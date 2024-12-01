@@ -212,6 +212,27 @@ async def fetch_weather(city: str) -> str:
         return response.text
 ```
 
+Complex input handling example:
+```python
+from pydantic import BaseModel, Field
+from typing import Annotated
+
+class ShrimpTank(BaseModel):
+    class Shrimp(BaseModel):
+        name: Annotated[str, Field(max_length=10)]
+
+    shrimp: list[Shrimp]
+
+@mcp.tool()
+def name_shrimp(
+    tank: ShrimpTank,
+    # You can use pydantic Field in function signatures for validation.
+    extra_names: Annotated[list[str], Field(max_length=10)],
+) -> list[str]:
+    """List all shrimp names in the tank"""
+    return [shrimp.name for shrimp in tank.shrimp] + extra_names
+```
+
 ### Prompts
 
 Prompts are reusable templates that help LLMs interact with your server effectively. They're like "best practices" encoded into your server. A prompt can be as simple as a string:

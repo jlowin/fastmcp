@@ -3,7 +3,7 @@ from typing import Optional
 
 import pytest
 from pydantic import BaseModel
-
+import json
 from fastmcp.exceptions import ToolError
 from fastmcp.tools import ToolManager
 
@@ -155,6 +155,74 @@ class TestCallTools:
         manager = ToolManager()
         with pytest.raises(ToolError):
             await manager.call_tool("unknown", {"a": 1})
+
+    async def test_call_tool_with_list_int_input(self):
+        def sum_vals(vals: list[int]) -> int:
+            return sum(vals)
+
+        manager = ToolManager()
+        manager.add_tool(sum_vals)
+        # Try both with plain list and with JSON list
+        result = await manager.call_tool("sum_vals", {"vals": "[1, 2, 3]"})
+        assert result == 6
+        result = await manager.call_tool("sum_vals", {"vals": [1, 2, 3]})
+        assert result == 6
+
+    async def test_call_tool_with_list_str_or_str_input(self):
+        def concat_strs(vals: list[str] | str) -> str:
+            return vals if isinstance(vals, str) else "".join(vals)
+
+        manager = ToolManager()
+        manager.add_tool(concat_strs)
+        # Try both with plain python object and with JSON list
+        result = await manager.call_tool("concat_strs", {"vals": ["a", "b", "c"]})
+        assert result == "abc"
+        result = await manager.call_tool("concat_strs", {"vals": '["a", "b", "c"]'})
+        assert result == "abc"
+        result = await manager.call_tool("concat_strs", {"vals": "a"})
+        assert result == "a"
+        result = await manager.call_tool("concat_strs", {"vals": '"a"'})
+        assert result == '"a"'
+
+    async def test_call_tool_with_complex_model(self):
+        from fastmcp import Context
+
+        class MyShrimpTank(BaseModel):
+            class Shrimp(BaseModel):
+                name: str
+
+            shrimp: list[Shrimp]
+            x: None
+
+        def name_shrimp(tank: MyShrimpTank, ctx: Context) -> list[str]:
+            return [x.name for x in tank.shrimp]
+
+        manager = ToolManager()
+        manager.add_tool(name_shrimp)
+        result = await manager.call_tool(
+            "name_shrimp",
+            {"tank": {"x": None, "shrimp": [{"name": "rex"}, {"name": "gertrude"}]}},
+        )
+        assert result == ["rex", "gertrude"]
+        result = await manager.call_tool(
+            "name_shrimp",
+            {"tank": '{"x": null, "shrimp": [{"name": "rex"}, {"name": "gertrude"}]}'},
+        )
+        assert result == ["rex", "gertrude"]
+
+
+class TestToolSchema:
+    async def test_context_arg_excluded_from_schema(self):
+        from fastmcp import Context
+
+        def something(a: int, ctx: Context) -> int:
+            return a
+
+        manager = ToolManager()
+        tool = manager.add_tool(something)
+        assert "ctx" not in json.dumps(tool.parameters)
+        assert "Context" not in json.dumps(tool.parameters)
+        assert "ctx" not in tool.fn_metadata.arg_model.model_fields
 
 
 class TestContextHandling:
