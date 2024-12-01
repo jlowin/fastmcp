@@ -27,9 +27,7 @@ from fastmcp import FastMCP
 
 
 class SurgeSettings(BaseSettings):
-    model_config: SettingsConfigDict = SettingsConfigDict(
-        env_prefix="SURGE_", env_file=".env"
-    )
+    model_config = SettingsConfigDict(env_prefix="SURGE_", env_file=".env")
 
     api_key: str
     account_id: str
@@ -42,7 +40,7 @@ class SurgeSettings(BaseSettings):
 
 # Create server
 mcp = FastMCP("Text me")
-surge_settings = SurgeSettings()  # type: ignore
+surge_settings = SurgeSettings()
 
 
 @mcp.tool(name="textme", description="Send a text message to me")

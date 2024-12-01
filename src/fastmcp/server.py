@@ -20,6 +20,7 @@ from mcp.types import (
     GetPromptResult,
     ImageContent,
     TextContent,
+    PromptArgument,
 )
 from mcp.types import (
     Prompt as MCPPrompt,
@@ -54,7 +55,7 @@ class Settings(BaseSettings):
     For example, FASTMCP_DEBUG=true will set debug=True.
     """
 
-    model_config: SettingsConfigDict = SettingsConfigDict(
+    model_config = SettingsConfigDict(
         env_prefix="FASTMCP_",
         env_file=".env",
         extra="ignore",
@@ -114,8 +115,7 @@ class FastMCP:
         Args:
             transport: Transport protocol to use ("stdio" or "sse")
         """
-        TRANSPORTS = Literal["stdio", "sse"]
-        if transport not in TRANSPORTS.__args__:  # type: ignore
+        if transport not in {"stdio", "sse"}:
             raise ValueError(f"Unknown transport: {transport}")
 
         if transport == "stdio":
@@ -158,8 +158,8 @@ class FastMCP:
         return Context(request_context=request_context, fastmcp=self)
 
     async def call_tool(
-        self, name: str, arguments: dict
-    ) -> Sequence[TextContent | ImageContent]:
+        self, name: str, arguments: dict[str, Any]
+    ) -> Sequence[TextContent | ImageContent | EmbeddedResource]:
         """Call a tool by name with arguments."""
         context = self.get_context()
         result = await self._tool_manager.call_tool(name, arguments, context=context)
@@ -421,10 +421,11 @@ class FastMCP:
         """Run the server using SSE transport."""
         from starlette.applications import Starlette
         from starlette.routing import Route
+        from starlette.requests import Request
 
         sse = SseServerTransport("/messages")
 
-        async def handle_sse(request):
+        async def handle_sse(request: Request) -> None:
             async with sse.connect_sse(
                 request.scope, request.receive, request._send
             ) as streams:
@@ -434,7 +435,7 @@ class FastMCP:
                     self._mcp_server.create_initialization_options(),
                 )
 
-        async def handle_messages(request):
+        async def handle_messages(request: Request) -> None:
             await sse.handle_post_message(request.scope, request.receive, request._send)
 
         starlette_app = Starlette(
@@ -462,11 +463,11 @@ class FastMCP:
                 name=prompt.name,
                 description=prompt.description,
                 arguments=[
-                    {
-                        "name": arg.name,
-                        "description": arg.description,
-                        "required": arg.required,
-                    }
+                    PromptArgument(
+                        name=arg.name,
+                        description=arg.description,
+                        required=arg.required,
+                    )
                     for arg in (prompt.arguments or [])
                 ],
             )
@@ -644,7 +645,7 @@ class Context(BaseModel):
         return str(self.request_context.request_id)
 
     @property
-    def session(self):
+    def session(self) -> Any:
         """Access to the underlying session for advanced usage."""
         return self.request_context.session
 
