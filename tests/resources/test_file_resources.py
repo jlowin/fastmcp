@@ -1,3 +1,5 @@
+import os
+
 import pytest
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -28,12 +30,12 @@ class TestFileResource:
     def test_file_resource_creation(self, temp_file: Path):
         """Test creating a FileResource."""
         resource = FileResource(
-            uri=f"file://{temp_file}",
+            uri=temp_file.as_uri(),
             name="test",
             description="test file",
             path=temp_file,
         )
-        assert str(resource.uri) == f"file://{temp_file}"
+        assert str(resource.uri) == temp_file.as_uri()
         assert resource.name == "test"
         assert resource.description == "test file"
         assert resource.mime_type == "text/plain"  # default
@@ -94,12 +96,15 @@ class TestFileResource:
         with pytest.raises(ValueError, match="Error reading file"):
             await resource.read()
 
+    @pytest.mark.skipif(
+        os.name == "nt", reason="File permissions behave differently on Windows"
+    )
     async def test_permission_error(self, temp_file: Path):
         """Test reading a file without permissions."""
         temp_file.chmod(0o000)  # Remove all permissions
         try:
             resource = FileResource(
-                uri=f"file://{temp_file}",
+                uri=temp_file.as_uri(),
                 name="test",
                 path=temp_file,
             )

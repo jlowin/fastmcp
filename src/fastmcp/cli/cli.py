@@ -11,8 +11,8 @@ import typer
 from typing_extensions import Annotated
 import dotenv
 
-from ..utilities.logging import get_logger
-from . import claude
+from fastmcp.cli import claude
+from fastmcp.utilities.logging import get_logger
 
 logger = get_logger("cli")
 
@@ -22,6 +22,22 @@ app = typer.Typer(
     add_completion=False,
     no_args_is_help=True,  # Show help if no args provided
 )
+
+
+def _get_npx_command():
+    """Get the correct npx command for the current platform."""
+    if sys.platform == "win32":
+        # Try both npx.cmd and npx.exe on Windows
+        for cmd in ["npx.cmd", "npx.exe", "npx"]:
+            try:
+                subprocess.run(
+                    [cmd, "--version"], check=True, capture_output=True, shell=True
+                )
+                return cmd
+            except subprocess.CalledProcessError:
+                continue
+        return None
+    return "npx"  # On Unix-like systems, just use npx
 
 
 def _parse_env_var(env_var: str) -> Tuple[str, str]:
@@ -67,11 +83,17 @@ def _parse_file_path(file_spec: str) -> Tuple[Path, Optional[str]]:
     Returns:
         Tuple of (file_path, server_object)
     """
-    if ":" in file_spec:
+    # First check if we have a Windows path (e.g., C:\...)
+    has_windows_drive = len(file_spec) > 1 and file_spec[1] == ":"
+
+    # Split on the last colon, but only if it's not part of the Windows drive letter
+    # and there's actually another colon in the string after the drive letter
+    if ":" in (file_spec[2:] if has_windows_drive else file_spec):
         file_str, server_object = file_spec.rsplit(":", 1)
     else:
         file_str, server_object = file_spec, None
 
+    # Resolve the file path
     file_path = Path(file_str).expanduser().resolve()
     if not file_path.exists():
         logger.error(f"File not found: {file_path}")
@@ -93,6 +115,11 @@ def _import_server(file: Path, server_object: Optional[str] = None):
     Returns:
         The server object
     """
+    # Add parent directory to Python path so imports can be resolved
+    file_dir = str(file.parent)
+    if file_dir not in sys.path:
+        sys.path.insert(0, file_dir)
+
     # Import the module
     spec = importlib.util.spec_from_file_location("server_module", file)
     if not spec or not spec.loader:
@@ -199,10 +226,22 @@ def dev(
             with_packages = list(set(with_packages + server.dependencies))
 
         uv_cmd = _build_uv_command(file_spec, with_editable, with_packages)
-        # Run the MCP Inspector command
+
+        # Get the correct npx command
+        npx_cmd = _get_npx_command()
+        if not npx_cmd:
+            logger.error(
+                "npx not found. Please ensure Node.js and npm are properly installed "
+                "and added to your system PATH."
+            )
+            sys.exit(1)
+
+        # Run the MCP Inspector command with shell=True on Windows
+        shell = sys.platform == "win32"
         process = subprocess.run(
-            ["npx", "@modelcontextprotocol/inspector"] + uv_cmd,
+            [npx_cmd, "@modelcontextprotocol/inspector"] + uv_cmd,
             check=True,
+            shell=shell,
         )
         sys.exit(process.returncode)
     except subprocess.CalledProcessError as e:
@@ -217,7 +256,9 @@ def dev(
         sys.exit(e.returncode)
     except FileNotFoundError:
         logger.error(
-            "npx not found. Please install Node.js and npm.",
+            "npx not found. Please ensure Node.js and npm are properly installed "
+            "and added to your system PATH. You may need to restart your terminal "
+            "after installation.",
             extra={"file": str(file)},
         )
         sys.exit(1)
