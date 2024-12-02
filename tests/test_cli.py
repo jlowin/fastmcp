@@ -1,12 +1,13 @@
 """Tests for the FastMCP CLI."""
 
 import json
-from unittest.mock import patch
+from pathlib import Path
+from unittest.mock import patch, call
 
 import pytest
 from typer.testing import CliRunner
 
-from fastmcp.cli.cli import app, _parse_env_var
+from fastmcp.cli.cli import app, _parse_env_var, _parse_file_path
 
 
 @pytest.fixture
@@ -89,6 +90,41 @@ def test_install_with_env_vars(mock_config, server_file, args, expected_env):
         assert len(config["mcpServers"]) == 1
         server = next(iter(config["mcpServers"].values()))
         assert server["env"] == expected_env
+
+
+def test_parse_file_path_windows_drive():
+    """Test parsing a Windows file path with a drive letter."""
+    file_spec = r"C:\path\to\file.txt"
+    with (
+        patch("pathlib.Path.exists", return_value=True),
+        patch("pathlib.Path.is_file", return_value=True),
+    ):
+        file_path, server_object = _parse_file_path(file_spec)
+        assert file_path == Path(r"C:\path\to\file.txt").resolve()
+        assert server_object is None
+
+
+def test_parse_file_path_with_object():
+    """Test parsing a file path with an object specification."""
+    file_spec = "/path/to/file.txt:object"
+    with patch("sys.exit") as mock_exit:
+        _parse_file_path(file_spec)
+
+        # Check that sys.exit was called twice with code 1
+        assert mock_exit.call_count == 2
+        mock_exit.assert_has_calls([call(1), call(1)])
+
+
+def test_parse_file_path_windows_with_object():
+    """Test parsing a Windows file path with an object specification."""
+    file_spec = r"C:\path\to\file.txt:object"
+    with (
+        patch("pathlib.Path.exists", return_value=True),
+        patch("pathlib.Path.is_file", return_value=True),
+    ):
+        file_path, server_object = _parse_file_path(file_spec)
+        assert file_path == Path(r"C:\path\to\file.txt").resolve()
+        assert server_object == "object"
 
 
 def test_install_with_env_file(mock_config, server_file, mock_env_file):
