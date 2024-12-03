@@ -1,5 +1,5 @@
 import inspect
-from collections.abc import Callable, Sequence, Awaitable
+from collections.abc import Callable, Sequence
 from typing import (
     Annotated,
     Any,
@@ -47,7 +47,7 @@ class FuncMetadata(BaseModel):
 
     async def call_fn_with_arg_validation(
         self,
-        fn: Callable | Awaitable,
+        fn: Callable,
         fn_is_async: bool,
         arguments_to_validate: dict[str, Any],
         arguments_to_pass_directly: dict[str, Any] | None,

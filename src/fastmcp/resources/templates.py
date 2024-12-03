@@ -6,7 +6,8 @@ from typing import Any, Callable, Dict, Optional
 
 from pydantic import BaseModel, Field, TypeAdapter, validate_call
 
-from fastmcp.resources.types import FunctionResource, Resource
+from fastmcp.resources.types import FunctionResource
+from fastmcp.resources.base import Resource
 
 
 class ResourceTemplate(BaseModel):
@@ -70,7 +71,7 @@ class ResourceTemplate(BaseModel):
                 result = await result
 
             return FunctionResource(
-                uri=uri,
+                uri=uri,  # type: ignore[arg-type]
                 name=self.name,
                 description=self.description,
                 mime_type=self.mime_type,

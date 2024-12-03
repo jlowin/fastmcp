@@ -5,7 +5,7 @@ import importlib.util
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional, Tuple, Dict
+from typing import Optional, Tuple, Dict, Any
 
 import typer
 from typing_extensions import Annotated
@@ -24,7 +24,7 @@ app = typer.Typer(
 )
 
 
-def _get_npx_command():
+def _get_npx_command() -> str | None:
     """Get the correct npx command for the current platform."""
     if sys.platform == "win32":
         # Try both npx.cmd and npx.exe on Windows
@@ -105,7 +105,7 @@ def _parse_file_path(file_spec: str) -> Tuple[Path, Optional[str]]:
     return file_path, server_object
 
 
-def _import_server(file: Path, server_object: Optional[str] = None):
+def _import_server(file: Path, server_object: Optional[str] = None) -> Any:
     """Import a FastMCP server from a file.
 
     Args:
@@ -410,6 +410,7 @@ def install(
                 extra={"error": str(e)},
             )
             name = file.stem
+    assert name is not None
 
     # Get server dependencies if available
     server_dependencies = getattr(server, "dependencies", []) if server else []
@@ -423,7 +424,13 @@ def install(
         # Load from .env file if specified
         if env_file:
             try:
-                env_dict.update(dotenv.dotenv_values(env_file))
+                env_dict.update(
+                    {
+                        k: v
+                        for k, v in dotenv.dotenv_values(env_file).items()
+                        if v is not None
+                    }
+                )
             except Exception as e:
                 logger.error(f"Failed to load .env file: {e}")
                 sys.exit(1)

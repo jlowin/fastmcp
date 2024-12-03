@@ -45,9 +45,11 @@ class Image:
     def to_image_content(self) -> ImageContent:
         """Convert to MCP ImageContent."""
         if self.path:
+            assert self.data is None
             with open(self.path, "rb") as f:
                 data = base64.b64encode(f.read()).decode()
         else:
+            assert self.data is not None
             data = base64.b64encode(self.data).decode()
 
         return ImageContent(type="image", data=data, mimeType=self._mime_type)

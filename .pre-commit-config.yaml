@@ -18,3 +18,13 @@ repos:
       - id: ruff-format
       - id: ruff
         args: [--fix, --exit-non-zero-on-fix]
+
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy
+        language: system
+        pass_filenames: false
+        entry: sh ./scripts/run_mypy.sh
+        require_serial: true
+        verbose: true

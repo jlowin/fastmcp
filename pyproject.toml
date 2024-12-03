@@ -30,6 +30,7 @@ tests = [
     "pytest-flakefinder",
     "pytest-xdist>=3.6.1",
     "ruff",
+    "mypy>=1.13.0",
 ]
 dev = ["fastmcp[tests]", "copychat>=0.5.2", "ipython>=8.12.3", "pdbpp>=0.10.3"]
 
@@ -39,3 +40,31 @@ asyncio_default_fixture_loop_scope = "session"
 
 [tool.hatch.version]
 source = "vcs"
+
+[tool.mypy]
+plugins = ["pydantic.mypy"]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_untyped_calls = false
+ignore_missing_imports = true
+show_error_codes = true
+pretty = true
+no_implicit_optional = true
+implicit_reexport = false
+disallow_any_generics = false
+strict_equality = true
+disallow_untyped_decorators = false
+strict=true
+enable_error_code=[
+    "ignore-without-code",
+    "truthy-bool",
+    "unused-awaitable",
+    "possibly-undefined",
+]
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
+warn_untyped_fields = true

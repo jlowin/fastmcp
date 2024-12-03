@@ -15,11 +15,13 @@ class Message(BaseModel):
     role: Literal["user", "assistant"]
     content: Union[TextContent, ImageContent, EmbeddedResource]
 
-    def __init__(self, content, **kwargs):
+    def __init__(
+        self, content: Union[TextContent, ImageContent, EmbeddedResource], **kwargs: Any
+    ):
         super().__init__(content=content, **kwargs)
 
     @field_validator("content", mode="before")
-    def validate_content(cls, v):
+    def validate_content(cls, v: Any) -> Any:
         if isinstance(v, str):
             return TextContent(type="text", text=v)
         return v
@@ -37,7 +39,9 @@ class AssistantMessage(Message):
     role: Literal["assistant"] = "assistant"
 
 
-message_validator = TypeAdapter(Union[UserMessage, AssistantMessage])
+message_validator: TypeAdapter[UserMessage | AssistantMessage] = TypeAdapter(
+    Union[UserMessage, AssistantMessage]
+)
 
 
 class PromptArgument(BaseModel):

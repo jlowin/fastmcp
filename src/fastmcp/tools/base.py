@@ -18,7 +18,7 @@ class Tool(BaseModel):
     fn: Callable = Field(exclude=True)
     name: str = Field(description="Name of the tool")
     description: str = Field(description="Description of what the tool does")
-    parameters: dict = Field(description="JSON schema for tool parameters")
+    parameters: dict[str, Any] = Field(description="JSON schema for tool parameters")
     fn_metadata: FuncMetadata = Field(
         description="Metadata about the function including a pydantic model for tool arguments"
     )
@@ -68,7 +68,9 @@ class Tool(BaseModel):
             context_kwarg=context_kwarg,
         )
 
-    async def run(self, arguments: dict, context: Optional["Context"] = None) -> Any:
+    async def run(
+        self, arguments: dict[str, Any], context: Optional["Context"] = None
+    ) -> Any:
         """Run the tool with arguments."""
         try:
             return await self.fn_metadata.call_fn_with_arg_validation(

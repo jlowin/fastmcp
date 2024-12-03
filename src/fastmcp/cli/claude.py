@@ -3,7 +3,7 @@
 import json
 import sys
 from pathlib import Path
-from typing import Optional, Dict
+from typing import Any, Optional, Dict
 
 from ..utilities.logging import get_logger
 
@@ -12,9 +12,13 @@ logger = get_logger(__name__)
 
 def get_claude_config_path() -> Path | None:
     """Get the Claude config directory based on platform."""
-    if sys.platform == "win32":
+
+    # mypy does shenanigans with sys.platform so assign it to a var to avoid.
+    plat: str = sys.platform
+
+    if plat == "win32":
         path = Path(Path.home(), "AppData", "Roaming", "Claude")
-    elif sys.platform == "darwin":
+    elif plat == "darwin":
         path = Path(Path.home(), "Library", "Application Support", "Claude")
     else:
         return None
@@ -110,7 +114,7 @@ def update_claude_config(
         # Add fastmcp run command
         args.extend(["fastmcp", "run", file_spec])
 
-        server_config = {
+        server_config: dict[str, Any] = {
             "command": "uv",
             "args": args,
         }
