@@ -228,7 +228,7 @@ wheels = [
 
 [[package]]
 name = "fastmcp"
-version = "0.3.6.dev5+g6a13ab9.d20241203"
+version = "0.3.6.dev8+g3b5ae20"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
