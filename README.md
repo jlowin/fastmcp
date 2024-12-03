@@ -464,22 +464,19 @@ FastMCP requires Python 3.10+ and [uv](https://docs.astral.sh/uv/).
 
 ### Installation
 
-Create a fork of this repository, then clone it:
+For development, we recommend installing FastMCP with development dependencies, which includes various utilities the maintainers find useful.
 
 ```bash
-git clone https://github.com/YouFancyUserYou/fastmcp.git
+git clone https://github.com/jlowin/fastmcp.git
 cd fastmcp
+uv sync --frozen --extra dev
 ```
 
-Next, create a virtual environment and install FastMCP:
+For running tests only (e.g., in CI), you only need the testing dependencies:
 
 ```bash
-uv venv
-source .venv/bin/activate
-uv sync --frozen --all-extras --dev
+uv sync --frozen --extra tests
 ```
-
-
 
 ### Testing
 

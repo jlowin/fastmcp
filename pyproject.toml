@@ -23,16 +23,14 @@ requires = ["hatchling>=1.21.0", "hatch-vcs>=0.4.0"]
 build-backend = "hatchling.build"
 
 [project.optional-dependencies]
-dev = [
-    "copychat>=0.5.2",
-    "ipython>=8.12.3",
-    "pdbpp>=0.10.3",
+tests = [
     "pre-commit",
-    "pytest-xdist>=3.6.1",
     "pytest>=8.3.3",
     "pytest-asyncio>=0.23.5",
+    "pytest-xdist>=3.6.1",
     "ruff",
 ]
+dev = ["fastmcp[tests]", "copychat>=0.5.2", "ipython>=8.12.3", "pdbpp>=0.10.3"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

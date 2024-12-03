@@ -1,34 +1,17 @@
 """Base classes and interfaces for FastMCP resources."""
 
 import abc
-from typing import Annotated, Union
+from typing import Union
 
 from pydantic import (
     AnyUrl,
     BaseModel,
-    BeforeValidator,
     ConfigDict,
     Field,
     FileUrl,
     ValidationInfo,
     field_validator,
 )
-from pydantic.networks import _BaseUrl  # TODO: remove this once pydantic is updated
-
-
-def maybe_cast_str_to_any_url(x) -> AnyUrl:
-    if isinstance(x, FileUrl):
-        return x
-    elif isinstance(x, AnyUrl):
-        return x
-    elif isinstance(x, str):
-        if x.startswith("file://"):
-            return FileUrl(x)
-        return AnyUrl(x)
-    raise ValueError(f"Expected str or AnyUrl, got {type(x)}")
-
-
-LaxAnyUrl = Annotated[_BaseUrl | str, BeforeValidator(maybe_cast_str_to_any_url)]
 
 
 class Resource(BaseModel, abc.ABC):
@@ -36,7 +19,8 @@ class Resource(BaseModel, abc.ABC):
 
     model_config = ConfigDict(validate_default=True)
 
-    uri: LaxAnyUrl = Field(default=..., description="URI of the resource")
+    # uri: Annotated[AnyUrl, BeforeValidator(maybe_cast_str_to_any_url)] = Field(
+    uri: AnyUrl = Field(default=..., description="URI of the resource")
     name: str | None = Field(description="Name of the resource", default=None)
     description: str | None = Field(
         description="Description of the resource", default=None
@@ -46,6 +30,15 @@ class Resource(BaseModel, abc.ABC):
         description="MIME type of the resource content",
         pattern=r"^[a-zA-Z0-9]+/[a-zA-Z0-9\-+.]+$",
     )
+
+    @field_validator("uri", mode="before")
+    def validate_uri(cls, uri: AnyUrl | str) -> AnyUrl:
+        if isinstance(uri, str):
+            # AnyUrl doesn't support triple-slashes, but files do ("file:///absolute/path")
+            if uri.startswith("file://"):
+                return FileUrl(uri)
+            return AnyUrl(uri)
+        return uri
 
     @field_validator("name", mode="before")
     @classmethod
