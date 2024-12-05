@@ -6,7 +6,7 @@ import inspect
 import json
 import re
 from itertools import chain
-from typing import Any, Callable, Dict, Literal, Sequence
+from typing import Any, Callable, Dict, Literal, Sequence, TypeVar, ParamSpec
 
 import pydantic_core
 from pydantic import Field
@@ -40,12 +40,17 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from fastmcp.exceptions import ResourceError
 from fastmcp.prompts import Prompt, PromptManager
+from fastmcp.prompts.base import PromptResult
 from fastmcp.resources import FunctionResource, Resource, ResourceManager
 from fastmcp.tools import ToolManager
 from fastmcp.utilities.logging import configure_logging, get_logger
 from fastmcp.utilities.types import Image
 
 logger = get_logger(__name__)
+
+P = ParamSpec("P")
+R = TypeVar("R")
+R_PromptResult = TypeVar("R_PromptResult", bound=PromptResult)
 
 
 class Settings(BaseSettings):
@@ -222,7 +227,9 @@ class FastMCP:
         """
         self._tool_manager.add_tool(fn, name=name, description=description)
 
-    def tool(self, name: str | None = None, description: str | None = None) -> Callable:
+    def tool(
+        self, name: str | None = None, description: str | None = None
+    ) -> Callable[[Callable[P, R]], Callable[P, R]]:
         """Decorator to register a tool.
 
         Tools can optionally request a Context object by adding a parameter with the Context type annotation.
@@ -254,7 +261,7 @@ class FastMCP:
                 "Did you forget to call it? Use @tool() instead of @tool"
             )
 
-        def decorator(fn: Callable) -> Callable:
+        def decorator(fn: Callable[P, R]) -> Callable[P, R]:
             self.add_tool(fn, name=name, description=description)
             return fn
 
@@ -275,7 +282,7 @@ class FastMCP:
         name: str | None = None,
         description: str | None = None,
         mime_type: str | None = None,
-    ) -> Callable:
+    ) -> Callable[[Callable[P, R]], Callable[P, R]]:
         """Decorator to register a function as a resource.
 
         The function will be called when the resource is read to generate its content.
@@ -309,9 +316,9 @@ class FastMCP:
                 "Did you forget to call it? Use @resource('uri') instead of @resource"
             )
 
-        def decorator(fn: Callable) -> Callable:
+        def decorator(fn: Callable[P, R]) -> Callable[P, R]:
             @functools.wraps(fn)
-            def wrapper(*args: Any, **kwargs: Any) -> Any:
+            def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
                 return fn(*args, **kwargs)
 
             # Check if this should be a template
@@ -361,7 +368,7 @@ class FastMCP:
 
     def prompt(
         self, name: str | None = None, description: str | None = None
-    ) -> Callable:
+    ) -> Callable[[Callable[P, R_PromptResult]], Callable[P, R_PromptResult]]:
         """Decorator to register a prompt.
 
         Args:
@@ -402,7 +409,7 @@ class FastMCP:
                 "Did you forget to call it? Use @prompt() instead of @prompt"
             )
 
-        def decorator(func: Callable) -> Callable:
+        def decorator(func: Callable[P, R_PromptResult]) -> Callable[P, R_PromptResult]:
             prompt = Prompt.from_function(func, name=name, description=description)
             self.add_prompt(prompt)
             return func
