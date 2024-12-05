@@ -174,6 +174,21 @@ def test_str_vs_list_str():
     assert result["str_or_list"] == ["hello", "world"]
 
 
+def test_str_vs_int():
+    """
+    Test that string values are kept as strings even when they contain numbers,
+    while numbers are parsed correctly.
+    """
+
+    def func_with_str_and_int(a: str, b: int):
+        return a
+
+    meta = func_metadata(func_with_str_and_int)
+    result = meta.pre_parse_json({"a": "123", "b": 123})
+    assert result["a"] == "123"
+    assert result["b"] == 123
+
+
 def test_skip_names():
     """Test that skipped parameters are not included in the model"""
 

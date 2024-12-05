@@ -91,7 +91,7 @@ class FuncMetadata(BaseModel):
                     pre_parsed = json.loads(data[field_name])
                 except json.JSONDecodeError:
                     continue  # Not JSON - skip
-                if isinstance(pre_parsed, str):
+                if isinstance(pre_parsed, (str, int, float)):
                     # This is likely that the raw value is e.g. `"hello"` which we
                     # Should really be parsed as '"hello"' in Python - but if we parse
                     # it as JSON it'll turn into just 'hello'. So we skip it.
