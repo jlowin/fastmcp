@@ -8,7 +8,7 @@ from typing import (
 )
 from pydantic import Field
 from fastmcp.exceptions import InvalidSignature
-from pydantic._internal._typing_extra import try_eval_type
+from pydantic._internal._typing_extra import eval_type_lenient
 import json
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
@@ -178,12 +178,7 @@ def func_metadata(func: Callable, skip_names: Sequence[str] = ()) -> FuncMetadat
 def _get_typed_annotation(annotation: Any, globalns: Dict[str, Any]) -> Any:
     if isinstance(annotation, str):
         annotation = ForwardRef(annotation)
-        annotation, status = try_eval_type(annotation, globalns, globalns)
-
-        # This check and raise could perhaps be skipped, and we (FastMCP) just call
-        # model_rebuild right before using it 🤷
-        if status is False:
-            raise InvalidSignature(f"Unable to evaluate type annotation {annotation}")
+        annotation = eval_type_lenient(annotation, globalns, globalns)
 
     return annotation
 
