@@ -13,7 +13,7 @@ dependencies = [
 ]
 requires-python = ">=3.10"
 readme = "README.md"
-license = { text = "Apache-2.0" }
+license = { text = "MIT" }
 
 [project.scripts]
 fastmcp = "fastmcp.cli:app"
