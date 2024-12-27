@@ -37,6 +37,8 @@ fastmcp install demo.py
 
 FastMCP handles all the complex protocol details and server management, so you can focus on building great tools. It's designed to be high-level and Pythonic - in most cases, decorating a function is all you need.
 
+> [!NOTE]
+> For a TypeScript implementation, see [FastMCP](https://github.com/punkpeye/fastmcp).
 
 ### Key features:
 * **Fast**: High-level interface means less code and faster development
