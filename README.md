@@ -58,6 +58,8 @@ FastMCP 1.0 made it so easy to build MCP servers that it's now part of the [offi
 
 Based on how the MCP ecosystem is evolving, FastMCP 2.0 builds on that foundation to introduce a variety of new features (and more experimental ideas). It adds advanced features like proxying and composing MCP servers, as well as automatically generating them from OpenAPI specs or FastAPI objects. FastMCP 2.0 also introduces new client-side functionality like LLM sampling.
 
+> [!NOTE]
+> For a TypeScript implementation, see [FastMCP](https://github.com/punkpeye/fastmcp).
 
 ---
 
