@@ -9,7 +9,7 @@ If you haven't already installed FastMCP, follow the [installation instructions]
 
 ## Creating a FastMCP Server
 
-A FastMCP server is a collection of tools, resources, and other MCP components. To create a server, start by instantiating the `FastMCP` class. 
+A FastMCP server is a collection of tools, resources, and other MCP components. To create a server, start by instantiating the `FastMCP` class.
 
 Create a new file called `my_server.py` and add the following code:
 
@@ -19,9 +19,7 @@ from fastmcp import FastMCP
 mcp = FastMCP("My MCP Server")
 ```
 
-
 That's it! You've created a FastMCP server, albeit a very boring one. Let's add a tool to make it more interesting.
-
 
 ## Adding a Tool
 
@@ -32,14 +30,12 @@ from fastmcp import FastMCP
 
 mcp = FastMCP("My MCP Server")
 
-@mcp.tool
+@mcp.tool()
 def greet(name: str) -> str:
     return f"Hello, {name}!"
 ```
 
-
 ## Testing the Server
-
 
 To test the server, create a FastMCP client and point it at the server object.
 
@@ -63,6 +59,7 @@ asyncio.run(call_tool("Ford"))
 ```
 
 There are a few things to note here:
+
 - Clients are asynchronous, so we need to use `asyncio.run` to run the client.
 - We must enter a client context (`async with client:`) before using the client. You can make multiple client calls within the same context.
 
@@ -89,11 +86,12 @@ This lets us run the server with `python my_server.py`, using the default `stdio
 Why do we need the `if __name__ == "__main__":` block?
 
 Within the FastMCP ecosystem, this line may be unecessary. However, including it ensures that your FastMCP server runs for all users and clients in a consistent way and is therefore recommended as best practice.
+
 </Tip>
 
 ### Interacting with the Python server
 
-Now that the server can be executed with `python my_server.py`, we can interact with it like any other MCP server. 
+Now that the server can be executed with `python my_server.py`, we can interact with it like any other MCP server.
 
 In a new file, create a client and point it at the server file:
 
@@ -110,8 +108,6 @@ async def call_tool(name: str):
 asyncio.run(call_tool("Ford"))
 ```
 
-
-
 ### Using the FastMCP CLI
 
 To have FastMCP run the server for us, we can use the `fastmcp run` command. This will start the server and keep it running until it is stopped. By default, it will use the `stdio` transport, which is a simple text-based protocol for interacting with the server.
@@ -120,8 +116,12 @@ To have FastMCP run the server for us, we can use the `fastmcp run` command. Thi
 fastmcp run my_server.py:mcp
 ```
 
-Note that FastMCP *does not* require the `__main__` block in the server file, and will ignore it if it is present. Instead, it looks for the server object provided in the CLI command (here, `mcp`). If no server object is provided, `fastmcp run` will automatically search for servers called "mcp", "app", or "server" in the file.
+Note that FastMCP _does not_ require the `__main__` block in the server file, and will ignore it if it is present. Instead, it looks for the server object provided in the CLI command (here, `mcp`). If no server object is provided, `fastmcp run` will automatically search for servers called "mcp", "app", or "server" in the file.
 
 <Tip>
-We pointed our client at the server file, which is recognized as a Python MCP server and executed with `python my_server.py` by default. This exceutes the `__main__` block of the server file. There are other ways to run the server, which are described in the [server configuration](/servers/fastmcp#running-the-server) guide.
+  We pointed our client at the server file, which is recognized as a Python MCP
+  server and executed with `python my_server.py` by default. This exceutes the
+  `__main__` block of the server file. There are other ways to run the server,
+  which are described in the [server
+  configuration](/servers/fastmcp#running-the-server) guide.
 </Tip>
