@@ -596,8 +596,8 @@ class FastMCPOpenAPI(FastMCP):
         result = await self._tool_manager.call_tool(name, arguments, context=context)
 
         # For other tools, ensure the response is wrapped in TextContent
-        if isinstance(result, dict | str):
-            if isinstance(result, dict):
+        if isinstance(result, dict | str | list):
+            if isinstance(result, dict | list):
                 result_text = json.dumps(result)
             else:
                 result_text = result
