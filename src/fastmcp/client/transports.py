@@ -431,14 +431,26 @@ def infer_transport(
     elif isinstance(transport, FastMCPServer):
         return FastMCPTransport(mcp=transport)
 
-    # the transport is a path to a script
-    elif isinstance(transport, Path | str) and Path(transport).exists():
-        if str(transport).endswith(".py"):
-            return PythonStdioTransport(script_path=transport)
-        elif str(transport).endswith(".js"):
-            return NodeStdioTransport(script_path=transport)
+    # the transport is command or path to a script
+    elif isinstance(transport, Path | str):
+        if Path(transport).exists():
+            if str(transport).endswith(".py"):
+                return PythonStdioTransport(script_path=transport)
+            elif str(transport).endswith(".js"):
+                return NodeStdioTransport(script_path=transport)
+            else:
+                raise ValueError(f"Unsupported script type: {transport}")
         else:
-            raise ValueError(f"Unsupported script type: {transport}")
+            from shlex import split
+
+            commands = split(str(transport))
+            if not commands:
+                raise ValueError(
+                    "Could not infer a valid transport from empty command string"
+                )
+            cmd = commands[0]
+            arguments = commands[1:] if len(commands) > 1 else []
+            return StdioTransport(command=cmd, args=arguments)
 
     # the transport is an http(s) URL
     elif isinstance(transport, AnyUrl | str) and str(transport).startswith("http"):
