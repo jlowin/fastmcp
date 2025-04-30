@@ -432,7 +432,9 @@ def infer_transport(
         return FastMCPTransport(mcp=transport)
 
     # the transport is command or path to a script
-    elif isinstance(transport, Path | str):
+    elif isinstance(transport, Path | str) and not str(transport).startswith(
+        ("http:", "https:", "ws:")
+    ):
         if Path(transport).exists():
             if str(transport).endswith(".py"):
                 return PythonStdioTransport(script_path=transport)
