@@ -451,6 +451,8 @@ def infer_transport(
                     "Could not infer a valid transport from empty command string"
                 )
             cmd = commands[0]
+            if shutil.which(cmd) is None:
+                raise ValueError(f"Command '{cmd}' not found")
             arguments = commands[1:] if len(commands) > 1 else []
             return StdioTransport(command=cmd, args=arguments)
 
