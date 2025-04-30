@@ -401,7 +401,7 @@ class FastMCPTransport(ClientTransport):
                 raise ClientError(exc)
 
         # backport of 3.11's except* syntax
-        with catch({McpError: mcperror_handler, Exception: exception_handler}):
+        with catch({McpError: mcperror_handler, BaseException: exception_handler}):
             # create_connected_server_and_client_session manages the session lifecycle itself
             async with create_connected_server_and_client_session(
                 server=self._fastmcp._mcp_server,
