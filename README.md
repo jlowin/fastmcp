@@ -212,7 +212,11 @@ Decorate synchronous or asynchronous functions with `@mcp.tool()`. FastMCP autom
 
 ```python
 import httpx
+from fastmcp import FastMCP
 from pydantic import BaseModel
+
+# Create MCP server before defining tools
+mcp = FastMCP("Demo 🚀")
 
 class UserInfo(BaseModel):
     user_id: int
