@@ -22,7 +22,7 @@ from pydantic import (
 from fastmcp.resources.types import FunctionResource, Resource
 from fastmcp.utilities.types import (
     _convert_set_defaults,
-    is_class_member_of_type,
+    find_kwarg_by_type,
 )
 
 if TYPE_CHECKING:
@@ -109,23 +109,25 @@ class ResourceTemplate(BaseModel):
         if func_name == "<lambda>":
             raise ValueError("You must provide a name for lambda functions")
 
+        # Reject functions with *args
+        # (**kwargs is allowed because the URI will define the parameter names)
+        sig = inspect.signature(fn)
+        for param in sig.parameters.values():
+            if param.kind == inspect.Parameter.VAR_POSITIONAL:
+                raise ValueError(
+                    "Functions with *args are not supported as resource templates"
+                )
+
         # Auto-detect context parameter if not provided
         if context_kwarg is None:
-            if inspect.ismethod(fn) and hasattr(fn, "__func__"):
-                sig = inspect.signature(fn.__func__)
-            else:
-                sig = inspect.signature(fn)
-            for param_name, param in sig.parameters.items():
-                if is_class_member_of_type(param.annotation, Context):
-                    context_kwarg = param_name
-                    break
+            context_kwarg = find_kwarg_by_type(fn, kwarg_type=Context)
 
         # Validate that URI params match function params
         uri_params = set(re.findall(r"{(\w+)(?:\*)?}", uri_template))
         if not uri_params:
             raise ValueError("URI template must contain at least one parameter")
 
-        func_params = set(inspect.signature(fn).parameters.keys())
+        func_params = set(sig.parameters.keys())
         if context_kwarg:
             func_params.discard(context_kwarg)
 
@@ -133,20 +135,26 @@ class ResourceTemplate(BaseModel):
         required_params = {
             p
             for p in func_params
-            if inspect.signature(fn).parameters[p].default is inspect.Parameter.empty
+            if sig.parameters[p].default is inspect.Parameter.empty
+            and sig.parameters[p].kind != inspect.Parameter.VAR_KEYWORD
+            and p != context_kwarg
         }
-        if context_kwarg and context_kwarg in required_params:
-            required_params.discard(context_kwarg)
 
+        # Check if required parameters are a subset of the URI parameters
         if not required_params.issubset(uri_params):
             raise ValueError(
-                f"URI parameters {uri_params} must be a subset of the required function arguments: {required_params}"
+                f"Required function arguments {required_params} must be a subset of the URI parameters {uri_params}"
             )
 
-        if not uri_params.issubset(func_params):
-            raise ValueError(
-                f"URI parameters {uri_params} must be a subset of the function arguments: {func_params}"
-            )
+        # Check if the URI parameters are a subset of the function parameters (skip if **kwargs present)
+        if not any(
+            param.kind == inspect.Parameter.VAR_KEYWORD
+            for param in sig.parameters.values()
+        ):
+            if not uri_params.issubset(func_params):
+                raise ValueError(
+                    f"URI parameters {uri_params} must be a subset of the function arguments: {func_params}"
+                )
 
         # Get schema from TypeAdapter - will fail if function isn't properly typed
         parameters = TypeAdapter(fn).json_schema()

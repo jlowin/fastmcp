@@ -15,6 +15,12 @@ from typing import TYPE_CHECKING, Any, Generic, Literal
 import anyio
 import httpx
 import uvicorn
+from mcp.server.auth.middleware.auth_context import AuthContextMiddleware
+from mcp.server.auth.middleware.bearer_auth import (
+    BearerAuthBackend,
+    RequireAuthMiddleware,
+)
+from mcp.server.auth.provider import OAuthAuthorizationServerProvider
 from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.lowlevel.server import LifespanResultT
 from mcp.server.lowlevel.server import Server as MCPServer
@@ -28,6 +34,7 @@ from mcp.types import (
     ImageContent,
     PromptMessage,
     TextContent,
+    ToolAnnotations,
 )
 from mcp.types import Prompt as MCPPrompt
 from mcp.types import Resource as MCPResource
@@ -35,8 +42,12 @@ from mcp.types import ResourceTemplate as MCPResourceTemplate
 from mcp.types import Tool as MCPTool
 from pydantic.networks import AnyUrl
 from starlette.applications import Starlette
+from starlette.middleware import Middleware
+from starlette.middleware.authentication import AuthenticationMiddleware
 from starlette.requests import Request
+from starlette.responses import Response
 from starlette.routing import Mount, Route
+from starlette.types import Receive, Scope, Send
 
 import fastmcp
 import fastmcp.settings
@@ -48,6 +59,7 @@ from fastmcp.resources.template import ResourceTemplate
 from fastmcp.tools import ToolManager
 from fastmcp.tools.tool import Tool
 from fastmcp.utilities.decorators import DecoratedFunction
+from fastmcp.utilities.http import RequestMiddleware
 from fastmcp.utilities.logging import configure_logging, get_logger
 
 if TYPE_CHECKING:
@@ -183,6 +195,8 @@ class FastMCP(Generic[LifespanResultT]):
         self,
         name: str | None = None,
         instructions: str | None = None,
+        auth_server_provider: OAuthAuthorizationServerProvider[Any, Any, Any]
+        | None = None,
         lifespan: (
             Callable[
                 [FastMCP[LifespanResultT]],
@@ -191,6 +205,7 @@ class FastMCP(Generic[LifespanResultT]):
             | None
         ) = None,
         tags: set[str] | None = None,
+        tool_serializer: Callable[[Any], str] | None = None,
         **settings: Any,
     ):
         self.tags: set[str] = tags or set()
@@ -204,7 +219,10 @@ class FastMCP(Generic[LifespanResultT]):
         self._mounted_servers: dict[str, MountedServer] = {}
 
         if lifespan is None:
+            self._has_lifespan = False
             lifespan = default_lifespan
+        else:
+            self._has_lifespan = True
 
         self._mcp_server = MCPServer[LifespanResultT](
             name=name or "FastMCP",
@@ -212,7 +230,8 @@ class FastMCP(Generic[LifespanResultT]):
             lifespan=_lifespan_wrapper(self, lifespan),
         )
         self._tool_manager = ToolManager(
-            duplicate_behavior=self.settings.on_duplicate_tools
+            duplicate_behavior=self.settings.on_duplicate_tools,
+            serializer=tool_serializer,
         )
         self._resource_manager = ResourceManager(
             duplicate_behavior=self.settings.on_duplicate_resources
@@ -220,6 +239,15 @@ class FastMCP(Generic[LifespanResultT]):
         self._prompt_manager = PromptManager(
             duplicate_behavior=self.settings.on_duplicate_prompts
         )
+
+        if (self.settings.auth is not None) != (auth_server_provider is not None):
+            # TODO: after we support separate authorization servers (see
+            raise ValueError(
+                "settings.auth must be specified if and only if auth_server_provider "
+                "is specified"
+            )
+        self._auth_server_provider = auth_server_provider
+        self._custom_starlette_routes: list[Route] = []
         self.dependencies = self.settings.dependencies
 
         # Set up MCP protocol handlers
@@ -339,6 +367,50 @@ class FastMCP(Generic[LifespanResultT]):
             self._cache.set("prompts", prompts)
         return prompts
 
+    def custom_route(
+        self,
+        path: str,
+        methods: list[str],
+        name: str | None = None,
+        include_in_schema: bool = True,
+    ):
+        """
+        Decorator to register a custom HTTP route on the FastMCP server.
+
+        Allows adding arbitrary HTTP endpoints outside the standard MCP protocol,
+        which can be useful for OAuth callbacks, health checks, or admin APIs.
+        The handler function must be an async function that accepts a Starlette
+        Request and returns a Response.
+
+        Args:
+            path: URL path for the route (e.g., "/oauth/callback")
+            methods: List of HTTP methods to support (e.g., ["GET", "POST"])
+            name: Optional name for the route (to reference this route with
+                Starlette's reverse URL lookup feature)
+            include_in_schema: Whether to include in OpenAPI schema, defaults to True
+
+        Example:
+            @server.custom_route("/health", methods=["GET"])
+            async def health_check(request: Request) -> Response:
+                return JSONResponse({"status": "ok"})
+        """
+
+        def decorator(
+            func: Callable[[Request], Awaitable[Response]],
+        ) -> Callable[[Request], Awaitable[Response]]:
+            self._custom_starlette_routes.append(
+                Route(
+                    path,
+                    endpoint=func,
+                    methods=methods,
+                    name=name,
+                    include_in_schema=include_in_schema,
+                )
+            )
+            return func
+
+        return decorator
+
     async def _mcp_list_tools(self) -> list[MCPTool]:
         """
         List all available tools, in the format expected by the low-level MCP
@@ -455,6 +527,7 @@ class FastMCP(Generic[LifespanResultT]):
         name: str | None = None,
         description: str | None = None,
         tags: set[str] | None = None,
+        annotations: ToolAnnotations | dict[str, Any] | None = None,
     ) -> None:
         """Add a tool to the server.
 
@@ -466,9 +539,17 @@ class FastMCP(Generic[LifespanResultT]):
             name: Optional name for the tool (defaults to function name)
             description: Optional description of what the tool does
             tags: Optional set of tags for categorizing the tool
+            annotations: Optional annotations about the tool's behavior
         """
+        if isinstance(annotations, dict):
+            annotations = ToolAnnotations(**annotations)
+
         self._tool_manager.add_tool_from_fn(
-            fn, name=name, description=description, tags=tags
+            fn,
+            name=name,
+            description=description,
+            tags=tags,
+            annotations=annotations,
         )
         self._cache.clear()
 
@@ -477,6 +558,7 @@ class FastMCP(Generic[LifespanResultT]):
         name: str | None = None,
         description: str | None = None,
         tags: set[str] | None = None,
+        annotations: ToolAnnotations | dict[str, Any] | None = None,
     ) -> Callable[[AnyFunction], AnyFunction]:
         """Decorator to register a tool.
 
@@ -488,6 +570,7 @@ class FastMCP(Generic[LifespanResultT]):
             name: Optional name for the tool (defaults to function name)
             description: Optional description of what the tool does
             tags: Optional set of tags for categorizing the tool
+            annotations: Optional annotations about the tool's behavior
 
         Example:
             @server.tool()
@@ -513,7 +596,13 @@ class FastMCP(Generic[LifespanResultT]):
             )
 
         def decorator(fn: AnyFunction) -> AnyFunction:
-            self.add_tool(fn, name=name, description=description, tags=tags)
+            self.add_tool(
+                fn,
+                name=name,
+                description=description,
+                tags=tags,
+                annotations=annotations,
+            )
             return fn
 
         return decorator
@@ -737,41 +826,125 @@ class FastMCP(Generic[LifespanResultT]):
         host: str | None = None,
         port: int | None = None,
         log_level: str | None = None,
+        uvicorn_config: dict | None = None,
     ) -> None:
         """Run the server using SSE transport."""
-        starlette_app = self.sse_app()
+        uvicorn_config = uvicorn_config or {}
+        # the SSE app hangs even when a signal is sent, so we disable the timeout to make it possible to close immediately.
+        # see https://github.com/jlowin/fastmcp/issues/296
+        uvicorn_config.setdefault("timeout_graceful_shutdown", 0)
+        app = RequestMiddleware(self.sse_app())
 
         config = uvicorn.Config(
-            starlette_app,
+            app,
             host=host or self.settings.host,
             port=port or self.settings.port,
             log_level=log_level or self.settings.log_level.lower(),
+            **uvicorn_config,
         )
         server = uvicorn.Server(config)
         await server.serve()
 
     def sse_app(self) -> Starlette:
         """Return an instance of the SSE server app."""
+        from starlette.middleware import Middleware
+        from starlette.routing import Mount, Route
+
+        # Set up auth context and dependencies
+
         sse = SseServerTransport(self.settings.message_path)
 
-        async def handle_sse(request: Request) -> None:
+        async def handle_sse(scope: Scope, receive: Receive, send: Send):
+            # Add client ID from auth context into request context if available
+
             async with sse.connect_sse(
-                request.scope,
-                request.receive,
-                request._send,  # type: ignore[reportPrivateUsage]
+                scope,
+                receive,
+                send,
             ) as streams:
                 await self._mcp_server.run(
                     streams[0],
                     streams[1],
                     self._mcp_server.create_initialization_options(),
                 )
+            return Response()
 
+        # Create routes
+        routes: list[Route | Mount] = []
+        middleware: list[Middleware] = []
+        required_scopes = []
+
+        # Add auth endpoints if auth provider is configured
+        if self._auth_server_provider:
+            assert self.settings.auth
+            from mcp.server.auth.routes import create_auth_routes
+
+            required_scopes = self.settings.auth.required_scopes or []
+
+            middleware = [
+                # extract auth info from request (but do not require it)
+                Middleware(
+                    AuthenticationMiddleware,
+                    backend=BearerAuthBackend(
+                        provider=self._auth_server_provider,
+                    ),
+                ),
+                # Add the auth context middleware to store
+                # authenticated user in a contextvar
+                Middleware(AuthContextMiddleware),
+            ]
+            routes.extend(
+                create_auth_routes(
+                    provider=self._auth_server_provider,
+                    issuer_url=self.settings.auth.issuer_url,
+                    service_documentation_url=self.settings.auth.service_documentation_url,
+                    client_registration_options=self.settings.auth.client_registration_options,
+                    revocation_options=self.settings.auth.revocation_options,
+                )
+            )
+
+        # When auth is not configured, we shouldn't require auth
+        if self._auth_server_provider:
+            # Auth is enabled, wrap the endpoints with RequireAuthMiddleware
+            routes.append(
+                Route(
+                    self.settings.sse_path,
+                    endpoint=RequireAuthMiddleware(handle_sse, required_scopes),
+                    methods=["GET"],
+                )
+            )
+            routes.append(
+                Mount(
+                    self.settings.message_path,
+                    app=RequireAuthMiddleware(sse.handle_post_message, required_scopes),
+                )
+            )
+        else:
+            # Auth is disabled, no need for RequireAuthMiddleware
+            # Since handle_sse is an ASGI app, we need to create a compatible endpoint
+            async def sse_endpoint(request: Request) -> None:
+                # Convert the Starlette request to ASGI parameters
+                await handle_sse(request.scope, request.receive, request._send)  # type: ignore[reportPrivateUsage]
+
+            routes.append(
+                Route(
+                    self.settings.sse_path,
+                    endpoint=sse_endpoint,
+                    methods=["GET"],
+                )
+            )
+            routes.append(
+                Mount(
+                    self.settings.message_path,
+                    app=sse.handle_post_message,
+                )
+            )
+        # mount these routes last, so they have the lowest route matching precedence
+        routes.extend(self._custom_starlette_routes)
+
+        # Create Starlette app with routes and middleware
         return Starlette(
-            debug=self.settings.debug,
-            routes=[
-                Route(self.settings.sse_path, endpoint=handle_sse),
-                Mount(self.settings.message_path, app=sse.handle_post_message),
-            ],
+            debug=self.settings.debug, routes=routes, middleware=middleware
         )
 
     def mount(
@@ -781,10 +954,62 @@ class FastMCP(Generic[LifespanResultT]):
         tool_separator: str | None = None,
         resource_separator: str | None = None,
         prompt_separator: str | None = None,
+        as_proxy: bool | None = None,
     ) -> None:
+        """Mount another FastMCP server on this server with the given prefix.
+
+        Unlike importing (with import_server), mounting establishes a dynamic connection
+        between servers. When a client interacts with a mounted server's objects through
+        the parent server, requests are forwarded to the mounted server in real-time.
+        This means changes to the mounted server are immediately reflected when accessed
+        through the parent.
+
+        When a server is mounted:
+        - Tools from the mounted server are accessible with prefixed names using the tool_separator.
+          Example: If server has a tool named "get_weather", it will be available as "prefix_get_weather".
+        - Resources are accessible with prefixed URIs using the resource_separator.
+          Example: If server has a resource with URI "weather://forecast", it will be available as
+          "prefix+weather://forecast".
+        - Templates are accessible with prefixed URI templates using the resource_separator.
+          Example: If server has a template with URI "weather://location/{id}", it will be available
+          as "prefix+weather://location/{id}".
+        - Prompts are accessible with prefixed names using the prompt_separator.
+          Example: If server has a prompt named "weather_prompt", it will be available as
+          "prefix_weather_prompt".
+
+        There are two modes for mounting servers:
+        1. Direct mounting (default when server has no custom lifespan): The parent server
+           directly accesses the mounted server's objects in-memory for better performance.
+           In this mode, no client lifecycle events occur on the mounted server, including
+           lifespan execution.
+
+        2. Proxy mounting (default when server has a custom lifespan): The parent server
+           treats the mounted server as a separate entity and communicates with it via a
+           Client transport. This preserves all client-facing behaviors, including lifespan
+           execution, but with slightly higher overhead.
+
+        Args:
+            prefix: Prefix to use for the mounted server's objects.
+            server: The FastMCP server to mount.
+            tool_separator: Separator character for tool names (defaults to "_").
+            resource_separator: Separator character for resource URIs (defaults to "+").
+            prompt_separator: Separator character for prompt names (defaults to "_").
+            as_proxy: Whether to treat the mounted server as a proxy. If None (default),
+                automatically determined based on whether the server has a custom lifespan
+                (True if it has a custom lifespan, False otherwise).
         """
-        Mount another FastMCP server on a given prefix.
-        """
+        from fastmcp import Client
+        from fastmcp.client.transports import FastMCPTransport
+        from fastmcp.server.proxy import FastMCPProxy
+
+        # if as_proxy is not specified and the server has a custom lifespan,
+        # we should treat it as a proxy
+        if as_proxy is None:
+            as_proxy = server._has_lifespan
+
+        if as_proxy and not isinstance(server, FastMCPProxy):
+            server = FastMCPProxy(Client(transport=FastMCPTransport(server)))
+
         mounted_server = MountedServer(
             server=server,
             prefix=prefix,

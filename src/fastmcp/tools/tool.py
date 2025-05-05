@@ -1,20 +1,23 @@
 from __future__ import annotations
 
 import inspect
+import json
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Annotated, Any
 
 import pydantic_core
-from mcp.types import EmbeddedResource, ImageContent, TextContent
+from mcp.types import EmbeddedResource, ImageContent, TextContent, ToolAnnotations
 from mcp.types import Tool as MCPTool
 from pydantic import BaseModel, BeforeValidator, Field
 
 from fastmcp.exceptions import ToolError
-from fastmcp.utilities.func_metadata import FuncMetadata, func_metadata
+from fastmcp.utilities.json_schema import prune_params
+from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.types import (
     Image,
     _convert_set_defaults,
-    is_class_member_of_type,
+    find_kwarg_by_type,
+    get_cached_typeadapter,
 )
 
 if TYPE_CHECKING:
@@ -22,6 +25,12 @@ if TYPE_CHECKING:
     from mcp.shared.context import LifespanContextT
 
     from fastmcp.server import Context
+
+logger = get_logger(__name__)
+
+
+def default_serializer(data: Any) -> str:
+    return pydantic_core.to_json(data, fallback=str, indent=2).decode()
 
 
 class Tool(BaseModel):
@@ -31,16 +40,17 @@ class Tool(BaseModel):
     name: str = Field(description="Name of the tool")
     description: str = Field(description="Description of what the tool does")
     parameters: dict[str, Any] = Field(description="JSON schema for tool parameters")
-    fn_metadata: FuncMetadata = Field(
-        description="Metadata about the function including a pydantic model for tool"
-        " arguments"
-    )
-    is_async: bool = Field(description="Whether the tool is async")
     context_kwarg: str | None = Field(
         None, description="Name of the kwarg that should receive context"
     )
     tags: Annotated[set[str], BeforeValidator(_convert_set_defaults)] = Field(
         default_factory=set, description="Tags for the tool"
+    )
+    annotations: ToolAnnotations | None = Field(
+        None, description="Additional annotations about the tool"
+    )
+    serializer: Callable[[Any], str] | None = Field(
+        None, description="Optional custom serializer for tool results"
     )
 
     @classmethod
@@ -51,9 +61,19 @@ class Tool(BaseModel):
         description: str | None = None,
         context_kwarg: str | None = None,
         tags: set[str] | None = None,
+        annotations: ToolAnnotations | None = None,
+        serializer: Callable[[Any], str] | None = None,
     ) -> Tool:
         """Create a Tool from a function."""
         from fastmcp import Context
+
+        # Reject functions with *args or **kwargs
+        sig = inspect.signature(fn)
+        for param in sig.parameters.values():
+            if param.kind == inspect.Parameter.VAR_POSITIONAL:
+                raise ValueError("Functions with *args are not supported as tools")
+            if param.kind == inspect.Parameter.VAR_KEYWORD:
+                raise ValueError("Functions with **kwargs are not supported as tools")
 
         func_name = name or fn.__name__
 
@@ -61,40 +81,24 @@ class Tool(BaseModel):
             raise ValueError("You must provide a name for lambda functions")
 
         func_doc = description or fn.__doc__ or ""
-        is_async = inspect.iscoroutinefunction(fn)
+
+        type_adapter = get_cached_typeadapter(fn)
+        schema = type_adapter.json_schema()
 
         if context_kwarg is None:
-            if inspect.ismethod(fn) and hasattr(fn, "__func__"):
-                sig = inspect.signature(fn.__func__)
-            else:
-                sig = inspect.signature(fn)
-            for param_name, param in sig.parameters.items():
-                if is_class_member_of_type(param.annotation, Context):
-                    context_kwarg = param_name
-                    break
-
-        # Use callable typing to ensure fn is treated as a callable despite being a classmethod
-        fn_callable: Callable[..., Any] = fn
-        func_arg_metadata = func_metadata(
-            fn_callable,
-            skip_names=[context_kwarg] if context_kwarg is not None else [],
-        )
-        try:
-            parameters = func_arg_metadata.arg_model.model_json_schema()
-        except Exception as e:
-            raise TypeError(
-                f'Unable to parse parameters for function "{fn.__name__}": {e}'
-            ) from e
+            context_kwarg = find_kwarg_by_type(fn, kwarg_type=Context)
+        if context_kwarg:
+            schema = prune_params(schema, params=[context_kwarg])
 
         return cls(
-            fn=fn_callable,
+            fn=fn,
             name=func_name,
             description=func_doc,
-            parameters=parameters,
-            fn_metadata=func_arg_metadata,
-            is_async=is_async,
+            parameters=schema,
             context_kwarg=context_kwarg,
             tags=tags or set(),
+            annotations=annotations,
+            serializer=serializer,
         )
 
     async def run(
@@ -104,18 +108,31 @@ class Tool(BaseModel):
     ) -> list[TextContent | ImageContent | EmbeddedResource]:
         """Run the tool with arguments."""
         try:
-            pass_args = (
-                {self.context_kwarg: context}
-                if self.context_kwarg is not None
-                else None
+            injected_args = (
+                {self.context_kwarg: context} if self.context_kwarg is not None else {}
             )
-            result = await self.fn_metadata.call_fn_with_arg_validation(
-                fn=self.fn,
-                fn_is_async=self.is_async,
-                arguments_to_validate=arguments,
-                arguments_to_pass_directly=pass_args,
-            )
-            return _convert_to_content(result)
+
+            parsed_args = arguments.copy()
+
+            # Pre-parse data from JSON in order to handle cases like `["a", "b", "c"]`
+            # being passed in as JSON inside a string rather than an actual list.
+            #
+            # Claude desktop is prone to this - in fact it seems incapable of NOT doing
+            # this. For sub-models, it tends to pass dicts (JSON objects) as JSON strings,
+            # which can be pre-parsed here.
+            for param_name in self.parameters["properties"]:
+                if isinstance(parsed_args.get(param_name, None), str):
+                    try:
+                        parsed_args[param_name] = json.loads(parsed_args[param_name])
+                    except json.JSONDecodeError:
+                        pass
+
+            type_adapter = get_cached_typeadapter(self.fn)
+            result = type_adapter.validate_python(parsed_args | injected_args)
+            if inspect.isawaitable(result):
+                result = await result
+
+            return _convert_to_content(result, serializer=self.serializer)
         except Exception as e:
             raise ToolError(f"Error executing tool {self.name}: {e}") from e
 
@@ -124,6 +141,7 @@ class Tool(BaseModel):
             "name": self.name,
             "description": self.description,
             "inputSchema": self.parameters,
+            "annotations": self.annotations,
         }
         return MCPTool(**kwargs | overrides)
 
@@ -135,6 +153,7 @@ class Tool(BaseModel):
 
 def _convert_to_content(
     result: Any,
+    serializer: Callable[[Any], str] | None = None,
     _process_as_single_item: bool = False,
 ) -> list[TextContent | ImageContent | EmbeddedResource]:
     """Convert a result to a sequence of content objects."""
@@ -170,6 +189,17 @@ def _convert_to_content(
         return other_content + mcp_types
 
     if not isinstance(result, str):
-        result = pydantic_core.to_json(result, fallback=str, indent=2).decode()
+        if serializer is None:
+            result = default_serializer(result)
+        else:
+            try:
+                result = serializer(result)
+            except Exception as e:
+                logger.warning(
+                    "Error serializing tool result: %s",
+                    e,
+                    exc_info=True,
+                )
+                result = default_serializer(result)
 
     return [TextContent(type="text", text=result)]

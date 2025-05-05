@@ -4,7 +4,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from mcp.shared.context import LifespanContextT
-from mcp.types import EmbeddedResource, ImageContent, TextContent
+from mcp.types import EmbeddedResource, ImageContent, TextContent, ToolAnnotations
 
 from fastmcp.exceptions import NotFoundError
 from fastmcp.settings import DuplicateBehavior
@@ -22,8 +22,13 @@ logger = get_logger(__name__)
 class ToolManager:
     """Manages FastMCP tools."""
 
-    def __init__(self, duplicate_behavior: DuplicateBehavior | None = None):
+    def __init__(
+        self,
+        duplicate_behavior: DuplicateBehavior | None = None,
+        serializer: Callable[[Any], str] | None = None,
+    ):
         self._tools: dict[str, Tool] = {}
+        self._serializer = serializer
 
         # Default to "warn" if None is provided
         if duplicate_behavior is None:
@@ -61,9 +66,17 @@ class ToolManager:
         name: str | None = None,
         description: str | None = None,
         tags: set[str] | None = None,
+        annotations: ToolAnnotations | None = None,
     ) -> Tool:
         """Add a tool to the server."""
-        tool = Tool.from_function(fn, name=name, description=description, tags=tags)
+        tool = Tool.from_function(
+            fn,
+            name=name,
+            description=description,
+            tags=tags,
+            annotations=annotations,
+            serializer=self._serializer,
+        )
         return self.add_tool(tool)
 
     def add_tool(self, tool: Tool, key: str | None = None) -> Tool:

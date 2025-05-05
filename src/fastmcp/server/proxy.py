@@ -24,7 +24,6 @@ from fastmcp.resources import Resource, ResourceTemplate
 from fastmcp.server.context import Context
 from fastmcp.server.server import FastMCP
 from fastmcp.tools.tool import Tool
-from fastmcp.utilities.func_metadata import func_metadata
 from fastmcp.utilities.logging import get_logger
 
 if TYPE_CHECKING:
@@ -53,8 +52,6 @@ class ProxyTool(Tool):
             description=tool.description,
             parameters=tool.inputSchema,
             fn=_proxy_passthrough,
-            fn_metadata=func_metadata(_proxy_passthrough),
-            is_async=True,
         )
 
     async def run(
@@ -65,8 +62,9 @@ class ProxyTool(Tool):
         # the client context manager will swallow any exceptions inside a TaskGroup
         # so we return the raw result and raise an exception ourselves
         async with self._client:
-            result = await self._client.call_tool(
-                self.name, arguments, _return_raw_result=True
+            result = await self._client.call_tool_mcp(
+                name=self.name,
+                arguments=arguments,
             )
         if result.isError:
             raise ValueError(cast(mcp.types.TextContent, result.content[0]).text)

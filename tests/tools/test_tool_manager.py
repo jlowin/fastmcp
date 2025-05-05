@@ -1,7 +1,9 @@
 import json
 import logging
-from typing import Annotated
+import uuid
+from typing import Annotated, Any
 
+import pydantic_core
 import pytest
 from mcp.server.session import ServerSessionT
 from mcp.shared.context import LifespanContextT
@@ -29,7 +31,6 @@ class TestAddTools:
         assert tool is not None
         assert tool.name == "add"
         assert tool.description == "Add two numbers."
-        assert tool.is_async is False
         assert tool.parameters["properties"]["a"]["type"] == "integer"
         assert tool.parameters["properties"]["b"]["type"] == "integer"
 
@@ -47,7 +48,6 @@ class TestAddTools:
         assert tool is not None
         assert tool.name == "fetch_data"
         assert tool.description == "Fetch data from URL."
-        assert tool.is_async is True
         assert tool.parameters["properties"]["url"]["type"] == "string"
 
     def test_pydantic_model_function(self):
@@ -68,7 +68,6 @@ class TestAddTools:
         assert tool is not None
         assert tool.name == "create_user"
         assert tool.description == "Create a new user."
-        assert tool.is_async is False
         assert "name" in tool.parameters["$defs"]["UserInput"]["properties"]
         assert "age" in tool.parameters["$defs"]["UserInput"]["properties"]
         assert "flag" in tool.parameters["properties"]
@@ -85,9 +84,9 @@ class TestAddTools:
         assert tool.parameters["properties"]["data"]["type"] == "string"
         assert isinstance(result[0], ImageContent)
 
-    def test_add_invalid_tool(self):
+    def test_add_noncallable_tool(self):
         manager = ToolManager()
-        with pytest.raises(AttributeError):
+        with pytest.raises(TypeError, match="not a callable object"):
             manager.add_tool_from_fn(1)  # type: ignore
 
     def test_add_lambda(self):
@@ -367,7 +366,7 @@ class TestCallTools:
         assert isinstance(result, list)
         assert len(result) == 1
         assert isinstance(result[0], TextContent)
-        assert result[0].text == '"a"'
+        assert result[0].text == "a"
 
     async def test_call_tool_with_complex_model(self):
         class MyShrimpTank(BaseModel):
@@ -377,7 +376,7 @@ class TestCallTools:
             shrimp: list[Shrimp]
             x: None
 
-        def name_shrimp(tank: MyShrimpTank, ctx: Context) -> list[str]:
+        def name_shrimp(tank: MyShrimpTank, ctx: Context | None) -> list[str]:
             return [x.name for x in tank.shrimp]
 
         manager = ToolManager()
@@ -392,6 +391,51 @@ class TestCallTools:
         assert isinstance(result[0], TextContent)
         assert result[0].text == '[\n  "rex",\n  "gertrude"\n]'
 
+    async def test_call_tool_with_custom_serializer(self):
+        """Test that a custom serializer provided to FastMCP is used by tools."""
+
+        def custom_serializer(data: Any) -> str:
+            if isinstance(data, dict):
+                return f"CUSTOM:{json.dumps(data)}"
+            return json.dumps(data)
+
+        # Instantiate FastMCP with the custom serializer
+        mcp = FastMCP(tool_serializer=custom_serializer)
+        manager = mcp._tool_manager
+
+        def get_data() -> dict:
+            return {"key": "value", "number": 123}
+
+        manager.add_tool_from_fn(get_data)
+
+        result = await manager.call_tool("get_data", {})
+        assert isinstance(result, list)
+        assert len(result) == 1
+        assert isinstance(result[0], TextContent)
+        assert result[0].text == 'CUSTOM:{"key": "value", "number": 123}'
+
+    async def test_custom_serializer_fallback_on_error(self):
+        """Test that a broken custom serializer gracefully falls back."""
+
+        uuid_result = uuid.uuid4()
+
+        def custom_serializer(data: Any) -> str:
+            return json.dumps(data)
+
+        mcp = FastMCP(tool_serializer=custom_serializer)
+        manager = mcp._tool_manager
+
+        def get_data() -> uuid.UUID:
+            return uuid_result
+
+        manager.add_tool_from_fn(get_data)
+
+        result = await manager.call_tool("get_data", {})
+        assert isinstance(result, list)
+        assert len(result) == 1
+        assert isinstance(result[0], TextContent)
+        assert result[0].text == pydantic_core.to_json(uuid_result).decode()
+
 
 class TestToolSchema:
     async def test_context_arg_excluded_from_schema(self):
@@ -402,7 +446,24 @@ class TestToolSchema:
         tool = manager.add_tool_from_fn(something)
         assert "ctx" not in json.dumps(tool.parameters)
         assert "Context" not in json.dumps(tool.parameters)
-        assert "ctx" not in tool.fn_metadata.arg_model.model_fields
+
+    async def test_optional_context_arg_excluded_from_schema(self):
+        def something(a: int, ctx: Context | None) -> int:
+            return a
+
+        manager = ToolManager()
+        tool = manager.add_tool_from_fn(something)
+        assert "ctx" not in json.dumps(tool.parameters)
+        assert "Context" not in json.dumps(tool.parameters)
+
+    async def test_annotated_context_arg_excluded_from_schema(self):
+        def something(a: int, ctx: Annotated[Context | int | None, "ctx"]) -> int:
+            return a
+
+        manager = ToolManager()
+        tool = manager.add_tool_from_fn(something)
+        assert "ctx" not in json.dumps(tool.parameters)
+        assert "Context" not in json.dumps(tool.parameters)
 
 
 class TestContextHandling:

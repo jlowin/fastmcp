@@ -5,19 +5,19 @@ from __future__ import annotations
 import enum
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from re import Pattern
 from typing import TYPE_CHECKING, Any, Literal
 
 import httpx
-from mcp.types import EmbeddedResource, ImageContent, TextContent
+from mcp.types import EmbeddedResource, ImageContent, TextContent, ToolAnnotations
 from pydantic.networks import AnyUrl
 
 from fastmcp.resources import Resource, ResourceTemplate
 from fastmcp.server.server import FastMCP
 from fastmcp.tools.tool import Tool, _convert_to_content
 from fastmcp.utilities import openapi
-from fastmcp.utilities.func_metadata import func_metadata
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.openapi import (
     _combine_schemas,
@@ -122,20 +122,20 @@ class OpenAPITool(Tool):
         name: str,
         description: str,
         parameters: dict[str, Any],
-        fn_metadata: Any,
-        is_async: bool = True,
         tags: set[str] = set(),
         timeout: float | None = None,
+        annotations: ToolAnnotations | None = None,
+        serializer: Callable[[Any], str] | None = None,
     ):
         super().__init__(
             name=name,
             description=description,
             parameters=parameters,
             fn=self._execute_request,  # We'll use an instance method instead of a global function
-            fn_metadata=fn_metadata,
-            is_async=is_async,
             context_kwarg="context",  # Default context keyword argument
             tags=tags,
+            annotations=annotations,
+            serializer=serializer,
         )
         self._client = client
         self._route = route
@@ -548,8 +548,6 @@ class FastMCPOpenAPI(FastMCP):
             name=tool_name,
             description=enhanced_description,
             parameters=combined_schema,
-            fn_metadata=func_metadata(_openapi_passthrough),
-            is_async=True,
             tags=set(route.tags or []),
             timeout=self._timeout,
         )
