@@ -741,6 +741,7 @@ class TestPromptDecorator:
 class TestSSEUseMountPath:
     def test_normalize(self):
         from fastmcp.server.http import _normalize_path
+
         # Test root path
         assert _normalize_path("/", "/messages/") == "/messages/"
 
@@ -757,17 +758,16 @@ class TestSSEUseMountPath:
         assert _normalize_path("/api/", "/v1/") == "/api/v1/"
 
     async def test_http_app_mount_path(self):
-
         mcp = FastMCP()
         with patch(
-                "fastmcp.server.http._normalize_path", return_value="/messages/"
+            "fastmcp.server.http._normalize_path", return_value="/messages/"
         ) as mock_normalize:
             mcp.http_app(transport="sse")
             mock_normalize.assert_called_once_with("/", "/messages/")
 
         mcp = FastMCP()
         with patch(
-                "fastmcp.server.http._normalize_path", return_value="/mcp/messages/"
+            "fastmcp.server.http._normalize_path", return_value="/mcp/messages/"
         ) as mock_normalize:
             mcp.http_app(mount_path="/mcp", transport="sse")
             mock_normalize.assert_called_once_with("/mcp", "/messages/")
@@ -775,7 +775,7 @@ class TestSSEUseMountPath:
         mcp = FastMCP()
         mcp.settings.mount_path = "/api"
         with patch(
-                "fastmcp.server.http._normalize_path", return_value="/api/messages/"
+            "fastmcp.server.http._normalize_path", return_value="/api/messages/"
         ) as mock_normalize:
             mcp.http_app(transport="sse")
             mock_normalize.assert_called_once_with("/api", "/messages/")
@@ -794,9 +794,9 @@ class TestSSEUseMountPath:
 
         # Verify path values
         assert sse_routes[0].path == "/sse", "SSE route path should be /sse"
-        assert (
-            mount_routes[0].path == "/messages"
-        ), "Mount route path should be /messages"
+        assert mount_routes[0].path == "/messages", (
+            "Mount route path should be /messages"
+        )
 
         mcp = FastMCP()
         mcp.settings.mount_path = "/api"
@@ -812,6 +812,6 @@ class TestSSEUseMountPath:
 
         # Verify path values
         assert sse_routes[0].path == "/sse", "SSE route path should be /sse"
-        assert (
-            mount_routes[0].path == "/messages"
-        ), "Mount route path should be /messages"
+        assert mount_routes[0].path == "/messages", (
+            "Mount route path should be /messages"
+        )

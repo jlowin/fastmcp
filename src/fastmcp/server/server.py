@@ -192,7 +192,9 @@ class FastMCP(Generic[LifespanResultT]):
         elif transport == "streamable-http":
             await self.run_http_async(transport="streamable-http", **transport_kwargs)
         elif transport == "sse":
-            await self.run_http_async(transport="sse", mount_path=mount_path, **transport_kwargs)
+            await self.run_http_async(
+                transport="sse", mount_path=mount_path, **transport_kwargs
+            )
         else:
             raise ValueError(f"Unknown transport: {transport}")
 
@@ -210,7 +212,11 @@ class FastMCP(Generic[LifespanResultT]):
         """
         logger.info(f'Starting server "{self.name}"...')
 
-        anyio.run(partial(self.run_async, transport, mount_path=mount_path, **transport_kwargs))
+        anyio.run(
+            partial(
+                self.run_async, transport, mount_path=mount_path, **transport_kwargs
+            )
+        )
 
     def _setup_handlers(self) -> None:
         """Set up core MCP protocol handlers."""
