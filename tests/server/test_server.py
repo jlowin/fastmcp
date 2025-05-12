@@ -1,4 +1,5 @@
 from typing import Annotated
+from unittest.mock import patch
 
 import pytest
 from mcp.types import (
@@ -6,11 +7,11 @@ from mcp.types import (
     TextResourceContents,
 )
 from pydantic import Field
-from starlette.routing import Route, Mount
+from starlette.routing import Mount, Route
 
 from fastmcp import Client, FastMCP
 from fastmcp.exceptions import ClientError, NotFoundError
-from unittest.mock import patch
+
 
 class TestCreateServer:
     async def test_create_server(self):
