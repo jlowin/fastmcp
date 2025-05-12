@@ -135,10 +135,36 @@ def create_base_app(
     )
 
 
+def _normalize_path(mount_path: str, endpoint: str) -> str:
+    """
+    Combine mount path and endpoint to return a normalized path.
+    Args:
+        mount_path: The mount path (e.g. "/mcp" or "/")
+        endpoint: The endpoint path (e.g. "/messages/")
+    Returns:
+        Normalized path (e.g. "/mcp/messages/")
+    """
+    # Special case: root path
+    if mount_path == "/":
+        return endpoint
+
+    # Remove trailing slash from mount path
+    if mount_path.endswith("/"):
+        mount_path = mount_path[:-1]
+
+    # Ensure endpoint starts with slash
+    if not endpoint.startswith("/"):
+        endpoint = "/" + endpoint
+
+    # Combine paths
+    return mount_path + endpoint
+
+
 def create_sse_app(
     server: FastMCP,
     message_path: str,
     sse_path: str,
+    mount_path: str | None = None,
     auth_server_provider: OAuthAuthorizationServerProvider | None = None,
     auth_settings: AuthSettings | None = None,
     debug: bool = False,
@@ -151,6 +177,7 @@ def create_sse_app(
         server: The FastMCP server instance
         message_path: Path for SSE messages
         sse_path: Path for SSE connections
+        mount_path: Optional mount path for SSE transport
         auth_server_provider: Optional auth provider
         auth_settings: Optional auth settings
         debug: Whether to enable debug mode
@@ -163,8 +190,13 @@ def create_sse_app(
     server_routes: list[BaseRoute] = []
     server_middleware: list[Middleware] = []
 
+    normalized_message_endpoint = message_path
+    if mount_path is not None:
+        # Create normalized endpoint considering the mount path
+        normalized_message_endpoint = _normalize_path(mount_path, message_path)
+
     # Set up SSE transport
-    sse = SseServerTransport(message_path)
+    sse = SseServerTransport(normalized_message_endpoint)
 
     # Create handler for SSE connections
     async def handle_sse(scope: Scope, receive: Receive, send: Send) -> Response:
