@@ -821,7 +821,7 @@ class TestResourceTemplates:
 
         with pytest.raises(
             ValueError,
-            match="URI parameters .* must be a subset of the function arguments",
+            match="URI parameters .* must have corresponding function arguments",
         ):
 
             @mcp.resource("resource://{param}")
@@ -1299,3 +1299,6 @@ class TestPromptContext:
             assert len(result.messages) == 1
             message = result.messages[0]
             assert message.role == "user"
+            content = message.content
+            assert isinstance(content, TextContent)
+            assert content.text == "Hello, World! 1"
