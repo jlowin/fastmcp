@@ -6,10 +6,11 @@ from mcp.types import (
     TextResourceContents,
 )
 from pydantic import Field
+from starlette.routing import Route, Mount
 
 from fastmcp import Client, FastMCP
 from fastmcp.exceptions import ClientError, NotFoundError
-
+from unittest.mock import patch
 
 class TestCreateServer:
     async def test_create_server(self):
@@ -734,3 +735,82 @@ class TestPromptDecorator:
         assert len(prompts_dict) == 1
         prompt = prompts_dict["sample_prompt"]
         assert prompt.tags == {"example", "test-tag"}
+
+
+class TestSSEUseMountPath:
+    def test_normalize(self):
+        from fastmcp.server.http import _normalize_path
+        # Test root path
+        assert _normalize_path("/", "/messages/") == "/messages/"
+
+        # Test path with trailing slash
+        assert _normalize_path("/mcp/", "/messages/") == "/mcp/messages/"
+
+        # Test path without trailing slash
+        assert _normalize_path("/mcp", "/messages/") == "/mcp/messages/"
+
+        # Test endpoint without leading slash
+        assert _normalize_path("/mcp", "messages/") == "/mcp/messages/"
+
+        # Test both with trailing/leading slashes
+        assert _normalize_path("/api/", "/v1/") == "/api/v1/"
+
+    async def test_http_app_mount_path(self):
+
+        mcp = FastMCP()
+        with patch(
+                "fastmcp.server.http._normalize_path", return_value="/messages/"
+        ) as mock_normalize:
+            mcp.http_app(transport="sse")
+            mock_normalize.assert_called_once_with("/", "/messages/")
+
+        mcp = FastMCP()
+        with patch(
+                "fastmcp.server.http._normalize_path", return_value="/mcp/messages/"
+        ) as mock_normalize:
+            mcp.http_app(mount_path="/mcp", transport="sse")
+            mock_normalize.assert_called_once_with("/mcp", "/messages/")
+
+        mcp = FastMCP()
+        mcp.settings.mount_path = "/api"
+        with patch(
+                "fastmcp.server.http._normalize_path", return_value="/api/messages/"
+        ) as mock_normalize:
+            mcp.http_app(transport="sse")
+            mock_normalize.assert_called_once_with("/api", "/messages/")
+
+    async def test_starlette_routes_not_change_with_mount_path(self):
+        mcp = FastMCP()
+        app = mcp.http_app(mount_path="/mcp", transport="sse")
+
+        # Find routes by type
+        sse_routes = [r for r in app.routes if isinstance(r, Route)]
+        mount_routes = [r for r in app.routes if isinstance(r, Mount)]
+
+        # Verify routes exist
+        assert len(sse_routes) == 1, "Should have one SSE route"
+        assert len(mount_routes) == 1, "Should have one mount route"
+
+        # Verify path values
+        assert sse_routes[0].path == "/sse", "SSE route path should be /sse"
+        assert (
+            mount_routes[0].path == "/messages"
+        ), "Mount route path should be /messages"
+
+        mcp = FastMCP()
+        mcp.settings.mount_path = "/api"
+        app = mcp.http_app(transport="sse")
+
+        # Find routes by type
+        sse_routes = [r for r in app.routes if isinstance(r, Route)]
+        mount_routes = [r for r in app.routes if isinstance(r, Mount)]
+
+        # Verify routes exist
+        assert len(sse_routes) == 1, "Should have one SSE route"
+        assert len(mount_routes) == 1, "Should have one mount route"
+
+        # Verify path values
+        assert sse_routes[0].path == "/sse", "SSE route path should be /sse"
+        assert (
+            mount_routes[0].path == "/messages"
+        ), "Mount route path should be /messages"
