@@ -738,7 +738,7 @@ class TestPromptDecorator:
         assert prompt.tags == {"example", "test-tag"}
 
 
-class TestSSEUseMountPath:
+class TestSSEUseBasePath:
     def test_normalize(self):
         from fastmcp.server.http import _normalize_path
 
@@ -757,7 +757,7 @@ class TestSSEUseMountPath:
         # Test both with trailing/leading slashes
         assert _normalize_path("/api/", "/v1/") == "/api/v1/"
 
-    async def test_http_app_mount_path(self):
+    async def test_http_app_base_path(self):
         mcp = FastMCP()
         with patch(
             "fastmcp.server.http._normalize_path", return_value="/messages/"
@@ -769,20 +769,20 @@ class TestSSEUseMountPath:
         with patch(
             "fastmcp.server.http._normalize_path", return_value="/mcp/messages/"
         ) as mock_normalize:
-            mcp.http_app(mount_path="/mcp", transport="sse")
+            mcp.http_app(base_path="/mcp", transport="sse")
             mock_normalize.assert_called_once_with("/mcp", "/messages/")
 
         mcp = FastMCP()
-        mcp.settings.mount_path = "/api"
+        mcp.settings.base_path = "/api"
         with patch(
             "fastmcp.server.http._normalize_path", return_value="/api/messages/"
         ) as mock_normalize:
             mcp.http_app(transport="sse")
             mock_normalize.assert_called_once_with("/api", "/messages/")
 
-    async def test_starlette_routes_not_change_with_mount_path(self):
+    async def test_starlette_routes_not_change_with_base_path(self):
         mcp = FastMCP()
-        app = mcp.http_app(mount_path="/mcp", transport="sse")
+        app = mcp.http_app(base_path="/mcp", transport="sse")
 
         # Find routes by type
         sse_routes = [r for r in app.routes if isinstance(r, Route)]
@@ -799,7 +799,7 @@ class TestSSEUseMountPath:
         )
 
         mcp = FastMCP()
-        mcp.settings.mount_path = "/api"
+        mcp.settings.base_path = "/api"
         app = mcp.http_app(transport="sse")
 
         # Find routes by type

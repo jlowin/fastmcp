@@ -173,14 +173,12 @@ class FastMCP(Generic[LifespanResultT]):
     async def run_async(
         self,
         transport: Literal["stdio", "streamable-http", "sse"] | None = None,
-        mount_path: str | None = None,
         **transport_kwargs: Any,
     ) -> None:
         """Run the FastMCP server asynchronously.
 
         Args:
             transport: Transport protocol to use ("stdio", "sse", or "streamable-http")
-            mount_path: Optional mount path for SSE transport
         """
         if transport is None:
             transport = "stdio"
@@ -192,16 +190,13 @@ class FastMCP(Generic[LifespanResultT]):
         elif transport == "streamable-http":
             await self.run_http_async(transport="streamable-http", **transport_kwargs)
         elif transport == "sse":
-            await self.run_http_async(
-                transport="sse", mount_path=mount_path, **transport_kwargs
-            )
+            await self.run_http_async(transport="sse", **transport_kwargs)
         else:
             raise ValueError(f"Unknown transport: {transport}")
 
     def run(
         self,
         transport: Literal["stdio", "streamable-http", "sse"] | None = None,
-        mount_path: str | None = None,
         **transport_kwargs: Any,
     ) -> None:
         """Run the FastMCP server. Note this is a synchronous function.
@@ -212,11 +207,7 @@ class FastMCP(Generic[LifespanResultT]):
         """
         logger.info(f'Starting server "{self.name}"...')
 
-        anyio.run(
-            partial(
-                self.run_async, transport, mount_path=mount_path, **transport_kwargs
-            )
-        )
+        anyio.run(partial(self.run_async, transport, **transport_kwargs))
 
     def _setup_handlers(self) -> None:
         """Set up core MCP protocol handlers."""
@@ -733,7 +724,7 @@ class FastMCP(Generic[LifespanResultT]):
         transport: Literal["streamable-http", "sse"] = "streamable-http",
         host: str | None = None,
         port: int | None = None,
-        mount_path: str | None = None,
+        base_path: str | None = None,
         log_level: str | None = None,
         path: str | None = None,
         uvicorn_config: dict | None = None,
@@ -744,7 +735,7 @@ class FastMCP(Generic[LifespanResultT]):
             transport: Transport protocol to use - either "streamable-http" (default) or "sse"
             host: Host address to bind to (defaults to settings.host)
             port: Port to bind to (defaults to settings.port)
-            mount_path: Optional mount path for SSE transport
+            base_path: Optional base path for SSE transport
             log_level: Log level for the server (defaults to settings.log_level)
             path: Path for the endpoint (defaults to settings.streamable_http_path or settings.sse_path)
             uvicorn_config: Additional configuration for the Uvicorn server
@@ -754,7 +745,7 @@ class FastMCP(Generic[LifespanResultT]):
         # lifespan is required for streamable http
         uvicorn_config["lifespan"] = "on"
 
-        app = self.http_app(mount_path=mount_path, path=path, transport=transport)
+        app = self.http_app(base_path=base_path or self.settings.base_path, path=path, transport=transport)
 
         config = uvicorn.Config(
             app,
@@ -850,15 +841,15 @@ class FastMCP(Generic[LifespanResultT]):
     def http_app(
         self,
         path: str | None = None,
-        mount_path: str | None = None,
+        base_path: str | None = None,
         middleware: list[Middleware] | None = None,
         transport: Literal["streamable-http", "sse"] = "streamable-http",
     ) -> Starlette:
         """Create a Starlette app using the specified HTTP transport.
 
         Args:
-            mount_path: Optional mount path for SSE transport
             path: The path for the HTTP endpoint
+            base_path: Optional base path for SSE transport
             middleware: A list of middleware to apply to the app
             transport: Transport protocol to use - either "streamable-http" (default) or "sse"
 
@@ -881,15 +872,15 @@ class FastMCP(Generic[LifespanResultT]):
                 middleware=middleware,
             )
         elif transport == "sse":
-            # Update mount_path in settings if provided
-            if mount_path is not None:
-                self.settings.mount_path = mount_path
+            # Update base_path in settings if provided
+            if base_path is not None:
+                self.settings.base_path = base_path
 
             return create_sse_app(
                 server=self,
                 message_path=self.settings.message_path,
                 sse_path=path or self.settings.sse_path,
-                mount_path=self.settings.mount_path,
+                base_path=self.settings.base_path,
                 auth_server_provider=self._auth_server_provider,
                 auth_settings=self.settings.auth,
                 debug=self.settings.debug,

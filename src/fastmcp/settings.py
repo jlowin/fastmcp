@@ -59,7 +59,7 @@ class ServerSettings(BaseSettings):
     # HTTP settings
     host: str = "127.0.0.1"
     port: int = 8000
-    mount_path: str = "/"
+    base_path: str = "/"
     sse_path: str = "/sse"
     message_path: str = "/messages/"
     streamable_http_path: str = "/mcp"
