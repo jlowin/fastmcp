@@ -745,7 +745,11 @@ class FastMCP(Generic[LifespanResultT]):
         # lifespan is required for streamable http
         uvicorn_config["lifespan"] = "on"
 
-        app = self.http_app(base_path=base_path or self.settings.base_path, path=path, transport=transport)
+        app = self.http_app(
+            base_path=base_path or self.settings.base_path,
+            path=path,
+            transport=transport,
+        )
 
         config = uvicorn.Config(
             app,
