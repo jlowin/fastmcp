@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/jlowin-fastmcp-badge.png)](https://mseep.ai/app/jlowin-fastmcp)
+
 <div align="center">
 
 <!-- omit in toc -->
