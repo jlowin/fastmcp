@@ -1,9 +1,11 @@
+import asyncio
 import json
 import sys
 from collections.abc import Generator
 
 import pytest
 import uvicorn
+from mcp import McpError
 from mcp.types import TextResourceContents
 from starlette.applications import Starlette
 from starlette.routing import Mount
@@ -30,6 +32,12 @@ def fastmcp_server():
     def add(a: int, b: int) -> int:
         """Add two numbers together."""
         return a + b
+
+    @server.tool()
+    async def sleep(seconds: float) -> str:
+        """Sleep for a given number of seconds."""
+        await asyncio.sleep(seconds)
+        return f"Slept for {seconds} seconds"
 
     # Add a resource
     @server.resource(uri="data://users")
@@ -126,3 +134,16 @@ async def test_nested_sse_server_resolves_correctly():
         ) as client:
             result = await client.ping()
             assert result is True
+
+
+class TestTimeout:
+    async def test_timeout(self, sse_server: str):
+        async with Client(
+            transport=SSETransport(sse_server),
+            read_timeout_seconds=0.1,
+        ) as client:
+            with pytest.raises(
+                McpError,
+                match="Timed out while waiting for response to ClientRequest. Waited 0.1 seconds",
+            ):
+                await client.call_tool("sleep", {"seconds": 0.5})

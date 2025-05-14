@@ -1,3 +1,4 @@
+import asyncio
 import json
 import sys
 from collections.abc import Generator
@@ -30,6 +31,12 @@ def fastmcp_server():
     def add(a: int, b: int) -> int:
         """Add two numbers together."""
         return a + b
+
+    @server.tool()
+    async def sleep(seconds: float) -> str:
+        """Sleep for a given number of seconds."""
+        await asyncio.sleep(seconds)
+        return f"Slept for {seconds} seconds"
 
     # Add a resource
     @server.resource(uri="data://users")
@@ -139,3 +146,12 @@ async def test_nested_streamable_http_server_resolves_correctly():
         ) as client:
             result = await client.ping()
             assert result is True
+
+
+class TestTimeout:
+    async def test_timeout(self, streamable_http_server: str):
+        async with Client(
+            transport=StreamableHttpTransport(streamable_http_server),
+            read_timeout_seconds=0.1,
+        ) as client:
+            await client.call_tool("sleep", {"seconds": 0.5})

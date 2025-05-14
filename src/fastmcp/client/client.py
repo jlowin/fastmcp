@@ -45,12 +45,15 @@ class Client:
         sampling_handler: SamplingHandler | None = None,
         log_handler: LogHandler | None = None,
         message_handler: MessageHandler | None = None,
-        read_timeout_seconds: datetime.timedelta | None = None,
+        read_timeout_seconds: datetime.timedelta | float | int | None = None,
     ):
         self.transport = infer_transport(transport)
         self._session: ClientSession | None = None
         self._session_cm: AbstractAsyncContextManager[ClientSession] | None = None
         self._nesting_counter: int = 0
+
+        if isinstance(read_timeout_seconds, int | float):
+            read_timeout_seconds = datetime.timedelta(seconds=read_timeout_seconds)
 
         self._session_kwargs: SessionKwargs = {
             "sampling_callback": None,
