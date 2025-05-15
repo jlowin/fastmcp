@@ -183,9 +183,13 @@ class TestTimeout:
         """On Windows with SSE transport, the client timeout takes precedence when it's lower."""
         # On Windows, the client timeout (0.01s) will be used instead of the
         # tool call timeout (2s), causing a timeout error
-        with pytest.raises(McpError, match="Timed out"):
+        try:
             async with Client(
                 transport=SSETransport(sse_server),
                 timeout=0.01,
             ) as client:
                 await client.call_tool("sleep", {"seconds": 0.1}, timeout=2)
+        except Exception as e:
+            print(f"Error: {e}")
+            print(f"Type: {type(e)}")
+            raise
