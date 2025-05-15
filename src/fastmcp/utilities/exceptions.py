@@ -21,7 +21,7 @@ def _exception_handler(group: BaseExceptionGroup):
 
 # this catch handler is used to catch taskgroup exception groups and raise the
 # first exception. This allows more sane debugging.
-catch_handlers: Mapping[
+_catch_handlers: Mapping[
     type[BaseException] | Iterable[type[BaseException]],
     Callable[[BaseExceptionGroup[Any]], Any],
 ] = {
@@ -34,6 +34,6 @@ def get_catch_handlers() -> Mapping[
     Callable[[BaseExceptionGroup[Any]], Any],
 ]:
     if fastmcp.settings.settings.client_raise_first_exceptiongroup_error:
-        return catch_handlers
+        return _catch_handlers
     else:
         return {}

@@ -140,10 +140,35 @@ class TestTimeout:
     async def test_timeout(self, sse_server: str):
         async with Client(
             transport=SSETransport(sse_server),
-            read_timeout_seconds=0.1,
+            timeout=0.01,
         ) as client:
             with pytest.raises(
                 McpError,
-                match="Timed out while waiting for response to ClientRequest. Waited 0.1 seconds",
+                match="Timed out while waiting for response to ClientRequest. Waited 0.01 seconds",
             ):
-                await client.call_tool("sleep", {"seconds": 0.5})
+                await client.call_tool("sleep", {"seconds": 0.1})
+
+    async def test_timeout_tool_call(self, sse_server: str):
+        async with Client(transport=SSETransport(sse_server)) as client:
+            with pytest.raises(McpError, match="Timed out"):
+                await client.call_tool("sleep", {"seconds": 0.1}, timeout=0.01)
+
+    async def test_timeout_tool_call_overrides_client_timeout_if_lower(
+        self, sse_server: str
+    ):
+        async with Client(
+            transport=SSETransport(sse_server),
+            timeout=2,
+        ) as client:
+            with pytest.raises(McpError, match="Timed out"):
+                await client.call_tool("sleep", {"seconds": 0.1}, timeout=0.01)
+
+    async def test_timeout_client_timeout_does_not_override_tool_call_timeout_if_lower(
+        self, sse_server: str
+    ):
+        """with SSE, the tool call timeout always takes precedence! This seems different than other transports in the low-level SDK."""
+        async with Client(
+            transport=SSETransport(sse_server),
+            timeout=0.01,
+        ) as client:
+            await client.call_tool("sleep", {"seconds": 0.1}, timeout=2)
