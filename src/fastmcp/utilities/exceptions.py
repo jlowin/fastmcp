@@ -1,7 +1,10 @@
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
+import httpx
+import mcp.types
 from exceptiongroup import BaseExceptionGroup
+from mcp import McpError
 
 import fastmcp
 
@@ -16,6 +19,13 @@ def iter_exc(group: BaseExceptionGroup):
 
 def _exception_handler(group: BaseExceptionGroup):
     for leaf in iter_exc(group):
+        if isinstance(leaf, httpx.ConnectTimeout):
+            raise McpError(
+                error=mcp.types.ErrorData(
+                    code=mcp.types.INTERNAL_ERROR,
+                    message="Timed out.",
+                )
+            )
         raise leaf
 
 

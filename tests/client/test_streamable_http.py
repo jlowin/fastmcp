@@ -3,7 +3,6 @@ import json
 import sys
 from collections.abc import Generator
 
-import httpx
 import pytest
 import uvicorn
 from mcp import McpError
@@ -153,8 +152,8 @@ async def test_nested_streamable_http_server_resolves_correctly():
 class TestTimeout:
     async def test_timeout(self, streamable_http_server: str):
         # note this transport behaves differently than others and raises
-        # httpx.ConnectTimeout from the *client* context
-        with pytest.raises(httpx.ConnectTimeout):
+        # McpError from the *client* context
+        with pytest.raises(McpError, match="Timed out"):
             async with Client(
                 transport=StreamableHttpTransport(streamable_http_server),
                 timeout=0.01,
@@ -181,9 +180,9 @@ class TestTimeout:
     async def test_timeout_client_timeout_overrides_tool_call_timeout_if_lower(
         self, streamable_http_server: str
     ):
-        # note this transport behaves differently than others and respects the
-        # *lower* of the two timeouts. Other transports respect the tool call.
-        with pytest.raises(httpx.ConnectTimeout):
+        """Test that client timeout overrides tool call timeout on Windows."""
+        # On Windows, this raises McpError
+        with pytest.raises(McpError):
             async with Client(
                 transport=StreamableHttpTransport(streamable_http_server),
                 timeout=0.01,

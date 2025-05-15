@@ -204,8 +204,8 @@ You can control request timeouts at both the client level and individual request
 ```python
 # Client with a global 5-second timeout for all requests
 client = Client(
-    "http://localhost:8000/mcp",
-    timeout=5.0  # Default timeout in seconds for all requests
+    my_mcp_server,
+    timeout=5.0  # Default timeout in seconds
 )
 
 async with client:
@@ -215,9 +215,9 @@ async with client:
     # This specifies a 10-second timeout for this specific call
     result2 = await client.call_tool("slow_task", {"param": "value"}, timeout=10.0)
     
-    # This specifies a shorter 1-second timeout for this specific call
     try:
-        result3 = await client.call_tool("medium_task", {"param": "value"}, timeout=1.0)
+        # This will likely timeout
+        result3 = await client.call_tool("medium_task", {"param": "value"}, timeout=0.01)
     except McpError as e:
         # Handle timeout error
         print(f"The task timed out: {e}")
@@ -230,6 +230,7 @@ Timeout behavior varies between transport types:
 - With **HTTP** transport, the **lower** of the two timeouts (client or tool call) takes precedence.
 
 For consistent behavior across all transports, we recommend explicitly setting timeouts at the individual tool call level when needed, rather than relying on client-level timeouts.
+</Warning>
 
 #### LLM Sampling
 
