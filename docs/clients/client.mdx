@@ -202,6 +202,9 @@ MCP allows servers to interact with clients in order to provide additional capab
 You can control request timeouts at both the client level and individual request level:
 
 ```python
+from fastmcp import Client
+from fastmcp.exceptions import McpError
+
 # Client with a global 5-second timeout for all requests
 client = Client(
     my_mcp_server,
