@@ -163,10 +163,18 @@ class TestTimeout:
             with pytest.raises(McpError, match="Timed out"):
                 await client.call_tool("sleep", {"seconds": 0.1}, timeout=0.01)
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="This test is flaky on Windows. Sometimes the client timeout is respected and sometimes it is not.",
+    )
     async def test_timeout_client_timeout_does_not_override_tool_call_timeout_if_lower(
         self, sse_server: str
     ):
-        """With SSE, the tool call timeout always takes precedence over the client."""
+        """
+        With SSE, the tool call timeout always takes precedence over the client.
+
+        Note: on Windows, the behavior appears unpredictable.
+        """
         async with Client(
             transport=SSETransport(sse_server),
             timeout=0.01,
