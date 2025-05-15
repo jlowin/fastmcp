@@ -138,14 +138,14 @@ async def test_nested_sse_server_resolves_correctly():
 
 class TestTimeout:
     async def test_timeout(self, sse_server: str):
-        async with Client(
-            transport=SSETransport(sse_server),
-            timeout=0.01,
-        ) as client:
-            with pytest.raises(
-                McpError,
-                match="Timed out while waiting for response to ClientRequest. Waited 0.01 seconds",
-            ):
+        with pytest.raises(
+            McpError,
+            match="Timed out while waiting for response to ClientRequest. Waited 0.01 seconds",
+        ):
+            async with Client(
+                transport=SSETransport(sse_server),
+                timeout=0.01,
+            ) as client:
                 await client.call_tool("sleep", {"seconds": 0.1})
 
     async def test_timeout_tool_call(self, sse_server: str):

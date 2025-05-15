@@ -22,8 +22,8 @@ def _exception_handler(group: BaseExceptionGroup):
         if isinstance(leaf, httpx.ConnectTimeout):
             raise McpError(
                 error=mcp.types.ErrorData(
-                    code=mcp.types.INTERNAL_ERROR,
-                    message="Timed out.",
+                    code=httpx.codes.REQUEST_TIMEOUT,
+                    message="Timed out while waiting for response.",
                 )
             )
         raise leaf
