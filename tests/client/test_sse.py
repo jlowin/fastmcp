@@ -163,33 +163,12 @@ class TestTimeout:
             with pytest.raises(McpError, match="Timed out"):
                 await client.call_tool("sleep", {"seconds": 0.1}, timeout=0.01)
 
-    @pytest.mark.skipif(sys.platform == "win32", reason="Non-Windows specific test")
-    async def test_timeout_client_timeout_does_not_override_tool_call_timeout_if_lower_non_windows(
+    async def test_timeout_client_timeout_does_not_override_tool_call_timeout_if_lower(
         self, sse_server: str
     ):
-        """With SSE on non-Windows platforms, the tool call timeout always takes precedence."""
+        """With SSE, the tool call timeout always takes precedence over the client."""
         async with Client(
             transport=SSETransport(sse_server),
             timeout=0.01,
         ) as client:
-            # This should succeed because on non-Windows the tool timeout (2s) is used
-            # instead of the client timeout (0.01s)
             await client.call_tool("sleep", {"seconds": 0.1}, timeout=2)
-
-    @pytest.mark.skipif(sys.platform != "win32", reason="Windows-specific test")
-    async def test_timeout_client_timeout_overrides_tool_call_timeout_if_lower_windows(
-        self, sse_server: str
-    ):
-        """On Windows with SSE transport, the client timeout takes precedence when it's lower."""
-        # On Windows, the client timeout (0.01s) will be used instead of the
-        # tool call timeout (2s), causing a timeout error
-        try:
-            async with Client(
-                transport=SSETransport(sse_server),
-                timeout=0.01,
-            ) as client:
-                await client.call_tool("sleep", {"seconds": 0.1}, timeout=2)
-        except Exception as e:
-            print(f"Error: {e}")
-            print(f"Type: {type(e)}")
-            raise
