@@ -180,8 +180,6 @@ class TestTimeout:
     async def test_timeout_client_timeout_overrides_tool_call_timeout_if_lower(
         self, streamable_http_server: str
     ):
-        """Test that client timeout overrides tool call timeout on Windows."""
-        # On Windows, this raises McpError
         with pytest.raises(McpError):
             async with Client(
                 transport=StreamableHttpTransport(streamable_http_server),
