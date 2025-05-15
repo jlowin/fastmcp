@@ -181,11 +181,11 @@ class TestTimeout:
         self, sse_server: str
     ):
         """On Windows with SSE transport, the client timeout takes precedence when it's lower."""
-        async with Client(
-            transport=SSETransport(sse_server),
-            timeout=0.01,
-        ) as client:
-            # On Windows, the client timeout (0.01s) will be used instead of the
-            # tool call timeout (2s), causing a timeout error
-            with pytest.raises(McpError, match="Timed out"):
+        # On Windows, the client timeout (0.01s) will be used instead of the
+        # tool call timeout (2s), causing a timeout error
+        with pytest.raises(McpError, match="Timed out"):
+            async with Client(
+                transport=SSETransport(sse_server),
+                timeout=0.01,
+            ) as client:
                 await client.call_tool("sleep", {"seconds": 0.1}, timeout=2)
