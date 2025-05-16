@@ -34,7 +34,7 @@ from mcp.types import Prompt as MCPPrompt
 from mcp.types import Resource as MCPResource
 from mcp.types import ResourceTemplate as MCPResourceTemplate
 from mcp.types import Tool as MCPTool
-from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+
 from pydantic import AnyUrl
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
@@ -57,6 +57,7 @@ from fastmcp.utilities.decorators import DecoratedFunction
 from fastmcp.utilities.logging import get_logger
 
 if TYPE_CHECKING:
+    from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
     from fastmcp.client import Client
     from fastmcp.server.openapi import FastMCPOpenAPI
     from fastmcp.server.proxy import FastMCPProxy
