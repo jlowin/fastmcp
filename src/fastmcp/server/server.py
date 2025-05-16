@@ -34,6 +34,7 @@ from mcp.types import Prompt as MCPPrompt
 from mcp.types import Resource as MCPResource
 from mcp.types import ResourceTemplate as MCPResourceTemplate
 from mcp.types import Tool as MCPTool
+from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from pydantic import AnyUrl
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
@@ -156,6 +157,7 @@ class FastMCP(Generic[LifespanResultT]):
             instructions=instructions,
             lifespan=_lifespan_wrapper(self, lifespan),
         )
+        self._session_manager: StreamableHTTPSessionManager | None = None
 
         if (self.settings.auth is not None) != (auth_server_provider is not None):
             # TODO: after we support separate authorization servers (see
@@ -178,6 +180,25 @@ class FastMCP(Generic[LifespanResultT]):
     @property
     def instructions(self) -> str | None:
         return self._mcp_server.instructions
+
+    @property
+    def session_manager(self) -> StreamableHTTPSessionManager:
+        """Get the StreamableHTTP session manager.
+
+        This is exposed to enable advanced use cases like mounting multiple
+        FastMCP servers in a single FastAPI application.
+
+        Raises:
+            RuntimeError: If called before streamable_http_app() has been called.
+        """
+        if self._session_manager is None:
+            raise RuntimeError(
+                "Session manager can only be accessed after"
+                "calling streamable_http_app()."
+                "The session manager is created lazily"
+                "to avoid unnecessary initialization."
+            )
+        return self._session_manager
 
     async def run_async(
         self,

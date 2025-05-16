@@ -284,18 +284,19 @@ def create_streamable_http_app(
     server_middleware: list[Middleware] = []
 
     # Create session manager using the provided event store
-    session_manager = StreamableHTTPSessionManager(
-        app=server._mcp_server,
-        event_store=event_store,
-        json_response=json_response,
-        stateless=stateless_http,
-    )
+    if server._session_manager is None:
+        server._session_manager = StreamableHTTPSessionManager(
+            app=server._mcp_server,
+            event_store=event_store,
+            json_response=json_response,
+            stateless=stateless_http,
+        )
 
     # Create the ASGI handler
     async def handle_streamable_http(
         scope: Scope, receive: Receive, send: Send
     ) -> None:
-        await session_manager.handle_request(scope, receive, send)
+        await server.session_manager.handle_request(scope, receive, send)
 
     # Get auth middleware and routes
     auth_middleware, auth_routes, required_scopes = setup_auth_middleware_and_routes(
@@ -334,7 +335,7 @@ def create_streamable_http_app(
     # Create a lifespan manager to start and stop the session manager
     @asynccontextmanager
     async def lifespan(app: Starlette) -> AsyncGenerator[None, None]:
-        async with session_manager.run():
+        async with server.session_manager.run():
             yield
 
     # Create and return the app with lifespan
