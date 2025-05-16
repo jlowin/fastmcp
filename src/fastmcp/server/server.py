@@ -189,12 +189,12 @@ class FastMCP(Generic[LifespanResultT]):
         FastMCP servers in a single FastAPI application.
 
         Raises:
-            RuntimeError: If called before streamable_http_app() has been called.
+            RuntimeError: If called before create_streamable_http_app() has been called.
         """
         if self._session_manager is None:
             raise RuntimeError(
                 "Session manager can only be accessed after"
-                "calling streamable_http_app()."
+                "calling create_streamable_http_app()."
                 "The session manager is created lazily"
                 "to avoid unnecessary initialization."
             )
