@@ -6,6 +6,7 @@ import os
 import platform
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 from typing import Annotated
 
@@ -128,6 +129,17 @@ def dev(
             help="Additional packages to install",
         ),
     ] = [],
+    pyproj_dependencies: Annotated[
+        Path | None,
+        typer.Option(
+            "--pyproj-dependencies",
+            help="Path to pyproject.toml to extract dependencies from",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            resolve_path=True,
+        ),
+    ] = None,
     inspector_version: Annotated[
         str | None,
         typer.Option(
@@ -170,6 +182,19 @@ def dev(
         server = run_module.import_server(file, server_object)
         if hasattr(server, "dependencies") and server.dependencies is not None:
             with_packages = list(set(with_packages + server.dependencies))
+            
+        # Process dependencies from pyproject.toml if provided
+        if pyproj_dependencies:
+            try:
+                project_deps = _get_project_deps_from_pyproject(pyproj_dependencies)
+                
+                # Add extracted dependencies to with_packages
+                if project_deps:
+                    with_packages = list(set(with_packages + project_deps))
+                    logger.info(f"Added {len(project_deps)} dependencies from pyproject.toml")
+            except Exception as e:
+                logger.error(f"Failed to parse pyproject.toml: {e}")
+                sys.exit(1)
 
         env_vars = {}
         if ui_port:
@@ -428,3 +453,71 @@ def install(
     else:
         logger.error(f"Failed to install {name} in Claude app")
         sys.exit(1)
+
+
+def _get_project_deps_from_pyproject(
+    pyproj_dependencies: Path,
+) -> list[str]:
+    """Extract dependencies from a pyproject.toml file."""
+    with open(pyproj_dependencies, "rb") as f:
+        pyproject_data = tomllib.load(f)
+    
+    # Extract dependencies from different possible locations in pyproject.toml
+    project_deps = []
+    
+    # Try project.dependencies (PEP 621)
+    if "project" in pyproject_data and "dependencies" in pyproject_data["project"]:
+        project_deps.extend(pyproject_data["project"]["dependencies"])
+    
+    # Try tool.poetry.dependencies
+    tool_in_pyproject_data = "tool" in pyproject_data
+    poetry_in_tool = "poetry" in pyproject_data["tool"] if tool_in_pyproject_data else False
+    deps_in_poetry = "dependencies" in pyproject_data["tool"]["poetry"] if poetry_in_tool else False
+    
+    if deps_in_poetry:
+        poetry_deps = pyproject_data["tool"]["poetry"]["dependencies"]
+        # Poetry dependencies can be strings or dicts with version info
+        for dep_name, dep_info in poetry_deps.items():
+            if dep_name != "python":  # Skip python version constraint
+                if isinstance(dep_info, str):
+                    project_deps.append(f"{dep_name}{dep_info}")
+                else:
+                    project_deps.append(dep_name)
+                    
+    # Try tool.setuptools_scm
+    if "tool" in pyproject_data and "setuptools_scm" in pyproject_data["tool"]:
+        setuptools_scm_deps = pyproject_data["tool"]["setuptools_scm"].get("dependencies", [])
+        project_deps.extend(setuptools_scm_deps)
+        
+    # Remove duplicates
+    project_deps = list(set(project_deps))
+    
+    # Filter out any empty strings
+    project_deps = [dep for dep in project_deps if dep]
+    
+    def extract_package_name(dep):
+        # This will match package names before any version specifier
+        import re
+        match = re.match(r'^([a-zA-Z0-9_\-]+)', dep)
+        return match.group(1) if match else dep
+    
+    # Check if a dependency has any version specifier
+    def has_version_specifier(dep):
+        return any(op in dep for op in ["==", ">=", "<=", "!=", ">", "<", "~=", "^"])
+    
+    # Deduplicate dependencies, preferring ones with version specifiers
+    seen = {}
+    for dep in project_deps:
+        name = extract_package_name(dep)
+        if name in seen:
+            # If this dependency has a version specifier but the existing one doesn't,
+            # replace the existing one
+            if has_version_specifier(dep) and not has_version_specifier(seen[name]):
+                seen[name] = dep
+        else:
+            seen[name] = dep
+    
+    # Convert back to list
+    project_deps = list(seen.values())
+    
+    return project_deps

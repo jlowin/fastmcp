@@ -1,6 +1,7 @@
 """Tests for the CLI module."""
 
 import subprocess
+import tomllib
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
@@ -172,6 +173,138 @@ class TestHelperFunctions:
             "run",
             "file.py:server",
         ]
+    
+    @pytest.fixture
+    def pep621_pyproject_file(self, tmp_path):
+        """Create a pyproject.toml file with PEP 621 dependencies."""
+        content = """
+[project]
+name = "test-project"
+version = "0.1.0"
+dependencies = [
+    "requests>=2.0.0",
+    "pandas==1.3.0",
+    "numpy"
+]
+"""
+        file_path = tmp_path / "pyproject.toml"
+        file_path.write_text(content)
+        return file_path
+
+    @pytest.fixture
+    def poetry_pyproject_file(self, tmp_path):
+        """Create a pyproject.toml file with Poetry dependencies."""
+        content = """
+[tool.poetry]
+name = "test-project"
+version = "0.1.0"
+
+[tool.poetry.dependencies]
+python = ">=3.8,<3.11"
+requests = "^2.0.0"
+pandas = { version = "1.3.0", optional = true }
+numpy = "*"
+"""
+        file_path = tmp_path / "pyproject.toml"
+        file_path.write_text(content)
+        return file_path
+
+    @pytest.fixture
+    def setuptools_scm_pyproject_file(self, tmp_path):
+        """Create a pyproject.toml file with setuptools_scm dependencies."""
+        content = """
+[build-system]
+requires = ["setuptools>=42", "wheel", "setuptools_scm[toml]>=6.0"]
+
+[tool.setuptools_scm]
+dependencies = ["pytest", "pytest-cov"]
+"""
+        file_path = tmp_path / "pyproject.toml"
+        file_path.write_text(content)
+        return file_path
+
+    @pytest.fixture
+    def combined_pyproject_file(self, tmp_path):
+        """Create a pyproject.toml file with multiple dependency formats."""
+        content = """
+[project]
+name = "test-project"
+version = "0.1.0"
+dependencies = [
+    "requests>=2.0.0",
+    "pandas==1.3.0"
+]
+
+[tool.poetry]
+name = "test-project"
+version = "0.1.0"
+
+[tool.poetry.dependencies]
+python = ">=3.8,<3.11"
+pandas = { version = "1.3.0", optional = true }
+numpy = "*"
+matplotlib = "^3.5.0"
+
+[tool.setuptools_scm]
+dependencies = ["pytest", "pytest-cov", "requests"]
+"""
+        file_path = tmp_path / "pyproject.toml"
+        file_path.write_text(content)
+        return file_path
+
+    def test_pep621_dependencies(self, pep621_pyproject_file):
+        """Test extracting dependencies from PEP 621 format."""
+        deps = cli._get_project_deps_from_pyproject(pep621_pyproject_file)
+        assert sorted(deps) == sorted(["requests>=2.0.0", "pandas==1.3.0", "numpy"])
+
+    def test_poetry_dependencies(self, poetry_pyproject_file):
+        """Test extracting dependencies from Poetry format."""
+        deps = cli._get_project_deps_from_pyproject(poetry_pyproject_file)
+        # Python is excluded, other deps are included
+        assert sorted(deps) == sorted(["requests^2.0.0", "pandas", "numpy*"])
+
+    def test_setuptools_scm_dependencies(self, setuptools_scm_pyproject_file):
+        """Test extracting dependencies from setuptools_scm format."""
+        deps = cli._get_project_deps_from_pyproject(setuptools_scm_pyproject_file)
+        assert sorted(deps) == sorted(["pytest", "pytest-cov"])
+
+    def test_combined_dependencies(self, combined_pyproject_file):
+        """Test extracting dependencies from multiple formats with deduplication."""
+        deps = cli._get_project_deps_from_pyproject(combined_pyproject_file)
+        expected = [
+            "requests>=2.0.0",
+            "pandas==1.3.0",
+            "numpy*",
+            "matplotlib^3.5.0",
+            "pytest",
+            "pytest-cov",
+        ]
+        # Check that all expected dependencies are present (order doesn't matter)
+        assert sorted(deps) == sorted(expected)
+
+    def test_empty_pyproject(self, tmp_path):
+        """Test with an empty pyproject.toml file."""
+        file_path = tmp_path / "pyproject.toml"
+        file_path.write_text("{}")
+        
+        # Check that a TOML decoder error is raised
+        with pytest.raises(tomllib.TOMLDecodeError):
+            cli._get_project_deps_from_pyproject(file_path)
+
+    def test_filtering_empty_strings(self, tmp_path):
+        """Test that empty strings are filtered from the dependencies."""
+        content = """
+[project]
+dependencies = [
+    "requests",
+    "",
+    "pandas"
+]
+"""
+        file_path = tmp_path / "pyproject.toml"
+        file_path.write_text(content)
+        deps = cli._get_project_deps_from_pyproject(file_path)
+        assert sorted(deps) == sorted(["requests", "pandas"])
 
 
 class TestVersionCommand:
@@ -409,3 +542,98 @@ class TestRunCommand:
             mock_server.run.assert_called_once_with(
                 transport="sse", host="0.0.0.0", port=8080, log_level="DEBUG"
             )
+
+            def test_version_priority(self, tmp_path):
+                """Test that versions with constraints take priority over bare package names."""
+                content = """
+            [project]
+            dependencies = [
+                "requests>=2.0.0",
+                "requests"
+            ]
+            """
+                file_path = tmp_path / "pyproject.toml"
+                file_path.write_text(content)
+                deps = cli._get_project_deps_from_pyproject(file_path)
+                assert deps == ["requests>=2.0.0"]
+
+            def test_duplicate_version_constraints(self, tmp_path):
+                """Test handling of duplicate dependencies with different version constraints."""
+                content = """
+            [project]
+            dependencies = [
+                "requests>=2.0.0",
+                "requests==2.28.1"
+            ]
+            """
+                file_path = tmp_path / "pyproject.toml"
+                file_path.write_text(content)
+                deps = cli._get_project_deps_from_pyproject(file_path)
+                # Should keep both since they have different constraints
+                assert sorted(deps) == sorted(["requests>=2.0.0", "requests==2.28.1"])
+
+
+            def test_complex_version_parsing(self, tmp_path):
+                """Test parsing of complex version specifications."""
+                content = """
+            [project]
+            dependencies = [
+                "simple-package",
+                "versioned-package==1.2.3",
+                "range-package>=2.0.0,<3.0.0",
+                "complex-package>=1.0.0,!=1.5.0,<2.0.0",
+            ]
+            """
+                file_path = tmp_path / "pyproject.toml"
+                file_path.write_text(content)
+                deps = cli._get_project_deps_from_pyproject(file_path)
+                expected = [
+                    "simple-package",
+                    "versioned-package==1.2.3",
+                    "range-package>=2.0.0,<3.0.0",
+                    "complex-package>=1.0.0,!=1.5.0,<2.0.0",
+                ]
+                assert sorted(deps) == sorted(expected)
+
+            def test_fix_combined_dependencies(self, combined_pyproject_file):
+                """Fix the test for combined dependencies that was failing."""
+                deps = cli._get_project_deps_from_pyproject(combined_pyproject_file)
+                # The key issue: requests appears twice, once with version constraint
+                # and once without. Should only keep the versioned one.
+                expected = [
+                    "requests>=2.0.0",
+                    "pandas==1.3.0",
+                    "numpy*",
+                    "matplotlib^3.5.0",
+                    "pytest",
+                    "pytest-cov",
+                ]
+                # Check that all expected dependencies are present (order doesn't matter)
+                assert sorted(deps) == sorted(expected)
+                # Specifically check that 'requests' without version doesn't appear
+                assert "requests" not in deps
+                assert "requests>=2.0.0" in deps
+
+            def test_cross_format_deduplication(self, tmp_path):
+                """Test deduplication works across different pyproject.toml formats."""
+                content = """
+            [project]
+            dependencies = [
+                "requests>=2.0.0",
+                "pandas==1.3.0"
+            ]
+
+            [tool.poetry.dependencies]
+            requests = "^2.0.0"  # Should be deduplicated with the one above
+            numpy = "*"
+
+            [tool.setuptools_scm]
+            dependencies = ["pytest", "requests"]  # This 'requests' should be removed in favor of the versioned one
+            """
+                file_path = tmp_path / "pyproject.toml"
+                file_path.write_text(content)
+                deps = cli._get_project_deps_from_pyproject(file_path)
+                expected = ["requests>=2.0.0", "pandas==1.3.0", "numpy*", "pytest"]
+                assert sorted(deps) == sorted(expected)
+                # Make sure only the versioned 'requests' is kept
+                assert "requests" not in deps
