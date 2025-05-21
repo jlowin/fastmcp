@@ -614,7 +614,6 @@ class FastMCPOpenAPI(FastMCP):
             if all_routes_as_tools
             else (route_maps or []) + DEFAULT_ROUTE_MAPPINGS
         )
-        
 
         for route in http_routes:
             # Determine route type based on mappings or default rules
