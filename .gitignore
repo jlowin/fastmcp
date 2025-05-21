@@ -22,6 +22,7 @@ venv/
 env/
 ENV/
 .env
+*venv
 
 # System files
 .DS_Store
@@ -54,6 +55,7 @@ dmypy.json
 .python-version
 .envrc
 .direnv/
+lib
 
 # Logs and databases
 *.log

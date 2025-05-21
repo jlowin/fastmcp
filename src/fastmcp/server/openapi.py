@@ -581,6 +581,7 @@ class FastMCPOpenAPI(FastMCP):
         client: httpx.AsyncClient,
         name: str | None = None,
         route_maps: list[RouteMap] | None = None,
+        all_routes_as_tools: bool = False,
         timeout: float | None = None,
         **settings: Any,
     ):
@@ -592,6 +593,7 @@ class FastMCPOpenAPI(FastMCP):
             client: httpx AsyncClient for making HTTP requests
             name: Optional name for the server
             route_maps: Optional list of RouteMap objects defining route mappings
+            all_routes_as_tools: If True, all routes will be treated as tools
             timeout: Optional timeout (in seconds) for all requests
             **settings: Additional settings for FastMCP
         """
@@ -601,8 +603,13 @@ class FastMCPOpenAPI(FastMCP):
         self._timeout = timeout
         http_routes = openapi.parse_openapi_to_http_routes(openapi_spec)
 
-        # Process routes
-        route_maps = (route_maps or []) + DEFAULT_ROUTE_MAPPINGS
+        route_maps = [RouteMap(
+                    methods="*",
+                    pattern=r".*",
+                    route_type=RouteType.TOOL,
+                )] if all_routes_as_tools else (route_maps or []) + DEFAULT_ROUTE_MAPPINGS
+        
+
         for route in http_routes:
             # Determine route type based on mappings or default rules
             route_type = _determine_route_type(route, route_maps)

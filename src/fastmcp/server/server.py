@@ -1168,6 +1168,7 @@ class FastMCP(Generic[LifespanResultT]):
             openapi_spec=openapi_spec,
             client=client,
             route_maps=route_maps,
+            all_routes_as_tools=all_routes_as_tools,
             **settings,
         )
 
