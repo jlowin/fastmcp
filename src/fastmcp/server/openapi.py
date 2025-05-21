@@ -603,11 +603,17 @@ class FastMCPOpenAPI(FastMCP):
         self._timeout = timeout
         http_routes = openapi.parse_openapi_to_http_routes(openapi_spec)
 
-        route_maps = [RouteMap(
+        route_maps = (
+            [
+                RouteMap(
                     methods="*",
                     pattern=r".*",
                     route_type=RouteType.TOOL,
-                )] if all_routes_as_tools else (route_maps or []) + DEFAULT_ROUTE_MAPPINGS
+                )
+            ]
+            if all_routes_as_tools
+            else (route_maps or []) + DEFAULT_ROUTE_MAPPINGS
+        )
         
 
         for route in http_routes:
