@@ -55,7 +55,6 @@ dmypy.json
 .python-version
 .envrc
 .direnv/
-lib
 
 # Logs and databases
 *.log
