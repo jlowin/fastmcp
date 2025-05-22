@@ -1,0 +1,14 @@
+Fix: Prompt arg handling & docs for #541
+
+Addresses #541:
+- Server now auto-deserializes JSON string args (list, dict, BaseModel) for prompts. This simplifies server-side prompt logic by reducing boilerplate `json.loads()` calls.
+- Docs updated to clarify `list_resource_templates` usage for templatized resources.
+- Docs updated to require client-side `json.dumps()` for complex `get_prompt` arguments, resolving the original Pydantic error.
+- Adds a new example (`examples/dynamic_story_prompt/`) demonstrating the server-side deserialization benefit and correct client-side serialization.
+
+Closes #541.
+
+---
+Notes for Reviewers:
+- **Server-Side Auto-Deserialization:** This change introduces a "magic" `json.loads()` in `Prompt.render`. This is an intentional DX improvement. It only triggers for `str` inputs targeting `list`, `dict`, or `BaseModel` type hints. If `json.loads()` fails (e.g., malformed JSON), the original string is passed to Pydantic's `validate_call`, ensuring robust error handling. This avoids boilerplate in user prompt functions.
+- **Client `get_prompt()` Return Value:** The `examples/dynamic_story_prompt/story_client.py` parses the result of `client.get_prompt()` by iterating and looking for a `('messages', ...)` tuple. This reflects the observed behavior of the current `client.get_prompt()`. This commit does *not* change `client.get_prompt()`'s return behavior; the example merely adapts to it. A separate discussion might be warranted for potentially simplifying `client.get_prompt()`'s return signature in the future. 

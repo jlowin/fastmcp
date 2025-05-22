@@ -222,3 +222,103 @@ The duplicate behavior options are:
 -   `"error"`: Raises a `ValueError`, preventing the duplicate registration.
 -   `"replace"`: Silently replaces the existing prompt with the new one.
 -   `"ignore"`: Keeps the original prompt and ignores the new registration attempt. 
+
+### Automatic Deserialization of String Arguments
+
+<VersionBadge version="2.4.1" />
+
+FastMCP enhances developer experience by automatically handling the deserialization of string arguments for your prompt functions when they are intended to be complex Python types like lists, dictionaries, or Pydantic models.
+
+When you define your prompt functions, you can use Pythonic type hints to specify the data structures you want to work with directly:
+
+```python server.py
+from fastmcp import FastMCP
+from pydantic import BaseModel
+
+mcp = FastMCP(name="PromptDemoServer")
+
+class MyConfig(BaseModel):
+    param_a: str
+    param_b: int
+    is_active: bool = True
+
+@mcp.prompt()
+def process_user_data(
+    user_id: int,
+    preferences: list[str],
+    settings: MyConfig,
+    metadata: dict[str, str | int]
+) -> str:
+    """
+    Generates a prompt based on processed user data, preferences,
+    settings, and metadata.
+    """
+    # Inside this function, you directly work with Python objects:
+    # - user_id is an int
+    # - preferences is a list of strings
+    # - settings is an instance of MyConfig
+    # - metadata is a dictionary
+    
+    pref_string = ", ".join(preferences)
+    return (
+        f"User {user_id} preferences: {pref_string}. "
+        f"Settings: {settings.param_a} (Active: {settings.is_active}, Value: {settings.param_b}). "
+        f"Metadata count: {len(metadata)}."
+    )
+```
+
+**How it Works:**
+
+If a client sends arguments for `preferences`, `settings`, or `metadata` as JSON strings (which is necessary for complex types due to the underlying MCP specification that expects `dict[str, str]` for prompt arguments – see [Client documentation](/clients/client#prompt-operations)), FastMCP's server-side logic will:
+
+1.  Detect that the incoming argument is a string.
+2.  Check your function's type hint for that parameter (e.g., `list[str]`, `MyConfig`, `dict[str, str | int]`).
+3.  If the type hint is `list`, `dict`, or a Pydantic `BaseModel` (or a generic version like `list[Any]`), FastMCP attempts to parse the string using `json.loads()`.
+4.  **On Success:** Your function receives the deserialized Python object (a `list`, `dict`, or `MyConfig` instance).
+5.  **On `json.JSONDecodeError`:** If the string is not valid JSON, it's passed to your function as-is. Pydantic's standard validation will then take over, likely raising a `ValidationError` if the string doesn't match the expected type (e.g., a string like `"not-a-list"` for a `list` parameter).
+
+This behavior significantly reduces boilerplate in your prompt functions, as you don't need to manually call `json.loads()` and handle potential errors for every complex parameter.
+
+<details>
+<summary>Hypothetical Client Example</summary>
+
+```python client.py
+import asyncio
+import json
+from fastmcp import Client
+
+async def run_client():
+    client = Client("server.py") # Or appropriate transport to your server
+
+    async with client:
+        user_prefs = ["notifications", "dark_mode"]
+        user_settings = {"param_a": "profile_v2", "param_b": 42, "is_active": False}
+        user_metadata = {"login_count": 10, "last_ip": "192.168.1.100"}
+
+        client_args = {
+            "user_id": 123, # Simple types are passed directly
+            "preferences": json.dumps(user_prefs),
+            "settings": json.dumps(user_settings),
+            "metadata": json.dumps(user_metadata)
+        }
+        
+        print(f"Sending to server: {client_args}")
+
+        try:
+            prompt_messages = await client.get_prompt("process_user_data", client_args)
+            for msg in prompt_messages:
+                print(f"Server responded with role '{msg.role}': {msg.content.text}")
+        except Exception as e:
+            print(f"An error occurred: {e}")
+
+if __name__ == "__main__":
+    asyncio.run(run_client())
+```
+**Expected Client Output (if server responds directly with the generated string):**
+```
+# Sending to server: {'user_id': 123, 'preferences': '["notifications", "dark_mode"]', 'settings': '{"param_a": "profile_v2", "param_b": 42, "is_active": false}', 'metadata': '{"login_count": 10, "last_ip": "192.168.1.100"}'}
+# Server responded with role 'user': User 123 preferences: notifications, dark_mode. Settings: profile_v2 (Active: False, Value: 42). Metadata count: 2.
+```
+</details>
+
+## Advanced Usage 

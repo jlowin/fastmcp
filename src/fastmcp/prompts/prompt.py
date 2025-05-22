@@ -184,7 +184,6 @@ class Prompt(BaseModel):
             # Prepare arguments
             kwargs = arguments.copy() if arguments else {}
 
-            # <<< NEW: Attempt to deserialize JSON strings for complex types >>>
             if self._original_param_types:
                 for param_name, param_value in list(kwargs.items()):
                     if param_name in self._original_param_types and isinstance(
@@ -192,9 +191,7 @@ class Prompt(BaseModel):
                     ):
                         target_type_hint = self._original_param_types[param_name]
 
-                        # Determine the actual base type to check (e.g., list from list[float])
                         origin_type = get_origin(target_type_hint)
-                        # Fallback to the hint itself if no origin (e.g. for non-generic BaseModel)
                         type_to_check_for_complex = (
                             origin_type if origin_type else target_type_hint
                         )
@@ -205,7 +202,6 @@ class Prompt(BaseModel):
                         elif inspect.isclass(type_to_check_for_complex) and issubclass(
                             type_to_check_for_complex, BaseModel
                         ):
-                            # BaseModel itself is imported from pydantic, so this check is fine
                             is_json_candidate = True
 
                         if is_json_candidate:
@@ -220,7 +216,6 @@ class Prompt(BaseModel):
                                     f"FastMCP: Param '{param_name}' for prompt '{self.name}' is a string "
                                     "but not valid JSON. Passing as string to Pydantic validation."
                                 )
-            # <<< END NEW LOGIC >>>
 
             # Prepare arguments with context
             context_kwarg = find_kwarg_by_type(self.fn, kwarg_type=Context)
