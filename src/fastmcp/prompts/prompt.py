@@ -3,14 +3,22 @@
 from __future__ import annotations as _annotations
 
 import inspect
+import json
 from collections.abc import Awaitable, Callable, Sequence
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any, get_origin
 
 import pydantic_core
 from mcp.types import EmbeddedResource, ImageContent, PromptMessage, Role, TextContent
 from mcp.types import Prompt as MCPPrompt
 from mcp.types import PromptArgument as MCPPromptArgument
-from pydantic import BaseModel, BeforeValidator, Field, TypeAdapter, validate_call
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    Field,
+    PrivateAttr,
+    TypeAdapter,
+    validate_call,
+)
 
 from fastmcp.server.dependencies import get_context
 from fastmcp.utilities.json_schema import compress_schema
@@ -77,6 +85,7 @@ class Prompt(BaseModel):
         None, description="Arguments that can be passed to the prompt"
     )
     fn: Callable[..., PromptResult | Awaitable[PromptResult]]
+    _original_param_types: dict[str, Any] = PrivateAttr(default_factory=dict)
 
     @classmethod
     def from_function(
@@ -96,24 +105,27 @@ class Prompt(BaseModel):
         """
         from fastmcp.server.context import Context
 
-        func_name = name or fn.__name__
+        original_fn_for_signature = fn
+        func_name = name or original_fn_for_signature.__name__
 
         if func_name == "<lambda>":
             raise ValueError("You must provide a name for lambda functions")
             # Reject functions with *args or **kwargs
-        sig = inspect.signature(fn)
+        sig = inspect.signature(original_fn_for_signature)
         for param in sig.parameters.values():
             if param.kind == inspect.Parameter.VAR_POSITIONAL:
                 raise ValueError("Functions with *args are not supported as prompts")
             if param.kind == inspect.Parameter.VAR_KEYWORD:
                 raise ValueError("Functions with **kwargs are not supported as prompts")
 
-        type_adapter = get_cached_typeadapter(fn)
+        type_adapter = get_cached_typeadapter(original_fn_for_signature)
         parameters = type_adapter.json_schema()
 
         # Auto-detect context parameter if not provided
 
-        context_kwarg = find_kwarg_by_type(fn, kwarg_type=Context)
+        context_kwarg = find_kwarg_by_type(
+            original_fn_for_signature, kwarg_type=Context
+        )
         if context_kwarg:
             prune_params = [context_kwarg]
         else:
@@ -133,16 +145,25 @@ class Prompt(BaseModel):
                     )
                 )
 
-        # ensure the arguments are properly cast
-        fn = validate_call(fn)
+        # ensure the arguments are properly cast by Pydantic's validate_call
+        validated_fn = validate_call(original_fn_for_signature)
 
-        return cls(
+        # Store original parameter types
+        original_param_types_dict = {
+            p.name: p.annotation
+            for p in sig.parameters.values()
+            if p.annotation != inspect.Parameter.empty
+        }
+
+        instance = cls(
             name=func_name,
-            description=description or fn.__doc__,
+            description=description or original_fn_for_signature.__doc__,
             arguments=arguments,
-            fn=fn,
+            fn=validated_fn,
             tags=tags or set(),
         )
+        instance._original_param_types = original_param_types_dict
+        return instance
 
     async def render(
         self,
@@ -160,8 +181,48 @@ class Prompt(BaseModel):
                 raise ValueError(f"Missing required arguments: {missing}")
 
         try:
-            # Prepare arguments with context
+            # Prepare arguments
             kwargs = arguments.copy() if arguments else {}
+
+            # <<< NEW: Attempt to deserialize JSON strings for complex types >>>
+            if self._original_param_types:
+                for param_name, param_value in list(kwargs.items()):
+                    if param_name in self._original_param_types and isinstance(
+                        param_value, str
+                    ):
+                        target_type_hint = self._original_param_types[param_name]
+
+                        # Determine the actual base type to check (e.g., list from list[float])
+                        origin_type = get_origin(target_type_hint)
+                        # Fallback to the hint itself if no origin (e.g. for non-generic BaseModel)
+                        type_to_check_for_complex = (
+                            origin_type if origin_type else target_type_hint
+                        )
+
+                        is_json_candidate = False
+                        if type_to_check_for_complex in (list, dict):
+                            is_json_candidate = True
+                        elif inspect.isclass(type_to_check_for_complex) and issubclass(
+                            type_to_check_for_complex, BaseModel
+                        ):
+                            # BaseModel itself is imported from pydantic, so this check is fine
+                            is_json_candidate = True
+
+                        if is_json_candidate:
+                            try:
+                                kwargs[param_name] = json.loads(param_value)
+                                logger.debug(
+                                    f"FastMCP: Auto-deserialized JSON string for param '{param_name}' in prompt '{self.name}'."
+                                )
+                            except json.JSONDecodeError:
+                                # Not valid JSON, pass the original string to Pydantic validation
+                                logger.debug(
+                                    f"FastMCP: Param '{param_name}' for prompt '{self.name}' is a string "
+                                    "but not valid JSON. Passing as string to Pydantic validation."
+                                )
+            # <<< END NEW LOGIC >>>
+
+            # Prepare arguments with context
             context_kwarg = find_kwarg_by_type(self.fn, kwarg_type=Context)
             if context_kwarg and context_kwarg not in kwargs:
                 kwargs[context_kwarg] = get_context()
