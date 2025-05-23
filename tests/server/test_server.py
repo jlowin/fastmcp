@@ -762,6 +762,167 @@ class TestPromptDecorator:
         assert prompt.tags == {"example", "test-tag"}
 
 
+class TestGlobalToolHooks:
+    async def test_before_hook_execution(self):
+        """Test that before hooks are called before tool execution."""
+        mcp = FastMCP()
+        hook_calls = []
+
+        @mcp.before_tool_call
+        def track_before(tool_name: str, arguments: dict):
+            hook_calls.append(f"before:{tool_name}:{arguments}")
+
+        @mcp.tool()
+        def add(a: int, b: int) -> int:
+            return a + b
+
+        result = await mcp._mcp_call_tool("add", {"a": 5, "b": 3})
+
+        assert len(hook_calls) == 1
+        assert hook_calls[0] == "before:add:{'a': 5, 'b': 3}"
+        if isinstance(result[0], TextContent):
+            assert result[0].text == "8"
+
+    async def test_after_hook_execution(self):
+        """Test that after hooks are called after tool execution."""
+        mcp = FastMCP()
+        hook_calls = []
+
+        @mcp.after_tool_call
+        def track_after(tool_name: str, arguments: dict, result):
+            hook_calls.append(f"after:{tool_name}:{len(result)}")
+
+        @mcp.tool()
+        def multiply(a: int, b: int) -> int:
+            return a * b
+
+        result = await mcp._mcp_call_tool("multiply", {"a": 4, "b": 6})
+
+        assert len(hook_calls) == 1
+        assert hook_calls[0] == "after:multiply:1"
+        if isinstance(result[0], TextContent):
+            assert result[0].text == "24"
+
+    async def test_multiple_hooks_execution_order(self):
+        """Test that multiple hooks execute in registration order."""
+        mcp = FastMCP()
+        execution_order = []
+
+        @mcp.before_tool_call
+        def before_hook_1(tool_name: str, arguments: dict):
+            execution_order.append("before_1")
+
+        @mcp.before_tool_call
+        def before_hook_2(tool_name: str, arguments: dict):
+            execution_order.append("before_2")
+
+        @mcp.after_tool_call
+        def after_hook_1(tool_name: str, arguments: dict, result):
+            execution_order.append("after_1")
+
+        @mcp.after_tool_call
+        def after_hook_2(tool_name: str, arguments: dict, result):
+            execution_order.append("after_2")
+
+        @mcp.tool()
+        def test_tool() -> str:
+            execution_order.append("tool_execution")
+            return "done"
+
+        await mcp._mcp_call_tool("test_tool", {})
+
+        assert execution_order == [
+            "before_1",
+            "before_2",
+            "tool_execution",
+            "after_1",
+            "after_2",
+        ]
+
+    async def test_both_sync_and_async_hooks(self):
+        """Test that both sync and async hooks work together."""
+        mcp = FastMCP()
+        results = []
+
+        @mcp.before_tool_call
+        def sync_before(tool_name: str, arguments: dict):
+            results.append("sync_before")
+
+        @mcp.before_tool_call
+        async def async_before(tool_name: str, arguments: dict):
+            results.append("async_before")
+
+        @mcp.after_tool_call
+        def sync_after(tool_name: str, arguments: dict, result):
+            results.append("sync_after")
+
+        @mcp.after_tool_call
+        async def async_after(tool_name: str, arguments: dict, result):
+            results.append("async_after")
+
+        @mcp.tool()
+        def sample_tool() -> str:
+            return "test"
+
+        await mcp._mcp_call_tool("sample_tool", {})
+
+        assert "sync_before" in results
+        assert "async_before" in results
+        assert "sync_after" in results
+        assert "async_after" in results
+
+    async def test_hook_signature_validation(self):
+        """Test that hook signature validation works correctly."""
+        mcp = FastMCP()
+
+        # Valid signatures should work
+        @mcp.before_tool_call
+        def valid_before(tool_name: str, arguments: dict):
+            pass
+
+        @mcp.after_tool_call
+        def valid_after(tool_name: str, arguments: dict, result):
+            pass
+
+        # Invalid before hook signatures
+        with pytest.raises(
+            ValueError, match="Before hook must accept exactly 2 parameters"
+        ):
+
+            @mcp.before_tool_call
+            def invalid_before_too_few(tool_name):
+                pass
+
+        with pytest.raises(
+            ValueError, match="Before hook must accept exactly 2 parameters"
+        ):
+
+            @mcp.before_tool_call
+            def invalid_before_too_many(tool_name, arguments, extra):
+                pass
+
+        # Invalid after hook signatures
+        with pytest.raises(
+            ValueError, match="After hook must accept exactly 3 parameters"
+        ):
+
+            @mcp.after_tool_call
+            def invalid_after_too_few(tool_name, arguments):
+                pass
+
+        with pytest.raises(
+            ValueError, match="After hook must accept exactly 3 parameters"
+        ):
+
+            @mcp.after_tool_call
+            def invalid_after_too_many(tool_name, arguments, result, extra):
+                pass
+
+        # Verify the valid hooks were actually registered
+        assert len(mcp._tool_manager._global_before_hooks) == 1
+        assert len(mcp._tool_manager._global_after_hooks) == 1
+
+
 class TestResourcePrefixHelpers:
     @pytest.mark.parametrize(
         "uri,prefix,expected",

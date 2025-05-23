@@ -1,5 +1,6 @@
 from __future__ import annotations as _annotations
 
+import inspect
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
@@ -29,6 +30,10 @@ class ToolManager:
         self._serializer = serializer
         self.mask_error_details = mask_error_details
 
+        # Global hook support
+        self._global_before_hooks: list[Callable[..., Any]] = []
+        self._global_after_hooks: list[Callable[..., Any]] = []
+
         # Default to "warn" if None is provided
         if duplicate_behavior is None:
             duplicate_behavior = "warn"
@@ -40,6 +45,43 @@ class ToolManager:
             )
 
         self.duplicate_behavior = duplicate_behavior
+
+    def add_global_before_hook(self, hook: Callable[..., Any]) -> None:
+        """Add a hook to run before any tool execution."""
+        # Validate hook signature
+        sig = inspect.signature(hook)
+        params = [
+            p for p in sig.parameters.values() if p.kind == p.POSITIONAL_OR_KEYWORD
+        ]
+        if len(params) != 2:
+            raise ValueError(
+                f"Before hook must accept exactly 2 parameters "
+                f"(tool_name, arguments), got {len(params)}: "
+                f"{list(sig.parameters.keys())}"
+            )
+        self._global_before_hooks.append(hook)
+
+    def add_global_after_hook(self, hook: Callable[..., Any]) -> None:
+        """Add a hook to run after any tool execution."""
+        # Validate hook signature
+        sig = inspect.signature(hook)
+        params = [
+            p for p in sig.parameters.values() if p.kind == p.POSITIONAL_OR_KEYWORD
+        ]
+        if len(params) != 3:
+            raise ValueError(
+                f"After hook must accept exactly 3 parameters "
+                f"(tool_name, arguments, result), got {len(params)}: "
+                f"{list(sig.parameters.keys())}"
+            )
+        self._global_after_hooks.append(hook)
+
+    async def _call_hook(self, hook: Callable[..., Any], *args: Any) -> None:
+        """Call a hook, handling both sync and async functions."""
+        if inspect.iscoroutinefunction(hook):
+            await hook(*args)
+        else:
+            hook(*args)
 
     def has_tool(self, key: str) -> bool:
         """Check if a tool exists."""
@@ -119,7 +161,18 @@ class ToolManager:
             raise NotFoundError(f"Unknown tool: {key}")
 
         try:
-            return await tool.run(arguments)
+            # Run global before hooks
+            for hook in self._global_before_hooks:
+                await self._call_hook(hook, key, arguments)
+
+            # Execute the actual tool
+            result = await tool.run(arguments)
+
+            # Run global after hooks
+            for hook in self._global_after_hooks:
+                await self._call_hook(hook, key, arguments, result)
+
+            return result
 
         # raise ToolErrors as-is
         except ToolError as e:

@@ -768,6 +768,40 @@ class FastMCP(Generic[LifespanResultT]):
 
         return decorator
 
+    def before_tool_call(self, func: Callable[..., Any]) -> Callable[..., Any]:
+        """Decorator to register a global before hook for tool execution.
+
+        The hook will be called before any tool is executed. The hook function
+        receives the tool name and arguments as parameters.
+
+        Args:
+            func: The hook function to register
+
+        Example:
+            @server.before_tool_call
+            def log_tool_calls(tool_name: str, arguments: dict):
+                print(f"Calling {tool_name}")
+        """
+        self._tool_manager.add_global_before_hook(func)
+        return func
+
+    def after_tool_call(self, func: Callable[..., Any]) -> Callable[..., Any]:
+        """Decorator to register a global after hook for tool execution.
+
+        The hook will be called after any tool is executed. The hook function
+        receives the tool name, arguments, and result as parameters.
+
+        Args:
+            func: The hook function to register
+
+        Example:
+            @server.after_tool_call
+            def log_tool_results(tool_name: str, arguments: dict, result: Any):
+                print(f"Tool {tool_name} completed")
+        """
+        self._tool_manager.add_global_after_hook(func)
+        return func
+
     async def run_stdio_async(self) -> None:
         """Run the server using stdio transport."""
         async with stdio_server() as (read_stream, write_stream):
