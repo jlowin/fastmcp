@@ -1175,11 +1175,11 @@ class FastMCP(Generic[LifespanResultT]):
     async def passthrough_headers(request: httpx.Request):
         from fastmcp.server.dependencies import get_http_request
 
-        mcp_server_req: Request = get_http_request()
         mcp_server_settings = fastmcp.settings.ServerSettings()
 
         # Copy headers from the MCP server request to the FastAPI request
         if mcp_server_settings.passthrough_headers:
+            mcp_server_req: Request = get_http_request()
             allowed_headers = [
                 h.lower() for h in mcp_server_settings.passthrough_headers_list
             ]
