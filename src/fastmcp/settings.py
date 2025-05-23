@@ -117,8 +117,10 @@ class ServerSettings(BaseSettings):
 
     # FastAPI integration settings
     passthrough_headers: bool = False
-    passthrough_headers_list: list[str] = ["Authorization"]
-
+    passthrough_headers_list: Annotated[
+        list[str],
+        Field(default_factory=lambda: ["Authorization"]),
+    ] = []
     # resource settings
     on_duplicate_resources: DuplicateBehavior = "warn"
 
