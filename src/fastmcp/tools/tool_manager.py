@@ -78,10 +78,14 @@ class ToolManager:
 
     async def _call_hook(self, hook: Callable[..., Any], *args: Any) -> None:
         """Call a hook, handling both sync and async functions."""
-        if inspect.iscoroutinefunction(hook):
-            await hook(*args)
-        else:
-            hook(*args)
+        try:
+            if inspect.iscoroutinefunction(hook):
+                await hook(*args)
+            else:
+                hook(*args)
+        except Exception as e:
+            logger.exception(f"Hook {hook.__name__} failed: {e}")
+            # Continue execution - don't let hook failures break tools
 
     def has_tool(self, key: str) -> bool:
         """Check if a tool exists."""
