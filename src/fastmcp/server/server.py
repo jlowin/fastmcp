@@ -1171,12 +1171,16 @@ class FastMCP(Generic[LifespanResultT]):
             **settings,
         )
 
+    _cached_server_settings: fastmcp.settings.ServerSettings | None = None
+
     @staticmethod
     async def passthrough_headers(request: httpx.Request):
         from fastmcp.server.dependencies import get_http_request
 
-        mcp_server_settings = fastmcp.settings.ServerSettings()
+        if FastMCP._cached_server_settings is None:
+            FastMCP._cached_server_settings = fastmcp.settings.ServerSettings()
 
+        mcp_server_settings = FastMCP._cached_server_settings
         # Copy headers from the MCP server request to the FastAPI request
         if mcp_server_settings.passthrough_headers:
             mcp_server_req: Request = get_http_request()
