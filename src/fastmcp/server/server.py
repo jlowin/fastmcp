@@ -1168,6 +1168,22 @@ class FastMCP(Generic[LifespanResultT]):
             **settings,
         )
 
+    @staticmethod
+    async def passthrough_headers(request: httpx.Request):
+        from fastmcp.server.dependencies import get_http_request
+
+        mcp_server_req: Request = get_http_request()
+        mcp_server_settings = fastmcp.settings.ServerSettings()
+
+        # Copy headers from the MCP server request to the FastAPI request
+        if mcp_server_settings.passthrough_headers:
+            allowed_headers = [
+                h.lower() for h in mcp_server_settings.passthrough_headers_list
+            ]
+            for key, value in mcp_server_req.headers.items():
+                if key.lower() in allowed_headers:
+                    request.headers[key] = value
+
     @classmethod
     def from_fastapi(
         cls,
@@ -1192,7 +1208,9 @@ class FastMCP(Generic[LifespanResultT]):
             ]
 
         client = httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://fastapi"
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://fastapi",
+            event_hooks={"request": [cls.passthrough_headers]},
         )
 
         name = name or app.title

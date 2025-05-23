@@ -90,8 +90,8 @@ class Settings(BaseSettings):
 class ServerSettings(BaseSettings):
     """FastMCP server settings.
 
-    All settings can be configured via environment variables with the prefix FASTMCP_.
-    For example, FASTMCP_DEBUG=true will set debug=True.
+    All settings can be configured via environment variables with the prefix FASTMCP_SERVER_.
+    For example, FASTMCP_SERVER_DEBUG=true will set debug=True.
     """
 
     model_config = SettingsConfigDict(
@@ -105,7 +105,7 @@ class ServerSettings(BaseSettings):
     log_level: Annotated[
         LOG_LEVEL,
         Field(default_factory=lambda: Settings().log_level),
-    ]
+    ] = Settings().log_level
 
     # HTTP settings
     host: str = "127.0.0.1"
@@ -114,6 +114,10 @@ class ServerSettings(BaseSettings):
     message_path: str = "/messages/"
     streamable_http_path: str = "/mcp"
     debug: bool = False
+
+    # FastAPI integration settings
+    passthrough_headers: bool = False
+    passthrough_headers_list: list[str] = ["Authorization"]
 
     # resource settings
     on_duplicate_resources: DuplicateBehavior = "warn"
