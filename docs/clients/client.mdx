@@ -229,6 +229,9 @@ The standard client methods return user-friendly representations that may change
     templates = await client.list_resource_templates()
     # templates -> list[mcp.types.ResourceTemplate]
     ```
+    <Tip>
+    If you define a resource with placeholders in its URI (e.g., `@mcp.resource("data://{user_id}/profile")`), it is considered a **resource template**. You will find it using `client.list_resource_templates()`. The `client.list_resources()` method is for resources defined with fully static URIs.
+    </Tip>
 *   **`read_resource(uri: str | AnyUrl)`**: Reads the content of a resource or a resolved template.
     ```python
     # Read a static resource
@@ -244,7 +247,20 @@ The standard client methods return user-friendly representations that may change
 #### Prompt Operations
 
 *   **`list_prompts()`**: Retrieves available prompt templates.
-*   **`get_prompt(name: str, arguments: dict[str, Any] | None = None)`**: Retrieves a rendered prompt message list.
+*   **`get_prompt(name: str, arguments: dict[str, str] | None = None)`**: Retrieves a rendered prompt message list.
+    *   **Important:** When passing complex data types (like lists or dictionaries) as values in the `arguments` dictionary, they **must be serialized to JSON strings**. For example, if your prompt expects a list of numbers for an argument named `data_points`, you should pass `{"data_points": json.dumps([1, 2, 3])}`.
+    *   The FastMCP server will automatically attempt to deserialize these JSON strings back into appropriate Python objects (lists, dicts, Pydantic models) if your server-side prompt function is type-hinted accordingly. See the server-side [Prompts documentation](/servers/prompts#automatic-deserialization-of-string-arguments) for more details on this server behavior.
+    ```python
+    import json
+
+    # Assuming 'analyze_data' prompt expects 'data_points' (list) and 'settings' (dict)
+    args = {
+        "data_points": json.dumps([1.0, 2.5, 3.0]),
+        "settings": json.dumps({"mode": "detailed", "threshold": 0.5})
+    }
+    prompt_messages = await client.get_prompt("analyze_data", args)
+    # prompt_messages -> list[mcp.types.PromptMessage]
+    ```
 
 ### Raw MCP Protocol Objects
 

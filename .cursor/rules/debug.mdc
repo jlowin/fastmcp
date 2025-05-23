@@ -1,0 +1,7 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+- prefer using your shell tool to find and `rg` through site-packages to your web tool when you need to know details on upstream libraries
+- iterative, empirical observations are better than rumination
