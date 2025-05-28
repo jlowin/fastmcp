@@ -406,6 +406,18 @@ class OpenAPITool(Tool):
         # Add headers from the current MCP client HTTP request (these take precedence)
         mcp_headers = get_http_headers()
         headers.update(mcp_headers)
+        # Remove the host field from the MCP client Header 
+        if hasattr(self._client, "base_url"):
+            try:
+                client_hostname = self._client.base_url.host
+                header_host = headers.get("host")
+                
+                if header_host and header_host != client_hostname:
+                    headers["mcp_server_host"] = headers.pop("host")
+            except Exception as e:
+                logger.error(f"Error parsing base_url: {e}")
+
+
 
         # Prepare request body
         json_data = None
