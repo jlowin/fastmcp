@@ -512,6 +512,37 @@ class TestErrorHandling:
             assert "test error" in result.content[0].text
             assert "abc" in result.content[0].text
 
+    async def test_mcp_errors_preserve_error_codes_through_client_round_trip(self):
+        """Test that McpErrors with custom codes survive the full client request/response round trip."""
+        from mcp import McpError
+        from mcp.types import ErrorData
+
+        mcp = FastMCP("TestServer")
+
+        @mcp.tool()
+        def mcp_error_tool():
+            raise McpError(
+                ErrorData(
+                    code=-32001,
+                    message="Custom business logic error",
+                    data={"retry_after": 30, "error_type": "rate_limit"},
+                )
+            )
+
+        client = Client(transport=FastMCPTransport(mcp))
+
+        async with client:
+            # McpError should result in an exception that clients can handle programmatically
+            with pytest.raises(McpError) as excinfo:
+                await client.call_tool_mcp("mcp_error_tool", {})
+
+            assert excinfo.value.error.code == -32001
+            assert excinfo.value.error.message == "Custom business logic error"
+            assert excinfo.value.error.data == {
+                "retry_after": 30,
+                "error_type": "rate_limit",
+            }
+
     async def test_general_resource_exceptions_are_not_masked_by_default(self):
         mcp = FastMCP("TestServer")
 

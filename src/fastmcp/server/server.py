@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any, Generic, Literal
 import anyio
 import httpx
 import uvicorn
+from mcp import McpError
 from mcp.server.auth.provider import OAuthAuthorizationServerProvider
 from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.lowlevel.server import LifespanResultT, NotificationOptions
@@ -25,9 +26,12 @@ from mcp.server.lowlevel.server import Server as MCPServer
 from mcp.server.stdio import stdio_server
 from mcp.types import (
     AnyFunction,
+    CallToolRequest,
+    CallToolResult,
     EmbeddedResource,
     GetPromptResult,
     ImageContent,
+    ServerResult,
     TextContent,
     ToolAnnotations,
 )
@@ -246,7 +250,9 @@ class FastMCP(Generic[LifespanResultT]):
     def _setup_handlers(self) -> None:
         """Set up core MCP protocol handlers."""
         self._mcp_server.list_tools()(self._mcp_list_tools)
-        self._mcp_server.call_tool()(self._mcp_call_tool)
+        self._mcp_server.request_handlers[CallToolRequest] = (
+            self._custom_call_tool_handler
+        )
         self._mcp_server.list_resources()(self._mcp_list_resources)
         self._mcp_server.read_resource()(self._mcp_read_resource)
         self._mcp_server.list_prompts()(self._mcp_list_prompts)
@@ -1303,6 +1309,30 @@ class FastMCP(Generic[LifespanResultT]):
         )
 
         return cls.as_proxy(client, **settings)
+
+    async def _custom_call_tool_handler(self, req: CallToolRequest) -> ServerResult:
+        """Custom call_tool handler that properly handles McpError.
+
+        This replaces the upstream call_tool decorator to allow McpError to bubble up
+        to _handle_request for proper JSON-RPC error response generation, while
+        maintaining backward compatibility for other exceptions.
+        """
+        try:
+            results = await self._mcp_call_tool(
+                req.params.name, req.params.arguments or {}
+            )
+            return ServerResult(CallToolResult(content=list(results), isError=False))
+        except McpError:
+            # Let McpError bubble up to _handle_request for JSON-RPC error response
+            raise
+        except Exception as e:
+            # Keep backward compatibility for other exceptions
+            return ServerResult(
+                CallToolResult(
+                    content=[TextContent(type="text", text=str(e))],
+                    isError=True,
+                )
+            )
 
 
 class MountedServer:
