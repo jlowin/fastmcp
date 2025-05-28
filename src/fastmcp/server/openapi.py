@@ -406,7 +406,7 @@ class OpenAPITool(Tool):
         # Add headers from the current MCP client HTTP request (these take precedence)
         mcp_headers = get_http_headers()
         headers.update(mcp_headers)
-        # Remove the host field from the MCP client Header 
+        
         if hasattr(self._client, "base_url"):
             try:
                 client_hostname = self._client.base_url.host
