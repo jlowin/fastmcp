@@ -3,6 +3,7 @@ from __future__ import annotations as _annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from mcp import McpError
 from mcp.types import EmbeddedResource, ImageContent, TextContent, ToolAnnotations
 
 from fastmcp.exceptions import NotFoundError, ToolError
@@ -120,6 +121,11 @@ class ToolManager:
 
         try:
             return await tool.run(arguments)
+
+        # raise McpErrors as-is to preserve error codes
+        except McpError as e:
+            logger.exception(f"Error calling tool {key!r}: {e}")
+            raise
 
         # raise ToolErrors as-is
         except ToolError as e:

@@ -837,6 +837,33 @@ class TestCustomToolNames:
 class TestToolErrorHandling:
     """Test error handling in the ToolManager."""
 
+    async def test_mcp_error_passthrough(self):
+        """Test that McpErrors are passed through directly to preserve error codes."""
+        from mcp import McpError
+        from mcp.types import ErrorData
+
+        manager = ToolManager()
+
+        def mcp_error_tool(x: int) -> int:
+            """Tool that raises an McpError with custom code."""
+            raise McpError(
+                ErrorData(
+                    code=-32001,
+                    message="Custom business logic error",
+                    data={"retry_after": 30},
+                )
+            )
+
+        manager.add_tool_from_fn(mcp_error_tool)
+
+        with pytest.raises(McpError) as excinfo:
+            await manager.call_tool("mcp_error_tool", {"x": 42})
+
+        # McpError should be passed through with original error data intact
+        assert excinfo.value.error.code == -32001
+        assert excinfo.value.error.message == "Custom business logic error"
+        assert excinfo.value.error.data == {"retry_after": 30}
+
     async def test_tool_error_passthrough(self):
         """Test that ToolErrors are passed through directly."""
         manager = ToolManager()
