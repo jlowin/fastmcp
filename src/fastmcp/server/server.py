@@ -253,13 +253,13 @@ class FastMCP(Generic[LifespanResultT]):
         self._mcp_server.get_prompt()(self._mcp_get_prompt)
         self._mcp_server.list_resource_templates()(self._mcp_list_resource_templates)
 
-    async def get_tools(self) -> dict[str, Tool]:
+    def get_tools(self) -> dict[str, Tool]:
         """Get all registered tools, indexed by registered key."""
         if (tools := self._cache.get("tools")) is self._cache.NOT_FOUND:
             tools: dict[str, Tool] = {}
             for prefix, server in self._mounted_servers.items():
                 try:
-                    server_tools = await server.get_tools()
+                    server_tools = server.get_tools()
                     tools.update(server_tools)
                 except Exception as e:
                     logger.warning(
@@ -270,13 +270,13 @@ class FastMCP(Generic[LifespanResultT]):
             self._cache.set("tools", tools)
         return tools
 
-    async def get_resources(self) -> dict[str, Resource]:
+    def get_resources(self) -> dict[str, Resource]:
         """Get all registered resources, indexed by registered key."""
         if (resources := self._cache.get("resources")) is self._cache.NOT_FOUND:
             resources: dict[str, Resource] = {}
             for prefix, server in self._mounted_servers.items():
                 try:
-                    server_resources = await server.get_resources()
+                    server_resources = server.get_resources()
                     resources.update(server_resources)
                 except Exception as e:
                     logger.warning(
@@ -287,7 +287,7 @@ class FastMCP(Generic[LifespanResultT]):
             self._cache.set("resources", resources)
         return resources
 
-    async def get_resource_templates(self) -> dict[str, ResourceTemplate]:
+    def get_resource_templates(self) -> dict[str, ResourceTemplate]:
         """Get all registered resource templates, indexed by registered key."""
         if (
             templates := self._cache.get("resource_templates")
@@ -295,7 +295,7 @@ class FastMCP(Generic[LifespanResultT]):
             templates: dict[str, ResourceTemplate] = {}
             for prefix, server in self._mounted_servers.items():
                 try:
-                    server_templates = await server.get_resource_templates()
+                    server_templates = server.get_resource_templates()
                     templates.update(server_templates)
                 except Exception as e:
                     logger.warning(
@@ -307,7 +307,7 @@ class FastMCP(Generic[LifespanResultT]):
             self._cache.set("resource_templates", templates)
         return templates
 
-    async def get_prompts(self) -> dict[str, Prompt]:
+    def get_prompts(self) -> dict[str, Prompt]:
         """
         List all available prompts.
         """
@@ -315,7 +315,7 @@ class FastMCP(Generic[LifespanResultT]):
             prompts: dict[str, Prompt] = {}
             for prefix, server in self._mounted_servers.items():
                 try:
-                    server_prompts = await server.get_prompts()
+                    server_prompts = server.get_prompts()
                     prompts.update(server_prompts)
                 except Exception as e:
                     logger.warning(
@@ -370,45 +370,45 @@ class FastMCP(Generic[LifespanResultT]):
 
         return decorator
 
-    async def _mcp_list_tools(self) -> list[MCPTool]:
+    def _mcp_list_tools(self) -> list[MCPTool]:
         """
         List all available tools, in the format expected by the low-level MCP
         server.
 
         """
-        tools = await self.get_tools()
+        tools = self.get_tools()
         return [tool.to_mcp_tool(name=key) for key, tool in tools.items()]
 
-    async def _mcp_list_resources(self) -> list[MCPResource]:
+    def _mcp_list_resources(self) -> list[MCPResource]:
         """
         List all available resources, in the format expected by the low-level MCP
         server.
 
         """
-        resources = await self.get_resources()
+        resources = self.get_resources()
         return [
             resource.to_mcp_resource(uri=key) for key, resource in resources.items()
         ]
 
-    async def _mcp_list_resource_templates(self) -> list[MCPResourceTemplate]:
+    def _mcp_list_resource_templates(self) -> list[MCPResourceTemplate]:
         """
         List all available resource templates, in the format expected by the low-level
         MCP server.
 
         """
-        templates = await self.get_resource_templates()
+        templates = self.get_resource_templates()
         return [
             template.to_mcp_template(uriTemplate=key)
             for key, template in templates.items()
         ]
 
-    async def _mcp_list_prompts(self) -> list[MCPPrompt]:
+    def _mcp_list_prompts(self) -> list[MCPPrompt]:
         """
         List all available prompts, in the format expected by the low-level MCP
         server.
 
         """
-        prompts = await self.get_prompts()
+        prompts = self.get_prompts()
         return [prompt.to_mcp_prompt(name=key) for key, prompt in prompts.items()]
 
     async def _mcp_call_tool(
@@ -1095,7 +1095,7 @@ class FastMCP(Generic[LifespanResultT]):
         self._mounted_servers.pop(prefix)
         self._cache.clear()
 
-    async def import_server(
+    def import_server(
         self,
         prefix: str,
         server: FastMCP[LifespanResultT],
@@ -1163,21 +1163,21 @@ class FastMCP(Generic[LifespanResultT]):
 
         # Import tools from the mounted server
         tool_prefix = f"{prefix}_"
-        for key, tool in (await server.get_tools()).items():
+        for key, tool in server.get_tools().items():
             self._tool_manager.add_tool(tool, key=f"{tool_prefix}{key}")
 
         # Import resources and templates from the mounted server
-        for key, resource in (await server.get_resources()).items():
+        for key, resource in server.get_resources().items():
             prefixed_key = add_resource_prefix(key, prefix, self.resource_prefix_format)
             self._resource_manager.add_resource(resource, key=prefixed_key)
 
-        for key, template in (await server.get_resource_templates()).items():
+        for key, template in server.get_resource_templates().items():
             prefixed_key = add_resource_prefix(key, prefix, self.resource_prefix_format)
             self._resource_manager.add_template(template, key=prefixed_key)
 
         # Import prompts from the mounted server
         prompt_prefix = f"{prefix}_"
-        for key, prompt in (await server.get_prompts()).items():
+        for key, prompt in server.get_prompts().items():
             self._prompt_manager.add_prompt(prompt, key=f"{prompt_prefix}{key}")
 
         logger.info(f"Imported server {server.name} with prefix '{prefix}'")
@@ -1341,12 +1341,12 @@ class MountedServer:
         self.server = server
         self.prefix = prefix
 
-    async def get_tools(self) -> dict[str, Tool]:
-        tools = await self.server.get_tools()
+    def get_tools(self) -> dict[str, Tool]:
+        tools = self.server.get_tools()
         return {f"{self.prefix}_{key}": tool for key, tool in tools.items()}
 
-    async def get_resources(self) -> dict[str, Resource]:
-        resources = await self.server.get_resources()
+    def get_resources(self) -> dict[str, Resource]:
+        resources = self.server.get_resources()
         return {
             add_resource_prefix(
                 key, self.prefix, self.server.resource_prefix_format
@@ -1354,8 +1354,8 @@ class MountedServer:
             for key, resource in resources.items()
         }
 
-    async def get_resource_templates(self) -> dict[str, ResourceTemplate]:
-        templates = await self.server.get_resource_templates()
+    def get_resource_templates(self) -> dict[str, ResourceTemplate]:
+        templates = self.server.get_resource_templates()
         return {
             add_resource_prefix(
                 key, self.prefix, self.server.resource_prefix_format
@@ -1363,8 +1363,8 @@ class MountedServer:
             for key, template in templates.items()
         }
 
-    async def get_prompts(self) -> dict[str, Prompt]:
-        prompts = await self.server.get_prompts()
+    def get_prompts(self) -> dict[str, Prompt]:
+        prompts = self.server.get_prompts()
         return {f"{self.prefix}_{key}": prompt for key, prompt in prompts.items()}
 
     def match_tool(self, key: str) -> bool:
