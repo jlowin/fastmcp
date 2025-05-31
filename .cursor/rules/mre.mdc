@@ -1,0 +1,10 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+- put a MINIMAL reproducible example in repros/{issue_number}.py
+- afterwards, change the library as needed, if necessary
+- test against the MRE
+- add unit tests (in a sensible place) if applicable
+- after adding tests, critically review them and the library changes

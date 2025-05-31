@@ -3,11 +3,17 @@ from mcp.types import EmbeddedResource, TextResourceContents
 from pydantic import FileUrl
 
 from fastmcp.prompts.prompt import (
+    BaseModel,
     Message,
     Prompt,
     PromptMessage,
     TextContent,
 )
+
+
+class MyTestModel(BaseModel):
+    key: str
+    value: int
 
 
 class TestRenderPrompt:
@@ -240,3 +246,67 @@ class TestRenderPrompt:
                 ),
             )
         ]
+
+    async def test_render_with_json_string_list_arg(self):
+        """Test that JSON string for a list argument is auto-deserialized."""
+
+        def prompt_with_list(my_list: list[int]) -> str:
+            return f"List sum: {sum(my_list)}"
+
+        prompt = Prompt.from_function(prompt_with_list)
+        rendered_messages = await prompt.render(arguments={"my_list": "[1, 2, 3, 4]"})
+        assert len(rendered_messages) == 1
+        assert isinstance(rendered_messages[0].content, TextContent)
+        assert rendered_messages[0].content.text == "List sum: 10"
+
+    async def test_render_with_json_string_dict_arg(self):
+        """Test that JSON string for a dict argument is auto-deserialized."""
+
+        def prompt_with_dict(my_dict: dict[str, int]) -> str:
+            return f"Value for 'b': {my_dict.get('b')}"
+
+        prompt = Prompt.from_function(prompt_with_dict)
+        rendered_messages = await prompt.render(
+            arguments={"my_dict": '{"a": 1, "b": 2}'}
+        )  # escaped JSON string
+        assert len(rendered_messages) == 1
+        assert isinstance(rendered_messages[0].content, TextContent)
+        assert rendered_messages[0].content.text == "Value for 'b': 2"
+
+    async def test_render_with_json_string_basemodel_arg(self):
+        """Test that JSON string for a Pydantic BaseModel argument is auto-deserialized."""
+
+        def prompt_with_model(my_model: MyTestModel) -> str:
+            return f"Model: {my_model.key}={my_model.value}"
+
+        prompt = Prompt.from_function(prompt_with_model)
+        rendered_messages = await prompt.render(
+            arguments={"my_model": '{"key": "test", "value": 123}'}
+        )  # escaped JSON string
+        assert len(rendered_messages) == 1
+        assert isinstance(rendered_messages[0].content, TextContent)
+        assert rendered_messages[0].content.text == "Model: test=123"
+
+    async def test_render_with_malformed_json_string_arg(self):
+        """Test that a malformed JSON string for a list arg is passed as string (and Pydantic errors)."""
+
+        def prompt_with_list(my_list: list[int]) -> str:
+            return f"List sum: {sum(my_list)}"
+
+        prompt = Prompt.from_function(prompt_with_list)
+        with pytest.raises(
+            ValueError, match="Error rendering prompt prompt_with_list."
+        ):
+            await prompt.render(arguments={"my_list": "not a valid json list"})
+
+    async def test_render_with_non_json_string_for_string_arg(self):
+        """Test that a regular string for a string argument is not json.loads-ed."""
+
+        def prompt_with_string(my_string: str) -> str:
+            return f"String: {my_string}"
+
+        prompt = Prompt.from_function(prompt_with_string)
+        rendered_messages = await prompt.render(arguments={"my_string": '{"a": 1}'})
+        assert len(rendered_messages) == 1
+        assert isinstance(rendered_messages[0].content, TextContent)
+        assert rendered_messages[0].content.text == 'String: {"a": 1}'
