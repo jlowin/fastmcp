@@ -5,7 +5,6 @@ from collections.abc import Generator
 import pytest
 import uvicorn
 from fastapi import FastAPI, Request
-from mcp.types import TextContent, TextResourceContents
 
 from fastmcp import Client, FastMCP
 from fastmcp.client.transports import (
@@ -115,8 +114,7 @@ class TestClientHeaders:
             transport=SSETransport(sse_server, headers={"X-TEST": "test-123"})
         ) as client:
             result = await client.read_resource("resource://get_headers_headers_get")
-            assert isinstance(result[0], TextResourceContents)
-            headers = json.loads(result[0].text)
+            headers = json.loads(result[0].text)  # type: ignore[attr-defined]
             assert headers["x-test"] == "test-123"
 
     async def test_client_headers_shttp_resource(self, shttp_server: str):
@@ -126,8 +124,7 @@ class TestClientHeaders:
             )
         ) as client:
             result = await client.read_resource("resource://get_headers_headers_get")
-            assert isinstance(result[0], TextResourceContents)
-            headers = json.loads(result[0].text)
+            headers = json.loads(result[0].text)  # type: ignore[attr-defined]
             assert headers["x-test"] == "test-123"
 
     async def test_client_headers_fastmcp_resource(self):
@@ -139,8 +136,7 @@ class TestClientHeaders:
             )
         ) as client:
             result = await client.read_resource("resource://get_headers_headers_get")
-            assert isinstance(result[0], TextResourceContents)
-            headers = json.loads(result[0].text)
+            headers = json.loads(result[0].text)  # type: ignore[attr-defined]
             assert headers["x-test"] == "test-123"
 
     async def test_client_headers_sse_resource_template(self, sse_server: str):
@@ -150,8 +146,7 @@ class TestClientHeaders:
             result = await client.read_resource(
                 "resource://get_header_by_name_headers/x-test"
             )
-            assert isinstance(result[0], TextResourceContents)
-            header = json.loads(result[0].text)
+            header = json.loads(result[0].text)  # type: ignore[attr-defined]
             assert header == "test-123"
 
     async def test_client_headers_shttp_resource_template(self, shttp_server: str):
@@ -163,8 +158,7 @@ class TestClientHeaders:
             result = await client.read_resource(
                 "resource://get_header_by_name_headers/x-test"
             )
-            assert isinstance(result[0], TextResourceContents)
-            header = json.loads(result[0].text)
+            header = json.loads(result[0].text)  # type: ignore[attr-defined]
             assert header == "test-123"
 
     async def test_client_headers_fastmcp_resource_template(self):
@@ -178,8 +172,7 @@ class TestClientHeaders:
             result = await client.read_resource(
                 "resource://get_header_by_name_headers/x-test"
             )
-            assert isinstance(result[0], TextResourceContents)
-            header = json.loads(result[0].text)
+            header = json.loads(result[0].text)  # type: ignore[attr-defined]
             assert header == "test-123"
 
     async def test_client_headers_sse_tool(self, sse_server: str):
@@ -187,8 +180,7 @@ class TestClientHeaders:
             transport=SSETransport(sse_server, headers={"X-TEST": "test-123"})
         ) as client:
             result = await client.call_tool("post_headers_headers_post")
-            assert isinstance(result[0], TextContent)
-            headers = json.loads(result[0].text)
+            headers = json.loads(result[0].text)  # type: ignore[attr-defined]
             assert headers["x-test"] == "test-123"
 
     async def test_client_headers_shttp_tool(self, shttp_server: str):
@@ -198,8 +190,7 @@ class TestClientHeaders:
             )
         ) as client:
             result = await client.call_tool("post_headers_headers_post")
-            assert isinstance(result[0], TextContent)
-            headers = json.loads(result[0].text)
+            headers = json.loads(result[0].text)  # type: ignore[attr-defined]
             assert headers["x-test"] == "test-123"
 
     async def test_client_headers_fastmcp_tool(self):
@@ -211,8 +202,7 @@ class TestClientHeaders:
             )
         ) as client:
             result = await client.call_tool("post_headers_headers_post")
-            assert isinstance(result[0], TextContent)
-            headers = json.loads(result[0].text)
+            headers = json.loads(result[0].text)  # type: ignore[attr-defined]
             assert headers["x-test"] == "test-123"
 
     async def test_client_overrides_server_headers(self, shttp_server: str):
@@ -222,8 +212,7 @@ class TestClientHeaders:
             )
         ) as client:
             result = await client.read_resource("resource://get_headers_headers_get")
-            assert isinstance(result[0], TextResourceContents)
-            headers = json.loads(result[0].text)
+            headers = json.loads(result[0].text)  # type: ignore[attr-defined]
             assert headers["x-server-header"] == "test-client"
 
     async def test_client_with_excluded_header_is_ignored(self, sse_server: str):
@@ -238,8 +227,7 @@ class TestClientHeaders:
             )
         ) as client:
             result = await client.read_resource("resource://get_headers_headers_get")
-            assert isinstance(result[0], TextResourceContents)
-            headers = json.loads(result[0].text)
+            headers = json.loads(result[0].text)  # type: ignore[attr-defined]
             assert headers["not-host"] == "1.2.3.4"
             assert headers["host"] == "fastapi"
 
@@ -249,6 +237,5 @@ class TestClientHeaders:
         """
         async with Client(transport=StreamableHttpTransport(proxy_server)) as client:
             result = await client.read_resource("resource://get_headers_headers_get")
-            assert isinstance(result[0], TextResourceContents)
-            headers = json.loads(result[0].text)
+            headers = json.loads(result[0].text)  # type: ignore[attr-defined]
             assert headers["x-server-header"] == "test-abc"
