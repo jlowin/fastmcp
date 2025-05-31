@@ -4,10 +4,13 @@ from collections.abc import Generator
 
 import pytest
 import uvicorn
-from mcp.types import TextContent, TextResourceContents
 
 from fastmcp.client import Client
-from fastmcp.client.transports import SSETransport, StreamableHttpTransport
+from fastmcp.client.transports import (
+    FastMCPTransport,
+    SSETransport,
+    StreamableHttpTransport,
+)
 from fastmcp.server.dependencies import get_http_request
 from fastmcp.server.server import FastMCP
 from fastmcp.utilities.tests import run_server_in_process
@@ -99,8 +102,7 @@ async def test_http_headers_resource_shttp(shttp_server: str):
         )
     ) as client:
         raw_result = await client.read_resource("request://headers")
-        assert isinstance(raw_result[0], TextResourceContents)
-        json_result = json.loads(raw_result[0].text)
+        json_result = json.loads(raw_result[0].text)  # type: ignore[attr-defined]
         assert "x-demo-header" in json_result
         assert json_result["x-demo-header"] == "ABC"
 
@@ -111,8 +113,21 @@ async def test_http_headers_resource_sse(sse_server: str):
         transport=SSETransport(sse_server, headers={"X-DEMO-HEADER": "ABC"})
     ) as client:
         raw_result = await client.read_resource("request://headers")
-        assert isinstance(raw_result[0], TextResourceContents)
-        json_result = json.loads(raw_result[0].text)
+        json_result = json.loads(raw_result[0].text)  # type: ignore[attr-defined]
+        assert "x-demo-header" in json_result
+        assert json_result["x-demo-header"] == "ABC"
+
+
+async def test_http_headers_resource_fastmcp():
+    async with Client(
+        transport=FastMCPTransport(
+            fastmcp_server(),
+            transport="streamable-http",
+            transport_kwargs={"headers": {"X-DEMO-HEADER": "ABC"}},
+        )
+    ) as client:
+        raw_result = await client.read_resource("request://headers")
+        json_result = json.loads(raw_result[0].text)  # type: ignore[attr-defined]
         assert "x-demo-header" in json_result
         assert json_result["x-demo-header"] == "ABC"
 
@@ -125,8 +140,7 @@ async def test_http_headers_tool_shttp(shttp_server: str):
         )
     ) as client:
         result = await client.call_tool("get_headers_tool")
-        assert isinstance(result[0], TextContent)
-        json_result = json.loads(result[0].text)
+        json_result = json.loads(result[0].text)  # type: ignore[attr-defined]
         assert "x-demo-header" in json_result
         assert json_result["x-demo-header"] == "ABC"
 
@@ -136,8 +150,21 @@ async def test_http_headers_tool_sse(sse_server: str):
         transport=SSETransport(sse_server, headers={"X-DEMO-HEADER": "ABC"})
     ) as client:
         result = await client.call_tool("get_headers_tool")
-        assert isinstance(result[0], TextContent)
-        json_result = json.loads(result[0].text)
+        json_result = json.loads(result[0].text)  # type: ignore[attr-defined]
+        assert "x-demo-header" in json_result
+        assert json_result["x-demo-header"] == "ABC"
+
+
+async def test_http_headers_tool_fastmcp():
+    async with Client(
+        transport=FastMCPTransport(
+            fastmcp_server(),
+            transport="streamable-http",
+            transport_kwargs={"headers": {"X-DEMO-HEADER": "ABC"}},
+        )
+    ) as client:
+        result = await client.call_tool("get_headers_tool")
+        json_result = json.loads(result[0].text)  # type: ignore[attr-defined]
         assert "x-demo-header" in json_result
         assert json_result["x-demo-header"] == "ABC"
 
@@ -150,8 +177,7 @@ async def test_http_headers_prompt_shttp(shttp_server: str):
         )
     ) as client:
         result = await client.get_prompt("get_headers_prompt")
-        assert isinstance(result.messages[0].content, TextContent)
-        json_result = json.loads(result.messages[0].content.text)
+        json_result = json.loads(result.messages[0].content.text)  # type: ignore[attr-defined]
         assert "x-demo-header" in json_result
         assert json_result["x-demo-header"] == "ABC"
 
@@ -162,7 +188,20 @@ async def test_http_headers_prompt_sse(sse_server: str):
         transport=SSETransport(sse_server, headers={"X-DEMO-HEADER": "ABC"})
     ) as client:
         result = await client.get_prompt("get_headers_prompt")
-        assert isinstance(result.messages[0].content, TextContent)
-        json_result = json.loads(result.messages[0].content.text)
+        json_result = json.loads(result.messages[0].content.text)  # type: ignore[attr-defined]
+        assert "x-demo-header" in json_result
+        assert json_result["x-demo-header"] == "ABC"
+
+
+async def test_http_headers_prompt_fastmcp():
+    async with Client(
+        transport=FastMCPTransport(
+            fastmcp_server(),
+            transport="streamable-http",
+            transport_kwargs={"headers": {"X-DEMO-HEADER": "ABC"}},
+        )
+    ) as client:
+        result = await client.get_prompt("get_headers_prompt")
+        json_result = json.loads(result.messages[0].content.text)  # type: ignore[attr-defined]
         assert "x-demo-header" in json_result
         assert json_result["x-demo-header"] == "ABC"

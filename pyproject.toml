@@ -13,6 +13,7 @@ dependencies = [
     "typer>=0.15.2",
     "websockets>=14.0",
     "authlib>=1.5.2",
+    "asgi-lifespan>=2.1.0",
 ]
 requires-python = ">=3.10"
 readme = "README.md"
