@@ -7,7 +7,10 @@ import uvicorn
 from mcp.types import TextContent, TextResourceContents
 
 from fastmcp.client import Client
-from fastmcp.client.transports import SSETransport, StreamableHttpTransport
+from fastmcp.client.transports import (
+    SSETransport,
+    StreamableHttpTransport,
+)
 from fastmcp.server.dependencies import get_http_request
 from fastmcp.server.server import FastMCP
 from fastmcp.utilities.tests import run_server_in_process

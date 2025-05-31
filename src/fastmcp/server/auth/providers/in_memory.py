@@ -1,3 +1,8 @@
+"""
+This is a simple in-memory OAuth provider for testing purposes.
+It simulates the OAuth 2.0 flow locally without external calls.
+"""
+
 import secrets
 import time
 
@@ -28,7 +33,7 @@ DEFAULT_ACCESS_TOKEN_EXPIRY_SECONDS = 60 * 60  # 1 hour
 DEFAULT_REFRESH_TOKEN_EXPIRY_SECONDS = None  # No expiry
 
 
-class InMemoryOAuthProvider(OAuthProvider):
+class InMemory(OAuthProvider):
     """
     An in-memory OAuth provider for testing purposes.
     It simulates the OAuth 2.0 flow locally without external calls.
@@ -43,7 +48,7 @@ class InMemoryOAuthProvider(OAuthProvider):
         required_scopes: list[str] | None = None,
     ):
         super().__init__(
-            issuer_url or "https://example.com",
+            issuer_url=issuer_url or "http://fastmcp.example.com",
             service_documentation_url=service_documentation_url,
             client_registration_options=client_registration_options,
             revocation_options=revocation_options,

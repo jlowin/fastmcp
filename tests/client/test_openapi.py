@@ -8,7 +8,10 @@ from fastapi import FastAPI, Request
 from mcp.types import TextContent, TextResourceContents
 
 from fastmcp import Client, FastMCP
-from fastmcp.client.transports import SSETransport, StreamableHttpTransport
+from fastmcp.client.transports import (
+    SSETransport,
+    StreamableHttpTransport,
+)
 from fastmcp.utilities.tests import run_server_in_process
 
 
@@ -35,75 +38,86 @@ def fastmcp_server_for_headers() -> FastMCP:
     return mcp
 
 
+def run_shttp_server(host: str, port: int) -> None:
+    try:
+        app = fastmcp_server_for_headers().http_app(transport="streamable-http")
+        server = uvicorn.Server(
+            config=uvicorn.Config(
+                app=app,
+                host=host,
+                port=port,
+                log_level="error",
+                lifespan="on",
+            )
+        )
+        server.run()
+    except Exception as e:
+        print(f"Server error: {e}")
+        sys.exit(1)
+    sys.exit(0)
+
+
+def run_sse_server(host: str, port: int) -> None:
+    try:
+        app = fastmcp_server_for_headers().http_app(transport="sse")
+        server = uvicorn.Server(
+            config=uvicorn.Config(
+                app=app,
+                host=host,
+                port=port,
+                log_level="error",
+                lifespan="on",
+            )
+        )
+        server.run()
+    except Exception as e:
+        print(f"Server error: {e}")
+        sys.exit(1)
+    sys.exit(0)
+
+
+def run_proxy_server(host: str, port: int, remote_url: str) -> None:
+    try:
+        client = Client(transport=StreamableHttpTransport(remote_url))
+        app = FastMCP.as_proxy(client).http_app(transport="streamable-http")
+        server = uvicorn.Server(
+            config=uvicorn.Config(
+                app=app,
+                host=host,
+                port=port,
+                log_level="error",
+                lifespan="on",
+            )
+        )
+        server.run()
+    except Exception as e:
+        print(f"Server error: {e}")
+        sys.exit(1)
+    sys.exit(0)
+
+
+def broken_server_for_testing(host: str, port: int) -> None:
+    """Test function that always fails to verify error capture."""
+    print(f"Starting broken server on {host}:{port}")
+    print("This is a stdout message", file=sys.stdout)
+    print("This is a stderr message", file=sys.stderr)
+    raise ValueError("This is an intentional error for testing!")
+
+
 class TestClientHeaders:
-    def run_shttp_server(self, host: str, port: int) -> None:
-        try:
-            app = fastmcp_server_for_headers().http_app(transport="streamable-http")
-            server = uvicorn.Server(
-                config=uvicorn.Config(
-                    app=app,
-                    host=host,
-                    port=port,
-                    log_level="error",
-                    lifespan="on",
-                )
-            )
-            server.run()
-        except Exception as e:
-            print(f"Server error: {e}")
-            sys.exit(1)
-        sys.exit(0)
-
-    def run_sse_server(self, host: str, port: int) -> None:
-        try:
-            app = fastmcp_server_for_headers().http_app(transport="sse")
-            server = uvicorn.Server(
-                config=uvicorn.Config(
-                    app=app,
-                    host=host,
-                    port=port,
-                    log_level="error",
-                    lifespan="on",
-                )
-            )
-            server.run()
-        except Exception as e:
-            print(f"Server error: {e}")
-            sys.exit(1)
-        sys.exit(0)
-
-    def run_proxy_server(self, host: str, port: int, remote_url: str) -> None:
-        try:
-            client = Client(transport=StreamableHttpTransport(remote_url))
-            app = FastMCP.as_proxy(client).http_app(transport="streamable-http")
-            server = uvicorn.Server(
-                config=uvicorn.Config(
-                    app=app,
-                    host=host,
-                    port=port,
-                    log_level="error",
-                    lifespan="on",
-                )
-            )
-            server.run()
-        except Exception as e:
-            print(f"Server error: {e}")
-            sys.exit(1)
-        sys.exit(0)
-
     @pytest.fixture(scope="class")
     def shttp_server(self) -> Generator[str, None, None]:
-        with run_server_in_process(self.run_shttp_server) as url:
+        with run_server_in_process(run_shttp_server) as url:
             yield f"{url}/mcp"
 
     @pytest.fixture(scope="class")
     def sse_server(self) -> Generator[str, None, None]:
-        with run_server_in_process(self.run_sse_server) as url:
+        with run_server_in_process(run_sse_server) as url:
             yield f"{url}/sse"
 
     @pytest.fixture(scope="class")
     def proxy_server(self, shttp_server: str) -> Generator[str, None, None]:
-        with run_server_in_process(self.run_proxy_server, shttp_server + "/mcp") as url:
+        with run_server_in_process(run_proxy_server, shttp_server + "/mcp") as url:
             yield f"{url}/mcp"
 
     async def test_client_headers_sse_resource(self, sse_server: str):

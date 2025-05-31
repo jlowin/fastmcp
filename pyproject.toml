@@ -13,6 +13,7 @@ dependencies = [
     "typer>=0.15.2",
     "websockets>=14.0",
     "authlib>=1.5.2",
+    "asgi-lifespan>=2.1.0",
 ]
 requires-python = ">=3.10"
 readme = "README.md"
@@ -85,7 +86,7 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
 filterwarnings = []
-timeout = 3
+timeout = 2
 env = [
     "FASTMCP_TEST_MODE=1",
     'D:FASTMCP_LOG_LEVEL=DEBUG',

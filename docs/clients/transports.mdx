@@ -350,7 +350,9 @@ asyncio.run(main())
 - **Inferred From:** An instance of `fastmcp.server.FastMCP` or a **FastMCP 1.0 server** (`mcp.server.fastmcp.FastMCP`)
 - **Use Case:** Connecting directly to a FastMCP server instance in the same Python process
 
-This is extremely useful for testing your FastMCP servers.
+This is extremely useful for testing your FastMCP servers. FastMCPTransport can simulate both `stdio` and `streamable-http` transports, making it a versatile tool for testing different transport scenarios without needing separate server processes.
+
+#### Basic Usage (stdio)
 
 ```python
 from fastmcp import FastMCP, Client
@@ -364,7 +366,7 @@ def ping():
     return "pong"
 
 # 2. Create a client pointing directly to the server instance
-client = Client(server)  # Transport is automatically inferred
+client = Client(server)  # Transport is automatically inferred as stdio mode
 
 async def main():
     async with client:
@@ -374,7 +376,48 @@ async def main():
 asyncio.run(main())
 ```
 
-Communication happens through efficient in-memory queues, making it very fast and ideal for unit testing. 
+#### Advanced Usage (Streamable HTTP)
+
+<VersionBadge version="2.6.0" />
+
+You can also simulate a streamable-http connection for testing HTTP-specific behavior:
+
+```python
+from fastmcp import FastMCP, Client
+from fastmcp.client.transports import FastMCPTransport
+import asyncio
+
+server = FastMCP(name="HttpTestServer")
+
+@server.tool()
+def get_data():
+    return {"message": "Hello from HTTP simulation"}
+
+# Create a client with streamable-http transport simulation
+transport = FastMCPTransport(server, transport="streamable-http")
+client = Client(transport)
+
+async def main():
+    async with client:
+        result = await client.call_tool("get_data")
+        print(f"HTTP simulation result: {result}")
+
+asyncio.run(main())
+```
+
+#### Important Limitations
+
+<Warning>
+When using `transport="streamable-http"`, SSE-based streaming features are **not supported** due to restrictions of the in-memory ASGI transport. This includes:
+
+- Progress reporting (`context.report_progress()`)
+- Sampling callbacks
+- Other real-time streaming features
+
+The streamable-http mode is primarily intended for testing HTTP transport logic and request/response patterns, not for testing streaming capabilities.
+</Warning>
+
+Communication happens through efficient in-memory queues (in stdio mode) or simulated HTTP requests (in streamable-http mode), making both very fast and ideal for unit testing.
 
 ## Configuration-Based Transports
 

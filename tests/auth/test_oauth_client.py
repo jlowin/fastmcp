@@ -1,6 +1,6 @@
 import sys
 from collections.abc import Generator
-from unittest.mock import patch
+from functools import partial
 from urllib.parse import parse_qs, urlparse
 
 import httpx
@@ -9,10 +9,11 @@ import uvicorn
 
 import fastmcp.client.auth  # Import module, not the function directly
 from fastmcp.client import Client
-from fastmcp.client.transports import StreamableHttpTransport
+from fastmcp.client.transports import FastMCPTransport, StreamableHttpTransport
 from fastmcp.server.auth.auth import ClientRegistrationOptions
-from fastmcp.server.auth.in_memory_provider import InMemoryOAuthProvider
+from fastmcp.server.auth.providers.in_memory import InMemory
 from fastmcp.server.server import FastMCP
+from fastmcp.utilities.http import find_available_port
 from fastmcp.utilities.tests import run_server_in_process
 
 
@@ -20,7 +21,7 @@ def fastmcp_server(issuer_url: str):
     """Create a FastMCP server with OAuth authentication."""
     server = FastMCP(
         "TestServer",
-        auth=InMemoryOAuthProvider(
+        auth=InMemory(
             issuer_url=issuer_url,
             client_registration_options=ClientRegistrationOptions(enabled=True),
         ),
@@ -71,6 +72,17 @@ def client_unauthorized(streamable_http_server: str) -> Client:
     return Client(transport=StreamableHttpTransport(streamable_http_server))
 
 
+@pytest.fixture()
+def client_unauthorized_in_memory() -> Client:
+    port = find_available_port()
+    return Client(
+        transport=FastMCPTransport(
+            fastmcp_server(f"http://localhost:{port}"),
+            transport="streamable-http",
+        )
+    )
+
+
 class HeadlessOAuthProvider(httpx.Auth):
     """
     OAuth provider that bypasses browser interaction for testing.
@@ -86,11 +98,12 @@ class HeadlessOAuthProvider(httpx.Auth):
     requiring browser interaction or external OAuth providers.
     """
 
-    def __init__(self, mcp_url: str):
+    def __init__(self, mcp_url: str, client: httpx.AsyncClient | None = None):
         self.mcp_url = mcp_url
         parsed_url = urlparse(mcp_url)
         self.server_base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
         self._access_token = None
+        self.client = client or httpx.AsyncClient()
 
     async def async_auth_flow(self, request):
         """httpx.Auth interface - add Bearer token to requests."""
@@ -122,7 +135,7 @@ class HeadlessOAuthProvider(httpx.Auth):
         )
 
         # Create HTTP client to talk to the server
-        async with httpx.AsyncClient() as http_client:
+        async with self.client as http_client:
             # 1. Discover OAuth metadata
             metadata_url = (
                 f"{self.server_base_url}/.well-known/oauth-authorization-server"
@@ -135,7 +148,7 @@ class HeadlessOAuthProvider(httpx.Auth):
             client_info = OAuthClientInformationFull(
                 client_id="test_client_headless",
                 client_secret="test_secret_headless",
-                redirect_uris=[AnyHttpUrl("http://localhost:8080/callback")],
+                redirect_uris=[AnyHttpUrl(f"{self.server_base_url}/callback")],
             )
 
             register_response = await http_client.post(
@@ -149,7 +162,7 @@ class HeadlessOAuthProvider(httpx.Auth):
             auth_params = {
                 "response_type": "code",
                 "client_id": registered_client["client_id"],
-                "redirect_uri": "http://localhost:8080/callback",
+                "redirect_uri": f"{self.server_base_url}/callback",
                 "code_challenge": code_challenge,
                 "code_challenge_method": "S256",
                 "state": "test_state_headless",
@@ -184,7 +197,7 @@ class HeadlessOAuthProvider(httpx.Auth):
                     "client_id": registered_client["client_id"],
                     "client_secret": registered_client["client_secret"],
                     "code": auth_code,
-                    "redirect_uri": "http://localhost:8080/callback",
+                    "redirect_uri": f"{self.server_base_url}/callback",
                     "code_verifier": code_verifier,
                 }
 
@@ -200,24 +213,57 @@ class HeadlessOAuthProvider(httpx.Auth):
 
 
 @pytest.fixture()
-def client_with_headless_oauth(
+def client(
     streamable_http_server: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> Generator[Client, None, None]:
-    """Client with headless OAuth that bypasses browser interaction."""
+    """Client with headless OAuth that bypasses browser interaction. Note this uses a full integration test."""
 
     # Patch the OAuth function to return our headless provider
-    def headless_oauth(*args, **kwargs):
-        mcp_url = args[0] if args else kwargs.get("mcp_url", "")
-        if not mcp_url:
-            raise ValueError("mcp_url is required")
-        return HeadlessOAuthProvider(mcp_url)
+    monkeypatch.setattr("fastmcp.client.auth.OAuth", HeadlessOAuthProvider)
+    client = Client(
+        transport=StreamableHttpTransport(streamable_http_server),
+        auth=fastmcp.client.auth.OAuth(mcp_url=streamable_http_server),
+    )
+    yield client
 
-    with patch("fastmcp.client.auth.OAuth", side_effect=headless_oauth):
-        client = Client(
-            transport=StreamableHttpTransport(streamable_http_server),
-            auth=fastmcp.client.auth.OAuth(mcp_url=streamable_http_server),
-        )
-        yield client
+
+@pytest.fixture()
+def client_in_memory(
+    streamable_http_server: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Generator[Client, None, None]:
+    """
+    Client with headless OAuth that bypasses browser interaction.
+
+    Note that this client uses in-memory FastMCPTransport to test that it works with auth
+    """
+
+    # Patch the OAuth function to return our headless provider
+    port = find_available_port()
+    mcp = fastmcp_server(f"http://localhost:{port}")
+    app = mcp.http_app(transport="streamable-http", path="/mcp/")
+
+    # patch headless to use our app
+    monkeypatch.setattr(
+        "fastmcp.client.auth.OAuth",
+        partial(
+            HeadlessOAuthProvider,
+            client=httpx.AsyncClient(
+                transport=httpx.ASGITransport(app),
+            ),
+        ),
+    )
+
+    transport = FastMCPTransport(
+        mcp,
+        transport="streamable-http",
+        transport_kwargs=dict(
+            auth=fastmcp.client.auth.OAuth(mcp_url=f"http://localhost:{port}/mcp/")
+        ),
+    )
+    client = Client(transport=transport)
+    yield client
 
 
 async def test_unauthorized(client_unauthorized: Client):
@@ -227,39 +273,82 @@ async def test_unauthorized(client_unauthorized: Client):
             pass
 
 
-async def test_ping(client_with_headless_oauth: Client):
+async def test_unauthorized_in_memory(client_unauthorized_in_memory: Client):
+    """Test that unauthenticated requests are rejected."""
+    with pytest.raises(httpx.HTTPStatusError, match="401 Unauthorized"):
+        async with client_unauthorized_in_memory:
+            pass
+
+
+async def test_ping(client: Client):
     """Test that we can ping the server."""
-    async with client_with_headless_oauth:
-        assert await client_with_headless_oauth.ping()
+    async with client:
+        assert await client.ping()
 
 
-async def test_list_tools(client_with_headless_oauth: Client):
+async def test_ping_in_memory(client_in_memory: Client):
+    """Test that we can ping the server."""
+    async with client_in_memory:
+        assert await client_in_memory.ping()
+
+
+async def test_list_tools(client: Client):
     """Test that we can list tools."""
-    async with client_with_headless_oauth:
-        tools = await client_with_headless_oauth.list_tools()
+    async with client:
+        tools = await client.list_tools()
         tool_names = [tool.name for tool in tools]
         assert "add" in tool_names
 
 
-async def test_call_tool(client_with_headless_oauth: Client):
+async def test_list_tools_in_memory(client_in_memory: Client):
+    """Test that we can list tools."""
+    async with client_in_memory:
+        tools = await client_in_memory.list_tools()
+        tool_names = [tool.name for tool in tools]
+        assert "add" in tool_names
+
+
+async def test_call_tool(client: Client):
     """Test that we can call a tool."""
-    async with client_with_headless_oauth:
-        result = await client_with_headless_oauth.call_tool("add", {"a": 5, "b": 3})
+    async with client:
+        result = await client.call_tool("add", {"a": 5, "b": 3})
         assert result[0].text == "8"  # type: ignore[attr-defined]
 
 
-async def test_list_resources(client_with_headless_oauth: Client):
+async def test_call_tool_in_memory(client_in_memory: Client):
+    """Test that we can call a tool."""
+    async with client_in_memory:
+        result = await client_in_memory.call_tool("add", {"a": 5, "b": 3})
+        assert result[0].text == "8"  # type: ignore[attr-defined]
+
+
+async def test_list_resources(client: Client):
     """Test that we can list resources."""
-    async with client_with_headless_oauth:
-        resources = await client_with_headless_oauth.list_resources()
+    async with client:
+        resources = await client.list_resources()
         resource_uris = [str(resource.uri) for resource in resources]
         assert "resource://test" in resource_uris
 
 
-async def test_read_resource(client_with_headless_oauth: Client):
+async def test_list_resources_in_memory(client_in_memory: Client):
+    """Test that we can list resources."""
+    async with client_in_memory:
+        resources = await client_in_memory.list_resources()
+        resource_uris = [str(resource.uri) for resource in resources]
+        assert "resource://test" in resource_uris
+
+
+async def test_read_resource(client: Client):
     """Test that we can read a resource."""
-    async with client_with_headless_oauth:
-        resource = await client_with_headless_oauth.read_resource("resource://test")
+    async with client:
+        resource = await client.read_resource("resource://test")
+        assert resource[0].text == "Hello from authenticated resource!"  # type: ignore[attr-defined]
+
+
+async def test_read_resource_in_memory(client_in_memory: Client):
+    """Test that we can read a resource."""
+    async with client_in_memory:
+        resource = await client_in_memory.read_resource("resource://test")
         assert resource[0].text == "Hello from authenticated resource!"  # type: ignore[attr-defined]
 
 

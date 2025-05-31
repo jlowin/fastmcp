@@ -1,19 +1,16 @@
 from __future__ import annotations
 
 import copy
-import multiprocessing
 import socket
+import subprocess
+import sys
 import time
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any, Literal
-
-import uvicorn
+from typing import Any
 
 from fastmcp.settings import settings
-
-if TYPE_CHECKING:
-    from fastmcp.server.server import FastMCP
+from fastmcp.utilities.http import find_available_port
 
 
 @contextmanager
@@ -52,21 +49,19 @@ def temporary_settings(**kwargs: Any):
                 setattr(settings, attr, old_settings[attr])
 
 
-def _run_server(mcp_server: FastMCP, transport: Literal["sse"], port: int) -> None:
-    # Some Starlette apps are not pickleable, so we need to create them here based on the indicated transport
-    if transport == "sse":
-        app = mcp_server.http_app(transport="sse")
-    else:
-        raise ValueError(f"Invalid transport: {transport}")
-    uvicorn_server = uvicorn.Server(
-        config=uvicorn.Config(
-            app=app,
-            host="127.0.0.1",
-            port=port,
-            log_level="error",
-        )
-    )
-    uvicorn_server.run()
+def _run_server_wrapper(server_fn: Callable[..., None], host: str, port: int, *args):
+    """
+    Wrapper function to run the server function and handle errors.
+    This runs in the subprocess.
+    """
+    try:
+        server_fn(host, port, *args)
+    except Exception as e:
+        print(f"Server function failed with error: {e}", file=sys.stderr)
+        import traceback
+
+        traceback.print_exc()
+        sys.exit(1)
 
 
 @contextmanager
@@ -74,29 +69,52 @@ def run_server_in_process(
     server_fn: Callable[..., None], *args
 ) -> Generator[str, None, None]:
     """
-    Context manager that runs a Starlette app in a separate process and returns the
+    Context manager that runs a server function in a separate process and returns the
     server URL. When the context manager is exited, the server process is killed.
 
     Args:
-        app: The Starlette app to run.
+        server_fn: The server function to run.
+        *args: Additional arguments to pass to the server function.
 
     Returns:
         The server URL.
     """
     host = "127.0.0.1"
-    with socket.socket() as s:
-        s.bind((host, 0))
-        port = s.getsockname()[1]
+    port = find_available_port()
 
-    proc = multiprocessing.Process(
-        target=server_fn, args=(host, port, *args), daemon=True
+    # Create a subprocess that runs the server function
+    proc = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            f"""
+import sys
+import traceback
+from importlib import import_module
+
+# Import the server function
+module_name = "{server_fn.__module__}"
+function_name = "{server_fn.__name__}"
+
+try:
+    module = import_module(module_name)
+    server_fn = getattr(module, function_name)
+    server_fn("{host}", {port}, *{args!r})
+except Exception as e:
+    print(f"Server function failed with error: {{e}}", file=sys.stderr)
+    traceback.print_exc()
+    sys.exit(1)
+""",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
     )
-    proc.start()
 
     # Wait for server to be running
     max_attempts = 10
     attempt = 0
-    while attempt < max_attempts and proc.is_alive():
+    while attempt < max_attempts and proc.poll() is None:
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.connect((host, port))
@@ -108,15 +126,47 @@ def run_server_in_process(
                 time.sleep(0.1)
             attempt += 1
     else:
+        # Check if process died during startup
+        if proc.poll() is not None:
+            stdout, stderr = proc.communicate(timeout=1)
+            if stdout:
+                print(f"Server stdout: {stdout}", file=sys.stdout)
+            if stderr:
+                print(f"Server stderr: {stderr}", file=sys.stderr)
+            print(
+                f"Server process died during startup with exit code: {proc.returncode}",
+                file=sys.stderr,
+            )
         raise RuntimeError(f"Server failed to start after {max_attempts} attempts")
 
-    yield f"http://{host}:{port}"
+    try:
+        yield f"http://{host}:{port}"
+    finally:
+        proc.terminate()
+        try:
+            stdout, stderr = proc.communicate(timeout=5)
+            if stdout:
+                print(f"Server stdout: {stdout}", file=sys.stdout)
+            if stderr:
+                print(f"Server stderr: {stderr}", file=sys.stderr)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            try:
+                stdout, stderr = proc.communicate(timeout=2)
+                if stdout:
+                    print(f"Server stdout: {stdout}", file=sys.stdout)
+                if stderr:
+                    print(f"Server stderr: {stderr}", file=sys.stderr)
+            except subprocess.TimeoutExpired:
+                print(
+                    "Server process failed to terminate even after kill",
+                    file=sys.stderr,
+                )
+                raise RuntimeError("Server process failed to terminate even after kill")
 
-    proc.terminate()
-    proc.join(timeout=5)
-    if proc.is_alive():
-        # If it's still alive, then force kill it
-        proc.kill()
-        proc.join(timeout=2)
-        if proc.is_alive():
-            raise RuntimeError("Server process failed to terminate even after kill")
+        # If the process ended with a non-zero exit code, report it
+        if proc.returncode != 0:
+            print(
+                f"Server process ended with exit code: {proc.returncode}",
+                file=sys.stderr,
+            )
