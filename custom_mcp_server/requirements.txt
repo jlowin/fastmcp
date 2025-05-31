@@ -1,0 +1,5 @@
+fastmcp
+requests
+replicate
+firecrawl-py
+dataforseo-api-python
