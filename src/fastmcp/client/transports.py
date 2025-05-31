@@ -666,6 +666,7 @@ class FastMCPTransport(ClientTransport):
         mcp: FastMCP | FastMCP1Server,
         transport: Literal["stdio", "streamable-http"] | None = None,
         transport_kwargs: dict[str, Any] | None = None,
+        auth: httpx.Auth | Literal["oauth"] | str | None = None,
     ):
         """Initialize a FastMCPTransport from a FastMCP server instance."""
         if transport is None:
@@ -682,6 +683,23 @@ class FastMCPTransport(ClientTransport):
                 "FastMCP 1.0 servers are only supported with transport='stdio'"
             )
         self.server = mcp
+        self._auth = None
+        self._set_auth(auth)
+
+        if self.transport == "streamable-http":
+            assert isinstance(self.server, FastMCP)
+            self._http_app = self.server.http_app(
+                transport="streamable-http",
+                path="/mcp/",
+            )
+        else:
+            self._http_app = None
+
+    def _set_auth(self, auth: httpx.Auth | Literal["oauth"] | str | None):
+        if self.transport == "streamable-http" and auth is not None:
+            self._auth = auth
+        else:
+            super()._set_auth(auth)
 
     @contextlib.asynccontextmanager
     async def connect_session_stdio(
@@ -698,16 +716,14 @@ class FastMCPTransport(ClientTransport):
     async def connect_session_streamable_http(
         self, **session_kwargs: Unpack[SessionKwargs]
     ) -> AsyncIterator[ClientSession]:
-        assert isinstance(self.server, FastMCP)
-        app = self.server.http_app(transport="streamable-http", path="/mcp/")
-
         def client_factory(
             headers: dict[str, str] | None = None,
             timeout: httpx.Timeout | None = None,
             auth: httpx.Auth | None = None,
         ) -> httpx.AsyncClient:
+            assert self._http_app is not None
             return httpx.AsyncClient(
-                transport=httpx.ASGITransport(app),
+                transport=httpx.ASGITransport(self._http_app),
                 headers=headers,
                 timeout=timeout,
                 auth=auth,
@@ -716,10 +732,12 @@ class FastMCPTransport(ClientTransport):
         transport = StreamableHttpTransport(
             url="http://localhost/mcp/",
             httpx_client_factory=client_factory,
+            auth=self._auth,
             **self.transport_kwargs,
         )
 
-        async with LifespanManager(app):
+        assert self._http_app is not None
+        async with LifespanManager(self._http_app):
             async with transport.connect_session(**session_kwargs) as session:
                 yield session
 

@@ -8,7 +8,11 @@ from fastapi import FastAPI, Request
 from mcp.types import TextContent, TextResourceContents
 
 from fastmcp import Client, FastMCP
-from fastmcp.client.transports import SSETransport, StreamableHttpTransport
+from fastmcp.client.transports import (
+    FastMCPTransport,
+    SSETransport,
+    StreamableHttpTransport,
+)
 from fastmcp.utilities.tests import run_server_in_process
 
 
@@ -126,6 +130,19 @@ class TestClientHeaders:
             headers = json.loads(result[0].text)
             assert headers["x-test"] == "test-123"
 
+    async def test_client_headers_fastmcp_resource(self):
+        async with Client(
+            transport=FastMCPTransport(
+                fastmcp_server_for_headers(),
+                transport="streamable-http",
+                transport_kwargs={"headers": {"X-TEST": "test-123"}},
+            )
+        ) as client:
+            result = await client.read_resource("resource://get_headers_headers_get")
+            assert isinstance(result[0], TextResourceContents)
+            headers = json.loads(result[0].text)
+            assert headers["x-test"] == "test-123"
+
     async def test_client_headers_sse_resource_template(self, sse_server: str):
         async with Client(
             transport=SSETransport(sse_server, headers={"X-TEST": "test-123"})
@@ -150,6 +167,21 @@ class TestClientHeaders:
             header = json.loads(result[0].text)
             assert header == "test-123"
 
+    async def test_client_headers_fastmcp_resource_template(self):
+        async with Client(
+            transport=FastMCPTransport(
+                fastmcp_server_for_headers(),
+                transport="streamable-http",
+                transport_kwargs={"headers": {"X-TEST": "test-123"}},
+            )
+        ) as client:
+            result = await client.read_resource(
+                "resource://get_header_by_name_headers/x-test"
+            )
+            assert isinstance(result[0], TextResourceContents)
+            header = json.loads(result[0].text)
+            assert header == "test-123"
+
     async def test_client_headers_sse_tool(self, sse_server: str):
         async with Client(
             transport=SSETransport(sse_server, headers={"X-TEST": "test-123"})
@@ -163,6 +195,19 @@ class TestClientHeaders:
         async with Client(
             transport=StreamableHttpTransport(
                 shttp_server, headers={"X-TEST": "test-123"}
+            )
+        ) as client:
+            result = await client.call_tool("post_headers_headers_post")
+            assert isinstance(result[0], TextContent)
+            headers = json.loads(result[0].text)
+            assert headers["x-test"] == "test-123"
+
+    async def test_client_headers_fastmcp_tool(self):
+        async with Client(
+            transport=FastMCPTransport(
+                fastmcp_server_for_headers(),
+                transport="streamable-http",
+                transport_kwargs={"headers": {"X-TEST": "test-123"}},
             )
         ) as client:
             result = await client.call_tool("post_headers_headers_post")
