@@ -13,6 +13,7 @@ from fastmcp.client.transports import FastMCPTransport, StreamableHttpTransport
 from fastmcp.server.auth.auth import ClientRegistrationOptions
 from fastmcp.server.auth.providers.in_memory import InMemory
 from fastmcp.server.server import FastMCP
+from fastmcp.utilities.http import find_available_port
 from fastmcp.utilities.tests import run_server_in_process
 
 
@@ -73,9 +74,10 @@ def client_unauthorized(streamable_http_server: str) -> Client:
 
 @pytest.fixture()
 def client_unauthorized_in_memory() -> Client:
+    port = find_available_port()
     return Client(
         transport=FastMCPTransport(
-            fastmcp_server("http://localhost"),
+            fastmcp_server(f"http://localhost:{port}"),
             transport="streamable-http",
         )
     )
@@ -146,7 +148,7 @@ class HeadlessOAuthProvider(httpx.Auth):
             client_info = OAuthClientInformationFull(
                 client_id="test_client_headless",
                 client_secret="test_secret_headless",
-                redirect_uris=[AnyHttpUrl("http://localhost:8080/callback")],
+                redirect_uris=[AnyHttpUrl(f"{self.server_base_url}/callback")],
             )
 
             register_response = await http_client.post(
@@ -160,7 +162,7 @@ class HeadlessOAuthProvider(httpx.Auth):
             auth_params = {
                 "response_type": "code",
                 "client_id": registered_client["client_id"],
-                "redirect_uri": "http://localhost:8080/callback",
+                "redirect_uri": f"{self.server_base_url}/callback",
                 "code_challenge": code_challenge,
                 "code_challenge_method": "S256",
                 "state": "test_state_headless",
@@ -195,7 +197,7 @@ class HeadlessOAuthProvider(httpx.Auth):
                     "client_id": registered_client["client_id"],
                     "client_secret": registered_client["client_secret"],
                     "code": auth_code,
-                    "redirect_uri": "http://localhost:8080/callback",
+                    "redirect_uri": f"{self.server_base_url}/callback",
                     "code_verifier": code_verifier,
                 }
 
@@ -238,7 +240,8 @@ def client_in_memory(
     """
 
     # Patch the OAuth function to return our headless provider
-    mcp = fastmcp_server("http://localhost/")
+    port = find_available_port()
+    mcp = fastmcp_server(f"http://localhost:{port}")
     app = mcp.http_app(transport="streamable-http", path="/mcp/")
 
     # patch headless to use our app
@@ -256,7 +259,7 @@ def client_in_memory(
         mcp,
         transport="streamable-http",
         transport_kwargs=dict(
-            auth=fastmcp.client.auth.OAuth(mcp_url="http://localhost/mcp/")
+            auth=fastmcp.client.auth.OAuth(mcp_url=f"http://localhost:{port}/mcp/")
         ),
     )
     client = Client(transport=transport)

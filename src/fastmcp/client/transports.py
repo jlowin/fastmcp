@@ -40,6 +40,7 @@ from typing_extensions import Unpack
 from fastmcp.client.auth import OAuth
 from fastmcp.server import FastMCP
 from fastmcp.server.dependencies import get_http_headers
+from fastmcp.utilities.http import find_available_port
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.mcp_config import MCPConfig, infer_transport_type_from_url
 
@@ -704,6 +705,8 @@ class FastMCPTransport(ClientTransport):
             path="/mcp/",
         )
 
+        port = find_available_port()
+
         def client_factory(
             headers: dict[str, str] | None = None,
             timeout: httpx.Timeout | None = None,
@@ -714,10 +717,11 @@ class FastMCPTransport(ClientTransport):
                 headers=headers,
                 timeout=timeout,
                 auth=auth,
+                base_url=f"http://localhost:{port}",
             )
 
         transport = StreamableHttpTransport(
-            url="http://localhost/mcp/",
+            url=f"http://localhost:{port}/mcp/",
             httpx_client_factory=client_factory,
             **self.transport_kwargs,
         )

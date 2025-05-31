@@ -6,14 +6,10 @@ import socket
 import time
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any, Literal
-
-import uvicorn
+from typing import Any
 
 from fastmcp.settings import settings
-
-if TYPE_CHECKING:
-    from fastmcp.server.server import FastMCP
+from fastmcp.utilities.http import find_available_port
 
 
 @contextmanager
@@ -52,23 +48,6 @@ def temporary_settings(**kwargs: Any):
                 setattr(settings, attr, old_settings[attr])
 
 
-def _run_server(mcp_server: FastMCP, transport: Literal["sse"], port: int) -> None:
-    # Some Starlette apps are not pickleable, so we need to create them here based on the indicated transport
-    if transport == "sse":
-        app = mcp_server.http_app(transport="sse")
-    else:
-        raise ValueError(f"Invalid transport: {transport}")
-    uvicorn_server = uvicorn.Server(
-        config=uvicorn.Config(
-            app=app,
-            host="127.0.0.1",
-            port=port,
-            log_level="error",
-        )
-    )
-    uvicorn_server.run()
-
-
 @contextmanager
 def run_server_in_process(
     server_fn: Callable[..., None], *args
@@ -84,9 +63,7 @@ def run_server_in_process(
         The server URL.
     """
     host = "127.0.0.1"
-    with socket.socket() as s:
-        s.bind((host, 0))
-        port = s.getsockname()[1]
+    port = find_available_port()
 
     proc = multiprocessing.Process(
         target=server_fn, args=(host, port, *args), daemon=True
