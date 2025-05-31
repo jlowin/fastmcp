@@ -94,17 +94,17 @@ class TestClientHeaders:
             sys.exit(1)
         sys.exit(0)
 
-    @pytest.fixture()
+    @pytest.fixture(scope="class")
     def shttp_server(self) -> Generator[str, None, None]:
         with run_server_in_process(self.run_shttp_server) as url:
             yield f"{url}/mcp"
 
-    @pytest.fixture()
+    @pytest.fixture(scope="class")
     def sse_server(self) -> Generator[str, None, None]:
         with run_server_in_process(self.run_sse_server) as url:
             yield f"{url}/sse"
 
-    @pytest.fixture()
+    @pytest.fixture(scope="class")
     def proxy_server(self, shttp_server: str) -> Generator[str, None, None]:
         with run_server_in_process(self.run_proxy_server, shttp_server + "/mcp") as url:
             yield f"{url}/mcp"
