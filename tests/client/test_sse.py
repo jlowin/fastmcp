@@ -77,7 +77,7 @@ def run_server(host: str, port: int, path: str | None = None) -> None:
     sys.exit(0)
 
 
-@pytest.fixture(autouse=True, scope="module")
+@pytest.fixture()
 def sse_server() -> Generator[str, None, None]:
     with run_server_in_process(run_server) as url:
         yield f"{url}/sse"
