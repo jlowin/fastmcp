@@ -36,3 +36,81 @@ async def test_tool_functionality(mcp_server):
 ```
 
 This pattern creates a direct connection between the client and server, allowing you to test your server's functionality efficiently.
+
+
+
+### Stdio 
+
+By default, `FastMCPTransport` creates a direct connection to the server using the `stdio` transport. This is the most efficient way to test your server's functionality.
+
+```python
+from fastmcp.client.transports import FastMCPTransport
+
+async def test_stdio_transport(mcp_server):
+    transport = FastMCPTransport(mcp_server, transport="stdio")
+    async with Client(transport) as client:
+        result = await client.call_tool("greet", {"name": "World"})
+        assert result[0].text == "Hello, World!"
+```
+
+### Streamable HTTP
+
+For testing HTTP-specific behavior, you can simulate a `streamable-http` connection:
+
+```python
+async def test_http_transport(mcp_server):
+    transport = FastMCPTransport(mcp_server, transport="streamable-http")
+    async with Client(transport) as client:
+        result = await client.call_tool("greet", {"name": "World"})
+        assert result[0].text == "Hello, World!"
+```
+
+<Note>
+When using `transport="streamable-http"`, SSE-based streaming features like progress reporting and sampling callbacks are not supported due to in-memory ASGI transport limitations. Use stdio mode for testing streaming capabilities.
+</Note>
+
+## Integration Testing
+
+For full integration tests that verify your server works correctly over real HTTP connections, use `run_server_in_process` from `fastmcp.utilities.tests`. You can use this to test both SSE and streamable HTTP transports:
+
+```python
+import sys
+import pytest
+import uvicorn
+from fastmcp import FastMCP, Client
+from fastmcp.utilities.tests import run_server_in_process
+
+def create_server():
+    server = FastMCP("IntegrationServer")
+    
+    @server.tool()
+    def greet(name: str) -> str:
+        return f"Hello, {name}!"
+    
+    return server
+
+def run_server(host: str, port: int) -> None:
+    try:
+        app = create_server().http_app(transport="streamable-http")
+        server = uvicorn.Server(
+            config=uvicorn.Config(app=app, host=host, port=port, log_level="error")
+        )
+        server.run()
+    except Exception as e:
+        print(f"Server error: {e}")
+        sys.exit(1)
+    sys.exit(0)
+
+@pytest.fixture(scope="module")
+def integration_server():
+    with run_server_in_process(run_server) as url:
+        yield f"{url}/mcp"
+
+async def test_integration(integration_server):
+    """Test against a real HTTP server."""
+    async with Client(integration_server) as client:
+        result = await client.call_tool("greet", {"name": "Integration"})
+        assert result[0].text == "Hello, Integration!"
+```
+
+This approach starts your FastMCP server in a separate process and provides a real URL for testing, making it ideal for verifying HTTP transport behavior, authentication, and other deployment-specific functionality.

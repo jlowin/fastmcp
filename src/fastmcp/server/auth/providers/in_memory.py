@@ -48,7 +48,7 @@ class InMemory(OAuthProvider):
         required_scopes: list[str] | None = None,
     ):
         super().__init__(
-            issuer_url or "https://example.com",
+            issuer_url=issuer_url or "http://fastmcp.example.com",
             service_documentation_url=service_documentation_url,
             client_registration_options=client_registration_options,
             revocation_options=revocation_options,

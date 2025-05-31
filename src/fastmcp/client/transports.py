@@ -6,7 +6,7 @@ import os
 import shutil
 import sys
 import warnings
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
@@ -19,6 +19,7 @@ from typing import (
 )
 
 import httpx
+from asgi_lifespan import LifespanManager
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.session import (
     ListRootsFnT,
@@ -31,14 +32,14 @@ from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamablehttp_client
 from mcp.client.websocket import websocket_client
 from mcp.server.fastmcp import FastMCP as FastMCP1Server
+from mcp.shared._httpx_utils import McpHttpClientFactory
 from mcp.shared.memory import create_connected_server_and_client_session
 from pydantic import AnyUrl
 from typing_extensions import Unpack
 
 from fastmcp.client.auth import OAuth
-from fastmcp.server import FastMCP as FastMCPServer
+from fastmcp.server import FastMCP
 from fastmcp.server.dependencies import get_http_headers
-from fastmcp.server.server import FastMCP
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.mcp_config import MCPConfig, infer_transport_type_from_url
 
@@ -54,7 +55,6 @@ __all__ = [
     "ClientTransport",
     "SSETransport",
     "StreamableHttpTransport",
-    "FastMCPServer",
     "StdioTransport",
     "PythonStdioTransport",
     "FastMCPStdioTransport",
@@ -162,7 +162,7 @@ class SSETransport(ClientTransport):
         headers: dict[str, str] | None = None,
         auth: httpx.Auth | Literal["oauth"] | str | None = None,
         sse_read_timeout: datetime.timedelta | float | int | None = None,
-        httpx_client_factory: Callable[[], httpx.AsyncClient] | None = None,
+        httpx_client_factory: McpHttpClientFactory | None = None,
     ):
         if isinstance(url, AnyUrl):
             url = str(url)
@@ -229,7 +229,7 @@ class StreamableHttpTransport(ClientTransport):
         headers: dict[str, str] | None = None,
         auth: httpx.Auth | Literal["oauth"] | str | None = None,
         sse_read_timeout: datetime.timedelta | float | int | None = None,
-        httpx_client_factory: Callable[[], httpx.AsyncClient] | None = None,
+        httpx_client_factory: McpHttpClientFactory | None = None,
     ):
         if isinstance(url, AnyUrl):
             url = str(url)
@@ -653,18 +653,38 @@ class FastMCPTransport(ClientTransport):
     Python process. It works with both FastMCP 2.x servers and FastMCP 1.0
     servers from the low-level MCP SDK. This is particularly useful for unit
     tests or scenarios where client and server run in the same runtime.
+
+    FastMCPTransport can simulate stdio and streamable-http transports. However,
+    note that sse transport and sse-based features of streamable-http (like
+    sampling, progress, etc.) are not supported due to restrictions on the
+    in-memory ASGI transport. Therefore, the primary use case for
+    FastMCPTransport(transport="streamable-http") is testing.
     """
 
-    def __init__(self, mcp: FastMCPServer | FastMCP1Server):
+    def __init__(
+        self,
+        mcp: FastMCP | FastMCP1Server,
+        transport: Literal["stdio", "streamable-http"] | None = None,
+        transport_kwargs: dict[str, Any] | None = None,
+    ):
         """Initialize a FastMCPTransport from a FastMCP server instance."""
+        if transport is None:
+            transport = "stdio"
+        self.transport = transport
+        self.transport_kwargs = transport_kwargs or {}
 
-        # Accept both FastMCP 2.x and FastMCP 1.0 servers. Both expose a
-        # ``_mcp_server`` attribute pointing to the underlying MCP server
-        # implementation, so we can treat them identically.
+        # Accept both FastMCP 2.x and FastMCP 1.0 servers for `stdio`. Both
+        # expose a ``_mcp_server`` attribute pointing to the underlying MCP
+        # server implementation, so we can treat them identically (as long as
+        # the transport is `stdio`; http implementations have diverged.)
+        if isinstance(mcp, FastMCP1Server) and transport != "stdio":
+            raise ValueError(
+                "FastMCP 1.0 servers are only supported with transport='stdio'"
+            )
         self.server = mcp
 
     @contextlib.asynccontextmanager
-    async def connect_session(
+    async def connect_session_stdio(
         self, **session_kwargs: Unpack[SessionKwargs]
     ) -> AsyncIterator[ClientSession]:
         # create_connected_server_and_client_session manages the session lifecycle itself
@@ -673,6 +693,50 @@ class FastMCPTransport(ClientTransport):
             **session_kwargs,
         ) as session:
             yield session
+
+    @contextlib.asynccontextmanager
+    async def connect_session_streamable_http(
+        self, **session_kwargs: Unpack[SessionKwargs]
+    ) -> AsyncIterator[ClientSession]:
+        assert isinstance(self.server, FastMCP)
+        app = self.server.http_app(transport="streamable-http", path="/mcp/")
+
+        def client_factory(
+            headers: dict[str, str] | None = None,
+            timeout: httpx.Timeout | None = None,
+            auth: httpx.Auth | None = None,
+        ) -> httpx.AsyncClient:
+            return httpx.AsyncClient(
+                transport=httpx.ASGITransport(app),
+                headers=headers,
+                timeout=timeout,
+                auth=auth,
+            )
+
+        transport = StreamableHttpTransport(
+            url="http://localhost/mcp/",
+            httpx_client_factory=client_factory,
+            **self.transport_kwargs,
+        )
+
+        async with LifespanManager(app):
+            async with transport.connect_session(**session_kwargs) as session:
+                yield session
+
+    @contextlib.asynccontextmanager
+    async def connect_session(
+        self, **session_kwargs: Unpack[SessionKwargs]
+    ) -> AsyncIterator[ClientSession]:
+        if self.transport == "stdio":
+            async with self.connect_session_stdio(**session_kwargs) as session:
+                yield session
+        elif self.transport == "streamable-http":
+            async with self.connect_session_streamable_http(
+                **session_kwargs
+            ) as session:
+                yield session
+        else:
+            raise ValueError(f"Invalid transport: {self.transport}")
 
     def __repr__(self) -> str:
         return f"<FastMCP(server='{self.server.name}')>"
@@ -769,7 +833,7 @@ def infer_transport(transport: ClientTransportT) -> ClientTransportT: ...
 
 
 @overload
-def infer_transport(transport: FastMCPServer) -> FastMCPTransport: ...
+def infer_transport(transport: FastMCP) -> FastMCPTransport: ...
 
 
 @overload
@@ -804,7 +868,7 @@ def infer_transport(transport: Path) -> PythonStdioTransport | NodeStdioTranspor
 
 def infer_transport(
     transport: ClientTransport
-    | FastMCPServer
+    | FastMCP
     | FastMCP1Server
     | AnyUrl
     | Path
@@ -821,7 +885,7 @@ def infer_transport(
 
     The function supports these input types:
     - ClientTransport: Used directly without modification
-    - FastMCPServer or FastMCP1Server: Creates an in-memory FastMCPTransport
+    - FastMCP instance or FastMCP 1.0 instance: Creates an in-memory FastMCPTransport
     - Path or str (file path): Creates PythonStdioTransport (.py) or NodeStdioTransport (.js)
     - AnyUrl or str (URL): Creates StreamableHttpTransport (default) or SSETransport (for /sse endpoints)
     - MCPConfig or dict: Creates MCPConfigTransport, potentially connecting to multiple servers
@@ -859,7 +923,7 @@ def infer_transport(
         return transport
 
     # the transport is a FastMCP server (2.x or 1.0)
-    elif isinstance(transport, FastMCPServer | FastMCP1Server):
+    elif isinstance(transport, FastMCP | FastMCP1Server):
         inferred_transport = FastMCPTransport(mcp=transport)
 
     # the transport is a path to a script
