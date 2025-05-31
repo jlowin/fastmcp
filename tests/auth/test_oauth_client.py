@@ -247,7 +247,7 @@ def client_in_memory(
         client.transport._set_auth(
             fastmcp.client.auth.OAuth(
                 mcp_url="http://localhost/mcp/",
-                client=httpx.AsyncClient(
+                client=httpx.AsyncClient(  # pyright: ignore[reportCallIssue]
                     transport=httpx.ASGITransport(client.transport._http_app)
                 ),
             )
