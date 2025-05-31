@@ -1,3 +1,8 @@
+"""
+This is a simple in-memory OAuth provider for testing purposes.
+It simulates the OAuth 2.0 flow locally without external calls.
+"""
+
 import secrets
 import time
 
@@ -28,7 +33,7 @@ DEFAULT_ACCESS_TOKEN_EXPIRY_SECONDS = 60 * 60  # 1 hour
 DEFAULT_REFRESH_TOKEN_EXPIRY_SECONDS = None  # No expiry
 
 
-class InMemoryOAuthProvider(OAuthProvider):
+class InMemory(OAuthProvider):
     """
     An in-memory OAuth provider for testing purposes.
     It simulates the OAuth 2.0 flow locally without external calls.
