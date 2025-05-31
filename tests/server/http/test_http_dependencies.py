@@ -83,13 +83,13 @@ def run_sse_server(host: str, port: int) -> None:
     sys.exit(0)
 
 
-@pytest.fixture()
+@pytest.fixture(autouse=True, scope="module")
 def shttp_server() -> Generator[str, None, None]:
     with run_server_in_process(run_shttp_server) as url:
         yield f"{url}/mcp"
 
 
-@pytest.fixture()
+@pytest.fixture(autouse=True, scope="module")
 def sse_server() -> Generator[str, None, None]:
     with run_server_in_process(run_sse_server) as url:
         yield f"{url}/sse"
