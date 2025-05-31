@@ -704,6 +704,7 @@ class FastMCPTransport(ClientTransport):
             transport="streamable-http",
             path="/mcp/",
         )
+        1 / 0
 
         port = find_available_port()
 
