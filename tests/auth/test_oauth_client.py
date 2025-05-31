@@ -236,22 +236,22 @@ def client_in_memory(
     """
 
     # Patch the OAuth function to return our headless provider
+    mcp = fastmcp_server("http://localhost/")
+    app = mcp.http_app(transport="streamable-http", path="/mcp/")
     with patch("fastmcp.client.auth.OAuth", side_effect=HeadlessOAuthProvider):
-        client = Client(
-            transport=FastMCPTransport(
-                fastmcp_server("http://localhost/"),
-                transport="streamable-http",
+        transport = FastMCPTransport(
+            mcp,
+            transport="streamable-http",
+            transport_kwargs=dict(
+                auth=fastmcp.client.auth.OAuth(
+                    mcp_url="http://localhost/mcp/",
+                    client=httpx.AsyncClient(  # pyright: ignore[reportCallIssue]
+                        transport=httpx.ASGITransport(app)
+                    ),
+                )
             ),
         )
-        assert client.transport._http_app is not None
-        client.transport._set_auth(
-            fastmcp.client.auth.OAuth(
-                mcp_url="http://localhost/mcp/",
-                client=httpx.AsyncClient(  # pyright: ignore[reportCallIssue]
-                    transport=httpx.ASGITransport(client.transport._http_app)
-                ),
-            )
-        )
+        client = Client(transport=transport)
         yield client
 
 
