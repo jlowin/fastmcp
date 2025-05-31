@@ -65,35 +65,43 @@ def run_server_in_process(
     host = "127.0.0.1"
     port = find_available_port()
 
-    proc = multiprocessing.Process(
-        target=server_fn, args=(host, port, *args), daemon=True
-    )
-    proc.start()
+    original_method = multiprocessing.get_start_method()
+    multiprocessing.set_start_method("spawn", force=True)
 
-    # Wait for server to be running
-    max_attempts = 10
-    attempt = 0
-    while attempt < max_attempts and proc.is_alive():
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.connect((host, port))
-                break
-        except ConnectionRefusedError:
-            if attempt < 3:
-                time.sleep(0.01)
-            else:
-                time.sleep(0.1)
-            attempt += 1
-    else:
-        raise RuntimeError(f"Server failed to start after {max_attempts} attempts")
+    try:
+        proc = multiprocessing.Process(
+            target=server_fn, args=(host, port, *args), daemon=True
+        )
+        proc.start()
 
-    yield f"http://{host}:{port}"
+        # Wait for server to be running
+        max_attempts = 10
+        attempt = 0
+        while attempt < max_attempts and proc.is_alive():
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.connect((host, port))
+                    break
+            except ConnectionRefusedError:
+                if attempt < 3:
+                    time.sleep(0.01)
+                else:
+                    time.sleep(0.1)
+                attempt += 1
+        else:
+            raise RuntimeError(f"Server failed to start after {max_attempts} attempts")
 
-    proc.terminate()
-    proc.join(timeout=5)
-    if proc.is_alive():
-        # If it's still alive, then force kill it
-        proc.kill()
-        proc.join(timeout=2)
+        yield f"http://{host}:{port}"
+
+        proc.terminate()
+        proc.join(timeout=5)
         if proc.is_alive():
-            raise RuntimeError("Server process failed to terminate even after kill")
+            # If it's still alive, then force kill it
+            proc.kill()
+            proc.join(timeout=2)
+            if proc.is_alive():
+                raise RuntimeError("Server process failed to terminate even after kill")
+
+    finally:
+        # Restore original settings
+        multiprocessing.set_start_method(original_method, force=True)
