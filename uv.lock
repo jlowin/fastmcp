@@ -455,7 +455,6 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "asgi-lifespan" },
     { name = "copychat" },
     { name = "dirty-equals" },
     { name = "fastapi" },
@@ -491,7 +490,6 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "asgi-lifespan", specifier = ">=2.1.0" },
     { name = "copychat", specifier = ">=0.5.2" },
     { name = "dirty-equals", specifier = ">=0.9.0" },
     { name = "fastapi", specifier = ">=0.115.12" },
