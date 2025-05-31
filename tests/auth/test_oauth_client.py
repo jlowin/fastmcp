@@ -1,6 +1,6 @@
 import sys
 from collections.abc import Generator
-from unittest.mock import patch
+from functools import partial
 from urllib.parse import parse_qs, urlparse
 
 import httpx
@@ -213,21 +213,23 @@ class HeadlessOAuthProvider(httpx.Auth):
 @pytest.fixture()
 def client(
     streamable_http_server: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> Generator[Client, None, None]:
     """Client with headless OAuth that bypasses browser interaction. Note this uses a full integration test."""
 
     # Patch the OAuth function to return our headless provider
-    with patch("fastmcp.client.auth.OAuth", side_effect=HeadlessOAuthProvider):
-        client = Client(
-            transport=StreamableHttpTransport(streamable_http_server),
-            auth=fastmcp.client.auth.OAuth(mcp_url=streamable_http_server),
-        )
-        yield client
+    monkeypatch.setattr("fastmcp.client.auth.OAuth", HeadlessOAuthProvider)
+    client = Client(
+        transport=StreamableHttpTransport(streamable_http_server),
+        auth=fastmcp.client.auth.OAuth(mcp_url=streamable_http_server),
+    )
+    yield client
 
 
 @pytest.fixture()
 def client_in_memory(
     streamable_http_server: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> Generator[Client, None, None]:
     """
     Client with headless OAuth that bypasses browser interaction.
@@ -238,21 +240,27 @@ def client_in_memory(
     # Patch the OAuth function to return our headless provider
     mcp = fastmcp_server("http://localhost/")
     app = mcp.http_app(transport="streamable-http", path="/mcp/")
-    with patch("fastmcp.client.auth.OAuth", side_effect=HeadlessOAuthProvider):
-        transport = FastMCPTransport(
-            mcp,
-            transport="streamable-http",
-            transport_kwargs=dict(
-                auth=fastmcp.client.auth.OAuth(
-                    mcp_url="http://localhost/mcp/",
-                    client=httpx.AsyncClient(  # pyright: ignore[reportCallIssue]
-                        transport=httpx.ASGITransport(app)
-                    ),
-                )
+
+    # patch headless to use our app
+    monkeypatch.setattr(
+        "fastmcp.client.auth.OAuth",
+        partial(
+            HeadlessOAuthProvider,
+            client=httpx.AsyncClient(
+                transport=httpx.ASGITransport(app),
             ),
-        )
-        client = Client(transport=transport)
-        yield client
+        ),
+    )
+
+    transport = FastMCPTransport(
+        mcp,
+        transport="streamable-http",
+        transport_kwargs=dict(
+            auth=fastmcp.client.auth.OAuth(mcp_url="http://localhost/mcp/")
+        ),
+    )
+    client = Client(transport=transport)
+    yield client
 
 
 async def test_unauthorized(client_unauthorized: Client):
