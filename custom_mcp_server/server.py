@@ -1,6 +1,6 @@
-import os
 from typing import Dict, List, Any
 from fastmcp import FastMCP, Context # Assuming Context might be needed later
+from .config import DATAFORSEO_API_KEY, REPLICATE_API_TOKEN, FIRECRAWL_API_KEY
 
 # Create a FastMCP server instance
 mcp = FastMCP(
@@ -8,11 +8,6 @@ mcp = FastMCP(
     description="An MCP server integrating DataForSEO, Replicate, and Firecrawl functionalities.",
     version="0.1.0"
 )
-
-# --- Configuration and API Key Management ---
-DATAFORSEO_API_KEY = os.getenv("DATAFORSEO_API_KEY")
-REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN")
-FIRECRAWL_API_KEY = os.getenv("FIRECRAWL_API_KEY")
 
 # Placeholder for DataForSEO client initialization if needed
 # from dataforseo_api_client import APIClient # Fictional, replace with actual
