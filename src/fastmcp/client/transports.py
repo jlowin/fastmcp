@@ -679,7 +679,8 @@ class FastMCPTransport(ClientTransport):
 
 
 class MCPConfigTransport(ClientTransport):
-    """Transport for connecting to one or more MCP servers defined in an MCPConfig.
+    """
+    Transport for connecting to one or more MCP servers defined in an MCPConfig.
 
     This transport provides a unified interface to multiple MCP servers defined in an MCPConfig
     object or dictionary matching the MCPConfig schema. It supports two key scenarios:
