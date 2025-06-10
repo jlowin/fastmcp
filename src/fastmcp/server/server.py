@@ -55,7 +55,7 @@ from fastmcp.server.http import (
     create_sse_app,
     create_streamable_http_app,
 )
-from fastmcp.server.middleware.base import MCPMiddlewareProtocol
+from fastmcp.server.middleware.base import MCPMiddleware
 from fastmcp.server.middleware.server import MiddlewareServer
 from fastmcp.tools import ToolManager
 from fastmcp.tools.tool import FunctionTool, Tool
@@ -133,7 +133,7 @@ class FastMCP(Generic[LifespanResultT]):
         resource_prefix_format: Literal["protocol", "path"] | None = None,
         mask_error_details: bool | None = None,
         tools: list[Tool | Callable[..., Any]] | None = None,
-        middleware: list[MCPMiddlewareProtocol] | None = None,
+        middleware: list[MCPMiddleware] | None = None,
         **settings: Any,
     ):
         if cache_expiration_seconds is not None:
@@ -211,7 +211,7 @@ class FastMCP(Generic[LifespanResultT]):
     def instructions(self) -> str | None:
         return self._mcp_server.instructions
 
-    def add_middleware(self, middleware: MCPMiddlewareProtocol) -> None:
+    def add_middleware(self, middleware: MCPMiddleware) -> None:
         self._mcp_server.add_middleware(middleware)
 
     async def run_async(

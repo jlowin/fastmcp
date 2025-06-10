@@ -39,6 +39,13 @@ def set_context(context: Context) -> Generator[Context, None, None]:
         _current_context.reset(token)
 
 
+def get_context() -> Context:
+    context = _current_context.get()
+    if context is None:
+        raise ValueError("Context not found")
+    return context
+
+
 @dataclass
 class Context:
     """Context object providing access to MCP capabilities.

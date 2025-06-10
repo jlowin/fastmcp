@@ -13,7 +13,7 @@ from mcp.shared.session import (
 )
 from mcp.types import METHOD_NOT_FOUND, ErrorData
 
-from .base import MCPMiddlewareProtocol
+from .base import MCPMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -22,18 +22,16 @@ R = TypeVar("R")
 
 
 class MiddlewareServer(Server[LifespanResultT, RequestT]):
-    def __init__(
-        self, *args, middleware: list[MCPMiddlewareProtocol] | None = None, **kwargs
-    ):
+    def __init__(self, *args, middleware: list[MCPMiddleware] | None = None, **kwargs):
         super().__init__(*args, **kwargs)
-        self._middleware: list[MCPMiddlewareProtocol] = middleware or []
+        self._middleware: list[MCPMiddleware] = middleware or []
 
-    def add_middleware(self, middleware: MCPMiddlewareProtocol) -> None:
+    def add_middleware(self, middleware: MCPMiddleware) -> None:
         """Add middleware to the stack."""
         self._middleware.append(middleware)
 
     async def _apply_middleware(
-        self, message: Any, call_next: Callable[..., Awaitable[R]]
+        self, message: Any, call_next: Callable[[Any], Awaitable[R]]
     ) -> R:
         """Apply middleware chain to a message."""
         # Build the chain from right to left
@@ -44,7 +42,7 @@ class MiddlewareServer(Server[LifespanResultT, RequestT]):
 
     @staticmethod
     def _make_middleware_wrapper(
-        middleware: MCPMiddlewareProtocol, next_func: Callable[..., Awaitable[R]]
+        middleware: MCPMiddleware, next_func: Callable[[Any], Awaitable[R]]
     ) -> Callable[[Any], Awaitable[R]]:
         """Create a wrapper that applies a single middleware."""
 
