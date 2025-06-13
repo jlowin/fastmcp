@@ -10,6 +10,7 @@ from pydantic import AnyUrl
 from fastmcp import Client, FastMCP
 from fastmcp.server.context import Context
 from fastmcp.server.middleware import MCPMiddleware
+from fastmcp.server.middleware.base import MiddlewareContext
 
 
 @dataclass
@@ -20,8 +21,9 @@ class Recording:
     hook: str
     # the type is the type of the payload, e.g. "request" or "notification"
     type: str
-    payload: mcp.types.Request | mcp.types.Notification
+    payload: Any
     result: mcp.types.ServerResult | None
+    context: MiddlewareContext
 
 
 class RecordingMiddleware(MCPMiddleware):
@@ -35,7 +37,9 @@ class RecordingMiddleware(MCPMiddleware):
         """Dynamically create recording methods for any on_* method."""
         if name.startswith("on_"):
 
-            async def record_and_call(arg: Any, call_next: Callable) -> Any:
+            async def record_and_call(
+                arg: Any, context: MiddlewareContext, call_next: Callable
+            ) -> Any:
                 result = await call_next(arg)
 
                 if isinstance(
@@ -52,6 +56,7 @@ class RecordingMiddleware(MCPMiddleware):
                         hook=name,
                         type=type(arg).__name__,
                         payload=arg,
+                        context=context,
                         result=result,
                     )
                 )
@@ -181,7 +186,7 @@ class TestMethods:
             hook="on_message", method="notifications/initialized"
         )
         recording_middleware.assert_called(
-            hook="on_client_notification", method="notifications/initialized"
+            hook="on_notification", method="notifications/initialized"
         )
         recording_middleware.assert_called(
             hook="on_initialize_notification", method="notifications/initialized"
@@ -193,9 +198,7 @@ class TestMethods:
             await client.list_tools()
 
         recording_middleware.assert_called(hook="on_message", method="tools/list")
-        recording_middleware.assert_called(
-            hook="on_client_request", method="tools/list"
-        )
+        recording_middleware.assert_called(hook="on_request", method="tools/list")
         recording_middleware.assert_called(
             hook="on_list_tools_request", method="tools/list"
         )
@@ -205,7 +208,7 @@ class TestMethods:
             await client.list_resources()
 
         recording_middleware.assert_called("on_message", "resources/list")
-        recording_middleware.assert_called("on_client_request", "resources/list")
+        recording_middleware.assert_called("on_request", "resources/list")
         recording_middleware.assert_called(
             "on_list_resources_request", "resources/list"
         )
@@ -215,9 +218,7 @@ class TestMethods:
             await client.list_resource_templates()
 
         recording_middleware.assert_called("on_message", "resources/templates/list")
-        recording_middleware.assert_called(
-            "on_client_request", "resources/templates/list"
-        )
+        recording_middleware.assert_called("on_request", "resources/templates/list")
         recording_middleware.assert_called(
             "on_list_resource_templates_request", "resources/templates/list"
         )
@@ -227,7 +228,7 @@ class TestMethods:
             await client.list_prompts()
 
         recording_middleware.assert_called("on_message", "prompts/list")
-        recording_middleware.assert_called("on_client_request", "prompts/list")
+        recording_middleware.assert_called("on_request", "prompts/list")
         recording_middleware.assert_called("on_list_prompts_request", "prompts/list")
 
     async def test_get_prompt(self, client, recording_middleware):
@@ -235,7 +236,7 @@ class TestMethods:
             await client.get_prompt("test_prompt", {"x": "hello"})
 
         recording_middleware.assert_called("on_message", "prompts/get")
-        recording_middleware.assert_called("on_client_request", "prompts/get")
+        recording_middleware.assert_called("on_request", "prompts/get")
         recording_middleware.assert_called("on_get_prompt_request", "prompts/get")
 
     async def test_call_tool(self, client, recording_middleware: RecordingMiddleware):
@@ -243,7 +244,7 @@ class TestMethods:
             await client.call_tool("add", {"a": 1, "b": 2})
 
         recording_middleware.assert_called("on_message", "tools/call")
-        recording_middleware.assert_called("on_client_request", "tools/call")
+        recording_middleware.assert_called("on_request", "tools/call")
         recording_middleware.assert_called("on_call_tool_request", "tools/call")
 
         calls = recording_middleware.get_calls(hook="on_call_tool_request")
@@ -261,7 +262,7 @@ class TestMethods:
             await client.read_resource("resource://test")
 
         recording_middleware.assert_called("on_message", "resources/read")
-        recording_middleware.assert_called("on_client_request", "resources/read")
+        recording_middleware.assert_called("on_request", "resources/read")
         recording_middleware.assert_called("on_read_resource_request", "resources/read")
 
         calls = recording_middleware.get_calls(hook="on_read_resource_request")
@@ -278,7 +279,7 @@ class TestMethods:
             await client.read_resource("resource://test-template/123")
 
         recording_middleware.assert_called("on_message", "resources/read")
-        recording_middleware.assert_called("on_client_request", "resources/read")
+        recording_middleware.assert_called("on_request", "resources/read")
         recording_middleware.assert_called("on_read_resource_request", "resources/read")
         calls = recording_middleware.get_calls(hook="on_read_resource_request")
         assert len(calls) == 1
@@ -299,9 +300,7 @@ class TestMethods:
             await client.call_tool("progress_tool", {})
 
         recording_middleware.assert_called("on_message", "notifications/progress")
-        recording_middleware.assert_called(
-            "on_server_notification", "notifications/progress"
-        )
+        recording_middleware.assert_called("on_notification", "notifications/progress")
         recording_middleware.assert_called(
             "on_progress_notification", "notifications/progress"
         )
@@ -311,9 +310,7 @@ class TestMethods:
             await client.call_tool("log_tool", {})
 
         recording_middleware.assert_called("on_message", "notifications/message")
-        recording_middleware.assert_called(
-            "on_server_notification", "notifications/message"
-        )
+        recording_middleware.assert_called("on_notification", "notifications/message")
         recording_middleware.assert_called(
             "on_logging_message_notification", "notifications/message"
         )
@@ -333,4 +330,4 @@ class TestMiddleware:
 
         # Can also check the full call history
         calls = recording_middleware.get_calls(method="tools/list")
-        assert len(calls) == 9  # 3 on_message + 3 on_client_request + 3 on_list_tools
+        assert len(calls) == 9  # 3 on_message + 3 on_request + 3 on_list_tools
