@@ -1,0 +1,65 @@
+# Dockerfile para WAHA MCP PLUS - Premium WhatsApp Automation
+FROM python:3.11-slim
+
+# Metadata
+LABEL maintainer="FastMCP Premium Team"
+LABEL version="1.0.0-plus"
+LABEL description="Premium WhatsApp automation server with AI, analytics and campaigns"
+
+# Instalar dependências do sistema
+RUN apt-get update && apt-get install -y \
+    curl \
+    wget \
+    git \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Definir diretório de trabalho
+WORKDIR /app
+
+# Copiar arquivos de dependências
+COPY pyproject.toml ./
+COPY uv.lock ./
+
+# Instalar uv para gerenciamento de dependências
+RUN pip install uv
+
+# Instalar dependências premium
+RUN uv sync --frozen
+
+# Instalar dependências extras para recursos premium
+RUN uv add redis schedule openai anthropic
+
+# Copiar código fonte
+COPY src/ ./src/
+COPY examples/ ./examples/
+COPY waha_mcp_plus.py ./
+
+# Criar diretórios necessários
+RUN mkdir -p /app/logs /app/cache /app/reports /app/campaigns
+
+# Configurar permissões
+RUN chmod +x /app/waha_mcp_plus.py
+
+# Expor portas
+EXPOSE 8000 8080
+
+# Definir variáveis de ambiente premium
+ENV WAHA_BASE_URL=http://localhost:3000
+ENV WAHA_DEFAULT_SESSION=default
+ENV WAHA_ENABLE_ANALYTICS=true
+ENV WAHA_ENABLE_AUTO_REPLY=true
+ENV WAHA_ENABLE_RATE_LIMITING=true
+ENV WAHA_ENABLE_SCHEDULING=true
+ENV WAHA_MAX_REQUESTS_PER_MINUTE=100
+ENV WAHA_MAX_SESSIONS=10
+ENV WAHA_CACHE_TTL_SECONDS=3600
+ENV PYTHONPATH=/app/src:/app
+ENV PYTHONUNBUFFERED=1
+
+# Health check premium
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD python -c "import httpx; httpx.get('http://localhost:8000/health', timeout=5).raise_for_status()" || exit 1
+
+# Comando premium com logging avançado
+CMD ["uv", "run", "python", "-u", "waha_mcp_plus.py"]

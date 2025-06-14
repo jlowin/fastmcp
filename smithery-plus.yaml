@@ -1,0 +1,488 @@
+# Configuração do Smithery para WAHA MCP PLUS
+apiVersion: v1
+kind: MCPServer
+
+metadata:
+  name: waha-mcp-plus
+  description: "🚀 WAHA MCP PLUS - Premium WhatsApp Automation Server com IA, Analytics e Campanhas"
+  version: "1.0.0-plus"
+  author: "FastMCP Premium Team"
+  license: "MIT"
+  tags:
+    - whatsapp
+    - premium
+    - automation
+    - ai
+    - analytics
+    - campaigns
+    - marketing
+    - chatbot
+    - bulk-messaging
+
+spec:
+  # Configuração da build
+  build:
+    type: docker
+    dockerfile: Dockerfile.plus
+    context: .
+    
+  # Configuração do runtime
+  runtime:
+    entrypoint: ["uv", "run", "python", "waha_mcp_plus.py"]
+    workingDirectory: /app
+    
+    # Variáveis de ambiente premium
+    environment:
+      WAHA_BASE_URL: "http://localhost:3000"
+      WAHA_DEFAULT_SESSION: "default"
+      WAHA_ENABLE_ANALYTICS: "true"
+      WAHA_ENABLE_AUTO_REPLY: "true"
+      WAHA_ENABLE_RATE_LIMITING: "true"
+      WAHA_MAX_REQUESTS_PER_MINUTE: "60"
+      WAHA_MAX_SESSIONS: "10"
+      PYTHONPATH: "/app"
+    
+    # Recursos computacionais premium
+    resources:
+      cpu: "1.0"
+      memory: "1Gi"
+      storage: "2Gi"
+    
+    # Portas expostas
+    ports:
+      - containerPort: 8000
+        protocol: TCP
+        name: mcp
+      - containerPort: 8080
+        protocol: TCP
+        name: dashboard
+    
+  # Configuração do servidor MCP
+  mcp:
+    # Protocolo de comunicação
+    transport: stdio
+    
+    # Capacidades premium
+    capabilities:
+      tools: true
+      resources: false
+      prompts: false
+      streaming: true
+      
+    # Ferramentas premium disponíveis
+    tools:
+      # === SESSÕES AVANÇADAS ===
+      - name: create_multi_session
+        description: "Criar múltiplas sessões WhatsApp simultaneamente"
+        category: "premium-sessions"
+        parameters:
+          - name: session_names
+            type: array
+            required: true
+            description: "Lista de nomes para as sessões"
+          - name: config
+            type: object
+            required: false
+            description: "Configuração personalizada para as sessões"
+            
+      - name: get_sessions_status
+        description: "Status detalhado de todas as sessões com informações premium"
+        category: "premium-sessions"
+        
+      # === MENSAGENS INTELIGENTES ===
+      - name: send_smart_message
+        description: "Enviar mensagem inteligente com recursos avançados"
+        category: "premium-messaging"
+        parameters:
+          - name: chat_id
+            type: string
+            required: true
+            description: "ID do chat de destino"
+          - name: message
+            type: string
+            required: true
+            description: "Conteúdo da mensagem"
+          - name: priority
+            type: string
+            required: false
+            description: "Prioridade da mensagem (low, normal, high, urgent)"
+          - name: schedule_time
+            type: string
+            required: false
+            description: "Agendamento da mensagem (ISO format)"
+          - name: auto_translate
+            type: boolean
+            required: false
+            description: "Tradução automática"
+            
+      - name: send_bulk_messages
+        description: "Enviar mensagens em massa com controle de delay"
+        category: "premium-messaging"
+        parameters:
+          - name: targets
+            type: array
+            required: true
+            description: "Lista de alvos com chat_id e message"
+          - name: delay_seconds
+            type: integer
+            required: false
+            description: "Delay entre mensagens"
+            
+      # === ANALYTICS PREMIUM ===
+      - name: get_analytics_dashboard
+        description: "Dashboard completo de analytics com métricas avançadas"
+        category: "premium-analytics"
+        parameters:
+          - name: hours
+            type: integer
+            required: false
+            description: "Período em horas para análise"
+            
+      - name: generate_usage_report
+        description: "Relatório detalhado de uso com análise temporal"
+        category: "premium-analytics"
+        parameters:
+          - name: days
+            type: integer
+            required: false
+            description: "Período em dias para o relatório"
+            
+      # === AUTO REPLY ===
+      - name: configure_auto_reply
+        description: "Configurar regras de resposta automática inteligente"
+        category: "premium-automation"
+        parameters:
+          - name: trigger_patterns
+            type: array
+            required: true
+            description: "Padrões que acionam a resposta"
+          - name: response_template
+            type: string
+            required: true
+            description: "Template da resposta automática"
+          - name: rule_name
+            type: string
+            required: true
+            description: "Nome da regra"
+          - name: priority
+            type: integer
+            required: false
+            description: "Prioridade da regra"
+            
+      - name: list_auto_reply_rules
+        description: "Listar todas as regras de auto-resposta"
+        category: "premium-automation"
+        
+      - name: test_auto_reply
+        description: "Testar sistema de resposta automática"
+        category: "premium-automation"
+        parameters:
+          - name: message
+            type: string
+            required: true
+            description: "Mensagem para testar"
+            
+      # === CAMPANHAS DE MARKETING ===
+      - name: create_marketing_campaign
+        description: "Criar campanha de marketing avançada"
+        category: "premium-campaigns"
+        parameters:
+          - name: campaign_name
+            type: string
+            required: true
+            description: "Nome da campanha"
+          - name: target_chats
+            type: array
+            required: true
+            description: "Lista de chats alvos"
+          - name: message_template
+            type: string
+            required: true
+            description: "Template da mensagem"
+          - name: schedule_time
+            type: string
+            required: false
+            description: "Agendamento da campanha"
+            
+      - name: start_campaign
+        description: "Iniciar execução de campanha"
+        category: "premium-campaigns"
+        parameters:
+          - name: campaign_id
+            type: string
+            required: true
+            description: "ID da campanha"
+            
+      - name: get_campaign_report
+        description: "Relatório detalhado da campanha"
+        category: "premium-campaigns"
+        parameters:
+          - name: campaign_id
+            type: string
+            required: true
+            description: "ID da campanha"
+            
+      # === AGENDAMENTO ===
+      - name: list_scheduled_messages
+        description: "Listar mensagens agendadas"
+        category: "premium-scheduling"
+        
+      - name: cancel_scheduled_message
+        description: "Cancelar mensagem agendada"
+        category: "premium-scheduling"
+        parameters:
+          - name: message_id
+            type: string
+            required: true
+            description: "ID da mensagem agendada"
+            
+      # === MONITORAMENTO PREMIUM ===
+      - name: system_health_check
+        description: "Verificação completa de saúde do sistema"
+        category: "premium-monitoring"
+
+  # Configuração de dependências
+  dependencies:
+    services:
+      - name: waha
+        description: "Servidor WAHA (WhatsApp HTTP API)"
+        image: "devlikeapro/waha:latest"
+        ports:
+          - "3000:3000"
+        environment:
+          WAHA_WEBHOOK_URL: "http://localhost:8000/webhook"
+          WAHA_WEBHOOK_EVENTS: "message,session.status,message.ack"
+        required: true
+        
+      - name: redis
+        description: "Redis para cache e analytics avançados"
+        image: "redis:7-alpine"
+        ports:
+          - "6379:6379"
+        required: false
+        
+  # Documentação premium
+  documentation:
+    readme: |
+      # 🚀 WAHA MCP PLUS - Premium WhatsApp Automation
+      
+      ## ✨ Funcionalidades Premium
+      
+      ### 🤖 **Inteligência Artificial**
+      - Respostas automáticas inteligentes
+      - Análise de sentimento
+      - Tradução automática
+      - Processamento de linguagem natural
+      
+      ### 📊 **Analytics Avançados**
+      - Dashboard em tempo real
+      - Métricas de performance
+      - Análise de engajamento
+      - Relatórios customizados
+      
+      ### 🎯 **Campanhas de Marketing**
+      - Envio em massa inteligente
+      - Segmentação de audiência
+      - A/B testing
+      - ROI tracking
+      
+      ### ⚡ **Performance Premium**
+      - Rate limiting inteligente
+      - Cache avançado
+      - Múltiplas sessões
+      - Processamento assíncrono
+      
+      ## 🛠️ Configuração Premium
+      
+      Configure as variáveis de ambiente:
+      
+      ```env
+      # Básico
+      WAHA_BASE_URL=http://localhost:3000
+      WAHA_API_KEY=your_premium_key
+      
+      # Premium Features
+      WAHA_ENABLE_ANALYTICS=true
+      WAHA_ENABLE_AUTO_REPLY=true
+      WAHA_MAX_SESSIONS=10
+      WAHA_MAX_REQUESTS_PER_MINUTE=100
+      
+      # IA (Opcional)
+      OPENAI_API_KEY=your_openai_key
+      
+      # Redis (Opcional)
+      REDIS_URL=redis://localhost:6379
+      ```
+      
+      ## 🚀 Funcionalidades Exclusivas
+      
+      ### Multi-Session Management
+      ```python
+      # Criar múltiplas sessões
+      create_multi_session(["vendas", "suporte", "marketing"])
+      ```
+      
+      ### Bulk Messaging
+      ```python
+      # Envio em massa com delay inteligente
+      send_bulk_messages([
+          {"chat_id": "user1", "message": "Oferta especial!"},
+          {"chat_id": "user2", "message": "Promoção limitada!"}
+      ], delay_seconds=2)
+      ```
+      
+      ### Auto-Reply Engine
+      ```python
+      # Configurar resposta automática
+      configure_auto_reply(
+          trigger_patterns=["preço", "valor", "custo"],
+          response_template="Nossos preços são muito competitivos! Vou enviar nossa tabela.",
+          rule_name="Consulta de Preços"
+      )
+      ```
+      
+      ### Analytics Dashboard
+      ```python
+      # Dashboard completo
+      dashboard = get_analytics_dashboard(hours=24)
+      print(f"Taxa de sucesso: {dashboard['summary']['success_rate']}")
+      ```
+      
+      ### Marketing Campaigns
+      ```python
+      # Criar campanha
+      campaign_id = create_marketing_campaign(
+          campaign_name="Black Friday 2025",
+          target_chats=["user1", "user2", "user3"],
+          message_template="🔥 Descontos de até 70% na Black Friday!"
+      )
+      
+      # Executar campanha
+      start_campaign(campaign_id)
+      ```
+      
+    examples: |
+      ## 🎯 Casos de Uso Premium
+      
+      ### 🏢 **E-commerce Automation**
+      ```python
+      # Notificação de abandono de carrinho
+      configure_auto_reply(
+          trigger_patterns=["carrinho", "esqueci", "finalizar"],
+          response_template="Vi que você esqueceu itens no carrinho! 🛒\nFinalize agora e ganhe 10% de desconto: FINISH10",
+          rule_name="Abandono de Carrinho"
+      )
+      ```
+      
+      ### 📈 **Lead Nurturing**
+      ```python
+      # Campanha de nutrição
+      campaign = create_marketing_campaign(
+          campaign_name="Nutrição Q1 2025",
+          target_chats=leads_qualificados,
+          message_template="🎯 Conteúdo exclusivo sobre {topic}\nBaixe nosso e-book gratuito: {link}"
+      )
+      ```
+      
+      ### 🎪 **Event Marketing**
+      ```python
+      # Lembrete de evento
+      send_smart_message(
+          chat_id="event_list",
+          message="📅 Lembrete: Nosso webinar começa em 1 hora!\nLink: {webinar_link}",
+          schedule_time="2025-06-15T14:00:00",
+          priority="high"
+      )
+      ```
+      
+      ### 📊 **Business Intelligence**
+      ```python
+      # Relatório executivo
+      report = generate_usage_report(days=30)
+      
+      # Analytics personalizados
+      dashboard = get_analytics_dashboard(hours=168)  # 7 dias
+      
+      top_performers = dashboard['top_chats'][:5]
+      conversion_rate = calculate_conversion(dashboard)
+      ```
+      
+  # Health checks premium
+  health:
+    readiness:
+      path: /health
+      port: 8000
+      initialDelaySeconds: 45
+      periodSeconds: 10
+      
+    liveness:
+      path: /health
+      port: 8000
+      initialDelaySeconds: 90
+      periodSeconds: 30
+      
+    # Custom health checks
+    custom:
+      - name: waha_connectivity
+        command: ["python", "-c", "import httpx; httpx.get('http://localhost:3000/ping').raise_for_status()"]
+        intervalSeconds: 60
+        
+      - name: analytics_engine
+        command: ["python", "-c", "from waha_mcp_plus import cache; assert len(cache._analytics) >= 0"]
+        intervalSeconds: 300
+
+  # Configurações de segurança
+  security:
+    # Rate limiting global
+    rateLimit:
+      enabled: true
+      requestsPerMinute: 100
+      burstSize: 20
+      
+    # Validação de entrada
+    inputValidation:
+      enabled: true
+      maxMessageLength: 4096
+      allowedFileTypes: ["image/jpeg", "image/png", "application/pdf"]
+      
+    # Logs de auditoria
+    audit:
+      enabled: true
+      logLevel: "INFO"
+      retentionDays: 30
+
+  # Métricas e observabilidade
+  observability:
+    metrics:
+      enabled: true
+      endpoint: "/metrics"
+      port: 8080
+      
+    tracing:
+      enabled: true
+      sampling: 0.1
+      
+    logging:
+      level: "INFO"
+      format: "json"
+      outputs: ["stdout", "file"]
+
+  # Configurações de performance
+  performance:
+    # Cache configuration
+    cache:
+      enabled: true
+      provider: "memory"  # ou "redis" se disponível
+      defaultTTL: 3600
+      maxSize: "256MB"
+      
+    # Connection pooling
+    connectionPool:
+      maxConnections: 50
+      maxIdleTime: 300
+      
+    # Async processing
+    async:
+      enabled: true
+      maxWorkers: 10
+      queueSize: 1000
