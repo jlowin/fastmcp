@@ -1,416 +1,592 @@
 <div align="center">
 
-<!-- omit in toc -->
-# FastMCP v2 🚀
-<strong>The fast, Pythonic way to build MCP servers and clients.</strong>
+# 🚀 WAHA WhatsApp MCP Server
 
-*FastMCP is made with 💙 by [Prefect](https://www.prefect.io/)*
+### **Integração Completa do WhatsApp via Model Context Protocol**
 
-[![Docs](https://img.shields.io/badge/docs-gofastmcp.com-blue)](https://gofastmcp.com)
-[![PyPI - Version](https://img.shields.io/pypi/v/fastmcp.svg)](https://pypi.org/project/fastmcp)
-[![Tests](https://github.com/jlowin/fastmcp/actions/workflows/run-tests.yml/badge.svg)](https://github.com/jlowin/fastmcp/actions/workflows/run-tests.yml)
-[![License](https://img.shields.io/github/license/jlowin/fastmcp.svg)](https://github.com/jlowin/fastmcp/blob/main/LICENSE)
+[![FastMCP](https://img.shields.io/badge/Built%20with-FastMCP-00D9FF?style=for-the-badge&logo=fastapi)](https://fastmcp.com)
+[![WAHA](https://img.shields.io/badge/Powered%20by-WAHA-25D366?style=for-the-badge&logo=whatsapp)](https://waha.devlike.pro)
+[![Python](https://img.shields.io/badge/Python-3.8+-3776AB?style=for-the-badge&logo=python)](https://python.org)
 
-<a href="https://trendshift.io/repositories/13266" target="_blank"><img src="https://trendshift.io/api/badge/repositories/13266" alt="jlowin%2Ffastmcp | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
+*Transforme seu WhatsApp em uma API poderosa acessível via MCP Tools*
+
 </div>
 
-> [!Note]
-> #### Beyond the Protocol
-> 
-> FastMCP is the standard framework for working with the Model Context Protocol. FastMCP 1.0 was incorporated into the [official MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk) in 2024.
-> 
-> This is FastMCP 2.0, the **actively maintained version** that provides a complete toolkit for working with the MCP ecosystem.
->
-> FastMCP 2.0 has a comprehensive set of features that go far beyond the core MCP specification, all in service of providing **the simplest path to production**. These include deployment, auth, clients, server proxying and composition, generating servers from REST APIs, dynamic tool rewriting, built-in testing tools, integrations, and more.
->
-> Ready to upgrade or get started? Follow the [installation instructions](/getting-started/installation), which include steps for upgrading from the official MCP SDK.
+---
+
+## ✨ **O que é este projeto?**
+
+Este é um **servidor MCP (Model Context Protocol)** que conecta seu **WhatsApp** a **qualquer LLM** através da API WAHA, permitindo que modelos de IA interajam diretamente com o WhatsApp para:
+
+- 📱 **Enviar mensagens automaticamente**
+- 👥 **Gerenciar grupos e contatos** 
+- 🖼️ **Compartilhar mídia**
+- 📊 **Automatizar workflows de comunicação**
+- 🤖 **Criar assistentes conversacionais**
 
 ---
 
-The [Model Context Protocol (MCP)](https://modelcontextprotocol.io) is a new, standardized way to provide context and tools to your LLMs, and FastMCP makes building MCP servers and clients simple and intuitive. Create tools, expose resources, define prompts, and connect components with clean, Pythonic code.
+## 🎯 **Por que usar?**
 
-```python
-# server.py
-from fastmcp import FastMCP
+<table>
+<tr>
+<td width="50%">
 
-mcp = FastMCP("Demo 🚀")
+### 🔥 **Para Desenvolvedores**
+- ⚡ Setup em **menos de 5 minutos**
+- 🛠️ **40+ ferramentas** prontas para usar
+- 📚 Documentação **crystal clear**
+- 🔧 Configuração **zero-config**
+- 🎨 Código **limpo e modular**
 
-@mcp.tool
-def add(a: int, b: int) -> int:
-    """Add two numbers"""
-    return a + b
+</td>
+<td width="50%">
 
-if __name__ == "__main__":
-    mcp.run()
-```
+### 🚀 **Para Businesses**
+- 💬 **Atendimento automatizado**
+- 📈 **Notificações inteligentes**
+- 👥 **Gestão de grupos em massa**
+- 📊 **Analytics de conversas**
+- 🔄 **Integração com CRM/ERP**
 
-Run the server locally:
-```bash
-fastmcp run server.py
-```
-
-### 📚 Documentation
-
-FastMCP's complete documentation is available at **[gofastmcp.com](https://gofastmcp.com)**, including detailed guides, API references, and advanced patterns. This readme provides only a high-level overview.
-
-Documentation is also available in [llms.txt format](https://llmstxt.org/), which is a simple markdown standard that LLMs can consume easily. 
-
-There are two ways to access the LLM-friendly documentation:
-- [`llms.txt`](https://gofastmcp.com/llms.txt) is essentially a sitemap, listing all the pages in the documentation.
-- [`llms-full.txt`](https://gofastmcp.com/llms-full.txt) contains the entire documentation. Note this may exceed the context window of your LLM.
+</td>
+</tr>
+</table>
 
 ---
 
-<!-- omit in toc -->
-## Table of Contents
+## 🛠️ **Funcionalidades Épicas**
 
-- [What is MCP?](#what-is-mcp)
-- [Why FastMCP?](#why-fastmcp)
-- [Installation](#installation)
-- [Core Concepts](#core-concepts)
-  - [The `FastMCP` Server](#the-fastmcp-server)
-  - [Tools](#tools)
-  - [Resources \& Templates](#resources--templates)
-  - [Prompts](#prompts)
-  - [Context](#context)
-  - [MCP Clients](#mcp-clients)
-- [Advanced Features](#advanced-features)
-  - [Proxy Servers](#proxy-servers)
-  - [Composing MCP Servers](#composing-mcp-servers)
-  - [OpenAPI \& FastAPI Generation](#openapi--fastapi-generation)
-  - [Authentication \& Security](#authentication--security)
-- [Running Your Server](#running-your-server)
-- [Contributing](#contributing)
-  - [Prerequisites](#prerequisites)
-  - [Setup](#setup)
-  - [Unit Tests](#unit-tests)
-  - [Static Checks](#static-checks)
-  - [Pull Requests](#pull-requests)
+<details>
+<summary><strong>🖥️ Gerenciamento de Sessões</strong> (6 ferramentas)</summary>
+
+```python
+# Controle total sobre suas sessões WhatsApp
+list_sessions()                    # 📋 Lista todas as sessões
+get_session_info(session)          # ℹ️  Status detalhado
+start_session(session)             # ▶️  Iniciar conexão
+stop_session(session)              # ⏹️  Parar sessão
+get_qr_code(session)               # 📱 QR para autenticação
+get_my_profile(session)            # 👤 Dados do perfil
+```
+</details>
+
+<details>
+<summary><strong>📤 Sistema de Mensagens</strong> (8 ferramentas)</summary>
+
+```python
+# Envie qualquer tipo de conteúdo
+send_text_message(chat_id, text)                    # 💬 Texto simples
+send_image_from_url(chat_id, url, caption)          # 🖼️ Imagem da web
+send_image_base64(chat_id, data, filename)          # 📸 Imagem local
+send_file_from_url(chat_id, url, filename)          # 📎 Qualquer arquivo
+mark_as_read(chat_id)                               # ✅ Marcar como lido
+start_typing(chat_id)                               # ⌨️  Indicador de digitação
+stop_typing(chat_id)                                # ⏸️  Parar digitação
+check_number_status(phone)                          # 🔍 Verificar número
+```
+</details>
+
+<details>
+<summary><strong>💬 Gerenciamento de Chats</strong> (4 ferramentas)</summary>
+
+```python
+# Controle total sobre conversas
+get_chats()                                         # 📜 Lista de chats
+get_chat_messages(chat_id, limit)                   # 💭 Histórico de mensagens
+archive_chat(chat_id)                               # 📦 Arquivar conversa
+unarchive_chat(chat_id)                             # 📤 Desarquivar
+```
+</details>
+
+<details>
+<summary><strong>👤 Sistema de Contatos</strong> (6 ferramentas)</summary>
+
+```python
+# Gestão completa de contatos
+get_all_contacts()                                  # 📇 Lista completa
+get_contact_info(contact_id)                        # ℹ️  Detalhes do contato
+get_contact_profile_picture(contact_id)             # 🖼️ Foto de perfil
+block_contact(contact_id)                           # 🚫 Bloquear
+unblock_contact(contact_id)                         # ✅ Desbloquear
+check_number_status(phone)                          # 📱 Status no WhatsApp
+```
+</details>
+
+<details>
+<summary><strong>👥 Administração de Grupos</strong> (8 ferramentas)</summary>
+
+```python
+# Poder total sobre grupos
+create_group(name, participants)                    # ➕ Criar grupo
+get_groups()                                        # 📋 Lista de grupos
+get_group_info(group_id)                           # ℹ️  Detalhes do grupo
+add_group_participants(group_id, participants)      # 👥 Adicionar membros
+remove_group_participants(group_id, participants)   # ➖ Remover membros
+get_group_invite_code(group_id)                     # 🔗 Código de convite
+leave_group(group_id)                               # 🚪 Sair do grupo
+```
+</details>
+
+<details>
+<summary><strong>🔍 Monitoramento & Debug</strong> (3 ferramentas)</summary>
+
+```python
+# Mantenha tudo sob controle
+ping_server()                                       # 🏓 Status do servidor
+get_server_version()                                # 📋 Versão atual
+get_server_status()                                 # 📊 Métricas detalhadas
+```
+</details>
 
 ---
 
-## What is MCP?
+## ⚡ **Setup Ultra-Rápido**
 
-The [Model Context Protocol (MCP)](https://modelcontextprotocol.io) lets you build servers that expose data and functionality to LLM applications in a secure, standardized way. It is often described as "the USB-C port for AI", providing a uniform way to connect LLMs to resources they can use. It may be easier to think of it as an API, but specifically designed for LLM interactions. MCP servers can:
-
-- Expose data through **Resources** (think of these sort of like GET endpoints; they are used to load information into the LLM's context)
-- Provide functionality through **Tools** (sort of like POST endpoints; they are used to execute code or otherwise produce a side effect)
-- Define interaction patterns through **Prompts** (reusable templates for LLM interactions)
-- And more!
-
-FastMCP provides a high-level, Pythonic interface for building, managing, and interacting with these servers.
-
-## Why FastMCP?
-
-The MCP protocol is powerful but implementing it involves a lot of boilerplate - server setup, protocol handlers, content types, error management. FastMCP handles all the complex protocol details and server management, so you can focus on building great tools. It's designed to be high-level and Pythonic; in most cases, decorating a function is all you need.
-
-FastMCP 2.0 has evolved into a comprehensive platform that goes far beyond basic protocol implementation. While 1.0 provided server-building capabilities (and is now part of the official MCP SDK), 2.0 offers a complete ecosystem including client libraries, authentication systems, deployment tools, integrations with major AI platforms, testing frameworks, and production-ready infrastructure patterns.
-
-FastMCP aims to be:
-
-🚀 **Fast:** High-level interface means less code and faster development
-
-🍀 **Simple:** Build MCP servers with minimal boilerplate
-
-🐍 **Pythonic:** Feels natural to Python developers
-
-🔍 **Complete:** A comprehensive platform for all MCP use cases, from dev to prod
-
-## Installation
-
-We recommend installing FastMCP with [uv](https://docs.astral.sh/uv/):
-
+### 1️⃣ **Clone e Instale**
 ```bash
-uv pip install fastmcp
+# Clone o projeto
+git clone <repository>
+cd fastmcp/examples
+
+# Instale dependências
+pip install fastmcp httpx pydantic pydantic-settings
 ```
 
-For full installation instructions, including verification, upgrading from the official MCPSDK, and developer setup, see the [**Installation Guide**](https://gofastmcp.com/getting-started/installation).
+### 2️⃣ **Execute o WAHA**
+```bash
+# Opção 1: Docker (Recomendado)
+docker run -it --rm -p 3000:3000/tcp devlikeapro/waha
 
-## Core Concepts
+# Opção 2: Docker Compose
+# Crie um docker-compose.yml (veja exemplo abaixo)
+docker-compose up -d
+```
 
-These are the building blocks for creating MCP servers and clients with FastMCP.
+### 3️⃣ **Configure (Opcional)**
+```bash
+# Copie o arquivo de exemplo
+cp .env.waha.example .env
 
-### The `FastMCP` Server
+# Edite suas configurações
+nano .env
+```
 
-The central object representing your MCP application. It holds your tools, resources, and prompts, manages connections, and can be configured with settings like authentication.
+### 4️⃣ **Execute o MCP**
+```bash
+# Versão simples (6 ferramentas)
+python waha_simple.py
+
+# Versão completa (40+ ferramentas)  
+python waha_whatsapp.py
+```
+
+### 5️⃣ **Teste Tudo**
+```bash
+# Teste básico de conexão
+python demo_waha.py test
+
+# Demo completa
+python demo_waha.py
+```
+
+---
+
+## 🎨 **Configuração Flexível**
+
+<table>
+<tr>
+<td width="50%">
+
+### 📄 **Via arquivo .env**
+```env
+WAHA_BASE_URL=http://localhost:3000
+WAHA_API_KEY=sua_chave_secreta
+WAHA_DEFAULT_SESSION=producao
+```
+
+</td>
+<td width="50%">
+
+### 🔧 **Via código**
+```python
+# Edite no início dos arquivos
+BASE_URL = "http://localhost:3000"
+DEFAULT_SESSION = "minha_sessao"
+```
+
+</td>
+</tr>
+</table>
+
+---
+
+## 🎯 **Fluxo de Trabalho Mágico**
+
+```mermaid
+graph LR
+    A[🚀 Iniciar WAHA] --> B[📱 Criar Sessão]
+    B --> C[📋 Obter QR Code]
+    C --> D[📷 Escanear QR]
+    D --> E[✅ Sessão Ativa]
+    E --> F[💬 Enviar Mensagens]
+    E --> G[👥 Gerenciar Grupos]
+    E --> H[📊 Automatizar]
+```
+
+---
+
+## 💡 **Exemplos Práticos**
+
+### 🤖 **Bot de Atendimento**
+```python
+# Resposta automática
+def auto_responder():
+    chats = get_chats()
+    for chat in chats:
+        messages = get_chat_messages(chat['id'], 1)
+        if messages and not messages[0]['fromMe']:
+            send_text_message(chat['id'], 
+                "Obrigado pela mensagem! Em breve retornaremos.")
+```
+
+### 📈 **Notificações de Sistema**
+```python
+# Alertas para administradores
+def send_alert(message, urgency="normal"):
+    admin_group = "123456789-admin@g.us"
+    emoji = "🚨" if urgency == "high" else "ℹ️"
+    send_text_message(admin_group, f"{emoji} {message}")
+```
+
+### 👥 **Gestão de Grupos em Massa**
+```python
+# Adicionar usuário em múltiplos grupos
+def add_to_multiple_groups(user_phone, group_list):
+    for group_id in group_list:
+        add_group_participants(group_id, [user_phone])
+        send_text_message(group_id, f"🎉 Bem-vindo(a), {user_phone}!")
+```
+
+---
+
+## 🐳 **Docker Compose Setup**
+
+Crie um `docker-compose.yml` para facilitar o deploy:
+
+```yaml
+version: '3.8'
+services:
+  waha:
+    image: devlikeapro/waha
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      WAHA_WEBHOOK_URL: http://localhost:3001/webhook
+      WAHA_WEBHOOK_EVENTS: message,session.status
+    volumes:
+      - ./sessions:/app/sessions
+
+  mcp-server:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      - waha
+    environment:
+      WAHA_BASE_URL: http://waha:3000
+    volumes:
+      - ./logs:/app/logs
+```
+
+---
+
+## 📱 **Formatos de Chat ID**
+
+<table>
+<tr>
+<th width="30%">Tipo</th>
+<th width="35%">Formato</th>
+<th width="35%">Exemplo</th>
+</tr>
+<tr>
+<td>🇧🇷 <strong>Número BR</strong></td>
+<td><code>55XXXXXXXXXXX</code></td>
+<td><code>5511999999999</code></td>
+</tr>
+<tr>
+<td>🌍 <strong>Internacional</strong></td>
+<td><code>CCXXXXXXXXXX</code></td>
+<td><code>1234567890</code></td>
+</tr>
+<tr>
+<td>👥 <strong>Grupo</strong></td>
+<td><code>XXXXX-XXXXX@g.us</code></td>
+<td><code>12345-67890@g.us</code></td>
+</tr>
+<tr>
+<td>⚡ <strong>Auto-Format</strong></td>
+<td><code>Número sem @</code></td>
+<td><code>5511999999999</code> → <code>5511999999999@c.us</code></td>
+</tr>
+</table>
+
+---
+
+## 🔥 **Use Cases Reais**
+
+<div align="center">
+
+### 🏢 **Para Empresas**
+
+</div>
+
+<table>
+<tr>
+<td width="33%">
+
+#### 🤖 **Atendimento 24/7**
+- Respostas automáticas
+- FAQ inteligente  
+- Escalamento para humanos
+- Histórico completo
+
+</td>
+<td width="33%">
+
+#### 📊 **Alertas & Dashboards**
+- Notificações de sistema
+- Relatórios automáticos
+- Alertas de vendas
+- Status de serviços
+
+</td>
+<td width="33%">
+
+#### 👥 **Gestão de Equipes**
+- Grupos organizacionais
+- Broadcasts corporativos
+- Integração com CRM
+- Automação de workflows
+
+</td>
+</tr>
+</table>
+
+<div align="center">
+
+### 🚀 **Para Desenvolvedores**
+
+</div>
+
+<table>
+<tr>
+<td width="33%">
+
+#### 🔧 **Monitoramento**
+- Alertas de erro
+- Status de servidores
+- Deploy notifications
+- Health checks
+
+</td>
+<td width="33%">
+
+#### 🎯 **Marketing Automation**
+- Campanhas segmentadas
+- A/B testing
+- Analytics em tempo real
+- ROI tracking
+
+</td>
+<td width="33%">
+
+#### 🔄 **Integrações**
+- APIs terceirizadas
+- Webhooks
+- Pipelines CI/CD
+- Database sync
+
+</td>
+</tr>
+</table>
+
+---
+
+## 🛡️ **Segurança & Boas Práticas**
+
+### ✅ **Recomendações**
+- 🔐 **Use HTTPS** em produção
+- 🔑 **Rotacione API keys** regularmente  
+- 📝 **Log todas as ações** importantes
+- 🚫 **Rate limiting** para evitar spam
+- 🔒 **Validação de entrada** sempre
+
+### ⚠️ **Limitações do WhatsApp**
+- 📱 **1 sessão** por número
+- ⏱️ **Rate limits** da API oficial
+- 🚫 **Números bloqueados** podem afetar entrega
+- 📋 **ToS WhatsApp** devem ser respeitados
+
+---
+
+## 🐛 **Troubleshooting**
+
+<details>
+<summary><strong>❌ Erro de Conexão</strong></summary>
+
+```bash
+# Verifique se WAHA está rodando
+curl http://localhost:3000/ping
+
+# Verifique logs do Docker
+docker logs waha-container
+
+# Teste conectividade
+telnet localhost 3000
+```
+</details>
+
+<details>
+<summary><strong>📱 QR Code não aparece</strong></summary>
 
 ```python
+# Force restart da sessão
+stop_session("default")
+start_session("default")
+get_qr_code("default")
+
+# Verifique status
+get_session_info("default")
+```
+</details>
+
+<details>
+<summary><strong>💬 Mensagem não enviada</strong></summary>
+
+```python
+# 1. Verifique número
+status = check_number_status("5511999999999")
+
+# 2. Confirme sessão ativa  
+session = get_session_info("default")
+
+# 3. Teste com número conhecido
+send_text_message("5511999999999", "Teste")
+```
+</details>
+
+<details>
+<summary><strong>🔧 Performance Issues</strong></summary>
+
+- **Limite mensagens simultâneas**: Max 10/segundo
+- **Use connection pooling**: httpx.AsyncClient()
+- **Cache session info**: Evite calls desnecessários
+- **Monitor memory**: Grupos grandes consomem RAM
+</details>
+
+---
+
+## 🎓 **Tutoriais Avançados**
+
+### 🔄 **Webhook Setup**
+```python
+from fastapi import FastAPI
 from fastmcp import FastMCP
 
-# Create a server instance
-mcp = FastMCP(name="MyAssistantServer")
-```
+app = FastAPI()
+mcp = FastMCP("WAHA Advanced")
 
-Learn more in the [**FastMCP Server Documentation**](https://gofastmcp.com/servers/fastmcp).
-
-### Tools
-
-Tools allow LLMs to perform actions by executing your Python functions (sync or async). Ideal for computations, API calls, or side effects (like `POST`/`PUT`). FastMCP handles schema generation from type hints and docstrings. Tools can return various types, including text, JSON-serializable objects, and even images using the [`fastmcp.Image`](https://gofastmcp.com/servers/tools#return-values) helper.
-
-```python
+@app.post("/webhook/message")
+async def handle_message(data: dict):
+    if not data.get('fromMe'):
+        # Processar mensagem recebida
+        await process_incoming_message(data)
+    
 @mcp.tool
-def multiply(a: float, b: float) -> float:
-    """Multiplies two numbers."""
-    return a * b
+async def process_incoming_message(message_data: dict):
+    # Sua lógica aqui
+    pass
 ```
 
-Learn more in the [**Tools Documentation**](https://gofastmcp.com/servers/tools).
-
-### Resources & Templates
-
-Resources expose read-only data sources (like `GET` requests). Use `@mcp.resource("your://uri")`. Use `{placeholders}` in the URI to create dynamic templates that accept parameters, allowing clients to request specific data subsets.
-
+### 📊 **Analytics & Metrics**
 ```python
-# Static resource
-@mcp.resource("config://version")
-def get_version(): 
-    return "2.0.1"
+import time
+from collections import defaultdict
 
-# Dynamic resource template
-@mcp.resource("users://{user_id}/profile")
-def get_profile(user_id: int):
-    # Fetch profile for user_id...
-    return {"name": f"User {user_id}", "status": "active"}
+class WhatsAppAnalytics:
+    def __init__(self):
+        self.metrics = defaultdict(int)
+        
+    def track_message(self, chat_id: str, message_type: str):
+        self.metrics[f"messages_{message_type}"] += 1
+        self.metrics[f"chat_{chat_id}"] += 1
+        
+    def get_top_chats(self, limit: int = 10):
+        chat_metrics = {k: v for k, v in self.metrics.items() 
+                       if k.startswith('chat_')}
+        return sorted(chat_metrics.items(), 
+                     key=lambda x: x[1], reverse=True)[:limit]
 ```
 
-Learn more in the [**Resources & Templates Documentation**](https://gofastmcp.com/servers/resources).
+---
 
-### Prompts
+## 🤝 **Contribuindo**
 
-Prompts define reusable message templates to guide LLM interactions. Decorate functions with `@mcp.prompt`. Return strings or `Message` objects.
+Adoramos contribuições! Aqui está como você pode ajudar:
 
-```python
-@mcp.prompt
-def summarize_request(text: str) -> str:
-    """Generate a prompt asking for a summary."""
-    return f"Please summarize the following text:\n\n{text}"
-```
+1. 🍴 **Fork** o repositório
+2. 🌟 **Crie** uma branch para sua feature
+3. ✅ **Teste** tudo thoroughly  
+4. 📝 **Documente** suas mudanças
+5. 🚀 **Envie** um Pull Request
 
-Learn more in the [**Prompts Documentation**](https://gofastmcp.com/servers/prompts).
+### 📋 **Checklist para PRs**
+- [ ] ✅ Testes passando
+- [ ] 📚 Documentação atualizada
+- [ ] 🎨 Código formatado (black/flake8)
+- [ ] 🔍 Type hints adicionados
+- [ ] 📝 Changelog atualizado
 
-### Context
+---
 
-Access MCP session capabilities within your tools, resources, or prompts by adding a `ctx: Context` parameter. Context provides methods for:
-*   **Logging:** Log messages to MCP clients with `ctx.info()`, `ctx.error()`, etc.
-*   **LLM Sampling:** Use `ctx.sample()` to request completions from the client's LLM.
-*   **HTTP Request:** Use `ctx.http_request()` to make HTTP requests to other servers.
-*   **Resource Access:** Use `ctx.read_resource()` to access resources on the server
-*   **Progress Reporting:** Use `ctx.report_progress()` to report progress to the client.
-*   and more...
+## 📚 **Recursos Extras**
 
-To access the context, add a parameter annotated as `Context` to any mcp-decorated function. FastMCP will automatically inject the correct context object when the function is called.
+### 🔗 **Links Úteis**
+- 📖 [Documentação WAHA](https://waha.devlike.pro/)
+- 🐙 [WAHA GitHub](https://github.com/devlikeapro/waha)
+- ⚡ [FastMCP Docs](https://fastmcp.com/)
+- 💬 [WhatsApp Business API](https://business.whatsapp.com/)
 
-```python
-from fastmcp import FastMCP, Context
+### 🎯 **Roadmap**
+- [ ] 🔊 **Suporte a áudio/voz**
+- [ ] 📋 **Polls e interações**
+- [ ] 🏷️ **Labels e tags**
+- [ ] 📺 **Status/Stories**
+- [ ] 🤖 **AI-powered responses**
+- [ ] 📊 **Dashboard web**
 
-mcp = FastMCP("My MCP Server")
+---
 
-@mcp.tool
-async def process_data(uri: str, ctx: Context):
-    # Log a message to the client
-    await ctx.info(f"Processing {uri}...")
+<div align="center">
 
-    # Read a resource from the server
-    data = await ctx.read_resource(uri)
+## ⭐ **Gostou do projeto?**
 
-    # Ask client LLM to summarize the data
-    summary = await ctx.sample(f"Summarize: {data.content[:500]}")
+**Dê uma estrela no repositório e compartilhe com seus amigos!**
 
-    # Return the summary
-    return summary.text
-```
+[![GitHub Stars](https://img.shields.io/github/stars/your-repo/fastmcp?style=social)](https://github.com/your-repo/fastmcp)
+[![Twitter](https://img.shields.io/twitter/follow/yourhandle?style=social)](https://twitter.com/yourhandle)
 
-Learn more in the [**Context Documentation**](https://gofastmcp.com/servers/context).
+---
 
-### MCP Clients
+### 📄 **Licença**
 
-Interact with *any* MCP server programmatically using the `fastmcp.Client`. It supports various transports (Stdio, SSE, In-Memory) and often auto-detects the correct one. The client can also handle advanced patterns like server-initiated **LLM sampling requests** if you provide an appropriate handler.
+Este projeto está sob a licença MIT. Veja [LICENSE](LICENSE) para mais detalhes.
 
-Critically, the client allows for efficient **in-memory testing** of your servers by connecting directly to a `FastMCP` server instance via the `FastMCPTransport`, eliminating the need for process management or network calls during tests.
+---
 
-```python
-from fastmcp import Client
+**Feito com ❤️ para a comunidade brasileira de desenvolvedores**
 
-async def main():
-    # Connect via stdio to a local script
-    async with Client("my_server.py") as client:
-        tools = await client.list_tools()
-        print(f"Available tools: {tools}")
-        result = await client.call_tool("add", {"a": 5, "b": 3})
-        print(f"Result: {result.text}")
+*Última atualização: Junho 2025*
 
-    # Connect via SSE
-    async with Client("http://localhost:8000/sse") as client:
-        # ... use the client
-        pass
-```
-
-To use clients to test servers, use the following pattern:
-
-```python
-from fastmcp import FastMCP, Client
-
-mcp = FastMCP("My MCP Server")
-
-async def main():
-    # Connect via in-memory transport
-    async with Client(mcp) as client:
-        # ... use the client
-```
-
-FastMCP also supports connecting to multiple servers through a single unified client using the standard MCP configuration format:
-
-```python
-from fastmcp import Client
-
-# Standard MCP configuration with multiple servers
-config = {
-    "mcpServers": {
-        "weather": {"url": "https://weather-api.example.com/mcp"},
-        "assistant": {"command": "python", "args": ["./assistant_server.py"]}
-    }
-}
-
-# Create a client that connects to all servers
-client = Client(config)
-
-async def main():
-    async with client:
-        # Access tools and resources with server prefixes
-        forecast = await client.call_tool("weather_get_forecast", {"city": "London"})
-        answer = await client.call_tool("assistant_answer_question", {"query": "What is MCP?"})
-```
-
-Learn more in the [**Client Documentation**](https://gofastmcp.com/clients/client) and [**Transports Documentation**](https://gofastmcp.com/clients/transports).
-
-## Advanced Features
-
-FastMCP introduces powerful ways to structure and deploy your MCP applications.
-
-### Proxy Servers
-
-Create a FastMCP server that acts as an intermediary for another local or remote MCP server using `FastMCP.as_proxy()`. This is especially useful for bridging transports (e.g., remote SSE to local Stdio) or adding a layer of logic to a server you don't control.
-
-Learn more in the [**Proxying Documentation**](https://gofastmcp.com/patterns/proxy).
-
-### Composing MCP Servers
-
-Build modular applications by mounting multiple `FastMCP` instances onto a parent server using `mcp.mount()` (live link) or `mcp.import_server()` (static copy).
-
-Learn more in the [**Composition Documentation**](https://gofastmcp.com/patterns/composition).
-
-### OpenAPI & FastAPI Generation
-
-Automatically generate FastMCP servers from existing OpenAPI specifications (`FastMCP.from_openapi()`) or FastAPI applications (`FastMCP.from_fastapi()`), instantly bringing your web APIs to the MCP ecosystem.
-
-Learn more: [**OpenAPI Integration**](https://gofastmcp.com/servers/openapi#openapi-integration) | [**FastAPI Integration**](https://gofastmcp.com/deployment/asgi#fastapi-integration).
-
-### Authentication & Security
-
-FastMCP provides built-in authentication support to secure both your MCP servers and clients in production environments. Protect your server endpoints from unauthorized access and authenticate your clients against secured MCP servers using industry-standard protocols.
-
-- **Server Protection**: Secure your FastMCP server endpoints with configurable authentication providers
-- **Client Authentication**: Connect to authenticated MCP servers with automatic credential management
-- **Production Ready**: Support for common authentication patterns used in enterprise environments
-
-Learn more in the **Authentication Documentation** for [servers](https://gofastmcp.com/servers/auth) and [clients](https://gofastmcp.com/clients/auth).
-
-## Running Your Server
-
-The main way to run a FastMCP server is by calling the `run()` method on your server instance:
-
-```python
-# server.py
-from fastmcp import FastMCP
-
-mcp = FastMCP("Demo 🚀")
-
-@mcp.tool
-def hello(name: str) -> str:
-    return f"Hello, {name}!"
-
-if __name__ == "__main__":
-    mcp.run()  # Default: uses STDIO transport
-```
-
-FastMCP supports three transport protocols:
-
-**STDIO (Default)**: Best for local tools and command-line scripts.
-```python
-mcp.run(transport="stdio")  # Default, so transport argument is optional
-```
-
-**Streamable HTTP**: Recommended for web deployments.
-```python
-mcp.run(transport="streamable-http", host="127.0.0.1", port=8000, path="/mcp")
-```
-
-**SSE**: For compatibility with existing SSE clients.
-```python
-mcp.run(transport="sse", host="127.0.0.1", port=8000)
-```
-
-See the [**Running Server Documentation**](https://gofastmcp.com/deployment/running-server) for more details.
-
-## Contributing
-
-Contributions are the core of open source! We welcome improvements and features.
-
-### Prerequisites
-
-*   Python 3.10+
-*   [uv](https://docs.astral.sh/uv/) (Recommended for environment management)
-
-### Setup
-
-1. Clone the repository: 
-   ```bash
-   git clone https://github.com/jlowin/fastmcp.git 
-   cd fastmcp
-   ```
-2. Create and sync the environment: 
-   ```bash
-   uv sync
-   ```
-   This installs all dependencies, including dev tools.
-   
-3. Activate the virtual environment (e.g., `source .venv/bin/activate` or via your IDE).
-
-### Unit Tests
-
-FastMCP has a comprehensive unit test suite. All PRs must introduce or update tests as appropriate and pass the full suite.
-
-Run tests using pytest:
-```bash
-pytest
-```
-or if you want an overview of the code coverage
-```bash
-uv run pytest --cov=src --cov=examples --cov-report=html
-```
-
-### Static Checks
-
-FastMCP uses `pre-commit` for code formatting, linting, and type-checking. All PRs must pass these checks (they run automatically in CI).
-
-Install the hooks locally:
-```bash
-uv run pre-commit install
-```
-The hooks will now run automatically on `git commit`. You can also run them manually at any time:
-```bash
-pre-commit run --all-files
-# or via uv
-uv run pre-commit run --all-files
-```
-
-### Pull Requests
-
-1.  Fork the repository on GitHub.
-2.  Create a feature branch from `main`.
-3.  Make your changes, including tests and documentation updates.
-4.  Ensure tests and pre-commit hooks pass.
-5.  Commit your changes and push to your fork.
-6.  Open a pull request against the `main` branch of `jlowin/fastmcp`.
-
-Please open an issue or discussion for questions or suggestions before starting significant work!
+</div>
