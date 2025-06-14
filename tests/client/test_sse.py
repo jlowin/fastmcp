@@ -1,7 +1,7 @@
 import asyncio
 import json
 import sys
-from collections.abc import Generator
+from collections.abc import AsyncGenerator
 
 import pytest
 import uvicorn
@@ -68,8 +68,12 @@ def run_server(host: str, port: int, **kwargs) -> None:
 
 
 @pytest.fixture(autouse=True, scope="module")
-def sse_server() -> Generator[str, None, None]:
+async def sse_server() -> AsyncGenerator[str, None]:
+    """Fixture that creates a FastMCP server with tools, resources, and prompts."""
     with run_server_in_process(run_server, transport="sse") as url:
+        async with Client(transport=SSETransport(f"{url}/sse")) as client:
+            result = await client.ping()
+            assert result is True
         yield f"{url}/sse"
 
 
