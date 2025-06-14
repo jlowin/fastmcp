@@ -143,6 +143,14 @@ get_server_status()                                 # 📊 Métricas detalhadas
 
 ## ⚡ **Setup Ultra-Rápido**
 
+### Installing via Smithery
+
+To install FastMCP for Claude Desktop automatically via [Smithery](https://smithery.ai/server/@fellipesaraiva88/fastmcp):
+
+```bash
+npx -y @smithery/cli install @fellipesaraiva88/fastmcp --client claude
+```
+
 ### 1️⃣ **Clone e Instale**
 ```bash
 # Clone o projeto
