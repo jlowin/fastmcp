@@ -1,7 +1,7 @@
 import asyncio
 import json
 import sys
-from collections.abc import Generator
+from collections.abc import AsyncGenerator
 
 import pytest
 import uvicorn
@@ -88,8 +88,10 @@ def run_nested_server(host: str, port: int) -> None:
 
 
 @pytest.fixture(scope="module")
-def streamable_http_server() -> Generator[str, None, None]:
+async def streamable_http_server() -> AsyncGenerator[str, None]:
     with run_server_in_process(run_server, transport="streamable-http") as url:
+        async with Client(transport=StreamableHttpTransport(f"{url}/mcp")) as client:
+            assert await client.ping()
         yield f"{url}/mcp"
 
 
