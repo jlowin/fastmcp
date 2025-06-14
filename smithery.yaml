@@ -1,0 +1,233 @@
+# Configuração do Smithery para WAHA MCP Server
+apiVersion: v1
+kind: MCPServer
+
+metadata:
+  name: waha-whatsapp-mcp
+  description: "MCP Server para integração completa com WhatsApp via WAHA API"
+  version: "1.0.0"
+  author: "FastMCP Community"
+  license: "MIT"
+  tags:
+    - whatsapp
+    - messaging
+    - communication
+    - automation
+    - waha
+    - chatbot
+
+spec:
+  # Configuração da build
+  build:
+    type: docker
+    dockerfile: Dockerfile
+    context: .
+    
+  # Configuração do runtime
+  runtime:
+    entrypoint: ["uv", "run", "python", "server.py"]
+    workingDirectory: /app
+    
+    # Variáveis de ambiente
+    environment:
+      WAHA_BASE_URL: "http://localhost:3000"
+      WAHA_DEFAULT_SESSION: "default"
+      PYTHONPATH: "/app/src"
+    
+    # Recursos computacionais
+    resources:
+      cpu: "0.5"
+      memory: "512Mi"
+    
+    # Portas expostas
+    ports:
+      - containerPort: 8000
+        protocol: TCP
+        name: mcp
+    
+  # Configuração do servidor MCP
+  mcp:
+    # Protocolo de comunicação
+    transport: stdio
+    
+    # Informações sobre as ferramentas disponíveis
+    capabilities:
+      tools: true
+      resources: false
+      prompts: false
+      
+    # Metadados sobre as ferramentas
+    tools:
+      - name: send_text_message
+        description: "Enviar mensagem de texto para um chat do WhatsApp"
+        parameters:
+          - name: chat_id
+            type: string
+            required: true
+            description: "ID do chat (número com @c.us ou ID do grupo)"
+          - name: text
+            type: string  
+            required: true
+            description: "Texto da mensagem"
+          - name: session
+            type: string
+            required: false
+            description: "Sessão do WhatsApp"
+            
+      - name: get_session_info
+        description: "Obter informações de uma sessão do WhatsApp"
+        parameters:
+          - name: session
+            type: string
+            required: false
+            description: "Nome da sessão"
+            
+      - name: start_session
+        description: "Iniciar uma sessão do WhatsApp"
+        parameters:
+          - name: session
+            type: string
+            required: false
+            description: "Nome da sessão"
+            
+      - name: get_qr_code
+        description: "Obter código QR para autenticação"
+        parameters:
+          - name: session
+            type: string
+            required: false
+            description: "Nome da sessão"
+            
+      - name: send_image_from_url
+        description: "Enviar imagem de uma URL para um chat"
+        parameters:
+          - name: chat_id
+            type: string
+            required: true
+            description: "ID do chat"
+          - name: image_url
+            type: string
+            required: true
+            description: "URL da imagem"
+          - name: caption
+            type: string
+            required: false
+            description: "Legenda da imagem"
+            
+      - name: check_number_status
+        description: "Verificar se um número está registrado no WhatsApp"
+        parameters:
+          - name: phone_number
+            type: string
+            required: true
+            description: "Número de telefone"
+            
+      - name: get_chats
+        description: "Obter lista de todos os chats"
+        parameters:
+          - name: session
+            type: string
+            required: false
+            description: "Nome da sessão"
+            
+      - name: create_group
+        description: "Criar um novo grupo"
+        parameters:
+          - name: name
+            type: string
+            required: true
+            description: "Nome do grupo"
+          - name: participants
+            type: array
+            required: true
+            description: "Lista de participantes"
+            
+      - name: get_all_contacts
+        description: "Obter todos os contatos"
+        parameters:
+          - name: session
+            type: string
+            required: false
+            description: "Nome da sessão"
+
+  # Configuração de dependências externas
+  dependencies:
+    services:
+      - name: waha
+        description: "Servidor WAHA (WhatsApp HTTP API)"
+        image: "devlikeapro/waha:latest"
+        ports:
+          - "3000:3000"
+        environment:
+          WAHA_WEBHOOK_URL: "http://localhost:8000/webhook"
+          WAHA_WEBHOOK_EVENTS: "message,session.status"
+        required: true
+        
+  # Documentação
+  documentation:
+    readme: |
+      # WAHA WhatsApp MCP Server
+      
+      Este servidor MCP fornece integração completa com WhatsApp através da API WAHA.
+      
+      ## Funcionalidades
+      - ✅ Envio de mensagens de texto e mídia
+      - ✅ Gerenciamento de sessões WhatsApp
+      - ✅ Controle de grupos e contatos
+      - ✅ Verificação de status de números
+      - ✅ 40+ ferramentas disponíveis
+      
+      ## Configuração
+      
+      1. Configure as variáveis de ambiente:
+         - `WAHA_BASE_URL`: URL do servidor WAHA
+         - `WAHA_DEFAULT_SESSION`: Sessão padrão
+         
+      2. Inicie o servidor WAHA separadamente
+      
+      3. Execute o MCP server
+      
+      ## Uso
+      
+      Conecte-se ao servidor via MCP protocol e utilize as ferramentas disponíveis
+      para automação de WhatsApp.
+      
+    examples: |
+      ## Exemplos de Uso
+      
+      ### Enviar mensagem
+      ```python
+      await mcp.call_tool("send_text_message", {
+          "chat_id": "5511999999999",
+          "text": "Olá do MCP!"
+      })
+      ```
+      
+      ### Verificar número
+      ```python
+      await mcp.call_tool("check_number_status", {
+          "phone_number": "5511999999999"
+      })
+      ```
+      
+      ### Criar grupo
+      ```python
+      await mcp.call_tool("create_group", {
+          "name": "Meu Grupo",
+          "participants": ["5511999999999", "5511888888888"]
+      })
+      ```
+      
+  # Configuração de health checks
+  health:
+    readiness:
+      path: /health
+      port: 8000
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      
+    liveness:
+      path: /health
+      port: 8000
+      initialDelaySeconds: 60
+      periodSeconds: 30

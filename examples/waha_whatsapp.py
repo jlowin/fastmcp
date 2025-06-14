@@ -725,6 +725,31 @@ def get_server_status() -> Dict[str, Any]:
         return response.json()
 
 
+# ==========================================
+# HEALTH CHECK ENDPOINT
+# ==========================================
+
+@mcp.tool
+def health_check() -> Dict[str, Any]:
+    """Verificar saúde do servidor MCP e conexão com WAHA"""
+    try:
+        # Testar conexão com WAHA
+        with httpx.Client(timeout=5.0) as client:
+            response = client.get(f"{settings.base_url}/ping")
+            waha_status = "healthy" if response.status_code == 200 else "unhealthy"
+    except Exception:
+        waha_status = "unreachable"
+    
+    return {
+        "status": "healthy",
+        "timestamp": "2025-06-14T00:00:00Z",
+        "version": "1.0.0",
+        "waha_connection": waha_status,
+        "base_url": settings.base_url,
+        "default_session": settings.default_session
+    }
+
+
 if __name__ == "__main__":
     # Executar o servidor
     mcp.run()
