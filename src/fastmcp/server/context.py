@@ -11,7 +11,6 @@ from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.shared.context import RequestContext
 from mcp.types import (
     CreateMessageResult,
-    ImageContent,
     ModelHint,
     ModelPreferences,
     Root,
@@ -22,8 +21,10 @@ from pydantic.networks import AnyUrl
 from starlette.requests import Request
 
 import fastmcp.server.dependencies
+from fastmcp import settings
 from fastmcp.server.server import FastMCP
 from fastmcp.utilities.logging import get_logger
+from fastmcp.utilities.types import MCPContent
 
 logger = get_logger(__name__)
 
@@ -210,7 +211,7 @@ class Context:
         temperature: float | None = None,
         max_tokens: int | None = None,
         model_preferences: ModelPreferences | str | list[str] | None = None,
-    ) -> TextContent | ImageContent:
+    ) -> MCPContent:
         """
         Send a sampling request to the client and await the response.
 
@@ -249,14 +250,15 @@ class Context:
     def get_http_request(self) -> Request:
         """Get the active starlette request."""
 
-        # Deprecation warning, added in FastMCP 2.2.11
-        warnings.warn(
-            "Context.get_http_request() is deprecated and will be removed in a future version. "
-            "Use get_http_request() from fastmcp.server.dependencies instead. "
-            "See https://gofastmcp.com/patterns/http-requests for more details.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
+        # Deprecated in 2.2.11
+        if settings.deprecation_warnings:
+            warnings.warn(
+                "Context.get_http_request() is deprecated and will be removed in a future version. "
+                "Use get_http_request() from fastmcp.server.dependencies instead. "
+                "See https://gofastmcp.com/patterns/http-requests for more details.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
         return fastmcp.server.dependencies.get_http_request()
 

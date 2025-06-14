@@ -13,9 +13,10 @@ from re import Pattern
 from typing import TYPE_CHECKING, Any, Literal
 
 import httpx
-from mcp.types import EmbeddedResource, ImageContent, TextContent, ToolAnnotations
+from mcp.types import ToolAnnotations
 from pydantic.networks import AnyUrl
 
+import fastmcp
 from fastmcp.exceptions import ToolError
 from fastmcp.resources import Resource, ResourceTemplate
 from fastmcp.server.dependencies import get_http_headers
@@ -28,6 +29,7 @@ from fastmcp.utilities.openapi import (
     _combine_schemas,
     format_description_with_responses,
 )
+from fastmcp.utilities.types import MCPContent
 
 if TYPE_CHECKING:
     from fastmcp.server import Context
@@ -103,41 +105,56 @@ class RouteType(enum.Enum):
     IGNORE = "IGNORE"
 
 
-@dataclass
+@dataclass(kw_only=True)
 class RouteMap:
     """Mapping configuration for HTTP routes to FastMCP component types."""
 
     methods: list[HttpMethod] | Literal["*"] = field(default="*")
     pattern: Pattern[str] | str = field(default=r".*")
-    mcp_type: MCPType | None = field(default=None)
     route_type: RouteType | MCPType | None = field(default=None)
-    tags: set[str] = field(default_factory=set)
+    tags: set[str] = field(
+        default_factory=set,
+        metadata={"description": "A set of tags to match. All tags must match."},
+    )
+    mcp_type: MCPType | None = field(
+        default=None,
+        metadata={"description": "The type of FastMCP component to create."},
+    )
+    mcp_tags: set[str] = field(
+        default_factory=set,
+        metadata={
+            "description": "A set of tags to apply to the generated FastMCP component."
+        },
+    )
 
     def __post_init__(self):
         """Validate and process the route map after initialization."""
         # Handle backward compatibility for route_type, deprecated in 2.5.0
         if self.mcp_type is None and self.route_type is not None:
-            warnings.warn(
-                "The 'route_type' parameter is deprecated and will be removed in a future version. "
-                "Use 'mcp_type' instead with the appropriate MCPType value.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            if isinstance(self.route_type, RouteType):
+            if fastmcp.settings.deprecation_warnings:
                 warnings.warn(
-                    "The RouteType class is deprecated and will be removed in a future version. "
-                    "Use MCPType instead.",
+                    "The 'route_type' parameter is deprecated and will be removed in a future version. "
+                    "Use 'mcp_type' instead with the appropriate MCPType value.",
                     DeprecationWarning,
                     stacklevel=2,
                 )
+            if isinstance(self.route_type, RouteType):
+                if fastmcp.settings.deprecation_warnings:
+                    warnings.warn(
+                        "The RouteType class is deprecated and will be removed in a future version. "
+                        "Use MCPType instead.",
+                        DeprecationWarning,
+                        stacklevel=2,
+                    )
             # Check for the deprecated IGNORE value
             if self.route_type == RouteType.IGNORE:
-                warnings.warn(
-                    "RouteType.IGNORE is deprecated and will be removed in a future version. "
-                    "Use MCPType.EXCLUDE instead.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
+                if fastmcp.settings.deprecation_warnings:
+                    warnings.warn(
+                        "RouteType.IGNORE is deprecated and will be removed in a future version. "
+                        "Use MCPType.EXCLUDE instead.",
+                        DeprecationWarning,
+                        stacklevel=2,
+                    )
 
             # Convert from RouteType to MCPType if needed
             if isinstance(self.route_type, RouteType):
@@ -155,23 +172,17 @@ class RouteMap:
             self.route_type = self.mcp_type
 
 
-# Default route mappings as a list, where order determines priority
+# Default route mapping: all routes become tools.
+# Users can provide custom route_maps to override this behavior.
 DEFAULT_ROUTE_MAPPINGS = [
-    # GET requests with path parameters go to ResourceTemplate
-    RouteMap(
-        methods=["GET"], pattern=r".*\{.*\}.*", mcp_type=MCPType.RESOURCE_TEMPLATE
-    ),
-    # GET requests without path parameters go to Resource
-    RouteMap(methods=["GET"], pattern=r".*", mcp_type=MCPType.RESOURCE),
-    # All other HTTP methods go to Tool
-    RouteMap(methods="*", pattern=r".*", mcp_type=MCPType.TOOL),
+    RouteMap(mcp_type=MCPType.TOOL),
 ]
 
 
 def _determine_route_type(
     route: openapi.HTTPRoute,
     mappings: list[RouteMap],
-) -> MCPType:
+) -> RouteMap:
     """
     Determines the FastMCP component type based on the route and mappings.
 
@@ -180,7 +191,7 @@ def _determine_route_type(
         mappings: List of RouteMap objects in priority order
 
     Returns:
-        MCPType for this route
+        The RouteMap that matches the route, or a catchall "Tool" RouteMap if no match is found.
     """
     # Check mappings in priority order (first match wins)
     for route_map in mappings:
@@ -207,10 +218,10 @@ def _determine_route_type(
                 logger.debug(
                     f"Route {route.method} {route.path} matched mapping to {route_map.mcp_type.name}"
                 )
-                return route_map.mcp_type
+                return route_map
 
     # Default fallback
-    return MCPType.TOOL
+    return RouteMap(mcp_type=MCPType.TOOL)
 
 
 class OpenAPITool(Tool):
@@ -223,19 +234,17 @@ class OpenAPITool(Tool):
         name: str,
         description: str,
         parameters: dict[str, Any],
-        tags: set[str] = set(),
+        tags: set[str] | None = None,
         timeout: float | None = None,
         annotations: ToolAnnotations | None = None,
-        exclude_args: list[str] | None = None,
         serializer: Callable[[Any], str] | None = None,
     ):
         super().__init__(
             name=name,
             description=description,
             parameters=parameters,
-            tags=tags,
+            tags=tags or set(),
             annotations=annotations,
-            exclude_args=exclude_args,
             serializer=serializer,
         )
         self._client = client
@@ -246,9 +255,7 @@ class OpenAPITool(Tool):
         """Custom representation to prevent recursion errors when printing."""
         return f"OpenAPITool(name={self.name!r}, method={self._route.method}, path={self._route.path})"
 
-    async def run(
-        self, arguments: dict[str, Any]
-    ) -> list[TextContent | ImageContent | EmbeddedResource]:
+    async def run(self, arguments: dict[str, Any]) -> list[MCPContent]:
         """Execute the HTTP request based on the route configuration."""
 
         # Prepare URL
@@ -688,6 +695,7 @@ class FastMCPOpenAPI(FastMCP):
         route_map_fn: RouteMapFn | None = None,
         mcp_component_fn: ComponentFn | None = None,
         mcp_names: dict[str, str] | None = None,
+        tags: set[str] | None = None,
         timeout: float | None = None,
         **settings: Any,
     ):
@@ -710,6 +718,8 @@ class FastMCPOpenAPI(FastMCP):
                 operationId up to the first double underscore. If no operationId exists,
                 falls back to slugified summary or path-based naming.
                 All names are truncated to 56 characters maximum.
+            tags: Optional set of tags to add to all components. Components always receive any tags
+                from the route.
             timeout: Optional timeout (in seconds) for all requests
             **settings: Additional settings for FastMCP
         """
@@ -717,9 +727,7 @@ class FastMCPOpenAPI(FastMCP):
 
         self._client = client
         self._timeout = timeout
-        self._route_map_fn = route_map_fn
         self._mcp_component_fn = mcp_component_fn
-        self._mcp_names = mcp_names or {}
 
         # Keep track of names to detect collisions
         self._used_names = {
@@ -735,12 +743,16 @@ class FastMCPOpenAPI(FastMCP):
         route_maps = (route_maps or []) + DEFAULT_ROUTE_MAPPINGS
         for route in http_routes:
             # Determine route type based on mappings or default rules
-            route_type = _determine_route_type(route, route_maps)
+            route_map = _determine_route_type(route, route_maps)
+
+            # TODO: remove this once RouteType is removed and mcp_type is typed as MCPType without | None
+            assert route_map.mcp_type is not None
+            route_type = route_map.mcp_type
 
             # Call route_map_fn if provided
-            if self._route_map_fn is not None:
+            if route_map_fn is not None:
                 try:
-                    result = self._route_map_fn(route, route_type)
+                    result = route_map_fn(route, route_type)
                     if result is not None:
                         route_type = result
                         logger.debug(
@@ -754,29 +766,32 @@ class FastMCPOpenAPI(FastMCP):
                     )
 
             # Generate a default name from the route
-            component_name = self._generate_default_name(route, route_type)
+            component_name = self._generate_default_name(route, mcp_names)
+
+            route_tags = set(route.tags) | route_map.mcp_tags | (tags or set())
 
             if route_type == MCPType.TOOL:
-                self._create_openapi_tool(route, component_name)
+                self._create_openapi_tool(route, component_name, tags=route_tags)
             elif route_type == MCPType.RESOURCE:
-                self._create_openapi_resource(route, component_name)
+                self._create_openapi_resource(route, component_name, tags=route_tags)
             elif route_type == MCPType.RESOURCE_TEMPLATE:
-                self._create_openapi_template(route, component_name)
+                self._create_openapi_template(route, component_name, tags=route_tags)
             elif route_type == MCPType.EXCLUDE:
                 logger.info(f"Excluding route: {route.method} {route.path}")
 
         logger.info(f"Created FastMCP OpenAPI server with {len(http_routes)} routes")
 
     def _generate_default_name(
-        self, route: openapi.HTTPRoute, mcp_type: MCPType
+        self, route: openapi.HTTPRoute, mcp_names_map: dict[str, str] | None = None
     ) -> str:
         """Generate a default name from the route using the configured strategy."""
         name = ""
+        mcp_names_map = mcp_names_map or {}
 
         # First check if there's a custom mapping for this operationId
         if route.operation_id:
-            if route.operation_id in self._mcp_names:
-                name = self._mcp_names[route.operation_id]
+            if route.operation_id in mcp_names_map:
+                name = mcp_names_map[route.operation_id]
             else:
                 # If there's a double underscore in the operationId, use the first part
                 name = route.operation_id.split("__")[0]
@@ -821,7 +836,12 @@ class FastMCPOpenAPI(FastMCP):
 
         return new_name
 
-    def _create_openapi_tool(self, route: openapi.HTTPRoute, name: str):
+    def _create_openapi_tool(
+        self,
+        route: openapi.HTTPRoute,
+        name: str,
+        tags: set[str],
+    ):
         """Creates and registers an OpenAPITool with enhanced description."""
         combined_schema = _combine_schemas(route)
 
@@ -848,7 +868,7 @@ class FastMCPOpenAPI(FastMCP):
             name=tool_name,
             description=enhanced_description,
             parameters=combined_schema,
-            tags=set(route.tags or []),
+            tags=set(route.tags or []) | tags,
             timeout=self._timeout,
         )
 
@@ -869,7 +889,12 @@ class FastMCPOpenAPI(FastMCP):
             f"Registered TOOL: {tool_name} ({route.method} {route.path}) with tags: {route.tags}"
         )
 
-    def _create_openapi_resource(self, route: openapi.HTTPRoute, name: str):
+    def _create_openapi_resource(
+        self,
+        route: openapi.HTTPRoute,
+        name: str,
+        tags: set[str],
+    ):
         """Creates and registers an OpenAPIResource with enhanced description."""
         # Get a unique resource name
         resource_name = self._get_unique_name(name, "resource")
@@ -893,7 +918,7 @@ class FastMCPOpenAPI(FastMCP):
             uri=resource_uri,
             name=resource_name,
             description=enhanced_description,
-            tags=set(route.tags or []),
+            tags=set(route.tags or []) | tags,
             timeout=self._timeout,
         )
 
@@ -914,7 +939,12 @@ class FastMCPOpenAPI(FastMCP):
             f"Registered RESOURCE: {resource_uri} ({route.method} {route.path}) with tags: {route.tags}"
         )
 
-    def _create_openapi_template(self, route: openapi.HTTPRoute, name: str):
+    def _create_openapi_template(
+        self,
+        route: openapi.HTTPRoute,
+        name: str,
+        tags: set[str],
+    ):
         """Creates and registers an OpenAPIResourceTemplate with enhanced description."""
         # Get a unique template name
         template_name = self._get_unique_name(name, "resource_template")
@@ -967,7 +997,7 @@ class FastMCPOpenAPI(FastMCP):
             name=template_name,
             description=enhanced_description,
             parameters=template_params_schema,
-            tags=set(route.tags or []),
+            tags=set(route.tags or []) | tags,
             timeout=self._timeout,
         )
 

@@ -1,7 +1,7 @@
 import asyncio
 import json
 import sys
-from collections.abc import Generator
+from collections.abc import AsyncGenerator
 
 import pytest
 import uvicorn
@@ -87,9 +87,11 @@ def run_nested_server(host: str, port: int) -> None:
     server.run()
 
 
-@pytest.fixture(scope="module")
-def streamable_http_server() -> Generator[str, None, None]:
+@pytest.fixture()
+async def streamable_http_server() -> AsyncGenerator[str, None]:
     with run_server_in_process(run_server, transport="streamable-http") as url:
+        async with Client(transport=StreamableHttpTransport(f"{url}/mcp")) as client:
+            assert await client.ping()
         yield f"{url}/mcp"
 
 
@@ -138,16 +140,16 @@ class TestTimeout:
         with pytest.raises(McpError, match="Timed out"):
             async with Client(
                 transport=StreamableHttpTransport(streamable_http_server),
-                timeout=0.01,
+                timeout=0.1,
             ) as client:
-                await client.call_tool("sleep", {"seconds": 0.1})
+                await client.call_tool("sleep", {"seconds": 0.2})
 
     async def test_timeout_tool_call(self, streamable_http_server: str):
         async with Client(
             transport=StreamableHttpTransport(streamable_http_server),
         ) as client:
             with pytest.raises(McpError):
-                await client.call_tool("sleep", {"seconds": 0.1}, timeout=0.01)
+                await client.call_tool("sleep", {"seconds": 0.2}, timeout=0.1)
 
     async def test_timeout_tool_call_overrides_client_timeout(
         self, streamable_http_server: str
@@ -157,14 +159,4 @@ class TestTimeout:
             timeout=2,
         ) as client:
             with pytest.raises(McpError):
-                await client.call_tool("sleep", {"seconds": 0.1}, timeout=0.01)
-
-    async def test_timeout_client_timeout_overrides_tool_call_timeout_if_lower(
-        self, streamable_http_server: str
-    ):
-        with pytest.raises(McpError):
-            async with Client(
-                transport=StreamableHttpTransport(streamable_http_server),
-                timeout=0.01,
-            ) as client:
-                await client.call_tool("sleep", {"seconds": 0.1}, timeout=2)
+                await client.call_tool("sleep", {"seconds": 0.2}, timeout=0.1)

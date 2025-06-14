@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from mcp import GetPromptResult
 
+from fastmcp import settings
 from fastmcp.exceptions import NotFoundError, PromptError
 from fastmcp.prompts.prompt import FunctionPrompt, Prompt, PromptResult
 from fastmcp.settings import DuplicateBehavior
@@ -23,10 +24,10 @@ class PromptManager:
     def __init__(
         self,
         duplicate_behavior: DuplicateBehavior | None = None,
-        mask_error_details: bool = False,
+        mask_error_details: bool | None = None,
     ):
         self._prompts: dict[str, Prompt] = {}
-        self.mask_error_details = mask_error_details
+        self.mask_error_details = mask_error_details or settings.mask_error_details
 
         # Default to "warn" if None is provided
         if duplicate_behavior is None:
@@ -40,9 +41,11 @@ class PromptManager:
 
         self.duplicate_behavior = duplicate_behavior
 
-    def get_prompt(self, key: str) -> Prompt | None:
+    def get_prompt(self, key: str) -> Prompt:
         """Get prompt by key."""
-        return self._prompts.get(key)
+        if key in self._prompts:
+            return self._prompts[key]
+        raise NotFoundError(f"Unknown prompt: {key}")
 
     def get_prompts(self) -> dict[str, Prompt]:
         """Get all registered prompts, indexed by registered key."""
@@ -57,11 +60,12 @@ class PromptManager:
     ) -> FunctionPrompt:
         """Create a prompt from a function."""
         # deprecated in 2.7.0
-        warnings.warn(
-            "PromptManager.add_prompt_from_fn() is deprecated. Use Prompt.from_function() and call add_prompt() instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
+        if settings.deprecation_warnings:
+            warnings.warn(
+                "PromptManager.add_prompt_from_fn() is deprecated. Use Prompt.from_function() and call add_prompt() instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         prompt = FunctionPrompt.from_function(
             fn, name=name, description=description, tags=tags
         )

@@ -4,12 +4,14 @@ import warnings
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from mcp.types import EmbeddedResource, ImageContent, TextContent, ToolAnnotations
+from mcp.types import ToolAnnotations
 
+from fastmcp import settings
 from fastmcp.exceptions import NotFoundError, ToolError
 from fastmcp.settings import DuplicateBehavior
 from fastmcp.tools.tool import Tool
 from fastmcp.utilities.logging import get_logger
+from fastmcp.utilities.types import MCPContent
 
 if TYPE_CHECKING:
     pass
@@ -23,10 +25,10 @@ class ToolManager:
     def __init__(
         self,
         duplicate_behavior: DuplicateBehavior | None = None,
-        mask_error_details: bool = False,
+        mask_error_details: bool | None = None,
     ):
         self._tools: dict[str, Tool] = {}
-        self.mask_error_details = mask_error_details
+        self.mask_error_details = mask_error_details or settings.mask_error_details
 
         # Default to "warn" if None is provided
         if duplicate_behavior is None:
@@ -70,11 +72,12 @@ class ToolManager:
     ) -> Tool:
         """Add a tool to the server."""
         # deprecated in 2.7.0
-        warnings.warn(
-            "ToolManager.add_tool_from_fn() is deprecated. Use Tool.from_function() and call add_tool() instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
+        if settings.deprecation_warnings:
+            warnings.warn(
+                "ToolManager.add_tool_from_fn() is deprecated. Use Tool.from_function() and call add_tool() instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         tool = Tool.from_function(
             fn,
             name=name,
@@ -118,9 +121,7 @@ class ToolManager:
         else:
             raise NotFoundError(f"Unknown tool: {key}")
 
-    async def call_tool(
-        self, key: str, arguments: dict[str, Any]
-    ) -> list[TextContent | ImageContent | EmbeddedResource]:
+    async def call_tool(self, key: str, arguments: dict[str, Any]) -> list[MCPContent]:
         """Call a tool by name with arguments."""
         tool = self.get_tool(key)
         if not tool:

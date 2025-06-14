@@ -41,17 +41,9 @@ That's it! Your entire API is now available as an MCP server. Clients can discov
 
 ## Route Mapping
 
+By default, FastMCP converts **every endpoint** in your OpenAPI specification into an MCP **Tool**. This provides a simple, predictable starting point that ensures all your API's functionality is immediately available to the vast majority of LLM clients which only support MCP tools.
 
-
-FastMCP analyzes your API specification and automatically creates MCP components based on HTTP semantics and REST conventions. By default, the following rules are used to determine what MCP component to create for each route:
-
-| OpenAPI Route | Example | MCP Component | 
-|---------------|---------|---------------|
-| `GET` with path params | `GET /users/{id}` | **Resource Template** |
-| `GET` without path params | `GET /stats` | **Resource** |
-| `POST`, `PUT`, `PATCH`, `DELETE`, etc. | `POST /users` | **Tool** |
-
-Interally, FastMCP uses an ordered list of `RouteMap` objects to determine how to map OpenAPI routes to various MCP component types.
+While this is a pragmatic default for maximum compatibility, you can easily customize this behavior. Internally, FastMCP uses an ordered list of `RouteMap` objects to determine how to map OpenAPI routes to various MCP component types.
 
 Each `RouteMap` specifies a combination of methods, patterns, and tags, as well as a corresponding MCP component type. Each OpenAPI route is checked against each `RouteMap` in order, and the first one that matches every criteria is used to determine its converted MCP type. A special type, `EXCLUDE`, can be used to exclude routes from the MCP server entirely.
 
@@ -59,34 +51,16 @@ Each `RouteMap` specifies a combination of methods, patterns, and tags, as well 
 - **Pattern**: Regex pattern to match the route path (e.g. `r"^/users/.*"` or `r".*"` for all)
 - **Tags**: A set of OpenAPI tags that must all be present. An empty set (`{}`) means no tag filtering, so the route matches regardless of its tags.
 - **MCP type**: What MCP component type to create (`TOOL`, `RESOURCE`, `RESOURCE_TEMPLATE`, or `EXCLUDE`)
+- **MCP tags** A set of custom tags to add to components created from matching routes
 
-To illustrate this in practice, here are FastMCP's default rules as a list of `RouteMap` objects:
+Here is FastMCP's default rule:
 
 ```python
 from fastmcp.server.openapi import RouteMap, MCPType
 
 DEFAULT_ROUTE_MAPPINGS = [
-
-    # GET with path parameters → ResourceTemplate
-    RouteMap(
-        methods=["GET"], 
-        pattern=r".*\{.*\}.*", 
-        mcp_type=MCPType.RESOURCE_TEMPLATE
-    ),
-
-    # GET without path parameters → Resource
-    RouteMap(
-        methods=["GET"], 
-        pattern=r".*", 
-        mcp_type=MCPType.RESOURCE
-    ),
-
-    # All other methods → Tool
-    RouteMap(
-        methods=["*"], 
-        pattern=r".*", 
-        mcp_type=MCPType.TOOL
-    ),
+    # All routes become tools
+    RouteMap(mcp_type=MCPType.TOOL),
 ]
 ```
 
@@ -94,19 +68,27 @@ DEFAULT_ROUTE_MAPPINGS = [
 
 When creating your FastMCP server, you can customize routing behavior by providing your own list of `RouteMap` objects. Your custom maps are processed before the default route maps, and routes will be assigned to the first matching custom map.
 
-For example, the following simple rule will treat every OpenAPI route as a tool:
+For example, prior to FastMCP 2.8.0, GET requests were automatically mapped to `Resource` and `ResourceTemplate` components based on whether they had path parameters. (This was changed solely for client compatibility reasons.) You can restore this behavior by providing custom route maps:
 
-```python {7}
+```python {2, 5-10}
 from fastmcp import FastMCP
 from fastmcp.server.openapi import RouteMap, MCPType
 
+# Restore pre-2.8.0 semantic mapping
+semantic_maps = [
+    # GET requests with path parameters become ResourceTemplates
+    RouteMap(methods=["GET"], pattern=r".*\{.*\}.*", mcp_type=MCPType.RESOURCE_TEMPLATE),
+    # All other GET requests become Resources
+    RouteMap(methods=["GET"], pattern=r".*", mcp_type=MCPType.RESOURCE),
+]
+
 mcp = FastMCP.from_openapi(
     ...,
-    route_maps=[
-        RouteMap(mcp_type=MCPType.TOOL),
-    ],
+    route_maps=semantic_maps,
 )
 ```
+
+With these maps, `GET` requests are handled semantically, and all other methods (`POST`, `PUT`, etc.) will fall through to the default rule and become `Tool`s.
 
 Here is a more complete example that uses custom route maps to convert all `GET` endpoints under `/analytics/` to tools while excluding all admin endpoints and all routes tagged "internal". All other routes will be handled by the default rules:
 
@@ -225,9 +207,76 @@ mcp = FastMCP.from_openapi(
 
 ## Customizing MCP Components
 
+### Tags
+
+<VersionBadge version="2.8.0" />
+
+FastMCP provides several ways to add tags to your MCP components, allowing you to categorize and organize them for better discoverability and filtering. Tags are combined from multiple sources to create the final set of tags on each component.
+
+#### RouteMap Tags
+
+You can add custom tags to components created from specific routes using the `mcp_tags` parameter in `RouteMap`. These tags will be applied to all components created from routes that match that particular route map.
+
+```python {12, 20, 28}
+from fastmcp import FastMCP
+from fastmcp.server.openapi import RouteMap, MCPType
+
+mcp = FastMCP.from_openapi(
+    ...,
+    route_maps=[
+        # Add custom tags to all POST endpoints
+        RouteMap(
+            methods=["POST"],
+            pattern=r".*",
+            mcp_type=MCPType.TOOL,
+            mcp_tags={"write-operation", "api-mutation"}
+        ),
+        
+        # Add different tags to detail view endpoints
+        RouteMap(
+            methods=["GET"],
+            pattern=r".*\{.*\}.*",
+            mcp_type=MCPType.RESOURCE_TEMPLATE,
+            mcp_tags={"detail-view", "parameterized"}
+        ),
+        
+        # Add tags to list endpoints
+        RouteMap(
+            methods=["GET"],
+            pattern=r".*",
+            mcp_type=MCPType.RESOURCE,
+            mcp_tags={"list-data", "collection"}
+        ),
+    ],
+)
+```
+
+#### Global Tags
+
+You can add tags to **all** components by providing a `tags` parameter when creating your FastMCP server with `from_openapi` or `from_fastapi`. These global tags will be applied to every component created from your OpenAPI specification.
+
+<CodeGroup>
+```python {6} from_openapi()
+from fastmcp import FastMCP
+
+mcp = FastMCP.from_openapi(
+    openapi_spec=spec,
+    client=client,
+    tags={"api-v2", "production", "external"}
+)
+```
+```python {5} from_fastapi()
+from fastmcp import FastMCP
+
+mcp = FastMCP.from_fastapi(
+    app=app,
+    tags={"internal-api", "microservice"}
+)
+```
+</CodeGroup>
 
 
-### Component Names
+### Names
 
 <VersionBadge version="2.5.0" />
 
@@ -440,10 +489,16 @@ mcp = FastMCP.from_fastapi(
     app=app,
     name="My Custom Server",
     timeout=5.0,
+    tags={"api-v1", "fastapi"},  # Global tags for all components
     mcp_names={"operationId": "friendly_name"},  # Custom component names
     route_maps=[
-        # Admin endpoints become tools
-        RouteMap(methods="*", pattern=r"^/admin/.*", mcp_type=MCPType.TOOL),
+        # Admin endpoints become tools with custom tags
+        RouteMap(
+            methods="*", 
+            pattern=r"^/admin/.*", 
+            mcp_type=MCPType.TOOL,
+            mcp_tags={"admin", "privileged"}
+        ),
         # Internal endpoints are excluded
         RouteMap(methods="*", pattern=r".*", mcp_type=MCPType.EXCLUDE, tags={"internal"}),
     ],
