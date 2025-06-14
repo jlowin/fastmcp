@@ -1,6 +1,5 @@
 import asyncio
 import json
-import sys
 from collections.abc import AsyncGenerator
 
 import pytest
@@ -91,7 +90,9 @@ def run_nested_server(host: str, port: int) -> None:
 async def streamable_http_server() -> AsyncGenerator[str, None]:
     with run_server_in_process(run_server, transport="streamable-http") as url:
         async with Client(transport=StreamableHttpTransport(f"{url}/mcp")) as client:
+            print("----------- ATTEMPTING TO PING ------------")
             assert await client.ping()
+            print("----------- PINGED ------------")
         yield f"{url}/mcp"
 
 
@@ -129,10 +130,10 @@ async def test_nested_streamable_http_server_resolves_correctly():
             assert result is True
 
 
-@pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="Timeout tests are flaky on Windows. Timeouts *are* supported but the tests are unreliable.",
-)
+# @pytest.mark.skipif(
+#     sys.platform == "win32",
+#     reason="Timeout tests are flaky on Windows. Timeouts *are* supported but the tests are unreliable.",
+# )
 class TestTimeout:
     async def test_timeout(self, streamable_http_server: str):
         # note this transport behaves differently than others and raises
