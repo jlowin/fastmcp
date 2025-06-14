@@ -1,0 +1,23 @@
+{
+	"name": "waha-mcp-plus-smithery",
+	"version": "1.0.0-plus",
+	"description": "WAHA MCP PLUS - Premium WhatsApp Automation Server for Smithery",
+	"main": "index.js",
+	"module": "./src/index.ts",
+	"type": "module",
+	"scripts": {
+		"dev": "npx @smithery/cli dev",
+		"build": "npx @smithery/cli build"
+	},
+	"keywords": ["whatsapp", "automation", "mcp", "smithery", "chatbot"],
+	"author": "WAHA MCP PLUS Team",
+	"license": "ISC",
+	"dependencies": {
+		"@modelcontextprotocol/sdk": "^1.12.1",
+		"zod": "^3.25.46"
+	},
+	"devDependencies": {
+		"@smithery/cli": "^1.2.4",
+		"tsx": "^4.19.4"
+	}
+}

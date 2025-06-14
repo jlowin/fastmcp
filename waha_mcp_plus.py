@@ -321,6 +321,21 @@ cache = AdvancedCache()
 auto_reply = AutoReplyEngine(settings.openai_api_key)
 campaigns = CampaignManager()
 
+# Adicionar endpoint de health check para Docker
+@mcp.custom_route("/health", methods=["GET"])
+async def health_check(request):
+    """Health check endpoint para monitoramento"""
+    from starlette.responses import JSONResponse
+    return JSONResponse({
+        "status": "healthy",
+        "service": "WAHA MCP PLUS",
+        "timestamp": datetime.now().isoformat(),
+        "version": "1.0.0-plus"
+    })
+
+# Expor a aplicação ASGI para o uvicorn
+app = mcp.http_app()
+
 # Estado global
 active_sessions = {}
 message_queue = deque()
@@ -1055,6 +1070,12 @@ def system_health_check() -> Dict[str, Any]:
     return health_status
 
 
+# Para execução com Uvicorn, a aplicação ASGI é app (que aponta para mcp.app)
+# O Dockerfile chamará uvicorn diretamente.
+# Se precisar rodar localmente com Uvicorn:
+# uvicorn waha_mcp_plus:app --host 0.0.0.0 --port 8000 --reload
+
 if __name__ == "__main__":
-    # Executar o servidor premium
-    mcp.run()
+    # Quando executado diretamente, usar uvicorn
+    import uvicorn
+    uvicorn.run("waha_mcp_plus:app", host="0.0.0.0", port=8000, log_level="info")
