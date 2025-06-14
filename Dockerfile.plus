@@ -9,30 +9,18 @@ LABEL description="Premium WhatsApp automation server with AI, analytics and cam
 # Instalar dependências do sistema
 RUN apt-get update && apt-get install -y \
     curl \
-    wget \
-    git \
-    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 # Definir diretório de trabalho
 WORKDIR /app
 
-# Copiar arquivos de dependências
-COPY pyproject.toml ./
-COPY uv.lock ./
+# Copiar requirements primeiro para cache eficiente
+COPY requirements-plus.txt ./
 
-# Instalar uv para gerenciamento de dependências
-RUN pip install uv
+# Instalar dependências Python
+RUN pip install --no-cache-dir -r requirements-plus.txt
 
-# Instalar dependências premium
-RUN uv sync --frozen
-
-# Instalar dependências extras para recursos premium
-RUN uv add redis schedule openai anthropic
-
-# Copiar código fonte
-COPY src/ ./src/
-COPY examples/ ./examples/
+# Copiar apenas o arquivo principal
 COPY waha_mcp_plus.py ./
 
 # Criar diretórios necessários
@@ -42,7 +30,7 @@ RUN mkdir -p /app/logs /app/cache /app/reports /app/campaigns
 RUN chmod +x /app/waha_mcp_plus.py
 
 # Expor portas
-EXPOSE 8000 8080
+EXPOSE 8000
 
 # Definir variáveis de ambiente premium
 ENV WAHA_BASE_URL=http://localhost:3000
@@ -54,12 +42,11 @@ ENV WAHA_ENABLE_SCHEDULING=true
 ENV WAHA_MAX_REQUESTS_PER_MINUTE=100
 ENV WAHA_MAX_SESSIONS=10
 ENV WAHA_CACHE_TTL_SECONDS=3600
-ENV PYTHONPATH=/app/src:/app
 ENV PYTHONUNBUFFERED=1
 
 # Health check premium
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD python -c "import httpx; httpx.get('http://localhost:8000/health', timeout=5).raise_for_status()" || exit 1
+    CMD curl -f http://localhost:8000/health || exit 1
 
 # Comando premium com logging avançado
-CMD ["uv", "run", "python", "-u", "waha_mcp_plus.py"]
+CMD ["python", "-u", "waha_mcp_plus.py"]
