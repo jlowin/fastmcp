@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
+from datetime import datetime, timezone
 from typing import Any, Literal, Protocol, TypeVar, runtime_checkable
 
 import mcp.types as types
-from mcp.server.session import ServerSession
+from mcp.server.lowlevel.server import request_ctx
+from mcp.shared.context import RequestContext
 
 logger = logging.getLogger(__name__)
 
@@ -34,20 +37,6 @@ class ServerResultProtocol(Protocol[ServerResultT]):
     root: ServerResultT
 
 
-@runtime_checkable
-class MiddlewareHandler(Protocol[T, R]):
-    """
-    A protocol for middleware handlers.
-    """
-
-    def __call__(
-        self,
-        message: T,
-        context: MiddlewareContext,
-        call_next: Callable[[T], Awaitable[R]],
-    ) -> Awaitable[R]: ...
-
-
 @dataclass(kw_only=True, frozen=True)
 class MiddlewareContext:
     """
@@ -58,15 +47,14 @@ class MiddlewareContext:
 
     # the raw message
     message: Any
+    # the request context
+    request_context: RequestContext | None = None
     # was the request initiated by the client or the server?
     source: Literal["client", "server"] = "client"
-    # the session object
-    session: ServerSession | None = None
-    # the request id
-    request_id: str | None = None
-    # timestamp: datetime
-    # correlation_id: str
-    # context: Context
+
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    correlation_id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
 
 class MCPMiddleware:
@@ -85,10 +73,14 @@ class MCPMiddleware:
     ) -> Any:
         """Main entry point that orchestrates the pipeline."""
 
+        try:
+            request_context = request_ctx.get()
+        except LookupError:
+            request_context = None
+
         context = MiddlewareContext(
             message=message,
-            session=None,
-            request_id=None,
+            request_context=request_context,
         )
 
         # Process the message
@@ -98,7 +90,9 @@ class MCPMiddleware:
 
     def _create_handler(
         self,
-        method: MiddlewareHandler[T, R],
+        method: Callable[
+            [T, MiddlewareContext, Callable[[T], Awaitable[R]]], Awaitable[R]
+        ],
         context: MiddlewareContext,
         call_next: Callable[[Any], Awaitable[Any]],
     ) -> Callable[[T], Awaitable[R]]:
@@ -108,7 +102,7 @@ class MCPMiddleware:
         """
 
         async def handler(message: T) -> R:
-            return await method(message, context=context, call_next=call_next)
+            return await method(message, context, call_next)
 
         return handler
 
@@ -157,110 +151,104 @@ class MCPMiddleware:
 
             case types.ListToolsRequest():
                 handler = self._create_handler(
-                    self.on_list_tools_request, context, call_next=handler
+                    self.on_list_tools_request, context, handler
                 )
 
             case types.CallToolRequest():
                 handler = self._create_handler(
-                    self.on_call_tool_request, context, call_next=handler
+                    self.on_call_tool_request, context, handler
                 )
             case types.ListResourcesRequest():
                 handler = self._create_handler(
-                    self.on_list_resources_request, context, call_next=handler
+                    self.on_list_resources_request, context, handler
                 )
             case types.ListResourceTemplatesRequest():
                 handler = self._create_handler(
                     self.on_list_resource_templates_request,
                     context,
-                    call_next=handler,
+                    handler,
                 )
             case types.ReadResourceRequest():
                 handler = self._create_handler(
-                    self.on_read_resource_request, context, call_next=handler
+                    self.on_read_resource_request, context, handler
                 )
             case types.ListPromptsRequest():
                 handler = self._create_handler(
-                    self.on_list_prompts_request, context, call_next=handler
+                    self.on_list_prompts_request, context, handler
                 )
             case types.GetPromptRequest():
                 handler = self._create_handler(
-                    self.on_get_prompt_request, context, call_next=handler
+                    self.on_get_prompt_request, context, handler
                 )
             case types.CompleteRequest():
                 handler = self._create_handler(
-                    self.on_complete_request, context, call_next=handler
+                    self.on_complete_request, context, handler
                 )
             case types.PingRequest():
-                handler = self._create_handler(
-                    self.on_ping_request, context, call_next=handler
-                )
+                handler = self._create_handler(self.on_ping_request, context, handler)
             case types.CreateMessageRequest():
                 handler = self._create_handler(
-                    self.on_create_message_request, context, call_next=handler
+                    self.on_create_message_request, context, handler
                 )
             case types.ListRootsRequest():
                 handler = self._create_handler(
-                    self.on_list_roots_request, context, call_next=handler
+                    self.on_list_roots_request, context, handler
                 )
 
             # --- Notifications ---
 
             case types.InitializedNotification():
                 handler = self._create_handler(
-                    self.on_initialize_notification, context, call_next=handler
+                    self.on_initialize_notification, context, handler
                 )
             case types.ProgressNotification():
                 handler = self._create_handler(
-                    self.on_progress_notification, context, call_next=handler
+                    self.on_progress_notification, context, handler
                 )
             case types.LoggingMessageNotification():
                 handler = self._create_handler(
-                    self.on_logging_message_notification, context, call_next=handler
+                    self.on_logging_message_notification, context, handler
                 )
             case types.ResourceUpdatedNotification():
                 handler = self._create_handler(
-                    self.on_resource_updated_notification, context, call_next=handler
+                    self.on_resource_updated_notification, context, handler
                 )
             case types.ToolListChangedNotification():
                 handler = self._create_handler(
-                    self.on_tool_list_changed_notification, context, call_next=handler
+                    self.on_tool_list_changed_notification, context, handler
                 )
             case types.ResourceListChangedNotification():
                 handler = self._create_handler(
                     self.on_resource_list_changed_notification,
                     context,
-                    call_next=handler,
+                    handler,
                 )
             case types.PromptListChangedNotification():
                 handler = self._create_handler(
                     self.on_prompt_list_changed_notification,
                     context,
-                    call_next=handler,
+                    handler,
                 )
             case types.RootsListChangedNotification():
                 handler = self._create_handler(
                     self.on_roots_list_changed_notification,
                     context,
-                    call_next=handler,
+                    handler,
                 )
             case types.CancelledNotification():
                 handler = self._create_handler(
-                    self.on_cancelled_notification, context, call_next=handler
+                    self.on_cancelled_notification, context, handler
                 )
 
         # next, add the request and notification hooks
         match message:
             case types.Request():
-                handler = self._create_handler(
-                    self.on_request, context, call_next=handler
-                )
+                handler = self._create_handler(self.on_request, context, handler)
             case types.Notification():
-                handler = self._create_handler(
-                    self.on_notification, context, call_next=handler
-                )
+                handler = self._create_handler(self.on_notification, context, handler)
 
         # finally, add the general message hook
-        handler = self._create_handler(self.on_message, context, call_next=handler)
+        handler = self._create_handler(self.on_message, context, handler)
 
         # process the message through the handler chain
         return await handler(message)
