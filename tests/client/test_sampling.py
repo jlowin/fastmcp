@@ -5,6 +5,7 @@ from mcp.types import TextContent
 
 from fastmcp import Client, Context, FastMCP
 from fastmcp.client.sampling import RequestContext, SamplingMessage, SamplingParams
+from fastmcp.exceptions import ToolError
 
 
 @pytest.fixture
@@ -37,6 +38,12 @@ def fastmcp_server():
         return cast(TextContent, result).text
 
     return mcp
+
+
+async def test_sampling_with_unsupported_client(fastmcp_server: FastMCP):
+    async with Client(fastmcp_server) as client:
+        with pytest.raises(ToolError, match="Sampling not supported"):
+            await client.call_tool("simple_sample", {"message": "Hello, world!"})
 
 
 async def test_simple_sampling(fastmcp_server: FastMCP):

@@ -21,7 +21,6 @@ import httpx
 import uvicorn
 from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.lowlevel.server import LifespanResultT, NotificationOptions
-from mcp.server.lowlevel.server import Server as MCPServer
 from mcp.server.stdio import stdio_server
 from mcp.types import (
     AnyFunction,
@@ -52,6 +51,8 @@ from fastmcp.server.http import (
     create_sse_app,
     create_streamable_http_app,
 )
+from fastmcp.server.middleware.mcp_middleware import MCPMiddleware
+from fastmcp.server.middleware.server import MiddlewareServer
 from fastmcp.settings import Settings
 from fastmcp.tools import ToolManager
 from fastmcp.tools.tool import FunctionTool, Tool
@@ -95,10 +96,12 @@ def _lifespan_wrapper(
         [FastMCP[LifespanResultT]], AbstractAsyncContextManager[LifespanResultT]
     ],
 ) -> Callable[
-    [MCPServer[LifespanResultT]], AbstractAsyncContextManager[LifespanResultT]
+    [MiddlewareServer[LifespanResultT]], AbstractAsyncContextManager[LifespanResultT]
 ]:
     @asynccontextmanager
-    async def wrap(s: MCPServer[LifespanResultT]) -> AsyncIterator[LifespanResultT]:
+    async def wrap(
+        s: MiddlewareServer[LifespanResultT],
+    ) -> AsyncIterator[LifespanResultT]:
         async with AsyncExitStack() as stack:
             context = await stack.enter_async_context(lifespan(app))
             yield context
@@ -127,6 +130,7 @@ class FastMCP(Generic[LifespanResultT]):
         resource_prefix_format: Literal["protocol", "path"] | None = None,
         mask_error_details: bool | None = None,
         tools: list[Tool | Callable[..., Any]] | None = None,
+        middleware: list[MCPMiddleware] | None = None,
         dependencies: list[str] | None = None,
         include_tags: set[str] | None = None,
         exclude_tags: set[str] | None = None,
@@ -173,10 +177,11 @@ class FastMCP(Generic[LifespanResultT]):
             lifespan = default_lifespan
         else:
             self._has_lifespan = True
-        self._mcp_server = MCPServer[LifespanResultT](
+        self._mcp_server = MiddlewareServer[LifespanResultT](
             name=name or "FastMCP",
             instructions=instructions,
             lifespan=_lifespan_wrapper(self, lifespan),
+            middleware=middleware,
         )
 
         if auth is None and fastmcp.settings.default_auth_provider == "bearer_env":
@@ -269,6 +274,9 @@ class FastMCP(Generic[LifespanResultT]):
     @property
     def instructions(self) -> str | None:
         return self._mcp_server.instructions
+
+    def add_middleware(self, middleware: MCPMiddleware) -> None:
+        self._mcp_server.add_middleware(middleware)
 
     async def run_async(
         self,
