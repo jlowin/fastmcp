@@ -507,10 +507,10 @@ class MCPMiddleware:
 
     async def on_message(
         self,
-        message: T,
+        message: Any,
         context: MiddlewareContext,
         call_next: Callable[[Any], Awaitable[Any]],
-    ) -> R:
+    ) -> Any:
         """
         Hook called for EVERY message before any other processing.
 
