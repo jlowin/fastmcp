@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
-from typing import Any, Protocol, TypeVar, runtime_checkable
+from dataclasses import dataclass, replace
+from typing import Any, Literal, Protocol, TypeVar, runtime_checkable
 
 import mcp.types as types
 from mcp.server.session import ServerSession
@@ -48,7 +48,7 @@ class MiddlewareHandler(Protocol[T, R]):
     ) -> Awaitable[R]: ...
 
 
-@dataclass(kw_only=True)
+@dataclass(kw_only=True, frozen=True)
 class MiddlewareContext:
     """
     Context passed to all middleware hooks.
@@ -59,7 +59,7 @@ class MiddlewareContext:
     # the raw message
     message: Any
     # was the request initiated by the client or the server?
-    # source: Literal["client", "server"]
+    source: Literal["client", "server"] = "client"
     # the session object
     session: ServerSession | None = None
     # the request id
@@ -102,7 +102,10 @@ class MCPMiddleware:
         context: MiddlewareContext,
         call_next: Callable[[Any], Awaitable[Any]],
     ) -> Callable[[T], Awaitable[R]]:
-        """Create a handler function with a single argument for a given method, context, and call_next function."""
+        """
+        Create a handler function with a single argument for a given method,
+        context, and call_next function.
+        """
 
         async def handler(message: T) -> R:
             return await method(message, context=context, call_next=call_next)
@@ -119,6 +122,34 @@ class MCPMiddleware:
 
         # start with the next handler
         handler = call_next
+
+        # server-initiated requests and notifications are wrapped in a
+        # ServerRequest or ServerNotification RootModel. We unwrap them here,
+        # but ensure call_next gets the original wrapped message.
+        match message:
+            case types.ServerNotification(root=inner_message):
+                # Create a handler that passes the *original* message to call_next
+                async def wrapped_handler(inner_message):
+                    return await call_next(message)
+
+                # Recursively process the inner message with the wrapped handler
+                return await self._process_message(
+                    inner_message,
+                    context=replace(context, source="server"),
+                    call_next=wrapped_handler,
+                )
+
+            case types.ServerRequest(root=inner_message):
+                # Create a handler that passes the *original* message to call_next
+                async def wrapped_handler(inner_message):
+                    return await call_next(message)
+
+                # Recursively process the inner message with the wrapped handler
+                return await self._process_message(
+                    inner_message,
+                    context=replace(context, source="server"),
+                    call_next=wrapped_handler,
+                )
 
         # next, add the type-specific handler to the chain
         match message:
@@ -346,18 +377,6 @@ class MCPMiddleware:
         """Process ping request."""
         return await call_next(message)
 
-    async def on_sample_request(
-        self,
-        message: types.CreateMessageRequest,
-        context: MiddlewareContext,
-        call_next: Callable[
-            [types.CreateMessageRequest],
-            Awaitable[types.CreateMessageResult],
-        ],
-    ) -> types.CreateMessageResult:
-        """Process sample request."""
-        return await call_next(message)
-
     async def on_create_message_request(
         self,
         message: types.CreateMessageRequest,
@@ -367,7 +386,7 @@ class MCPMiddleware:
             Awaitable[types.CreateMessageResult],
         ],
     ) -> types.CreateMessageResult:
-        """Process create_message request."""
+        """Process create_message request (used for sampling)"""
         return await call_next(message)
 
     async def on_list_roots_request(

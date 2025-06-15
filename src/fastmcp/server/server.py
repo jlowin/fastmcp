@@ -51,7 +51,7 @@ from fastmcp.server.http import (
     create_sse_app,
     create_streamable_http_app,
 )
-from fastmcp.server.middleware.base import MCPMiddleware
+from fastmcp.server.middleware.mcp_middleware import MCPMiddleware
 from fastmcp.server.middleware.server import MiddlewareServer
 from fastmcp.settings import Settings
 from fastmcp.tools import ToolManager

@@ -13,7 +13,7 @@ from mcp.shared.session import (
 )
 from mcp.types import METHOD_NOT_FOUND, ErrorData
 
-from .base import MCPMiddleware
+from .mcp_middleware import MCPMiddleware
 
 logger = logging.getLogger(__name__)
 
