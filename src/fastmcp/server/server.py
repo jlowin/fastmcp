@@ -665,7 +665,7 @@ class FastMCP(Generic[LifespanResultT]):
 
         raise NotFoundError(f"Unknown prompt: {name}")
 
-    def _enable_tool(self, name: str) -> Tool:
+    async def _enable_tool(self, name: str) -> Tool:
         """Handle 'enableTool' requests.
 
         Args:
@@ -676,13 +676,19 @@ class FastMCP(Generic[LifespanResultT]):
         """
         logger.debug("Enabling tool: %s", name)
 
-        # Enable tool, checking from our tools
+        # Enable tool, checking first from our tools, then from the mounted servers
         if self._tool_manager.has_tool(name):
             return self._tool_manager.enable_tool(name)
-
+        
+        # Check mounted servers to see if they have the tool
+        for server in self._mounted_servers.values():
+            if server.match_tool(name):
+                tool_key = server.strip_tool_prefix(name)
+                return await self._enable_tool(tool_key)
+                
         raise NotFoundError(f"Unknown tool: {name}")
 
-    def _disable_tool(self, name: str) -> Tool:
+    async def _disable_tool(self, name: str) -> Tool:
         """Handle 'disableTool' requests.
 
         Args:
@@ -696,74 +702,104 @@ class FastMCP(Generic[LifespanResultT]):
         # Disable tool, checking from our tools
         if self._tool_manager.has_tool(name):
             return self._tool_manager.disable_tool(name)
-
+        
+        # Check mounted servers to see if they have the tool
+        for server in self._mounted_servers.values():
+            if server.match_tool(name):
+                tool_key = server.strip_tool_prefix(name)
+                return await self._disable_tool(tool_key)
+                
         raise NotFoundError(f"Unknown tool: {name}")
 
-    def _enable_resource(self, name: str) -> Resource:
+    async def _enable_resource(self, name: str) -> Resource:
         """Handle 'enableResource' requests.
 
         Args:
             name: The name of the resource to enable
 
         Returns:
-            Resource containing the tool messages
+            The resource that was enabled
         """
         logger.debug("Enabling resource: %s", name)
 
-        # Enable tool, checking from our tools
+        # Enable resource, checking first from our resource, then from the mounted servers
         if self._resource_manager.has_resource(name):
             return self._resource_manager.enable_resource(name)
+        
+        # Check mounted servers to see if they have the resource
+        for server in self._mounted_servers.values():
+            if server.match_resource(str(name)):
+                new_uri = server.strip_resource_prefix(str(name))
+                return await server.server._enable_resource(new_uri)
 
         raise NotFoundError(f"Unknown resource: {name}")
 
-    def _disable_resource(self, name: str) -> Resource:
+    async def _disable_resource(self, name: str) -> Resource:
         """Handle 'disableResource' requests.
 
         Args:
             name: The name of the resource to disable
 
         Returns:
-            Resource containing the tool messages
+            The resource that was disabled
         """
         logger.debug("Disable resource: %s", name)
 
-        # Disable tool, checking from our tools
+        # Disable resource, checking first from our resource, then from the mounted servers
         if self._resource_manager.has_resource(name):
             return self._resource_manager.disable_resource(name)
+        
+        # Check mounted servers to see if they have the resource
+        for server in self._mounted_servers.values():
+            if server.match_resource(str(name)):
+                new_uri = server.strip_resource_prefix(str(name))
+                return await server.server._disable_resource(new_uri)
 
         raise NotFoundError(f"Unknown resource: {name}")
 
-    def _enable_prompt(self, name: str) -> Prompt:
+    async def _enable_prompt(self, name: str) -> Prompt:
         """Handle 'enablePrompt' requests.
 
         Args:
             name: The name of the prompt to enable
 
         Returns:
-            Prompt containing the tool messages
+            The prompt that was enable
         """
         logger.debug("Enabling prompt: %s", name)
 
-        # Enable tool, checking from our tools
+        # Enable prompt, checking first from our prompts, then from the mounted servers
         if self._prompt_manager.has_prompt(name):
             return self._prompt_manager.enable_prompt(name)
-
+        
+        # Check mounted servers to see if they have the prompt
+        for server in self._mounted_servers.values():
+            if server.match_prompt(name):
+                prompt_name = server.strip_prompt_prefix(name)
+                return await self._enable_prompt(prompt_name)
+            
         raise NotFoundError(f"Unknown prompt: {name}")
 
-    def _disable_prompt(self, name: str) -> Prompt:
+    async def _disable_prompt(self, name: str) -> Prompt:
         """Handle 'disablePrompt' requests.
 
         Args:
             name: The name of the prompt to disable
 
         Returns:
-            Prompt containing the tool messages
+            The prompt that was disabled
         """
         logger.debug("Disable prompt: %s", name)
 
-        # Disable tool, checking from our tools
+        # Disable prompt, checking first from our prompts, then from the mounted servers
         if self._prompt_manager.has_prompt(name):
             return self._prompt_manager.disable_prompt(name)
+            
+        # Check mounted servers to see if they have the prompt
+        for server in self._mounted_servers.values():
+            if server.match_prompt(name):
+                prompt_name = server.strip_prompt_prefix(name)
+                return await self._enable_prompt(prompt_name)
 
         raise NotFoundError(f"Unknown prompt: {name}")
 
@@ -817,7 +853,7 @@ class FastMCP(Generic[LifespanResultT]):
                 name = request.path_params[param_key]
                     
                 try:
-                    handler(name)
+                    await handler(name)
                     return JSONResponse(
                         {
                             "message": f"{action.capitalize()}d {component}: {name}"
