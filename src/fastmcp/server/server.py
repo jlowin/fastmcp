@@ -38,7 +38,6 @@ from starlette.middleware import Middleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import BaseRoute, Route
-from urllib.parse import unquote
 
 import fastmcp
 import fastmcp.server
@@ -679,13 +678,13 @@ class FastMCP(Generic[LifespanResultT]):
         # Enable tool, checking first from our tools, then from the mounted servers
         if self._tool_manager.has_tool(name):
             return self._tool_manager.enable_tool(name)
-        
+
         # Check mounted servers to see if they have the tool
         for server in self._mounted_servers.values():
             if server.match_tool(name):
                 tool_key = server.strip_tool_prefix(name)
                 return await self._enable_tool(tool_key)
-                
+
         raise NotFoundError(f"Unknown tool: {name}")
 
     async def _disable_tool(self, name: str) -> Tool:
@@ -702,13 +701,13 @@ class FastMCP(Generic[LifespanResultT]):
         # Disable tool, checking from our tools
         if self._tool_manager.has_tool(name):
             return self._tool_manager.disable_tool(name)
-        
+
         # Check mounted servers to see if they have the tool
         for server in self._mounted_servers.values():
             if server.match_tool(name):
                 tool_key = server.strip_tool_prefix(name)
                 return await self._disable_tool(tool_key)
-                
+
         raise NotFoundError(f"Unknown tool: {name}")
 
     async def _enable_resource(self, name: str) -> Resource:
@@ -725,7 +724,7 @@ class FastMCP(Generic[LifespanResultT]):
         # Enable resource, checking first from our resource, then from the mounted servers
         if self._resource_manager.has_resource(name):
             return self._resource_manager.enable_resource(name)
-        
+
         # Check mounted servers to see if they have the resource
         for server in self._mounted_servers.values():
             if server.match_resource(str(name)):
@@ -748,7 +747,7 @@ class FastMCP(Generic[LifespanResultT]):
         # Disable resource, checking first from our resource, then from the mounted servers
         if self._resource_manager.has_resource(name):
             return self._resource_manager.disable_resource(name)
-        
+
         # Check mounted servers to see if they have the resource
         for server in self._mounted_servers.values():
             if server.match_resource(str(name)):
@@ -771,13 +770,13 @@ class FastMCP(Generic[LifespanResultT]):
         # Enable prompt, checking first from our prompts, then from the mounted servers
         if self._prompt_manager.has_prompt(name):
             return self._prompt_manager.enable_prompt(name)
-        
+
         # Check mounted servers to see if they have the prompt
         for server in self._mounted_servers.values():
             if server.match_prompt(name):
                 prompt_name = server.strip_prompt_prefix(name)
                 return await self._enable_prompt(prompt_name)
-            
+
         raise NotFoundError(f"Unknown prompt: {name}")
 
     async def _disable_prompt(self, name: str) -> Prompt:
@@ -794,7 +793,7 @@ class FastMCP(Generic[LifespanResultT]):
         # Disable prompt, checking first from our prompts, then from the mounted servers
         if self._prompt_manager.has_prompt(name):
             return self._prompt_manager.disable_prompt(name)
-            
+
         # Check mounted servers to see if they have the prompt
         for server in self._mounted_servers.values():
             if server.match_prompt(name):
@@ -808,8 +807,20 @@ class FastMCP(Generic[LifespanResultT]):
 
         route_configs = [
             # (path_template, param_key, action, handler_method)
-            ("tool", "/tools/{tool_name}/enable", "tool_name", "enable", self._enable_tool),
-            ("tool", "/tools/{tool_name}/disable", "tool_name", "disable", self._disable_tool),
+            (
+                "tool",
+                "/tools/{tool_name}/enable",
+                "tool_name",
+                "enable",
+                self._enable_tool,
+            ),
+            (
+                "tool",
+                "/tools/{tool_name}/disable",
+                "tool_name",
+                "disable",
+                self._disable_tool,
+            ),
             (
                 "resource",
                 "/resources/{uri:path}/enable",
@@ -849,15 +860,12 @@ class FastMCP(Generic[LifespanResultT]):
                 action: str = action,
                 handler: Callable[[str], Any] = handler,
             ):
- 
                 name = request.path_params[param_key]
-                    
+
                 try:
                     await handler(name)
                     return JSONResponse(
-                        {
-                            "message": f"{action.capitalize()}d {component}: {name}"
-                        }
+                        {"message": f"{action.capitalize()}d {component}: {name}"}
                     )
                 except NotFoundError:
                     raise HTTPException(
