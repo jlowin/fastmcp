@@ -38,6 +38,7 @@ from starlette.middleware import Middleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import BaseRoute, Route
+from urllib.parse import unquote
 
 import fastmcp
 import fastmcp.server
@@ -771,27 +772,31 @@ class FastMCP(Generic[LifespanResultT]):
 
         route_configs = [
             # (path_template, param_key, action, handler_method)
-            ("/tools/{tool_name}/enable", "tool_name", "enable", self._enable_tool),
-            ("/tools/{tool_name}/disable", "tool_name", "disable", self._disable_tool),
+            ("tool", "/tools/{tool_name}/enable", "tool_name", "enable", self._enable_tool),
+            ("tool", "/tools/{tool_name}/disable", "tool_name", "disable", self._disable_tool),
             (
-                "/resources/{resource_name}/enable",
-                "resource_name",
+                "resource",
+                "/resources/{uri:path}/enable",
+                "uri",
                 "enable",
                 self._enable_resource,
             ),
             (
-                "/resources/{resource_name}/disable",
-                "resource_name",
+                "resource",
+                "/resources/{uri:path}/disable",
+                "uri",
                 "disable",
                 self._disable_resource,
             ),
             (
+                "prompt",
                 "/prompts/{prompt_name}/enable",
                 "prompt_name",
                 "enable",
                 self._enable_prompt,
             ),
             (
+                "prompt",
                 "/prompts/{prompt_name}/disable",
                 "prompt_name",
                 "disable",
@@ -799,26 +804,29 @@ class FastMCP(Generic[LifespanResultT]):
             ),
         ]
 
-        for path, param_key, action, handler in route_configs:
+        for component, path, param_key, action, handler in route_configs:
 
             async def endpoint(
                 request: Request,
+                component: str = component,
                 param_key: str = param_key,
                 action: str = action,
                 handler: Callable[[str], Any] = handler,
             ):
+ 
                 name = request.path_params[param_key]
+                    
                 try:
                     handler(name)
                     return JSONResponse(
                         {
-                            "message": f"{action.capitalize()}d {param_key.replace('_name', '')}: {name}"
+                            "message": f"{action.capitalize()}d {component}: {name}"
                         }
                     )
                 except NotFoundError:
                     raise HTTPException(
                         status_code=404,
-                        detail=f"Unknown {param_key.replace('_name', '')}: {name}",
+                        detail=f"Unknown {component}: {name}",
                     )
 
             self._additional_http_routes.append(
