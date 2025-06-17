@@ -317,3 +317,21 @@ class ResourceManager:
     def get_templates(self) -> dict[str, ResourceTemplate]:
         """Get all registered templates, keyed by URI template."""
         return self._templates
+
+    def enable_resource(self, key: str) -> Resource:
+        """Enable a resource."""
+        logger.info("Enabled resource: %s", key)
+
+        if key in self._resources:
+            resource = self._resources[key]
+            resource.enable()
+            return resource
+        raise NotFoundError(f"Unknown resource: {key}")
+
+    def disable_resource(self, key: str) -> Resource:
+        """Disable a resource."""
+        if key in self._resources:
+            resource = self._resources[key]
+            resource.disable()
+            return resource
+        raise NotFoundError(f"Unknown resource: {key}")

@@ -51,6 +51,24 @@ class PromptManager:
         """Get all registered prompts, indexed by registered key."""
         return self._prompts
 
+    def enable_prompt(self, key: str) -> Prompt:
+        """Enable a prompt."""
+        logger.info("Enabled prompt: %s", key)
+
+        if key in self._prompts:
+            prompt = self._prompts[key]
+            prompt.enable()
+            return prompt
+        raise NotFoundError(f"Unknown prompt: {key}")
+
+    def disable_prompt(self, key: str) -> Prompt:
+        """Disable a prompt."""
+        if key in self._prompts:
+            prompt = self._prompts[key]
+            prompt.disable()
+            return prompt
+        raise NotFoundError(f"Unknown prompt: {key}")
+
     def add_prompt_from_fn(
         self,
         fn: Callable[..., PromptResult | Awaitable[PromptResult]],

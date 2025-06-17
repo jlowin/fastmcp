@@ -60,6 +60,24 @@ class ToolManager:
         """List all registered tools."""
         return list(self.get_tools().values())
 
+    def enable_tool(self, key: str) -> Tool:
+        """Enable a tool."""
+        logger.info("Enabled tool: %s", key)
+
+        if key in self._tools:
+            tool = self._tools[key]
+            tool.enable()
+            return tool
+        raise NotFoundError(f"Unknown tool: {key}")
+
+    def disable_tool(self, key: str) -> Tool:
+        """Disable a tool."""
+        if key in self._tools:
+            tool = self._tools[key]
+            tool.disable()
+            return tool
+        raise NotFoundError(f"Unknown tool: {key}")
+
     def add_tool_from_fn(
         self,
         fn: Callable[..., Any],

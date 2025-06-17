@@ -33,9 +33,10 @@ from mcp.types import Resource as MCPResource
 from mcp.types import ResourceTemplate as MCPResourceTemplate
 from mcp.types import Tool as MCPTool
 from pydantic import AnyUrl
+from starlette.exceptions import HTTPException
 from starlette.middleware import Middleware
 from starlette.requests import Request
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 from starlette.routing import BaseRoute, Route
 
 import fastmcp
@@ -156,6 +157,7 @@ class FastMCP(Generic[LifespanResultT]):
         )
         self._mounted_servers: dict[str, MountedServer] = {}
         self._additional_http_routes: list[BaseRoute] = []
+
         self._tool_manager = ToolManager(
             duplicate_behavior=on_duplicate_tools,
             mask_error_details=mask_error_details,
@@ -198,6 +200,9 @@ class FastMCP(Generic[LifespanResultT]):
         # Set up MCP protocol handlers
         self._setup_handlers()
         self.dependencies = dependencies or fastmcp.settings.server_dependencies
+
+        # Set up the tool management routes
+        self._tool_management_routes()
 
         # handle deprecated settings
         self._handle_deprecated_settings(
@@ -659,6 +664,165 @@ class FastMCP(Generic[LifespanResultT]):
                 return await server.server._mcp_get_prompt(prompt_name, arguments)
 
         raise NotFoundError(f"Unknown prompt: {name}")
+
+    def _enable_tool(self, name: str) -> Tool:
+        """Handle 'enableTool' requests. Only works for fastmcp tools.
+
+        Args:
+            name: The name of the tool to enable
+
+        Returns:
+             containing the tool messages
+        """
+        logger.debug("Enabling tool: %s", name)
+
+        # Enable tool, checking from our tools
+        if self._tool_manager.has_tool(name):
+            return self._tool_manager.enable_tool(name)
+
+        raise NotFoundError(f"Unknown tool: {name}")
+
+    def _disable_tool(self, name: str) -> Tool:
+        """Handle 'disableTool' requests. Only works for fastmcp tools.
+
+        Args:
+            name: The name of the tool to disable
+
+        Returns:
+             containing the tool messages
+        """
+        logger.debug("Disable tool: %s", name)
+
+        # Disable tool, checking from our tools
+        if self._tool_manager.has_tool(name):
+            return self._tool_manager.disable_tool(name)
+
+        raise NotFoundError(f"Unknown tool: {name}")
+
+    def _enable_resource(self, name: str) -> Resource:
+        """Handle 'enableResource' requests. Only works for fastmcp resources.
+
+        Args:
+            name: The name of the resource to enable
+
+        Returns:
+             containing the tool messages
+        """
+        logger.debug("Enabling resource: %s", name)
+
+        # Enable tool, checking from our tools
+        if self._resource_manager.has_resource(name):
+            return self._resource_manager.enable_resource(name)
+
+        raise NotFoundError(f"Unknown resource: {name}")
+
+    def _disable_resource(self, name: str) -> Resource:
+        """Handle 'disableResource' requests. Only works for fastmcp resources.
+
+        Args:
+            name: The name of the resource to disable
+
+        Returns:
+             containing the tool messages
+        """
+        logger.debug("Disable resource: %s", name)
+
+        # Disable tool, checking from our tools
+        if self._resource_manager.has_resource(name):
+            return self._resource_manager.disable_resource(name)
+
+        raise NotFoundError(f"Unknown resource: {name}")
+
+    def _enable_prompt(self, name: str) -> Prompt:
+        """Handle 'enablePrompt' requests. Only works for fastmcp prompts.
+
+        Args:
+            name: The name of the prompt to enable
+
+        Returns:
+             containing the tool messages
+        """
+        logger.debug("Enabling prompt: %s", name)
+
+        # Enable tool, checking from our tools
+        if self._prompt_manager.has_prompt(name):
+            return self._prompt_manager.enable_prompt(name)
+
+        raise NotFoundError(f"Unknown prompt: {name}")
+
+    def _disable_prompt(self, name: str) -> Prompt:
+        """Handle 'disablePrompt' requests. Only works for fastmcp prompts.
+
+        Args:
+            name: The name of the prompt to disable
+
+        Returns:
+             containing the tool messages
+        """
+        logger.debug("Disable prompt: %s", name)
+
+        # Disable tool, checking from our tools
+        if self._prompt_manager.has_prompt(name):
+            return self._prompt_manager.disable_prompt(name)
+
+        raise NotFoundError(f"Unknown prompt: {name}")
+
+    def _tool_management_routes(self):
+        route_configs = [
+            # (path_template, param_key, action, handler_method)
+            ("/tools/{tool_name}/enable", "tool_name", "enable", self._enable_tool),
+            ("/tools/{tool_name}/disable", "tool_name", "disable", self._disable_tool),
+            (
+                "/resources/{resource_name}/enable",
+                "resource_name",
+                "enable",
+                self._enable_resource,
+            ),
+            (
+                "/resources/{resource_name}/disable",
+                "resource_name",
+                "disable",
+                self._disable_resource,
+            ),
+            (
+                "/prompts/{prompt_name}/enable",
+                "prompt_name",
+                "enable",
+                self._enable_prompt,
+            ),
+            (
+                "/prompts/{prompt_name}/disable",
+                "prompt_name",
+                "disable",
+                self._disable_prompt,
+            ),
+        ]
+
+        for path, param_key, action, handler in route_configs:
+
+            async def endpoint(
+                request: Request,
+                param_key: str = param_key,
+                action: str = action,
+                handler: Callable[[str], Any] = handler,
+            ):
+                name = request.path_params[param_key]
+                try:
+                    handler(name)
+                    return JSONResponse(
+                        {
+                            "message": f"{action.capitalize()}d {param_key.replace('_name', '')}: {name}"
+                        }
+                    )
+                except NotFoundError:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Unknown {param_key.replace('_name', '')}: {name}",
+                    )
+
+            self._additional_http_routes.append(
+                Route(path, endpoint=endpoint, methods=["POST"])
+            )
 
     def add_tool(self, tool: Tool) -> None:
         """Add a tool to the server.
