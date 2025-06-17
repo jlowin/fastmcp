@@ -7,39 +7,39 @@ from fastmcp import FastMCP
 
 class TestToolManagementRoutes:
     @pytest.fixture
-    def app(self):
+    def mcp(self):
         """Create a FastMCP server with test tools, resources, and prompts."""
-        app = FastMCP("TestServer")
+        mcp = FastMCP("TestServer")
 
         # Add a test tool
-        @app.tool
+        @mcp.tool
         def test_tool() -> str:
             """Test tool for tool management routes."""
             return "test_tool_result"
 
         # Add a test resource
-        @app.resource("data://test_resource")
+        @mcp.resource("data://test_resource")
         def test_resource() -> str:
             """Test resource for tool management routes."""
             return "test_resource_result"
 
         # Add a test prompt
-        @app.prompt
+        @mcp.prompt
         def test_prompt() -> str:
             """Test prompt for tool management routes."""
             return "test_prompt_result"
 
-        return app
+        return mcp
 
     @pytest.fixture
-    def client(self, app):
+    def client(self, mcp):
         """Create a test client for the FastMCP server."""
-        return TestClient(app.http_app())
+        return TestClient(mcp.http_app())
 
-    def test_enable_tool_route(self, client, app):
+    def test_enable_tool_route(self, client, mcp):
         """Test enabling a tool via the HTTP route."""
         # First disable the tool
-        tool = app._tool_manager.get_tool("test_tool")
+        tool = mcp._tool_manager.get_tool("test_tool")
         tool.enabled = False
 
         # Enable the tool via the HTTP route
@@ -49,13 +49,13 @@ class TestToolManagementRoutes:
         assert response.json() == {"message": "Enabled tool: test_tool"}
 
         # Verify the tool is enabled
-        tool = app._tool_manager.get_tool("test_tool")
+        tool = mcp._tool_manager.get_tool("test_tool")
         assert tool.enabled is True
 
-    def test_disable_tool_route(self, client, app):
+    def test_disable_tool_route(self, client, mcp):
         """Test disabling a tool via the HTTP route."""
         # First ensure the tool is enabled
-        tool = app._tool_manager.get_tool("test_tool")
+        tool = mcp._tool_manager.get_tool("test_tool")
         tool.enabled = True
 
         # Disable the tool via the HTTP route
@@ -65,47 +65,47 @@ class TestToolManagementRoutes:
         assert response.json() == {"message": "Disabled tool: test_tool"}
 
         # Verify the tool is disabled
-        tool = app._tool_manager.get_tool("test_tool")
+        tool = mcp._tool_manager.get_tool("test_tool")
         assert tool.enabled is False
 
     @pytest.mark.asyncio
-    async def test_enable_resource_route(self, client, app):
+    async def test_enable_resource_route(self, client, mcp):
         """Test enabling a resource via the HTTP route."""
         # First disable the resource
-        resource = await app._resource_manager.get_resource("test_resource")
+        resource = await mcp._resource_manager.get_resource("data://test_resource")
         resource.enabled = False
 
         # Enable the resource via the HTTP route
-        response = client.post("/resources/test_resource/enable")
+        response = client.post("/resources/data://test_resource/enable")
 
         assert response.status_code == status.HTTP_200_OK
-        assert response.json() == {"message": "Enabled resource: test_resource"}
+        assert response.json() == {"message": "Enabled resource: data://test_resource"}
 
         # Verify the resource is enabled
-        resource = await app._resource_manager.get_resource("test_resource")
+        resource = await mcp._resource_manager.get_resource("data://test_resource")
         assert resource.enabled is True
 
     @pytest.mark.asyncio
-    async def test_disable_resource_route(self, client, app):
+    async def test_disable_resource_route(self, client, mcp):
         """Test disabling a resource via the HTTP route."""
         # First ensure the resource is enabled
-        resource = await app._resource_manager.get_resource("test_resource")
+        resource = await mcp._resource_manager.get_resource("data://test_resource")
         resource.enabled = True
 
         # Disable the resource via the HTTP route
-        response = client.post("/resources/test_resource/disable")
+        response = client.post("/resources/data://test_resource/disable")
 
         assert response.status_code == status.HTTP_200_OK
-        assert response.json() == {"message": "Disabled resource: test_resource"}
+        assert response.json() == {"message": "Disabled resource: data://test_resource"}
 
         # Verify the resource is disabled
-        resource = await app._resource_manager.get_resource("test_resource")
+        resource = await mcp._resource_manager.get_resource("data://test_resource")
         assert resource.enabled is False
 
-    def test_enable_prompt_route(self, client, app):
+    def test_enable_prompt_route(self, client, mcp):
         """Test enabling a prompt via the HTTP route."""
         # First disable the prompt
-        prompt = app._prompt_manager.get_prompt("test_prompt")
+        prompt = mcp._prompt_manager.get_prompt("test_prompt")
         prompt.enabled = False
 
         # Enable the prompt via the HTTP route
@@ -115,13 +115,13 @@ class TestToolManagementRoutes:
         assert response.json() == {"message": "Enabled prompt: test_prompt"}
 
         # Verify the prompt is enabled
-        prompt = app._prompt_manager.get_prompt("test_prompt")
+        prompt = mcp._prompt_manager.get_prompt("test_prompt")
         assert prompt.enabled is True
 
-    def test_disable_prompt_route(self, client, app):
+    def test_disable_prompt_route(self, client, mcp):
         """Test disabling a prompt via the HTTP route."""
         # First ensure the prompt is enabled
-        prompt = app._prompt_manager.get_prompt("test_prompt")
+        prompt = mcp._prompt_manager.get_prompt("test_prompt")
         prompt.enabled = True
 
         # Disable the prompt via the HTTP route
@@ -131,7 +131,7 @@ class TestToolManagementRoutes:
         assert response.json() == {"message": "Disabled prompt: test_prompt"}
 
         # Verify the prompt is disabled
-        prompt = app._prompt_manager.get_prompt("test_prompt")
+        prompt = mcp._prompt_manager.get_prompt("test_prompt")
         assert prompt.enabled is False
 
     def test_enable_nonexistent_tool(self, client):
