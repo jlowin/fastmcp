@@ -157,7 +157,6 @@ class FastMCP(Generic[LifespanResultT]):
         )
         self._mounted_servers: dict[str, MountedServer] = {}
         self._additional_http_routes: list[BaseRoute] = []
-
         self._tool_manager = ToolManager(
             duplicate_behavior=on_duplicate_tools,
             mask_error_details=mask_error_details,
@@ -700,7 +699,7 @@ class FastMCP(Generic[LifespanResultT]):
         raise NotFoundError(f"Unknown tool: {name}")
 
     def _enable_resource(self, name: str) -> Resource:
-        """Handle 'enableResource' requests. Only works for fastmcp resources.
+        """Handle 'enableResource' requests.
 
         Args:
             name: The name of the resource to enable
@@ -717,7 +716,7 @@ class FastMCP(Generic[LifespanResultT]):
         raise NotFoundError(f"Unknown resource: {name}")
 
     def _disable_resource(self, name: str) -> Resource:
-        """Handle 'disableResource' requests. Only works for fastmcp resources.
+        """Handle 'disableResource' requests.
 
         Args:
             name: The name of the resource to disable
@@ -734,7 +733,7 @@ class FastMCP(Generic[LifespanResultT]):
         raise NotFoundError(f"Unknown resource: {name}")
 
     def _enable_prompt(self, name: str) -> Prompt:
-        """Handle 'enablePrompt' requests. Only works for fastmcp prompts.
+        """Handle 'enablePrompt' requests.
 
         Args:
             name: The name of the prompt to enable
@@ -751,7 +750,7 @@ class FastMCP(Generic[LifespanResultT]):
         raise NotFoundError(f"Unknown prompt: {name}")
 
     def _disable_prompt(self, name: str) -> Prompt:
-        """Handle 'disablePrompt' requests. Only works for fastmcp prompts.
+        """Handle 'disablePrompt' requests.
 
         Args:
             name: The name of the prompt to disable
