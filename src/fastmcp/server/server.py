@@ -666,13 +666,13 @@ class FastMCP(Generic[LifespanResultT]):
         raise NotFoundError(f"Unknown prompt: {name}")
 
     def _enable_tool(self, name: str) -> Tool:
-        """Handle 'enableTool' requests. Only works for fastmcp tools.
+        """Handle 'enableTool' requests.
 
         Args:
             name: The name of the tool to enable
 
         Returns:
-             containing the tool messages
+            The tool that was enabled
         """
         logger.debug("Enabling tool: %s", name)
 
@@ -683,13 +683,13 @@ class FastMCP(Generic[LifespanResultT]):
         raise NotFoundError(f"Unknown tool: {name}")
 
     def _disable_tool(self, name: str) -> Tool:
-        """Handle 'disableTool' requests. Only works for fastmcp tools.
+        """Handle 'disableTool' requests.
 
         Args:
             name: The name of the tool to disable
 
         Returns:
-             containing the tool messages
+            The tool that was disabled
         """
         logger.debug("Disable tool: %s", name)
 
@@ -706,7 +706,7 @@ class FastMCP(Generic[LifespanResultT]):
             name: The name of the resource to enable
 
         Returns:
-             containing the tool messages
+            Resource containing the tool messages
         """
         logger.debug("Enabling resource: %s", name)
 
@@ -723,7 +723,7 @@ class FastMCP(Generic[LifespanResultT]):
             name: The name of the resource to disable
 
         Returns:
-             containing the tool messages
+            Resource containing the tool messages
         """
         logger.debug("Disable resource: %s", name)
 
@@ -740,7 +740,7 @@ class FastMCP(Generic[LifespanResultT]):
             name: The name of the prompt to enable
 
         Returns:
-             containing the tool messages
+            Prompt containing the tool messages
         """
         logger.debug("Enabling prompt: %s", name)
 
@@ -757,7 +757,7 @@ class FastMCP(Generic[LifespanResultT]):
             name: The name of the prompt to disable
 
         Returns:
-             containing the tool messages
+            Prompt containing the tool messages
         """
         logger.debug("Disable prompt: %s", name)
 
@@ -768,6 +768,8 @@ class FastMCP(Generic[LifespanResultT]):
         raise NotFoundError(f"Unknown prompt: {name}")
 
     def _tool_management_routes(self):
+        """Set up routes for enabling/disabling tools, resources, and prompts."""
+
         route_configs = [
             # (path_template, param_key, action, handler_method)
             ("/tools/{tool_name}/enable", "tool_name", "enable", self._enable_tool),

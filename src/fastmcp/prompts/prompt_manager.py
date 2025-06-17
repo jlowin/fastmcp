@@ -53,8 +53,6 @@ class PromptManager:
 
     def enable_prompt(self, key: str) -> Prompt:
         """Enable a prompt."""
-        logger.info("Enabled prompt: %s", key)
-
         if key in self._prompts:
             prompt = self._prompts[key]
             prompt.enable()

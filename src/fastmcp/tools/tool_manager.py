@@ -62,8 +62,6 @@ class ToolManager:
 
     def enable_tool(self, key: str) -> Tool:
         """Enable a tool."""
-        logger.info("Enabled tool: %s", key)
-
         if key in self._tools:
             tool = self._tools[key]
             tool.enable()

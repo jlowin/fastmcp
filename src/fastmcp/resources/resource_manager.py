@@ -320,8 +320,6 @@ class ResourceManager:
 
     def enable_resource(self, key: str) -> Resource:
         """Enable a resource."""
-        logger.info("Enabled resource: %s", key)
-
         if key in self._resources:
             resource = self._resources[key]
             resource.enable()
