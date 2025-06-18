@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any, Generic, Literal, overload
 
 import anyio
 import httpx
+from starlette.applications import Starlette
 import uvicorn
 from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.lowlevel.server import LifespanResultT, NotificationOptions
@@ -200,8 +201,10 @@ class FastMCP(Generic[LifespanResultT]):
         self._setup_handlers()
         self.dependencies = dependencies or fastmcp.settings.server_dependencies
 
-        # Set up the tool management routes
-        self._tool_management_routes()
+        # Set up the component management routes
+        self._component_management_routes: list[BaseRoute] = [] 
+        self._set_up_component_management_routes()
+        self._component_management_router: Starlette = Starlette(routes=self._component_management_routes)
 
         # handle deprecated settings
         self._handle_deprecated_settings(
@@ -683,7 +686,7 @@ class FastMCP(Generic[LifespanResultT]):
         for server in self._mounted_servers.values():
             if server.match_tool(name):
                 tool_key = server.strip_tool_prefix(name)
-                return await self._enable_tool(tool_key)
+                return await server.server._enable_tool(tool_key)
 
         raise NotFoundError(f"Unknown tool: {name}")
 
@@ -706,7 +709,7 @@ class FastMCP(Generic[LifespanResultT]):
         for server in self._mounted_servers.values():
             if server.match_tool(name):
                 tool_key = server.strip_tool_prefix(name)
-                return await self._disable_tool(tool_key)
+                return await server.server._disable_tool(tool_key)
 
         raise NotFoundError(f"Unknown tool: {name}")
 
@@ -775,7 +778,7 @@ class FastMCP(Generic[LifespanResultT]):
         for server in self._mounted_servers.values():
             if server.match_prompt(name):
                 prompt_name = server.strip_prompt_prefix(name)
-                return await self._enable_prompt(prompt_name)
+                return await server.server._enable_prompt(prompt_name)
 
         raise NotFoundError(f"Unknown prompt: {name}")
 
@@ -798,15 +801,15 @@ class FastMCP(Generic[LifespanResultT]):
         for server in self._mounted_servers.values():
             if server.match_prompt(name):
                 prompt_name = server.strip_prompt_prefix(name)
-                return await self._enable_prompt(prompt_name)
+                return await server.server._enable_prompt(prompt_name)
 
         raise NotFoundError(f"Unknown prompt: {name}")
 
-    def _tool_management_routes(self):
+    def _set_up_component_management_routes(self):
         """Set up routes for enabling/disabling tools, resources, and prompts."""
 
         route_configs = [
-            # (path_template, param_key, action, handler_method)
+            # (component, path_template, param_key, action, handler_method)
             (
                 "tool",
                 "/tools/{tool_name}/enable",
@@ -860,6 +863,7 @@ class FastMCP(Generic[LifespanResultT]):
                 action: str = action,
                 handler: Callable[[str], Any] = handler,
             ):
+
                 name = request.path_params[param_key]
 
                 try:
@@ -873,10 +877,10 @@ class FastMCP(Generic[LifespanResultT]):
                         detail=f"Unknown {component}: {name}",
                     )
 
-            self._additional_http_routes.append(
+            self._component_management_routes.append(
                 Route(path, endpoint=endpoint, methods=["POST"])
             )
-
+    
     def add_tool(self, tool: Tool) -> None:
         """Add a tool to the server.
 

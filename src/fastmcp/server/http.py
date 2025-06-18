@@ -198,6 +198,16 @@ def create_sse_app(
                 app=RequireAuthMiddleware(sse.handle_post_message, required_scopes),
             )
         )
+        server_routes.append(
+            Mount(
+                "/",
+                app=RequireAuthMiddleware(
+                    server._component_management_router,
+                    required_scopes
+                ),
+            )
+        )
+
     else:
         # No auth required
         async def sse_endpoint(request: Request) -> Response:
@@ -216,6 +226,7 @@ def create_sse_app(
                 app=sse.handle_post_message,
             )
         )
+        server_routes.extend(server._component_management_routes)
 
     # Add custom routes with lowest precedence
     if routes:
@@ -321,6 +332,15 @@ def create_streamable_http_app(
                 app=RequireAuthMiddleware(handle_streamable_http, required_scopes),
             )
         )
+        server_routes.append(
+            Mount(
+                "/",
+                app=RequireAuthMiddleware(
+                    server._component_management_router,
+                    required_scopes
+                ),
+            )
+        )    
     else:
         # No auth required
         server_routes.append(
@@ -329,6 +349,7 @@ def create_streamable_http_app(
                 app=handle_streamable_http,
             )
         )
+        server_routes.extend(server._component_management_routes)
 
     # Add custom routes with lowest precedence
     if routes:
@@ -358,3 +379,4 @@ def create_streamable_http_app(
     app.state.path = streamable_http_path
 
     return app
+
