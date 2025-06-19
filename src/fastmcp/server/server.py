@@ -33,8 +33,8 @@ from mcp.types import Resource as MCPResource
 from mcp.types import ResourceTemplate as MCPResourceTemplate
 from mcp.types import Tool as MCPTool
 from pydantic import AnyUrl
-from starlette.applications import Starlette
 from starlette.exceptions import HTTPException
+from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
@@ -202,11 +202,8 @@ class FastMCP(Generic[LifespanResultT]):
         self.dependencies = dependencies or fastmcp.settings.server_dependencies
 
         # Set up the component management routes
-        self._component_management_routes: list[BaseRoute] = []
-        self._set_up_component_management_routes()
-        self._component_management_router: Starlette = Starlette(
-            routes=self._component_management_routes
-        )
+        self._component_management_routes: list[Route] = []
+        self._set_up_component_management_router()
 
         # handle deprecated settings
         self._handle_deprecated_settings(
@@ -807,54 +804,57 @@ class FastMCP(Generic[LifespanResultT]):
 
         raise NotFoundError(f"Unknown prompt: {name}")
 
-    def _set_up_component_management_routes(self):
+    def _set_up_component_management_router(self):
         """Set up routes for enabling/disabling tools, resources, and prompts."""
 
         route_configs = [
             # (component, path_template, param_key, action, handler_method)
             (
                 "tool",
-                "/tools/{tool_name}/enable",
+                "/{tool_name}/enable",
                 "tool_name",
                 "enable",
                 self._enable_tool,
             ),
             (
                 "tool",
-                "/tools/{tool_name}/disable",
+                "/{tool_name}/disable",
                 "tool_name",
                 "disable",
                 self._disable_tool,
             ),
             (
                 "resource",
-                "/resources/{uri:path}/enable",
+                "/{uri:path}/enable",
                 "uri",
                 "enable",
                 self._enable_resource,
             ),
             (
                 "resource",
-                "/resources/{uri:path}/disable",
+                "/{uri:path}/disable",
                 "uri",
                 "disable",
                 self._disable_resource,
             ),
             (
                 "prompt",
-                "/prompts/{prompt_name}/enable",
+                "/{prompt_name}/enable",
                 "prompt_name",
                 "enable",
                 self._enable_prompt,
             ),
             (
                 "prompt",
-                "/prompts/{prompt_name}/disable",
+                "/{prompt_name}/disable",
                 "prompt_name",
                 "disable",
                 self._disable_prompt,
             ),
         ]
+        tool_routes: list[Route] = []
+        resource_routes: list[Route] = []
+        prompt_routes: list[Route] = []
 
         for component, path, param_key, action, handler in route_configs:
 
@@ -877,10 +877,22 @@ class FastMCP(Generic[LifespanResultT]):
                         status_code=404,
                         detail=f"Unknown {component}: {name}",
                     )
+            route_path = f"/{component}s{path}"
+            route = Route(route_path, endpoint=endpoint, methods=["POST"])
+            route_with_prefix = Route(path, endpoint=endpoint, methods=["POST"])
 
-            self._component_management_routes.append(
-                Route(path, endpoint=endpoint, methods=["POST"])
-            )
+            self._component_management_routes.append(route)
+            if component == "tool":
+                tool_routes.append(route_with_prefix)
+            elif component == "resource":
+                resource_routes.append(route_with_prefix)
+            elif component == "prompt":
+                prompt_routes.append(route_with_prefix)
+
+        self._tool_router: Starlette = Starlette(routes=tool_routes)
+        self._resource_router: Starlette = Starlette(routes=resource_routes)
+        self._prompt_router: Starlette = Starlette(routes=prompt_routes)
+
 
     def add_tool(self, tool: Tool) -> None:
         """Add a tool to the server.

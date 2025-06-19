@@ -17,6 +17,7 @@ from mcp.server.streamable_http import EventStore
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
+from starlette.applications import Starlette
 from starlette.middleware.authentication import AuthenticationMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
@@ -200,13 +201,31 @@ def create_sse_app(
         )
         server_routes.append(
             Mount(
-                "/",
+                "/tools",
                 app=RequireAuthMiddleware(
-                    server._component_management_router,
+                    server._tool_router,
                     required_scopes
                 ),
             )
-        )
+        )    
+        server_routes.append(
+            Mount(
+                "/resources",
+                app=RequireAuthMiddleware(
+                    server._resource_router,
+                    required_scopes
+                ),
+            )
+        )   
+        server_routes.append(
+            Mount(
+                "/prompts",
+                app=RequireAuthMiddleware(
+                    server._prompt_router,
+                    required_scopes
+                ),
+            )
+        )  
 
     else:
         # No auth required
@@ -227,6 +246,7 @@ def create_sse_app(
             )
         )
         server_routes.extend(server._component_management_routes)
+
 
     # Add custom routes with lowest precedence
     if routes:
@@ -334,13 +354,32 @@ def create_streamable_http_app(
         )
         server_routes.append(
             Mount(
-                "/",
+                "/tools",
                 app=RequireAuthMiddleware(
-                    server._component_management_router,
+                    server._tool_router,
                     required_scopes
                 ),
             )
         )    
+        server_routes.append(
+            Mount(
+                "/resources",
+                app=RequireAuthMiddleware(
+                    server._resource_router,
+                    required_scopes
+                ),
+            )
+        )   
+        server_routes.append(
+            Mount(
+                "/prompts",
+                app=RequireAuthMiddleware(
+                    server._prompt_router,
+                    required_scopes
+                ),
+            )
+        )   
+   
     else:
         # No auth required
         server_routes.append(
