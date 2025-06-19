@@ -6,7 +6,9 @@ from fastmcp import FastMCP
 from fastmcp.server.auth.providers.bearer import BearerAuthProvider, RSAKeyPair
 
 
-class TestToolManagementRoutes:
+class TestComponentManagementRoutes:
+    """Test the component management routes for tools, resources, and prompts."""
+
     @pytest.fixture
     def mounted_mcp(self):
         """Create a FastMCP server with a mounted sub-server and a tool, resource, and prompt on the sub-server."""
@@ -270,8 +272,8 @@ class TestToolManagementRoutes:
         assert response.text == "Unknown prompt: nonexistent_prompt"
 
 
-class TestAuthToolManagement:
-    """Test authentication requirements for tool management routes."""
+class TestAuthComponentManagementRoutes:
+    """Test the component management routes with authentication for tools, resources, and prompts."""
 
     def setup_method(self):
         """Set up test fixtures."""
