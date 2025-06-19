@@ -18,7 +18,6 @@ from typing import TYPE_CHECKING, Any, Generic, Literal, overload
 
 import anyio
 import httpx
-from starlette.applications import Starlette
 import uvicorn
 from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.lowlevel.server import LifespanResultT, NotificationOptions
@@ -34,6 +33,7 @@ from mcp.types import Resource as MCPResource
 from mcp.types import ResourceTemplate as MCPResourceTemplate
 from mcp.types import Tool as MCPTool
 from pydantic import AnyUrl
+from starlette.applications import Starlette
 from starlette.exceptions import HTTPException
 from starlette.middleware import Middleware
 from starlette.requests import Request
@@ -202,9 +202,11 @@ class FastMCP(Generic[LifespanResultT]):
         self.dependencies = dependencies or fastmcp.settings.server_dependencies
 
         # Set up the component management routes
-        self._component_management_routes: list[BaseRoute] = [] 
+        self._component_management_routes: list[BaseRoute] = []
         self._set_up_component_management_routes()
-        self._component_management_router: Starlette = Starlette(routes=self._component_management_routes)
+        self._component_management_router: Starlette = Starlette(
+            routes=self._component_management_routes
+        )
 
         # handle deprecated settings
         self._handle_deprecated_settings(
@@ -801,7 +803,7 @@ class FastMCP(Generic[LifespanResultT]):
         for server in self._mounted_servers.values():
             if server.match_prompt(name):
                 prompt_name = server.strip_prompt_prefix(name)
-                return await server.server._enable_prompt(prompt_name)
+                return await server.server._disable_prompt(prompt_name)
 
         raise NotFoundError(f"Unknown prompt: {name}")
 
@@ -863,7 +865,6 @@ class FastMCP(Generic[LifespanResultT]):
                 action: str = action,
                 handler: Callable[[str], Any] = handler,
             ):
-
                 name = request.path_params[param_key]
 
                 try:
@@ -880,7 +881,7 @@ class FastMCP(Generic[LifespanResultT]):
             self._component_management_routes.append(
                 Route(path, endpoint=endpoint, methods=["POST"])
             )
-    
+
     def add_tool(self, tool: Tool) -> None:
         """Add a tool to the server.
 
