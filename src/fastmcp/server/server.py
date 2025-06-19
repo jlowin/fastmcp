@@ -33,11 +33,9 @@ from mcp.types import Resource as MCPResource
 from mcp.types import ResourceTemplate as MCPResourceTemplate
 from mcp.types import Tool as MCPTool
 from pydantic import AnyUrl
-from starlette.exceptions import HTTPException
-from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
+from starlette.responses import Response
 from starlette.routing import BaseRoute, Route
 
 import fastmcp
@@ -200,10 +198,6 @@ class FastMCP(Generic[LifespanResultT]):
         # Set up MCP protocol handlers
         self._setup_handlers()
         self.dependencies = dependencies or fastmcp.settings.server_dependencies
-
-        # Set up the component management routes
-        self._component_management_routes: list[Route] = []
-        self._set_up_component_management_router()
 
         # handle deprecated settings
         self._handle_deprecated_settings(
@@ -803,96 +797,6 @@ class FastMCP(Generic[LifespanResultT]):
                 return await server.server._disable_prompt(prompt_name)
 
         raise NotFoundError(f"Unknown prompt: {name}")
-
-    def _set_up_component_management_router(self):
-        """Set up routes for enabling/disabling tools, resources, and prompts."""
-
-        route_configs = [
-            # (component, path_template, param_key, action, handler_method)
-            (
-                "tool",
-                "/{tool_name}/enable",
-                "tool_name",
-                "enable",
-                self._enable_tool,
-            ),
-            (
-                "tool",
-                "/{tool_name}/disable",
-                "tool_name",
-                "disable",
-                self._disable_tool,
-            ),
-            (
-                "resource",
-                "/{uri:path}/enable",
-                "uri",
-                "enable",
-                self._enable_resource,
-            ),
-            (
-                "resource",
-                "/{uri:path}/disable",
-                "uri",
-                "disable",
-                self._disable_resource,
-            ),
-            (
-                "prompt",
-                "/{prompt_name}/enable",
-                "prompt_name",
-                "enable",
-                self._enable_prompt,
-            ),
-            (
-                "prompt",
-                "/{prompt_name}/disable",
-                "prompt_name",
-                "disable",
-                self._disable_prompt,
-            ),
-        ]
-        tool_routes: list[Route] = []
-        resource_routes: list[Route] = []
-        prompt_routes: list[Route] = []
-
-        for component, path, param_key, action, handler in route_configs:
-
-            async def endpoint(
-                request: Request,
-                component: str = component,
-                param_key: str = param_key,
-                action: str = action,
-                handler: Callable[[str], Any] = handler,
-            ):
-                name = request.path_params[param_key]
-
-                try:
-                    await handler(name)
-                    return JSONResponse(
-                        {"message": f"{action.capitalize()}d {component}: {name}"}
-                    )
-                except NotFoundError:
-                    raise HTTPException(
-                        status_code=404,
-                        detail=f"Unknown {component}: {name}",
-                    )
-            route_path = f"/{component}s{path}"
-            route = Route(route_path, endpoint=endpoint, methods=["POST"])
-            route_with_prefix = Route(path, endpoint=endpoint, methods=["POST"])
-
-            self._component_management_routes.append(route)
-            if component == "tool":
-                tool_routes.append(route_with_prefix)
-            elif component == "resource":
-                resource_routes.append(route_with_prefix)
-            elif component == "prompt":
-                prompt_routes.append(route_with_prefix)
-
-        self._tool_router: Starlette = Starlette(routes=tool_routes)
-        self._resource_router: Starlette = Starlette(routes=resource_routes)
-        self._prompt_router: Starlette = Starlette(routes=prompt_routes)
-
 
     def add_tool(self, tool: Tool) -> None:
         """Add a tool to the server.

@@ -3,7 +3,8 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator, Callable, Generator
 from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar
-from typing import TYPE_CHECKING
+from http.client import HTTPException
+from typing import TYPE_CHECKING, Any
 
 from mcp.server.auth.middleware.auth_context import AuthContextMiddleware
 from mcp.server.auth.middleware.bearer_auth import (
@@ -19,11 +20,13 @@ from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.applications import Starlette
 from starlette.middleware.authentication import AuthenticationMiddleware
+from starlette.exceptions import HTTPException
 from starlette.requests import Request
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 from starlette.routing import BaseRoute, Mount, Route
 from starlette.types import Lifespan, Receive, Scope, Send
 
+from fastmcp.exceptions import NotFoundError
 from fastmcp.server.auth.auth import OAuthProvider
 from fastmcp.utilities.logging import get_logger
 
@@ -107,6 +110,93 @@ def setup_auth_middleware_and_routes(
 
     return middleware, auth_routes, required_scopes
 
+def set_up_component_management_routes(server, required_scopes: list[str] | None) -> list[Route] | list[Mount]:
+    """Set up routes for enabling/disabling tools, resources, and prompts."""
+    route_configs = {
+        "tool": {
+            "param": "tool_name",
+            "enable": server._enable_tool,
+            "disable": server._disable_tool,
+        },
+        "resource": {
+            "param": "uri:path",
+            "enable": server._enable_resource,
+            "disable": server._disable_resource,
+        },
+        "prompt": {
+            "param": "prompt_name",
+            "enable": server._enable_prompt,
+            "disable": server._disable_prompt,
+        },
+    }
+
+    tool_routes: list[Route] = []
+    resource_routes: list[Route] = []
+    prompt_routes: list[Route] = []
+    component_management_routes: list[Route] = []
+
+    for component in route_configs:
+        config = route_configs[component]
+        for action in ["enable", "disable"]:
+            path = f"/{{{config['param']}}}/{action}"
+            async def endpoint(
+                request: Request,
+                action: str = action,
+                component: str = component,
+                config: dict[str, Any] = config,
+            ):
+
+                name = request.path_params[config["param"].split(":")[0]]
+
+                try:
+                    await config[action](name)
+                    return JSONResponse(
+                        {"message": f"{action.capitalize()}d {component}: {name}"}
+                    )
+                except NotFoundError:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Unknown {component}: {name}",
+                    )
+
+            route_path = f"/{component}s{path}"
+            route = Route(route_path, endpoint=endpoint, methods=["POST"])
+            route_without_prefix = Route(path, endpoint=endpoint, methods=["POST"])
+
+            component_management_routes.append(route)
+            if component == "tool":
+                tool_routes.append(route_without_prefix)
+            elif component == "resource":
+                resource_routes.append(route_without_prefix)
+            elif component == "prompt":
+                prompt_routes.append(route_without_prefix)
+
+    if required_scopes is None:
+        return component_management_routes
+    else:
+        return [
+            Mount(
+                "/tools",
+                app=RequireAuthMiddleware(
+                    Starlette(routes=tool_routes),
+                    required_scopes
+                ),
+            ),
+            Mount(
+                "/resources",
+                app=RequireAuthMiddleware(
+                    Starlette(routes=resource_routes),
+                    required_scopes
+                ),
+            ),
+            Mount(
+                "/prompts",
+                app=RequireAuthMiddleware(
+                    Starlette(routes=prompt_routes),
+                    required_scopes
+                ),
+            ),
+        ]
 
 def create_base_app(
     routes: list[BaseRoute],
@@ -199,34 +289,7 @@ def create_sse_app(
                 app=RequireAuthMiddleware(sse.handle_post_message, required_scopes),
             )
         )
-        server_routes.append(
-            Mount(
-                "/tools",
-                app=RequireAuthMiddleware(
-                    server._tool_router,
-                    required_scopes
-                ),
-            )
-        )    
-        server_routes.append(
-            Mount(
-                "/resources",
-                app=RequireAuthMiddleware(
-                    server._resource_router,
-                    required_scopes
-                ),
-            )
-        )   
-        server_routes.append(
-            Mount(
-                "/prompts",
-                app=RequireAuthMiddleware(
-                    server._prompt_router,
-                    required_scopes
-                ),
-            )
-        )  
-
+        server_routes.extend(set_up_component_management_routes(server, required_scopes))
     else:
         # No auth required
         async def sse_endpoint(request: Request) -> Response:
@@ -245,8 +308,7 @@ def create_sse_app(
                 app=sse.handle_post_message,
             )
         )
-        server_routes.extend(server._component_management_routes)
-
+        server_routes.extend(set_up_component_management_routes(server, None))
 
     # Add custom routes with lowest precedence
     if routes:
@@ -352,34 +414,7 @@ def create_streamable_http_app(
                 app=RequireAuthMiddleware(handle_streamable_http, required_scopes),
             )
         )
-        server_routes.append(
-            Mount(
-                "/tools",
-                app=RequireAuthMiddleware(
-                    server._tool_router,
-                    required_scopes
-                ),
-            )
-        )    
-        server_routes.append(
-            Mount(
-                "/resources",
-                app=RequireAuthMiddleware(
-                    server._resource_router,
-                    required_scopes
-                ),
-            )
-        )   
-        server_routes.append(
-            Mount(
-                "/prompts",
-                app=RequireAuthMiddleware(
-                    server._prompt_router,
-                    required_scopes
-                ),
-            )
-        )   
-   
+        server_routes.extend(set_up_component_management_routes(server, required_scopes))
     else:
         # No auth required
         server_routes.append(
@@ -388,7 +423,7 @@ def create_streamable_http_app(
                 app=handle_streamable_http,
             )
         )
-        server_routes.extend(server._component_management_routes)
+        server_routes.extend(set_up_component_management_routes(server, None))
 
     # Add custom routes with lowest precedence
     if routes:

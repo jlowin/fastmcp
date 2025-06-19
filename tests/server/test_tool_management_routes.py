@@ -1,3 +1,4 @@
+import asyncio
 import pytest
 from starlette import status
 from starlette.testclient import TestClient
@@ -351,3 +352,93 @@ class TestAuthToolManagement:
         assert response.status_code == 200
         assert response.json() == {"message": "Disabled tool: test_tool"}
         assert tool.enabled is False
+
+    @pytest.mark.asyncio
+    async def test_unauthorized_enable_resource(self):
+        """Test that unauthenticated requests to enable a resource are rejected."""
+        resource = await self.mcp._resource_manager.get_resource("data://test_resource")
+        resource.enabled = False
+
+        response = self.client.post("/resources/data://test_resource/enable")
+        assert response.status_code == 401
+        assert resource.enabled is False
+
+    @pytest.mark.asyncio
+    async def test_authorized_enable_resource(self):
+        """Test that authenticated requests to enable a resource are allowed."""
+        resource = await self.mcp._resource_manager.get_resource("data://test_resource")
+        resource.enabled = False
+
+        response = self.client.post(
+            "/resources/data://test_resource/enable", headers={"Authorization": "Bearer " + self.token}
+        )
+        assert response.status_code == 200
+        assert response.json() == {"message": "Enabled resource: data://test_resource"}
+        assert resource.enabled is True
+
+    @pytest.mark.asyncio
+    async def test_unauthorized_disable_resource(self):
+        """Test that unauthenticated requests to disable a resource are rejected."""
+        resource = await self.mcp._resource_manager.get_resource("data://test_resource")
+        resource.enabled = True
+
+        response = self.client.post("/resources/data://test_resource/disable")
+        assert response.status_code == 401
+        assert resource.enabled is True
+        
+    @pytest.mark.asyncio
+    async def test_authorized_disable_resource(self):
+        """Test that authenticated requests to disable a resource are allowed."""
+        resource = await self.mcp._resource_manager.get_resource("data://test_resource")
+        resource.enabled = True
+
+        response = self.client.post(
+            "/resources/data://test_resource/disable",
+            headers={"Authorization": "Bearer " + self.token},
+        )
+        assert response.status_code == 200
+        assert response.json() == {"message": "Disabled resource: data://test_resource"}
+        assert resource.enabled is False
+
+    def test_unauthorized_enable_prompt(self):
+        """Test that unauthenticated requests to enable a prompt are rejected."""
+        prompt = self.mcp._prompt_manager.get_prompt("test_prompt")
+        prompt.enabled = False
+
+        response = self.client.post("/prompts/test_prompt/enable")
+        assert response.status_code == 401
+        assert prompt.enabled is False
+
+    def test_authorized_enable_prompt(self):
+        """Test that authenticated requests to enable a prompt are allowed."""
+        prompt = self.mcp._prompt_manager.get_prompt("test_prompt")
+        prompt.enabled = False
+
+        response = self.client.post(
+            "/prompts/test_prompt/enable", headers={"Authorization": "Bearer " + self.token}
+        )
+        assert response.status_code == 200
+        assert response.json() == {"message": "Enabled prompt: test_prompt"}
+        assert prompt.enabled is True
+
+    def test_unauthorized_disable_prompt(self):
+        """Test that unauthenticated requests to disable a prompt are rejected."""
+        prompt = self.mcp._prompt_manager.get_prompt("test_prompt")
+        prompt.enabled = True
+
+        response = self.client.post("/prompts/test_prompt/disable")
+        assert response.status_code == 401
+        assert prompt.enabled is True
+
+    def test_authorized_disable_prompt(self):
+        """Test that authenticated requests to disable a prompt are allowed."""
+        prompt = self.mcp._prompt_manager.get_prompt("test_prompt")
+        prompt.enabled = True
+
+        response = self.client.post(
+            "/prompts/test_prompt/disable",
+            headers={"Authorization": "Bearer " + self.token},
+        )
+        assert response.status_code == 200
+        assert response.json() == {"message": "Disabled prompt: test_prompt"}
+        assert prompt.enabled is False
