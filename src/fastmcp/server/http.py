@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator, Callable, Generator
 from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar
-from http.client import HTTPException
 from typing import TYPE_CHECKING, Any
 
 from mcp.server.auth.middleware.auth_context import AuthContextMiddleware
@@ -17,10 +16,9 @@ from mcp.server.sse import SseServerTransport
 from mcp.server.streamable_http import EventStore
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from starlette.applications import Starlette
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware import Middleware
-from starlette.applications import Starlette
 from starlette.middleware.authentication import AuthenticationMiddleware
-from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import BaseRoute, Mount, Route
@@ -110,8 +108,17 @@ def setup_auth_middleware_and_routes(
 
     return middleware, auth_routes, required_scopes
 
-def set_up_component_management_routes(server, required_scopes: list[str] | None) -> list[Route] | list[Mount]:
-    """Set up routes for enabling/disabling tools, resources, and prompts."""
+
+def set_up_component_management_routes(
+    server, required_scopes: list[str] | None
+) -> list[Route] | list[Mount]:
+    """Set up routes for enabling/disabling tools, resources, and prompts.
+    Args:
+        server: The FastMCP server instance
+        required_scopes: Optional list of scopes required for these routes
+    Returns:
+        A list of Starlette routes or mounts for component management
+    """
     route_configs = {
         "tool": {
             "param": "tool_name",
@@ -139,13 +146,13 @@ def set_up_component_management_routes(server, required_scopes: list[str] | None
         config = route_configs[component]
         for action in ["enable", "disable"]:
             path = f"/{{{config['param']}}}/{action}"
+
             async def endpoint(
                 request: Request,
                 action: str = action,
                 component: str = component,
                 config: dict[str, Any] = config,
             ):
-
                 name = request.path_params[config["param"].split(":")[0]]
 
                 try:
@@ -154,7 +161,7 @@ def set_up_component_management_routes(server, required_scopes: list[str] | None
                         {"message": f"{action.capitalize()}d {component}: {name}"}
                     )
                 except NotFoundError:
-                    raise HTTPException(
+                    raise StarletteHTTPException(
                         status_code=404,
                         detail=f"Unknown {component}: {name}",
                     )
@@ -178,25 +185,23 @@ def set_up_component_management_routes(server, required_scopes: list[str] | None
             Mount(
                 "/tools",
                 app=RequireAuthMiddleware(
-                    Starlette(routes=tool_routes),
-                    required_scopes
+                    Starlette(routes=tool_routes), required_scopes
                 ),
             ),
             Mount(
                 "/resources",
                 app=RequireAuthMiddleware(
-                    Starlette(routes=resource_routes),
-                    required_scopes
+                    Starlette(routes=resource_routes), required_scopes
                 ),
             ),
             Mount(
                 "/prompts",
                 app=RequireAuthMiddleware(
-                    Starlette(routes=prompt_routes),
-                    required_scopes
+                    Starlette(routes=prompt_routes), required_scopes
                 ),
             ),
         ]
+
 
 def create_base_app(
     routes: list[BaseRoute],
@@ -289,7 +294,9 @@ def create_sse_app(
                 app=RequireAuthMiddleware(sse.handle_post_message, required_scopes),
             )
         )
-        server_routes.extend(set_up_component_management_routes(server, required_scopes))
+        server_routes.extend(
+            set_up_component_management_routes(server, required_scopes)
+        )
     else:
         # No auth required
         async def sse_endpoint(request: Request) -> Response:
@@ -414,7 +421,9 @@ def create_streamable_http_app(
                 app=RequireAuthMiddleware(handle_streamable_http, required_scopes),
             )
         )
-        server_routes.extend(set_up_component_management_routes(server, required_scopes))
+        server_routes.extend(
+            set_up_component_management_routes(server, required_scopes)
+        )
     else:
         # No auth required
         server_routes.append(
@@ -453,4 +462,3 @@ def create_streamable_http_app(
     app.state.path = streamable_http_path
 
     return app
-

@@ -1,4 +1,3 @@
-import asyncio
 import pytest
 from starlette import status
 from starlette.testclient import TestClient
@@ -370,7 +369,8 @@ class TestAuthToolManagement:
         resource.enabled = False
 
         response = self.client.post(
-            "/resources/data://test_resource/enable", headers={"Authorization": "Bearer " + self.token}
+            "/resources/data://test_resource/enable",
+            headers={"Authorization": "Bearer " + self.token},
         )
         assert response.status_code == 200
         assert response.json() == {"message": "Enabled resource: data://test_resource"}
@@ -385,7 +385,7 @@ class TestAuthToolManagement:
         response = self.client.post("/resources/data://test_resource/disable")
         assert response.status_code == 401
         assert resource.enabled is True
-        
+
     @pytest.mark.asyncio
     async def test_authorized_disable_resource(self):
         """Test that authenticated requests to disable a resource are allowed."""
@@ -415,7 +415,8 @@ class TestAuthToolManagement:
         prompt.enabled = False
 
         response = self.client.post(
-            "/prompts/test_prompt/enable", headers={"Authorization": "Bearer " + self.token}
+            "/prompts/test_prompt/enable",
+            headers={"Authorization": "Bearer " + self.token},
         )
         assert response.status_code == 200
         assert response.json() == {"message": "Enabled prompt: test_prompt"}
