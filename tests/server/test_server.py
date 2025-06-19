@@ -3,8 +3,6 @@ from typing import Annotated
 import pytest
 from mcp import McpError
 from pydantic import Field
-from starlette import status
-from starlette.testclient import TestClient
 
 from fastmcp import Client, FastMCP
 from fastmcp.exceptions import NotFoundError
@@ -959,6 +957,7 @@ class TestPromptDecorator:
             assert len(result.messages) == 1
             message = result.messages[0]
             assert message.content.text == "Static Hello, world!"  # type: ignore[attr-defined]
+
 
 class TestResourcePrefixHelpers:
     @pytest.mark.parametrize(

@@ -173,6 +173,24 @@ def seasonal_prompt(): return "Happy Holidays!"
 seasonal_prompt.disable()
 seasonal_prompt.enable()
 ```
+
+Additionally, you can manage prompt states via API endpoints:
+
+```bash
+# These endpoints are secured if authentication is enabled.
+POST /prompts/{prompt_name}/enable
+POST /prompts/{prompt_name}/disable
+```
+
+Usage example:
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer YOUR_TOKEN_HERE" \
+  -H "Content-Type: application/json" \
+  http://localhost:8001/prompts/TOOL_NAME/enable
+```
+
 ### Asynchronous Prompts
 
 FastMCP seamlessly supports both standard (`def`) and asynchronous (`async def`) functions as prompts.

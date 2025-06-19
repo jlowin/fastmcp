@@ -122,6 +122,23 @@ get_config.disable()
 get_config.enable()
 ```
 
+Additionally, you can manage resources states via API endpoints:
+
+```bash
+# These endpoints are secured if authentication is enabled
+POST /resources/{uri:path}/enable
+POST /resources/{uri:path}/disable
+```
+
+Usage example:
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer YOUR_TOKEN_HERE" \
+  -H "Content-Type: application/json" \
+  http://localhost:8001/resources/URI:PATH/enable
+```
+
 ### Accessing MCP Context
 
 <VersionBadge version="2.2.5" />
