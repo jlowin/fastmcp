@@ -117,7 +117,7 @@ def set_up_component_management_routes(
         server: The FastMCP server instance
         required_scopes: Optional list of scopes required for these routes
     Returns:
-        A list of Starlette routes or mounts for component management
+        A list of routes or mounts for component management
     """
     route_configs = {
         "tool": {
