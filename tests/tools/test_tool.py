@@ -1,4 +1,6 @@
 import json
+from dataclasses import dataclass
+from typing import Annotated, Any, TypedDict
 
 import pytest
 from mcp.types import (
@@ -8,7 +10,7 @@ from mcp.types import (
     TextContent,
     TextResourceContents,
 )
-from pydantic import AnyUrl, BaseModel
+from pydantic import AnyUrl, BaseModel, Field, TypeAdapter
 
 from fastmcp import FastMCP
 from fastmcp.client import Client
@@ -33,6 +35,7 @@ class TestToolFromFunction:
         assert len(tool.parameters["properties"]) == 2
         assert tool.parameters["properties"]["a"]["type"] == "integer"
         assert tool.parameters["properties"]["b"]["type"] == "integer"
+        assert tool.output_schema == {"type": "integer"}
 
     async def test_async_function(self):
         """Test registering and running an async function."""
@@ -242,6 +245,234 @@ class TestToolFromFunction:
         result = await tool.run(arguments={"items": [1, 2, 3, 4, 5]})
         assert isinstance(result[0], TextContent)
         assert result[0].text == "Custom serializer: 15"
+
+
+class TestToolFromFunctionOutputSchema:
+    async def test_no_return_annotation(self):
+        def func():
+            pass
+
+        tool = Tool.from_function(func)
+        assert tool.output_schema is None
+
+    @pytest.mark.parametrize(
+        "annotation",
+        [
+            None,
+            int,
+            float,
+            bool,
+            str,
+            int | float,
+            list[int],
+            list[int | float],
+            dict[str, int | None],
+            tuple[int, str],
+            set[int],
+            list[tuple[int, str]],
+        ],
+    )
+    async def test_simple_return_annotation(self, annotation):
+        def func() -> annotation:  # type: ignore
+            return 1
+
+        tool = Tool.from_function(func)
+        assert tool.output_schema == TypeAdapter(annotation).json_schema()
+
+    @pytest.mark.parametrize(
+        "annotation",
+        [
+            Any,
+            AnyUrl,
+            Annotated[int, Field(ge=1)],
+            Annotated[int, Field(ge=1)],
+        ],
+    )
+    async def test_complex_return_annotation(self, annotation):
+        def func() -> annotation:  # type: ignore
+            return 1
+
+        tool = Tool.from_function(func)
+        assert tool.output_schema == TypeAdapter(annotation).json_schema()
+
+    @pytest.mark.parametrize(
+        "annotation, expected",
+        [
+            (Image, ImageContent),
+            (Audio, AudioContent),
+            (File, EmbeddedResource),
+            (Image | int, ImageContent | int),
+            (Image | Audio, ImageContent | AudioContent),
+            (list[Image | Audio], list[ImageContent | AudioContent]),
+        ],
+    )
+    async def test_converted_return_annotation(self, annotation, expected):
+        def func() -> annotation:  # type: ignore
+            return 1
+
+        tool = Tool.from_function(func)
+        assert tool.output_schema == TypeAdapter(expected).json_schema()
+
+    async def test_dataclass_return_annotation(self):
+        @dataclass
+        class Person:
+            name: str
+            age: int
+
+        def func() -> Person:
+            return Person(name="John", age=30)
+
+        tool = Tool.from_function(func)
+        assert tool.output_schema == TypeAdapter(Person).json_schema()
+
+    async def test_base_model_return_annotation(self):
+        class Person(BaseModel):
+            name: str
+            age: int
+
+        def func() -> Person:
+            return Person(name="John", age=30)
+
+        tool = Tool.from_function(func)
+        assert tool.output_schema == TypeAdapter(Person).json_schema()
+
+    async def test_typeddict_return_annotation(self):
+        class Person(TypedDict):
+            name: str
+            age: int
+
+        def func() -> Person:
+            return Person(name="John", age=30)
+
+        tool = Tool.from_function(func)
+        assert tool.output_schema == TypeAdapter(Person).json_schema()
+
+    async def test_unserializable_return_annotation(self):
+        class Unserializable:
+            def __init__(self, data: Any):
+                self.data = data
+
+        def func() -> Unserializable:
+            return Unserializable(data="test")
+
+        tool = Tool.from_function(func)
+        assert tool.output_schema is None
+
+    async def test_mixed_unserializable_return_annotation(self):
+        class Unserializable:
+            def __init__(self, data: Any):
+                self.data = data
+
+        def func() -> Unserializable | int:
+            return Unserializable(data="test")
+
+        tool = Tool.from_function(func)
+        assert tool.output_schema is None
+
+    async def test_provided_output_schema_takes_precedence_over_json_compatible_annotation(
+        self,
+    ):
+        """Test that provided output_schema takes precedence over inferred schema from JSON-compatible annotation."""
+
+        def func() -> dict[str, int]:
+            return {"a": 1, "b": 2}
+
+        # Provide a custom output schema that differs from the inferred one
+        custom_schema = {"type": "string", "description": "Custom schema"}
+
+        tool = Tool.from_function(func, output_schema=custom_schema)
+        assert tool.output_schema == custom_schema
+
+    async def test_provided_output_schema_takes_precedence_over_complex_annotation(
+        self,
+    ):
+        """Test that provided output_schema takes precedence over inferred schema from complex annotation."""
+
+        def func() -> list[dict[str, int | float]]:
+            return [{"a": 1, "b": 2.5}]
+
+        # Provide a custom output schema that differs from the inferred one
+        custom_schema = {"type": "object", "properties": {"custom": {"type": "string"}}}
+
+        tool = Tool.from_function(func, output_schema=custom_schema)
+        assert tool.output_schema == custom_schema
+
+    async def test_provided_output_schema_takes_precedence_over_unserializable_annotation(
+        self,
+    ):
+        """Test that provided output_schema takes precedence over None schema from unserializable annotation."""
+
+        class Unserializable:
+            def __init__(self, data: Any):
+                self.data = data
+
+        def func() -> Unserializable:
+            return Unserializable(data="test")
+
+        # Provide a custom output schema even though the annotation is unserializable
+        custom_schema = {"type": "array", "items": {"type": "string"}}
+
+        tool = Tool.from_function(func, output_schema=custom_schema)
+        assert tool.output_schema == custom_schema
+
+    async def test_provided_output_schema_takes_precedence_over_no_annotation(self):
+        """Test that provided output_schema takes precedence over None schema from no annotation."""
+
+        def func():
+            return "hello"
+
+        # Provide a custom output schema even though there's no return annotation
+        custom_schema = {"type": "number", "minimum": 0}
+
+        tool = Tool.from_function(func, output_schema=custom_schema)
+        assert tool.output_schema == custom_schema
+
+    async def test_provided_output_schema_takes_precedence_over_converted_annotation(
+        self,
+    ):
+        """Test that provided output_schema takes precedence over converted schema from Image/Audio/File annotations."""
+
+        def func() -> Image:
+            return Image(data=b"test")
+
+        # Provide a custom output schema that differs from the converted ImageContent schema
+        custom_schema = {
+            "type": "object",
+            "properties": {"custom_image": {"type": "string"}},
+        }
+
+        tool = Tool.from_function(func, output_schema=custom_schema)
+        assert tool.output_schema == custom_schema
+
+    async def test_provided_output_schema_takes_precedence_over_union_annotation(self):
+        """Test that provided output_schema takes precedence over inferred schema from union annotation."""
+
+        def func() -> str | int | None:
+            return "hello"
+
+        # Provide a custom output schema that differs from the inferred union schema
+        custom_schema = {"type": "boolean"}
+
+        tool = Tool.from_function(func, output_schema=custom_schema)
+        assert tool.output_schema == custom_schema
+
+    async def test_provided_output_schema_takes_precedence_over_pydantic_annotation(
+        self,
+    ):
+        """Test that provided output_schema takes precedence over inferred schema from Pydantic model annotation."""
+
+        class Person(BaseModel):
+            name: str
+            age: int
+
+        def func() -> Person:
+            return Person(name="John", age=30)
+
+        # Provide a custom output schema that differs from the inferred Person schema
+        custom_schema = {"type": "array", "items": {"type": "number"}}
+
+        tool = Tool.from_function(func, output_schema=custom_schema)
+        assert tool.output_schema == custom_schema
 
 
 class TestLegacyToolJsonParsing:
