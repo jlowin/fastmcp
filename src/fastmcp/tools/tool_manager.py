@@ -110,6 +110,54 @@ class ToolManager:
         tools_dict = await self._load_tools(via_server=True)
         return list(tools_dict.values())
 
+    async def enable_tool(self, key: str) -> Tool:
+        """Enable a tool."""
+        # 1. Check local tools first. The server will have already applied its filter.
+        if key in self._tools:
+            tool = await self.get_tool(key)
+            tool.enable()
+            return tool
+
+        # 2. Check mounted servers using the filtered protocol path.
+        for mounted in reversed(self._mounted_servers):
+            if mounted.prefix:
+                if key.startswith(f"{mounted.prefix}_"):
+                    try:
+                        tool_key = key.removeprefix(f"{mounted.prefix}_")
+                        return await mounted.server._tool_manager.enable_tool(tool_key)
+                    except NotFoundError:
+                        logger.debug(
+                            f"Tool {key!r} not found in mounted server: {mounted.prefix}"
+                        )
+                else:
+                    continue
+
+        raise NotFoundError(f"Unknown tool: {key}")
+
+    async def disable_tool(self, key: str) -> Tool:
+        """Disable a tool."""
+        # 1. Check local tools first. The server will have already applied its filter.
+        if key in self._tools:
+            tool = await self.get_tool(key)
+            tool.disable()
+            return tool
+
+        # 2. Check mounted servers using the filtered protocol path.
+        for mounted in reversed(self._mounted_servers):
+            if mounted.prefix:
+                if key.startswith(f"{mounted.prefix}_"):
+                    try:
+                        tool_key = key.removeprefix(f"{mounted.prefix}_")
+                        return await mounted.server._tool_manager.disable_tool(tool_key)
+                    except NotFoundError:
+                        logger.debug(
+                            f"Tool {key!r} not found in mounted server: {mounted.prefix}"
+                        )
+                else:
+                    continue
+
+        raise NotFoundError(f"Unknown tool: {key}")
+
     def add_tool_from_fn(
         self,
         fn: Callable[..., Any],

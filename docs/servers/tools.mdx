@@ -222,6 +222,23 @@ dynamic_tool.disable()
 dynamic_tool.enable()
 ```
 
+Additionally, you can manage tools states via API endpoints:
+
+```bash
+# These endpoints are secured if authentication is enabled.
+POST /tools/{tool_name}/enable
+POST /tools/{tool_name}/disable
+```
+
+Usage example:
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer YOUR_TOKEN_HERE" \
+  -H "Content-Type: application/json" \
+  http://localhost:8001/tools/TOOL_NAME/enable
+```
+
 ### Async Tools
 
 FastMCP seamlessly supports both standard (`def`) and asynchronous (`async def`) functions as tools.

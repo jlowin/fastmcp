@@ -111,6 +111,58 @@ class PromptManager:
         prompts_dict = await self._load_prompts(via_server=True)
         return list(prompts_dict.values())
 
+    async def enable_prompt(self, key: str) -> Prompt:
+        """Enable a prompt."""
+        # 1. Check local prompts first. The server will have already applied its filter.
+        if key in self._prompts:
+            prompt = await self.get_prompt(key)
+            prompt.enable()
+            return prompt
+
+        # 2. Check mounted servers using the filtered protocol path.
+        for mounted in reversed(self._mounted_servers):
+            if mounted.prefix:
+                if key.startswith(f"{mounted.prefix}_"):
+                    try:
+                        prompt_key = key.removeprefix(f"{mounted.prefix}_")
+                        return await mounted.server._prompt_manager.enable_prompt(
+                            prompt_key
+                        )
+                    except NotFoundError:
+                        logger.debug(
+                            f"Prompt {key!r} not found in mounted server: {mounted.prefix}"
+                        )
+                else:
+                    continue
+
+        raise NotFoundError(f"Unknown prompt: {key}")
+
+    async def disable_prompt(self, key: str) -> Prompt:
+        """Disable a prompt."""
+        # 1. Check local prompts first. The server will have already applied its filter.
+        if key in self._prompts:
+            prompt = await self.get_prompt(key)
+            prompt.disable()
+            return prompt
+
+        # 2. Check mounted servers using the filtered protocol path.
+        for mounted in reversed(self._mounted_servers):
+            if mounted.prefix:
+                if key.startswith(f"{mounted.prefix}_"):
+                    try:
+                        prompt_key = key.removeprefix(f"{mounted.prefix}_")
+                        return await mounted.server._prompt_manager.disable_prompt(
+                            prompt_key
+                        )
+                    except NotFoundError:
+                        logger.debug(
+                            f"Prompt {key!r} not found in mounted server: {mounted.prefix}"
+                        )
+                else:
+                    continue
+
+        raise NotFoundError(f"Unknown prompt: {key}")
+
     def add_prompt_from_fn(
         self,
         fn: Callable[..., PromptResult | Awaitable[PromptResult]],

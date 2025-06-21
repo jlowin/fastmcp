@@ -490,3 +490,85 @@ class ResourceManager:
                 continue
 
         raise NotFoundError(f"Resource {uri_str!r} not found.")
+
+    async def enable_resource(self, key: str) -> Resource | ResourceTemplate:
+        """Enable a resource."""
+        # 1. Check local resources first. The server will have already applied its filter.
+        if key in self._resources:
+            resource = await self.get_resource(key)
+            resource.enable()
+            return resource
+
+        if key in self._templates:
+            template = self._templates[key]
+            template.enable()
+            return template
+
+        # 2. Check mounted servers using the filtered protocol path.
+        from fastmcp.server.server import has_resource_prefix, remove_resource_prefix
+
+        for mounted in reversed(self._mounted_servers):
+            if mounted.prefix:
+                try:
+                    if has_resource_prefix(
+                        key,
+                        mounted.prefix,
+                        mounted.resource_prefix_format,
+                    ):
+                        key = remove_resource_prefix(
+                            key,
+                            mounted.prefix,
+                            mounted.resource_prefix_format,
+                        )
+                        return await mounted.server._resource_manager.enable_resource(
+                            key
+                        )
+                except NotFoundError:
+                    logger.debug(
+                        f"Resource {key!r} not found in mounted server: {mounted.prefix}"
+                    )
+            else:
+                continue
+
+        raise NotFoundError(f"Unknown resource: {key}")
+
+    async def disable_resource(self, key: str) -> Resource | ResourceTemplate:
+        """Disable a resource."""
+        # 1. Check local resources first. The server will have already applied its filter.
+        if key in self._resources:
+            resource = await self.get_resource(key)
+            resource.disable()
+            return resource
+
+        if key in self._templates:
+            template = self._templates[key]
+            template.disable()
+            return template
+
+        # 2. Check mounted servers using the filtered protocol path.
+        from fastmcp.server.server import has_resource_prefix, remove_resource_prefix
+
+        for mounted in reversed(self._mounted_servers):
+            if mounted.prefix:
+                try:
+                    if has_resource_prefix(
+                        key,
+                        mounted.prefix,
+                        mounted.resource_prefix_format,
+                    ):
+                        key = remove_resource_prefix(
+                            key,
+                            mounted.prefix,
+                            mounted.resource_prefix_format,
+                        )
+                        return await mounted.server._resource_manager.disable_resource(
+                            key
+                        )
+                except NotFoundError:
+                    logger.debug(
+                        f"Resource {key!r} not found in mounted server: {mounted.prefix}"
+                    )
+            else:
+                continue
+
+        raise NotFoundError(f"Unknown resource: {key}")

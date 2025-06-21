@@ -734,6 +734,108 @@ class FastMCP(Generic[LifespanResultT]):
         )
         return await self._apply_middleware(mw_context, _handler)
 
+    async def _enable_tool(self, name: str) -> Tool:
+        """Handle 'enableTool' requests.
+
+        Args:
+            name: The name of the tool to enable
+
+        Returns:
+            The tool that was enabled
+        """
+        logger.debug("Enabling tool: %s", name)
+
+        # Enable tool, checking first from our tools, then from the mounted servers
+        if await self._tool_manager.has_tool(name):
+            return await self._tool_manager.enable_tool(name)
+
+        raise NotFoundError(f"Unknown tool: {name}")
+
+    async def _disable_tool(self, name: str) -> Tool:
+        """Handle 'disableTool' requests.
+
+        Args:
+            name: The name of the tool to disable
+
+        Returns:
+            The tool that was disabled
+        """
+        logger.debug("Disable tool: %s", name)
+
+        # Disable tool, checking from our tools
+        if await self._tool_manager.has_tool(name):
+            return await self._tool_manager.disable_tool(name)
+
+        raise NotFoundError(f"Unknown tool: {name}")
+
+    async def _enable_resource(self, name: str) -> Resource | ResourceTemplate:
+        """Handle 'enableResource' requests.
+
+        Args:
+            name: The name of the resource to enable
+
+        Returns:
+            The resource that was enabled
+        """
+        logger.debug("Enabling resource: %s", name)
+
+        # Enable resource, checking first from our resource, then from the mounted servers
+        if await self._resource_manager.has_resource(name):
+            return await self._resource_manager.enable_resource(name)
+
+        raise NotFoundError(f"Unknown resource: {name}")
+
+    async def _disable_resource(self, name: str) -> Resource | ResourceTemplate:
+        """Handle 'disableResource' requests.
+
+        Args:
+            name: The name of the resource to disable
+
+        Returns:
+            The resource that was disabled
+        """
+        logger.debug("Disable resource: %s", name)
+
+        # Disable resource, checking first from our resource, then from the mounted servers
+        if await self._resource_manager.has_resource(name):
+            return await self._resource_manager.disable_resource(name)
+
+        raise NotFoundError(f"Unknown resource: {name}")
+
+    async def _enable_prompt(self, name: str) -> Prompt:
+        """Handle 'enablePrompt' requests.
+
+        Args:
+            name: The name of the prompt to enable
+
+        Returns:
+            The prompt that was enable
+        """
+        logger.debug("Enabling prompt: %s", name)
+
+        # Enable prompt, checking first from our prompts, then from the mounted servers
+        if await self._prompt_manager.has_prompt(name):
+            return await self._prompt_manager.enable_prompt(name)
+
+        raise NotFoundError(f"Unknown prompt: {name}")
+
+    async def _disable_prompt(self, name: str) -> Prompt:
+        """Handle 'disablePrompt' requests.
+
+        Args:
+            name: The name of the prompt to disable
+
+        Returns:
+            The prompt that was disabled
+        """
+        logger.debug("Disable prompt: %s", name)
+
+        # Disable prompt, checking first from our prompts, then from the mounted servers
+        if await self._prompt_manager.has_prompt(name):
+            return await self._prompt_manager.disable_prompt(name)
+
+        raise NotFoundError(f"Unknown prompt: {name}")
+
     def add_tool(self, tool: Tool) -> None:
         """Add a tool to the server.
 
