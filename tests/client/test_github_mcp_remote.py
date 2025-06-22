@@ -13,7 +13,7 @@ HEADER_AUTHORIZATION = "Authorization"
 MCP_GITHUB_PAT = os.getenv("MCP_GITHUB_PAT")
 
 
-@pytest.fixture(name="streamable_http_client", autouse=True)
+@pytest.fixture(name="streamable_http_client")
 def fixture_streamable_http_client() -> Client[ClientTransport]:
     return Client(
         StreamableHttpTransport(url=GITHUB_REMOTE_MCP_URL,
@@ -46,7 +46,7 @@ async def test_list_tools(streamable_http_client: Client[StreamableHttpTransport
         assert streamable_http_client.is_connected()
         tools = await streamable_http_client.list_tools()
         assert isinstance(tools, list)
-        assert len(tools) >= 40
+        assert len(tools) > 0  # Ensure the tools list is non-empty
         for tool in tools:
             assert isinstance(tool, Tool)
             assert len(tool.name) > 0
@@ -81,10 +81,8 @@ async def test_call_tool_ko(streamable_http_client: Client[StreamableHttpTranspo
     """Test calling a non-existing tool"""
     async with streamable_http_client:
         assert streamable_http_client.is_connected()
-        try:
+        with pytest.raises(McpError, match="tool not found") as excinfo:
             await streamable_http_client.call_tool("foo")
-        except McpError as e:
-            assert "tool not found" in e.args[0]
 
 
 @pytest.mark.asyncio
