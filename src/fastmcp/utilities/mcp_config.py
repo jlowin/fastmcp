@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 from urllib.parse import urlparse
 
-from pydantic import AnyUrl, Field
+import httpx
+from pydantic import AnyUrl, ConfigDict, Field
 
 from fastmcp.utilities.types import FastMCPBaseModel
 
@@ -17,7 +19,7 @@ if TYPE_CHECKING:
 
 def infer_transport_type_from_url(
     url: str | AnyUrl,
-) -> Literal["streamable-http", "sse"]:
+) -> Literal["http", "sse"]:
     """
     Infer the appropriate transport type from the given URL.
     """
@@ -28,10 +30,11 @@ def infer_transport_type_from_url(
     parsed_url = urlparse(url)
     path = parsed_url.path
 
-    if "/sse/" in path or path.rstrip("/").endswith("/sse"):
+    # Match /sse followed by /, ?, &, or end of string
+    if re.search(r"/sse(/|\?|&|$)", path):
         return "sse"
     else:
-        return "streamable-http"
+        return "http"
 
 
 class StdioMCPServer(FastMCPBaseModel):
@@ -55,13 +58,15 @@ class StdioMCPServer(FastMCPBaseModel):
 class RemoteMCPServer(FastMCPBaseModel):
     url: str
     headers: dict[str, str] = Field(default_factory=dict)
-    transport: Literal["streamable-http", "sse"] | None = None
+    transport: Literal["http", "streamable-http", "sse"] | None = None
     auth: Annotated[
-        str | Literal["oauth"] | None,
+        str | Literal["oauth"] | httpx.Auth | None,
         Field(
-            description='Either a string representing a Bearer token or the literal "oauth" to use OAuth authentication.'
+            description='Either a string representing a Bearer token, the literal "oauth" to use OAuth authentication, or an httpx.Auth instance for custom authentication.',
         ),
     ] = None
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     def to_transport(self) -> StreamableHttpTransport | SSETransport:
         from fastmcp.client.transports import SSETransport, StreamableHttpTransport
@@ -74,6 +79,7 @@ class RemoteMCPServer(FastMCPBaseModel):
         if transport == "sse":
             return SSETransport(self.url, headers=self.headers, auth=self.auth)
         else:
+            # Both "http" and "streamable-http" map to StreamableHttpTransport
             return StreamableHttpTransport(
                 self.url, headers=self.headers, auth=self.auth
             )

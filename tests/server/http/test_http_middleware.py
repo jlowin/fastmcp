@@ -96,7 +96,7 @@ async def test_streamable_http_app_with_custom_middleware():
     server._additional_http_routes = routes
 
     # Create the app with custom middleware
-    app = server.http_app(transport="streamable-http", middleware=custom_middleware)
+    app = server.http_app(transport="http", middleware=custom_middleware)
 
     # Create a test client
     transport = ASGITransport(app=app)
@@ -126,7 +126,7 @@ async def test_create_sse_app_with_custom_middleware():
     app = create_sse_app(
         server=server,
         message_path="/message",
-        sse_path="/sse",
+        sse_path="/sse/",
         middleware=custom_middleware,
         routes=additional_routes,
     )

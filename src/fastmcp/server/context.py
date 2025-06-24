@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 from mcp import LoggingLevel
 from mcp.server.lowlevel.helper_types import ReadResourceContents
+from mcp.server.lowlevel.server import request_ctx
 from mcp.shared.context import RequestContext
 from mcp.types import (
     CreateMessageResult,
@@ -95,8 +96,14 @@ class Context:
 
     @property
     def request_context(self) -> RequestContext:
-        """Access to the underlying request context."""
-        return self.fastmcp._mcp_server.request_context
+        """Access to the underlying request context.
+
+        If called outside of a request context, this will raise a ValueError.
+        """
+        try:
+            return request_ctx.get()
+        except LookupError:
+            raise ValueError("Context is not available outside of a request")
 
     async def report_progress(
         self, progress: float, total: float | None = None, message: str | None = None
@@ -170,6 +177,37 @@ class Context:
     def request_id(self) -> str:
         """Get the unique ID for this request."""
         return str(self.request_context.request_id)
+
+    @property
+    def session_id(self) -> str | None:
+        """Get the MCP session ID for HTTP transports.
+
+        Returns the session ID that can be used as a key for session-based
+        data storage (e.g., Redis) to share data between tool calls within
+        the same client session.
+
+        Returns:
+            The session ID for HTTP transports (SSE, StreamableHTTP), or None
+            for stdio and in-memory transports which don't use session IDs.
+
+        Example:
+            ```python
+            @server.tool
+            def store_data(data: dict, ctx: Context) -> str:
+                if session_id := ctx.session_id:
+                    redis_client.set(f"session:{session_id}:data", json.dumps(data))
+                    return f"Data stored for session {session_id}"
+                return "No session ID available (stdio/memory transport)"
+            ```
+        """
+        try:
+            from fastmcp.server.dependencies import get_http_headers
+
+            headers = get_http_headers(include_all=True)
+            return headers.get("mcp-session-id")
+        except RuntimeError:
+            # No HTTP context available (stdio/in-memory transport)
+            return None
 
     @property
     def session(self):
