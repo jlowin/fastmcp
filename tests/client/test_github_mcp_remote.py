@@ -70,10 +70,9 @@ async def test_list_prompts(streamable_http_client: Client[StreamableHttpTranspo
     """Test listing the MCP prompts """
     async with streamable_http_client:
         assert streamable_http_client.is_connected()
-        try:
+        with pytest.raises(McpError) as exc:
             await streamable_http_client.list_prompts()
-        except McpError as e:
-            assert e.args[0] == "prompts not supported"
+        assert exc.value.args[0] == "prompts not supported"
 
 
 @pytest.mark.asyncio
