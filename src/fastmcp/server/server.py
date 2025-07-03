@@ -1591,9 +1591,8 @@ class FastMCP(Generic[LifespanResultT]):
             resource_separator: Deprecated. Separator character for resource URIs.
             prompt_separator: Deprecated. Separator character for prompt names.
         """
-        from fastmcp import Client
         from fastmcp.client.transports import FastMCPTransport
-        from fastmcp.server.proxy import FastMCPProxy
+        from fastmcp.server.proxy import FastMCPProxy, ProxyClient
 
         # Deprecated since 2.9.0
         # Prior to 2.9.0, the first positional argument was the prefix and the
@@ -1645,7 +1644,7 @@ class FastMCP(Generic[LifespanResultT]):
             as_proxy = server._has_lifespan
 
         if as_proxy and not isinstance(server, FastMCPProxy):
-            server = FastMCPProxy(Client(transport=FastMCPTransport(server)))
+            server = FastMCPProxy(ProxyClient(transport=FastMCPTransport(server)))
 
         # Delegate mounting to all three managers
         mounted_server = MountedServer(
@@ -1856,14 +1855,16 @@ class FastMCP(Generic[LifespanResultT]):
     @classmethod
     def as_proxy(
         cls,
-        backend: Client[ClientTransportT]
-        | ClientTransport
-        | FastMCP[Any]
-        | AnyUrl
-        | Path
-        | MCPConfig
-        | dict[str, Any]
-        | str,
+        backend: (
+            Client[ClientTransportT]
+            | ClientTransport
+            | FastMCP[Any]
+            | AnyUrl
+            | Path
+            | MCPConfig
+            | dict[str, Any]
+            | str
+        ),
         **settings: Any,
     ) -> FastMCPProxy:
         """Create a FastMCP proxy server for the given backend.
@@ -1874,12 +1875,12 @@ class FastMCP(Generic[LifespanResultT]):
         `fastmcp.client.Client` constructor.
         """
         from fastmcp.client.client import Client
-        from fastmcp.server.proxy import FastMCPProxy
+        from fastmcp.server.proxy import FastMCPProxy, ProxyClient
 
         if isinstance(backend, Client):
             client = backend
         else:
-            client = Client(backend)
+            client = ProxyClient(backend)
 
         return FastMCPProxy(client=client, **settings)
 
