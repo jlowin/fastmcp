@@ -1,5 +1,7 @@
 import base64
 import os
+import tempfile
+from pathlib import Path
 from types import EllipsisType
 from typing import Annotated, Any
 
@@ -141,11 +143,13 @@ class TestImage:
 
     def test_image_path_expansion_with_env_var(self, monkeypatch):
         """Test that environment variables are expanded."""
-        monkeypatch.setenv("TEST_PATH", "/tmp/test")
+        test_dir = tempfile.mkdtemp()
+        monkeypatch.setenv("TEST_PATH", test_dir)
         image = Image(path="$TEST_PATH/test.png")
         assert image.path is not None
         assert not str(image.path).startswith("$TEST_PATH")
-        assert str(image.path) == "/tmp/test/test.png"
+        expected_path = Path(test_dir) / "test.png"
+        assert image.path == expected_path
 
     def test_image_initialization_with_data(self):
         """Test image initialization with data."""
@@ -240,11 +244,13 @@ class TestAudio:
 
     def test_audio_path_expansion_with_env_var(self, monkeypatch):
         """Test that environment variables are expanded."""
-        monkeypatch.setenv("TEST_AUDIO_PATH", "/tmp/audio")
+        test_dir = tempfile.mkdtemp()
+        monkeypatch.setenv("TEST_AUDIO_PATH", test_dir)
         audio = Audio(path="$TEST_AUDIO_PATH/test.wav")
         assert audio.path is not None
         assert not str(audio.path).startswith("$TEST_AUDIO_PATH")
-        assert str(audio.path) == "/tmp/audio/test.wav"
+        expected_path = Path(test_dir) / "test.wav"
+        assert audio.path == expected_path
 
     def test_audio_initialization_with_data(self):
         """Test audio initialization with data."""
@@ -352,11 +358,13 @@ class TestFile:
 
     def test_file_path_expansion_with_env_var(self, monkeypatch):
         """Test that environment variables are expanded."""
-        monkeypatch.setenv("TEST_FILE_PATH", "/tmp/files")
+        test_dir = tempfile.mkdtemp()
+        monkeypatch.setenv("TEST_FILE_PATH", test_dir)
         file = File(path="$TEST_FILE_PATH/test.txt")
         assert file.path is not None
         assert not str(file.path).startswith("$TEST_FILE_PATH")
-        assert str(file.path) == "/tmp/files/test.txt"
+        expected_path = Path(test_dir) / "test.txt"
+        assert file.path == expected_path
 
     def test_file_initialization_with_data(self):
         """Test initialization with data and format."""
