@@ -70,12 +70,12 @@ def log_server_banner(
             info_table.add_row("🔗", "Server URL:", server_url)
 
     # Add documentation link
-    info_table.add_row()
+    info_table.add_row("", "", "")
     info_table.add_row("📚", "Docs:", "https://gofastmcp.com")
     info_table.add_row("🚀", "Deploy:", "https://fastmcp.cloud")
 
     # Add version information with explicit style overrides
-    info_table.add_row()
+    info_table.add_row("", "", "")
     info_table.add_row(
         "🏎️",
         "FastMCP version:",
