@@ -421,7 +421,7 @@ async def default_proxy_roots_handler(
     context: RequestContext[ClientSession, LifespanContextT],
 ) -> RootsList:
     """
-    A handler that forwards the roots request from a remote client to the proxy.
+    A handler that forwards the list roots request from the remote server to the proxy's connected clients and relays the response back to the remote server.
     """
     ctx = get_context()
     return await ctx.list_roots()
@@ -429,12 +429,8 @@ async def default_proxy_roots_handler(
 
 class ProxyClient(Client[ClientTransportT]):
     """
-    A client that extends proxy to support advanced MCP features, including:
-        - roots
-        - sampling
-        - elicitation
-        - logging
-        - progress
+    A proxy client that forwards advanced interactions between a remote MCP server and the proxy's connected clients.
+    Supports forwarding roots, sampling, elicitation, logging, and progress.
     """
 
     def __init__(
@@ -470,7 +466,7 @@ class ProxyClient(Client[ClientTransportT]):
         context: RequestContext[ClientSession, LifespanContextT],
     ) -> mcp.types.CreateMessageResult:
         """
-        A handler that forwards the sampling request from a remote client to the proxy.
+        A handler that forwards the sampling request from the remote server to the proxy's connected clients and relays the response back to the remote server.
         """
         ctx = get_context()
         content = await ctx.sample(
@@ -497,7 +493,7 @@ class ProxyClient(Client[ClientTransportT]):
         context: RequestContext[ClientSession, LifespanContextT],
     ) -> ElicitResult:
         """
-        A handler that forwards the elicitation request from a remote client to the proxy.
+        A handler that forwards the elicitation request from the remote server to the proxy's connected clients and relays the response back to the remote server.
         """
         ctx = get_context()
         result = await ctx.elicit(message, response_type)
@@ -509,7 +505,7 @@ class ProxyClient(Client[ClientTransportT]):
     @classmethod
     async def default_log_handler(cls, message: LogMessage) -> None:
         """
-        A handler that forwards the log request from a remote client to the proxy.
+        A handler that forwards the log notification from the remote server to the proxy's connected clients.
         """
         ctx = get_context()
         await ctx.log(message.data, level=message.level, logger_name=message.logger)
@@ -522,7 +518,7 @@ class ProxyClient(Client[ClientTransportT]):
         message: str | None,
     ) -> None:
         """
-        A handler that forwards the progress request from a remote client to the proxy.
+        A handler that forwards the progress notification from the remote server to the proxy's connected clients.
         """
         ctx = get_context()
         await ctx.report_progress(progress, total, message)
