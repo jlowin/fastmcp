@@ -1,0 +1,112 @@
+---
+title: fastmcp.cli.cursor
+---
+
+# fastmcp.cli.cursor
+
+Cursor app integration utilities.
+
+## Functions
+
+### get_cursor_config_path
+
+```python
+def get_cursor_config_path() -> Path | None
+```
+
+Get the Cursor config directory based on platform.
+
+**Returns:**
+- `Path | None`: Path to Cursor config directory if it exists, None otherwise
+
+### open_cursor_deeplink
+
+```python
+def open_cursor_deeplink(server_name: str) -> bool
+```
+
+Open Cursor with a deeplink to highlight the MCP server configuration.
+
+**Args:**
+- `server_name` (str): Name of the server that was just installed
+
+**Returns:**
+- `bool`: True if the deeplink was opened successfully, False otherwise
+
+### update_cursor_config
+
+```python
+def update_cursor_config(
+    file_spec: str,
+    server_name: str,
+    *,
+    with_editable: Path | None = None,
+    with_packages: list[str] | None = None,
+    env_vars: dict[str, str] | None = None,
+    transport: str = "stdio",
+    open_cursor: bool = True,
+) -> bool
+```
+
+Add or update a FastMCP server in Cursor's configuration.
+
+**Args:**
+- `file_spec` (str): Path to the server file, optionally with :object suffix
+- `server_name` (str): Name for the server in Cursor's config
+- `with_editable` (Path | None): Optional directory to install in editable mode
+- `with_packages` (list[str] | None): Optional list of additional packages to install
+- `env_vars` (dict[str, str] | None): Optional dictionary of environment variables. These are merged with any existing variables, with new values taking precedence
+- `transport` (str): Transport type to use (stdio or sse). Defaults to "stdio"
+- `open_cursor` (bool): Whether to open Cursor after installation. Defaults to True
+
+**Returns:**
+- `bool`: True if the update was successful, False otherwise
+
+**Raises:**
+- `RuntimeError`: If Cursor's config directory is not found, indicating Cursor may not be installed or properly set up
+
+### list_cursor_servers
+
+```python
+def list_cursor_servers() -> dict[str, Any] | None
+```
+
+List all MCP servers configured in Cursor.
+
+**Returns:**
+- `dict[str, Any] | None`: Dictionary of configured servers or None if config not found
+
+## Examples
+
+### Basic Usage
+
+```python
+from fastmcp.cli.cursor import update_cursor_config
+
+# Install a server in Cursor
+success = update_cursor_config(
+    "weather_server.py",
+    "Weather Assistant",
+    env_vars={"API_KEY": "secret"}
+)
+
+if success:
+    print("Server installed successfully!")
+```
+
+### Listing Installed Servers
+
+```python
+from fastmcp.cli.cursor import list_cursor_servers
+
+servers = list_cursor_servers()
+if servers:
+    for name, config in servers.items():
+        print(f"Server: {name}")
+        print(f"  Transport: {'SSE' if 'url' in config else 'STDIO'}")
+```
+
+## See Also
+
+- [Cursor IDE Integration](/integrations/cursor) - Complete guide to using FastMCP with Cursor
+- [fastmcp.cli.claude](/python-sdk/fastmcp-cli-claude) - Similar utilities for Claude Desktop 

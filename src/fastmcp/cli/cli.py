@@ -19,6 +19,7 @@ from typer import Context, Exit
 
 import fastmcp
 from fastmcp.cli import claude
+from fastmcp.cli import cursor
 from fastmcp.cli import run as run_module
 from fastmcp.server.server import FastMCP
 from fastmcp.utilities.inspect import FastMCPInfo, inspect_fastmcp
@@ -452,6 +453,218 @@ def install(
         logger.info(f"Successfully installed {name} in Claude app")
     else:
         logger.error(f"Failed to install {name} in Claude app")
+        sys.exit(1)
+
+
+@app.command(name="cursor")
+def install_cursor(
+    server_spec: str = typer.Argument(
+        None,
+        help="Python file to run, optionally with :object suffix",
+    ),
+    server_name: Annotated[
+        str | None,
+        typer.Option(
+            "--name",
+            "-n",
+            help="Custom name for the server (defaults to server's name attribute or"
+            " file name)",
+        ),
+    ] = None,
+    with_editable: Annotated[
+        Path | None,
+        typer.Option(
+            "--with-editable",
+            "-e",
+            help="Directory containing pyproject.toml to install in editable mode",
+            exists=True,
+            file_okay=False,
+            resolve_path=True,
+        ),
+    ] = None,
+    with_packages: Annotated[
+        list[str],
+        typer.Option(
+            "--with",
+            help="Additional packages to install",
+        ),
+    ] = [],
+    env_vars: Annotated[
+        list[str],
+        typer.Option(
+            "--env-var",
+            "-v",
+            help="Environment variables in KEY=VALUE format",
+        ),
+    ] = [],
+    env_file: Annotated[
+        Path | None,
+        typer.Option(
+            "--env-file",
+            "-f",
+            help="Load environment variables from a .env file",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            resolve_path=True,
+        ),
+    ] = None,
+    transport: Annotated[
+        str,
+        typer.Option(
+            "--transport",
+            "-t",
+            help="Transport protocol to use (stdio or sse)",
+        ),
+    ] = "stdio",
+    no_open: Annotated[
+        bool,
+        typer.Option(
+            "--no-open",
+            help="Don't try to open Cursor after installation",
+        ),
+    ] = False,
+    list_servers: Annotated[
+        bool,
+        typer.Option(
+            "--list",
+            "-l",
+            help="List all installed MCP servers in Cursor",
+        ),
+    ] = False,
+) -> None:
+    """Install a MCP server in Cursor IDE.
+
+    This command configures a FastMCP server to work with Cursor's AI assistant.
+    It automatically handles the configuration and can optionally open Cursor
+    with a deeplink to highlight the newly installed server.
+
+    Examples:
+        # Install a server with default settings
+        fastmcp cursor server.py
+
+        # Install with a custom name and environment variables
+        fastmcp cursor server.py --name "My Server" -v API_KEY=secret
+
+        # Install with SSE transport for remote servers
+        fastmcp cursor server.py --transport sse
+
+        # List all installed servers
+        fastmcp cursor --list
+    """
+    # Handle list option
+    if list_servers:
+        servers = cursor.list_cursor_servers()
+        if servers is None:
+            logger.error("Cursor not found or config not accessible")
+            sys.exit(1)
+        elif not servers:
+            console.print("No MCP servers installed in Cursor")
+        else:
+            table = Table(title="Installed MCP Servers in Cursor")
+            table.add_column("Name", style="cyan")
+            table.add_column("Type", style="green")
+            table.add_column("Command/URL", style="yellow")
+            
+            for name, config in servers.items():
+                if "url" in config:
+                    table.add_row(name, "SSE", config["url"])
+                elif "command" in config:
+                    cmd = config["command"]
+                    if "args" in config:
+                        cmd = f"{cmd} {' '.join(config['args'])}"
+                    table.add_row(name, "STDIO", cmd[:50] + "..." if len(cmd) > 50 else cmd)
+                    
+            console.print(table)
+        return
+
+    # Require server_spec if not listing
+    if not server_spec:
+        console.print("[red]Error:[/red] SERVER_SPEC is required when not using --list")
+        raise typer.Exit(1)
+
+    file, server_object = run_module.parse_file_path(server_spec)
+
+    logger.debug(
+        "Installing server in Cursor",
+        extra={
+            "file": str(file),
+            "server_name": server_name,
+            "server_object": server_object,
+            "with_editable": str(with_editable) if with_editable else None,
+            "with_packages": with_packages,
+            "transport": transport,
+        },
+    )
+
+    if not cursor.get_cursor_config_path():
+        logger.error("Cursor not found. Please ensure Cursor IDE is installed.")
+        sys.exit(1)
+
+    # Try to import server to get its name, but fall back to file name if dependencies
+    # missing
+    name = server_name
+    server = None
+    if not name:
+        try:
+            server = run_module.import_server(file, server_object)
+            name = server.name
+        except (ImportError, ModuleNotFoundError) as e:
+            logger.debug(
+                "Could not import server (likely missing dependencies), using file"
+                " name",
+                extra={"error": str(e)},
+            )
+            name = file.stem
+
+    # Get server dependencies if available
+    server_dependencies = getattr(server, "dependencies", []) if server else []
+    if server_dependencies:
+        with_packages = list(set(with_packages + server_dependencies))
+
+    # Process environment variables if provided
+    env_dict: dict[str, str] | None = None
+    if env_file or env_vars:
+        env_dict = {}
+        # Load from .env file if specified
+        if env_file:
+            try:
+                env_dict |= {
+                    k: v
+                    for k, v in dotenv.dotenv_values(env_file).items()
+                    if v is not None
+                }
+            except Exception as e:
+                logger.error(f"Failed to load .env file: {e}")
+                sys.exit(1)
+
+        # Add command line environment variables
+        for env_var in env_vars:
+            key, value = _parse_env_var(env_var)
+            env_dict[key] = value
+
+    # Validate transport
+    if transport not in ["stdio", "sse"]:
+        logger.error("Transport must be either 'stdio' or 'sse'")
+        sys.exit(1)
+
+    if cursor.update_cursor_config(
+        server_spec,
+        name,
+        with_editable=with_editable,
+        with_packages=with_packages,
+        env_vars=env_dict,
+        transport=transport,
+        open_cursor=not no_open,
+    ):
+        logger.info(f"Successfully installed {name} in Cursor")
+        if not no_open:
+            console.print(
+                f"\n💡 [bold cyan]Tip:[/bold cyan] If Cursor didn't open automatically, "
+                f"restart it to use the {name} MCP server."
+            )
+    else:
+        logger.error(f"Failed to install {name} in Cursor")
         sys.exit(1)
 
 

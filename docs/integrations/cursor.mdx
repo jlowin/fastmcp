@@ -1,0 +1,179 @@
+---
+title: Cursor IDE
+---
+
+# Cursor IDE Integration
+
+FastMCP provides seamless integration with [Cursor IDE](https://cursor.com), allowing you to use your MCP servers directly within Cursor's AI assistant.
+
+## Installation
+
+The FastMCP CLI includes a dedicated command for installing MCP servers in Cursor:
+
+```bash
+fastmcp cursor server.py
+```
+
+This command automatically:
+- Detects your Cursor installation
+- Configures the MCP server in Cursor's configuration file
+- Optionally opens Cursor with a deeplink to highlight the newly installed server
+
+## Basic Usage
+
+### Installing a Simple Server
+
+```bash
+# Install with default settings
+fastmcp cursor examples/simple_server.py
+
+# Install with a custom name
+fastmcp cursor server.py --name "My Custom Server"
+
+# Install with environment variables
+fastmcp cursor server.py -v API_KEY=secret -v MODEL=gpt-4
+```
+
+### Transport Options
+
+Cursor supports two transport protocols for MCP servers:
+
+1. **STDIO (default)** - For local servers
+2. **SSE** - For remote servers
+
+```bash
+# Install with SSE transport for remote servers
+fastmcp cursor server.py --transport sse
+```
+
+### Managing Dependencies
+
+```bash
+# Install with additional packages
+fastmcp cursor server.py --with requests --with pandas
+
+# Install with editable development package
+fastmcp cursor server.py --with-editable ./my-package
+```
+
+### Environment Variables
+
+Environment variables can be provided via command line or from a file:
+
+```bash
+# From command line
+fastmcp cursor server.py -v API_KEY=secret -v DEBUG=true
+
+# From .env file
+fastmcp cursor server.py --env-file .env
+```
+
+## Advanced Features
+
+### Listing Installed Servers
+
+View all MCP servers currently installed in Cursor:
+
+```bash
+fastmcp cursor --list
+```
+
+### Preventing Auto-Open
+
+By default, the command tries to open Cursor after installation. To prevent this:
+
+```bash
+fastmcp cursor server.py --no-open
+```
+
+## Example
+
+Here's a complete example of creating and installing a MCP server in Cursor:
+
+1. Create a server file (`weather_server.py`):
+
+```python
+from fastmcp import FastMCP
+
+mcp = FastMCP(
+    "Weather Server",
+    instructions="Provides weather information and forecasts"
+)
+
+@mcp.tool()
+def get_weather(location: str) -> str:
+    """Get current weather for a location."""
+    # In a real server, this would call a weather API
+    return f"The weather in {location} is sunny and 72°F"
+
+@mcp.tool()
+def get_forecast(location: str, days: int = 3) -> str:
+    """Get weather forecast for the next few days."""
+    return f"{days}-day forecast for {location}: Partly cloudy with a chance of rain"
+
+if __name__ == "__main__":
+    mcp.run()
+```
+
+2. Install it in Cursor:
+
+```bash
+fastmcp cursor weather_server.py --name "Weather Assistant"
+```
+
+3. Use it in Cursor by asking the AI assistant:
+   - "What's the weather in New York?"
+   - "Give me a 5-day forecast for San Francisco"
+
+## Configuration File
+
+The Cursor MCP configuration is stored in `~/.cursor/mcp.json`. FastMCP automatically manages this file, but you can also edit it manually if needed:
+
+```json
+{
+  "mcpServers": {
+    "Weather Assistant": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--with",
+        "fastmcp",
+        "fastmcp",
+        "run",
+        "/path/to/weather_server.py"
+      ],
+      "env": {
+        "API_KEY": "your-api-key"
+      }
+    }
+  }
+}
+```
+
+## Troubleshooting
+
+### Cursor Not Found
+
+If you get a "Cursor not found" error:
+1. Ensure Cursor IDE is installed
+2. Make sure you've run Cursor at least once to create its configuration directory
+3. Check that `~/.cursor` directory exists
+
+### Server Not Appearing
+
+If your server doesn't appear in Cursor after installation:
+1. Restart Cursor completely
+2. Check the configuration file at `~/.cursor/mcp.json`
+3. Verify the server runs correctly with `fastmcp run server.py`
+
+### Deeplink Not Working
+
+If Cursor doesn't open automatically:
+- This is normal on some systems
+- Simply open Cursor manually and your server will be available
+
+## See Also
+
+- [Claude Desktop Integration](/integrations/claude-desktop) - Similar integration for Claude Desktop
+- [Creating MCP Servers](/tutorials/create-mcp-server) - Tutorial on building MCP servers
+- [FastMCP CLI Reference](/cli/reference) - Complete CLI documentation 
