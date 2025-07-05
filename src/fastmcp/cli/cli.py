@@ -18,8 +18,7 @@ from rich.table import Table
 from typer import Context, Exit
 
 import fastmcp
-from fastmcp.cli import claude
-from fastmcp.cli import cursor
+from fastmcp.cli import claude, cursor
 from fastmcp.cli import run as run_module
 from fastmcp.server.server import FastMCP
 from fastmcp.utilities.inspect import FastMCPInfo, inspect_fastmcp
@@ -565,7 +564,7 @@ def install_cursor(
             table.add_column("Name", style="cyan")
             table.add_column("Type", style="green")
             table.add_column("Command/URL", style="yellow")
-            
+
             for name, config in servers.items():
                 if "url" in config:
                     table.add_row(name, "SSE", config["url"])
@@ -573,8 +572,10 @@ def install_cursor(
                     cmd = config["command"]
                     if "args" in config:
                         cmd = f"{cmd} {' '.join(config['args'])}"
-                    table.add_row(name, "STDIO", cmd[:50] + "..." if len(cmd) > 50 else cmd)
-                    
+                    table.add_row(
+                        name, "STDIO", cmd[:50] + "..." if len(cmd) > 50 else cmd
+                    )
+
             console.print(table)
         return
 

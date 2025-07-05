@@ -2,8 +2,8 @@
 
 import json
 import os
-import sys
 import subprocess
+import sys
 import webbrowser
 from pathlib import Path
 from typing import Any
@@ -18,7 +18,7 @@ def get_cursor_config_path() -> Path | None:
     """Get the Cursor config directory based on platform."""
     # Cursor stores its MCP config in ~/.cursor/mcp.json across all platforms
     cursor_dir = Path.home() / ".cursor"
-    
+
     if cursor_dir.exists():
         return cursor_dir
     return None
@@ -26,10 +26,10 @@ def get_cursor_config_path() -> Path | None:
 
 def open_cursor_deeplink(server_name: str) -> bool:
     """Open Cursor with a deeplink to highlight the MCP server configuration.
-    
+
     Args:
         server_name: Name of the server that was just installed
-        
+
     Returns:
         True if the deeplink was opened successfully, False otherwise
     """
@@ -37,9 +37,9 @@ def open_cursor_deeplink(server_name: str) -> bool:
         # Cursor deeplink format for opening settings
         # This is a hypothetical format - actual format may differ
         deeplink = f"cursor://settings/mcp?highlight={quote(server_name)}"
-        
+
         logger.debug(f"Opening Cursor deeplink: {deeplink}")
-        
+
         # Try to open the deeplink
         if sys.platform == "darwin":  # macOS
             subprocess.run(["open", deeplink], check=True)
@@ -47,7 +47,7 @@ def open_cursor_deeplink(server_name: str) -> bool:
             os.startfile(deeplink)
         else:  # Linux and others
             webbrowser.open(deeplink)
-            
+
         return True
     except Exception as e:
         logger.debug(f"Failed to open Cursor deeplink: {e}")
@@ -124,7 +124,7 @@ def update_cursor_config(
             # For SSE transport, we need to provide a URL
             # This would typically be for remote servers
             server_config: dict[str, Any] = {
-                "url": f"http://localhost:8000/sse"  # Default SSE endpoint
+                "url": "http://localhost:8000/sse"  # Default SSE endpoint
             }
             if env_vars:
                 server_config["env"] = env_vars
@@ -156,10 +156,7 @@ def update_cursor_config(
             # Add fastmcp run command
             args.extend(["fastmcp", "run", file_spec])
 
-            server_config = {
-                "command": "uv",
-                "args": args
-            }
+            server_config = {"command": "uv", "args": args}
 
             # Add environment variables if specified
             if env_vars:
@@ -168,13 +165,13 @@ def update_cursor_config(
         config["mcpServers"][server_name] = server_config
 
         config_file.write_text(json.dumps(config, indent=2))
-        
+
         action = "Updated" if is_update else "Added"
         logger.info(
             f"{action} server '{server_name}' in Cursor config",
             extra={"config_file": str(config_file)},
         )
-        
+
         # Try to open Cursor with deeplink if requested
         if open_cursor:
             if open_cursor_deeplink(server_name):
@@ -183,7 +180,7 @@ def update_cursor_config(
                 logger.info(
                     f"Please restart Cursor to use the {server_name} MCP server"
                 )
-        
+
         return True
     except Exception as e:
         logger.error(
@@ -198,21 +195,21 @@ def update_cursor_config(
 
 def list_cursor_servers() -> dict[str, Any] | None:
     """List all MCP servers configured in Cursor.
-    
+
     Returns:
         Dictionary of configured servers or None if config not found
     """
     config_dir = get_cursor_config_path()
     if not config_dir:
         return None
-        
+
     config_file = config_dir / "mcp.json"
     if not config_file.exists():
         return {}
-        
+
     try:
         config = json.loads(config_file.read_text())
         return config.get("mcpServers", {})
     except Exception as e:
         logger.error(f"Failed to read Cursor config: {e}")
-        return None 
+        return None

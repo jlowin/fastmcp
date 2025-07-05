@@ -1,10 +1,9 @@
 """Tests for Cursor CLI integration."""
 
 import json
-import os
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, mock_open, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -18,7 +17,7 @@ class TestGetCursorConfigPath:
         """Should return path when .cursor directory exists."""
         cursor_dir = tmp_path / ".cursor"
         cursor_dir.mkdir()
-        
+
         with patch.object(Path, "home", return_value=tmp_path):
             result = cursor.get_cursor_config_path()
             assert result == cursor_dir
@@ -33,11 +32,14 @@ class TestGetCursorConfigPath:
 class TestOpenCursorDeeplink:
     """Test open_cursor_deeplink function."""
 
-    @pytest.mark.parametrize("platform,expected_method", [
-        ("darwin", "subprocess.run"),
-        ("win32", "os.startfile"),
-        ("linux", "webbrowser.open"),
-    ])
+    @pytest.mark.parametrize(
+        "platform,expected_method",
+        [
+            ("darwin", "subprocess.run"),
+            ("win32", "os.startfile"),
+            ("linux", "webbrowser.open"),
+        ],
+    )
     def test_opens_deeplink_by_platform(self, platform, expected_method):
         """Should use platform-specific method to open deeplink."""
         with patch.object(sys, "platform", platform):
@@ -46,18 +48,27 @@ class TestOpenCursorDeeplink:
                     result = cursor.open_cursor_deeplink("test-server")
                     assert result is True
                     mock_run.assert_called_once()
-                    assert "cursor://settings/mcp?highlight=test-server" in mock_run.call_args[0][0]
+                    assert (
+                        "cursor://settings/mcp?highlight=test-server"
+                        in mock_run.call_args[0][0]
+                    )
             elif expected_method == "os.startfile":
                 # os.startfile is only available on Windows
-                with patch("fastmcp.cli.cursor.os.startfile", create=True) as mock_startfile:
+                with patch(
+                    "fastmcp.cli.cursor.os.startfile", create=True
+                ) as mock_startfile:
                     result = cursor.open_cursor_deeplink("test-server")
                     assert result is True
-                    mock_startfile.assert_called_once_with("cursor://settings/mcp?highlight=test-server")
+                    mock_startfile.assert_called_once_with(
+                        "cursor://settings/mcp?highlight=test-server"
+                    )
             else:  # webbrowser.open
                 with patch("webbrowser.open") as mock_open:
                     result = cursor.open_cursor_deeplink("test-server")
                     assert result is True
-                    mock_open.assert_called_once_with("cursor://settings/mcp?highlight=test-server")
+                    mock_open.assert_called_once_with(
+                        "cursor://settings/mcp?highlight=test-server"
+                    )
 
     def test_returns_false_on_error(self):
         """Should return False when opening deeplink fails."""
@@ -81,17 +92,15 @@ class TestUpdateCursorConfig:
         cursor_dir = tmp_path / ".cursor"
         cursor_dir.mkdir()
         config_file = cursor_dir / "mcp.json"
-        
+
         with patch.object(Path, "home", return_value=tmp_path):
             with patch("fastmcp.cli.cursor.open_cursor_deeplink", return_value=False):
                 result = cursor.update_cursor_config(
-                    "server.py",
-                    "test-server",
-                    open_cursor=False
+                    "server.py", "test-server", open_cursor=False
                 )
                 assert result is True
                 assert config_file.exists()
-                
+
                 config = json.loads(config_file.read_text())
                 assert "mcpServers" in config
                 assert "test-server" in config["mcpServers"]
@@ -102,7 +111,7 @@ class TestUpdateCursorConfig:
         cursor_dir.mkdir()
         config_file = cursor_dir / "mcp.json"
         config_file.write_text("{}")
-        
+
         with patch.object(Path, "home", return_value=tmp_path):
             with patch("fastmcp.cli.cursor.open_cursor_deeplink", return_value=False):
                 result = cursor.update_cursor_config(
@@ -111,13 +120,13 @@ class TestUpdateCursorConfig:
                     with_packages=["requests", "pandas"],
                     env_vars={"API_KEY": "secret"},
                     transport="stdio",
-                    open_cursor=False
+                    open_cursor=False,
                 )
                 assert result is True
-                
+
                 config = json.loads(config_file.read_text())
                 server_config = config["mcpServers"]["test-server"]
-                
+
                 assert server_config["command"] == "uv"
                 assert "run" in server_config["args"]
                 assert "--with" in server_config["args"]
@@ -132,20 +141,17 @@ class TestUpdateCursorConfig:
         cursor_dir.mkdir()
         config_file = cursor_dir / "mcp.json"
         config_file.write_text("{}")
-        
+
         with patch.object(Path, "home", return_value=tmp_path):
             with patch("fastmcp.cli.cursor.open_cursor_deeplink", return_value=False):
                 result = cursor.update_cursor_config(
-                    "server.py",
-                    "test-server",
-                    transport="sse",
-                    open_cursor=False
+                    "server.py", "test-server", transport="sse", open_cursor=False
                 )
                 assert result is True
-                
+
                 config = json.loads(config_file.read_text())
                 server_config = config["mcpServers"]["test-server"]
-                
+
                 assert "url" in server_config
                 assert server_config["url"] == "http://localhost:8000/sse"
 
@@ -154,32 +160,32 @@ class TestUpdateCursorConfig:
         cursor_dir = tmp_path / ".cursor"
         cursor_dir.mkdir()
         config_file = cursor_dir / "mcp.json"
-        
+
         # Create initial config with env vars
         initial_config = {
             "mcpServers": {
                 "test-server": {
                     "command": "uv",
                     "args": ["run", "--with", "fastmcp", "fastmcp", "run", "server.py"],
-                    "env": {"OLD_VAR": "old_value", "API_KEY": "old_key"}
+                    "env": {"OLD_VAR": "old_value", "API_KEY": "old_key"},
                 }
             }
         }
         config_file.write_text(json.dumps(initial_config))
-        
+
         with patch.object(Path, "home", return_value=tmp_path):
             with patch("fastmcp.cli.cursor.open_cursor_deeplink", return_value=False):
                 result = cursor.update_cursor_config(
                     "server.py",
                     "test-server",
                     env_vars={"API_KEY": "new_key", "NEW_VAR": "new_value"},
-                    open_cursor=False
+                    open_cursor=False,
                 )
                 assert result is True
-                
+
                 config = json.loads(config_file.read_text())
                 env = config["mcpServers"]["test-server"]["env"]
-                
+
                 # Old var preserved, API_KEY updated, new var added
                 assert env["OLD_VAR"] == "old_value"
                 assert env["API_KEY"] == "new_key"
@@ -191,19 +197,17 @@ class TestUpdateCursorConfig:
         cursor_dir.mkdir()
         config_file = cursor_dir / "mcp.json"
         config_file.write_text("{}")
-        
+
         with patch.object(Path, "home", return_value=tmp_path):
             with patch("fastmcp.cli.cursor.open_cursor_deeplink", return_value=False):
                 result = cursor.update_cursor_config(
-                    "/path/to/server.py:app",
-                    "test-server",
-                    open_cursor=False
+                    "/path/to/server.py:app", "test-server", open_cursor=False
                 )
                 assert result is True
-                
+
                 config = json.loads(config_file.read_text())
                 args = config["mcpServers"]["test-server"]["args"]
-                
+
                 # Should preserve the :app suffix in the resolved path
                 # Find the fastmcp run command and then the server arg
                 fastmcp_index = args.index("fastmcp")
@@ -217,13 +221,13 @@ class TestUpdateCursorConfig:
         cursor_dir.mkdir()
         config_file = cursor_dir / "mcp.json"
         config_file.write_text("{}")
-        
+
         with patch.object(Path, "home", return_value=tmp_path):
-            with patch("fastmcp.cli.cursor.open_cursor_deeplink", return_value=True) as mock_deeplink:
+            with patch(
+                "fastmcp.cli.cursor.open_cursor_deeplink", return_value=True
+            ) as mock_deeplink:
                 result = cursor.update_cursor_config(
-                    "server.py",
-                    "test-server",
-                    open_cursor=True
+                    "server.py", "test-server", open_cursor=True
                 )
                 assert result is True
                 mock_deeplink.assert_called_once_with("test-server")
@@ -233,18 +237,16 @@ class TestUpdateCursorConfig:
         cursor_dir = tmp_path / ".cursor"
         cursor_dir.mkdir()
         config_file = cursor_dir / "mcp.json"
-        
+
         # Make config file unwritable
         config_file.write_text("{}")
         config_file.chmod(0o444)
-        
+
         with patch.object(Path, "home", return_value=tmp_path):
             with patch("fastmcp.cli.cursor.open_cursor_deeplink", return_value=False):
                 with patch("fastmcp.cli.cursor.logger") as mock_logger:
                     result = cursor.update_cursor_config(
-                        "server.py",
-                        "test-server",
-                        open_cursor=False
+                        "server.py", "test-server", open_cursor=False
                     )
                     # On some systems, this might still succeed, so we check if it failed
                     if not result:
@@ -264,7 +266,7 @@ class TestListCursorServers:
         """Should return empty dict when config doesn't exist."""
         cursor_dir = tmp_path / ".cursor"
         cursor_dir.mkdir()
-        
+
         with patch.object(Path, "home", return_value=tmp_path):
             result = cursor.list_cursor_servers()
             assert result == {}
@@ -274,15 +276,15 @@ class TestListCursorServers:
         cursor_dir = tmp_path / ".cursor"
         cursor_dir.mkdir()
         config_file = cursor_dir / "mcp.json"
-        
+
         config = {
             "mcpServers": {
                 "server1": {"command": "uv", "args": ["run", "server1.py"]},
-                "server2": {"url": "http://localhost:8000/sse"}
+                "server2": {"url": "http://localhost:8000/sse"},
             }
         }
         config_file.write_text(json.dumps(config))
-        
+
         with patch.object(Path, "home", return_value=tmp_path):
             result = cursor.list_cursor_servers()
             assert result == config["mcpServers"]
@@ -293,9 +295,9 @@ class TestListCursorServers:
         cursor_dir.mkdir()
         config_file = cursor_dir / "mcp.json"
         config_file.write_text("invalid json")
-        
+
         with patch.object(Path, "home", return_value=tmp_path):
             with patch("fastmcp.cli.cursor.logger") as mock_logger:
                 result = cursor.list_cursor_servers()
                 assert result is None
-                mock_logger.error.assert_called() 
+                mock_logger.error.assert_called()
