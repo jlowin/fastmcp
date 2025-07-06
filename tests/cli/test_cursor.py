@@ -215,7 +215,7 @@ class TestInstallCursor:
         assert "pandas" in server_config.args
         assert "requests" in server_config.args
         assert "--with-editable" in server_config.args
-        assert "/path/to/editable" in server_config.args
+        assert str(Path("/path/to/editable")) in server_config.args
         assert "fastmcp" in server_config.args
         assert "run" in server_config.args
         assert server_config.env == {"API_KEY": "secret", "DEBUG": "true"}

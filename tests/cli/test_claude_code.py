@@ -186,7 +186,7 @@ class TestInstallClaudeCode:
         assert "pandas" in call_args
         assert "requests" in call_args
         assert "--with-editable" in call_args
-        assert "/path/to/editable" in call_args
+        assert str(Path("/path/to/editable")) in call_args
 
     @patch("fastmcp.cli.install.claude_code.find_claude_command")
     @patch("subprocess.run")
