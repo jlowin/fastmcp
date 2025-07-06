@@ -30,9 +30,9 @@ def generate_cursor_deeplink(
     """
     # Create the configuration structure expected by Cursor
 
-    # Base64 encode the configuration
+    # Base64 encode the configuration (URL-safe for query parameter)
     config_json = server_config.model_dump_json(exclude_none=True)
-    config_b64 = base64.b64encode(config_json.encode()).decode()
+    config_b64 = base64.urlsafe_b64encode(config_json.encode()).decode()
 
     # Generate the deeplink URL
     deeplink = f"cursor://anysphere.cursor-deeplink/mcp/install?name={server_name}&config={config_b64}"
