@@ -43,6 +43,7 @@ from starlette.routing import BaseRoute, Route
 import fastmcp
 import fastmcp.server
 from fastmcp.exceptions import DisabledError, NotFoundError
+from fastmcp.mcp_config import MCPConfig
 from fastmcp.prompts import Prompt, PromptManager
 from fastmcp.prompts.prompt import FunctionPrompt
 from fastmcp.resources import Resource, ResourceManager
@@ -60,9 +61,9 @@ from fastmcp.settings import Settings
 from fastmcp.tools import ToolManager
 from fastmcp.tools.tool import FunctionTool, Tool, ToolResult
 from fastmcp.utilities.cache import TimedCache
+from fastmcp.utilities.cli import log_server_banner
 from fastmcp.utilities.components import FastMCPComponent
 from fastmcp.utilities.logging import get_logger
-from fastmcp.utilities.mcp_config import MCPConfig
 from fastmcp.utilities.types import NotSet, NotSetT
 
 if TYPE_CHECKING:
@@ -285,6 +286,7 @@ class FastMCP(Generic[LifespanResultT]):
     async def run_async(
         self,
         transport: Transport | None = None,
+        show_banner: bool = True,
         **transport_kwargs: Any,
     ) -> None:
         """Run the FastMCP server asynchronously.
@@ -298,15 +300,23 @@ class FastMCP(Generic[LifespanResultT]):
             raise ValueError(f"Unknown transport: {transport}")
 
         if transport == "stdio":
-            await self.run_stdio_async(**transport_kwargs)
+            await self.run_stdio_async(
+                show_banner=show_banner,
+                **transport_kwargs,
+            )
         elif transport in {"http", "sse", "streamable-http"}:
-            await self.run_http_async(transport=transport, **transport_kwargs)
+            await self.run_http_async(
+                transport=transport,
+                show_banner=show_banner,
+                **transport_kwargs,
+            )
         else:
             raise ValueError(f"Unknown transport: {transport}")
 
     def run(
         self,
         transport: Transport | None = None,
+        show_banner: bool = True,
         **transport_kwargs: Any,
     ) -> None:
         """Run the FastMCP server. Note this is a synchronous function.
@@ -315,7 +325,14 @@ class FastMCP(Generic[LifespanResultT]):
             transport: Transport protocol to use ("stdio", "sse", or "streamable-http")
         """
 
-        anyio.run(partial(self.run_async, transport, **transport_kwargs))
+        anyio.run(
+            partial(
+                self.run_async,
+                transport,
+                show_banner=show_banner,
+                **transport_kwargs,
+            )
+        )
 
     def _setup_handlers(self) -> None:
         """Set up core MCP protocol handlers."""
@@ -1321,8 +1338,16 @@ class FastMCP(Generic[LifespanResultT]):
             enabled=enabled,
         )
 
-    async def run_stdio_async(self) -> None:
+    async def run_stdio_async(self, show_banner: bool = True) -> None:
         """Run the server using stdio transport."""
+
+        # Display server banner
+        if show_banner:
+            log_server_banner(
+                server=self,
+                transport="stdio",
+            )
+
         async with stdio_server() as (read_stream, write_stream):
             logger.info(f"Starting MCP server {self.name!r} with transport 'stdio'")
             await self._mcp_server.run(
@@ -1335,6 +1360,7 @@ class FastMCP(Generic[LifespanResultT]):
 
     async def run_http_async(
         self,
+        show_banner: bool = True,
         transport: Literal["http", "streamable-http", "sse"] = "http",
         host: str | None = None,
         port: int | None = None,
@@ -1342,6 +1368,7 @@ class FastMCP(Generic[LifespanResultT]):
         path: str | None = None,
         uvicorn_config: dict[str, Any] | None = None,
         middleware: list[ASGIMiddleware] | None = None,
+        stateless_http: bool | None = None,
     ) -> None:
         """Run the server using HTTP transport.
 
@@ -1352,15 +1379,39 @@ class FastMCP(Generic[LifespanResultT]):
             log_level: Log level for the server (defaults to settings.log_level)
             path: Path for the endpoint (defaults to settings.streamable_http_path or settings.sse_path)
             uvicorn_config: Additional configuration for the Uvicorn server
+            middleware: A list of middleware to apply to the app
+            stateless_http: Whether to use stateless HTTP (defaults to settings.stateless_http)
         """
+
         host = host or self._deprecated_settings.host
         port = port or self._deprecated_settings.port
         default_log_level_to_use = (
             log_level or self._deprecated_settings.log_level
         ).lower()
 
-        app = self.http_app(path=path, transport=transport, middleware=middleware)
+        app = self.http_app(
+            path=path,
+            transport=transport,
+            middleware=middleware,
+            stateless_http=stateless_http,
+        )
 
+        # Get the path for the server URL
+        server_path = (
+            app.state.path.lstrip("/")
+            if hasattr(app, "state") and hasattr(app.state, "path")
+            else path or ""
+        )
+
+        # Display server banner
+        if show_banner:
+            log_server_banner(
+                server=self,
+                transport=transport,
+                host=host,
+                port=port,
+                path=server_path,
+            )
         _uvicorn_config_from_user = uvicorn_config or {}
 
         config_kwargs: dict[str, Any] = {
@@ -1378,6 +1429,7 @@ class FastMCP(Generic[LifespanResultT]):
         logger.info(
             f"Starting MCP server {self.name!r} with transport {transport!r} on http://{host}:{port}/{path}"
         )
+
         await server.serve()
 
     async def run_sse_async(
@@ -1591,9 +1643,8 @@ class FastMCP(Generic[LifespanResultT]):
             resource_separator: Deprecated. Separator character for resource URIs.
             prompt_separator: Deprecated. Separator character for prompt names.
         """
-        from fastmcp import Client
         from fastmcp.client.transports import FastMCPTransport
-        from fastmcp.server.proxy import FastMCPProxy
+        from fastmcp.server.proxy import FastMCPProxy, ProxyClient
 
         # Deprecated since 2.9.0
         # Prior to 2.9.0, the first positional argument was the prefix and the
@@ -1645,7 +1696,7 @@ class FastMCP(Generic[LifespanResultT]):
             as_proxy = server._has_lifespan
 
         if as_proxy and not isinstance(server, FastMCPProxy):
-            server = FastMCPProxy(Client(transport=FastMCPTransport(server)))
+            server = FastMCPProxy(ProxyClient(transport=FastMCPTransport(server)))
 
         # Delegate mounting to all three managers
         mounted_server = MountedServer(
@@ -1856,14 +1907,16 @@ class FastMCP(Generic[LifespanResultT]):
     @classmethod
     def as_proxy(
         cls,
-        backend: Client[ClientTransportT]
-        | ClientTransport
-        | FastMCP[Any]
-        | AnyUrl
-        | Path
-        | MCPConfig
-        | dict[str, Any]
-        | str,
+        backend: (
+            Client[ClientTransportT]
+            | ClientTransport
+            | FastMCP[Any]
+            | AnyUrl
+            | Path
+            | MCPConfig
+            | dict[str, Any]
+            | str
+        ),
         **settings: Any,
     ) -> FastMCPProxy:
         """Create a FastMCP proxy server for the given backend.
@@ -1874,12 +1927,12 @@ class FastMCP(Generic[LifespanResultT]):
         `fastmcp.client.Client` constructor.
         """
         from fastmcp.client.client import Client
-        from fastmcp.server.proxy import FastMCPProxy
+        from fastmcp.server.proxy import FastMCPProxy, ProxyClient
 
         if isinstance(backend, Client):
             client = backend
         else:
-            client = Client(backend)
+            client = ProxyClient(backend)
 
         return FastMCPProxy(client=client, **settings)
 

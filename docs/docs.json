@@ -21,8 +21,8 @@
   },
   "description": "The fast, Pythonic way to build MCP servers and clients.",
   "favicon": {
-    "dark": "/assets/favicon.ico",
-    "light": "/assets/favicon.ico"
+    "dark": "/assets/favicon.svg",
+    "light": "/assets/favicon.svg"
   },
   "footer": {
     "socials": {
@@ -139,10 +139,11 @@
                   "integrations/chatgpt",
                   "integrations/claude-code",
                   "integrations/claude-desktop",
-                  "integrations/gemini",
-                  "integrations/openai",
+                  "integrations/cursor",
                   "integrations/eunomia-authorization",
-                  "integrations/contrib"
+                  "integrations/gemini",
+                  "integrations/mcp-json-configuration",
+                  "integrations/openai"
                 ]
               },
               {
@@ -152,7 +153,8 @@
                   "patterns/decorating-methods",
                   "patterns/http-requests",
                   "patterns/testing",
-                  "patterns/cli"
+                  "patterns/cli",
+                  "patterns/contrib"
                 ]
               },
               {

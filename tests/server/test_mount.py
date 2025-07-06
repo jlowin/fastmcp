@@ -8,6 +8,7 @@ from fastmcp import FastMCP
 from fastmcp.client import Client
 from fastmcp.client.transports import FastMCPTransport, SSETransport
 from fastmcp.server.proxy import FastMCPProxy
+from fastmcp.utilities.tests import caplog_for_fastmcp
 
 
 class TestBasicMount:
@@ -290,25 +291,26 @@ class TestMultipleServerMount:
         main_app.mount(unreachable_proxy, "unreachable")
 
         # All object types should work from working server despite unreachable proxy
-        async with Client(main_app) as client:
-            # Test tools
-            tools = await client.list_tools()
-            tool_names = [tool.name for tool in tools]
-            assert "working_working_tool" in tool_names
+        with caplog_for_fastmcp(caplog):
+            async with Client(main_app) as client:
+                # Test tools
+                tools = await client.list_tools()
+                tool_names = [tool.name for tool in tools]
+                assert "working_working_tool" in tool_names
 
-            # Test calling a tool
-            result = await client.call_tool("working_working_tool", {})
-            assert result.data == "Working tool"
+                # Test calling a tool
+                result = await client.call_tool("working_working_tool", {})
+                assert result.data == "Working tool"
 
-            # Test resources
-            resources = await client.list_resources()
-            resource_uris = [str(resource.uri) for resource in resources]
-            assert "working://working/data" in resource_uris
+                # Test resources
+                resources = await client.list_resources()
+                resource_uris = [str(resource.uri) for resource in resources]
+                assert "working://working/data" in resource_uris
 
-            # Test prompts
-            prompts = await client.list_prompts()
-            prompt_names = [prompt.name for prompt in prompts]
-            assert "working_working_prompt" in prompt_names
+                # Test prompts
+                prompts = await client.list_prompts()
+                prompt_names = [prompt.name for prompt in prompts]
+                assert "working_working_prompt" in prompt_names
 
         # Verify that warnings were logged for the unreachable server
         warning_messages = [
@@ -775,9 +777,7 @@ class TestProxyServer:
             return f"Data for {query}"
 
         # Create proxy server
-        proxy_server = FastMCP.as_proxy(
-            Client(transport=FastMCPTransport(original_server))
-        )
+        proxy_server = FastMCP.as_proxy(FastMCPTransport(original_server))
 
         # Mount proxy server
         main_app = FastMCP("MainApp")
@@ -798,9 +798,7 @@ class TestProxyServer:
         original_server = FastMCP("OriginalServer")
 
         # Create proxy server
-        proxy_server = FastMCP.as_proxy(
-            Client(transport=FastMCPTransport(original_server))
-        )
+        proxy_server = FastMCP.as_proxy(FastMCPTransport(original_server))
 
         # Mount proxy server
         main_app = FastMCP("MainApp")
@@ -830,9 +828,7 @@ class TestProxyServer:
             return {"api_key": "12345"}
 
         # Create proxy server
-        proxy_server = FastMCP.as_proxy(
-            Client(transport=FastMCPTransport(original_server))
-        )
+        proxy_server = FastMCP.as_proxy(FastMCPTransport(original_server))
 
         # Mount proxy server
         main_app = FastMCP("MainApp")
@@ -854,9 +850,7 @@ class TestProxyServer:
             return f"Welcome, {name}!"
 
         # Create proxy server
-        proxy_server = FastMCP.as_proxy(
-            Client(transport=FastMCPTransport(original_server))
-        )
+        proxy_server = FastMCP.as_proxy(FastMCPTransport(original_server))
 
         # Mount proxy server
         main_app = FastMCP("MainApp")
@@ -912,7 +906,7 @@ class TestAsProxyKwarg:
     async def test_as_proxy_ignored_for_proxy_mounts_default(self):
         mcp = FastMCP("Main")
         sub = FastMCP("Sub")
-        sub_proxy = FastMCP.as_proxy(Client(transport=FastMCPTransport(sub)))
+        sub_proxy = FastMCP.as_proxy(FastMCPTransport(sub))
 
         mcp.mount(sub_proxy, "sub")
 
@@ -921,7 +915,7 @@ class TestAsProxyKwarg:
     async def test_as_proxy_ignored_for_proxy_mounts_false(self):
         mcp = FastMCP("Main")
         sub = FastMCP("Sub")
-        sub_proxy = FastMCP.as_proxy(Client(transport=FastMCPTransport(sub)))
+        sub_proxy = FastMCP.as_proxy(FastMCPTransport(sub))
 
         mcp.mount(sub_proxy, "sub", as_proxy=False)
 
@@ -930,7 +924,7 @@ class TestAsProxyKwarg:
     async def test_as_proxy_ignored_for_proxy_mounts_true(self):
         mcp = FastMCP("Main")
         sub = FastMCP("Sub")
-        sub_proxy = FastMCP.as_proxy(Client(transport=FastMCPTransport(sub)))
+        sub_proxy = FastMCP.as_proxy(FastMCPTransport(sub))
 
         mcp.mount(sub_proxy, "sub", as_proxy=True)
 

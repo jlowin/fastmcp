@@ -29,10 +29,10 @@ from typing_extensions import TypedDict, Unpack
 import fastmcp
 from fastmcp.client.auth.bearer import BearerAuth
 from fastmcp.client.auth.oauth import OAuth
+from fastmcp.mcp_config import MCPConfig, infer_transport_type_from_url
 from fastmcp.server.dependencies import get_http_headers
 from fastmcp.server.server import FastMCP
 from fastmcp.utilities.logging import get_logger
-from fastmcp.utilities.mcp_config import MCPConfig, infer_transport_type_from_url
 
 logger = get_logger(__name__)
 
@@ -773,8 +773,6 @@ class MCPConfigTransport(ClientTransport):
     """
 
     def __init__(self, config: MCPConfig | dict):
-        from fastmcp.client.client import Client
-
         if isinstance(config, dict):
             config = MCPConfig.from_dict(config)
         self.config = config
@@ -792,9 +790,9 @@ class MCPConfigTransport(ClientTransport):
             composite_server = FastMCP()
 
             for name, server in self.config.mcpServers.items():
-                server_client = Client(transport=server.to_transport())
                 composite_server.mount(
-                    prefix=name, server=FastMCP.as_proxy(server_client)
+                    prefix=name,
+                    server=FastMCP.as_proxy(backend=server.to_transport()),
                 )
 
             self.transport = FastMCPTransport(mcp=composite_server)

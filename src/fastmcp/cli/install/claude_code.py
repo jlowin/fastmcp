@@ -1,0 +1,193 @@
+"""Claude Code integration for FastMCP install."""
+
+from __future__ import annotations
+
+import subprocess
+import sys
+from pathlib import Path
+from typing import Annotated
+
+import typer
+from rich import print
+
+from fastmcp.utilities.logging import get_logger
+
+from .shared import process_common_args
+
+logger = get_logger(__name__)
+
+
+def find_claude_command() -> str | None:
+    """Find the Claude Code CLI command."""
+    # Check the default installation location
+    default_path = Path.home() / ".claude" / "local" / "claude"
+    if default_path.exists():
+        try:
+            result = subprocess.run(
+                [str(default_path), "--version"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            if "Claude Code" in result.stdout:
+                return str(default_path)
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            pass
+
+    return None
+
+
+def check_claude_code_available() -> bool:
+    """Check if Claude Code CLI is available."""
+    return find_claude_command() is not None
+
+
+def install_claude_code(
+    file: Path,
+    server_object: str | None,
+    name: str,
+    *,
+    with_editable: Path | None = None,
+    with_packages: list[str] | None = None,
+    env_vars: dict[str, str] | None = None,
+) -> bool:
+    """Install FastMCP server in Claude Code.
+
+    Args:
+        file: Path to the server file
+        server_object: Optional server object name (for :object suffix)
+        name: Name for the server in Claude Code
+        with_editable: Optional directory to install in editable mode
+        with_packages: Optional list of additional packages to install
+        env_vars: Optional dictionary of environment variables
+
+    Returns:
+        True if installation was successful, False otherwise
+    """
+    # Check if Claude Code CLI is available
+    claude_cmd = find_claude_command()
+    if not claude_cmd:
+        print(
+            "[red]Claude Code CLI not found.[/red]\n"
+            "[blue]Please ensure Claude Code is installed. Try running 'claude --version' to verify.[/blue]"
+        )
+        return False
+
+    # Build uv run command
+    args = ["run"]
+
+    # Collect all packages in a set to deduplicate
+    packages = {"fastmcp"}
+    if with_packages:
+        packages.update(pkg for pkg in with_packages if pkg)
+
+    # Add all packages with --with
+    for pkg in sorted(packages):
+        args.extend(["--with", pkg])
+
+    if with_editable:
+        args.extend(["--with-editable", str(with_editable)])
+
+    # Build server spec from parsed components
+    if server_object:
+        server_spec = f"{file.resolve()}:{server_object}"
+    else:
+        server_spec = str(file.resolve())
+
+    # Add fastmcp run command
+    args.extend(["fastmcp", "run", server_spec])
+
+    # Build claude mcp add command
+    cmd_parts = [claude_cmd, "mcp", "add"]
+
+    # Add environment variables if specified (before the name and command)
+    if env_vars:
+        for key, value in env_vars.items():
+            cmd_parts.extend(["-e", f"{key}={value}"])
+
+    # Add server name and command
+    cmd_parts.extend([name, "--"])
+    cmd_parts.extend(["uv"] + args)
+
+    try:
+        # Run the claude mcp add command
+        subprocess.run(cmd_parts, check=True, capture_output=True, text=True)
+        return True
+    except subprocess.CalledProcessError as e:
+        print(
+            f"[red]Failed to install '[bold]{name}[/bold]' in Claude Code: {e.stderr.strip() if e.stderr else str(e)}[/red]"
+        )
+        return False
+    except Exception as e:
+        print(f"[red]Failed to install '[bold]{name}[/bold]' in Claude Code: {e}[/red]")
+        return False
+
+
+def claude_code_command(
+    server_spec: Annotated[
+        str, typer.Argument(help="Python file to run, optionally with :object suffix")
+    ],
+    server_name: Annotated[
+        str | None,
+        typer.Option(
+            "--name",
+            "-n",
+            help="Custom name for the server (defaults to server's name attribute or file name)",
+        ),
+    ] = None,
+    with_editable: Annotated[
+        Path | None,
+        typer.Option(
+            "--with-editable",
+            "-e",
+            help="Directory containing pyproject.toml to install in editable mode",
+            exists=True,
+            file_okay=False,
+            resolve_path=True,
+        ),
+    ] = None,
+    with_packages: Annotated[
+        list[str],
+        typer.Option(
+            "--with", help="Additional packages to install, in PEP 508 format"
+        ),
+    ] = [],
+    env_vars: Annotated[
+        list[str],
+        typer.Option(
+            "--env-var", "-v", help="Environment variables in KEY=VALUE format"
+        ),
+    ] = [],
+    env_file: Annotated[
+        Path | None,
+        typer.Option(
+            "--env-file",
+            "-f",
+            help="Load environment variables from a .env file",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            resolve_path=True,
+        ),
+    ] = None,
+) -> None:
+    """Install a MCP server in Claude Code."""
+    file, server_object, name, packages, env_dict = process_common_args(
+        server_spec, server_name, with_packages, env_vars, env_file
+    )
+
+    success = install_claude_code(
+        file=file,
+        server_object=server_object,
+        name=name,
+        with_editable=with_editable,
+        with_packages=packages,
+        env_vars=env_dict,
+    )
+
+    if success:
+        print(
+            f"[green bold]Successfully installed '[bold]{name}[/bold]' in Claude Code[/green bold]"
+        )
+    else:
+        sys.exit(1)
