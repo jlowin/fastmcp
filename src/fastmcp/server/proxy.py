@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import warnings
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -325,15 +324,11 @@ class ProxyTemplate(ResourceTemplate):
 
     @classmethod
     def from_mcp_template(
-        cls,
-        client: Client,
-        mcp_template: mcp.types.ResourceTemplate,
-        reuse_sessions: bool = False,
+        cls, client: Client, mcp_template: mcp.types.ResourceTemplate
     ) -> ProxyTemplate:
         """Factory method to create a ProxyTemplate from a raw MCP template schema."""
         return cls(
             client=client,
-            reuse_sessions=reuse_sessions,
             uri_template=mcp_template.uriTemplate,
             name=mcp_template.name,
             description=mcp_template.description,
@@ -429,30 +424,32 @@ class FastMCPProxy(FastMCP):
         Initializes the proxy server.
 
         Args:
-            client: DEPRECATED. The FastMCP client connected to the backend server.
+            client: The FastMCP client connected to the backend server.
             client_factory: A callable that returns a Client instance when called.
             **kwargs: Additional settings for the FastMCP server.
         """
-        import fastmcp
 
         super().__init__(**kwargs)
 
-        # Handle backwards compatibility and validation
+        # Handle client and client_factory parameters
         if client is not None and client_factory is not None:
             raise ValueError("Cannot specify both 'client' and 'client_factory'")
 
         if client is not None:
-            # Backwards compatibility path
-            # Deprecated in v2.10.3
-            if fastmcp.settings.deprecation_warnings:
-                warnings.warn(
-                    "Passing a Client instance to FastMCPProxy is deprecated and will be removed in a future version. "
-                    "Pass a client_factory instead, or use FastMCP.as_proxy() for automatic handling.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-            # Default to creating fresh sessions for safety
-            self.client_factory = lambda: client.new()
+            # Create client factory from provided client
+            # Use appropriate session strategy based on client state
+            if client.is_connected():
+                # Reuse existing session for connected clients
+                def reuse_client_factory():
+                    return client
+
+                self.client_factory = reuse_client_factory
+            else:
+                # Create fresh sessions for disconnected clients
+                def fresh_client_factory():
+                    return client.new()
+
+                self.client_factory = fresh_client_factory
         elif client_factory is not None:
             self.client_factory = client_factory
         else:
