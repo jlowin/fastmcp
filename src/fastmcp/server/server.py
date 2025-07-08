@@ -1931,10 +1931,30 @@ class FastMCP(Generic[LifespanResultT]):
 
         if isinstance(backend, Client):
             client = backend
-        else:
-            client = ProxyClient(backend)
+            # If client was connected when passed to proxy, reuse sessions (for #959)
+            # If client was not connected, create fresh sessions per request (fixes #1068)
+            if client.is_connected():
+                # Reuse sessions - return the same client instance
+                def reuse_client_factory():
+                    return client
 
-        return FastMCPProxy(client=client, **settings)
+                client_factory = reuse_client_factory
+            else:
+                # Fresh sessions per request
+                def fresh_client_factory():
+                    return client.new()
+
+                client_factory = fresh_client_factory
+        else:
+            base_client = ProxyClient(backend)
+
+            # Fresh client created from transport - use fresh sessions per request
+            def proxy_client_factory():
+                return base_client.new()
+
+            client_factory = proxy_client_factory
+
+        return FastMCPProxy(client_factory=client_factory, **settings)
 
     @classmethod
     def from_client(
