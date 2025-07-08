@@ -67,11 +67,14 @@ def _prune_unused_defs(schema: dict) -> dict:
         walk(value, current_def=def_name)
 
     # Figure out what defs were referenced directly or recursively
-    def def_is_referenced(def_name, parent_def_names: set[str] = set()):
+    def def_is_referenced(def_name, parent_def_names: set[str] | None = None):
         if def_name in root_defs:
             return True
         references = referenced_by.get(def_name)
         if references:
+            if parent_def_names is None:
+                parent_def_names = set()
+
             # Handle recursion by excluding references already present in parent references
             parent_def_names = parent_def_names | {def_name}
             valid_references = [
@@ -79,6 +82,7 @@ def _prune_unused_defs(schema: dict) -> dict:
                 for reference in references
                 if reference not in parent_def_names
             ]
+
             for reference in valid_references:
                 if def_is_referenced(reference, parent_def_names):
                     return True
