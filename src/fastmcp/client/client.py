@@ -110,8 +110,8 @@ class Client(Generic[ClientTransportT]):
     between tasks, and ensures all session state changes happen within a lock.
     Events are only created when needed, never reset outside locks.
 
-    See: https://github.com/jlowin/fastmcp/issues/1051
-         https://github.com/jlowin/fastmcp/pull/1054
+    This design prevents race conditions where tasks wait on events that get
+    replaced by other tasks, ensuring reliable coordination in concurrent scenarios.
 
     Args:
         transport: Connection source specification, which can be:

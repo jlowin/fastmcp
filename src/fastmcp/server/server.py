@@ -1931,9 +1931,18 @@ class FastMCP(Generic[LifespanResultT]):
 
         if isinstance(backend, Client):
             client = backend
-            # If client was connected when passed to proxy, reuse sessions (for #959)
-            # If client was not connected, create fresh sessions per request (fixes #1068)
+            # Session strategy based on client connection state:
+            # - Connected clients: reuse existing session for all requests
+            # - Disconnected clients: create fresh sessions per request for isolation
             if client.is_connected():
+                from fastmcp.utilities.logging import get_logger
+
+                logger = get_logger(__name__)
+                logger.info(
+                    "Proxy detected connected client - reusing existing session for all requests. "
+                    "This may cause context mixing in concurrent scenarios."
+                )
+
                 # Reuse sessions - return the same client instance
                 def reuse_client_factory():
                     return client

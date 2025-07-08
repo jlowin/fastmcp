@@ -69,21 +69,41 @@ This single setup gives you:
 
 <VersionBadge version="2.10.3" />
 
-One of the most important features of FastMCP proxies is automatic session isolation. When multiple clients make simultaneous requests through the same proxy, each request operates with its own isolated session state.
+FastMCP proxies provide session isolation to ensure safe concurrent operations. The session strategy depends on how the proxy is configured:
+
+### Fresh Sessions
+
+When you pass a disconnected client (which is the normal case), each request gets its own isolated backend session:
 
 ```python
 from fastmcp.server.proxy import ProxyClient
 
-# This proxy can safely handle concurrent requests
+# Each request creates a fresh backend session (recommended)
 proxy = FastMCP.as_proxy(ProxyClient("backend_server.py"))
 
 # Multiple clients can use this proxy simultaneously without interference:
-# - Client A calls a tool -> gets isolated session
-# - Client B calls a tool -> gets different isolated session  
-# - No context mixing between the requests
+# - Client A calls a tool -> gets isolated backend session
+# - Client B calls a tool -> gets different isolated backend session  
+# - No context mixing between requests
 ```
 
-This solves common issues where concurrent operations would mix contexts or share state inappropriately.
+### Session Reuse with Connected Clients
+
+When you pass an already-connected client, the proxy will reuse that session for all requests:
+
+```python
+from fastmcp import Client
+
+# Create and connect a client
+async with Client("backend_server.py") as connected_client:
+    # This proxy will reuse the connected session for all requests
+    proxy = FastMCP.as_proxy(connected_client)
+    
+    # ⚠️ Warning: All requests share the same backend session
+    # This may cause context mixing in concurrent scenarios
+```
+
+**Important**: Using shared sessions with concurrent requests from multiple clients may lead to context mixing and race conditions. This approach should only be used in single-threaded scenarios or when you have explicit synchronization.
 
 ## Transport Bridging
 
@@ -247,11 +267,7 @@ Internally, `FastMCP.as_proxy()` uses the `FastMCPProxy` class. You generally do
 ```python
 from fastmcp.server.proxy import FastMCPProxy, ProxyClient
 
-# Recommended - pass a ProxyClient for full MCP features
-proxy_client = ProxyClient("backend_server.py")
-proxy = FastMCPProxy(client=proxy_client)
-
-# Advanced - provide a client factory for custom control
+# Provide a client factory for explicit session control
 def create_client():
     return ProxyClient("backend_server.py")
 
@@ -260,17 +276,29 @@ proxy = FastMCPProxy(client_factory=create_client)
 
 ### Parameters
 
-- **`client`**: A `Client` instance (preferably `ProxyClient`). The proxy automatically creates an appropriate session strategy for concurrent safety.
-- **`client_factory`**: *(Advanced)* A callable that returns a `Client` instance when called. Use this for custom session management or when you need fine-grained control over client creation.
+- **`client`**: **[DEPRECATED]** A `Client` instance. Use `client_factory` instead for explicit session management.
+- **`client_factory`**: A callable that returns a `Client` instance when called. This gives you full control over session creation and reuse strategies.
 
-### How Session Strategies Work
+### Explicit Session Management
 
-When you provide a `client` parameter, `FastMCPProxy` automatically creates a session strategy based on the client's connection state:
+`FastMCPProxy` requires explicit session management - no automatic detection is performed. You must choose your session strategy:
 
-- **Disconnected clients**: Creates fresh sessions per request (`lambda: client.new()`)
-- **Connected clients**: Reuses the existing session (`lambda: client`)
+```python
+# Share session across all requests (be careful with concurrency)
+shared_client = ProxyClient("backend_server.py")
+def shared_session_factory():
+    return shared_client
 
-For custom behavior, provide your own client factory:
+proxy = FastMCPProxy(client_factory=shared_session_factory)
+
+# Create fresh sessions per request (recommended)
+def fresh_session_factory():
+    return ProxyClient("backend_server.py")
+
+proxy = FastMCPProxy(client_factory=fresh_session_factory)
+```
+
+For automatic session strategy selection, use the convenience method `FastMCP.as_proxy()` instead.
 
 ```python
 # Custom factory with specific configuration
