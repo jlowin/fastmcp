@@ -27,6 +27,7 @@ from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.openapi import (
     HTTPRoute,
     _combine_schemas,
+    extract_output_schema_from_responses,
     format_array_parameter,
     format_description_with_responses,
 )
@@ -234,6 +235,7 @@ class OpenAPITool(Tool):
         name: str,
         description: str,
         parameters: dict[str, Any],
+        output_schema: dict[str, Any] | None = None,
         tags: set[str] | None = None,
         timeout: float | None = None,
         annotations: ToolAnnotations | None = None,
@@ -243,6 +245,7 @@ class OpenAPITool(Tool):
             name=name,
             description=description,
             parameters=parameters,
+            output_schema=output_schema,
             tags=tags or set(),
             annotations=annotations,
             serializer=serializer,
@@ -392,9 +395,22 @@ class OpenAPITool(Tool):
             # Try to parse as JSON first
             try:
                 result = response.json()
-                if not isinstance(result, dict):
-                    result = {"result": result}
-                return ToolResult(structured_content=result)
+
+                # Handle structured content based on output schema, if any
+                structured_output = None
+                if self.output_schema is not None:
+                    if self.output_schema.get("x-fastmcp-wrap-result"):
+                        # Schema says wrap - always wrap in result key
+                        structured_output = {"result": result}
+                    else:
+                        structured_output = result
+                # If no output schema, use fallback logic for backward compatibility
+                elif not isinstance(result, dict):
+                    structured_output = {"result": result}
+                else:
+                    structured_output = result
+
+                return ToolResult(structured_content=structured_output)
             except json.JSONDecodeError:
                 return ToolResult(content=response.text)
 
@@ -787,6 +803,11 @@ class FastMCPOpenAPI(FastMCP):
         """Creates and registers an OpenAPITool with enhanced description."""
         combined_schema = _combine_schemas(route)
 
+        # Extract output schema from OpenAPI responses
+        output_schema = extract_output_schema_from_responses(
+            route.responses, route.schema_definitions
+        )
+
         # Get a unique tool name
         tool_name = self._get_unique_name(name, "tool")
 
@@ -810,6 +831,7 @@ class FastMCPOpenAPI(FastMCP):
             name=tool_name,
             description=enhanced_description,
             parameters=combined_schema,
+            output_schema=output_schema,
             tags=set(route.tags or []) | tags,
             timeout=self._timeout,
         )
@@ -825,10 +847,13 @@ class FastMCPOpenAPI(FastMCP):
                     f"Using component as-is."
                 )
 
+        # Use the potentially modified tool name as the registration key
+        final_tool_name = tool.name
+
         # Register the tool by directly assigning to the tools dictionary
-        self._tool_manager._tools[tool_name] = tool
+        self._tool_manager._tools[final_tool_name] = tool
         logger.debug(
-            f"Registered TOOL: {tool_name} ({route.method} {route.path}) with tags: {route.tags}"
+            f"Registered TOOL: {final_tool_name} ({route.method} {route.path}) with tags: {route.tags}"
         )
 
     def _create_openapi_resource(
@@ -875,10 +900,13 @@ class FastMCPOpenAPI(FastMCP):
                     f"Using component as-is."
                 )
 
+        # Use the potentially modified resource URI as the registration key
+        final_resource_uri = str(resource.uri)
+
         # Register the resource by directly assigning to the resources dictionary
-        self._resource_manager._resources[str(resource.uri)] = resource
+        self._resource_manager._resources[final_resource_uri] = resource
         logger.debug(
-            f"Registered RESOURCE: {resource_uri} ({route.method} {route.path}) with tags: {route.tags}"
+            f"Registered RESOURCE: {final_resource_uri} ({route.method} {route.path}) with tags: {route.tags}"
         )
 
     def _create_openapi_template(
@@ -954,8 +982,11 @@ class FastMCPOpenAPI(FastMCP):
                     f"Using component as-is."
                 )
 
+        # Use the potentially modified template URI as the registration key
+        final_template_uri = template.uri_template
+
         # Register the template by directly assigning to the templates dictionary
-        self._resource_manager._templates[uri_template_str] = template
+        self._resource_manager._templates[final_template_uri] = template
         logger.debug(
-            f"Registered TEMPLATE: {uri_template_str} ({route.method} {route.path}) with tags: {route.tags}"
+            f"Registered TEMPLATE: {final_template_uri} ({route.method} {route.path}) with tags: {route.tags}"
         )

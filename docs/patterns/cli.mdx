@@ -45,6 +45,7 @@ This command runs the server directly in your current Python environment. You ar
 | Transport | `--transport`, `-t` | Transport protocol to use (`stdio`, `http`, or `sse`) |
 | Host | `--host` | Host to bind to when using http transport (default: 127.0.0.1) |
 | Port | `--port`, `-p` | Port to bind to when using http transport (default: 8000) |
+| Path | `--path` | Path to bind to when using http transport (default: `/mcp/` or `/sse/` for SSE) |
 | Log Level | `--log-level`, `-l` | Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL) |
 | No Banner | `--no-banner` | Disable the startup banner display |
 
@@ -160,7 +161,7 @@ fastmcp install cursor server.py
 fastmcp install mcp-json server.py
 ```
 
-Note that for security reasons, MCP clients run every server in a completely isolated environment. Therefore, all dependencies must be explicitly specified using the `--with` and/or `--with-editable` options (following `uv` conventions) or by attaching them to your server in code via the `dependencies` parameter.
+Note that for security reasons, MCP clients usually run every server in a completely isolated environment. Therefore, all dependencies must be explicitly specified using the `--with` and/or `--with-editable` options (following `uv` conventions) or by attaching them to your server in code via the `dependencies` parameter. You should not assume that the MCP server will have access to your local environment.
 
 <Warning>
 **`uv` must be installed and available in your system PATH**. Both Claude Desktop and Cursor run in isolated environments and need `uv` to manage dependencies. On macOS, install `uv` globally with Homebrew for Claude Desktop compatibility: `brew install uv`.
@@ -283,3 +284,9 @@ Display version information about FastMCP and related components.
 ```bash
 fastmcp version
 ```
+
+#### Options
+
+| Option | Flag | Description |
+| ------ | ---- | ----------- |
+| Copy to Clipboard | `--copy` | Copy version information to clipboard |

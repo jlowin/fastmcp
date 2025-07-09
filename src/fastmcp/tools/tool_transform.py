@@ -9,7 +9,7 @@ from typing import Any, Literal
 from mcp.types import ToolAnnotations
 from pydantic import ConfigDict
 
-from fastmcp.tools.tool import ParsedFunction, Tool, ToolResult
+from fastmcp.tools.tool import ParsedFunction, Tool, ToolResult, _convert_to_content
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.types import NotSet, NotSetT, get_cached_typeadapter
 
@@ -233,7 +233,6 @@ class TransformedTool(Tool):
         Returns:
             ToolResult object containing content and optional structured output.
         """
-        from fastmcp.tools.tool import _convert_to_content
 
         # Fill in missing arguments with schema defaults to ensure
         # ArgTransform defaults take precedence over function defaults
@@ -274,7 +273,6 @@ class TransformedTool(Tool):
             if isinstance(result, ToolResult):
                 if self.output_schema is None:
                     # Check if this is from a custom function that returns ToolResult
-                    import inspect
 
                     return_annotation = inspect.signature(self.fn).return_annotation
                     if return_annotation is ToolResult:
@@ -298,7 +296,6 @@ class TransformedTool(Tool):
                     return result
 
             # Otherwise convert to content and create ToolResult with proper structured content
-            from fastmcp.tools.tool import _convert_to_content
 
             unstructured_result = _convert_to_content(
                 result, serializer=self.serializer
@@ -433,8 +430,6 @@ class TransformedTool(Tool):
                 final_output_schema = parsed_fn.output_schema
                 if final_output_schema is None:
                     # Check if function returns ToolResult - if so, don't fall back to parent
-                    import inspect
-
                     return_annotation = inspect.signature(
                         transform_fn
                     ).return_annotation
@@ -553,6 +548,7 @@ class TransformedTool(Tool):
         """
 
         # Build transformed schema and mapping
+        parent_defs = parent_tool.parameters.get("$defs", {})
         parent_props = parent_tool.parameters.get("properties", {}).copy()
         parent_required = set(parent_tool.parameters.get("required", []))
 
@@ -607,6 +603,9 @@ class TransformedTool(Tool):
             "properties": new_props,
             "required": list(new_required),
         }
+
+        if parent_defs:
+            schema["$defs"] = parent_defs
 
         # Create forwarding function that closes over everything it needs
         async def _forward(**kwargs):
