@@ -236,3 +236,218 @@ async def get_my_data(ctx: Context) -> dict:
 </ParamField>
 </Card>
 
+## Scope-Based Authorization
+
+FastMCP supports scope-based authorization, allowing you to restrict access to specific tools, resources, or prompts based on the scopes present in the access token. This provides fine-grained control over what authenticated users can access.
+
+### Tool Scope Validation
+
+You can require specific scopes for tools using the `required_scope` parameter:
+
+```python
+from fastmcp import FastMCP
+from fastmcp.server.auth import BearerAuthProvider
+
+mcp = FastMCP(name="My Server", auth=auth)
+
+# Require specific scope for this tool
+@mcp.tool(required_scope="admin:write")
+async def admin_action() -> str:
+    return "Admin action completed"
+
+# Default scope is the tool name
+@mcp.tool(required_scope="user_data")  # or omit for default
+async def user_data() -> str:
+    return "User data retrieved"
+
+# No scope required (accessible to all authenticated users)
+@mcp.tool
+async def public_tool() -> str:
+    return "Public data"
+```
+
+### Default Scope Behavior
+
+When `required_scope` is not specified, FastMCP uses the tool name as the default required scope:
+
+```python
+# These two are equivalent:
+@mcp.tool
+async def get_user_profile() -> str:
+    return "Profile data"
+
+@mcp.tool(required_scope="get_user_profile")
+async def get_user_profile() -> str:
+    return "Profile data"
+```
+
+### Error Handling
+
+FastMCP provides distinct error types for authentication vs authorization failures:
+
+```python
+from fastmcp.exceptions import AuthenticationError, AuthorizationError
+
+@mcp.tool
+async def sensitive_operation() -> str:
+    # Manual scope checking (usually not needed)
+    access_token = get_access_token()
+    
+    if not access_token:
+        raise AuthenticationError("No access token provided")
+    
+    if "sensitive:read" not in access_token.scopes:
+        raise AuthorizationError("Insufficient permissions: 'sensitive:read' scope required")
+    
+    return "Sensitive data"
+```
+
+### Client Error Handling
+
+Clients can distinguish between authentication and authorization errors:
+
+```python
+from fastmcp.client import FastMCPClient
+from fastmcp.exceptions import AuthenticationError, AuthorizationError
+
+async def call_protected_tool():
+    try:
+        result = await client.call_tool("admin_action")
+        return result
+    except AuthenticationError as e:
+        # Token is invalid, expired, or missing
+        print(f"Authentication failed: {e}")
+        # Handle by refreshing token or re-authenticating
+    except AuthorizationError as e:
+        # Token is valid but lacks required scopes
+        print(f"Authorization failed: {e}")
+        # Handle by requesting additional scopes or showing permission denied
+```
+
+### Debugging Scope Validation
+
+If scope validation isn't working as expected, you can create a debugging script to troubleshoot:
+
+```python
+import logging
+from fastmcp import FastMCP
+from fastmcp.server.auth import BearerAuthProvider
+from fastmcp.server.auth.providers.bearer import RSAKeyPair
+
+# Enable debug logging
+logging.basicConfig(level=logging.DEBUG)
+
+# Create key pair for testing
+key_pair = RSAKeyPair.generate()
+
+# Configure auth provider
+auth = BearerAuthProvider(
+    public_key=key_pair.public_key,
+    issuer="https://debug.example.com",
+    audience="debug-server"
+)
+
+mcp = FastMCP(name="Debug Server", auth=auth)
+
+@mcp.tool(required_scope="admin:write")
+async def admin_tool() -> str:
+    return "Admin operation completed"
+
+@mcp.tool()  # Uses default scope: "user_tool"
+async def user_tool() -> str:
+    return "User operation completed"
+
+# Test tokens with different scopes
+test_tokens = {
+    "empty_scopes": key_pair.create_token(
+        subject="test-user",
+        issuer="https://debug.example.com",
+        audience="debug-server",
+        scopes=[]  # Empty scopes
+    ),
+    "admin_token": key_pair.create_token(
+        subject="admin-user",
+        issuer="https://debug.example.com",
+        audience="debug-server",
+        scopes=["admin:write", "admin:read"]
+    ),
+    "user_token": key_pair.create_token(
+        subject="regular-user",
+        issuer="https://debug.example.com",
+        audience="debug-server",
+        scopes=["user_tool", "profile:read"]
+    )
+}
+
+# Print tokens for testing
+for token_type, token in test_tokens.items():
+    print(f"{token_type}: {token}")
+```
+
+### Testing with cURL
+
+You can test scope validation using cURL:
+
+```bash
+# Test with empty scopes (should fail)
+curl -X POST http://localhost:8000/mcp/v1/tools/call \
+  -H "Authorization: Bearer $EMPTY_SCOPE_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "admin_tool", "arguments": {}}'
+
+# Test with admin scope (should succeed)
+curl -X POST http://localhost:8000/mcp/v1/tools/call \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "admin_tool", "arguments": {}}'
+```
+
+### Common Issues
+
+<Warning>
+**Scope validation only works with HTTP transports** (`http` and `sse`). It does not apply to `stdio` transport.
+</Warning>
+
+1. **No error when scopes are missing**: Ensure `ErrorHandlingMiddleware` is included in your server configuration
+2. **Scope validation not triggered**: Verify that `auth` is properly configured on your FastMCP instance
+3. **Default scope not working**: Check that tool names match expected scope names
+4. **Token parsing issues**: Verify token format and signature validation
+
+### Advanced Debugging
+
+For detailed debugging, you can monkey-patch the validation method:
+
+```python
+import logging
+from fastmcp.server.server import FastMCPServer
+
+# Store original method
+original_validate = FastMCPServer._validate_tool_scope
+
+def debug_validate_tool_scope(self, tool_name: str, required_scope: str | None) -> None:
+    logger = logging.getLogger(__name__)
+    logger.debug(f"=== SCOPE VALIDATION DEBUG ===")
+    logger.debug(f"Tool name: {tool_name}")
+    logger.debug(f"Required scope: {required_scope}")
+    logger.debug(f"Auth provider: {self.auth}")
+    
+    try:
+        access_token = self.get_access_token()
+        logger.debug(f"Access token: {access_token}")
+        if access_token:
+            logger.debug(f"Token scopes: {access_token.scopes}")
+        
+        # Call original method
+        result = original_validate(self, tool_name, required_scope)
+        logger.debug(f"Validation result: SUCCESS")
+        return result
+    except Exception as e:
+        logger.debug(f"Validation result: FAILED - {e}")
+        raise
+
+# Apply monkey patch
+FastMCPServer._validate_tool_scope = debug_validate_tool_scope
+```
+
+This debugging approach helps identify issues with token parsing, scope extraction, or validation logic.
+
