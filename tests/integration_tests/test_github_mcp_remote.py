@@ -12,23 +12,23 @@ from fastmcp.client.auth.bearer import BearerAuth
 GITHUB_REMOTE_MCP_URL = "https://api.githubcopilot.com/mcp/"
 
 HEADER_AUTHORIZATION = "Authorization"
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+FASTMCP_GITHUB_TOKEN = os.getenv("FASTMCP_GITHUB_TOKEN")
 
 # Skip tests if no GitHub token is available
 pytestmark = pytest.mark.xfail(
-    GITHUB_TOKEN is None,
-    reason="The GITHUB_TOKEN environment variable is not set",
+    FASTMCP_GITHUB_TOKEN is None,
+    reason="The FASTMCP_GITHUB_TOKEN environment variable is not set",
 )
 
 
 @pytest.fixture(name="streamable_http_client")
 def fixture_streamable_http_client() -> Client[StreamableHttpTransport]:
-    assert GITHUB_TOKEN is not None
+    assert FASTMCP_GITHUB_TOKEN is not None
 
     return Client(
         StreamableHttpTransport(
             url=GITHUB_REMOTE_MCP_URL,
-            auth=BearerAuth(GITHUB_TOKEN),
+            auth=BearerAuth(FASTMCP_GITHUB_TOKEN),
         )
     )
 
