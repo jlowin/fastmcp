@@ -49,4 +49,4 @@ jobs:
       - name: Run tests
         run: uv run pytest tests
         env:
-          FASTMCP_GITHUB_TOKEN: ${{ secrets.FASTMCP_GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
