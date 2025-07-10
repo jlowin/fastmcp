@@ -39,6 +39,60 @@ ParameterLocation = Literal["path", "query", "header", "cookie"]
 JsonSchema = dict[str, Any]
 
 
+def format_array_parameter(
+    values: list, parameter_name: str, is_query_parameter: bool = False
+) -> str | list:
+    """
+    Format an array parameter according to OpenAPI specifications.
+
+    Args:
+        values: List of values to format
+        parameter_name: Name of the parameter (for error messages)
+        is_query_parameter: If True, can return list for explode=True behavior
+
+    Returns:
+        String (comma-separated) or list (for query params with explode=True)
+    """
+    # For arrays of simple types (strings, numbers, etc.), join with commas
+    if all(isinstance(item, str | int | float | bool) for item in values):
+        return ",".join(str(v) for v in values)
+
+    # For complex types, try to create a simpler representation
+    try:
+        # Try to create a simple string representation
+        formatted_parts = []
+        for item in values:
+            if isinstance(item, dict):
+                # For objects, serialize key-value pairs
+                item_parts = []
+                for k, v in item.items():
+                    item_parts.append(f"{k}:{v}")
+                formatted_parts.append(".".join(item_parts))
+            else:
+                formatted_parts.append(str(item))
+
+        return ",".join(formatted_parts)
+    except Exception as e:
+        param_type = "query" if is_query_parameter else "path"
+        logger.warning(
+            f"Failed to format complex array {param_type} parameter '{parameter_name}': {e}"
+        )
+
+        if is_query_parameter:
+            # For query parameters, fallback to original list
+            return values
+        else:
+            # For path parameters, fallback to string representation without Python syntax
+            str_value = (
+                str(values)
+                .replace("[", "")
+                .replace("]", "")
+                .replace("'", "")
+                .replace('"', "")
+            )
+            return str_value
+
+
 class ParameterInfo(FastMCPBaseModel):
     """Represents a single parameter for an HTTP operation in our IR."""
 
@@ -47,6 +101,7 @@ class ParameterInfo(FastMCPBaseModel):
     required: bool = False
     schema_: JsonSchema = Field(..., alias="schema")  # Target name in IR
     description: str | None = None
+    explode: bool | None = None  # OpenAPI explode property for array parameters
 
 
 class RequestBodyInfo(FastMCPBaseModel):
@@ -84,6 +139,7 @@ class HTTPRoute(FastMCPBaseModel):
     schema_definitions: dict[str, JsonSchema] = Field(
         default_factory=dict
     )  # Store component schemas
+    extensions: dict[str, Any] = Field(default_factory=dict)
 
 
 # Export public symbols
@@ -96,6 +152,7 @@ __all__ = [
     "ParameterLocation",
     "JsonSchema",
     "parse_openapi_to_http_routes",
+    "extract_output_schema_from_responses",
 ]
 
 # Type variables for generic parser
@@ -274,6 +331,12 @@ class OpenAPIParser(
                 result = {}
 
             return _replace_ref_with_defs(result)
+        except ValueError as e:
+            # Re-raise ValueError for external reference errors and other validation issues
+            if "External or non-local reference not supported" in str(e):
+                raise
+            logger.error(f"Failed to extract schema as dict: {e}", exc_info=False)
+            return {}
         except Exception as e:
             logger.error(f"Failed to extract schema as dict: {e}", exc_info=False)
             return {}
@@ -302,11 +365,17 @@ class OpenAPIParser(
 
                 # Extract parameter info - handle both 3.0 and 3.1 parameter models
                 param_in = parameter.param_in  # Both use param_in
-                param_location = self._convert_to_parameter_location(param_in)
+                # Handle enum or string parameter locations
+                from enum import Enum
+
+                param_in_str = (
+                    param_in.value if isinstance(param_in, Enum) else param_in
+                )
+                param_location = self._convert_to_parameter_location(param_in_str)
                 param_schema_obj = parameter.param_schema  # Both use param_schema
 
                 # Skip duplicate parameters (same name and location)
-                param_key = (parameter.name, param_in)
+                param_key = (parameter.name, param_in_str)
                 if param_key in seen_params:
                     continue
                 seen_params[param_key] = True
@@ -346,6 +415,9 @@ class OpenAPIParser(
                         ):
                             param_schema_dict["default"] = resolved_media_schema.default
 
+                # Extract explode property if present
+                explode = getattr(parameter, "explode", None)
+
                 # Create parameter info object
                 param_info = ParameterInfo(
                     name=parameter.name,
@@ -353,6 +425,7 @@ class OpenAPIParser(
                     required=parameter.required,
                     schema=param_schema_dict,
                     description=parameter.description,
+                    explode=explode,
                 )
                 extracted_params.append(param_info)
             except Exception as e:
@@ -400,12 +473,30 @@ class OpenAPIParser(
                             request_body_info.content_schema[media_type_str] = (
                                 schema_dict
                             )
+                        except ValueError as e:
+                            # Re-raise ValueError for external reference errors
+                            if "External or non-local reference not supported" in str(
+                                e
+                            ):
+                                raise
+                            logger.error(
+                                f"Failed to extract schema for media type '{media_type_str}': {e}"
+                            )
                         except Exception as e:
                             logger.error(
                                 f"Failed to extract schema for media type '{media_type_str}': {e}"
                             )
 
             return request_body_info
+        except ValueError as e:
+            # Re-raise ValueError for external reference errors
+            if "External or non-local reference not supported" in str(e):
+                raise
+            ref_name = getattr(request_body_or_ref, "ref", "unknown")
+            logger.error(
+                f"Failed to extract request body '{ref_name}': {e}", exc_info=False
+            )
+            return None
         except Exception as e:
             ref_name = getattr(request_body_or_ref, "ref", "unknown")
             logger.error(
@@ -449,6 +540,17 @@ class OpenAPIParser(
                                     media_type_obj.media_type_schema
                                 )
                                 resp_info.content_schema[media_type_str] = schema_dict
+                            except ValueError as e:
+                                # Re-raise ValueError for external reference errors
+                                if (
+                                    "External or non-local reference not supported"
+                                    in str(e)
+                                ):
+                                    raise
+                                logger.error(
+                                    f"Failed to extract schema for media type '{media_type_str}' "
+                                    f"in response {status_code}: {e}"
+                                )
                             except Exception as e:
                                 logger.error(
                                     f"Failed to extract schema for media type '{media_type_str}' "
@@ -456,6 +558,16 @@ class OpenAPIParser(
                                 )
 
                 extracted_responses[str(status_code)] = resp_info
+            except ValueError as e:
+                # Re-raise ValueError for external reference errors
+                if "External or non-local reference not supported" in str(e):
+                    raise
+                ref_name = getattr(resp_or_ref, "ref", "unknown")
+                logger.error(
+                    f"Failed to extract response for status code {status_code} "
+                    f"from reference '{ref_name}': {e}",
+                    exc_info=False,
+                )
             except Exception as e:
                 ref_name = getattr(resp_or_ref, "ref", "unknown")
                 logger.error(
@@ -540,6 +652,14 @@ class OpenAPIParser(
                             getattr(operation, "responses", None)
                         )
 
+                        extensions = {}
+                        if hasattr(operation, "model_extra") and operation.model_extra:
+                            extensions = {
+                                k: v
+                                for k, v in operation.model_extra.items()
+                                if k.startswith("x-")
+                            }
+
                         route = HTTPRoute(
                             path=path_str,
                             method=method_upper,  # type: ignore[arg-type]  # Known valid HTTP method
@@ -551,10 +671,22 @@ class OpenAPIParser(
                             request_body=request_body_info,
                             responses=responses,
                             schema_definitions=schema_definitions,
+                            extensions=extensions,
                         )
                         routes.append(route)
                         logger.info(
                             f"Successfully extracted route: {method_upper} {path_str}"
+                        )
+                    except ValueError as op_error:
+                        # Re-raise ValueError for external reference errors
+                        if "External or non-local reference not supported" in str(
+                            op_error
+                        ):
+                            raise
+                        op_id = getattr(operation, "operationId", "unknown")
+                        logger.error(
+                            f"Failed to process operation {method_upper} {path_str} (ID: {op_id}): {op_error}",
+                            exc_info=True,
                         )
                     except Exception as op_error:
                         op_id = getattr(operation, "operationId", "unknown")
@@ -901,6 +1033,12 @@ def _replace_ref_with_defs(
         if ref_path.startswith("#/components/schemas/"):
             schema_name = ref_path.split("/")[-1]
             schema["$ref"] = f"#/$defs/{schema_name}"
+        elif not ref_path.startswith("#/"):
+            raise ValueError(
+                f"External or non-local reference not supported: {ref_path}. "
+                f"FastMCP only supports local schema references starting with '#/'. "
+                f"Please include all schema definitions within the OpenAPI document."
+            )
     elif properties := schema.get("properties"):
         if "$ref" in properties:
             schema["properties"] = _replace_ref_with_defs(properties)
@@ -922,6 +1060,7 @@ def _replace_ref_with_defs(
 def _combine_schemas(route: HTTPRoute) -> dict[str, Any]:
     """
     Combines parameter and request body schemas into a single schema.
+    Handles parameter name collisions by adding location suffixes.
 
     Args:
         route: HTTPRoute object
@@ -932,17 +1071,19 @@ def _combine_schemas(route: HTTPRoute) -> dict[str, Any]:
     properties = {}
     required = []
 
-    # Add path parameters
-    for param in route.parameters:
-        if param.required:
-            required.append(param.name)
-        properties[param.name] = _replace_ref_with_defs(
-            param.schema_.copy(), param.description
-        )
+    # First pass: collect parameter names by location and body properties
+    param_names_by_location = {
+        "path": set(),
+        "query": set(),
+        "header": set(),
+        "cookie": set(),
+    }
+    body_props = {}
 
-    # Add request body if it exists
+    for param in route.parameters:
+        param_names_by_location[param.location].add(param.name)
+
     if route.request_body and route.request_body.content_schema:
-        # For now, just use the first content type's schema
         content_type = next(iter(route.request_body.content_schema))
         body_schema = _replace_ref_with_defs(
             route.request_body.content_schema[content_type].copy(),
@@ -950,7 +1091,44 @@ def _combine_schemas(route: HTTPRoute) -> dict[str, Any]:
         )
         body_props = body_schema.get("properties", {})
 
-        # Add request body properties
+    # Detect collisions: parameters that exist in both body and path/query/header
+    all_non_body_params = set()
+    for location_params in param_names_by_location.values():
+        all_non_body_params.update(location_params)
+
+    body_param_names = set(body_props.keys())
+    colliding_params = all_non_body_params & body_param_names
+
+    # Add parameters with suffixes for collisions
+    for param in route.parameters:
+        if param.name in colliding_params:
+            # Add suffix for non-body parameters when collision detected
+            suffixed_name = f"{param.name}__{param.location}"
+            if param.required:
+                required.append(suffixed_name)
+
+            # Add location info to description
+            param_schema = _replace_ref_with_defs(
+                param.schema_.copy(), param.description
+            )
+            original_desc = param_schema.get("description", "")
+            location_desc = f"({param.location.capitalize()} parameter)"
+            if original_desc:
+                param_schema["description"] = f"{original_desc} {location_desc}"
+            else:
+                param_schema["description"] = location_desc
+
+            properties[suffixed_name] = param_schema
+        else:
+            # No collision, use original name
+            if param.required:
+                required.append(param.name)
+            properties[param.name] = _replace_ref_with_defs(
+                param.schema_.copy(), param.description
+            )
+
+    # Add request body properties (no suffixes for body parameters)
+    if route.request_body and route.request_body.content_schema:
         for prop_name, prop_schema in body_props.items():
             properties[prop_name] = prop_schema
 
@@ -970,3 +1148,94 @@ def _combine_schemas(route: HTTPRoute) -> dict[str, Any]:
     result = compress_schema(result)
 
     return result
+
+
+def extract_output_schema_from_responses(
+    responses: dict[str, ResponseInfo], schema_definitions: dict[str, Any] | None = None
+) -> dict[str, Any] | None:
+    """
+    Extract output schema from OpenAPI responses for use as MCP tool output schema.
+
+    This function finds the first successful response (200, 201, 202, 204) with a
+    JSON-compatible content type and extracts its schema. If the schema is not an
+    object type, it wraps it to comply with MCP requirements.
+
+    Args:
+        responses: Dictionary of ResponseInfo objects keyed by status code
+        schema_definitions: Optional schema definitions to include in the output schema
+
+    Returns:
+        dict: MCP-compliant output schema with potential wrapping, or None if no suitable schema found
+    """
+    if not responses:
+        return None
+
+    # Priority order for success status codes
+    success_codes = ["200", "201", "202", "204"]
+
+    # Find the first successful response
+    response_info = None
+    for status_code in success_codes:
+        if status_code in responses:
+            response_info = responses[status_code]
+            break
+
+    # If no explicit success codes, try any 2xx response
+    if response_info is None:
+        for status_code, resp_info in responses.items():
+            if status_code.startswith("2"):
+                response_info = resp_info
+                break
+
+    if response_info is None or not response_info.content_schema:
+        return None
+
+    # Prefer application/json, then fall back to other JSON-compatible types
+    json_compatible_types = [
+        "application/json",
+        "application/vnd.api+json",
+        "application/hal+json",
+        "application/ld+json",
+        "text/json",
+    ]
+
+    schema = None
+    for content_type in json_compatible_types:
+        if content_type in response_info.content_schema:
+            schema = response_info.content_schema[content_type]
+            break
+
+    # If no JSON-compatible type found, try the first available content type
+    if schema is None and response_info.content_schema:
+        first_content_type = next(iter(response_info.content_schema))
+        schema = response_info.content_schema[first_content_type]
+        logger.debug(
+            f"Using non-JSON content type for output schema: {first_content_type}"
+        )
+
+    if not schema or not isinstance(schema, dict):
+        return None
+
+    # Clean and copy the schema
+    output_schema = schema.copy()
+
+    # MCP requires output schemas to be objects. If this schema is not an object,
+    # we need to wrap it similar to how ParsedFunction.from_function() does it
+    if output_schema.get("type") != "object":
+        # Create a wrapped schema that contains the original schema under a "result" key
+        wrapped_schema = {
+            "type": "object",
+            "properties": {"result": output_schema},
+            "required": ["result"],
+            "x-fastmcp-wrap-result": True,
+        }
+        output_schema = wrapped_schema
+
+    # Add schema definitions if available
+    if schema_definitions:
+        output_schema["$defs"] = schema_definitions
+
+    # Use compress_schema to remove unused definitions
+    output_schema = compress_schema(output_schema)
+
+    return output_schema

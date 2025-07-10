@@ -1,14 +1,18 @@
-"""FastMCP run command implementation."""
+"""FastMCP run command implementation with enhanced type hints."""
 
 import importlib.util
 import re
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastmcp.utilities.logging import get_logger
 
 logger = get_logger("cli.run")
+
+# Type aliases for better type safety
+TransportType = Literal["stdio", "http", "sse", "streamable-http"]
+LogLevelType = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
 
 def is_url(path: str) -> bool:
@@ -164,11 +168,13 @@ def import_server_with_args(
 
 def run_command(
     server_spec: str,
-    transport: str | None = None,
+    transport: TransportType | None = None,
     host: str | None = None,
     port: int | None = None,
-    log_level: str | None = None,
+    path: str | None = None,
+    log_level: LogLevelType | None = None,
     server_args: list[str] | None = None,
+    show_banner: bool = True,
 ) -> None:
     """Run a MCP server or connect to a remote one.
 
@@ -177,8 +183,10 @@ def run_command(
         transport: Transport protocol to use
         host: Host to bind to when using http transport
         port: Port to bind to when using http transport
+        path: Path to bind to when using http transport
         log_level: Log level
         server_args: Additional arguments to pass to the server
+        show_banner: Whether to show the server banner
     """
     if is_url(server_spec):
         # Handle URL case
@@ -198,8 +206,13 @@ def run_command(
         kwargs["host"] = host
     if port:
         kwargs["port"] = port
+    if path:
+        kwargs["path"] = path
     if log_level:
         kwargs["log_level"] = log_level
+
+    if not show_banner:
+        kwargs["show_banner"] = False
 
     try:
         server.run(**kwargs)

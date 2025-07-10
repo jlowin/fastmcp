@@ -1,8 +1,12 @@
+from __future__ import annotations
+
 import asyncio
+import copy
 import datetime
 from contextlib import AsyncExitStack, asynccontextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Generic, Literal, cast, overload
+from typing import Any, Generic, Literal, TypeVar, cast, overload
 
 import anyio
 import httpx
@@ -13,12 +17,13 @@ from mcp import ClientSession
 from pydantic import AnyUrl
 
 import fastmcp
+from fastmcp.client.elicitation import ElicitationHandler, create_elicitation_callback
 from fastmcp.client.logging import (
     LogHandler,
-    MessageHandler,
     create_log_callback,
     default_log_handler,
 )
+from fastmcp.client.messages import MessageHandler, MessageHandlerT
 from fastmcp.client.progress import ProgressHandler, default_progress_handler
 from fastmcp.client.roots import (
     RootsHandler,
@@ -27,12 +32,15 @@ from fastmcp.client.roots import (
 )
 from fastmcp.client.sampling import SamplingHandler, create_sampling_callback
 from fastmcp.exceptions import ToolError
+from fastmcp.mcp_config import MCPConfig
 from fastmcp.server import FastMCP
 from fastmcp.utilities.exceptions import get_catch_handlers
-from fastmcp.utilities.mcp_config import MCPConfig
-from fastmcp.utilities.types import MCPContent
+from fastmcp.utilities.json_schema_type import json_schema_to_type
+from fastmcp.utilities.logging import get_logger
+from fastmcp.utilities.types import get_cached_typeadapter
 
 from .transports import (
+    ClientTransport,
     ClientTransportT,
     FastMCP1Server,
     FastMCPTransport,
@@ -53,8 +61,30 @@ __all__ = [
     "LogHandler",
     "MessageHandler",
     "SamplingHandler",
+    "ElicitationHandler",
     "ProgressHandler",
 ]
+
+logger = get_logger(__name__)
+
+T = TypeVar("T", bound="ClientTransport")
+
+
+@dataclass
+class ClientSessionState:
+    """Holds all session-related state for a Client instance.
+
+    This allows clean separation of configuration (which is copied) from
+    session state (which should be fresh for each new client instance).
+    """
+
+    session: ClientSession | None = None
+    nesting_counter: int = 0
+    lock: anyio.Lock = field(default_factory=anyio.Lock)
+    session_task: asyncio.Task | None = None
+    ready_event: anyio.Event = field(default_factory=anyio.Event)
+    stop_event: anyio.Event = field(default_factory=anyio.Event)
+    initialize_result: mcp.types.InitializeResult | None = None
 
 
 class Client(Generic[ClientTransportT]):
@@ -65,14 +95,35 @@ class Client(Generic[ClientTransportT]):
     handles connection establishment and management. Client provides methods for
     working with resources, prompts, tools and other MCP capabilities.
 
+    This client supports reentrant context managers (multiple concurrent
+    `async with client:` blocks) using reference counting and background session
+    management. This allows efficient session reuse in any scenario with
+    nested or concurrent client usage.
+
+    MCP SDK 1.10 introduced automatic list_tools() calls during call_tool()
+    execution. This created a race condition where events could be reset while
+    other tasks were waiting on them, causing deadlocks. The issue was exposed
+    in proxy scenarios but affects any reentrant usage.
+
+    The solution uses reference counting to track active context managers,
+    a background task to manage the session lifecycle, events to coordinate
+    between tasks, and ensures all session state changes happen within a lock.
+    Events are only created when needed, never reset outside locks.
+
+    This design prevents race conditions where tasks wait on events that get
+    replaced by other tasks, ensuring reliable coordination in concurrent scenarios.
+
     Args:
-        transport: Connection source specification, which can be:
-            - ClientTransport: Direct transport instance
-            - FastMCP: In-process FastMCP server
-            - AnyUrl | str: URL to connect to
-            - Path: File path for local socket
-            - MCPConfig: MCP server configuration
-            - dict: Transport configuration
+        transport:
+            Connection source specification, which can be:
+
+                - ClientTransport: Direct transport instance
+                - FastMCP: In-process FastMCP server
+                - AnyUrl or str: URL to connect to
+                - Path: File path for local socket
+                - MCPConfig: MCP server configuration
+                - dict: Transport configuration
+
         roots: Optional RootsList or RootsHandler for filesystem access
         sampling_handler: Optional handler for sampling requests
         log_handler: Optional handler for log messages
@@ -83,77 +134,93 @@ class Client(Generic[ClientTransportT]):
             Set to 0 to disable. If None, uses the value in the FastMCP global settings.
 
     Examples:
-        ```python # Connect to FastMCP server client =
-        Client("http://localhost:8080")
+        ```python
+        # Connect to FastMCP server
+        client = Client("http://localhost:8080")
 
         async with client:
-            # List available resources resources = await client.list_resources()
+            # List available resources
+            resources = await client.list_resources()
 
-            # Call a tool result = await client.call_tool("my_tool", {"param":
-            "value"})
+            # Call a tool
+            result = await client.call_tool("my_tool", {"param": "value"})
         ```
     """
 
     @overload
-    def __new__(
-        cls,
-        transport: ClientTransportT,
-        **kwargs: Any,
-    ) -> "Client[ClientTransportT]": ...
+    def __init__(self: Client[T], transport: T, *args, **kwargs) -> None: ...
 
     @overload
-    def __new__(
-        cls, transport: AnyUrl, **kwargs
-    ) -> "Client[SSETransport|StreamableHttpTransport]": ...
+    def __init__(
+        self: Client[SSETransport | StreamableHttpTransport],
+        transport: AnyUrl,
+        *args,
+        **kwargs,
+    ) -> None: ...
 
     @overload
-    def __new__(
-        cls, transport: FastMCP | FastMCP1Server, **kwargs
-    ) -> "Client[FastMCPTransport]": ...
+    def __init__(
+        self: Client[FastMCPTransport],
+        transport: FastMCP | FastMCP1Server,
+        *args,
+        **kwargs,
+    ) -> None: ...
 
     @overload
-    def __new__(
-        cls, transport: Path, **kwargs
-    ) -> "Client[PythonStdioTransport|NodeStdioTransport]": ...
+    def __init__(
+        self: Client[PythonStdioTransport | NodeStdioTransport],
+        transport: Path,
+        *args,
+        **kwargs,
+    ) -> None: ...
 
     @overload
-    def __new__(
-        cls, transport: MCPConfig | dict[str, Any], **kwargs
-    ) -> "Client[MCPConfigTransport]": ...
+    def __init__(
+        self: Client[MCPConfigTransport],
+        transport: MCPConfig | dict[str, Any],
+        *args,
+        **kwargs,
+    ) -> None: ...
 
     @overload
-    def __new__(
-        cls, transport: str, **kwargs
-    ) -> "Client[PythonStdioTransport|NodeStdioTransport|SSETransport|StreamableHttpTransport]": ...
-
-    def __new__(cls, transport, **kwargs) -> "Client":
-        instance = super().__new__(cls)
-        return instance
+    def __init__(
+        self: Client[
+            PythonStdioTransport
+            | NodeStdioTransport
+            | SSETransport
+            | StreamableHttpTransport
+        ],
+        transport: str,
+        *args,
+        **kwargs,
+    ) -> None: ...
 
     def __init__(
         self,
-        transport: ClientTransportT
-        | FastMCP
-        | AnyUrl
-        | Path
-        | MCPConfig
-        | dict[str, Any]
-        | str,
-        # Common args
+        transport: (
+            ClientTransportT
+            | FastMCP
+            | FastMCP1Server
+            | AnyUrl
+            | Path
+            | MCPConfig
+            | dict[str, Any]
+            | str
+        ),
         roots: RootsList | RootsHandler | None = None,
         sampling_handler: SamplingHandler | None = None,
+        elicitation_handler: ElicitationHandler | None = None,
         log_handler: LogHandler | None = None,
-        message_handler: MessageHandler | None = None,
+        message_handler: MessageHandlerT | MessageHandler | None = None,
         progress_handler: ProgressHandler | None = None,
         timeout: datetime.timedelta | float | int | None = None,
         init_timeout: datetime.timedelta | float | int | None = None,
         client_info: mcp.types.Implementation | None = None,
         auth: httpx.Auth | Literal["oauth"] | str | None = None,
-    ):
+    ) -> None:
         self.transport = cast(ClientTransportT, infer_transport(transport))
         if auth is not None:
             self.transport._set_auth(auth)
-        self._initialize_result: mcp.types.InitializeResult | None = None
 
         if log_handler is None:
             log_handler = default_log_handler
@@ -194,33 +261,32 @@ class Client(Generic[ClientTransportT]):
                 sampling_handler
             )
 
-        # session context management
-        self._session: ClientSession | None = None
-        self._exit_stack: AsyncExitStack | None = None
-        self._nesting_counter: int = 0
-        self._context_lock = anyio.Lock()
-        self._session_task: asyncio.Task | None = None
-        self._ready_event = anyio.Event()
-        self._stop_event = anyio.Event()
+        if elicitation_handler is not None:
+            self._session_kwargs["elicitation_callback"] = create_elicitation_callback(
+                elicitation_handler
+            )
+
+        # Session context management - see class docstring for detailed explanation
+        self._session_state = ClientSessionState()
 
     @property
     def session(self) -> ClientSession:
         """Get the current active session. Raises RuntimeError if not connected."""
-        if self._session is None:
+        if self._session_state.session is None:
             raise RuntimeError(
                 "Client is not connected. Use the 'async with client:' context manager first."
             )
 
-        return self._session
+        return self._session_state.session
 
     @property
     def initialize_result(self) -> mcp.types.InitializeResult:
         """Get the result of the initialization request."""
-        if self._initialize_result is None:
+        if self._session_state.initialize_result is None:
             raise RuntimeError(
                 "Client is not connected. Use the 'async with client:' context manager first."
             )
-        return self._initialize_result
+        return self._session_state.initialize_result
 
     def set_roots(self, roots: RootsList | RootsHandler) -> None:
         """Set the roots for the client. This does not automatically call `send_roots_list_changed`."""
@@ -232,9 +298,43 @@ class Client(Generic[ClientTransportT]):
             sampling_callback
         )
 
+    def set_elicitation_callback(
+        self, elicitation_callback: ElicitationHandler
+    ) -> None:
+        """Set the elicitation callback for the client."""
+        self._session_kwargs["elicitation_callback"] = create_elicitation_callback(
+            elicitation_callback
+        )
+
     def is_connected(self) -> bool:
         """Check if the client is currently connected."""
-        return self._session is not None
+        return self._session_state.session is not None
+
+    def new(self) -> Client[ClientTransportT]:
+        """Create a new client instance with the same configuration but fresh session state.
+
+        This creates a new client with the same transport, handlers, and configuration,
+        but with no active session. Useful for creating independent sessions that don't
+        share state with the original client.
+
+        Returns:
+            A new Client instance with the same configuration but disconnected state.
+
+        Example:
+            ```python
+            # Create a fresh client for each concurrent operation
+            fresh_client = client.new()
+            async with fresh_client:
+                await fresh_client.call_tool("some_tool", {})
+            ```
+        """
+
+        new_client = copy.copy(self)
+
+        # Reset session state to fresh state
+        new_client._session_state = ClientSessionState()
+
+        return new_client
 
     @asynccontextmanager
     async def _context_manager(self):
@@ -242,82 +342,136 @@ class Client(Generic[ClientTransportT]):
             async with self.transport.connect_session(
                 **self._session_kwargs
             ) as session:
-                self._session = session
+                self._session_state.session = session
                 # Initialize the session
                 try:
                     with anyio.fail_after(self._init_timeout):
-                        self._initialize_result = await self._session.initialize()
+                        self._session_state.initialize_result = (
+                            await self._session_state.session.initialize()
+                        )
                     yield
                 except anyio.ClosedResourceError:
                     raise RuntimeError("Server session was closed unexpectedly")
                 except TimeoutError:
                     raise RuntimeError("Failed to initialize server session")
                 finally:
-                    self._session = None
-                    self._initialize_result = None
+                    self._session_state.session = None
+                    self._session_state.initialize_result = None
 
     async def __aenter__(self):
-        await self._connect()
-        return self
+        return await self._connect()
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self._disconnect()
 
     async def _connect(self):
+        """
+        Establish or reuse a session connection.
+
+        This method implements the reentrant context manager pattern:
+        - First call: Creates background session task and waits for it to be ready
+        - Subsequent calls: Increments reference counter and reuses existing session
+        - All operations protected by _context_lock to prevent race conditions
+
+        The critical fix: Events are only created when starting a new session,
+        never reset outside the lock, preventing the deadlock scenario where
+        tasks wait on events that get replaced by other tasks.
+        """
         # ensure only one session is running at a time to avoid race conditions
-        async with self._context_lock:
-            need_to_start = self._session_task is None or self._session_task.done()
+        async with self._session_state.lock:
+            need_to_start = (
+                self._session_state.session_task is None
+                or self._session_state.session_task.done()
+            )
             if need_to_start:
-                self._stop_event = anyio.Event()
-                self._ready_event = anyio.Event()
-                self._session_task = asyncio.create_task(self._session_runner())
-            await self._ready_event.wait()
-            self._nesting_counter += 1
+                if self._session_state.nesting_counter != 0:
+                    raise RuntimeError(
+                        f"Internal error: nesting counter should be 0 when starting new session, got {self._session_state.nesting_counter}"
+                    )
+                self._session_state.stop_event = anyio.Event()
+                self._session_state.ready_event = anyio.Event()
+                self._session_state.session_task = asyncio.create_task(
+                    self._session_runner()
+                )
+                await self._session_state.ready_event.wait()
+
+                if self._session_state.session_task.done():
+                    exception = self._session_state.session_task.exception()
+                    if exception is None:
+                        raise RuntimeError(
+                            "Session task completed without exception but connection failed"
+                        )
+                    if isinstance(exception, httpx.HTTPStatusError):
+                        raise exception
+                    raise RuntimeError(
+                        f"Client failed to connect: {exception}"
+                    ) from exception
+
+            self._session_state.nesting_counter += 1
         return self
 
     async def _disconnect(self, force: bool = False):
+        """
+        Disconnect from session using reference counting.
+
+        This method implements proper cleanup for reentrant context managers:
+        - Decrements reference counter for normal exits
+        - Only stops session when counter reaches 0 (no more active contexts)
+        - Force flag bypasses reference counting for immediate shutdown
+        - Session cleanup happens inside the lock to ensure atomicity
+
+        Key fix: Removed the problematic "Reset for future reconnects" logic
+        that was resetting events outside the lock, causing race conditions.
+        Event recreation now happens only in _connect() when actually needed.
+        """
         # ensure only one session is running at a time to avoid race conditions
-        async with self._context_lock:
+        async with self._session_state.lock:
             # if we are forcing a disconnect, reset the nesting counter
             if force:
-                self._nesting_counter = 0
+                self._session_state.nesting_counter = 0
 
             # otherwise decrement to check if we are done nesting
             else:
-                self._nesting_counter = max(0, self._nesting_counter - 1)
+                self._session_state.nesting_counter = max(
+                    0, self._session_state.nesting_counter - 1
+                )
 
             # if we are still nested, return
-            if self._nesting_counter > 0:
+            if self._session_state.nesting_counter > 0:
                 return
 
             # stop the active seesion
-            if self._session_task is None:
+            if self._session_state.session_task is None:
                 return
-            self._stop_event.set()
-            runner_task = self._session_task
-            self._session_task = None
-
-        # wait for the session to finish
-        if runner_task:
-            await runner_task
-
-        # Reset for future reconnects
-        self._stop_event = anyio.Event()
-        self._ready_event = anyio.Event()
-        self._session = None
-        self._initialize_result = None
+            self._session_state.stop_event.set()
+            # wait for session to finish to ensure state has been reset
+            await self._session_state.session_task
+            self._session_state.session_task = None
 
     async def _session_runner(self):
-        async with AsyncExitStack() as stack:
-            try:
+        """
+        Background task that manages the actual session lifecycle.
+
+        This task runs in the background and:
+        1. Establishes the transport connection via _context_manager()
+        2. Signals that the session is ready via _ready_event.set()
+        3. Waits for disconnect signal via _stop_event.wait()
+        4. Ensures _ready_event is always set, even on failures
+
+        The simplified error handling (compared to the original) removes
+        redundant exception re-raising while ensuring waiting tasks are
+        always unblocked via the finally block.
+        """
+        try:
+            async with AsyncExitStack() as stack:
                 await stack.enter_async_context(self._context_manager())
                 # Session/context is now ready
-                self._ready_event.set()
+                self._session_state.ready_event.set()
                 # Wait until disconnect/stop is requested
-                await self._stop_event.wait()
-            finally:
-                # On exit, ensure ready event is set (idempotent)
-                self._ready_event.set()
+                await self._session_state.stop_event.wait()
+        finally:
+            # Ensure ready event is set even if context manager entry fails
+            self._session_state.ready_event.set()
 
     async def close(self):
         await self._disconnect(force=True)
@@ -675,7 +829,8 @@ class Client(Generic[ClientTransportT]):
         arguments: dict[str, Any] | None = None,
         timeout: datetime.timedelta | float | int | None = None,
         progress_handler: ProgressHandler | None = None,
-    ) -> list[MCPContent]:
+        raise_on_error: bool = True,
+    ) -> CallToolResult:
         """Call a tool on the server.
 
         Unlike call_tool_mcp, this method raises a ToolError if the tool call results in an error.
@@ -687,8 +842,13 @@ class Client(Generic[ClientTransportT]):
             progress_handler (ProgressHandler | None, optional): The progress handler to use for the tool call. Defaults to None.
 
         Returns:
-            list[mcp.types.TextContent | mcp.types.ImageContent | mcp.types.AudioContent | mcp.types.EmbeddedResource]:
-                The content returned by the tool.
+            CallToolResult:
+                The content returned by the tool. If the tool returns structured
+                outputs, they are returned as a dataclass (if an output schema
+                is available) or a dictionary; otherwise, a list of content
+                blocks is returned. Note: to receive both structured and
+                unstructured outputs, use call_tool_mcp instead and access the
+                raw result object.
 
         Raises:
             ToolError: If the tool call results in an error.
@@ -700,7 +860,43 @@ class Client(Generic[ClientTransportT]):
             timeout=timeout,
             progress_handler=progress_handler,
         )
-        if result.isError:
+        data = None
+        if result.isError and raise_on_error:
             msg = cast(mcp.types.TextContent, result.content[0]).text
             raise ToolError(msg)
-        return result.content
+        elif result.structuredContent:
+            try:
+                if name not in self.session._tool_output_schemas:
+                    await self.session.list_tools()
+                if name in self.session._tool_output_schemas:
+                    output_schema = self.session._tool_output_schemas.get(name)
+                    if output_schema:
+                        if output_schema.get("x-fastmcp-wrap-result"):
+                            output_schema = output_schema.get("properties", {}).get(
+                                "result"
+                            )
+                            structured_content = result.structuredContent.get("result")
+                        else:
+                            structured_content = result.structuredContent
+                        output_type = json_schema_to_type(output_schema)
+                        type_adapter = get_cached_typeadapter(output_type)
+                        data = type_adapter.validate_python(structured_content)
+                    else:
+                        data = result.structuredContent
+            except Exception as e:
+                logger.error(f"Error parsing structured content: {e}")
+
+        return CallToolResult(
+            content=result.content,
+            structured_content=result.structuredContent,
+            data=data,
+            is_error=result.isError,
+        )
+
+
+@dataclass
+class CallToolResult:
+    content: list[mcp.types.ContentBlock]
+    structured_content: dict[str, Any] | None
+    data: Any = None
+    is_error: bool = False

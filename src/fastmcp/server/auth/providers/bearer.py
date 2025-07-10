@@ -1,6 +1,6 @@
 import time
 from dataclasses import dataclass
-from typing import Any, TypedDict
+from typing import Any
 
 import httpx
 from authlib.jose import JsonWebKey, JsonWebToken
@@ -18,12 +18,14 @@ from mcp.shared.auth import (
     OAuthToken,
 )
 from pydantic import AnyHttpUrl, SecretStr, ValidationError
+from typing_extensions import TypedDict
 
 from fastmcp.server.auth.auth import (
     ClientRegistrationOptions,
     OAuthProvider,
     RevocationOptions,
 )
+from fastmcp.utilities.logging import get_logger
 
 
 class JWKData(TypedDict, total=False):
@@ -111,6 +113,7 @@ class RSAKeyPair:
         Returns:
             Signed JWT token string
         """
+        # TODO : Add support for configurable algorithms
         jwt = JsonWebToken(["RS256"])
 
         now = int(time.time())
@@ -149,7 +152,7 @@ class RSAKeyPair:
 class BearerAuthProvider(OAuthProvider):
     """
     Simple JWT Bearer Token validator for hosted MCP servers.
-    Uses RS256 asymmetric encryption. Supports either static public key
+    Uses RS256 asymmetric encryption by default but supports all JWA algorithms. Supports either static public key
     or JWKS URI for key rotation.
 
     Note that this provider DOES NOT permit client registration or revocation, or any OAuth flows.
@@ -161,6 +164,7 @@ class BearerAuthProvider(OAuthProvider):
         public_key: str | None = None,
         jwks_uri: str | None = None,
         issuer: str | None = None,
+        algorithm: str | None = None,
         audience: str | list[str] | None = None,
         required_scopes: list[str] | None = None,
     ):
@@ -171,6 +175,7 @@ class BearerAuthProvider(OAuthProvider):
             public_key: RSA public key in PEM format (for static key)
             jwks_uri: URI to fetch keys from (for key rotation)
             issuer: Expected issuer claim (optional)
+            algorithm: Algorithm to use for verification (optional, defaults to RS256)
             audience: Expected audience claim - can be a string or list of strings (optional)
             required_scopes: List of required scopes for access (optional)
         """
@@ -178,6 +183,24 @@ class BearerAuthProvider(OAuthProvider):
             raise ValueError("Either public_key or jwks_uri must be provided")
         if public_key and jwks_uri:
             raise ValueError("Provide either public_key or jwks_uri, not both")
+
+        if not algorithm:
+            algorithm = "RS256"
+        if algorithm not in {
+            "HS256",
+            "HS384",
+            "HS512",
+            "RS256",
+            "RS384",
+            "RS512",
+            "ES256",
+            "ES384",
+            "ES512",
+            "PS256",
+            "PS384",
+            "PS512",
+        }:
+            raise ValueError(f"Unsupported algorithm: {algorithm}.")
 
         # Only pass issuer to parent if it's a valid URL, otherwise use default
         # This allows the issuer claim validation to work with string issuers per RFC 7519
@@ -194,11 +217,13 @@ class BearerAuthProvider(OAuthProvider):
             required_scopes=required_scopes,
         )
 
+        self.algorithm = algorithm
         self.issuer = issuer
         self.audience = audience
         self.public_key = public_key
         self.jwks_uri = jwks_uri
-        self.jwt = JsonWebToken(["RS256"])
+        self.jwt = JsonWebToken([self.algorithm])  # Use RS256 by default
+        self.logger = get_logger(__name__)
 
         # Simple JWKS cache
         self._jwks_cache: dict[str, str] = {}
@@ -265,6 +290,9 @@ class BearerAuthProvider(OAuthProvider):
             # Select the appropriate key
             if kid:
                 if kid not in self._jwks_cache:
+                    self.logger.debug(
+                        "JWKS key lookup failed: key ID '%s' not found", kid
+                    )
                     raise ValueError(f"Key ID '{kid}' not found in JWKS")
                 return self._jwks_cache[kid]
             else:
@@ -279,6 +307,7 @@ class BearerAuthProvider(OAuthProvider):
                     raise ValueError("No keys found in JWKS")
 
         except Exception as e:
+            self.logger.debug("JWKS fetch failed: %s", str(e))
             raise ValueError(f"Failed to fetch JWKS: {e}")
 
     async def load_access_token(self, token: str) -> AccessToken | None:
@@ -298,15 +327,27 @@ class BearerAuthProvider(OAuthProvider):
             # Decode and verify the JWT token
             claims = self.jwt.decode(token, verification_key)
 
+            # Extract client ID early for logging
+            client_id = claims.get("client_id") or claims.get("sub") or "unknown"
+
             # Validate expiration
             exp = claims.get("exp")
             if exp and exp < time.time():
+                self.logger.debug(
+                    "Token validation failed: expired token for client %s", client_id
+                )
+                self.logger.info("Bearer token rejected for client %s", client_id)
                 return None
 
             # Validate issuer - note we use issuer instead of issuer_url here because
             # issuer is optional, allowing users to make this check optional
             if self.issuer:
                 if claims.get("iss") != self.issuer:
+                    self.logger.debug(
+                        "Token validation failed: issuer mismatch for client %s",
+                        client_id,
+                    )
+                    self.logger.info("Bearer token rejected for client %s", client_id)
                     return None
 
             # Validate audience if configured
@@ -314,26 +355,33 @@ class BearerAuthProvider(OAuthProvider):
                 aud = claims.get("aud")
 
                 # Handle different combinations of audience types
+                audience_valid = False
                 if isinstance(self.audience, list):
                     # self.audience is a list - check if any expected audience is present
                     if isinstance(aud, list):
                         # Both are lists - check for intersection
-                        if not any(expected in aud for expected in self.audience):
-                            return None
+                        audience_valid = any(
+                            expected in aud for expected in self.audience
+                        )
                     else:
                         # aud is a string - check if it's in our expected list
-                        if aud not in self.audience:
-                            return None
+                        audience_valid = aud in self.audience
                 else:
                     # self.audience is a string - use original logic
                     if isinstance(aud, list):
-                        if self.audience not in aud:
-                            return None
-                    elif aud != self.audience:
-                        return None
+                        audience_valid = self.audience in aud
+                    else:
+                        audience_valid = aud == self.audience
 
-            # Extract claims - prefer client_id over sub for OAuth application identification
-            client_id = claims.get("client_id") or claims.get("sub") or "unknown"
+                if not audience_valid:
+                    self.logger.debug(
+                        "Token validation failed: audience mismatch for client %s",
+                        client_id,
+                    )
+                    self.logger.info("Bearer token rejected for client %s", client_id)
+                    return None
+
+            # Extract scopes
             scopes = self._extract_scopes(claims)
 
             return AccessToken(
@@ -344,18 +392,44 @@ class BearerAuthProvider(OAuthProvider):
             )
 
         except JoseError:
+            self.logger.debug("Token validation failed: JWT signature/format invalid")
             return None
-        except Exception:
+        except Exception as e:
+            self.logger.debug("Token validation failed: %s", str(e))
             return None
 
     def _extract_scopes(self, claims: dict[str, Any]) -> list[str]:
-        """Extract scopes from JWT claims."""
-        scope_claim = claims.get("scope", "")
-        if isinstance(scope_claim, str):
-            return scope_claim.split()
-        elif isinstance(scope_claim, list):
-            return scope_claim
+        """
+        Extract scopes from JWT claims. Supports both 'scope' and 'scp'
+        claims.
+
+        Checks the `scope` claim first (standard OAuth2 claim), then the `scp`
+        claim (used by some Identity Providers).
+        """
+
+        for claim in ["scope", "scp"]:
+            if claim in claims:
+                if isinstance(claims[claim], str):
+                    return claims[claim].split()
+                elif isinstance(claims[claim], list):
+                    return claims[claim]
+
         return []
+
+    async def verify_token(self, token: str) -> AccessToken | None:
+        """
+        Verify a bearer token and return access info if valid.
+
+        This method implements the TokenVerifier protocol by delegating
+        to our existing load_access_token method.
+
+        Args:
+            token: The JWT token string to validate
+
+        Returns:
+            AccessToken object if valid, None if invalid or expired
+        """
+        return await self.load_access_token(token)
 
     # --- Unused OAuth server methods ---
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:

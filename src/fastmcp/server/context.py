@@ -1,16 +1,20 @@
-from __future__ import annotations as _annotations
+from __future__ import annotations
 
+import asyncio
 import warnings
 from collections.abc import Generator
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
+from enum import Enum
+from typing import Any, Literal, TypeVar, cast, get_origin, overload
 
-from mcp import LoggingLevel
+from mcp import LoggingLevel, ServerSession
 from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.lowlevel.server import request_ctx
 from mcp.shared.context import RequestContext
 from mcp.types import (
+    ContentBlock,
     CreateMessageResult,
     ModelHint,
     ModelPreferences,
@@ -23,13 +27,22 @@ from starlette.requests import Request
 
 import fastmcp.server.dependencies
 from fastmcp import settings
+from fastmcp.server.elicitation import (
+    AcceptedElicitation,
+    CancelledElicitation,
+    DeclinedElicitation,
+    ScalarElicitationType,
+    get_elicitation_schema,
+)
 from fastmcp.server.server import FastMCP
 from fastmcp.utilities.logging import get_logger
-from fastmcp.utilities.types import MCPContent
+from fastmcp.utilities.types import get_cached_typeadapter
 
 logger = get_logger(__name__)
 
+T = TypeVar("T")
 _current_context: ContextVar[Context | None] = ContextVar("context", default=None)
+_flush_lock = asyncio.Lock()
 
 
 @contextmanager
@@ -80,16 +93,20 @@ class Context:
     def __init__(self, fastmcp: FastMCP):
         self.fastmcp = fastmcp
         self._tokens: list[Token] = []
+        self._notification_queue: set[str] = set()  # Dedupe notifications
 
-    def __enter__(self) -> Context:
+    async def __aenter__(self) -> Context:
         """Enter the context manager and set this context as the current context."""
         # Always set this context and save the token
         token = _current_context.set(self)
         self._tokens.append(token)
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
         """Exit the context manager and reset the most recent token."""
+        # Flush any remaining notifications before exiting
+        await self._flush_notifications()
+
         if self._tokens:
             token = self._tokens.pop()
             _current_context.reset(token)
@@ -124,7 +141,7 @@ class Context:
         if progress_token is None:
             return
 
-        await self.request_context.session.send_progress_notification(
+        await self.session.send_progress_notification(
             progress_token=progress_token,
             progress=progress,
             total=total,
@@ -160,8 +177,11 @@ class Context:
         """
         if level is None:
             level = "info"
-        await self.request_context.session.send_log_message(
-            level=level, data=message, logger=logger_name
+        await self.session.send_log_message(
+            level=level,
+            data=message,
+            logger=logger_name,
+            related_request_id=self.request_id,
         )
 
     @property
@@ -210,7 +230,7 @@ class Context:
             return None
 
     @property
-    def session(self):
+    def session(self) -> ServerSession:
         """Access to the underlying session for advanced usage."""
         return self.request_context.session
 
@@ -233,8 +253,20 @@ class Context:
 
     async def list_roots(self) -> list[Root]:
         """List the roots available to the server, as indicated by the client."""
-        result = await self.request_context.session.list_roots()
+        result = await self.session.list_roots()
         return result.roots
+
+    async def send_tool_list_changed(self) -> None:
+        """Send a tool list changed notification to the client."""
+        await self.session.send_tool_list_changed()
+
+    async def send_resource_list_changed(self) -> None:
+        """Send a resource list changed notification to the client."""
+        await self.session.send_resource_list_changed()
+
+    async def send_prompt_list_changed(self) -> None:
+        """Send a prompt list changed notification to the client."""
+        await self.session.send_prompt_list_changed()
 
     async def sample(
         self,
@@ -243,7 +275,7 @@ class Context:
         temperature: float | None = None,
         max_tokens: int | None = None,
         model_preferences: ModelPreferences | str | list[str] | None = None,
-    ) -> MCPContent:
+    ) -> ContentBlock:
         """
         Send a sampling request to the client and await the response.
 
@@ -269,15 +301,141 @@ class Context:
                 for m in messages
             ]
 
-        result: CreateMessageResult = await self.request_context.session.create_message(
+        result: CreateMessageResult = await self.session.create_message(
             messages=sampling_messages,
             system_prompt=system_prompt,
             temperature=temperature,
             max_tokens=max_tokens,
             model_preferences=self._parse_model_preferences(model_preferences),
+            related_request_id=self.request_id,
         )
 
         return result.content
+
+    @overload
+    async def elicit(
+        self,
+        message: str,
+        response_type: None,
+    ) -> (
+        AcceptedElicitation[dict[str, Any]] | DeclinedElicitation | CancelledElicitation
+    ): ...
+
+    """When response_type is None, the accepted elicitaiton will contain an
+    empty dict"""
+
+    @overload
+    async def elicit(
+        self,
+        message: str,
+        response_type: type[T],
+    ) -> AcceptedElicitation[T] | DeclinedElicitation | CancelledElicitation: ...
+
+    """When response_type is not None, the accepted elicitaiton will contain the
+    response data"""
+
+    @overload
+    async def elicit(
+        self,
+        message: str,
+        response_type: list[str],
+    ) -> AcceptedElicitation[str] | DeclinedElicitation | CancelledElicitation: ...
+
+    """When response_type is a list of strings, the accepted elicitaiton will
+    contain the selected string response"""
+
+    async def elicit(
+        self,
+        message: str,
+        response_type: type[T] | list[str] | None = None,
+    ) -> (
+        AcceptedElicitation[T]
+        | AcceptedElicitation[dict[str, Any]]
+        | AcceptedElicitation[str]
+        | DeclinedElicitation
+        | CancelledElicitation
+    ):
+        """
+        Send an elicitation request to the client and await the response.
+
+        Call this method at any time to request additional information from
+        the user through the client. The client must support elicitation,
+        or the request will error.
+
+        Note that the MCP protocol only supports simple object schemas with
+        primitive types. You can provide a dataclass, TypedDict, or BaseModel to
+        comply. If you provide a primitive type, an object schema with a single
+        "value" field will be generated for the MCP interaction and
+        automatically deconstructed into the primitive type upon response.
+
+        If the response_type is None, the generated schema will be that of an
+        empty object in order to comply with the MCP protocol requirements.
+        Clients must send an empty object ("{}")in response.
+
+        Args:
+            message: A human-readable message explaining what information is needed
+            response_type: The type of the response, which should be a primitive
+                type or dataclass or BaseModel. If it is a primitive type, an
+                object schema with a single "value" field will be generated.
+        """
+        if response_type is None:
+            schema = {"type": "object", "properties": {}}
+        else:
+            # if the user provided a list of strings, treat it as a Literal
+            if isinstance(response_type, list):
+                if not all(isinstance(item, str) for item in response_type):
+                    raise ValueError(
+                        "List of options must be a list of strings. Received: "
+                        f"{response_type}"
+                    )
+                # Convert list of options to Literal type and wrap
+                choice_literal = Literal[tuple(response_type)]  # type: ignore
+                response_type = ScalarElicitationType[choice_literal]  # type: ignore
+            # if the user provided a primitive scalar, wrap it in an object schema
+            elif response_type in {bool, int, float, str}:
+                response_type = ScalarElicitationType[response_type]  # type: ignore
+            # if the user provided a Literal type, wrap it in an object schema
+            elif get_origin(response_type) is Literal:
+                response_type = ScalarElicitationType[response_type]  # type: ignore
+            # if the user provided an Enum type, wrap it in an object schema
+            elif isinstance(response_type, type) and issubclass(response_type, Enum):
+                response_type = ScalarElicitationType[response_type]  # type: ignore
+
+            response_type = cast(type[T], response_type)
+
+            schema = get_elicitation_schema(response_type)
+
+        result = await self.session.elicit(
+            message=message,
+            requestedSchema=schema,
+            related_request_id=self.request_id,
+        )
+
+        if result.action == "accept":
+            if response_type is not None:
+                type_adapter = get_cached_typeadapter(response_type)
+                validated_data = cast(
+                    T | ScalarElicitationType[T],
+                    type_adapter.validate_python(result.content),
+                )
+                if isinstance(validated_data, ScalarElicitationType):
+                    return AcceptedElicitation[T](data=validated_data.value)
+                else:
+                    return AcceptedElicitation[T](data=validated_data)
+            elif result.content:
+                raise ValueError(
+                    "Elicitation expected an empty response, but received: "
+                    f"{result.content}"
+                )
+            else:
+                return AcceptedElicitation[dict[str, Any]](data={})
+        elif result.action == "decline":
+            return DeclinedElicitation()
+        elif result.action == "cancel":
+            return CancelledElicitation()
+        else:
+            # This should never happen, but handle it just in case
+            raise ValueError(f"Unexpected elicitation action: {result.action}")
 
     def get_http_request(self) -> Request:
         """Get the active starlette request."""
@@ -293,6 +451,52 @@ class Context:
             )
 
         return fastmcp.server.dependencies.get_http_request()
+
+    def _queue_tool_list_changed(self) -> None:
+        """Queue a tool list changed notification."""
+        self._notification_queue.add("notifications/tools/list_changed")
+        self._try_flush_notifications()
+
+    def _queue_resource_list_changed(self) -> None:
+        """Queue a resource list changed notification."""
+        self._notification_queue.add("notifications/resources/list_changed")
+        self._try_flush_notifications()
+
+    def _queue_prompt_list_changed(self) -> None:
+        """Queue a prompt list changed notification."""
+        self._notification_queue.add("notifications/prompts/list_changed")
+        self._try_flush_notifications()
+
+    def _try_flush_notifications(self) -> None:
+        """Synchronous method that attempts to flush notifications if we're in an async context."""
+        try:
+            # Check if we're in an async context
+            loop = asyncio.get_running_loop()
+            if loop and not loop.is_running():
+                return
+            # Schedule flush as a task (fire-and-forget)
+            asyncio.create_task(self._flush_notifications())
+        except RuntimeError:
+            # No event loop - will flush later
+            pass
+
+    async def _flush_notifications(self) -> None:
+        """Send all queued notifications."""
+        async with _flush_lock:
+            if not self._notification_queue:
+                return
+
+            try:
+                if "notifications/tools/list_changed" in self._notification_queue:
+                    await self.session.send_tool_list_changed()
+                if "notifications/resources/list_changed" in self._notification_queue:
+                    await self.session.send_resource_list_changed()
+                if "notifications/prompts/list_changed" in self._notification_queue:
+                    await self.session.send_prompt_list_changed()
+                self._notification_queue.clear()
+            except Exception:
+                # Don't let notification failures break the request
+                pass
 
     def _parse_model_preferences(
         self, model_preferences: ModelPreferences | str | list[str] | None

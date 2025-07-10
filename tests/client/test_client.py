@@ -121,9 +121,10 @@ async def test_call_tool(fastmcp_server):
     async with client:
         result = await client.call_tool("greet", {"name": "World"})
 
-        # The result content should contain our greeting
-        content_str = str(result[0])
-        assert "Hello, World!" in content_str
+        assert result.content[0].text == "Hello, World!"  # type: ignore[attr-defined]
+        assert result.structured_content == {"result": "Hello, World!"}
+        assert result.data == "Hello, World!"
+        assert result.is_error is False
 
 
 async def test_call_tool_mcp(fastmcp_server):
@@ -448,27 +449,27 @@ async def test_client_nested_context_manager(fastmcp_server):
 
     # Before connection
     assert not client.is_connected()
-    assert client._session is None
+    assert client._session_state.session is None
 
     # During connection
     async with client:
         assert client.is_connected()
-        assert client._session is not None
-        session = client._session
+        assert client._session_state.session is not None
+        session = client._session_state.session
 
         # Re-use the same session
         async with client:
             assert client.is_connected()
-            assert client._session is session
+            assert client._session_state.session is session
 
         # Re-use the same session
         async with client:
             assert client.is_connected()
-            assert client._session is session
+            assert client._session_state.session is session
 
     # After connection
     assert not client.is_connected()
-    assert client._session is None
+    assert client._session_state.session is None
 
 
 async def test_concurrent_client_context_managers():
@@ -535,9 +536,9 @@ async def test_resource_template(fastmcp_server):
 
         # Check the content matches what we expect for the provided user_id
         content_str = str(result[0])
-        assert '"id": "123"' in content_str
-        assert '"name": "User 123"' in content_str
-        assert '"active": true' in content_str
+        assert '"id":"123"' in content_str
+        assert '"name":"User 123"' in content_str
+        assert '"active":true' in content_str
 
 
 async def test_list_resource_templates_mcp(fastmcp_server):
@@ -594,7 +595,7 @@ async def test_template_access_via_client(fastmcp_server):
         uri = cast(AnyUrl, "data://user/456")
         result = await client.read_resource(uri)
         content_str = str(result[0])
-        assert '"id": "456"' in content_str
+        assert '"id":"456"' in content_str
 
 
 async def test_tagged_resource_metadata(tagged_resources_server):
@@ -634,8 +635,8 @@ async def test_tagged_template_functionality(tagged_resources_server):
         uri = cast(AnyUrl, "template://123")
         result = await client.read_resource(uri)
         content_str = str(result[0])
-        assert '"id": "123"' in content_str
-        assert '"type": "template_data"' in content_str
+        assert '"id":"123"' in content_str
+        assert '"type":"template_data"' in content_str
 
 
 class TestErrorHandling:

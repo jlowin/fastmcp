@@ -1,4 +1,7 @@
 import base64
+import os
+import tempfile
+from pathlib import Path
 from types import EllipsisType
 from typing import Annotated, Any
 
@@ -12,6 +15,7 @@ from fastmcp.utilities.types import (
     find_kwarg_by_type,
     is_class_member_of_type,
     issubclass_safe,
+    replace_type,
 )
 
 
@@ -130,6 +134,23 @@ class TestImage:
         assert image.data is None
         assert image._mime_type == "image/png"
 
+    def test_image_path_expansion_with_tilde(self):
+        """Test that ~ is expanded to the user's home directory."""
+        image = Image(path="~/test.png")
+        assert image.path is not None
+        assert not str(image.path).startswith("~")
+        assert str(image.path).startswith(os.path.expanduser("~"))
+
+    def test_image_path_expansion_with_env_var(self, monkeypatch):
+        """Test that environment variables are expanded."""
+        test_dir = tempfile.mkdtemp()
+        monkeypatch.setenv("TEST_PATH", test_dir)
+        image = Image(path="$TEST_PATH/test.png")
+        assert image.path is not None
+        assert not str(image.path).startswith("$TEST_PATH")
+        expected_path = Path(test_dir) / "test.png"
+        assert image.path == expected_path
+
     def test_image_initialization_with_data(self):
         """Test image initialization with data."""
         image = Image(data=b"test")
@@ -213,6 +234,23 @@ class TestAudio:
         assert audio.path is not None
         assert audio.data is None
         assert audio._mime_type == "audio/wav"
+
+    def test_audio_path_expansion_with_tilde(self):
+        """Test that ~ is expanded to the user's home directory."""
+        audio = Audio(path="~/test.wav")
+        assert audio.path is not None
+        assert not str(audio.path).startswith("~")
+        assert str(audio.path).startswith(os.path.expanduser("~"))
+
+    def test_audio_path_expansion_with_env_var(self, monkeypatch):
+        """Test that environment variables are expanded."""
+        test_dir = tempfile.mkdtemp()
+        monkeypatch.setenv("TEST_AUDIO_PATH", test_dir)
+        audio = Audio(path="$TEST_AUDIO_PATH/test.wav")
+        assert audio.path is not None
+        assert not str(audio.path).startswith("$TEST_AUDIO_PATH")
+        expected_path = Path(test_dir) / "test.wav"
+        assert audio.path == expected_path
 
     def test_audio_initialization_with_data(self):
         """Test audio initialization with data."""
@@ -310,6 +348,23 @@ class TestFile:
         assert file.path is not None
         assert file.data is None
         assert file._mime_type == "text/plain"
+
+    def test_file_path_expansion_with_tilde(self):
+        """Test that ~ is expanded to the user's home directory."""
+        file = File(path="~/test.txt")
+        assert file.path is not None
+        assert not str(file.path).startswith("~")
+        assert str(file.path).startswith(os.path.expanduser("~"))
+
+    def test_file_path_expansion_with_env_var(self, monkeypatch):
+        """Test that environment variables are expanded."""
+        test_dir = tempfile.mkdtemp()
+        monkeypatch.setenv("TEST_FILE_PATH", test_dir)
+        file = File(path="$TEST_FILE_PATH/test.txt")
+        assert file.path is not None
+        assert not str(file.path).startswith("$TEST_FILE_PATH")
+        expected_path = Path(test_dir) / "test.txt"
+        assert file.path == expected_path
 
     def test_file_initialization_with_data(self):
         """Test initialization with data and format."""
@@ -536,3 +591,29 @@ class TestFindKwargByType:
             pass
 
         assert find_kwarg_by_type(func, str) == "c"
+
+
+class TestReplaceType:
+    @pytest.mark.parametrize(
+        "input,type_map,expected",
+        [
+            (int, {}, int),
+            (int, {int: str}, str),
+            (int, {int: int}, int),
+            (int, {int: float, bool: str}, float),
+            (bool, {int: float, bool: str}, str),
+            (int, {int: list[int]}, list[int]),
+            (list[int], {int: str}, list[str]),
+            (list[int], {int: list[str]}, list[list[str]]),
+            (
+                list[int],
+                {int: float, list[int]: bool},
+                bool,
+            ),  # list[int] will match before int
+            (list[int | bool], {int: str}, list[str | bool]),
+            (list[list[int]], {int: str}, list[list[str]]),
+        ],
+    )
+    def test_replace_type(self, input, type_map, expected):
+        """Test replacing a type with another type."""
+        assert replace_type(input, type_map) == expected

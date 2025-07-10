@@ -224,7 +224,7 @@ async def test_call_imported_custom_named_tool():
 
     async with Client(main_app) as client:
         result = await client.call_tool("api_get_data", {"query": "test"})
-        assert result[0].text == "Data for query: test"  # type: ignore[attr-defined]
+        assert result.data == "Data for query: test"
 
 
 async def test_first_level_importing_with_custom_name():
@@ -278,7 +278,7 @@ async def test_call_nested_imported_tool():
 
     async with Client(main_app) as client:
         result = await client.call_tool("service_provider_compute", {"input": 21})
-        assert result[0].text == "42"  # type: ignore[attr-defined]
+        assert result.data == 42
 
 
 async def test_import_with_proxy_tools():
@@ -297,12 +297,12 @@ async def test_import_with_proxy_tools():
     def get_data(query: str) -> str:
         return f"Data for query: {query}"
 
-    proxy_app = FastMCP.as_proxy(Client(api_app))
+    proxy_app = FastMCP.as_proxy(api_app)
     await main_app.import_server(proxy_app, "api")
 
     async with Client(main_app) as client:
         result = await client.call_tool("api_get_data", {"query": "test"})
-        assert result[0].text == "Data for query: test"  # type: ignore[attr-defined]
+        assert result.data == "Data for query: test"
 
 
 async def test_import_with_proxy_prompts():
@@ -321,7 +321,7 @@ async def test_import_with_proxy_prompts():
         """Example greeting prompt."""
         return f"Hello, {name} from API!"
 
-    proxy_app = FastMCP.as_proxy(Client(api_app))
+    proxy_app = FastMCP.as_proxy(api_app)
     await main_app.import_server(proxy_app, "api")
 
     async with Client(main_app) as client:
@@ -349,7 +349,7 @@ async def test_import_with_proxy_resources():
             "base_url": "https://api.example.com",
         }
 
-    proxy_app = FastMCP.as_proxy(Client(api_app))
+    proxy_app = FastMCP.as_proxy(api_app)
     await main_app.import_server(proxy_app, "api")
 
     # Access the resource through the main app with the prefixed key
@@ -376,7 +376,7 @@ async def test_import_with_proxy_resource_templates():
     def create_user(name: str, email: str):
         return {"name": name, "email": email}
 
-    proxy_app = FastMCP.as_proxy(Client(api_app))
+    proxy_app = FastMCP.as_proxy(api_app)
     await main_app.import_server(proxy_app, "api")
 
     # Instantiate the template through the main app with the prefixed key
@@ -443,7 +443,7 @@ async def test_import_with_no_prefix():
     async with Client(main_app) as client:
         # Test tool
         tool_result = await client.call_tool("sub_tool", {})
-        assert tool_result[0].text == "Sub tool result"  # type: ignore[attr-defined]
+        assert tool_result.data == "Sub tool result"
 
         # Test resource
         resource_result = await client.read_resource("data://config")
@@ -485,7 +485,7 @@ async def test_import_conflict_resolution_tools():
         assert tool_names.count("shared_tool") == 1  # Should only appear once
 
         result = await client.call_tool("shared_tool", {})
-        assert result[0].text == "Second app tool"  # type: ignore[attr-defined]
+        assert result.data == "Second app tool"
 
 
 async def test_import_conflict_resolution_resources():
@@ -604,4 +604,4 @@ async def test_import_conflict_resolution_with_prefix():
         assert tool_names.count("api_shared_tool") == 1  # Should only appear once
 
         result = await client.call_tool("api_shared_tool", {})
-        assert result[0].text == "Second app tool"  # type: ignore[attr-defined]
+        assert result.data == "Second app tool"

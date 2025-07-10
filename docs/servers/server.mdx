@@ -220,6 +220,8 @@ main.mount(sub, prefix="sub")
 
 FastMCP can act as a proxy for any MCP server (local or remote) using `FastMCP.as_proxy`, letting you bridge transports or add a frontend to existing servers. For example, you can expose a remote SSE server locally via stdio, or vice versa.
 
+Proxies automatically handle concurrent operations safely by creating fresh sessions for each request when using disconnected clients.
+
 See the [Proxying Servers](/servers/proxy) guide for details and advanced usage.
 
 ```python
@@ -228,6 +230,28 @@ from fastmcp import FastMCP, Client
 backend = Client("http://example.com/mcp/sse")
 proxy = FastMCP.as_proxy(backend, name="ProxyServer")
 # Now use the proxy like any FastMCP server
+```
+
+## OpenAPI Integration
+
+<VersionBadge version="2.0.0" />
+
+FastMCP can automatically generate servers from OpenAPI specifications or existing FastAPI applications using `FastMCP.from_openapi()` and `FastMCP.from_fastapi()`. This allows you to instantly convert existing APIs into MCP servers without manual tool creation.
+
+See the [FastAPI Integration](/integrations/fastapi) and [OpenAPI Integration](/integrations/openapi) guides for detailed examples and configuration options.
+
+```python
+import httpx
+from fastmcp import FastMCP
+
+# From OpenAPI spec
+spec = httpx.get("https://api.example.com/openapi.json").json()
+mcp = FastMCP.from_openapi(openapi_spec=spec, client=httpx.AsyncClient())
+
+# From FastAPI app
+from fastapi import FastAPI
+app = FastAPI()
+mcp = FastMCP.from_fastapi(app=app)
 ```
 
 ## Server Configuration
@@ -320,12 +344,12 @@ await mcp.run_async(
 )
 ```
 
-### Environment Variables
+### Setting Global Configuration
 
-Settings can be configured via environment variables:
+Global FastMCP settings can be configured via environment variables (prefixed with `FASTMCP_`):
 
 ```bash
-# Global settings
+# Configure global FastMCP behavior
 export FASTMCP_LOG_LEVEL=DEBUG
 export FASTMCP_MASK_ERROR_DETAILS=True
 export FASTMCP_RESOURCE_PREFIX_FORMAT=protocol

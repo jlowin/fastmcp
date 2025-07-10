@@ -44,11 +44,28 @@ class Resource(FastMCPComponent, abc.ABC):
         pattern=r"^[a-zA-Z0-9]+/[a-zA-Z0-9\-+.]+$",
     )
 
+    def enable(self) -> None:
+        super().enable()
+        try:
+            context = get_context()
+            context._queue_resource_list_changed()  # type: ignore[private-use]
+        except RuntimeError:
+            pass  # No context available
+
+    def disable(self) -> None:
+        super().disable()
+        try:
+            context = get_context()
+            context._queue_resource_list_changed()  # type: ignore[private-use]
+        except RuntimeError:
+            pass  # No context available
+
     @staticmethod
     def from_function(
-        fn: Callable[[], Any],
+        fn: Callable[..., Any],
         uri: str | AnyUrl,
         name: str | None = None,
+        title: str | None = None,
         description: str | None = None,
         mime_type: str | None = None,
         tags: set[str] | None = None,
@@ -58,6 +75,7 @@ class Resource(FastMCPComponent, abc.ABC):
             fn=fn,
             uri=uri,
             name=name,
+            title=title,
             description=description,
             mime_type=mime_type,
             tags=tags,
@@ -95,6 +113,7 @@ class Resource(FastMCPComponent, abc.ABC):
             "name": self.name,
             "description": self.description,
             "mimeType": self.mime_type,
+            "title": self.title,
         }
         return MCPResource(**kwargs | overrides)
 
@@ -125,14 +144,15 @@ class FunctionResource(Resource):
     - other types will be converted to JSON
     """
 
-    fn: Callable[[], Any]
+    fn: Callable[..., Any]
 
     @classmethod
     def from_function(
         cls,
-        fn: Callable[[], Any],
+        fn: Callable[..., Any],
         uri: str | AnyUrl,
         name: str | None = None,
+        title: str | None = None,
         description: str | None = None,
         mime_type: str | None = None,
         tags: set[str] | None = None,
@@ -145,6 +165,7 @@ class FunctionResource(Resource):
             fn=fn,
             uri=uri,
             name=name or fn.__name__,
+            title=title,
             description=description or inspect.getdoc(fn),
             mime_type=mime_type or "text/plain",
             tags=tags or set(),
@@ -161,7 +182,7 @@ class FunctionResource(Resource):
             kwargs[context_kwarg] = get_context()
 
         result = self.fn(**kwargs)
-        if inspect.iscoroutinefunction(self.fn):
+        if inspect.isawaitable(result):
             result = await result
 
         if isinstance(result, Resource):
@@ -171,4 +192,4 @@ class FunctionResource(Resource):
         elif isinstance(result, str):
             return result
         else:
-            return pydantic_core.to_json(result, fallback=str, indent=2).decode()
+            return pydantic_core.to_json(result, fallback=str).decode()

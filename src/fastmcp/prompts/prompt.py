@@ -9,9 +9,9 @@ from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
 import pydantic_core
+from mcp.types import ContentBlock, PromptMessage, Role, TextContent
 from mcp.types import Prompt as MCPPrompt
 from mcp.types import PromptArgument as MCPPromptArgument
-from mcp.types import PromptMessage, Role, TextContent
 from pydantic import Field, TypeAdapter
 
 from fastmcp.exceptions import PromptError
@@ -21,7 +21,6 @@ from fastmcp.utilities.json_schema import compress_schema
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.types import (
     FastMCPBaseModel,
-    MCPContent,
     find_kwarg_by_type,
     get_cached_typeadapter,
 )
@@ -30,7 +29,7 @@ logger = get_logger(__name__)
 
 
 def Message(
-    content: str | MCPContent, role: Role | None = None, **kwargs: Any
+    content: str | ContentBlock, role: Role | None = None, **kwargs: Any
 ) -> PromptMessage:
     """A user-friendly constructor for PromptMessage."""
     if isinstance(content, str):
@@ -70,6 +69,22 @@ class Prompt(FastMCPComponent, ABC):
         default=None, description="Arguments that can be passed to the prompt"
     )
 
+    def enable(self) -> None:
+        super().enable()
+        try:
+            context = get_context()
+            context._queue_prompt_list_changed()  # type: ignore[private-use]
+        except RuntimeError:
+            pass  # No context available
+
+    def disable(self) -> None:
+        super().disable()
+        try:
+            context = get_context()
+            context._queue_prompt_list_changed()  # type: ignore[private-use]
+        except RuntimeError:
+            pass  # No context available
+
     def to_mcp_prompt(self, **overrides: Any) -> MCPPrompt:
         """Convert the prompt to an MCP prompt."""
         arguments = [
@@ -84,6 +99,7 @@ class Prompt(FastMCPComponent, ABC):
             "name": self.name,
             "description": self.description,
             "arguments": arguments,
+            "title": self.title,
         }
         return MCPPrompt(**kwargs | overrides)
 
@@ -91,6 +107,7 @@ class Prompt(FastMCPComponent, ABC):
     def from_function(
         fn: Callable[..., PromptResult | Awaitable[PromptResult]],
         name: str | None = None,
+        title: str | None = None,
         description: str | None = None,
         tags: set[str] | None = None,
         enabled: bool | None = None,
@@ -104,7 +121,12 @@ class Prompt(FastMCPComponent, ABC):
         - A sequence of any of the above
         """
         return FunctionPrompt.from_function(
-            fn=fn, name=name, description=description, tags=tags, enabled=enabled
+            fn=fn,
+            name=name,
+            title=title,
+            description=description,
+            tags=tags,
+            enabled=enabled,
         )
 
     @abstractmethod
@@ -126,6 +148,7 @@ class FunctionPrompt(Prompt):
         cls,
         fn: Callable[..., PromptResult | Awaitable[PromptResult]],
         name: str | None = None,
+        title: str | None = None,
         description: str | None = None,
         tags: set[str] | None = None,
         enabled: bool | None = None,
@@ -217,6 +240,7 @@ class FunctionPrompt(Prompt):
 
         return cls(
             name=func_name,
+            title=title,
             description=description,
             arguments=arguments,
             tags=tags or set(),
@@ -305,7 +329,7 @@ class FunctionPrompt(Prompt):
 
             # Call function and check if result is a coroutine
             result = self.fn(**kwargs)
-            if inspect.iscoroutine(result):
+            if inspect.isawaitable(result):
                 result = await result
 
             # Validate messages
@@ -326,9 +350,7 @@ class FunctionPrompt(Prompt):
                             )
                         )
                     else:
-                        content = pydantic_core.to_json(
-                            msg, fallback=str, indent=2
-                        ).decode()
+                        content = pydantic_core.to_json(msg, fallback=str).decode()
                         messages.append(
                             PromptMessage(
                                 role="user",
@@ -339,6 +361,6 @@ class FunctionPrompt(Prompt):
                     raise PromptError("Could not convert prompt result to message.")
 
             return messages
-        except Exception as e:
-            logger.exception(f"Error rendering prompt {self.name}: {e}")
+        except Exception:
+            logger.exception(f"Error rendering prompt {self.name}")
             raise PromptError(f"Error rendering prompt {self.name}.")

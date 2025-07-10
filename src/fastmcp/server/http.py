@@ -87,7 +87,7 @@ def setup_auth_middleware_and_routes(
     middleware = [
         Middleware(
             AuthenticationMiddleware,
-            backend=BearerAuthBackend(provider=auth),
+            backend=BearerAuthBackend(auth),
         ),
         Middleware(AuthContextMiddleware),
     ]
@@ -157,10 +157,6 @@ def create_sse_app(
     Returns:
         A Starlette application with RequestContextMiddleware
     """
-
-    # Ensure the message_path ends with a trailing slash to avoid automatic redirects
-    if not message_path.endswith("/"):
-        message_path = message_path + "/"
 
     server_routes: list[BaseRoute] = []
     server_middleware: list[Middleware] = []
@@ -308,10 +304,6 @@ def create_streamable_http_app(
             else:
                 # Re-raise other RuntimeErrors if they don't match the specific message
                 raise
-
-    # Ensure the streamable_http_path ends with a trailing slash to avoid automatic redirects
-    if not streamable_http_path.endswith("/"):
-        streamable_http_path = streamable_http_path + "/"
 
     # Add StreamableHTTP routes with or without auth
     if auth:

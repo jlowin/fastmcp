@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import warnings
+from collections.abc import Callable
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import quote
 
 import mcp.types
+from mcp.client.session import ClientSession
+from mcp.shared.context import LifespanContextT, RequestContext
 from mcp.shared.exceptions import McpError
 from mcp.types import (
     METHOD_NOT_FOUND,
@@ -13,19 +18,26 @@ from mcp.types import (
 )
 from pydantic.networks import AnyUrl
 
-from fastmcp.client import Client
+import fastmcp
+from fastmcp.client.client import Client, FastMCP1Server
+from fastmcp.client.elicitation import ElicitResult
+from fastmcp.client.logging import LogMessage
+from fastmcp.client.roots import RootsList
+from fastmcp.client.transports import ClientTransportT
 from fastmcp.exceptions import NotFoundError, ResourceError, ToolError
+from fastmcp.mcp_config import MCPConfig
 from fastmcp.prompts import Prompt, PromptMessage
 from fastmcp.prompts.prompt import PromptArgument
 from fastmcp.prompts.prompt_manager import PromptManager
 from fastmcp.resources import Resource, ResourceTemplate
 from fastmcp.resources.resource_manager import ResourceManager
 from fastmcp.server.context import Context
+from fastmcp.server.dependencies import get_context
 from fastmcp.server.server import FastMCP
-from fastmcp.tools.tool import Tool
+from fastmcp.tools.tool import Tool, ToolResult
 from fastmcp.tools.tool_manager import ToolManager
+from fastmcp.utilities.components import MirroredComponent
 from fastmcp.utilities.logging import get_logger
-from fastmcp.utilities.types import MCPContent
 
 if TYPE_CHECKING:
     from fastmcp.server import Context
@@ -36,9 +48,9 @@ logger = get_logger(__name__)
 class ProxyToolManager(ToolManager):
     """A ToolManager that sources its tools from a remote client in addition to local and mounted tools."""
 
-    def __init__(self, client: Client, **kwargs):
+    def __init__(self, client_factory: Callable[[], Client], **kwargs):
         super().__init__(**kwargs)
-        self.client = client
+        self.client_factory = client_factory
 
     async def get_tools(self) -> dict[str, Tool]:
         """Gets the unfiltered tool inventory including local, mounted, and proxy tools."""
@@ -47,13 +59,12 @@ class ProxyToolManager(ToolManager):
 
         # Then add proxy tools, but don't overwrite existing ones
         try:
-            async with self.client:
-                client_tools = await self.client.list_tools()
+            client = self.client_factory()
+            async with client:
+                client_tools = await client.list_tools()
                 for tool in client_tools:
                     if tool.name not in all_tools:
-                        all_tools[tool.name] = ProxyTool.from_mcp_tool(
-                            self.client, tool
-                        )
+                        all_tools[tool.name] = ProxyTool.from_mcp_tool(client, tool)
         except McpError as e:
             if e.error.code == METHOD_NOT_FOUND:
                 pass  # No tools available from proxy
@@ -67,23 +78,28 @@ class ProxyToolManager(ToolManager):
         tools_dict = await self.get_tools()
         return list(tools_dict.values())
 
-    async def call_tool(self, key: str, arguments: dict[str, Any]) -> list[MCPContent]:
+    async def call_tool(self, key: str, arguments: dict[str, Any]) -> ToolResult:
         """Calls a tool, trying local/mounted first, then proxy if not found."""
         try:
             # First try local and mounted tools
             return await super().call_tool(key, arguments)
         except NotFoundError:
             # If not found locally, try proxy
-            async with self.client:
-                return await self.client.call_tool(key, arguments)
+            client = self.client_factory()
+            async with client:
+                result = await client.call_tool(key, arguments)
+                return ToolResult(
+                    content=result.content,
+                    structured_content=result.structured_content,
+                )
 
 
 class ProxyResourceManager(ResourceManager):
     """A ResourceManager that sources its resources from a remote client in addition to local and mounted resources."""
 
-    def __init__(self, client: Client, **kwargs):
+    def __init__(self, client_factory: Callable[[], Client], **kwargs):
         super().__init__(**kwargs)
-        self.client = client
+        self.client_factory = client_factory
 
     async def get_resources(self) -> dict[str, Resource]:
         """Gets the unfiltered resource inventory including local, mounted, and proxy resources."""
@@ -92,12 +108,13 @@ class ProxyResourceManager(ResourceManager):
 
         # Then add proxy resources, but don't overwrite existing ones
         try:
-            async with self.client:
-                client_resources = await self.client.list_resources()
+            client = self.client_factory()
+            async with client:
+                client_resources = await client.list_resources()
                 for resource in client_resources:
                     if str(resource.uri) not in all_resources:
                         all_resources[str(resource.uri)] = (
-                            ProxyResource.from_mcp_resource(self.client, resource)
+                            ProxyResource.from_mcp_resource(client, resource)
                         )
         except McpError as e:
             if e.error.code == METHOD_NOT_FOUND:
@@ -114,12 +131,13 @@ class ProxyResourceManager(ResourceManager):
 
         # Then add proxy templates, but don't overwrite existing ones
         try:
-            async with self.client:
-                client_templates = await self.client.list_resource_templates()
+            client = self.client_factory()
+            async with client:
+                client_templates = await client.list_resource_templates()
                 for template in client_templates:
                     if template.uriTemplate not in all_templates:
                         all_templates[template.uriTemplate] = (
-                            ProxyTemplate.from_mcp_template(self.client, template)
+                            ProxyTemplate.from_mcp_template(client, template)
                         )
         except McpError as e:
             if e.error.code == METHOD_NOT_FOUND:
@@ -146,8 +164,9 @@ class ProxyResourceManager(ResourceManager):
             return await super().read_resource(uri)
         except NotFoundError:
             # If not found locally, try proxy
-            async with self.client:
-                result = await self.client.read_resource(uri)
+            client = self.client_factory()
+            async with client:
+                result = await client.read_resource(uri)
                 if isinstance(result[0], TextResourceContents):
                     return result[0].text
                 elif isinstance(result[0], BlobResourceContents):
@@ -159,9 +178,9 @@ class ProxyResourceManager(ResourceManager):
 class ProxyPromptManager(PromptManager):
     """A PromptManager that sources its prompts from a remote client in addition to local and mounted prompts."""
 
-    def __init__(self, client: Client, **kwargs):
+    def __init__(self, client_factory: Callable[[], Client], **kwargs):
         super().__init__(**kwargs)
-        self.client = client
+        self.client_factory = client_factory
 
     async def get_prompts(self) -> dict[str, Prompt]:
         """Gets the unfiltered prompt inventory including local, mounted, and proxy prompts."""
@@ -170,12 +189,13 @@ class ProxyPromptManager(PromptManager):
 
         # Then add proxy prompts, but don't overwrite existing ones
         try:
-            async with self.client:
-                client_prompts = await self.client.list_prompts()
+            client = self.client_factory()
+            async with client:
+                client_prompts = await client.list_prompts()
                 for prompt in client_prompts:
                     if prompt.name not in all_prompts:
                         all_prompts[prompt.name] = ProxyPrompt.from_mcp_prompt(
-                            self.client, prompt
+                            client, prompt
                         )
         except McpError as e:
             if e.error.code == METHOD_NOT_FOUND:
@@ -201,12 +221,13 @@ class ProxyPromptManager(PromptManager):
             return await super().render_prompt(name, arguments)
         except NotFoundError:
             # If not found locally, try proxy
-            async with self.client:
-                result = await self.client.get_prompt(name, arguments)
+            client = self.client_factory()
+            async with client:
+                result = await client.get_prompt(name, arguments)
                 return result
 
 
-class ProxyTool(Tool):
+class ProxyTool(Tool, MirroredComponent):
     """
     A Tool that represents and executes a tool on a remote server.
     """
@@ -224,15 +245,16 @@ class ProxyTool(Tool):
             description=mcp_tool.description,
             parameters=mcp_tool.inputSchema,
             annotations=mcp_tool.annotations,
+            output_schema=mcp_tool.outputSchema,
+            _mirrored=True,
         )
 
     async def run(
         self,
         arguments: dict[str, Any],
         context: Context | None = None,
-    ) -> list[MCPContent]:
+    ) -> ToolResult:
         """Executes the tool by making a call through the client."""
-        # This is where the remote execution logic lives.
         async with self._client:
             result = await self._client.call_tool_mcp(
                 name=self.name,
@@ -240,10 +262,13 @@ class ProxyTool(Tool):
             )
         if result.isError:
             raise ToolError(cast(mcp.types.TextContent, result.content[0]).text)
-        return result.content
+        return ToolResult(
+            content=result.content,
+            structured_content=result.structuredContent,
+        )
 
 
-class ProxyResource(Resource):
+class ProxyResource(Resource, MirroredComponent):
     """
     A Resource that represents and reads a resource from a remote server.
     """
@@ -251,14 +276,22 @@ class ProxyResource(Resource):
     _client: Client
     _value: str | bytes | None = None
 
-    def __init__(self, client: Client, *, _value: str | bytes | None = None, **kwargs):
+    def __init__(
+        self,
+        client: Client,
+        *,
+        _value: str | bytes | None = None,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         self._client = client
         self._value = _value
 
     @classmethod
     def from_mcp_resource(
-        cls, client: Client, mcp_resource: mcp.types.Resource
+        cls,
+        client: Client,
+        mcp_resource: mcp.types.Resource,
     ) -> ProxyResource:
         """Factory method to create a ProxyResource from a raw MCP resource schema."""
         return cls(
@@ -267,6 +300,7 @@ class ProxyResource(Resource):
             name=mcp_resource.name,
             description=mcp_resource.description,
             mime_type=mcp_resource.mimeType or "text/plain",
+            _mirrored=True,
         )
 
     async def read(self) -> str | bytes:
@@ -284,7 +318,7 @@ class ProxyResource(Resource):
             raise ResourceError(f"Unsupported content type: {type(result[0])}")
 
 
-class ProxyTemplate(ResourceTemplate):
+class ProxyTemplate(ResourceTemplate, MirroredComponent):
     """
     A ResourceTemplate that represents and creates resources from a remote server template.
     """
@@ -305,6 +339,7 @@ class ProxyTemplate(ResourceTemplate):
             description=mcp_template.description,
             mime_type=mcp_template.mimeType or "text/plain",
             parameters={},  # Remote templates don't have local parameters
+            _mirrored=True,
         )
 
     async def create_resource(
@@ -340,7 +375,7 @@ class ProxyTemplate(ResourceTemplate):
         )
 
 
-class ProxyPrompt(Prompt):
+class ProxyPrompt(Prompt, MirroredComponent):
     """
     A Prompt that represents and renders a prompt from a remote server.
     """
@@ -369,6 +404,7 @@ class ProxyPrompt(Prompt):
             name=mcp_prompt.name,
             description=mcp_prompt.description,
             arguments=arguments,
+            _mirrored=True,
         )
 
     async def render(self, arguments: dict[str, Any]) -> list[PromptMessage]:
@@ -381,21 +417,166 @@ class ProxyPrompt(Prompt):
 class FastMCPProxy(FastMCP):
     """
     A FastMCP server that acts as a proxy to a remote MCP-compliant server.
-    It uses specialized managers that fulfill requests via an HTTP client.
+    It uses specialized managers that fulfill requests via a client factory.
     """
 
-    def __init__(self, client: Client, **kwargs):
+    def __init__(
+        self,
+        client: Client | None = None,
+        *,
+        client_factory: Callable[[], Client] | None = None,
+        **kwargs,
+    ):
         """
         Initializes the proxy server.
 
+        FastMCPProxy requires explicit session management via client_factory.
+        Use FastMCP.as_proxy() for convenience with automatic session strategy.
+
         Args:
-            client: The FastMCP client connected to the backend server.
+            client: [DEPRECATED] A Client instance. Use client_factory instead for explicit
+                   session management. When provided, a client_factory will be automatically
+                   created that provides session isolation for backwards compatibility.
+            client_factory: A callable that returns a Client instance when called.
+                           This gives you full control over session creation and reuse.
             **kwargs: Additional settings for the FastMCP server.
         """
+
         super().__init__(**kwargs)
-        self.client = client
+
+        # Handle client and client_factory parameters
+        if client is not None and client_factory is not None:
+            raise ValueError("Cannot specify both 'client' and 'client_factory'")
+
+        if client is not None:
+            # Deprecated in 2.10.3
+            if fastmcp.settings.deprecation_warnings:
+                warnings.warn(
+                    "Passing 'client' to FastMCPProxy is deprecated. Use 'client_factory' instead for explicit session management. "
+                    "For automatic session strategy, use FastMCP.as_proxy().",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+
+            # Create a factory that provides session isolation for backwards compatibility
+            def deprecated_client_factory():
+                return client.new()
+
+            self.client_factory = deprecated_client_factory
+        elif client_factory is not None:
+            self.client_factory = client_factory
+        else:
+            raise ValueError("Must specify 'client_factory'")
 
         # Replace the default managers with our specialized proxy managers.
-        self._tool_manager = ProxyToolManager(client=self.client)
-        self._resource_manager = ProxyResourceManager(client=self.client)
-        self._prompt_manager = ProxyPromptManager(client=self.client)
+        self._tool_manager = ProxyToolManager(client_factory=self.client_factory)
+        self._resource_manager = ProxyResourceManager(
+            client_factory=self.client_factory
+        )
+        self._prompt_manager = ProxyPromptManager(client_factory=self.client_factory)
+
+
+async def default_proxy_roots_handler(
+    context: RequestContext[ClientSession, LifespanContextT],
+) -> RootsList:
+    """
+    A handler that forwards the list roots request from the remote server to the proxy's connected clients and relays the response back to the remote server.
+    """
+    ctx = get_context()
+    return await ctx.list_roots()
+
+
+class ProxyClient(Client[ClientTransportT]):
+    """
+    A proxy client that forwards advanced interactions between a remote MCP server and the proxy's connected clients.
+    Supports forwarding roots, sampling, elicitation, logging, and progress.
+    """
+
+    def __init__(
+        self,
+        transport: ClientTransportT
+        | FastMCP
+        | FastMCP1Server
+        | AnyUrl
+        | Path
+        | MCPConfig
+        | dict[str, Any]
+        | str,
+        **kwargs,
+    ):
+        if "roots" not in kwargs:
+            kwargs["roots"] = default_proxy_roots_handler
+        if "sampling_handler" not in kwargs:
+            kwargs["sampling_handler"] = ProxyClient.default_sampling_handler
+        if "elicitation_handler" not in kwargs:
+            kwargs["elicitation_handler"] = ProxyClient.default_elicitation_handler
+        if "log_handler" not in kwargs:
+            kwargs["log_handler"] = ProxyClient.default_log_handler
+        if "progress_handler" not in kwargs:
+            kwargs["progress_handler"] = ProxyClient.default_progress_handler
+        super().__init__(**kwargs | dict(transport=transport))
+
+    @classmethod
+    async def default_sampling_handler(
+        cls,
+        messages: list[mcp.types.SamplingMessage],
+        params: mcp.types.CreateMessageRequestParams,
+        context: RequestContext[ClientSession, LifespanContextT],
+    ) -> mcp.types.CreateMessageResult:
+        """
+        A handler that forwards the sampling request from the remote server to the proxy's connected clients and relays the response back to the remote server.
+        """
+        ctx = get_context()
+        content = await ctx.sample(
+            [msg for msg in messages],
+            system_prompt=params.systemPrompt,
+            temperature=params.temperature,
+            max_tokens=params.maxTokens,
+            model_preferences=params.modelPreferences,
+        )
+        if isinstance(content, mcp.types.ResourceLink | mcp.types.EmbeddedResource):
+            raise RuntimeError("Content is not supported")
+        return mcp.types.CreateMessageResult(
+            role="assistant",
+            model="fastmcp-client",
+            content=content,
+        )
+
+    @classmethod
+    async def default_elicitation_handler(
+        cls,
+        message: str,
+        response_type: type,
+        params: mcp.types.ElicitRequestParams,
+        context: RequestContext[ClientSession, LifespanContextT],
+    ) -> ElicitResult:
+        """
+        A handler that forwards the elicitation request from the remote server to the proxy's connected clients and relays the response back to the remote server.
+        """
+        ctx = get_context()
+        result = await ctx.elicit(message, response_type)
+        if result.action == "accept":
+            return result.data
+        else:
+            return ElicitResult(action=result.action)
+
+    @classmethod
+    async def default_log_handler(cls, message: LogMessage) -> None:
+        """
+        A handler that forwards the log notification from the remote server to the proxy's connected clients.
+        """
+        ctx = get_context()
+        await ctx.log(message.data, level=message.level, logger_name=message.logger)
+
+    @classmethod
+    async def default_progress_handler(
+        cls,
+        progress: float,
+        total: float | None,
+        message: str | None,
+    ) -> None:
+        """
+        A handler that forwards the progress notification from the remote server to the proxy's connected clients.
+        """
+        ctx = get_context()
+        await ctx.report_progress(progress, total, message)
