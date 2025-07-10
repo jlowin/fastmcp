@@ -117,6 +117,7 @@ class HeadlessOAuthProvider(httpx.Auth):
                 client_id="test_client_headless",
                 client_secret="test_secret_headless",
                 redirect_uris=[AnyHttpUrl("http://localhost:8080/callback")],
+                scope="add",  # Include the 'add' scope for the add tool
             )
 
             register_response = await http_client.post(
@@ -134,6 +135,7 @@ class HeadlessOAuthProvider(httpx.Auth):
                 "code_challenge": code_challenge,
                 "code_challenge_method": "S256",
                 "state": "test_state_headless",
+                "scope": "add",  # Request the 'add' scope for the add tool
             }
 
             auth_response = await http_client.get(
@@ -167,6 +169,7 @@ class HeadlessOAuthProvider(httpx.Auth):
                     "code": auth_code,
                     "redirect_uri": "http://localhost:8080/callback",
                     "code_verifier": code_verifier,
+                    "scope": "add",  # Request the 'add' scope for the add tool
                 }
 
                 token_response = await http_client.post(

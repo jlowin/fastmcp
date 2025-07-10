@@ -19,7 +19,7 @@ from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.middleware.authentication import AuthenticationMiddleware
 from starlette.requests import Request
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 from starlette.routing import BaseRoute, Mount, Route
 from starlette.types import Lifespan, Receive, Scope, Send
 
@@ -101,6 +101,68 @@ def setup_auth_middleware_and_routes(
             service_documentation_url=auth.service_documentation_url,
             client_registration_options=auth.client_registration_options,
             revocation_options=auth.revocation_options,
+        )
+    )
+
+    # Add OAuth 2.0 Protected Resource Metadata endpoint (RFC 9728)
+    async def oauth_protected_resource_handler(request: Request) -> JSONResponse:
+        """
+        OAuth 2.0 Protected Resource Metadata endpoint (RFC 9728).
+
+        This endpoint provides metadata about the protected resource for OAuth clients.
+        """
+        # Construct the server URI from the request
+        server_uri = f"{request.url.scheme}://{request.url.netloc}"
+
+        # Get authorization server URI from the auth provider
+        auth_server_uri = str(auth.issuer_url).rstrip("/")
+
+        # Determine JWKS URI - use provider's JWKS URI if available, otherwise construct from issuer
+        from fastmcp.server.auth.providers.bearer import BearerAuthProvider
+
+        if isinstance(auth, BearerAuthProvider) and auth.jwks_uri:
+            jwks_uri = auth.jwks_uri
+        else:
+            jwks_uri = f"{auth_server_uri}/.well-known/jwks.json"
+
+        # Dynamically collect scopes from all tools in the server
+        scopes_supported = set()
+
+        # Try to get the FastMCP server instance from app state
+        if hasattr(request.app, "state") and hasattr(
+            request.app.state, "fastmcp_server"
+        ):
+            fastmcp_server = request.app.state.fastmcp_server
+            tools = await fastmcp_server.get_tools()
+
+            for tool in tools.values():
+                # Get the required scope for this tool (defaults to tool name if not specified)
+                required_scope = (
+                    tool.required_scope
+                    if tool.required_scope is not None
+                    else tool.name
+                )
+                scopes_supported.add(required_scope)
+
+        # Convert to sorted list for consistent output
+        scopes_supported_list = sorted(list(scopes_supported))
+
+        metadata = {
+            "resource": server_uri,
+            "authorization_server": auth_server_uri,
+            "jwks_uri": jwks_uri,
+            "scopes_supported": scopes_supported_list,
+            "bearer_methods_supported": ["header"],
+            "resource_documentation": f"{server_uri}/docs",
+        }
+
+        return JSONResponse(metadata)
+
+    auth_routes.append(
+        Route(
+            "/.well-known/oauth-protected-resource",
+            endpoint=oauth_protected_resource_handler,
+            methods=["GET"],
         )
     )
 

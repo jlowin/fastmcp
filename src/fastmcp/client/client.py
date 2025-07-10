@@ -863,10 +863,10 @@ class Client(Generic[ClientTransportT]):
         data = None
         if result.isError and raise_on_error:
             msg = cast(mcp.types.TextContent, result.content[0]).text
-            
+
             # Check for specific error codes in the error message to distinguish error types
             from fastmcp.exceptions import AuthenticationError, AuthorizationError
-            
+
             if "Authentication failed:" in msg:
                 raise AuthenticationError(msg.replace("Authentication failed: ", ""))
             elif "Authorization failed:" in msg:

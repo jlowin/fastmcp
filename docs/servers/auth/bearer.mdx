@@ -451,3 +451,110 @@ FastMCPServer._validate_tool_scope = debug_validate_tool_scope
 
 This debugging approach helps identify issues with token parsing, scope extraction, or validation logic.
 
+## OAuth 2.0 Protected Resource Metadata
+
+When you enable Bearer Token authentication, FastMCP automatically creates a `/.well-known/oauth-protected-resource` endpoint as defined in [RFC 9728](https://tools.ietf.org/html/rfc9728). This endpoint helps OAuth clients discover how to authenticate with your MCP server, which acts as a protected resource.
+
+<Note>
+Your MCP server is a **protected resource server**, not an authorization server. Clients obtain tokens from the authorization server specified in your `BearerAuthProvider` configuration, then use those tokens to access your MCP server's tools and resources.
+</Note>
+
+### What's Included in the Metadata
+
+The endpoint returns JSON metadata containing:
+
+- **`resource`**: The URI of this MCP server (the protected resource)
+- **`authorization_server`**: The URI of the authorization server that issues tokens for this resource
+- **`jwks_uri`**: The JWKS endpoint of the authorization server for token verification
+- **`scopes_supported`**: Array of OAuth scopes supported by this MCP server
+- **`bearer_methods_supported`**: Methods for presenting bearer tokens (FastMCP uses `["header"]`)
+- **`resource_documentation`**: URL to documentation for this MCP server's resources
+
+### Example Response
+
+```json
+{
+  "resource": "https://mcp-server.company.com",
+  "authorization_server": "https://auth.company.com",
+  "jwks_uri": "https://auth.company.com/.well-known/jwks.json",
+  "scopes_supported": ["mcp:read", "mcp:write", "mcp:admin"],
+  "bearer_methods_supported": ["header"],
+  "resource_documentation": "https://mcp-server.company.com/docs"
+}
+```
+
+### How OAuth Clients Use This
+
+OAuth clients can discover this endpoint to:
+
+1. **Find the authorization server**: Learn where to obtain access tokens
+2. **Discover required scopes**: Understand what permissions are needed to access specific tools/resources  
+3. **Get JWKS information**: Find the key server for token verification (if needed)
+4. **Understand token presentation**: Know to send tokens in the `Authorization` header
+5. **Access documentation**: Find links to API documentation
+
+### Public Access
+
+This endpoint is **not protected by authentication** - it needs to be publicly accessible so clients can discover authentication requirements without creating a "chicken and egg" problem.
+
+### Authentication Discovery Flow
+
+Here's the typical OAuth discovery and authentication flow for MCP clients:
+
+<Steps>
+<Step title="Discover protected resource metadata">
+```bash
+GET /.well-known/oauth-protected-resource
+```
+
+Response tells the client:
+- Which authorization server to contact (`authorization_server`)  
+- What scopes are needed (`scopes_supported`)
+- How to present tokens (`bearer_methods_supported`)
+</Step>
+
+<Step title="Obtain access token from authorization server">
+Client contacts the authorization server (not the MCP server) to obtain an access token with appropriate scopes using standard OAuth flows like:
+- Authorization Code with PKCE  
+- Client Credentials
+- Device Code
+</Step>
+
+<Step title="Access protected MCP endpoints">
+```bash
+Authorization: Bearer <access_token>
+```
+
+Client includes the bearer token when calling MCP endpoints like:
+- `/mcp/sse` (Server-Sent Events transport)
+- `/mcp/streamable-http` (Streamable HTTP transport)
+</Step>
+</Steps>
+
+### Testing the Endpoint
+
+You can test this endpoint with any HTTP client:
+
+<RequestExample>
+```bash cURL
+curl https://your-mcp-server/.well-known/oauth-protected-resource
+```
+</RequestExample>
+
+<ResponseExample>
+```json Response
+{
+  "resource": "https://your-mcp-server",
+  "authorization_server": "https://your-auth-server",
+  "jwks_uri": "https://your-auth-server/.well-known/jwks.json",
+  "scopes_supported": ["read", "write", "admin"],
+  "bearer_methods_supported": ["header"],
+  "resource_documentation": "https://your-mcp-server/docs"
+}
+```
+</ResponseExample>
+
+<Warning>
+Remember: Your MCP server is a **protected resource**, not an authorization server. Clients get tokens from the authorization server specified in your `BearerAuthProvider`, then use those tokens to access your MCP server.
+</Warning>
+

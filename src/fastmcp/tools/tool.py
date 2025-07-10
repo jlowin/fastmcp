@@ -107,7 +107,9 @@ class Tool(FastMCPComponent):
     ] = None
     required_scope: Annotated[
         str | None,
-        Field(description="Required scope for tool authorization. If not provided, defaults to tool name"),
+        Field(
+            description="Required scope for tool authorization. If not provided, defaults to tool name"
+        ),
     ] = None
 
     def enable(self) -> None:

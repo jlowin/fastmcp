@@ -88,7 +88,7 @@ class ErrorHandlingMiddleware(Middleware):
 
         # FastMCP specific error types
         from fastmcp.exceptions import AuthenticationError, AuthorizationError
-        
+
         if error_type is AuthenticationError:
             return McpError(
                 ErrorData(code=-32001, message=f"Authentication failed: {str(error)}")

@@ -899,7 +899,7 @@ class FastMCP(Generic[LifespanResultT]):
             @server.tool(name="custom_name")
             def my_tool(x: int) -> str:
                 return str(x)
-            
+
             # Register a tool with a required scope
             @server.tool(required_scope="admin")
             def admin_tool(x: int) -> str:
@@ -2042,13 +2042,17 @@ class FastMCP(Generic[LifespanResultT]):
 
     def _validate_tool_scope(self, tool: Tool) -> None:
         """Validate that the current user has the required scope to call this tool."""
-        from fastmcp.server.dependencies import get_access_token
         from fastmcp.exceptions import AuthorizationError
+        from fastmcp.server.dependencies import get_access_token
 
         try:
             access_token = get_access_token()
         except RuntimeError:
             # No access token available, skip validation
+            return
+
+        # If access_token is None, skip validation
+        if access_token is None:
             return
 
         # Determine the required scope

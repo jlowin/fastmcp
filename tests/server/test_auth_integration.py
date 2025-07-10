@@ -15,9 +15,6 @@ from mcp.server.auth.provider import (
     RefreshToken,
     construct_redirect_uri,
 )
-from mcp.server.auth.routes import (
-    create_auth_routes,
-)
 from mcp.server.auth.settings import (
     ClientRegistrationOptions,
     RevocationOptions,
@@ -29,9 +26,7 @@ from mcp.shared.auth import (
 from pydantic import AnyHttpUrl
 from starlette.applications import Starlette
 
-from fastmcp import FastMCP
-from fastmcp.server.auth.providers.bearer import BearerAuthProvider, RSAKeyPair
-from fastmcp.exceptions import ToolError
+from fastmcp.server.http import setup_auth_middleware_and_routes
 
 
 # Mock OAuth provider for testing
@@ -41,6 +36,19 @@ class MockOAuthProvider(OAuthAuthorizationServerProvider):
         self.auth_codes = {}  # code -> {client_id, code_challenge, redirect_uri}
         self.tokens = {}  # token -> {client_id, scopes, expires_at}
         self.refresh_tokens = {}  # refresh_token -> access_token
+
+        # Add attributes that OAuthProvider has
+        self.issuer_url = AnyHttpUrl("https://auth.example.com")
+        self.service_documentation_url = AnyHttpUrl("https://docs.example.com")
+        self.required_scopes = ["read", "write"]
+
+        # Add client registration and revocation options
+        self.client_registration_options = ClientRegistrationOptions(
+            enabled=True,
+            valid_scopes=["read", "write", "profile"],
+            default_scopes=["read", "write"],
+        )
+        self.revocation_options = RevocationOptions(enabled=True)
 
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
         return self.clients.get(client_id)
@@ -204,17 +212,12 @@ def mock_oauth_provider():
 
 @pytest.fixture
 def auth_app(mock_oauth_provider):
-    # Create auth router
-    auth_routes = create_auth_routes(
-        mock_oauth_provider,
-        AnyHttpUrl("https://auth.example.com"),
-        AnyHttpUrl("https://docs.example.com"),
-        client_registration_options=ClientRegistrationOptions(
-            enabled=True,
-            valid_scopes=["read", "write", "profile"],
-            default_scopes=["read", "write"],
-        ),
-        revocation_options=RevocationOptions(enabled=True),
+    # Set required scopes on the provider for testing
+    mock_oauth_provider.required_scopes = ["read", "write"]
+
+    # Create auth router using the setup function to include the new endpoint
+    middleware, auth_routes, required_scopes = setup_auth_middleware_and_routes(
+        mock_oauth_provider
     )
 
     # Create Starlette app
@@ -372,6 +375,39 @@ class TestAuthEndpoints:
             "refresh_token",
         ]
         assert metadata["service_documentation"] == "https://docs.example.com/"
+
+    async def test_oauth_protected_resource_endpoint(
+        self, test_client: httpx.AsyncClient
+    ):
+        """Test the OAuth 2.0 Protected Resource Metadata endpoint (RFC 9728)."""
+        print("Sending request to oauth-protected-resource endpoint")
+        response = await test_client.get("/.well-known/oauth-protected-resource")
+        print(f"Got response: {response.status_code}")
+        if response.status_code != 200:
+            print(f"Response content: {response.content}")
+        assert response.status_code == 200
+
+        metadata = response.json()
+        print(f"Response metadata: {metadata}")
+
+        # Check required fields for RFC 9728
+        assert "resource" in metadata
+        assert "authorization_server" in metadata
+        assert "jwks_uri" in metadata
+        assert "scopes_supported" in metadata
+        assert "bearer_methods_supported" in metadata
+        assert "resource_documentation" in metadata
+
+        # Verify the values
+        assert metadata["authorization_server"] == "https://auth.example.com"
+        assert (
+            metadata["scopes_supported"] == []
+        )  # No tools in this test setup, so no scopes
+        assert metadata["bearer_methods_supported"] == ["header"]
+        assert metadata["resource"].startswith(
+            "https://"
+        )  # Should be the MCP server URI
+        assert metadata["resource_documentation"].endswith("/docs")
 
     async def test_token_validation_error(self, test_client: httpx.AsyncClient):
         """Test token endpoint error - validation error."""
@@ -1237,7 +1273,9 @@ class TestAuthorizeEndpointErrors:
         assert "state" in query_params
         assert query_params["state"][0] == "test_state"
 
-    async def test_authorize_invalid_scope_in_refresh_token(self, test_client, registered_client):
+    async def test_authorize_invalid_scope_in_refresh_token(
+        self, test_client, registered_client, auth_code, pkce_challenge
+    ):
         """Test authorization endpoint with invalid scope in refresh token request."""
         # Exchange authorization code for tokens
         token_response = await test_client.post(
@@ -1271,6 +1309,3 @@ class TestAuthorizeEndpointErrors:
         error_response = response.json()
         assert error_response["error"] == "invalid_scope"
         assert "cannot request scope" in error_response["error_description"]
-
-
-
