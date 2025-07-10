@@ -86,7 +86,18 @@ class ErrorHandlingMiddleware(Middleware):
         # Map common exceptions to appropriate MCP error codes
         error_type = type(error)
 
-        if error_type in (ValueError, TypeError):
+        # FastMCP specific error types
+        from fastmcp.exceptions import AuthenticationError, AuthorizationError
+        
+        if error_type is AuthenticationError:
+            return McpError(
+                ErrorData(code=-32001, message=f"Authentication failed: {str(error)}")
+            )
+        elif error_type is AuthorizationError:
+            return McpError(
+                ErrorData(code=-32002, message=f"Authorization failed: {str(error)}")
+            )
+        elif error_type in (ValueError, TypeError):
             return McpError(
                 ErrorData(code=-32602, message=f"Invalid params: {str(error)}")
             )

@@ -646,6 +646,10 @@ class FastMCP(Generic[LifespanResultT]):
             if not self._should_enable_component(tool):
                 raise NotFoundError(f"Unknown tool: {context.message.name!r}")
 
+            # Validate scope if authentication is enabled
+            if self.auth is not None:
+                self._validate_tool_scope(tool)
+
             return await self._tool_manager.call_tool(
                 key=context.message.name, arguments=context.message.arguments or {}
             )
@@ -819,6 +823,7 @@ class FastMCP(Generic[LifespanResultT]):
         annotations: ToolAnnotations | dict[str, Any] | None = None,
         exclude_args: list[str] | None = None,
         enabled: bool | None = None,
+        required_scope: str | None = None,
     ) -> FunctionTool: ...
 
     @overload
@@ -834,6 +839,7 @@ class FastMCP(Generic[LifespanResultT]):
         annotations: ToolAnnotations | dict[str, Any] | None = None,
         exclude_args: list[str] | None = None,
         enabled: bool | None = None,
+        required_scope: str | None = None,
     ) -> Callable[[AnyFunction], FunctionTool]: ...
 
     def tool(
@@ -848,6 +854,7 @@ class FastMCP(Generic[LifespanResultT]):
         annotations: ToolAnnotations | dict[str, Any] | None = None,
         exclude_args: list[str] | None = None,
         enabled: bool | None = None,
+        required_scope: str | None = None,
     ) -> Callable[[AnyFunction], FunctionTool] | FunctionTool:
         """Decorator to register a tool.
 
@@ -871,6 +878,7 @@ class FastMCP(Generic[LifespanResultT]):
             annotations: Optional annotations about the tool's behavior
             exclude_args: Optional list of argument names to exclude from the tool schema
             enabled: Optional boolean to enable or disable the tool
+            required_scope: Optional scope required for tool authorization. If not provided, defaults to tool name. Only enforced when authentication is enabled.
 
         Examples:
             Register a tool with a custom name:
@@ -890,6 +898,11 @@ class FastMCP(Generic[LifespanResultT]):
 
             @server.tool(name="custom_name")
             def my_tool(x: int) -> str:
+                return str(x)
+            
+            # Register a tool with a required scope
+            @server.tool(required_scope="admin")
+            def admin_tool(x: int) -> str:
                 return str(x)
 
             # Direct function call
@@ -930,6 +943,7 @@ class FastMCP(Generic[LifespanResultT]):
                 exclude_args=exclude_args,
                 serializer=self._tool_serializer,
                 enabled=enabled,
+                required_scope=required_scope,
             )
             self.add_tool(tool)
             return tool
@@ -961,6 +975,7 @@ class FastMCP(Generic[LifespanResultT]):
             annotations=annotations,
             exclude_args=exclude_args,
             enabled=enabled,
+            required_scope=required_scope,
         )
 
     def add_resource(self, resource: Resource) -> Resource:
@@ -2005,36 +2020,49 @@ class FastMCP(Generic[LifespanResultT]):
         self,
         component: FastMCPComponent,
     ) -> bool:
-        """
-        Given a component, determine if it should be enabled. Returns True if it should be enabled; False if it should not.
-
-        Rules:
-            - If the component's enabled property is False, always return False.
-            - If both include_tags and exclude_tags are None, return True.
-            - If exclude_tags is provided, check each exclude tag:
-                - If the exclude tag is a string, it must be present in the input tags to exclude.
-            - If include_tags is provided, check each include tag:
-                - If the include tag is a string, it must be present in the input tags to include.
-            - If include_tags is provided and none of the include tags match, return False.
-            - If include_tags is not provided, return True.
-        """
+        """Check if a component should be enabled based on tags."""
+        # Check if component is explicitly disabled
         if not component.enabled:
             return False
 
-        if self.include_tags is None and self.exclude_tags is None:
-            return True
-
-        if self.exclude_tags is not None:
-            if any(etag in component.tags for etag in self.exclude_tags):
-                return False
-
+        # Check include_tags (if set, component must have at least one matching tag)
         if self.include_tags is not None:
-            if any(itag in component.tags for itag in self.include_tags):
-                return True
-            else:
+            if not component.tags:
                 return False
+            if not any(tag in self.include_tags for tag in component.tags):
+                return False
+
+        # Check exclude_tags (if set, component must not have any matching tag)
+        if self.exclude_tags is not None:
+            if component.tags:
+                if any(tag in self.exclude_tags for tag in component.tags):
+                    return False
 
         return True
+
+    def _validate_tool_scope(self, tool: Tool) -> None:
+        """Validate that the current user has the required scope to call this tool."""
+        from fastmcp.server.dependencies import get_access_token
+        from fastmcp.exceptions import AuthorizationError
+
+        try:
+            access_token = get_access_token()
+        except RuntimeError:
+            # No access token available, skip validation
+            return
+
+        # Determine the required scope
+        required_scope = tool.required_scope
+        if required_scope is None:
+            # Default scope is the tool name
+            required_scope = tool.name
+
+        # Check if the token has the required scope
+        if required_scope not in access_token.scopes:
+            raise AuthorizationError(
+                f"Access denied: Tool '{tool.name}' requires scope '{required_scope}' "
+                f"but only scopes {access_token.scopes} are available"
+            )
 
 
 @dataclass

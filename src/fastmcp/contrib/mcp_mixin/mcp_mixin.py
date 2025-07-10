@@ -29,6 +29,7 @@ def mcp_tool(
     exclude_args: list[str] | None = None,
     serializer: Callable[[Any], str] | None = None,
     enabled: bool | None = None,
+    required_scope: str | None = None,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Decorator to mark a method as an MCP tool for later registration."""
 
@@ -41,6 +42,7 @@ def mcp_tool(
             "exclude_args": exclude_args,
             "serializer": serializer,
             "enabled": enabled,
+            "required_scope": required_scope,
         }
         call_args = {k: v for k, v in call_args.items() if v is not None}
         setattr(func, _MCP_REGISTRATION_TOOL_ATTR, call_args)

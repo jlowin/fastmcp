@@ -29,6 +29,10 @@ from mcp.shared.auth import (
 from pydantic import AnyHttpUrl
 from starlette.applications import Starlette
 
+from fastmcp import FastMCP
+from fastmcp.server.auth.providers.bearer import BearerAuthProvider, RSAKeyPair
+from fastmcp.exceptions import ToolError
+
 
 # Mock OAuth provider for testing
 class MockOAuthProvider(OAuthAuthorizationServerProvider):
@@ -1232,3 +1236,41 @@ class TestAuthorizeEndpointErrors:
         # State should be preserved
         assert "state" in query_params
         assert query_params["state"][0] == "test_state"
+
+    async def test_authorize_invalid_scope_in_refresh_token(self, test_client, registered_client):
+        """Test authorization endpoint with invalid scope in refresh token request."""
+        # Exchange authorization code for tokens
+        token_response = await test_client.post(
+            "/token",
+            data={
+                "grant_type": "authorization_code",
+                "client_id": registered_client["client_id"],
+                "client_secret": registered_client["client_secret"],
+                "code": auth_code["code"],
+                "code_verifier": pkce_challenge["code_verifier"],
+                "redirect_uri": auth_code["redirect_uri"],
+            },
+        )
+        assert token_response.status_code == 200
+
+        tokens = token_response.json()
+        refresh_token = tokens["refresh_token"]
+
+        # Try to use refresh token with an invalid scope
+        response = await test_client.post(
+            "/token",
+            data={
+                "grant_type": "refresh_token",
+                "client_id": registered_client["client_id"],
+                "client_secret": registered_client["client_secret"],
+                "refresh_token": refresh_token,
+                "scope": "read write invalid_scope",  # Adding an invalid scope
+            },
+        )
+        assert response.status_code == 400
+        error_response = response.json()
+        assert error_response["error"] == "invalid_scope"
+        assert "cannot request scope" in error_response["error_description"]
+
+
+
