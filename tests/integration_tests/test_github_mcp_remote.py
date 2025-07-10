@@ -2,35 +2,46 @@ import json
 import os
 
 import pytest
-from fastmcp import Client
-from fastmcp.client import ClientTransport, StreamableHttpTransport
 from mcp import McpError
 from mcp.types import Tool
+
+from fastmcp import Client
+from fastmcp.client import StreamableHttpTransport
+from fastmcp.client.auth.bearer import BearerAuth
 
 GITHUB_REMOTE_MCP_URL = "https://api.githubcopilot.com/mcp/"
 
 HEADER_AUTHORIZATION = "Authorization"
-MCP_GITHUB_PAT = os.getenv("MCP_GITHUB_PAT")
+FASTMCP_GITHUB_TOKEN = os.getenv("FASTMCP_GITHUB_TOKEN")
+
+# Skip tests if no GitHub token is available
+pytestmark = pytest.mark.xfail(
+    FASTMCP_GITHUB_TOKEN is None,
+    reason="The FASTMCP_GITHUB_TOKEN environment variable is not set",
+)
 
 
 @pytest.fixture(name="streamable_http_client")
-def fixture_streamable_http_client() -> Client[ClientTransport]:
+def fixture_streamable_http_client() -> Client[StreamableHttpTransport]:
+    assert FASTMCP_GITHUB_TOKEN is not None
+
     return Client(
-        StreamableHttpTransport(url=GITHUB_REMOTE_MCP_URL,
-                                headers={HEADER_AUTHORIZATION: f"Bearer {MCP_GITHUB_PAT}"}
-                                )
+        StreamableHttpTransport(
+            url=GITHUB_REMOTE_MCP_URL,
+            auth=BearerAuth(FASTMCP_GITHUB_TOKEN),
+        )
     )
 
 
-@pytest.mark.asyncio
-async def test_connect_disconnect(streamable_http_client: Client[StreamableHttpTransport]):
+async def test_connect_disconnect(
+    streamable_http_client: Client[StreamableHttpTransport],
+):
     async with streamable_http_client:
         assert streamable_http_client.is_connected() is True
         await streamable_http_client._disconnect()  # pylint: disable=W0212 (protected-access)
         assert streamable_http_client.is_connected() is False
 
 
-@pytest.mark.asyncio
 async def test_ping(streamable_http_client: Client[StreamableHttpTransport]):
     """Test pinging the server."""
     async with streamable_http_client:
@@ -39,7 +50,6 @@ async def test_ping(streamable_http_client: Client[StreamableHttpTransport]):
         assert result is True
 
 
-@pytest.mark.asyncio
 async def test_list_tools(streamable_http_client: Client[StreamableHttpTransport]):
     """Test listing the MCP tools"""
     async with streamable_http_client:
@@ -50,14 +60,13 @@ async def test_list_tools(streamable_http_client: Client[StreamableHttpTransport
         for tool in tools:
             assert isinstance(tool, Tool)
             assert len(tool.name) > 0
-            assert len(tool.description) > 0
+            assert tool.description is not None and len(tool.description) > 0
             assert isinstance(tool.inputSchema, dict)
             assert len(tool.inputSchema) > 0
 
 
-@pytest.mark.asyncio
 async def test_list_resources(streamable_http_client: Client[StreamableHttpTransport]):
-    """Test listing the MCP resources """
+    """Test listing the MCP resources"""
     async with streamable_http_client:
         assert streamable_http_client.is_connected()
         resources = await streamable_http_client.list_resources()
@@ -65,35 +74,38 @@ async def test_list_resources(streamable_http_client: Client[StreamableHttpTrans
         assert len(resources) == 0
 
 
-@pytest.mark.asyncio
 async def test_list_prompts(streamable_http_client: Client[StreamableHttpTransport]):
-    """Test listing the MCP prompts """
+    """Test listing the MCP prompts"""
     async with streamable_http_client:
         assert streamable_http_client.is_connected()
-        with pytest.raises(McpError) as exc:
-            await streamable_http_client.list_prompts()
-        assert exc.value.args[0] == "prompts not supported"
+        prompts = await streamable_http_client.list_prompts()
+        # there is at least one prompt (as of July 2025)
+        assert len(prompts) >= 1
 
 
-@pytest.mark.asyncio
 async def test_call_tool_ko(streamable_http_client: Client[StreamableHttpTransport]):
     """Test calling a non-existing tool"""
     async with streamable_http_client:
         assert streamable_http_client.is_connected()
-        with pytest.raises(McpError, match="tool not found") as excinfo:
+        with pytest.raises(McpError, match="tool not found"):
             await streamable_http_client.call_tool("foo")
 
 
-@pytest.mark.asyncio
-async def test_call_tool_list_commits(streamable_http_client: Client[StreamableHttpTransport]):
+async def test_call_tool_list_commits(
+    streamable_http_client: Client[StreamableHttpTransport],
+):
     """Test calling a list_commit tool"""
     async with streamable_http_client:
         assert streamable_http_client.is_connected()
-        result = await streamable_http_client.call_tool("list_commits",
-                                                        {"owner": "jlowin", "repo": "fastmcp"})
-        assert isinstance(result, list)
-        assert len(result) == 1
-        commits = json.loads(result[0].text)
+        result = await streamable_http_client.call_tool(
+            "list_commits", {"owner": "jlowin", "repo": "fastmcp"}
+        )
+
+        # at this time, the github server does not support structured content
+        assert result.structured_content is None
+        assert isinstance(result.content, list)
+        assert len(result.content) == 1
+        commits = json.loads(result.content[0].text)  # type: ignore[attr-defined]
         for commit in commits:
             assert isinstance(commit, dict)
             assert "sha" in commit
