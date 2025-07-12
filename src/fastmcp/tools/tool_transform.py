@@ -333,6 +333,7 @@ class TransformedTool(Tool):
         output_schema: dict[str, Any] | None | Literal[False] = None,
         serializer: Callable[[Any], str] | None = None,
         enabled: bool | None = None,
+        required_scope: str | None = None,
     ) -> TransformedTool:
         """Create a transformed tool from a parent tool.
 
@@ -521,6 +522,7 @@ class TransformedTool(Tool):
             serializer=serializer or tool.serializer,
             transform_args=transform_args,
             enabled=enabled if enabled is not None else True,
+            required_scope=required_scope,
         )
 
         return transformed_tool
