@@ -12,6 +12,11 @@ from fastmcp.client import Client
 from fastmcp.client.transports import FastMCPTransport, StreamableHttpTransport
 from fastmcp.exceptions import ToolError
 from fastmcp.server.proxy import FastMCPProxy, ProxyClient
+from fastmcp.tools.tool_transform import (
+    ArgTransformRequest,
+    ToolTransformRequest,
+    TransformedTool,
+)
 
 USERS = [
     {"id": "1", "name": "Alice", "active": True},
@@ -117,6 +122,35 @@ class TestTools:
         assert "add" in tools
         assert "error_tool" in tools
         assert "tool_without_description" in tools
+
+    async def test_get_tools_with_transform(self, proxy_server):
+        proxy_server.add_tool_transform(
+            "greet",
+            ToolTransformRequest(
+                name="transformed_greet",
+                arguments={
+                    "name": ArgTransformRequest(
+                        name="transformed_name",
+                        description="The transformed name to greet",
+                    )
+                },
+            ),
+        )
+        tools = await proxy_server.get_tools()
+        assert "transformed_greet" in tools
+        assert "greet" not in tools
+
+        transformed_greet = tools["transformed_greet"]
+
+        assert isinstance(transformed_greet, TransformedTool)
+        assert transformed_greet.name == "transformed_greet"
+
+        greet_tool_parameters = transformed_greet.parameters
+        assert (
+            greet_tool_parameters["properties"]["transformed_name"]["description"]
+            == "The transformed name to greet"
+        )
+        assert "name" not in greet_tool_parameters["properties"]
 
     async def test_tool_without_description(self, proxy_server):
         tools = await proxy_server.get_tools()

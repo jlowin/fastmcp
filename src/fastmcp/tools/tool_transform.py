@@ -8,10 +8,17 @@ from typing import Any, Literal
 
 from mcp.types import ToolAnnotations
 from pydantic import ConfigDict
+from pydantic.fields import Field
 
 from fastmcp.tools.tool import ParsedFunction, Tool, ToolResult, _convert_to_content
+from fastmcp.utilities.components import FastMCPComponent
 from fastmcp.utilities.logging import get_logger
-from fastmcp.utilities.types import NotSet, NotSetT, get_cached_typeadapter
+from fastmcp.utilities.types import (
+    FastMCPBaseModel,
+    NotSet,
+    NotSetT,
+    get_cached_typeadapter,
+)
 
 logger = get_logger(__name__)
 
@@ -191,6 +198,29 @@ class ArgTransform:
             raise ValueError(
                 "Cannot specify 'required=False'. Set a default value instead."
             )
+
+
+class ArgTransformRequest(FastMCPBaseModel):
+    """A model for requesting a single argument transform."""
+
+    name: str | None = Field(default=None, description="The new name for the argument.")
+    description: str | None = Field(
+        default=None, description="The new description for the argument."
+    )
+    default: str | int | float | bool | None = Field(
+        default=None, description="The new default value for the argument."
+    )
+    hide: bool = Field(
+        default=False, description="Whether to hide the argument from the tool."
+    )
+    required: Literal[True] | None = Field(
+        default=None, description="Whether the argument is required."
+    )
+    examples: Any | None = Field(default=None, description="Examples of the argument.")
+
+    def to_arg_transform(self) -> ArgTransform:
+        """Convert the argument transform to a FastMCP argument transform."""
+        return ArgTransform(**self.model_dump(exclude_none=True))  # pyright: ignore[reportAny]
 
 
 class TransformedTool(Tool):
@@ -797,4 +827,26 @@ class TransformedTool(Tool):
         sig = inspect.signature(fn)
         return any(
             p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+        )
+
+
+class ToolTransformRequest(FastMCPComponent):
+    """Provides a way to transform a tool."""
+
+    name: str | None = Field(default=None, description="The new name for the tool.")
+
+    arguments: dict[str, ArgTransformRequest] = Field(
+        default_factory=dict,
+        description="A dictionary of argument transforms to apply to the tool.",
+    )
+
+    def apply(self, tool: Tool) -> Tool:
+        """Apply the transform to the tool."""
+
+        tool_changes = self.model_dump(exclude_none=True, exclude={"arguments"})
+
+        return TransformedTool.from_tool(
+            tool=tool,
+            **tool_changes,
+            transform_args={k: v.to_arg_transform() for k, v in self.arguments.items()},
         )

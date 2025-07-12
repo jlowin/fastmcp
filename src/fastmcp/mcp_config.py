@@ -174,6 +174,16 @@ class MCPConfig(BaseModel):
     model_config = ConfigDict(extra="allow")  # Preserve unknown top-level fields
 
     @classmethod
+    def _validate_stdio_server(cls, server_config: dict[str, Any]) -> StdioMCPServer:
+        """Validate a stdio server configuration."""
+        return StdioMCPServer.model_validate(server_config)
+
+    @classmethod
+    def _validate_remote_server(cls, server_config: dict[str, Any]) -> RemoteMCPServer:
+        """Validate a remote server configuration."""
+        return RemoteMCPServer.model_validate(server_config)
+
+    @classmethod
     def from_dict(cls, config: dict[str, Any]) -> MCPConfig:
         """Parse MCP configuration from dictionary format."""
         # Handle case where config is just the mcpServers object
@@ -195,9 +205,9 @@ class MCPConfig(BaseModel):
 
             # Determine if this is stdio or remote based on fields
             if "command" in server_config:
-                parsed_servers[name] = StdioMCPServer.model_validate(server_config)
+                parsed_servers[name] = cls._validate_stdio_server(server_config)
             elif "url" in server_config:
-                parsed_servers[name] = RemoteMCPServer.model_validate(server_config)
+                parsed_servers[name] = cls._validate_remote_server(server_config)
             else:
                 # Skip invalid server configs but preserve them as raw dicts
                 # This allows for forward compatibility with unknown server types
@@ -216,7 +226,7 @@ class MCPConfig(BaseModel):
 
         # Add mcpServers with all fields preserved
         result["mcpServers"] = {
-            name: server.model_dump(exclude_none=True)
+            name: server.model_dump(exclude_none=True, serialize_as_any=True)
             for name, server in self.mcpServers.items()
         }
 
