@@ -5,7 +5,6 @@ import pytest
 from fastmcp.utilities.openapi import HTTPRoute, ParameterInfo, _combine_schemas
 
 
-@pytest.mark.asyncio
 async def test_optional_parameter_schema_allows_null():
     """Test that optional parameters generate schemas that allow null values."""
     # Create a minimal HTTPRoute with optional parameter
@@ -68,7 +67,6 @@ async def test_optional_parameter_schema_allows_null():
         {"type": "object", "properties": {"name": {"type": "string"}}},
     ],
 )
-@pytest.mark.asyncio
 async def test_optional_parameter_allows_null_for_type(param_schema):
     """Test that optional parameters of any type allow null values."""
     optional_param = ParameterInfo(
