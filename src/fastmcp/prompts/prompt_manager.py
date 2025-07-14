@@ -78,7 +78,7 @@ class PromptManager:
             except Exception as e:
                 # Skip failed mounts silently, matches existing behavior
                 logger.warning(
-                    f"Failed to get prompts from mounted server '{mounted.prefix}': {e}"
+                    f"Failed to get prompts from {mounted.server.name} server mounted at '{mounted.prefix}': {e}"
                 )
                 continue
 

@@ -109,7 +109,7 @@ class ResourceManager:
             except Exception as e:
                 # Skip failed mounts silently, matches existing behavior
                 logger.warning(
-                    f"Failed to get resources from mounted server '{mounted.prefix}': {e}"
+                    f"Failed to get resources from {mounted.server.name} server mounted at '{mounted.prefix}': {e}"
                 )
                 continue
 
@@ -157,7 +157,7 @@ class ResourceManager:
             except Exception as e:
                 # Skip failed mounts silently, matches existing behavior
                 logger.warning(
-                    f"Failed to get templates from mounted server '{mounted.prefix}': {e}"
+                    f"Failed to get templates from {mounted.server.name} server mounted at '{mounted.prefix}': {e}"
                 )
                 continue
 
