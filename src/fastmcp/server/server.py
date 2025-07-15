@@ -16,6 +16,11 @@ from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Generic, Literal, cast, overload
+import json
+from http.server import HTTPServer, BaseHTTPRequestHandler
+import threading
+from typing import Any, Dict, List, Optional
+import asyncio
 
 import anyio
 import httpx
@@ -222,6 +227,9 @@ class FastMCP(Generic[LifespanResultT]):
             stateless_http=stateless_http,
         )
 
+        self._metadata_server = None
+        self._metadata_thread = None
+
     def __repr__(self) -> str:
         return f"{type(self).__name__}({self.name!r})"
 
@@ -400,6 +408,185 @@ class FastMCP(Generic[LifespanResultT]):
         if key not in prompts:
             raise NotFoundError(f"Unknown prompt: {key}")
         return prompts[key]
+
+    def get_metadata(self) -> Dict[str, Any]:
+        """Get the MCP metadata for this server."""
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # already running event loop, no deadlocks
+                raise RuntimeError("Cannot get metadata from within async context. Use get_metadata_async() instead.")
+        except RuntimeError:
+            # create new event loop
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        def safe_serialize(obj):
+            """Safely serialize objects to JSON-compatible format"""
+            if hasattr(obj, 'model_dump'):
+                return obj.model_dump(exclude_none=True)
+            elif hasattr(obj, 'dict'):
+                return obj.dict(exclude_none=True)
+            elif hasattr(obj, '__dict__'):
+                return {k: safe_serialize(v) for k, v in obj.__dict__.items() if v is not None}
+            elif isinstance(obj, (list, tuple)):
+                return [safe_serialize(item) for item in obj]
+            elif isinstance(obj, dict):
+                return {k: safe_serialize(v) for k, v in obj.items() if v is not None}
+            else:
+                return obj
+
+        # Next, get all the schemas
+        try:
+            # Get tools
+            tools = loop.run_until_complete(self.get_tools())
+            tool_schemas = []
+            for name, tool in tools.items():
+                tool_info = {
+                    "name": name,
+                    "description": tool.description,
+                    "tags": list(tool.tags) if tool.tags else [],
+                }
+                if hasattr(tool, 'input_schema'):
+                    tool_info["input_schema"] = tool.input_schema
+                tool_schemas.append(tool_info)
+
+            # Get resources
+            resources = loop.run_until_complete(self.get_resources())
+            resource_schemas = []
+            for uri, resource in resources.items():
+                resource_schemas.append({
+                    "uri": uri,
+                    "name": resource.name,
+                    "description": resource.description,
+                    "mime_type": resource.mime_type,
+                    "tags": list(resource.tags) if resource.tags else [],
+                })
+            # Get resource templates
+            templates = loop.run_until_complete(self.get_resource_templates())
+            template_schemas = []
+            for uri_template, template in templates.items():
+                template_schemas.append({
+                    "uri_template": uri_template,
+                    "name": template.name,
+                    "description": template.description,
+                    "mime_type": template.mime_type,
+                    "tags": list(template.tags) if template.tags else [],
+                })
+
+            # Get prompts
+            prompts = loop.run_until_complete(self.get_prompts())
+            prompt_schemas = []
+            for name, prompt in prompts.items():
+                prompt_info = {
+                    "name": name,
+                    "description": prompt.description,
+                    "tags": list(prompt.tags) if prompt.tags else [],
+                }
+                if hasattr(prompt, 'arguments'):
+                    prompt_info["arguments"] = safe_serialize(prompt.arguments)
+                prompt_schemas.append(prompt_info)
+
+            return {
+                "name": self.name,
+                "version": getattr(self, '_version', "1.0.0"),
+                "instructions": self.instructions,
+                "capabilities": {
+                    "tools": len(tool_schemas),
+                    "resources": len(resource_schemas),
+                    "resource_templates": len(template_schemas),
+                    "prompts": len(prompt_schemas),
+                },
+                "schemas": {
+                    "tools": tool_schemas,
+                    "resources": resource_schemas,
+                    "resource_templates": template_schemas,
+                    "prompts": prompt_schemas,
+                }
+            }
+        finally:
+            loop.close()
+
+    def start_metadata_server(
+        self,
+        port: int = 8080,
+        host: str = "localhost",
+        cors_enabled: bool = True,
+        custom_headers: Optional[Dict[str, str]] = None
+    ) -> None:
+            """Start HTTP server for metadata endpoints."""
+            if hasattr(self, '_metadata_server') and self._metadata_server:
+                raise RuntimeError("Metadata server is already running.")
+            
+            try:
+                fastmcp_instance = self
+
+                class ConfiguredMetadataHandler(BaseHTTPRequestHandler):
+                    def __init__(self, request, client_address, server):
+                        self.mcp_server = fastmcp_instance
+                        self.cors_enabled = cors_enabled
+                        self.custom_headers = custom_headers or {}
+                        super().__init__(request, client_address, server)
+                    
+                    def do_OPTIONS(self):
+                        """Handle CORS preflight requests."""
+                        self.send_response(200)
+                        if self.cors_enabled:
+                            self.send_header("Access-Control-Allow-Origin", "*")
+                            self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+                            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+                        self.end_headers()
+                    
+                    def do_GET(self):
+                        """Handle GET requests for metadata endpoints"""
+                        if self.path == '/.well-known/mcp-metadata':
+                            self.send_response(200)
+                            self.send_header('Content-type', 'application/json')
+
+                            # add CORS headers
+                            if self.cors_enabled:
+                                self.send_header("Access-Control-Allow-Origin", "*")
+                            
+                            # add custom headers
+                            for header, value in self.custom_headers.items():
+                                self.send_header(header, value)
+
+                            self.end_headers()
+
+                            try:
+                                metadata = self.mcp_server.get_metadata()
+                                response = json.dumps(metadata, indent=2)
+                                self.wfile.write(response.encode())
+                            except Exception as e:
+                                self.send_error(500, f"Error generating metadata: {str(e)}")
+                        else:
+                            self.send_error(404, "Not Found")
+                
+                # Create server
+                self._metadata_server = HTTPServer((host, port), ConfiguredMetadataHandler)
+                self._metadata_thread = threading.Thread(
+                    target=self._metadata_server.serve_forever,
+                    daemon=True
+                )
+                self._metadata_thread.start()
+                
+                logger.info(f"Metadata server started on http://{host}:{port}")
+                logger.info(f"Metadata available at: http://{host}:{port}/.well-known/mcp-metadata")
+                if cors_enabled:
+                    logger.info("CORS enabled for metadata endpoints")
+                
+            except Exception as e:
+                logger.error(f"Failed to start metadata server: {e}")
+                raise
+    
+    def stop_metadata_server(self) -> None:
+        """Stop the metadata server"""
+        if hasattr(self, '_metadata_server') and self._metadata_server:
+            self._metadata_server.shutdown()
+            self._metadata_server = None
+            if hasattr(self, '_metadata_thread'):
+                self._metadata_thread.join(timeout=1)
+            logger.info("Metadata server stopped")
 
     def custom_route(
         self,
