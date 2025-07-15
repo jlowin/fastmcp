@@ -101,8 +101,8 @@ def fastapi_app(users_db: dict[int, User]) -> FastAPI:
         user.name = name
         return user
 
-    @app.get("/headers", tags=["headers"])
-    async def get_headers(request: Request) -> dict[str, str]:
+    @app.get("/echo_headers", tags=["headers"])
+    async def echo_headers(request: Request) -> dict[str, str]:
         """Get all request headers as a JSON dictionary."""
         return dict(request.headers)
 

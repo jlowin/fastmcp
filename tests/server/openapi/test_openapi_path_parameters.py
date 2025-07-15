@@ -596,12 +596,6 @@ async def test_empty_deep_object_parameter_exclusion(mock_client):
     )
 
 
-# Update mock call counts to account for the new headers endpoint
-# The headers endpoint will be called once in addition to the existing endpoints
-
-
-# Update all the mock assertions to account for the additional endpoint call
-# Most tests will need to expect one more call due to the new /headers endpoint
 def test_parameter_location_enum_handling():
     """Test that ParameterLocation enum values are handled correctly (issue #950)."""
     from enum import Enum

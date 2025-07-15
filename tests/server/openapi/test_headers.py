@@ -1,26 +1,13 @@
 import httpx
 import pytest
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 
 from fastmcp import Client
 from fastmcp.server.openapi import FastMCPOpenAPI
 
 
-@pytest.fixture
-def header_echo_app() -> FastAPI:
-    """A simple FastAPI app that echoes headers."""
-    app = FastAPI(title="Header Echo App")
-
-    @app.get("/echo_headers")
-    async def echo_headers(request: Request):
-        """Returns all request headers as JSON."""
-        return request.headers
-
-    return app
-
-
 @pytest.mark.asyncio
-async def test_mcp_tool_with_client_headers(header_echo_app: FastAPI):
+async def test_mcp_tool_with_client_headers(fastapi_app: FastAPI):
     """
     Tests that headers from the FastMCP server's internal client are passed
     to the backend API when a tool is called.
@@ -32,22 +19,24 @@ async def test_mcp_tool_with_client_headers(header_echo_app: FastAPI):
     # Create an httpx client with the default header. This client will be used
     # by the FastMCP server to communicate with the backend API.
     async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=header_echo_app),
+        transport=httpx.ASGITransport(app=fastapi_app),
         base_url="http://test",
         headers=auth_header,
     ) as http_client:
         mcp_server = FastMCPOpenAPI(
-            openapi_spec=header_echo_app.openapi(),
+            openapi_spec=fastapi_app.openapi(),
             client=http_client,
         )
 
         async with Client(mcp_server) as mcp_client:
             tools = await mcp_client.list_tools()
-            assert len(tools) == 1
-            echo_tool_name = tools[0].name
-            assert "echo_headers" in echo_tool_name
+            echo_tool = next(
+                (t for t in tools if "echo_headers" in t.name),
+                None,
+            )
+            assert echo_tool is not None, "echo_headers tool not found"
 
-            result = await mcp_client.call_tool(echo_tool_name, {})
+            result = await mcp_client.call_tool(echo_tool.name, {})
 
             assert result.data is not None
             response_headers = result.data
