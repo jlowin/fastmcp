@@ -1,10 +1,9 @@
-import pytest
 import httpx
+import pytest
 from fastapi import FastAPI, Request
 
 from fastmcp import Client
 from fastmcp.server.openapi import FastMCPOpenAPI
-from fastmcp.tools.tool import ToolResult
 
 
 @pytest.fixture

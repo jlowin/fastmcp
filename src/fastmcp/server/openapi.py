@@ -418,7 +418,6 @@ class OpenAPITool(Tool):
 
         # Use headers from the HTTP client for the wrapped API
         headers = self._client.headers
-        logger.info(f"### Headers from XHTTP client in run: {headers}  ###")
 
         # Start with OpenAPI-defined header parameters
         openapi_headers = {}
@@ -598,7 +597,6 @@ class OpenAPIResource(Resource):
 
             # Use headers from the HTTP client for the wrapped API
             headers = self._client.headers
-            logger.info(f"### Headers from XHTTP client in read: {headers}  ###")
 
             # Add headers from the current MCP client HTTP request
             mcp_headers = get_http_headers()
