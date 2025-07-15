@@ -53,17 +53,17 @@ def run_proxy_server(host: str, port: int, shttp_url: str, **kwargs) -> None:
 
 
 class TestClientHeaders:
-    @pytest.fixture(scope="class")
+    @pytest.fixture(scope="function")
     def shttp_server(self) -> Generator[str, None, None]:
         with run_server_in_process(run_server, transport="http") as url:
             yield f"{url}/mcp/"
 
-    @pytest.fixture(scope="class")
+    @pytest.fixture(scope="function")
     def sse_server(self) -> Generator[str, None, None]:
         with run_server_in_process(run_server, transport="sse") as url:
             yield f"{url}/sse/"
 
-    @pytest.fixture(scope="class")
+    @pytest.fixture(scope="function")
     def proxy_server(self, shttp_server: str) -> Generator[str, None, None]:
         with run_server_in_process(
             run_proxy_server,
@@ -158,7 +158,7 @@ class TestClientHeaders:
 
     async def test_client_headers_proxy(self, proxy_server: str):
         """
-        Test that client headers are passed through the proxy to the remove server.
+        Test that client headers are passed through the proxy to the remote server.
         """
         async with Client(transport=StreamableHttpTransport(proxy_server)) as client:
             result = await client.read_resource("resource://get_headers_headers_get")

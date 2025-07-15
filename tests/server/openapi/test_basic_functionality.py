@@ -83,7 +83,7 @@ class TestTools:
         By default, tools exclude GET methods
         """
         server = FastMCPOpenAPI.from_fastapi(fastapi_app)
-        assert len(await server.get_tools()) == 8
+        assert len(await server.get_tools()) == 9
         assert len(await server.get_resources()) == 0
         assert len(await server.get_resource_templates()) == 0
 
@@ -242,7 +242,7 @@ class TestResources:
         """
         async with Client(fastmcp_openapi_server) as client:
             resources = await client.list_resources()
-        assert len(resources) == 4
+        assert len(resources) == 5
         assert resources[0].uri == AnyUrl("resource://get_users_users_get")
         assert resources[0].name == "get_users_users_get"
 

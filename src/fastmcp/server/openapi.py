@@ -416,8 +416,9 @@ class OpenAPITool(Tool):
                         # Non-array, non-deepObject parameters are passed as is
                         query_params[p.name] = param_value
 
-        # Prepare headers - fix typing by ensuring all values are strings
-        headers = {}
+        # Use headers from the HTTP client for the wrapped API
+        headers = self._client.headers
+        logger.info(f"### Headers from XHTTP client in run: {headers}  ###")
 
         # Start with OpenAPI-defined header parameters
         openapi_headers = {}
@@ -595,8 +596,11 @@ class OpenAPIResource(Resource):
                     if value is not None and value != "":
                         query_params[param.name] = value
 
-            # Prepare headers from MCP client request if available
-            headers = {}
+            # Use headers from the HTTP client for the wrapped API
+            headers = self._client.headers
+            logger.info(f"### Headers from XHTTP client in read: {headers}  ###")
+
+            # Add headers from the current MCP client HTTP request
             mcp_headers = get_http_headers()
             headers.update(mcp_headers)
 

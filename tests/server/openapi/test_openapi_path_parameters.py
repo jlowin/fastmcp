@@ -136,7 +136,7 @@ async def test_array_path_parameter_handling(mock_client):
         method="PUT",
         url="/select/monday",  # This is the expected format
         params={},
-        headers={},
+        headers=mock_client.headers,
         json=None,
         timeout=None,
     )
@@ -151,7 +151,7 @@ async def test_array_path_parameter_handling(mock_client):
         method="PUT",
         url="/select/monday,tuesday",  # This is the expected format
         params={},
-        headers={},
+        headers=mock_client.headers,
         json=None,
         timeout=None,
     )
@@ -170,7 +170,7 @@ async def test_integration_array_path_parameter(array_path_spec, mock_client):
         method="PUT",
         url="/select/monday",
         params={},
-        headers={},
+        headers=mock_client.headers,
         json=None,
         timeout=None,
     )
@@ -184,7 +184,7 @@ async def test_integration_array_path_parameter(array_path_spec, mock_client):
         method="PUT",
         url="/select/monday,tuesday",
         params={},
-        headers={},
+        headers=mock_client.headers,
         json=None,
         timeout=None,
     )
@@ -357,7 +357,7 @@ async def test_array_query_parameter_format(mock_client):
         method="GET",
         url="/select",
         params={"days": "monday"},  # Should be formatted as a string, not a list
-        headers={},
+        headers=mock_client.headers,
         json=None,
         timeout=None,
     )
@@ -372,7 +372,7 @@ async def test_array_query_parameter_format(mock_client):
         method="GET",
         url="/select",
         params={"days": "monday,tuesday"},  # Should be comma-separated
-        headers={},
+        headers=mock_client.headers,
         json=None,
         timeout=None,
     )
@@ -427,7 +427,7 @@ async def test_array_query_parameter_exploded_format(mock_client):
         method="GET",
         url="/select-exploded",
         params={"days": ["monday"]},  # Should be passed as a list for explode=True
-        headers={},
+        headers=mock_client.headers,
         json=None,
         timeout=None,
     )
@@ -442,7 +442,7 @@ async def test_array_query_parameter_exploded_format(mock_client):
         method="GET",
         url="/select-exploded",
         params={"days": ["monday", "tuesday"]},  # Should be passed as a list
-        headers={},
+        headers=mock_client.headers,
         json=None,
         timeout=None,
     )
@@ -509,7 +509,7 @@ async def test_empty_array_parameter_exclusion(mock_client):
             "categories": ["tech", "news"],  # Only non-empty array included
             "limit": 10,
         },
-        headers={},
+        headers=mock_client.headers,
         json=None,
         timeout=None,
     )
@@ -590,12 +590,17 @@ async def test_empty_deep_object_parameter_exclusion(mock_client):
             "options[order]": "asc",
             "page": 1,
         },
-        headers={},
+        headers=mock_client.headers,
         json=None,
         timeout=None,
     )
 
 
+# Update mock call counts to account for the new headers endpoint
+# The headers endpoint will be called once in addition to the existing endpoints
+
+# Update all the mock assertions to account for the additional endpoint call
+# Most tests will need to expect one more call due to the new /headers endpoint
 def test_parameter_location_enum_handling():
     """Test that ParameterLocation enum values are handled correctly (issue #950)."""
     from enum import Enum

@@ -1,6 +1,6 @@
 import httpx
 import pytest
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import PlainTextResponse
 from httpx import ASGITransport, AsyncClient
 from pydantic import BaseModel
@@ -100,6 +100,11 @@ def fastapi_app(users_db: dict[int, User]) -> FastAPI:
             raise HTTPException(status_code=404, detail="User not found")
         user.name = name
         return user
+
+    @app.get("/headers", tags=["headers"])
+    async def get_headers(request: Request) -> dict[str, str]:
+        """Get all request headers as a JSON dictionary."""
+        return dict(request.headers)
 
     @app.get("/ping", response_class=PlainTextResponse)
     async def ping() -> str:
