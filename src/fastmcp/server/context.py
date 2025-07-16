@@ -85,7 +85,6 @@ class Context:
         client_id = ctx.client_id
 
         # Manage state across the request
-        ctx.state["user_id"] = "12345"
         ctx.set_state_value("key", "value")
         value = ctx.get_state_value("key")
 
