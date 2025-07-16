@@ -95,6 +95,7 @@ class Context:
         self.fastmcp = fastmcp
         self._tokens: list[Token] = []
         self._notification_queue: set[str] = set()  # Dedupe notifications
+        self._state: dict[str, Any] = {}
 
     async def __aenter__(self) -> Context:
         """Enter the context manager and set this context as the current context."""
@@ -454,6 +455,14 @@ class Context:
             )
 
         return fastmcp.server.dependencies.get_http_request()
+
+    def set_state_value(self, key: str, value: Any) -> None:
+        """Set a value in the context state."""
+        self._state[key] = value
+    
+    def get_state_value(self, key: str) -> Any:
+        """Get a value from the context state."""
+        return self._state.get(key)
 
     def _queue_tool_list_changed(self) -> None:
         """Queue a tool list changed notification."""
