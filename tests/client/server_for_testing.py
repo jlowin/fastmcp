@@ -53,3 +53,21 @@ def run_proxy_server(host: str, port: int, shttp_url: str, **kwargs) -> None:
     """Runs an MCP proxy server."""
     app = FastMCP.as_proxy(StreamableHttpTransport(shttp_url))
     app.run(host=host, port=port, **kwargs)
+
+
+if __name__ == "__main__":
+    import sys
+
+    # This block allows the file to be run as a script to start a specific server,
+    # which is necessary for the multiprocessing logic in `run_server_in_process`
+    # to work correctly on Windows.
+    server_type = sys.argv[1]
+    host = sys.argv[2]
+    port = int(sys.argv[3])
+    transport = sys.argv[4]
+
+    if server_type == "run_server":
+        run_server(host=host, port=port, transport=transport)
+    elif server_type == "run_proxy_server":
+        shttp_url = sys.argv[5]
+        run_proxy_server(host=host, port=port, shttp_url=shttp_url, transport=transport)
