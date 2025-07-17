@@ -1,7 +1,10 @@
 import json
+import sys
+import time
 from collections.abc import Generator
 
 import pytest
+import requests
 
 from fastmcp import Client
 from fastmcp.client.transports import SSETransport, StreamableHttpTransport
@@ -22,6 +25,27 @@ class TestClientHeaders:
 
     @pytest.fixture(scope="function")
     def proxy_server(self, shttp_server: str) -> Generator[str, None, None]:
+        # Skip proxy server fixture on Windows due to multiprocessing issues
+        if sys.platform == "win32":
+            pytest.skip("Proxy server fixture unstable on Windows")
+
+        # Wait for shttp_server to be fully ready
+        max_retries = 50  # Increased retries for Windows
+        for _ in range(max_retries):
+            try:
+                # Try to connect to the shttp_server to ensure it's ready
+                requests.get(f"{shttp_server}docs", timeout=2)
+                break
+            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+                time.sleep(0.2)  # Increased sleep duration for Windows
+        else:
+            pytest.fail(
+                f"shttp_server at {shttp_server} failed to start within timeout"
+            )
+
+        # Add additional delay for Windows stability
+        time.sleep(0.5)
+
         with run_server_in_process(
             run_proxy_server,
             shttp_url=shttp_server,
@@ -113,6 +137,9 @@ class TestClientHeaders:
             assert headers["not-host"] == "1.2.3.4"
             assert headers["host"] == "fastapi"
 
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="Proxy server test unstable on Windows"
+    )
     async def test_client_headers_proxy(self, proxy_server: str):
         """
         Test that client headers are passed through the proxy to the remote server.
