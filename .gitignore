@@ -63,3 +63,7 @@ dmypy.json
 
 # Claude worktree management
 .claude-wt/worktrees
+
+# Installing Mintlify for documentation will generate Node package files
+package.json
+package-lock.json
