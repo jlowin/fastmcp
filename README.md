@@ -422,6 +422,18 @@ pre-commit run --all-files
 uv run pre-commit run --all-files
 ```
 
+### Documentation
+
+Documentation is done with [Mintlify](https://mintlify.com/docs).
+
+To make changes to documentation, install Mintlify and run the local dev server to preview changes.
+
+```bash
+npm install mint
+cd docs && npx mint dev
+```
+
+
 ### Pull Requests
 
 1. Fork the repository on GitHub.
