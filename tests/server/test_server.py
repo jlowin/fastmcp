@@ -4,11 +4,23 @@ import pytest
 from mcp import McpError
 from pydantic import Field
 
+import json
+import sqlite3
+import tempfile
+import time
+import urllib.request
+import urllib.parse
+from pathlib import Path
+from unittest.mock import patch
+
 from fastmcp import Client, FastMCP
 from fastmcp.exceptions import NotFoundError
 from fastmcp.prompts.prompt import FunctionPrompt, Prompt
 from fastmcp.resources import Resource, ResourceTemplate
 from fastmcp.server.server import (
+    OAuth2Storage, 
+    _sanitize_metadata_response, 
+    _sanitize_oauth_metadata,
     add_resource_prefix,
     has_resource_prefix,
     remove_resource_prefix,
@@ -1366,3 +1378,674 @@ class TestShouldIncludeComponent:
         mcp2 = FastMCP(tools=[tool2], exclude_tags={"bad_tag"})
         result = mcp2._should_enable_component(tool2)
         assert result is True
+
+
+class TestMetadataServer:
+    """Tests for the metadata server functionality."""
+
+    async def test_get_metadata_basic(self):
+        """Test that get_metadata returns basic metadata structure."""
+        mcp = FastMCP(name="TestServer", instructions="Test instructions")
+        
+        @mcp.tool
+        def test_tool(x: int) -> int:
+            return x + 1
+        
+        @mcp.resource("resource://test")
+        def test_resource() -> str:
+            return "test data"
+        
+        @mcp.prompt
+        def test_prompt() -> str:
+            return "test prompt"
+        
+        metadata = mcp.get_metadata()
+        
+        assert metadata["name"] == "TestServer"
+        assert metadata["instructions"] == "Test instructions"
+        assert metadata["version"] == "1.0.0"
+        
+        assert metadata["capabilities"]["tools"] == 1
+        assert metadata["capabilities"]["resources"] == 1
+        assert metadata["capabilities"]["prompts"] == 1
+        
+        assert len(metadata["schemas"]["tools"]) == 1
+        assert len(metadata["schemas"]["resources"]) == 1
+        assert len(metadata["schemas"]["prompts"]) == 1
+        
+        assert "server_capabilities" in metadata
+        assert metadata["server_capabilities"]["experimental"]["http_metadata"] is True
+
+    async def test_get_metadata_with_oauth2(self):
+        """Test that get_metadata includes OAuth2 configuration when present."""
+        mcp = FastMCP(name="TestServer")
+        
+        # Set OAuth2 config
+        mcp._oauth_config = {
+            "base_url": "https://example.com",
+            "dynamic_registration": True,
+            "scopes_supported": ["read", "write"]
+        }
+        
+        metadata = mcp.get_metadata()
+        
+        assert "oauth2" in metadata
+        oauth2 = metadata["oauth2"]
+        assert oauth2["authorization_endpoint"] == "https://example.com/oauth/authorize"
+        assert oauth2["token_endpoint"] == "https://example.com/oauth/token"
+        assert oauth2["jwks_uri"] == "https://example.com/oauth/jwks"
+        assert oauth2["scopes_supported"] == ["read", "write"]
+        assert oauth2["registration_endpoint"] == "https://example.com/oauth/register"
+        
+        # Check server capabilities
+        assert metadata["server_capabilities"]["experimental"]["oauth2_dynamic_registration"] is True
+
+    async def test_get_metadata_without_oauth2(self):
+        """Test that get_metadata works without OAuth2 configuration."""
+        mcp = FastMCP(name="TestServer")
+        
+        metadata = mcp.get_metadata()
+        
+        assert "oauth2" not in metadata
+        assert metadata["server_capabilities"]["experimental"]["oauth2_dynamic_registration"] is False
+
+    async def test_metadata_server_lifecycle(self):
+        """Test starting and stopping the metadata server."""
+        mcp = FastMCP(name="TestServer")
+        
+        # Should not be running initially
+        assert not hasattr(mcp, '_metadata_server') or mcp._metadata_server is None
+        
+        # Start server
+        mcp.start_metadata_server(port=8081)
+        
+        # Should be running
+        assert hasattr(mcp, '_metadata_server') and mcp._metadata_server is not None
+        assert hasattr(mcp, '_metadata_thread') and mcp._metadata_thread is not None
+        
+        # Stop server
+        mcp.stop_metadata_server()
+        
+        # Should be stopped
+        assert mcp._metadata_server is None
+
+    async def test_metadata_server_already_running_error(self):
+        """Test that starting metadata server twice raises an error."""
+        mcp = FastMCP(name="TestServer")
+        
+        mcp.start_metadata_server(port=8082)
+        
+        with pytest.raises(RuntimeError, match="Metadata server is already running"):
+            mcp.start_metadata_server(port=8083)
+        
+        mcp.stop_metadata_server()
+
+    async def test_metadata_server_with_oauth_config(self):
+        """Test metadata server with OAuth2 configuration."""
+        mcp = FastMCP(name="TestServer")
+        
+        oauth_config = {
+            "dynamic_registration": True,
+            "scopes_supported": ["read", "write", "admin"],
+            "jwks_keys": [
+                {
+                    "kty": "RSA",
+                    "kid": "test-key",
+                    "use": "sig",
+                    "alg": "RS256",
+                    "n": "test-modulus",
+                    "e": "AQAB"
+                }
+            ]
+        }
+        
+        mcp.start_metadata_server(port=8084, oauth_config=oauth_config)
+        
+        # Check that OAuth config was stored
+        assert mcp._oauth_config == oauth_config
+        assert mcp._oauth_config["base_url"] == "http://localhost:8084"
+        
+        # Check that OAuth storage was initialized
+        assert mcp._oauth_storage is not None
+        
+        mcp.stop_metadata_server()
+
+    async def test_metadata_sanitization(self):
+        """Test that metadata response is properly sanitized."""
+        mcp = FastMCP(name="TestServer")
+        
+        # Test with minimal valid metadata
+        metadata = mcp.get_metadata()
+        
+        # Should not raise any validation errors
+        assert "name" in metadata
+        assert "capabilities" in metadata
+        assert "schemas" in metadata
+        
+        # Test with OAuth2 config
+        mcp._oauth_config = {
+            "base_url": "https://example.com",
+            "scopes_supported": ["read"]
+        }
+        
+        metadata = mcp.get_metadata()
+        
+        # Should have valid OAuth2 configuration
+        assert metadata["oauth2"]["authorization_endpoint"] == "https://example.com/oauth/authorize"
+        assert metadata["oauth2"]["token_endpoint"] == "https://example.com/oauth/token"
+        assert metadata["oauth2"]["jwks_uri"] == "https://example.com/oauth/jwks"
+
+    async def test_metadata_response_schema_validation(self):
+        """Test that metadata response contains all required schemas."""
+        mcp = FastMCP(name="TestServer")
+        
+        @mcp.tool
+        def tool_with_schema(x: int, y: str = "default") -> bool:
+            """A tool with a schema."""
+            return x > 0
+        
+        @mcp.resource("resource://test", description="Test resource")
+        def resource_with_meta() -> str:
+            return "data"
+        
+        @mcp.resource("resource://{param}", description="Test template")
+        def template_with_meta(param: str) -> str:
+            return f"data-{param}"
+        
+        @mcp.prompt
+        def prompt_with_args(name: str, greeting: str = "Hello") -> str:
+            """A prompt with arguments."""
+            return f"{greeting}, {name}!"
+        
+        metadata = mcp.get_metadata()
+        
+        # Check tool schema
+        tool_schema = metadata["schemas"]["tools"][0]
+        assert tool_schema["name"] == "tool_with_schema"
+        assert tool_schema["description"] == "A tool with a schema."
+        assert tool_schema["tags"] == []
+        assert "input_schema" in tool_schema
+        
+        # Check resource schema
+        resource_schema = metadata["schemas"]["resources"][0]
+        assert resource_schema["uri"] == "resource://test"
+        assert resource_schema["name"] == "resource_with_meta"
+        assert resource_schema["description"] == "Test resource"
+        assert resource_schema["tags"] == []
+        
+        # Check template schema
+        template_schema = metadata["schemas"]["resource_templates"][0]
+        assert template_schema["uri_template"] == "resource://{param}"
+        assert template_schema["name"] == "template_with_meta"
+        assert template_schema["description"] == "Test template"
+        
+        # Check prompt schema
+        prompt_schema = metadata["schemas"]["prompts"][0]
+        assert prompt_schema["name"] == "prompt_with_args"
+        assert prompt_schema["description"] == "A prompt with arguments."
+        assert "arguments" in prompt_schema
+
+    async def test_metadata_with_tags(self):
+        """Test that metadata includes tag information."""
+        mcp = FastMCP(name="TestServer")
+        
+        @mcp.tool(tags={"math", "utility"})
+        def tagged_tool(x: int) -> int:
+            return x + 1
+        
+        @mcp.resource("resource://tagged", tags={"data", "test"})
+        def tagged_resource() -> str:
+            return "tagged data"
+        
+        @mcp.prompt(tags={"ai", "assistant"})
+        def tagged_prompt() -> str:
+            return "tagged prompt"
+        
+        metadata = mcp.get_metadata()
+        
+        # Check that tags are included in schemas
+        tool_schema = metadata["schemas"]["tools"][0]
+        assert set(tool_schema["tags"]) == {"math", "utility"}
+        
+        resource_schema = metadata["schemas"]["resources"][0]
+        assert set(resource_schema["tags"]) == {"data", "test"}
+        
+        prompt_schema = metadata["schemas"]["prompts"][0]
+        assert set(prompt_schema["tags"]) == {"ai", "assistant"}
+
+
+class TestOAuth2Storage:
+    """Tests for the OAuth2Storage class."""
+
+    def test_oauth2_storage_init(self):
+        """Test OAuth2Storage initialization."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "test.db"
+            storage = OAuth2Storage(str(db_path))
+            
+            # Check that database file was created
+            assert db_path.exists()
+            
+            # Check that tables were created
+            with sqlite3.connect(str(db_path)) as conn:
+                cursor = conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                )
+                tables = [row[0] for row in cursor.fetchall()]
+                assert "oauth_clients" in tables
+                assert "oauth_tokens" in tables
+                assert "oauth_auth_codes" in tables
+
+    def test_client_registration(self):
+        """Test client registration functionality."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "test.db"
+            storage = OAuth2Storage(str(db_path))
+            
+            client_data = {
+                "client_name": "Test Client",
+                "redirect_uris": ["https://example.com/callback"],
+                "grant_types": ["authorization_code", "client_credentials"],
+                "scopes": ["read", "write"]
+            }
+            
+            result = storage.register_client(client_data)
+            
+            # Check response structure
+            assert "client_id" in result
+            assert "client_secret" in result
+            assert result["client_name"] == "Test Client"
+            assert result["redirect_uris"] == ["https://example.com/callback"]
+            assert result["grant_types"] == ["authorization_code", "client_credentials"]
+            assert result["scopes"] == ["read", "write"]
+            
+            # Check that client was stored in database
+            with sqlite3.connect(str(db_path)) as conn:
+                cursor = conn.execute("SELECT COUNT(*) FROM oauth_clients")
+                count = cursor.fetchone()[0]
+                assert count == 1
+
+    def test_client_credential_validation(self):
+        """Test client credential validation."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "test.db"
+            storage = OAuth2Storage(str(db_path))
+            
+            # Register a client
+            client_data = {
+                "client_name": "Test Client",
+                "grant_types": ["client_credentials"]
+            }
+            result = storage.register_client(client_data)
+            client_id = result["client_id"]
+            client_secret = result["client_secret"]
+            
+            # Test valid credentials
+            client_info = storage.validate_client_credentials(client_id, client_secret)
+            assert client_info is not None
+            assert client_info["client_id"] == client_id
+            assert client_info["client_name"] == "Test Client"
+            
+            # Test invalid credentials
+            invalid_info = storage.validate_client_credentials(client_id, "wrong_secret")
+            assert invalid_info is None
+            
+            # Test non-existent client
+            invalid_info = storage.validate_client_credentials("fake_client", client_secret)
+            assert invalid_info is None
+
+    def test_access_token_storage_and_validation(self):
+        """Test access token storage and validation."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "test.db"
+            storage = OAuth2Storage(str(db_path))
+            
+            # Register a client first
+            client_data = {"client_name": "Test Client"}
+            result = storage.register_client(client_data)
+            client_id = result["client_id"]
+            
+            # Store an access token
+            access_token = "test_access_token"
+            scopes = ["read", "write"]
+            token_id = storage.store_access_token(client_id, access_token, 3600, scopes)
+            
+            assert token_id is not None
+            
+            # Validate the token
+            token_info = storage.validate_access_token(access_token)
+            assert token_info is not None
+            assert token_info["client_id"] == client_id
+            assert token_info["scopes"] == scopes
+            
+            # Test invalid token
+            invalid_info = storage.validate_access_token("invalid_token")
+            assert invalid_info is None
+
+    def test_authorization_code_storage_and_validation(self):
+        """Test authorization code storage and validation."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "test.db"
+            storage = OAuth2Storage(str(db_path))
+            
+            # Register a client first
+            client_data = {"client_name": "Test Client"}
+            result = storage.register_client(client_data)
+            client_id = result["client_id"]
+            
+            # Store an authorization code
+            redirect_uri = "https://example.com/callback"
+            scopes = ["read"]
+            auth_code = storage.store_authorization_code(client_id, redirect_uri, scopes)
+            
+            assert auth_code is not None
+            
+            # Validate the code
+            code_info = storage.validate_authorization_code(auth_code, client_id, redirect_uri)
+            assert code_info is not None
+            assert code_info["client_id"] == client_id
+            assert code_info["redirect_uri"] == redirect_uri
+            assert code_info["scopes"] == scopes
+            
+            # Test that code can't be used twice
+            invalid_info = storage.validate_authorization_code(auth_code, client_id, redirect_uri)
+            assert invalid_info is None
+
+    def test_cleanup_expired_tokens(self):
+        """Test cleanup of expired tokens and codes."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "test.db"
+            storage = OAuth2Storage(str(db_path))
+            
+            # Register a client
+            client_data = {"client_name": "Test Client"}
+            result = storage.register_client(client_data)
+            client_id = result["client_id"]
+            
+            # Store an expired token (expires in -1 seconds)
+            storage.store_access_token(client_id, "expired_token", -1, ["read"])
+            
+            # Store an expired auth code
+            storage.store_authorization_code(client_id, "https://example.com", ["read"], -1)
+            
+            # Run cleanup
+            storage.cleanup_expired_tokens()
+            
+            # Check that expired items were removed
+            token_info = storage.validate_access_token("expired_token")
+            assert token_info is None
+
+
+class TestOAuth2Endpoints:
+    """Tests for OAuth2 endpoint functionality."""
+
+    async def test_jwks_fetcher_caching(self):
+        """Test JWKS fetcher caching mechanism."""
+        from fastmcp.server.server import _fetch_jwks, _jwks
+        
+        # Mock httpx.get to return test data
+        test_jwks = {
+            "keys": [
+                {
+                    "kty": "RSA",
+                    "kid": "test-key",
+                    "use": "sig",
+                    "alg": "RS256",
+                    "n": "test-modulus",
+                    "e": "AQAB"
+                }
+            ]
+        }
+        
+        with patch("httpx.get") as mock_get:
+            mock_response = mock_get.return_value
+            mock_response.raise_for_status.return_value = None
+            mock_response.json.return_value = test_jwks
+            
+            # First call should fetch from network
+            keys1 = _jwks("https://example.com")
+            assert len(keys1) == 1
+            assert keys1[0]["kid"] == "test-key"
+            assert mock_get.call_count == 1
+            
+            # Second call should use cache
+            keys2 = _jwks("https://example.com")
+            assert keys2 == keys1
+            assert mock_get.call_count == 1  # Should not increase
+            
+            # Clear cache and verify it refetches
+            _fetch_jwks.cache_clear()
+            keys3 = _jwks("https://example.com")
+            assert keys3 == keys1
+            assert mock_get.call_count == 2  # Should increase
+
+    async def test_jwks_fetcher_descope_url(self):
+        """Test JWKS fetcher with Descope-specific URL handling."""
+        from fastmcp.server.server import _fetch_jwks
+        
+        with patch("httpx.get") as mock_get:
+            mock_response = mock_get.return_value
+            mock_response.raise_for_status.return_value = None
+            mock_response.json.return_value = {"keys": []}
+            
+            # Test Descope URL transformation
+            _fetch_jwks("https://api.descope.com/v1/apps/test-project")
+            
+            # Check that the URL was transformed correctly
+            expected_url = "https://api.descope.com/test-project/.well-known/jwks.json"
+            mock_get.assert_called_with(expected_url, timeout=5)
+
+    async def test_metadata_response_sanitization(self):
+        """Test metadata response sanitization functions."""
+        from fastmcp.server.server import _sanitize_metadata_response, _sanitize_oauth_metadata
+        
+        # Test valid metadata
+        valid_metadata = {
+            "name": "TestServer",
+            "capabilities": {"tools": 1},
+            "schemas": {"tools": []}
+        }
+        
+        result = _sanitize_metadata_response(valid_metadata)
+        assert result == valid_metadata
+        
+        # Test invalid metadata - missing required field
+        invalid_metadata = {
+            "name": "TestServer",
+            "capabilities": {"tools": 1}
+            # Missing "schemas"
+        }
+        
+        with pytest.raises(ValueError, match="Missing required field: schemas"):
+            _sanitize_metadata_response(invalid_metadata)
+        
+        # Test valid OAuth2 metadata
+        valid_oauth = {
+            "issuer": "https://example.com",
+            "authorization_endpoint": "https://example.com/oauth/authorize",
+            "token_endpoint": "https://example.com/oauth/token"
+        }
+        
+        result = _sanitize_oauth_metadata(valid_oauth)
+        assert result == valid_oauth
+        
+        # Test invalid OAuth2 metadata
+        invalid_oauth = {
+            "issuer": "https://example.com",
+            "authorization_endpoint": "invalid-url",
+            "token_endpoint": "https://example.com/oauth/token" 
+        }
+        
+        with pytest.raises(ValueError, match="Invalid URL"):
+            _sanitize_oauth_metadata(invalid_oauth)
+
+    async def test_client_credentials_parsing(self):
+        """Test client credentials parsing from different sources."""
+        from fastmcp.server.server import _parse_client_credentials
+        import base64
+        
+        # Test Basic authentication
+        credentials = base64.b64encode(b"client_id:client_secret").decode()
+        headers = {"Authorization": f"Basic {credentials}"}
+        form_data = {}
+        
+        client_id, client_secret = _parse_client_credentials(headers, form_data)
+        assert client_id == "client_id"
+        assert client_secret == "client_secret"
+        
+        # Test form data
+        headers = {}
+        form_data = {"client_id": "form_client", "client_secret": "form_secret"}
+        
+        client_id, client_secret = _parse_client_credentials(headers, form_data)
+        assert client_id == "form_client"
+        assert client_secret == "form_secret"
+        
+        # Test Basic auth takes precedence
+        headers = {"Authorization": f"Basic {credentials}"}
+        form_data = {"client_id": "form_client", "client_secret": "form_secret"}
+        
+        client_id, client_secret = _parse_client_credentials(headers, form_data)
+        assert client_id == "client_id"  
+        assert client_secret == "client_secret" 
+        
+        # Test invalid Basic auth
+        headers = {"Authorization": "Basic invalid_base64"}
+        form_data = {"client_id": "form_client", "client_secret": "form_secret"}
+        
+        client_id, client_secret = _parse_client_credentials(headers, form_data)
+        assert client_id == "form_client"  
+        assert client_secret == "form_secret"
+
+
+class TestOAuth2Integration:
+    """Integration tests for OAuth2 functionality."""
+
+    async def test_full_oauth2_flow(self):
+        """Test complete OAuth2 flow with FastMCP server."""
+        mcp = FastMCP(name="OAuth2TestServer")
+        
+        @mcp.tool
+        def secure_operation(data: str) -> str:
+            return f"Processed: {data}"
+        
+        # Configure OAuth2
+        oauth_config = {
+            "dynamic_registration": True,
+            "scopes_supported": ["read", "write"],
+            "jwks_keys": [
+                {
+                    "kty": "RSA",
+                    "kid": "test-key",
+                    "use": "sig",
+                    "alg": "RS256",
+                    "n": "test-modulus",
+                    "e": "AQAB"
+                }
+            ]
+        }
+        
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "oauth2.db"
+            
+            mcp.start_metadata_server(
+                port=8085,
+                oauth_config=oauth_config,
+                oauth_db_path=str(db_path)
+            )
+            
+            try:
+                assert mcp._oauth_storage is not None
+                
+                # Test client registration
+                client_data = {
+                    "client_name": "Integration Test Client",
+                    "grant_types": ["client_credentials"]
+                }
+                
+                registered_client = mcp._oauth_storage.register_client(client_data)
+                assert registered_client["client_id"] is not None
+                assert registered_client["client_secret"] is not None
+                
+                # Test credential validation
+                client_info = mcp._oauth_storage.validate_client_credentials(
+                    registered_client["client_id"],
+                    registered_client["client_secret"]
+                )
+                assert client_info is not None
+                assert client_info["client_name"] == "Integration Test Client"
+                
+                # Test token generation
+                access_token = "test_token"
+                token_id = mcp._oauth_storage.store_access_token(
+                    registered_client["client_id"],
+                    access_token,
+                    3600,
+                    ["read", "write"]
+                )
+                assert token_id is not None
+                
+                # Test token validation
+                token_info = mcp._oauth_storage.validate_access_token(access_token)
+                assert token_info is not None
+                assert token_info["client_id"] == registered_client["client_id"]
+                
+            finally:
+                mcp.stop_metadata_server()
+
+    async def test_oauth2_metadata_includes_all_endpoints(self):
+        """Test that OAuth2 metadata includes all required endpoints."""
+        mcp = FastMCP(name="OAuth2TestServer")
+        
+        oauth_config = {
+            "dynamic_registration": True,
+            "scopes_supported": ["read", "write", "admin"]
+        }
+        
+        # Set OAuth2 config
+        mcp._oauth_config = oauth_config
+        mcp._oauth_config["base_url"] = "https://test.example.com"
+        
+        metadata = mcp.get_metadata()
+        
+        assert "oauth2" in metadata
+        oauth2 = metadata["oauth2"]
+        
+        assert oauth2["authorization_endpoint"] == "https://test.example.com/oauth/authorize"
+        assert oauth2["token_endpoint"] == "https://test.example.com/oauth/token"
+        assert oauth2["jwks_uri"] == "https://test.example.com/oauth/jwks"
+        
+        assert oauth2["registration_endpoint"] == "https://test.example.com/oauth/register"
+        
+        assert oauth2["scopes_supported"] == ["read", "write", "admin"]
+        assert "code" in oauth2["response_types_supported"]
+        assert "authorization_code" in oauth2["grant_types_supported"]
+        assert "client_credentials" in oauth2["grant_types_supported"]
+        assert "S256" in oauth2["code_challenge_methods_supported"]
+        assert "client_secret_basic" in oauth2["token_endpoint_auth_methods_supported"]
+        assert "client_secret_post" in oauth2["token_endpoint_auth_methods_supported"]
+
+    async def test_oauth2_without_dynamic_registration(self):
+        """Test OAuth2 configuration without dynamic registration."""
+        mcp = FastMCP(name="OAuth2TestServer")
+        
+        oauth_config = {
+            "dynamic_registration": False,
+            "scopes_supported": ["read"]
+        }
+        
+        mcp._oauth_config = oauth_config
+        mcp._oauth_config["base_url"] = "https://test.example.com"
+        
+        metadata = mcp.get_metadata()
+        
+        assert "oauth2" in metadata
+        oauth2 = metadata["oauth2"]
+        
+        assert "registration_endpoint" not in oauth2
+        
+        assert "authorization_endpoint" in oauth2
+        assert "token_endpoint" in oauth2
+        assert "jwks_uri" in oauth2
+        
+        assert metadata["server_capabilities"]["experimental"]["oauth2_dynamic_registration"] is False

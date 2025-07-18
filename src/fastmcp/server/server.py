@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime
+from datetime import timedelta
 import inspect
 import re
 import warnings
@@ -13,7 +14,7 @@ from contextlib import (
     asynccontextmanager,
 )
 from dataclasses import dataclass
-from functools import partial
+from functools import partial, lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Generic, Literal, cast, overload
 import json
@@ -21,6 +22,16 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 from typing import Any, Dict, List, Optional
 import asyncio
+import abc
+import httpx
+import logging
+import time
+import hashlib
+import sqlite3
+import urllib.parse
+import secrets
+from typing import Tuple
+import base64
 
 import anyio
 import httpx
@@ -86,6 +97,425 @@ Transport = Literal["stdio", "http", "sse", "streamable-http"]
 # Compiled URI parsing regex to split a URI into protocol and path components
 URI_PATTERN = re.compile(r"^([^:]+://)(.*?)$")
 
+
+class OAuth2Storage:
+    """Persistent storage for OAuth2 clients and tokens using SQLite."""
+    
+    def __init__(self, db_path: Optional[str] = None):
+        """Initialize OAuth2 storage with SQLite database."""
+        self.db_path = db_path or "oauth2.db"
+        self._lock = threading.Lock()
+        self._init_database()
+    
+    def _init_database(self):
+        """Initialize the database schema."""
+        with sqlite3.connect(self.db_path) as conn:
+            # Enable optimizations
+            conn.execute('PRAGMA journal_mode=WAL')
+            conn.execute('PRAGMA synchronous=NORMAL')
+            conn.execute('PRAGMA cache_size=1000')
+            conn.execute('PRAGMA temp_store=MEMORY')
+            
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS oauth_clients (
+                    client_id TEXT PRIMARY KEY,
+                    client_secret_hash TEXT NOT NULL,
+                    client_name TEXT NOT NULL,
+                    redirect_uris TEXT NOT NULL,  -- JSON array
+                    grant_types TEXT NOT NULL,   -- JSON array
+                    scopes TEXT,                 -- JSON array
+                    token_endpoint_auth_method TEXT DEFAULT 'client_secret_basic',
+                    client_secret_expires_at INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS oauth_tokens (
+                    token_id TEXT PRIMARY KEY,
+                    client_id TEXT NOT NULL,
+                    access_token_hash TEXT NOT NULL,
+                    token_type TEXT DEFAULT 'Bearer',
+                    expires_at TIMESTAMP NOT NULL,
+                    scopes TEXT,  -- JSON array
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (client_id) REFERENCES oauth_clients (client_id)
+                )
+            ''')
+            
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS oauth_auth_codes (
+                    code_hash TEXT PRIMARY KEY,
+                    client_id TEXT NOT NULL,
+                    redirect_uri TEXT NOT NULL,
+                    scopes TEXT,  -- JSON array
+                    expires_at TIMESTAMP NOT NULL,
+                    used BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (client_id) REFERENCES oauth_clients (client_id)
+                )
+            ''')
+            
+            # Create indexes for performance
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_tokens_client_id ON oauth_tokens(client_id)')
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_tokens_expires_at ON oauth_tokens(expires_at)')
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_tokens_hash ON oauth_tokens(access_token_hash)')
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_auth_codes_expires_at ON oauth_auth_codes(expires_at)')
+    
+    def _hash_secret(self, secret: str) -> str:
+        """Hash a secret using SHA-256."""
+        return hashlib.sha256(secret.encode()).hexdigest()
+    
+    def _verify_secret(self, secret: str, hash_value: str) -> bool:
+        """Verify a secret against its hash."""
+        return hashlib.sha256(secret.encode()).hexdigest() == hash_value
+    
+    def register_client(self, client_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Register a new OAuth2 client."""
+        with self._lock:
+            client_id = f"mcp-client-{secrets.token_urlsafe(16)}"
+            client_secret = secrets.token_urlsafe(32)
+            client_secret_hash = self._hash_secret(client_secret)
+            
+            redirect_uris = json.dumps(client_data.get('redirect_uris', []))
+            grant_types = json.dumps(client_data.get('grant_types', ['authorization_code']))
+            scopes = json.dumps(client_data.get('scopes', ['read', 'write']))
+            
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute('''
+                    INSERT INTO oauth_clients 
+                    (client_id, client_secret_hash, client_name, redirect_uris, 
+                     grant_types, scopes, token_endpoint_auth_method, client_secret_expires_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    client_id,
+                    client_secret_hash,
+                    client_data.get('client_name', 'MCP Client'),
+                    redirect_uris,
+                    grant_types,
+                    scopes,
+                    client_data.get('token_endpoint_auth_method', 'client_secret_basic'),
+                    client_data.get('client_secret_expires_at', 0)
+                ))
+            
+            logger.info(f"Registered new OAuth2 client: {client_id}")
+            
+            return {
+                'client_id': client_id,
+                'client_secret': client_secret,
+                'client_name': client_data.get('client_name', 'MCP Client'),
+                'redirect_uris': client_data.get('redirect_uris', []),
+                'grant_types': client_data.get('grant_types', ['authorization_code']),
+                'scopes': client_data.get('scopes', ['read', 'write']),
+                'token_endpoint_auth_method': client_data.get('token_endpoint_auth_method', 'client_secret_basic'),
+                'client_secret_expires_at': client_data.get('client_secret_expires_at', 0)
+            }
+    
+    def validate_client_credentials(self, client_id: str, client_secret: str) -> Optional[Dict[str, Any]]:
+        """Validate client credentials and return client info if valid."""
+        with self._lock:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.execute('''
+                    SELECT client_id, client_secret_hash, client_name, redirect_uris, 
+                           grant_types, scopes, token_endpoint_auth_method, client_secret_expires_at
+                    FROM oauth_clients 
+                    WHERE client_id = ?
+                ''', (client_id,))
+                
+                client = cursor.fetchone()
+                
+                if not client:
+                    logger.warning(f"Client not found: {client_id}")
+                    return None
+                
+                # Check if client secret has expired
+                if client['client_secret_expires_at'] > 0 and time.time() > client['client_secret_expires_at']:
+                    logger.warning(f"Client secret expired for: {client_id}")
+                    return None
+                
+                # Verify client secret
+                if not self._verify_secret(client_secret, client['client_secret_hash']):
+                    logger.warning(f"Invalid client secret for: {client_id}")
+                    return None
+                
+                return {
+                    'client_id': client['client_id'],
+                    'client_name': client['client_name'],
+                    'redirect_uris': json.loads(client['redirect_uris']),
+                    'grant_types': json.loads(client['grant_types']),
+                    'scopes': json.loads(client['scopes']),
+                    'token_endpoint_auth_method': client['token_endpoint_auth_method']
+                }
+    
+    def get_client(self, client_id: str) -> Optional[Dict[str, Any]]:
+        """Get client information by client_id."""
+        with self._lock:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.execute('''
+                    SELECT client_id, client_name, redirect_uris, grant_types, scopes, 
+                           token_endpoint_auth_method, client_secret_expires_at
+                    FROM oauth_clients 
+                    WHERE client_id = ?
+                ''', (client_id,))
+                
+                client = cursor.fetchone()
+                
+                if not client:
+                    return None
+                
+                return {
+                    'client_id': client['client_id'],
+                    'client_name': client['client_name'],
+                    'redirect_uris': json.loads(client['redirect_uris']),
+                    'grant_types': json.loads(client['grant_types']),
+                    'scopes': json.loads(client['scopes']),
+                    'token_endpoint_auth_method': client['token_endpoint_auth_method'],
+                    'client_secret_expires_at': client['client_secret_expires_at']
+                }
+    
+    def store_access_token(self, client_id: str, access_token: str, expires_in: int, scopes: List[str]) -> str:
+        """Store an access token and return token ID."""
+        with self._lock:
+            token_id = secrets.token_urlsafe(16)
+            access_token_hash = self._hash_secret(access_token)
+            expires_at = datetime.datetime.utcnow() + timedelta(seconds=expires_in)
+            
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute('''
+                    INSERT INTO oauth_tokens 
+                    (token_id, client_id, access_token_hash, expires_at, scopes)
+                    VALUES (?, ?, ?, ?, ?)
+                ''', (token_id, client_id, access_token_hash, expires_at.isoformat(), json.dumps(scopes)))
+            
+            logger.info(f"Stored access token for client: {client_id}")
+            return token_id
+    
+    def validate_access_token(self, access_token: str) -> Optional[Dict[str, Any]]:
+        """Validate an access token and return token info if valid."""
+        with self._lock:
+            access_token_hash = self._hash_secret(access_token)
+            
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.execute('''
+                    SELECT token_id, client_id, scopes, expires_at
+                    FROM oauth_tokens 
+                    WHERE access_token_hash = ? AND expires_at > ?
+                ''', (access_token_hash, datetime.datetime.utcnow().isoformat()))
+                
+                token = cursor.fetchone()
+                
+                if not token:
+                    return None
+                
+                return {
+                    'token_id': token['token_id'],
+                    'client_id': token['client_id'],
+                    'scopes': json.loads(token['scopes']),
+                    'expires_at': token['expires_at']
+                }
+    
+    def store_authorization_code(self, client_id: str, redirect_uri: str, scopes: List[str], expires_in: int = 600) -> str:
+        """Store an authorization code and return it."""
+        with self._lock:
+            auth_code = secrets.token_urlsafe(32)
+            code_hash = self._hash_secret(auth_code)
+            expires_at = datetime.datetime.utcnow() + timedelta(seconds=expires_in)
+            
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute('''
+                    INSERT INTO oauth_auth_codes 
+                    (code_hash, client_id, redirect_uri, scopes, expires_at)
+                    VALUES (?, ?, ?, ?, ?)
+                ''', (code_hash, client_id, redirect_uri, json.dumps(scopes), expires_at.isoformat()))
+            
+            logger.info(f"Stored authorization code for client: {client_id}")
+            return auth_code
+    
+    def validate_authorization_code(self, auth_code: str, client_id: str, redirect_uri: str) -> Optional[Dict[str, Any]]:
+        """Validate an authorization code and mark it as used."""
+        with self._lock:
+            code_hash = self._hash_secret(auth_code)
+            
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.execute('''
+                    SELECT code_hash, client_id, redirect_uri, scopes, expires_at, used
+                    FROM oauth_auth_codes 
+                    WHERE code_hash = ? AND client_id = ? AND redirect_uri = ?
+                ''', (code_hash, client_id, redirect_uri))
+                
+                code_record = cursor.fetchone()
+                
+                if not code_record:
+                    logger.warning(f"Authorization code not found: {client_id}")
+                    return None
+                
+                if code_record['used']:
+                    logger.warning(f"Authorization code already used: {client_id}")
+                    return None
+                
+                if datetime.datetime.fromisoformat(code_record['expires_at']) < datetime.datetime.utcnow():
+                    logger.warning(f"Authorization code expired: {client_id}")
+                    return None
+                
+                conn.execute('UPDATE oauth_auth_codes SET used = TRUE WHERE code_hash = ?', (code_hash,))
+                
+                return {
+                    'client_id': code_record['client_id'],
+                    'redirect_uri': code_record['redirect_uri'],
+                    'scopes': json.loads(code_record['scopes'])
+                }
+    
+    def cleanup_expired_tokens(self):
+        """Clean up expired tokens and authorization codes."""
+        with self._lock:
+            with sqlite3.connect(self.db_path) as conn:
+                now = datetime.datetime.utcnow().isoformat()
+                
+                cursor = conn.execute('DELETE FROM oauth_tokens WHERE expires_at < ?', (now,))
+                tokens_deleted = cursor.rowcount
+                
+                cursor = conn.execute('DELETE FROM oauth_auth_codes WHERE expires_at < ?', (now,))
+                codes_deleted = cursor.rowcount
+                
+                if tokens_deleted > 0 or codes_deleted > 0:
+                    logger.info(f"Cleaned up {tokens_deleted} expired tokens and {codes_deleted} expired codes")
+
+
+@lru_cache(maxsize=1)
+def _fetch_jwks(issuer: str) -> Dict[str, Any]:
+    """Download the issuer's JWKS once and keep it in memory."""
+    try:
+        if "api.descope.com/v1/apps/" in issuer: # specific to Descope
+            project_id = issuer.split("/")[-1] 
+            url = f"https://api.descope.com/{project_id}/.well-known/jwks.json"
+        else:
+            base_url = issuer.rstrip("/")
+            url = f"{base_url}/.well-known/jwks.json"
+
+        logger.debug(f"Fetching JWKS from: {url}")
+        
+        resp = httpx.get(url, timeout=5)
+        resp.raise_for_status()
+        
+        jwks_data = resp.json()
+        
+        # validate JWKS structure
+        if not isinstance(jwks_data, dict) or "keys" not in jwks_data:
+            raise ValueError(f"Invalid JWKS format from {url}")
+        
+        if not isinstance(jwks_data["keys"], list):
+            raise ValueError(f"JWKS keys must be a list from {url}")
+            
+        # validation of each key
+        for key in jwks_data["keys"]:
+            if not isinstance(key, dict) or "kty" not in key:
+                raise ValueError(f"Invalid JWK format from {url}")
+        
+        logger.info(f"Successfully fetched {len(jwks_data['keys'])} keys from {url}")
+        
+        return {
+            "ts": time.time(), 
+            "keys": jwks_data["keys"],
+            "url": url  
+        }
+    except httpx.TimeoutException:
+        logger.error(f"Timeout fetching JWKS from {issuer}")
+        raise
+    except httpx.HTTPStatusError as e:
+        logger.error(f"HTTP error fetching JWKS from {issuer}: {e.response.status_code}")
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching JWKS from {issuer}: {e}")
+        raise
+
+def _jwks(issuer: str, ttl_seconds: int = 600) -> List[Dict[str, Any]]:
+    """Return the cached JWKS; refresh based on TTL."""
+    try:
+        cached = _fetch_jwks(issuer)
+        
+        # check if cache is stale
+        if time.time() - cached["ts"] > ttl_seconds:
+            logger.debug(f"JWKS cache expired for {issuer}, refreshing...")
+            _fetch_jwks.cache_clear()
+            cached = _fetch_jwks(issuer)
+            
+        return cached["keys"]
+        
+    except Exception as e:
+        logger.error(f"Failed to get JWKS for {issuer}: {e}")
+        return []
+
+def get_jwks_for_issuer(issuer: str) -> Optional[Dict[str, Any]]:
+    """Get JWKS in the standard format for an issuer."""
+    try:
+        keys = _jwks(issuer)
+        return {"keys": keys} if keys else None
+    except Exception as e:
+        logger.error(f"Error getting JWKS for {issuer}: {e}")
+        return None
+
+def _parse_client_credentials(headers: Dict[str, str], form_data: Dict[str, str]) -> Tuple[Optional[str], Optional[str]]:
+    """Parse client credentials from headers or form data."""
+    auth_header = headers.get("Authorization", "")
+    if auth_header.startswith("Basic "):
+        try:
+            credentials = base64.b64decode(auth_header[6:]).decode()
+            client_id, client_secret = credentials.split(":", 1)
+            return client_id, client_secret
+        except Exception:
+            pass
+    
+    client_id = form_data.get("client_id")
+    client_secret = form_data.get("client_secret")
+    return client_id, client_secret
+
+def _sanitize_metadata_response(metadata: Dict[str, Any]) -> Dict[str, Any]:
+    """Sanitize metadata response to ensure valid well-known format."""
+    required_fields = ["name", "capabilities", "schemas"]
+    for field in required_fields:
+        if field not in metadata:
+            raise ValueError(f"Missing required field: {field}")
+    
+    if not isinstance(metadata["capabilities"], dict):
+        raise ValueError("Capabilities must be a dictionary")
+    
+    if not isinstance(metadata["schemas"], dict):
+        raise ValueError("Schemas must be a dictionary")
+    
+    if "oauth2" in metadata:
+        oauth2 = metadata["oauth2"]
+        if not isinstance(oauth2, dict):
+            raise ValueError("OAuth2 configuration must be a dictionary")
+            
+        required_oauth_fields = ["authorization_endpoint", "token_endpoint", "jwks_uri"]
+        for field in required_oauth_fields:
+            if field not in oauth2:
+                raise ValueError(f"Missing required OAuth2 field: {field}")
+            
+        for endpoint in ["authorization_endpoint", "token_endpoint", "jwks_uri"]:
+            if endpoint in oauth2 and not oauth2[endpoint].startswith(("http://", "https://")):
+                raise ValueError(f"Invalid URL for {endpoint}: {oauth2[endpoint]}")
+    
+    return metadata
+
+def _sanitize_oauth_metadata(oauth_metadata: Dict[str, Any]) -> Dict[str, Any]:
+    """Sanitize OAuth2 authorization server metadata."""
+    # RFC 8414
+    required_fields = ["issuer", "authorization_endpoint", "token_endpoint"]
+    for field in required_fields:
+        if field not in oauth_metadata:
+            raise ValueError(f"Missing required OAuth2 metadata field: {field}")
+    
+    for endpoint in ["issuer", "authorization_endpoint", "token_endpoint", "jwks_uri"]:
+        if endpoint in oauth_metadata and not oauth_metadata[endpoint].startswith(("http://", "https://")):
+            raise ValueError(f"Invalid URL for {endpoint}: {oauth_metadata[endpoint]}")
+
+    return oauth_metadata
 
 @asynccontextmanager
 async def default_lifespan(server: FastMCP[LifespanResultT]) -> AsyncIterator[Any]:
@@ -166,7 +596,7 @@ class FastMCP(Generic[LifespanResultT]):
         )
 
         self._cache = TimedCache(
-            expiration=datetime.timedelta(seconds=cache_expiration_seconds or 0)
+            expiration=timedelta(seconds=cache_expiration_seconds or 0)
         )
         self._additional_http_routes: list[BaseRoute] = []
         self._tool_manager = ToolManager(
@@ -229,6 +659,8 @@ class FastMCP(Generic[LifespanResultT]):
 
         self._metadata_server = None
         self._metadata_thread = None
+        self._oauth_config = None
+        self._oauth_storage = None
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}({self.name!r})"
@@ -411,16 +843,7 @@ class FastMCP(Generic[LifespanResultT]):
 
     def get_metadata(self) -> Dict[str, Any]:
         """Get the MCP metadata for this server."""
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # already running event loop, no deadlocks
-                raise RuntimeError("Cannot get metadata from within async context. Use get_metadata_async() instead.")
-        except RuntimeError:
-            # create new event loop
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-
+        
         def safe_serialize(obj):
             """Safely serialize objects to JSON-compatible format"""
             if hasattr(obj, 'model_dump'):
@@ -436,88 +859,138 @@ class FastMCP(Generic[LifespanResultT]):
             else:
                 return obj
 
-        # Next, get all the schemas
+        # Use synchronous access to avoid event loop issues
+        tool_schemas = []
+        resource_schemas = []
+        template_schemas = []
+        prompt_schemas = []
+        
         try:
-            # Get tools
-            tools = loop.run_until_complete(self.get_tools())
-            tool_schemas = []
-            for name, tool in tools.items():
-                tool_info = {
-                    "name": name,
-                    "description": tool.description,
-                    "tags": list(tool.tags) if tool.tags else [],
-                }
-                if hasattr(tool, 'input_schema'):
-                    tool_info["input_schema"] = tool.input_schema
-                tool_schemas.append(tool_info)
+            # Access managers directly to avoid async issues
+            if hasattr(self, '_tool_manager') and hasattr(self._tool_manager, '_tools'):
+                for name, tool in self._tool_manager._tools.items():
+                    if self._should_enable_component(tool):
+                        tool_info = {
+                            "name": name,
+                            "description": tool.description,
+                            "tags": list(tool.tags) if tool.tags else [],
+                        }
+                        if hasattr(tool, 'input_schema'):
+                            tool_info["input_schema"] = tool.input_schema
+                        if hasattr(tool, 'parameters'):
+                            tool_info["input_schema"] = {
+                                "type": "object",
+                                "properties": tool.parameters.get("properties", {}),
+                                "required": tool.parameters.get("required", [])
+                            }
+                        tool_schemas.append(tool_info)
 
-            # Get resources
-            resources = loop.run_until_complete(self.get_resources())
-            resource_schemas = []
-            for uri, resource in resources.items():
-                resource_schemas.append({
-                    "uri": uri,
-                    "name": resource.name,
-                    "description": resource.description,
-                    "mime_type": resource.mime_type,
-                    "tags": list(resource.tags) if resource.tags else [],
-                })
-            # Get resource templates
-            templates = loop.run_until_complete(self.get_resource_templates())
-            template_schemas = []
-            for uri_template, template in templates.items():
-                template_schemas.append({
-                    "uri_template": uri_template,
-                    "name": template.name,
-                    "description": template.description,
-                    "mime_type": template.mime_type,
-                    "tags": list(template.tags) if template.tags else [],
-                })
+            if hasattr(self, '_resource_manager'):
+                if hasattr(self._resource_manager, '_resources'):
+                    for uri, resource in self._resource_manager._resources.items():
+                        if self._should_enable_component(resource):
+                            resource_schemas.append({
+                                "uri": uri,
+                                "name": resource.name,
+                                "description": resource.description,
+                                "mime_type": resource.mime_type,
+                                "tags": list(resource.tags) if resource.tags else [],
+                            })
+                
+                if hasattr(self._resource_manager, '_templates'):
+                    for uri_template, template in self._resource_manager._templates.items():
+                        if self._should_enable_component(template):
+                            template_schemas.append({
+                                "uri_template": uri_template,
+                                "name": template.name,
+                                "description": template.description,
+                                "mime_type": template.mime_type,
+                                "tags": list(template.tags) if template.tags else [],
+                            })
 
-            # Get prompts
-            prompts = loop.run_until_complete(self.get_prompts())
-            prompt_schemas = []
-            for name, prompt in prompts.items():
-                prompt_info = {
-                    "name": name,
-                    "description": prompt.description,
-                    "tags": list(prompt.tags) if prompt.tags else [],
-                }
-                if hasattr(prompt, 'arguments'):
-                    prompt_info["arguments"] = safe_serialize(prompt.arguments)
-                prompt_schemas.append(prompt_info)
+            if hasattr(self, '_prompt_manager') and hasattr(self._prompt_manager, '_prompts'):
+                for name, prompt in self._prompt_manager._prompts.items():
+                    if self._should_enable_component(prompt):
+                        prompt_info = {
+                            "name": name,
+                            "description": prompt.description,
+                            "tags": list(prompt.tags) if prompt.tags else [],
+                        }
+                        if hasattr(prompt, 'arguments'):
+                            prompt_info["arguments"] = safe_serialize(prompt.arguments)
+                        prompt_schemas.append(prompt_info)
 
-            return {
-                "name": self.name,
-                "version": getattr(self, '_version', "1.0.0"),
-                "instructions": self.instructions,
-                "capabilities": {
-                    "tools": len(tool_schemas),
-                    "resources": len(resource_schemas),
-                    "resource_templates": len(template_schemas),
-                    "prompts": len(prompt_schemas),
-                },
-                "schemas": {
-                    "tools": tool_schemas,
-                    "resources": resource_schemas,
-                    "resource_templates": template_schemas,
-                    "prompts": prompt_schemas,
-                }
+        except Exception as e:
+            logger.warning(f"Error accessing managers directly: {e}")
+            # If direct access fails, return basic metadata
+            pass
+
+        metadata = {
+            "name": self.name,
+            "version": getattr(self, '_version', "1.0.0"),
+            "instructions": self.instructions,
+            "capabilities": {
+                "tools": len(tool_schemas),
+                "resources": len(resource_schemas),
+                "resource_templates": len(template_schemas),
+                "prompts": len(prompt_schemas),
+            },
+            "schemas": {
+                "tools": tool_schemas,
+                "resources": resource_schemas,
+                "resource_templates": template_schemas,
+                "prompts": prompt_schemas,
             }
-        finally:
-            loop.close()
+        }
+
+        # Add OAuth2 configuration if available
+        if hasattr(self, '_oauth_config') and self._oauth_config:
+            base_url = self._oauth_config.get('base_url', 'http://localhost:8080')
+            metadata["oauth2"] = {
+                "authorization_endpoint": f"{base_url}/oauth/authorize",
+                "token_endpoint": f"{base_url}/oauth/token",
+                "jwks_uri": f"{base_url}/oauth/jwks",
+                "scopes_supported": self._oauth_config.get("scopes_supported", ["read", "write"]),
+                "response_types_supported": ["code"],
+                "grant_types_supported": ["authorization_code", "client_credentials"],
+                "code_challenge_methods_supported": ["S256"],
+                "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post"]
+            }
+            
+            if self._oauth_config.get("dynamic_registration", False):
+                metadata["oauth2"]["registration_endpoint"] = f"{base_url}/oauth/register"
+
+        metadata["server_capabilities"] = {
+            "experimental": {
+                "http_metadata": True,
+                "oauth2_dynamic_registration": self._oauth_config.get("dynamic_registration", False) if hasattr(self, '_oauth_config') and self._oauth_config else False
+            }
+        }
+
+        return _sanitize_metadata_response(metadata)        
 
     def start_metadata_server(
         self,
         port: int = 8080,
         host: str = "localhost",
         cors_enabled: bool = True,
-        custom_headers: Optional[Dict[str, str]] = None
+        custom_headers: Optional[Dict[str, str]] = None,
+        oauth_config: Optional[Dict[str, Any]] = None, 
+        oauth_db_path: Optional[str] = None 
     ) -> None:
             """Start HTTP server for metadata endpoints."""
             if hasattr(self, '_metadata_server') and self._metadata_server:
                 raise RuntimeError("Metadata server is already running.")
+
+            self._oauth_config = oauth_config
+            if oauth_config and 'base_url' not in oauth_config:
+                oauth_config['base_url'] = f"http://{host}:{port}"
             
+            if oauth_config:
+                self._oauth_storage = OAuth2Storage(oauth_db_path)
+            else:
+                self._oauth_storage = None
+
             try:
                 fastmcp_instance = self
 
@@ -526,6 +999,8 @@ class FastMCP(Generic[LifespanResultT]):
                         self.mcp_server = fastmcp_instance
                         self.cors_enabled = cors_enabled
                         self.custom_headers = custom_headers or {}
+                        self.oauth_config = oauth_config
+                        self.base_url = oauth_config.get('base_url', f"http://{host}:{port}") if oauth_config else f"http://{host}:{port}"
                         super().__init__(request, client_address, server)
                     
                     def do_OPTIONS(self):
@@ -536,32 +1011,266 @@ class FastMCP(Generic[LifespanResultT]):
                             self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
                             self.send_header("Access-Control-Allow-Headers", "Content-Type")
                         self.end_headers()
-                    
-                    def do_GET(self):
-                        """Handle GET requests for metadata endpoints"""
-                        if self.path == '/.well-known/mcp-metadata':
-                            self.send_response(200)
-                            self.send_header('Content-type', 'application/json')
 
-                            # add CORS headers
+                    def _send_json_response(self, data: Dict[str, Any], status_code: int = 200):
+                        """Send a JSON response with proper headers."""
+                        try:
+                            self.send_response(status_code)
+                            self.send_header('Content-type', 'application/json')
+                            
                             if self.cors_enabled:
                                 self.send_header("Access-Control-Allow-Origin", "*")
                             
-                            # add custom headers
                             for header, value in self.custom_headers.items():
                                 self.send_header(header, value)
-
+                            
                             self.end_headers()
+                            
+                            response = json.dumps(data, indent=2)
+                            self.wfile.write(response.encode())
+                        except Exception as e:
+                            logger.error(f"Error sending JSON response: {e}")
+                            self.send_error(500, "Internal server error")
 
-                            try:
-                                metadata = self.mcp_server.get_metadata()
-                                response = json.dumps(metadata, indent=2)
-                                self.wfile.write(response.encode())
-                            except Exception as e:
-                                self.send_error(500, f"Error generating metadata: {str(e)}")
-                        else:
-                            self.send_error(404, "Not Found")
-                
+                    def _send_error_response(self, status_code: int, message: str):
+                        """Send a standardized error response."""
+                        error_response = {
+                            "error": {
+                                "code": status_code,
+                                "message": message
+                            }
+                        }
+                        self._send_json_response(error_response, status_code)
+                    
+                    def do_GET(self):
+                        """Handle GET requests for metadata endpoints"""
+                        try:
+                            if self.path == '/.well-known/mcp-metadata':
+                                self._handle_metadata()
+                            elif self.path == '/.well-known/oauth-authorization-server':
+                                self._handle_oauth_metadata()
+                            elif self.path == '/oauth/jwks':
+                                self._handle_jwks()
+                            elif self.path == '/oauth/authorize':
+                                self._handle_authorize()
+                            else:
+                                self.send_error(404, "Not Found")
+                        except Exception as e:
+                            logger.error(f"Error handling GET request: {e}")
+                            self.send_error(500, "Internal server error")
+
+                    def do_POST(self):
+                        """Handle POST requests for OAuth2 endpoints"""
+                        try:
+                            if self.path == '/oauth/register':
+                                self._handle_client_registration()
+                            elif self.path == '/oauth/token':
+                                self._handle_token_request()
+                            else:
+                                self.send_error(404, "Not Found")
+                        except Exception as e:
+                            logger.error(f"Error handling POST request: {e}")
+                            self.send_error(500, "Internal server error")
+
+                    def _handle_metadata(self):
+                        """Handle MCP metadata endpoint."""
+                        try:
+                            metadata = self.mcp_server.get_metadata()
+                            self._send_json_response(metadata)
+                        except ValueError as e:
+                            logger.error(f"Metadata validation error: {e}")
+                            self._send_error_response(500, "Invalid metadata format")
+                        except Exception as e:
+                            logger.error(f"Error generating metadata: {e}")
+                            self._send_error_response(500, "Error generating metadata")
+
+                    def _handle_authorize(self):
+                        """Handle OAuth2 authorization endpoint."""
+                        if not self.oauth_config:
+                            self.send_error(404, "OAuth2 not configured")
+                            return
+                        
+                        # This would typically redirect to a login page or handle the authorization flow
+                        self.send_response(200)
+                        self.send_header('Content-type', 'text/html')
+                        
+                        # Add CORS headers if enabled
+                        if self.cors_enabled:
+                            self.send_header("Access-Control-Allow-Origin", "*")
+                    
+                        # Add custom headers
+                        for header, value in self.custom_headers.items():
+                            self.send_header(header, value)
+                        
+                        self.end_headers()
+
+                    def _handle_client_registration(self):
+                        """Handle dynamic client registration (RFC 7591)."""
+                        if not self.oauth_config or not self.oauth_config.get("dynamic_registration", False):
+                            self._send_error_response(404, "Dynamic client registration not supported")
+                            return
+                        try:
+                            content_length = int(self.headers.get('Content-Length', 0))
+                            if content_length > 0:
+                                body = self.rfile.read(content_length)
+                                try:
+                                    request_data = json.loads(body.decode())
+                                except json.JSONDecodeError:
+                                    self._send_error_response(400, "Invalid JSON in request body")
+                                    return
+                            else:
+                                request_data = {}
+
+                            # validate
+                            if not isinstance(request_data, dict):
+                                self._send_error_response(400, "Request body must be a JSON object")
+                                return
+
+                            # generate credentials
+                            client_id = f"mcp-client-{secrets.token_urlsafe(16)}"
+                            client_secret = secrets.token_urlsafe(32)
+
+                            client_name = request_data.get("client_name", "MCP Client")
+                            redirect_uris = request_data.get("redirect_uris", [])
+                            grant_types = request_data.get("grant_types", ["authorization_code"])
+
+                            if redirect_uris:
+                                for uri in redirect_uris:
+                                    if not isinstance(uri, str) or not uri.startswith(("http://", "https://")):
+                                        self._send_error_response(400, f"Invalid redirect URI: {uri}")
+                                        return
+                            
+                            supported_grant_types = ["authorization_code", "client_credentials"]
+                            for grant_type in grant_types:
+                                if grant_type not in supported_grant_types:
+                                    self._send_error_response(400, f"Unsupported grant type: {grant_type}")
+                                    return
+
+                            registration_response = {
+                                "client_id": client_id,
+                                "client_secret": client_secret,
+                                "client_name": client_name,
+                                "redirect_uris": redirect_uris,
+                                "grant_types": grant_types,
+                                "token_endpoint_auth_method": "client_secret_basic",
+                                "client_secret_expires_at": 0 
+                            }   
+                        
+                            logger.info(f"Registered new client: {client_id}")
+                            self._send_json_response(registration_response, 201)
+                        
+                        except Exception as e:
+                            logger.error(f"Error in client registration: {e}")
+                            self._send_error_response(400, "Invalid registration request")
+
+                    def _handle_token_request(self):
+                        """Handle OAuth2 token endpoint with proper credential validation."""
+                        if not self.oauth_config:
+                            self._send_error_response(404, "OAuth2 not configured")
+                            return
+                        
+                        try:
+                            content_length = int(self.headers.get('Content-Length', 0))
+                            if content_length > 0:
+                                body = self.rfile.read(content_length)
+                                try:
+                                    form_data = urllib.parse.parse_qs(body.decode())
+                                    token_request = {k: v[0] if v else None for k, v in form_data.items()}
+                                except Exception:
+                                    self._send_error_response(400, "Invalid form data")
+                                    return
+                            else:
+                                token_request = {}
+                            
+                            grant_type = token_request.get("grant_type")
+                            if not grant_type:
+                                self._send_error_response(400, "Missing grant_type parameter")
+                                return
+                            
+                            client_id, client_secret = _parse_client_credentials(
+                                dict(self.headers),
+                                token_request
+                            )
+                            
+                            if not client_id or not client_secret:
+                                self._send_error_response(400, "Missing client credentials")
+                                return
+                            
+                            # Validate client credentials
+                            client_info = self.oauth_storage.validate_client_credentials(client_id, client_secret)
+                            if not client_info:
+                                self._send_error_response(401, "Invalid client credentials")
+                                return
+                            
+                            if grant_type == "client_credentials":
+                                if "client_credentials" not in client_info['grant_types']:
+                                    self._send_error_response(400, "Client not authorized for client_credentials grant")
+                                    return
+                                
+                                # Generate access token
+                                access_token = secrets.token_urlsafe(32)
+                                expires_in = 3600
+                                scopes = client_info.get('scopes', ['read', 'write'])
+                                
+                                # Store token
+                                self.oauth_storage.store_access_token(client_id, access_token, expires_in, scopes)
+                                
+                                token_response = {
+                                    "access_token": access_token,
+                                    "token_type": "Bearer",
+                                    "expires_in": expires_in,
+                                    "scope": " ".join(scopes)
+                                }
+                                
+                                self._send_json_response(token_response)
+                                
+                            elif grant_type == "authorization_code":
+                                if "authorization_code" not in client_info['grant_types']:
+                                    self._send_error_response(400, "Client not authorized for authorization_code grant")
+                                    return
+                                
+                                code = token_request.get("code")
+                                redirect_uri = token_request.get("redirect_uri")
+                                
+                                if not code:
+                                    self._send_error_response(400, "Missing authorization code")
+                                    return
+                                
+                                if not redirect_uri:
+                                    self._send_error_response(400, "Missing redirect_uri")
+                                    return
+                                
+                                # Validate authorization code
+                                code_info = self.oauth_storage.validate_authorization_code(code, client_id, redirect_uri)
+                                if not code_info:
+                                    self._send_error_response(400, "Invalid authorization code")
+                                    return
+                                
+                                # Generate access token
+                                access_token = secrets.token_urlsafe(32)
+                                expires_in = 3600
+                                scopes = code_info.get('scopes', ['read', 'write'])
+                                
+                                # Store token
+                                self.oauth_storage.store_access_token(client_id, access_token, expires_in, scopes)
+                                
+                                token_response = {
+                                    "access_token": access_token,
+                                    "token_type": "Bearer",
+                                    "expires_in": expires_in,
+                                    "scope": " ".join(scopes)
+                                }
+                                
+                                self._send_json_response(token_response)
+                                
+                            else:
+                                self._send_error_response(400, f"Unsupported grant type: {grant_type}")
+                                
+                        except Exception as e:
+                            logger.error(f"Error in token request: {e}")
+                            self._send_error_response(400, "Invalid token request")
+                                
+
                 # Create server
                 self._metadata_server = HTTPServer((host, port), ConfiguredMetadataHandler)
                 self._metadata_thread = threading.Thread(
@@ -572,12 +1281,33 @@ class FastMCP(Generic[LifespanResultT]):
                 
                 logger.info(f"Metadata server started on http://{host}:{port}")
                 logger.info(f"Metadata available at: http://{host}:{port}/.well-known/mcp-metadata")
+
+                if oauth_config:
+                    logger.info(f"OAuth2 metadata at: http://{host}:{port}/.well-known/oauth-authorization-server")
+                    logger.info(f"OAuth2 endpoints:")
+                    logger.info(f"  - Authorization: http://{host}:{port}/oauth/authorize")
+                    logger.info(f"  - Token: http://{host}:{port}/oauth/token")
+                    logger.info(f"  - JWKS: http://{host}:{port}/oauth/jwks")
+                    if oauth_config.get("dynamic_registration", False):
+                        logger.info(f"  - Registration: http://{host}:{port}/oauth/register")
+
                 if cors_enabled:
                     logger.info("CORS enabled for metadata endpoints")
                 
             except Exception as e:
                 logger.error(f"Failed to start metadata server: {e}")
                 raise
+
+    def _periodic_cleanup(self):
+        """Periodic cleanup of expired tokens and codes."""
+        while True:
+            try:
+                if self._oauth_storage:
+                    self._oauth_storage.cleanup_expired_tokens()
+                time.sleep(300)  
+            except Exception as e:
+                logger.error(f"Error in periodic cleanup: {e}")
+                time.sleep(60)
     
     def stop_metadata_server(self) -> None:
         """Stop the metadata server"""
