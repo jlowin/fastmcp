@@ -182,10 +182,10 @@ The `install` command supports the same `file.py:object` notation as the `run` c
 
 | Option | Flag | Description |
 | ------ | ---- | ----------- |
-| Server Name | `--name`, `-n` | Custom name for the server (defaults to server's name attribute or file name) |
+| Server Name | `--server-name`, `-n` | Custom name for the server (defaults to server's name attribute or file name) |
 | Editable Package | `--with-editable`, `-e` | Directory containing pyproject.toml to install in editable mode |
 | Additional Packages | `--with` | Additional packages to install (can be used multiple times) |
-| Environment Variables | `--env-var`, `-v` | Environment variables in KEY=VALUE format (can be used multiple times) |
+| Environment Variables | `--env`, `-v` | Environment variables in KEY=VALUE format (can be used multiple times) |
 | Environment File | `--env-file`, `-f` | Load environment variables from a .env file |
 
 **Examples**
@@ -201,16 +201,16 @@ fastmcp install claude-desktop server.py:my_server
 fastmcp install claude-desktop server.py:my_server -n "My Analysis Server" --with pandas
 
 # Install in Claude Code with environment variables
-fastmcp install claude-code server.py --env-var API_KEY=secret --env-var DEBUG=true
+fastmcp install claude-code server.py --env API_KEY=secret --env DEBUG=true
 
 # Install in Cursor with environment variables
-fastmcp install cursor server.py --env-var API_KEY=secret --env-var DEBUG=true
+fastmcp install cursor server.py --env API_KEY=secret --env DEBUG=true
 
 # Install with environment file
 fastmcp install cursor server.py --env-file .env
 
 # Generate MCP JSON configuration
-fastmcp install mcp-json server.py --name "My Server" --with pandas
+fastmcp install mcp-json server.py --server-name "My Server" --with pandas
 
 # Copy JSON configuration to clipboard
 fastmcp install mcp-json server.py --copy
