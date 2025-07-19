@@ -44,7 +44,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install FastMCP
-        run: uv sync --locked
+        run: uv sync --dev --all-groups --locked
 
       - name: Run tests
         run: uv run pytest tests

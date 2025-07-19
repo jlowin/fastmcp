@@ -8,7 +8,14 @@ from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
 from types import EllipsisType, UnionType
-from typing import Annotated, TypeAlias, TypeVar, Union, get_args, get_origin
+from typing import (
+    Annotated,
+    TypeAlias,
+    TypeVar,
+    Union,
+    get_args,
+    get_origin,
+)
 
 import mcp.types
 from mcp.types import Annotations
