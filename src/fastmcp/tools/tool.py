@@ -105,6 +105,12 @@ class Tool(FastMCPComponent):
         Callable[[Any], str] | None,
         Field(description="Optional custom serializer for tool results"),
     ] = None
+    required_scope: Annotated[
+        str | None,
+        Field(
+            description="Required scope for tool authorization. If not provided, defaults to tool name"
+        ),
+    ] = None
 
     def enable(self) -> None:
         super().enable()
@@ -152,6 +158,7 @@ class Tool(FastMCPComponent):
         output_schema: dict[str, Any] | None | NotSetT | Literal[False] = NotSet,
         serializer: Callable[[Any], str] | None = None,
         enabled: bool | None = None,
+        required_scope: str | None = None,
     ) -> FunctionTool:
         """Create a Tool from a function."""
         return FunctionTool.from_function(
@@ -165,6 +172,7 @@ class Tool(FastMCPComponent):
             output_schema=output_schema,
             serializer=serializer,
             enabled=enabled,
+            required_scope=required_scope,
         )
 
     async def run(self, arguments: dict[str, Any]) -> ToolResult:
@@ -193,6 +201,7 @@ class Tool(FastMCPComponent):
         output_schema: dict[str, Any] | None | Literal[False] = None,
         serializer: Callable[[Any], str] | None = None,
         enabled: bool | None = None,
+        required_scope: str | None = None,
     ) -> TransformedTool:
         from fastmcp.tools.tool_transform import TransformedTool
 
@@ -208,6 +217,7 @@ class Tool(FastMCPComponent):
             output_schema=output_schema,
             serializer=serializer,
             enabled=enabled,
+            required_scope=required_scope,
         )
 
 
@@ -227,6 +237,7 @@ class FunctionTool(Tool):
         output_schema: dict[str, Any] | None | NotSetT | Literal[False] = NotSet,
         serializer: Callable[[Any], str] | None = None,
         enabled: bool | None = None,
+        required_scope: str | None = None,
     ) -> FunctionTool:
         """Create a Tool from a function."""
 
@@ -259,6 +270,7 @@ class FunctionTool(Tool):
             tags=tags or set(),
             serializer=serializer,
             enabled=enabled if enabled is not None else True,
+            required_scope=required_scope,
         )
 
     async def run(self, arguments: dict[str, Any]) -> ToolResult:
