@@ -185,8 +185,9 @@ class Tool(FastMCPComponent):
         tool: Tool,
         transform_fn: Callable[..., Any] | None = None,
         name: str | None = None,
+        title: str | None | NotSetT = NotSet,
         transform_args: dict[str, ArgTransform] | None = None,
-        description: str | None = None,
+        description: str | None | NotSetT = NotSet,
         tags: set[str] | None = None,
         annotations: ToolAnnotations | None = None,
         output_schema: dict[str, Any] | None | Literal[False] = None,
@@ -199,6 +200,7 @@ class Tool(FastMCPComponent):
             tool=tool,
             transform_fn=transform_fn,
             name=name,
+            title=title,
             transform_args=transform_args,
             description=description,
             tags=tags,
@@ -397,7 +399,7 @@ class ParsedFunction:
 
             try:
                 type_adapter = get_cached_typeadapter(clean_output_type)
-                base_schema = type_adapter.json_schema()
+                base_schema = type_adapter.json_schema(mode="serialization")
 
                 # Generate schema for wrapped type if it's non-object
                 # because MCP requires that output schemas are objects
@@ -408,7 +410,7 @@ class ParsedFunction:
                     # Use the wrapped result schema directly
                     wrapped_type = _WrappedResult[clean_output_type]
                     wrapped_adapter = get_cached_typeadapter(wrapped_type)
-                    output_schema = wrapped_adapter.json_schema()
+                    output_schema = wrapped_adapter.json_schema(mode="serialization")
                     output_schema["x-fastmcp-wrap-result"] = True
                 else:
                     output_schema = base_schema
