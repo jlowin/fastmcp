@@ -58,3 +58,29 @@ class OAuthProvider(
             AccessToken object if valid, None if invalid or expired
         """
         return await self.load_access_token(token)
+
+    # ---------------------------------------------------------------------
+    # Route factory
+    # ---------------------------------------------------------------------
+
+    def get_auth_routes(self):  # type: ignore[override]
+        """Return a list of Starlette routes serving the OAuth endpoints.
+
+        The default implementation simply forwards to
+        ``mcp.server.auth.routes.create_auth_routes``.  Subclasses that need
+        to customise the behaviour of individual endpoints (for example, to
+        proxy the ``/token`` handler) can override this method and return a
+        custom route list.
+        """
+
+        # Local import to avoid the relatively heavy starlette / MCP auth
+        # dependencies during module import time.
+        from mcp.server.auth.routes import create_auth_routes  # type: ignore
+
+        return create_auth_routes(
+            provider=self,
+            issuer_url=self.issuer_url,
+            service_documentation_url=self.service_documentation_url,
+            client_registration_options=self.client_registration_options,
+            revocation_options=self.revocation_options,
+        )
