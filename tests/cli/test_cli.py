@@ -90,6 +90,91 @@ class TestMainCLI:
         ]
         assert cmd == expected
 
+    def test_build_uv_command_with_python_version(self):
+        """Test building uv command with Python version."""
+        cmd = _build_uv_command("server.py", python_version="3.11")
+        expected = [
+            "uv",
+            "run",
+            "--python",
+            "3.11",
+            "--with",
+            "fastmcp",
+            "fastmcp",
+            "run",
+            "server.py",
+        ]
+        assert cmd == expected
+
+    def test_build_uv_command_with_project(self):
+        """Test building uv command with project directory."""
+        project_path = Path("/path/to/project")
+        cmd = _build_uv_command("server.py", project=project_path)
+        expected = [
+            "uv",
+            "run",
+            "--project",
+            "/path/to/project",
+            "--with",
+            "fastmcp",
+            "fastmcp",
+            "run",
+            "server.py",
+        ]
+        assert cmd == expected
+
+    def test_build_uv_command_with_requirements(self):
+        """Test building uv command with requirements file."""
+        req_path = Path("requirements.txt")
+        cmd = _build_uv_command("server.py", with_requirements=req_path)
+        expected = [
+            "uv",
+            "run",
+            "--with",
+            "fastmcp",
+            "--with-requirements",
+            "requirements.txt",
+            "fastmcp",
+            "run",
+            "server.py",
+        ]
+        assert cmd == expected
+
+    def test_build_uv_command_with_all_options(self):
+        """Test building uv command with all options."""
+        cmd = _build_uv_command(
+            "server.py",
+            python_version="3.10",
+            project=Path("/my/project"),
+            with_packages=["pandas", "numpy"],
+            with_requirements=Path("reqs.txt"),
+            with_editable=Path("/local/pkg"),
+            no_banner=True,
+        )
+        expected = [
+            "uv",
+            "run",
+            "--python",
+            "3.10",
+            "--project",
+            "/my/project",
+            "--with",
+            "fastmcp",
+            "--with-editable",
+            "/local/pkg",
+            "--with",
+            "pandas",
+            "--with",
+            "numpy",
+            "--with-requirements",
+            "reqs.txt",
+            "fastmcp",
+            "run",
+            "server.py",
+            "--no-banner",
+        ]
+        assert cmd == expected
+
 
 class TestVersionCommand:
     """Test the version command."""
@@ -167,6 +252,29 @@ class TestDevCommand:
         assert bound.arguments["inspector_version"] == "1.0.0"
         assert bound.arguments["ui_port"] == 3000
 
+    def test_dev_command_parsing_with_new_options(self):
+        """Test dev command parsing with new uv options."""
+        command, bound, _ = app.parse_args(
+            [
+                "dev",
+                "server.py",
+                "--python",
+                "3.10",
+                "--project",
+                "/workspace",
+                "--with-requirements",
+                "dev-requirements.txt",
+                "--with",
+                "pytest",
+            ]
+        )
+        assert command is not None
+        assert bound.arguments["server_spec"] == "server.py"
+        assert bound.arguments["python"] == "3.10"
+        assert bound.arguments["project"] == Path("/workspace")
+        assert bound.arguments["with_requirements"] == Path("dev-requirements.txt")
+        assert bound.arguments["with_packages"] == ["pytest"]
+
 
 class TestRunCommand:
     """Test the run command."""
@@ -235,6 +343,32 @@ class TestRunCommand:
         assert "port" not in bound.arguments
         assert "log_level" not in bound.arguments
         assert "path" not in bound.arguments
+
+    def test_run_command_parsing_with_new_options(self):
+        """Test run command parsing with new uv options."""
+        command, bound, _ = app.parse_args(
+            [
+                "run",
+                "server.py",
+                "--python",
+                "3.11",
+                "--with",
+                "pandas",
+                "--with",
+                "numpy",
+                "--project",
+                "/path/to/project",
+                "--with-requirements",
+                "requirements.txt",
+            ]
+        )
+
+        assert command is not None
+        assert bound.arguments["server_spec"] == "server.py"
+        assert bound.arguments["python"] == "3.11"
+        assert bound.arguments["with_packages"] == ["pandas", "numpy"]
+        assert bound.arguments["project"] == Path("/path/to/project")
+        assert bound.arguments["with_requirements"] == Path("requirements.txt")
 
     def test_run_command_transport_aliases(self):
         """Test that both 'http' and 'streamable-http' are accepted as valid transport options."""
