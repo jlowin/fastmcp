@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import copy
 from collections import defaultdict
+
+from fastmcp.utilities import altcopy as copy
 
 
 def _prune_param(schema: dict, param: str) -> dict:

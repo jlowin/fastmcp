@@ -38,7 +38,6 @@ import hashlib
 import json
 import re
 from collections.abc import Callable, Mapping
-from copy import deepcopy
 from dataclasses import MISSING, field, make_dataclass
 from datetime import datetime
 from typing import (
@@ -60,6 +59,8 @@ from pydantic import (
     model_validator,
 )
 from typing_extensions import NotRequired, TypedDict
+
+from fastmcp.utilities.altcopy import deepcopy
 
 __all__ = ["json_schema_to_type", "JSONSchema"]
 
