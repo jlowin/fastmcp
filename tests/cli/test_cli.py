@@ -114,7 +114,7 @@ class TestMainCLI:
             "uv",
             "run",
             "--project",
-            "/path/to/project",
+            str(project_path),
             "--with",
             "fastmcp",
             "fastmcp",
@@ -142,13 +142,16 @@ class TestMainCLI:
 
     def test_build_uv_command_with_all_options(self):
         """Test building uv command with all options."""
+        project_path = Path("/my/project")
+        editable_path = Path("/local/pkg")
+        requirements_path = Path("reqs.txt")
         cmd = _build_uv_command(
             "server.py",
             python_version="3.10",
-            project=Path("/my/project"),
+            project=project_path,
             with_packages=["pandas", "numpy"],
-            with_requirements=Path("reqs.txt"),
-            with_editable=Path("/local/pkg"),
+            with_requirements=requirements_path,
+            with_editable=editable_path,
             no_banner=True,
         )
         expected = [
@@ -157,17 +160,17 @@ class TestMainCLI:
             "--python",
             "3.10",
             "--project",
-            "/my/project",
+            str(project_path),
             "--with",
             "fastmcp",
             "--with-editable",
-            "/local/pkg",
+            str(editable_path),
             "--with",
             "pandas",
             "--with",
             "numpy",
             "--with-requirements",
-            "reqs.txt",
+            str(requirements_path),
             "fastmcp",
             "run",
             "server.py",

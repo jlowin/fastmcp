@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from fastmcp.cli.install import install_app
 
 
@@ -246,4 +248,4 @@ class TestInstallCommandParsing:
         for cmd_args in commands_to_test:
             command, bound, _ = install_app.parse_args(cmd_args)
             assert command is not None
-            assert str(bound.arguments["project"]) == "/path/to/project"
+            assert str(bound.arguments["project"]) == str(Path("/path/to/project"))
