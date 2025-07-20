@@ -1,6 +1,8 @@
 from fastmcp.utilities.json_schema import (
+    _detect_self_reference,
     _prune_param,
     compress_schema,
+    dereference_json_schema,
 )
 
 # Wrapper for backward compatibility with tests
@@ -432,3 +434,705 @@ class TestCompressSchema:
             "additionalProperties"
             not in result["properties"]["foo"]["properties"]["nested"]
         )
+
+
+class TestDetectSelfReference:
+    """Tests for the _detect_self_reference function."""
+
+    def test_no_self_reference(self):
+        """Test schema with normal references (no self-references)."""
+        schema = {
+            "$defs": {
+                "Color": {"enum": ["red", "green", "blue"], "type": "string"},
+                "Size": {"enum": ["small", "medium", "large"], "type": "string"},
+            },
+            "properties": {
+                "color": {"$ref": "#/$defs/Color"},
+                "size": {"$ref": "#/$defs/Size"},
+            },
+        }
+        assert not _detect_self_reference(schema)
+
+    def test_cross_references_not_self_references(self):
+        """Test that cross-references (A->B->A) are not detected as self-references."""
+        schema = {
+            "$defs": {
+                "A": {"type": "object", "properties": {"b": {"$ref": "#/$defs/B"}}},
+                "B": {"type": "object", "properties": {"a": {"$ref": "#/$defs/A"}}},
+            },
+            "properties": {"root": {"$ref": "#/$defs/A"}},
+        }
+        assert not _detect_self_reference(schema)
+
+    def test_direct_self_reference(self):
+        """Test detection of direct self-reference (Node -> Node)."""
+        schema = {
+            "$defs": {
+                "Node": {
+                    "type": "object",
+                    "properties": {"child": {"$ref": "#/$defs/Node"}},
+                }
+            },
+            "properties": {"root": {"$ref": "#/$defs/Node"}},
+        }
+        assert _detect_self_reference(schema)
+
+
+class TestDereferenceJsonSchema:
+    """Tests for the dereference_json_schema function."""
+
+    def test_empty_schema(self):
+        """Test dereferencing an empty schema."""
+        schema = {}
+        result = dereference_json_schema(schema)
+        assert result == {}
+
+    def test_schema_without_defs(self):
+        """Test dereferencing a schema without $defs."""
+        schema = {
+            "type": "object",
+            "properties": {"name": {"type": "string"}, "age": {"type": "integer"}},
+        }
+        result = dereference_json_schema(schema)
+        assert result == schema
+
+    def test_basic_reference_resolution(self):
+        """Test basic reference resolution preserves $defs and resolves properties."""
+        schema = {
+            "$defs": {"Color": {"enum": ["red", "green", "blue"], "type": "string"}},
+            "properties": {"color": {"$ref": "#/$defs/Color"}},
+        }
+        result = dereference_json_schema(schema)
+
+        expected = {
+            "$defs": {"Color": {"enum": ["red", "green", "blue"], "type": "string"}},
+            "properties": {
+                "color": {"enum": ["red", "green", "blue"], "type": "string"}
+            },
+        }
+        assert result == expected
+        assert "$defs" in result
+
+    def test_self_reference_detection(self):
+        """Test that self-referencing schemas are returned unchanged."""
+        schema = {
+            "$defs": {
+                "Node": {
+                    "type": "object",
+                    "properties": {"child": {"$ref": "#/$defs/Node"}},
+                }
+            },
+            "properties": {"root": {"$ref": "#/$defs/Node"}},
+        }
+        result = dereference_json_schema(schema)
+        assert result == schema
+
+    def test_property_merging(self):
+        """Test that additional properties are merged when resolving references."""
+        schema = {
+            "$defs": {"BaseString": {"type": "string", "minLength": 1}},
+            "properties": {
+                "name": {
+                    "$ref": "#/$defs/BaseString",
+                    "title": "Full Name",
+                    "default": "Anonymous",
+                    "maxLength": 100,
+                }
+            },
+        }
+        result = dereference_json_schema(schema)
+
+        expected = {
+            "$defs": {"BaseString": {"type": "string", "minLength": 1}},
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "title": "Full Name",
+                    "default": "Anonymous",
+                    "maxLength": 100,
+                }
+            },
+        }
+        assert result == expected
+
+    def test_complex_schema_patterns(self):
+        """Test references in allOf, oneOf, and if/then/else patterns."""
+        schema = {
+            "$defs": {
+                "Animal": {
+                    "type": "object",
+                    "properties": {"name": {"type": "string"}},
+                },
+                "Dog": {"type": "object", "properties": {"breed": {"type": "string"}}},
+                "StringType": {"type": "string"},
+            },
+            "properties": {
+                "pet": {"allOf": [{"$ref": "#/$defs/Animal"}, {"$ref": "#/$defs/Dog"}]}
+            },
+            "if": {"$ref": "#/$defs/StringType"},
+            "then": {"minLength": 1},
+        }
+        result = dereference_json_schema(schema)
+
+        # Check that references were resolved
+        assert result["properties"]["pet"]["allOf"][0]["type"] == "object"
+        assert result["properties"]["pet"]["allOf"][1]["type"] == "object"
+        assert result["if"]["type"] == "string"
+        assert "$defs" in result
+
+
+class TestSchemaFlatteniingIntegration:
+    """Tests for schema flattening through the public compress_schema API."""
+
+    def test_integration_with_compress_schema(self):
+        """Test that dereference_refs parameter works with compress_schema."""
+        schema = {
+            "$defs": {
+                "Priority": {"enum": ["low", "medium", "high"], "type": "string"}
+            },
+            "properties": {
+                "title": {"type": "string"},
+                "priority": {"$ref": "#/$defs/Priority"},
+                "context_param": {"type": "string"},  # This will be pruned
+            },
+            "required": ["title", "priority", "context_param"],
+        }
+
+        # Test with flattening enabled
+        result = compress_schema(
+            schema, prune_params=["context_param"], dereference_refs=True
+        )
+
+        expected = {
+            "$defs": {
+                "Priority": {"enum": ["low", "medium", "high"], "type": "string"}
+            },
+            "properties": {
+                "title": {"type": "string"},
+                "priority": {"enum": ["low", "medium", "high"], "type": "string"},
+            },
+            "required": ["title", "priority"],
+        }
+        assert result == expected
+        assert "$defs" in result
+        assert "context_param" not in result["properties"]
+
+    def test_compress_schema_with_self_references(self):
+        """Test compress_schema behavior with self-referencing schemas."""
+        schema = {
+            "$defs": {
+                "Node": {
+                    "type": "object",
+                    "properties": {
+                        "value": {"type": "string"},
+                        "child": {"$ref": "#/$defs/Node"},
+                    },
+                }
+            },
+            "properties": {
+                "tree": {"$ref": "#/$defs/Node"},
+                "unused_param": {"type": "string"},
+            },
+            "required": ["tree", "unused_param"],
+        }
+
+        result = compress_schema(
+            schema, prune_params=["unused_param"], dereference_refs=True
+        )
+
+        # Self-referencing schema should be returned with only parameter pruning applied
+        expected = {
+            "$defs": {
+                "Node": {
+                    "type": "object",
+                    "properties": {
+                        "value": {"type": "string"},
+                        "child": {"$ref": "#/$defs/Node"},
+                    },
+                }
+            },
+            "properties": {
+                "tree": {"$ref": "#/$defs/Node"}  # Should remain as reference
+            },
+            "required": ["tree"],
+        }
+        assert result == expected
+
+    def test_compress_schema_multiple_operations(self):
+        """Test compress_schema with multiple operations including flattening."""
+        schema = {
+            "type": "object",
+            "title": "TestSchema",
+            "additionalProperties": False,
+            "$defs": {
+                "Status": {"enum": ["active", "inactive"], "type": "string"},
+                "UnusedType": {"type": "number"},  # Will be pruned
+            },
+            "properties": {
+                "name": {"type": "string", "title": "Name Field"},
+                "status": {"$ref": "#/$defs/Status", "title": "Status Field"},
+                "remove_me": {"type": "string"},  # Will be pruned
+            },
+            "required": ["name", "status", "remove_me"],
+        }
+
+        result = compress_schema(
+            schema,
+            prune_params=["remove_me"],
+            prune_defs=True,
+            prune_additional_properties=True,
+            prune_titles=True,
+            dereference_refs=True,
+        )
+
+        expected = {
+            "type": "object",
+            "$defs": {
+                "Status": {"enum": ["active", "inactive"], "type": "string"}
+                # UnusedType should be removed by prune_defs
+            },
+            "properties": {
+                "name": {"type": "string"},  # Title removed
+                "status": {
+                    "enum": ["active", "inactive"],
+                    "type": "string",
+                },  # Flattened and title removed
+            },
+            "required": ["name", "status"],
+            # additionalProperties: false should be removed
+            # title should be removed
+        }
+        assert result == expected
+        assert "title" not in result
+        assert "additionalProperties" not in result
+        assert "UnusedType" not in result["$defs"]
+        assert "remove_me" not in result["properties"]
+
+    def test_deep_nesting_references(self):
+        """Test dereferencing with multiple levels of nested references."""
+        schema = {
+            "$defs": {
+                "Level3": {"type": "string", "enum": ["a", "b", "c"]},
+                "Level2": {
+                    "type": "object",
+                    "properties": {"level3": {"$ref": "#/$defs/Level3"}},
+                },
+                "Level1": {
+                    "type": "object",
+                    "properties": {"level2": {"$ref": "#/$defs/Level2"}},
+                },
+            },
+            "properties": {"root": {"$ref": "#/$defs/Level1"}},
+        }
+        result = dereference_json_schema(schema)
+
+        expected = {
+            "$defs": {
+                "Level3": {"type": "string", "enum": ["a", "b", "c"]},
+                "Level2": {
+                    "type": "object",
+                    "properties": {"level3": {"$ref": "#/$defs/Level3"}},
+                },
+                "Level1": {
+                    "type": "object",
+                    "properties": {"level2": {"$ref": "#/$defs/Level2"}},
+                },
+            },
+            "properties": {
+                "root": {
+                    "type": "object",
+                    "properties": {
+                        "level2": {
+                            "type": "object",
+                            "properties": {
+                                "level3": {"type": "string", "enum": ["a", "b", "c"]}
+                            },
+                        }
+                    },
+                }
+            },
+        }
+        assert result == expected
+        assert "$defs" in result
+
+    def test_mixed_refs_and_non_refs(self):
+        """Test schema with mix of references and direct definitions."""
+        schema = {
+            "$defs": {"Status": {"enum": ["active", "inactive"], "type": "string"}},
+            "properties": {
+                "id": {"type": "integer"},
+                "name": {"type": "string"},
+                "status": {"$ref": "#/$defs/Status"},
+                "metadata": {
+                    "type": "object",
+                    "properties": {
+                        "created": {"type": "string", "format": "date-time"}
+                    },
+                },
+            },
+        }
+        result = dereference_json_schema(schema)
+
+        expected = {
+            "$defs": {"Status": {"enum": ["active", "inactive"], "type": "string"}},
+            "properties": {
+                "id": {"type": "integer"},
+                "name": {"type": "string"},
+                "status": {"enum": ["active", "inactive"], "type": "string"},
+                "metadata": {
+                    "type": "object",
+                    "properties": {
+                        "created": {"type": "string", "format": "date-time"}
+                    },
+                },
+            },
+        }
+        assert result == expected
+        assert "$defs" in result
+
+    def test_reference_in_oneof(self):
+        """Test dereferencing references within oneOf constructs."""
+        schema = {
+            "$defs": {
+                "Dog": {"type": "object", "properties": {"breed": {"type": "string"}}},
+                "Cat": {"type": "object", "properties": {"color": {"type": "string"}}},
+            },
+            "properties": {
+                "pet": {"oneOf": [{"$ref": "#/$defs/Dog"}, {"$ref": "#/$defs/Cat"}]}
+            },
+        }
+        result = dereference_json_schema(schema)
+
+        expected = {
+            "$defs": {
+                "Dog": {"type": "object", "properties": {"breed": {"type": "string"}}},
+                "Cat": {"type": "object", "properties": {"color": {"type": "string"}}},
+            },
+            "properties": {
+                "pet": {
+                    "oneOf": [
+                        {"type": "object", "properties": {"breed": {"type": "string"}}},
+                        {"type": "object", "properties": {"color": {"type": "string"}}},
+                    ]
+                }
+            },
+        }
+        assert result == expected
+
+    def test_reference_in_allof(self):
+        """Test dereferencing references within allOf constructs."""
+        schema = {
+            "$defs": {
+                "Base": {"type": "object", "properties": {"id": {"type": "integer"}}},
+                "Extended": {
+                    "type": "object",
+                    "properties": {"name": {"type": "string"}},
+                },
+            },
+            "properties": {
+                "item": {
+                    "allOf": [{"$ref": "#/$defs/Base"}, {"$ref": "#/$defs/Extended"}]
+                }
+            },
+        }
+        result = dereference_json_schema(schema)
+
+        expected = {
+            "$defs": {
+                "Base": {"type": "object", "properties": {"id": {"type": "integer"}}},
+                "Extended": {
+                    "type": "object",
+                    "properties": {"name": {"type": "string"}},
+                },
+            },
+            "properties": {
+                "item": {
+                    "allOf": [
+                        {"type": "object", "properties": {"id": {"type": "integer"}}},
+                        {"type": "object", "properties": {"name": {"type": "string"}}},
+                    ]
+                }
+            },
+        }
+        assert result == expected
+
+    def test_property_override_precedence(self):
+        """Test that properties in referring object take precedence over referenced ones."""
+        schema = {
+            "$defs": {
+                "BaseType": {
+                    "type": "string",
+                    "title": "Base Title",
+                    "description": "Base description",
+                }
+            },
+            "properties": {
+                "field": {
+                    "$ref": "#/$defs/BaseType",
+                    "title": "Override Title",  # This should override the base title
+                    "default": "default_value",  # This should be added
+                }
+            },
+        }
+        result = dereference_json_schema(schema)
+
+        expected = {
+            "$defs": {
+                "BaseType": {
+                    "type": "string",
+                    "title": "Base Title",
+                    "description": "Base description",
+                }
+            },
+            "properties": {
+                "field": {
+                    "title": "Override Title",  # Should keep the override
+                    "default": "default_value",  # Should keep the additional property
+                    "type": "string",  # Should get from base
+                    "description": "Base description",  # Should get from base
+                }
+            },
+        }
+        assert result == expected
+
+    def test_conditional_schemas_with_refs(self):
+        """Test dereferencing with if/then/else containing references."""
+        schema = {
+            "$defs": {
+                "StringType": {"type": "string"},
+                "NumberType": {"type": "number"},
+                "NamePattern": {"pattern": "^[A-Za-z]+$"},
+            },
+            "if": {"$ref": "#/$defs/StringType"},
+            "then": {"$ref": "#/$defs/NamePattern"},
+            "else": {"$ref": "#/$defs/NumberType"},
+        }
+        result = dereference_json_schema(schema)
+
+        expected = {
+            "$defs": {
+                "StringType": {"type": "string"},
+                "NumberType": {"type": "number"},
+                "NamePattern": {"pattern": "^[A-Za-z]+$"},
+            },
+            "if": {"type": "string"},
+            "then": {"pattern": "^[A-Za-z]+$"},
+            "else": {"type": "number"},
+        }
+        assert result == expected
+        assert "$defs" in result
+
+    def test_pattern_properties_with_refs(self):
+        """Test dereferencing references within patternProperties."""
+        schema = {
+            "$defs": {
+                "EmailType": {"type": "string", "format": "email"},
+                "PhoneType": {"type": "string", "pattern": "^\\+?[1-9]\\d{1,14}$"},
+            },
+            "type": "object",
+            "patternProperties": {
+                "^email": {"$ref": "#/$defs/EmailType"},
+                "^phone": {"$ref": "#/$defs/PhoneType"},
+            },
+        }
+        result = dereference_json_schema(schema)
+
+        expected = {
+            "$defs": {
+                "EmailType": {"type": "string", "format": "email"},
+                "PhoneType": {"type": "string", "pattern": "^\\+?[1-9]\\d{1,14}$"},
+            },
+            "type": "object",
+            "patternProperties": {
+                "^email": {"type": "string", "format": "email"},
+                "^phone": {"type": "string", "pattern": "^\\+?[1-9]\\d{1,14}$"},
+            },
+        }
+        assert result == expected
+
+    def test_additional_properties_with_refs(self):
+        """Test dereferencing references in additionalProperties."""
+        schema = {
+            "$defs": {
+                "FlexibleValue": {
+                    "oneOf": [
+                        {"type": "string"},
+                        {"type": "number"},
+                        {"type": "boolean"},
+                    ]
+                }
+            },
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+            "additionalProperties": {"$ref": "#/$defs/FlexibleValue"},
+        }
+        result = dereference_json_schema(schema)
+
+        expected = {
+            "$defs": {
+                "FlexibleValue": {
+                    "oneOf": [
+                        {"type": "string"},
+                        {"type": "number"},
+                        {"type": "boolean"},
+                    ]
+                }
+            },
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+            "additionalProperties": {
+                "oneOf": [{"type": "string"}, {"type": "number"}, {"type": "boolean"}]
+            },
+        }
+        assert result == expected
+
+    def test_very_deep_reference_chain(self):
+        """Test dereferencing a very deep chain of references."""
+        schema = {
+            "$defs": {
+                "Level1": {"$ref": "#/$defs/Level2"},
+                "Level2": {"$ref": "#/$defs/Level3"},
+                "Level3": {"$ref": "#/$defs/Level4"},
+                "Level4": {"$ref": "#/$defs/Level5"},
+                "Level5": {"type": "string", "maxLength": 100},
+            },
+            "properties": {"deep_field": {"$ref": "#/$defs/Level1"}},
+        }
+        result = dereference_json_schema(schema)
+
+        expected = {
+            "$defs": {
+                "Level1": {"$ref": "#/$defs/Level2"},
+                "Level2": {"$ref": "#/$defs/Level3"},
+                "Level3": {"$ref": "#/$defs/Level4"},
+                "Level4": {"$ref": "#/$defs/Level5"},
+                "Level5": {"type": "string", "maxLength": 100},
+            },
+            "properties": {"deep_field": {"type": "string", "maxLength": 100}},
+        }
+        assert result == expected
+
+    def test_refs_with_additional_keywords_complex(self):
+        """Test references combined with many additional keywords."""
+        schema = {
+            "$defs": {"BaseString": {"type": "string", "minLength": 1}},
+            "properties": {
+                "complex_field": {
+                    "$ref": "#/$defs/BaseString",
+                    "title": "Complex Field",
+                    "description": "A field with many constraints",
+                    "default": "default_value",
+                    "examples": ["example1", "example2"],
+                    "maxLength": 50,
+                    "pattern": "^[a-zA-Z0-9]+$",
+                    "format": "alphanumeric",
+                }
+            },
+        }
+        result = dereference_json_schema(schema)
+
+        expected = {
+            "$defs": {"BaseString": {"type": "string", "minLength": 1}},
+            "properties": {
+                "complex_field": {
+                    "title": "Complex Field",
+                    "description": "A field with many constraints",
+                    "default": "default_value",
+                    "examples": ["example1", "example2"],
+                    "maxLength": 50,
+                    "pattern": "^[a-zA-Z0-9]+$",
+                    "format": "alphanumeric",
+                    "type": "string",  # From the referenced schema
+                    "minLength": 1,  # From the referenced schema
+                }
+            },
+        }
+        assert result == expected
+
+    def test_refs_in_complex_compositions(self):
+        """Test references in complex schema compositions."""
+        schema = {
+            "$defs": {
+                "Animal": {
+                    "type": "object",
+                    "properties": {"name": {"type": "string"}},
+                },
+                "Dog": {
+                    "type": "object",
+                    "properties": {
+                        "breed": {"type": "string"},
+                        "isGoodBoy": {"type": "boolean", "default": True},
+                    },
+                },
+                "Cat": {
+                    "type": "object",
+                    "properties": {
+                        "livesLeft": {"type": "integer", "minimum": 1, "maximum": 9}
+                    },
+                },
+            },
+            "properties": {
+                "pet": {
+                    "allOf": [
+                        {"$ref": "#/$defs/Animal"},
+                        {"anyOf": [{"$ref": "#/$defs/Dog"}, {"$ref": "#/$defs/Cat"}]},
+                    ]
+                }
+            },
+        }
+        result = dereference_json_schema(schema)
+
+        expected = {
+            "$defs": {
+                "Animal": {
+                    "type": "object",
+                    "properties": {"name": {"type": "string"}},
+                },
+                "Dog": {
+                    "type": "object",
+                    "properties": {
+                        "breed": {"type": "string"},
+                        "isGoodBoy": {"type": "boolean", "default": True},
+                    },
+                },
+                "Cat": {
+                    "type": "object",
+                    "properties": {
+                        "livesLeft": {"type": "integer", "minimum": 1, "maximum": 9}
+                    },
+                },
+            },
+            "properties": {
+                "pet": {
+                    "allOf": [
+                        {"type": "object", "properties": {"name": {"type": "string"}}},
+                        {
+                            "anyOf": [
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "breed": {"type": "string"},
+                                        "isGoodBoy": {
+                                            "type": "boolean",
+                                            "default": True,
+                                        },
+                                    },
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "livesLeft": {
+                                            "type": "integer",
+                                            "minimum": 1,
+                                            "maximum": 9,
+                                        }
+                                    },
+                                },
+                            ]
+                        },
+                    ]
+                }
+            },
+        }
+        assert result == expected

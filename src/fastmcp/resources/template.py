@@ -15,6 +15,7 @@ from pydantic import (
     validate_call,
 )
 
+import fastmcp
 from fastmcp.resources.resource import Resource
 from fastmcp.server.dependencies import get_context
 from fastmcp.utilities.components import FastMCPComponent
@@ -274,7 +275,11 @@ class FunctionResourceTemplate(ResourceTemplate):
 
         # compress the schema
         prune_params = [context_kwarg] if context_kwarg else None
-        parameters = compress_schema(parameters, prune_params=prune_params)
+        parameters = compress_schema(
+            parameters,
+            prune_params=prune_params,
+            dereference_refs=fastmcp.settings.dereference_json_schemas,
+        )
 
         # ensure the arguments are properly cast
         fn = validate_call(fn)

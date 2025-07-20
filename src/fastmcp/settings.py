@@ -212,6 +212,26 @@ class Settings(BaseSettings):
         ),
     ] = "path"
 
+    dereference_json_schemas: Annotated[
+        bool,
+        Field(
+            default=False,
+            description=inspect.cleandoc(
+                """
+                If True, all JSON schemas generated for tools, prompts, and resources will have
+                their $refs resolved in properties while preserving the original $defs section.
+                This fixes compatibility issues with clients like Claude Desktop that fail to properly
+                handle $ref references, sending null values instead of valid enum parameters.
+                
+                When enabled, schemas with references like {"$ref": "#/$defs/EnumName"} in properties
+                will be expanded to include the full definition inline, while keeping the $defs section
+                intact for reference. This prevents parameter validation errors and ensures clients
+                can properly generate forms and send valid parameter values.
+                """
+            ),
+        ),
+    ] = False
+
     client_init_timeout: Annotated[
         float | None,
         Field(

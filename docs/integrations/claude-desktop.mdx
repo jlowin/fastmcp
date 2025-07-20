@@ -48,6 +48,79 @@ if __name__ == "__main__":
     mcp.run()
 ```
 
+## Claude Desktop Compatibility
+
+<Warning>
+Claude Desktop fails to properly handle JSON schemas that contain `$ref` references, sending null values instead of valid parameter values. This commonly occurs with complex FastMCP servers that use nested Pydantic models, enums, or advanced type annotations, causing parameter validation errors.
+</Warning>
+
+### Schema Compatibility Issues
+
+When FastMCP generates JSON schemas for complex Python types, it creates `$defs` sections with `$ref` references for reusable components:
+
+```json Problematic Schema (causes null parameters)
+{
+  "$defs": {
+    "TestColor": {"enum": ["red", "green", "blue"], title: "TestColor", "type": "string"}
+  },
+  "properties": {
+    "color": {"$ref": "#/$defs/TestColor"}
+  }
+}
+```
+
+**Result**: Claude Desktop sends null values instead of valid enum options:
+```json
+{
+  "color": null  // ❌ Should be "red", "green", or "blue"
+}
+```
+
+### Solution: Schema Dereferencing
+
+FastMCP provides automatic schema dereferencing that resolves `$ref` references in properties while preserving the original `$defs` section:
+
+```json Compatible Schema (works with Claude Desktop)
+{
+  "$defs": {
+    "TestColor": {"enum": ["red", "green", "blue"], title: "TestColor", "type": "string"}
+  },
+  "properties": {
+    "color": {"enum": ["red", "green", "blue"], title: "TestColor", "type": "string"}
+  }
+}
+```
+
+**Result**: Claude Desktop now sends proper parameter values:
+```json
+{
+  "color": "red"        // ✅ Valid enum value
+}
+```
+
+### Enabling Dereferencing
+
+<Tabs>
+<Tab title="Programmatic">
+Enable dereferencing in your server code:
+
+```python server.py {3,4}
+from fastmcp import FastMCP
+from fastmcp.settings import settings
+
+settings.dereference_json_schemas = True
+
+mcp = FastMCP(name="Compatible Test")
+
+# Your tools with complex types will now be Claude Desktop compatible
+@mcp.tool
+def test_enum(color: TestColor) -> dict:
+    """Process a complex task - schema will be automatically dereferenced."""
+    return {"status": "success", "color": color.value}
+```
+</Tab>
+</Tabs>
+
 ## Install the Server
 
 ### FastMCP CLI
