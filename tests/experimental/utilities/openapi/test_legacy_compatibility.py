@@ -2,16 +2,18 @@
 
 import pytest
 
-from fastmcp.utilities.openapi import HTTPRoute as LegacyHTTPRoute
-from fastmcp.utilities.openapi import ParameterInfo as LegacyParameterInfo
-from fastmcp.utilities.openapi import RequestBodyInfo as LegacyRequestBodyInfo
-from fastmcp.utilities.openapi import _combine_schemas as legacy_combine_schemas
-from fastmcp.utilities.openapi_new.models import (
+from fastmcp.experimental.utilities.openapi.models import (
     HTTPRoute,
     ParameterInfo,
     RequestBodyInfo,
 )
-from fastmcp.utilities.openapi_new.schemas import _combine_schemas_and_map_params
+from fastmcp.experimental.utilities.openapi.schemas import (
+    _combine_schemas_and_map_params,
+)
+from fastmcp.utilities.openapi import HTTPRoute as LegacyHTTPRoute
+from fastmcp.utilities.openapi import ParameterInfo as LegacyParameterInfo
+from fastmcp.utilities.openapi import RequestBodyInfo as LegacyRequestBodyInfo
+from fastmcp.utilities.openapi import _combine_schemas as legacy_combine_schemas
 
 
 class TestLegacyCompatibility:

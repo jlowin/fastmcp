@@ -16,10 +16,9 @@ if TYPE_CHECKING:
         OpenAPIResourceTemplate,
         OpenAPITool,
     )
-from fastmcp.utilities.logging import get_logger
-
 # Import from our new utilities
-from fastmcp.utilities.openapi_new import HttpMethod, HTTPRoute
+from fastmcp.experimental.utilities.openapi import HttpMethod, HTTPRoute
+from fastmcp.utilities.logging import get_logger
 
 logger = get_logger(__name__)
 

@@ -3,13 +3,13 @@
 import pytest
 from openapi_core import Spec
 
-from fastmcp.utilities.openapi_new.director import RequestDirector
-from fastmcp.utilities.openapi_new.models import (
+from fastmcp.experimental.utilities.openapi.director import RequestDirector
+from fastmcp.experimental.utilities.openapi.models import (
     HTTPRoute,
     ParameterInfo,
     RequestBodyInfo,
 )
-from fastmcp.utilities.openapi_new.parser import parse_openapi_to_http_routes
+from fastmcp.experimental.utilities.openapi.parser import parse_openapi_to_http_routes
 
 
 class TestRequestDirector:

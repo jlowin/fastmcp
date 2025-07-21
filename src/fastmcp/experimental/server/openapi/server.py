@@ -7,17 +7,16 @@ from typing import Any, Literal
 import httpx
 from openapi_core import Spec
 
-from fastmcp.server.server import FastMCP
-from fastmcp.utilities.logging import get_logger
-
 # Import from our new utilities and components
-from fastmcp.utilities.openapi_new import (
+from fastmcp.experimental.utilities.openapi import (
     HTTPRoute,
     extract_output_schema_from_responses,
     format_description_with_responses,
     parse_openapi_to_http_routes,
 )
-from fastmcp.utilities.openapi_new.director import RequestDirector
+from fastmcp.experimental.utilities.openapi.director import RequestDirector
+from fastmcp.server.server import FastMCP
+from fastmcp.utilities.logging import get_logger
 
 from .components import (
     OpenAPIResource,

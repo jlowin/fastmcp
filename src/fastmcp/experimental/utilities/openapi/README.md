@@ -124,7 +124,7 @@ async with httpx.AsyncClient() as client:
 ### Direct RequestDirector Usage
 
 ```python
-from fastmcp.utilities.openapi_new.director import RequestDirector
+from fastmcp.experimental.utilities.openapi.director import RequestDirector
 from openapi_core import Spec
 
 # Create RequestDirector manually

@@ -2,12 +2,12 @@
 
 import pytest
 
-from fastmcp.utilities.openapi_new.models import (
+from fastmcp.experimental.utilities.openapi.models import (
     HTTPRoute,
     ParameterInfo,
     RequestBodyInfo,
 )
-from fastmcp.utilities.openapi_new.schemas import (
+from fastmcp.experimental.utilities.openapi.schemas import (
     _combine_schemas,
     _combine_schemas_and_map_params,
     _replace_ref_with_defs,

@@ -2,7 +2,7 @@
 
 import pytest
 
-from fastmcp.utilities.openapi_new.parser import parse_openapi_to_http_routes
+from fastmcp.experimental.utilities.openapi.parser import parse_openapi_to_http_routes
 
 
 class TestOpenAPIParser:

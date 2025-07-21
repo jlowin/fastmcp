@@ -9,14 +9,13 @@ import httpx
 from mcp.types import ToolAnnotations
 from pydantic.networks import AnyUrl
 
+# Import from our new utilities
+from fastmcp.experimental.utilities.openapi import HTTPRoute
+from fastmcp.experimental.utilities.openapi.director import RequestDirector
 from fastmcp.resources import Resource, ResourceTemplate
 from fastmcp.server.dependencies import get_http_headers
 from fastmcp.tools.tool import Tool, ToolResult
 from fastmcp.utilities.logging import get_logger
-
-# Import from our new utilities
-from fastmcp.utilities.openapi_new import HTTPRoute
-from fastmcp.utilities.openapi_new.director import RequestDirector
 
 if TYPE_CHECKING:
     from fastmcp.server import Context
