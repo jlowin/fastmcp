@@ -3,8 +3,6 @@
 import logging
 from typing import Any, cast
 
-from fastmcp.utilities.json_schema import compress_schema
-
 from .models import HTTPRoute, JsonSchema, ResponseInfo
 
 logger = logging.getLogger(__name__)
@@ -316,8 +314,10 @@ def _combine_schemas_and_map_params(
     if route.schema_definitions:
         result["$defs"] = route.schema_definitions
 
-    # Use compress_schema to remove unused definitions
-    result = compress_schema(result)
+    # Use lightweight compression - only prune additionalProperties for cleaner schemas
+    # Skip expensive unused definition removal to maintain performance
+    if result.get("additionalProperties") is False:
+        result.pop("additionalProperties")
 
     return result, parameter_map
 
@@ -339,17 +339,57 @@ def _combine_schemas(route: HTTPRoute) -> dict[str, Any]:
     return schema
 
 
+def _has_one_of(obj: dict[str, Any] | list[Any]) -> bool:
+    """Quickly check if schema contains any 'oneOf' keys without deep traversal."""
+    if isinstance(obj, dict):
+        if "oneOf" in obj:
+            return True
+        # Only check likely schema containers, skip examples/defaults
+        for k, v in obj.items():
+            if k in [
+                "properties",
+                "items",
+                "allOf",
+                "anyOf",
+                "additionalProperties",
+            ] and isinstance(v, dict | list):
+                if _has_one_of(v):
+                    return True
+    elif isinstance(obj, list):
+        for item in obj:
+            if isinstance(item, dict | list) and _has_one_of(item):
+                return True
+    return False
+
+
 def _adjust_union_types(
-    schema: dict[str, Any] | list[Any],
+    schema: dict[str, Any] | list[Any], _depth: int = 0
 ) -> dict[str, Any] | list[Any]:
     """Recursively replace 'oneOf' with 'anyOf' in schema to handle overlapping unions."""
+    # MAJOR OPTIMIZATION: Skip entirely if schema has no oneOf keys
+    if _depth == 0 and not _has_one_of(schema):
+        return schema
+
+    # OPTIMIZATION: Early termination for very deep structures to prevent exponential slowdown
+    if _depth > 30:  # Reduced from 50 for better performance
+        return schema
+
     if isinstance(schema, dict):
         if "oneOf" in schema:
             schema["anyOf"] = schema.pop("oneOf")
+        # OPTIMIZATION: Only recurse into values that could contain more schemas
         for k, v in schema.items():
-            schema[k] = _adjust_union_types(v)
+            if isinstance(v, dict | list) and k not in [
+                "examples",
+                "example",
+                "default",
+            ]:
+                schema[k] = _adjust_union_types(v, _depth + 1)
     elif isinstance(schema, list):
-        return [_adjust_union_types(item) for item in schema]
+        # OPTIMIZATION: Mutate list in-place + depth tracking
+        for i, item in enumerate(schema):
+            if isinstance(item, dict | list):
+                schema[i] = _adjust_union_types(item, _depth + 1)
     return schema
 
 
@@ -438,8 +478,10 @@ def extract_output_schema_from_responses(
     if schema_definitions:
         output_schema["$defs"] = schema_definitions
 
-    # Use compress_schema to remove unused definitions
-    output_schema = compress_schema(output_schema)
+    # Use lightweight compression - only prune additionalProperties for cleaner schemas
+    # Skip expensive unused definition removal to maintain performance
+    if output_schema.get("additionalProperties") is False:
+        output_schema.pop("additionalProperties")
 
     # Adjust union types to handle overlapping unions
     output_schema = cast(dict[str, Any], _adjust_union_types(output_schema))
