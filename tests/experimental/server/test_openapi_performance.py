@@ -22,19 +22,21 @@ def use_new_openapi_parser():
 class TestOpenAPIPerformance:
     """Performance tests for OpenAPI parsing with real-world large schemas."""
 
-    # ten second maximum timeout for this test no matter what
-    @pytest.mark.timeout(10)
+    # 20 second maximum timeout for this test no matter what
+    @pytest.mark.timeout(20)
     async def test_github_api_schema_performance(self):
         """
-        Test that GitHub's full API schema parses within 3 seconds.
+        Test that GitHub's full API schema parses quickly.
 
         This is a regression test to ensure our performance optimizations
         (eliminating deepcopy, single-pass optimization, smart union adjustment)
         continue to work. Without these optimizations, this test would take
         multiple minutes to parse.
 
-        The 3-second limit provides a safety margin above our typical ~1.6s performance
-        while still catching major regressions.
+        On a local machine, this tests passes in ~2 seconds, but in GHA CI we see
+        times as high as 6-7 seconds, so the test is asserted to pass in under
+        10. Given that, this isn't intended to be a strict performance test, but
+        rather a canary to ensure we don't regress significantly.
         """
 
         # Download the full GitHub API schema (typically ~10MB)
@@ -53,15 +55,15 @@ class TestOpenAPIPerformance:
 
         elapsed_time = time.time() - start_time
 
+        print(f"OpenAPI parsing took {elapsed_time:.2f}s")
+
         # Verify the server was created successfully
         assert mcp_server is not None
 
-        # Performance regression test: should complete in under 3 seconds
-        # (Our typical performance is ~1.6s, but allow extra margin for CI/logging overhead)
-        assert elapsed_time < 3.0, (
-            f"OpenAPI parsing took {elapsed_time:.2f}s, exceeding 3s limit. "
-            f"This suggests a performance regression. Before optimization this "
-            f"took multiple minutes, after optimization it should be ~1.6s."
+        # Performance regression test: should complete in under 10 seconds
+        assert elapsed_time < 10.0, (
+            f"OpenAPI parsing took {elapsed_time:.2f}s, exceeding 10s limit. "
+            f"This suggests a performance regression."
         )
 
         # Verify server and tools were created successfully
