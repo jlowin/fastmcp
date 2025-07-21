@@ -60,6 +60,9 @@ dev = [
     "pytest-xdist>=3.6.1",
     "ruff",
 ]
+openai = [
+    "openai>=1.95.1",
+]
 
 [project.scripts]
 fastmcp = "fastmcp.cli:app"
