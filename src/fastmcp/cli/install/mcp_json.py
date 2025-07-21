@@ -16,7 +16,7 @@ from .shared import process_common_args
 logger = get_logger(__name__)
 
 
-def install_mcp_config(
+def install_mcp_json(
     file: Path,
     server_object: str | None,
     name: str,
@@ -25,6 +25,9 @@ def install_mcp_config(
     with_packages: list[str] | None = None,
     env_vars: dict[str, str] | None = None,
     copy: bool = False,
+    python_version: str | None = None,
+    with_requirements: Path | None = None,
+    project: Path | None = None,
 ) -> bool:
     """Generate MCP configuration JSON for manual installation.
 
@@ -36,6 +39,9 @@ def install_mcp_config(
         with_packages: Optional list of additional packages to install
         env_vars: Optional dictionary of environment variables
         copy: If True, copy to clipboard instead of printing to stdout
+        python_version: Optional Python version to use
+        with_requirements: Optional requirements file to install from
+        project: Optional project directory to run within
 
     Returns:
         True if generation was successful, False otherwise
@@ -43,6 +49,14 @@ def install_mcp_config(
     try:
         # Build uv run command
         args = ["run"]
+
+        # Add Python version if specified
+        if python_version:
+            args.extend(["--python", python_version])
+
+        # Add project if specified
+        if project:
+            args.extend(["--project", str(project)])
 
         # Collect all packages in a set to deduplicate
         packages = {"fastmcp"}
@@ -56,6 +70,9 @@ def install_mcp_config(
         if with_editable:
             args.extend(["--with-editable", str(with_editable)])
 
+        if with_requirements:
+            args.extend(["--with-requirements", str(with_requirements)])
+
         # Build server spec from parsed components
         if server_object:
             server_spec = f"{file.resolve()}:{server_object}"
@@ -65,15 +82,18 @@ def install_mcp_config(
         # Add fastmcp run command
         args.extend(["fastmcp", "run", server_spec])
 
-        # Build MCP server configuration (just the server object, not the wrapper)
-        config = {
+        # Build MCP server configuration
+        server_config = {
             "command": "uv",
             "args": args,
         }
 
         # Add environment variables if provided
         if env_vars:
-            config["env"] = env_vars
+            server_config["env"] = env_vars
+
+        # Wrap with server name as root key
+        config = {name: server_config}
 
         # Convert to JSON
         json_output = json.dumps(config, indent=2)
@@ -93,13 +113,13 @@ def install_mcp_config(
         return False
 
 
-def mcp_config_command(
+def mcp_json_command(
     server_spec: str,
     *,
     server_name: Annotated[
         str | None,
         cyclopts.Parameter(
-            name=["--server-name", "-n"],
+            name=["--name", "-n"],
             help="Custom name for the server in MCP config",
         ),
     ] = None,
@@ -141,6 +161,27 @@ def mcp_config_command(
             negative=False,
         ),
     ] = False,
+    python: Annotated[
+        str | None,
+        cyclopts.Parameter(
+            "--python",
+            help="Python version to use (e.g., 3.10, 3.11)",
+        ),
+    ] = None,
+    with_requirements: Annotated[
+        Path | None,
+        cyclopts.Parameter(
+            "--with-requirements",
+            help="Requirements file to install dependencies from",
+        ),
+    ] = None,
+    project: Annotated[
+        Path | None,
+        cyclopts.Parameter(
+            "--project",
+            help="Run the command within the given project directory",
+        ),
+    ] = None,
 ) -> None:
     """Generate MCP configuration JSON for manual installation.
 
@@ -151,7 +192,7 @@ def mcp_config_command(
         server_spec, server_name, with_packages, env_vars, env_file
     )
 
-    success = install_mcp_config(
+    success = install_mcp_json(
         file=file,
         server_object=server_object,
         name=name,
@@ -159,6 +200,9 @@ def mcp_config_command(
         with_packages=packages,
         env_vars=env_dict,
         copy=copy,
+        python_version=python,
+        with_requirements=with_requirements,
+        project=project,
     )
 
     if not success:
