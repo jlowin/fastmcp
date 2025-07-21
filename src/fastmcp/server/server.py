@@ -198,6 +198,8 @@ class FastMCP(Generic[LifespanResultT]):
             instructions=instructions,
             lifespan=_lifespan_wrapper(self, lifespan),
         )
+        # Set reference for middleware integration with initialization
+        self._mcp_server.fastmcp_server = self
 
         # if auth is `NotSet`, try to create a provider from the environment
         if auth is NotSet:
