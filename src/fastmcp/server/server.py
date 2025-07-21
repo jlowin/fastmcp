@@ -64,9 +64,13 @@ from fastmcp.tools.tool import FunctionTool, Tool, ToolResult
 from fastmcp.tools.tool_transform import ToolTransformConfig
 from fastmcp.utilities.cache import TimedCache
 from fastmcp.utilities.cli import log_server_banner
+from fastmcp.utilities.completions import LLMCompletionsProtocol, SamplingProtocol
 from fastmcp.utilities.components import FastMCPComponent
 from fastmcp.utilities.logging import get_logger
-from fastmcp.utilities.types import NotSet, NotSetT
+from fastmcp.utilities.types import (
+    NotSet,
+    NotSetT,
+)
 
 if TYPE_CHECKING:
     from fastmcp.client import Client
@@ -158,6 +162,8 @@ class FastMCP(Generic[LifespanResultT]):
         streamable_http_path: str | None = None,
         json_response: bool | None = None,
         stateless_http: bool | None = None,
+        llm_completions: LLMCompletionsProtocol | None = None,
+        sampling_fallback: SamplingProtocol | None = None,
     ):
         self.resource_prefix_format: Literal["protocol", "path"] = (
             resource_prefix_format or fastmcp.settings.resource_prefix_format
@@ -212,6 +218,9 @@ class FastMCP(Generic[LifespanResultT]):
         # Set up MCP protocol handlers
         self._setup_handlers()
         self.dependencies = dependencies or fastmcp.settings.server_dependencies
+
+        self.llm_completions = llm_completions
+        self.sampling_fallback = sampling_fallback
 
         # handle deprecated settings
         self._handle_deprecated_settings(

@@ -14,12 +14,14 @@ from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.lowlevel.server import request_ctx
 from mcp.shared.context import RequestContext
 from mcp.types import (
+    ClientCapabilities,
     ContentBlock,
     CreateMessageResult,
     IncludeContext,
     ModelHint,
     ModelPreferences,
     Root,
+    SamplingCapability,
     SamplingMessage,
     TextContent,
 )
@@ -36,8 +38,13 @@ from fastmcp.server.elicitation import (
     get_elicitation_schema,
 )
 from fastmcp.server.server import FastMCP
+from fastmcp.utilities.completions import (
+    LLMCompletionsProtocol,
+)
 from fastmcp.utilities.logging import get_logger
-from fastmcp.utilities.types import get_cached_typeadapter
+from fastmcp.utilities.types import (
+    get_cached_typeadapter,
+)
 
 logger = get_logger(__name__)
 
@@ -269,6 +276,12 @@ class Context:
         """Send a prompt list changed notification to the client."""
         await self.session.send_prompt_list_changed()
 
+    @property
+    def completions(self) -> LLMCompletionsProtocol:
+        if self.fastmcp.llm_completions is None:
+            raise ValueError("Server does not support completions")
+        return self.fastmcp.llm_completions
+
     async def sample(
         self,
         messages: str | list[str | SamplingMessage],
@@ -285,6 +298,16 @@ class Context:
         completion from the client. The client must be appropriately configured,
         or the request will error.
         """
+
+        if (
+            self.fastmcp.sampling_fallback is not None
+            and not self.session.check_client_capability(
+                capability=ClientCapabilities(sampling=SamplingCapability())
+            )
+        ):
+            return await self.fastmcp.sampling_fallback(
+                messages, system_prompt, temperature, max_tokens, model_preferences
+            )
 
         if max_tokens is None:
             max_tokens = 512
