@@ -473,3 +473,60 @@ class TestEdgeCases:
         assert (
             len(properties) > 0
         )  # Should have some properties from one of the content types
+
+    def test_oneof_reference_preserved(self):
+        """Test that schemas referenced in oneOf are preserved."""
+        from fastmcp.utilities.json_schema import compress_schema
+
+        schema = {
+            "type": "object",
+            "properties": {"data": {"oneOf": [{"$ref": "#/$defs/TestSchema"}]}},
+            "$defs": {
+                "TestSchema": {"type": "string"},
+                "UnusedSchema": {"type": "number"},
+            },
+        }
+
+        result = compress_schema(schema)
+
+        # TestSchema should be preserved (referenced in oneOf)
+        assert "TestSchema" in result["$defs"]
+
+        # UnusedSchema should be removed
+        assert "UnusedSchema" not in result["$defs"]
+
+    def test_anyof_reference_preserved(self):
+        """Test that schemas referenced in anyOf are preserved."""
+        from fastmcp.utilities.json_schema import compress_schema
+
+        schema = {
+            "type": "object",
+            "properties": {"data": {"anyOf": [{"$ref": "#/$defs/TestSchema"}]}},
+            "$defs": {
+                "TestSchema": {"type": "string"},
+                "UnusedSchema": {"type": "number"},
+            },
+        }
+
+        result = compress_schema(schema)
+
+        assert "TestSchema" in result["$defs"]
+        assert "UnusedSchema" not in result["$defs"]
+
+    def test_allof_reference_preserved(self):
+        """Test that schemas referenced in allOf are preserved."""
+        from fastmcp.utilities.json_schema import compress_schema
+
+        schema = {
+            "type": "object",
+            "properties": {"data": {"allOf": [{"$ref": "#/$defs/TestSchema"}]}},
+            "$defs": {
+                "TestSchema": {"type": "string"},
+                "UnusedSchema": {"type": "number"},
+            },
+        }
+
+        result = compress_schema(schema)
+
+        assert "TestSchema" in result["$defs"]
+        assert "UnusedSchema" not in result["$defs"]
