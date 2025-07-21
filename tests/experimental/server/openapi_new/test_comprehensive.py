@@ -8,7 +8,7 @@ import pytest
 from httpx import Response
 
 from fastmcp.client import Client
-from fastmcp.server.openapi_new import FastMCPOpenAPI
+from fastmcp.experimental.server.openapi import FastMCPOpenAPI
 
 
 class TestOpenAPIComprehensive:

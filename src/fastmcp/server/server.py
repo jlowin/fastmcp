@@ -71,13 +71,17 @@ from fastmcp.utilities.types import NotSet, NotSetT
 if TYPE_CHECKING:
     from fastmcp.client import Client
     from fastmcp.client.transports import ClientTransport, ClientTransportT
+    from fastmcp.experimental.server.openapi import FastMCPOpenAPI as FastMCPOpenAPINew
+    from fastmcp.experimental.server.openapi.routing import (
+        ComponentFn as OpenAPIComponentFnNew,
+    )
+    from fastmcp.experimental.server.openapi.routing import RouteMap as RouteMapNew
+    from fastmcp.experimental.server.openapi.routing import (
+        RouteMapFn as OpenAPIRouteMapFnNew,
+    )
     from fastmcp.server.openapi import ComponentFn as OpenAPIComponentFn
     from fastmcp.server.openapi import FastMCPOpenAPI, RouteMap
     from fastmcp.server.openapi import RouteMapFn as OpenAPIRouteMapFn
-    from fastmcp.server.openapi_new import FastMCPOpenAPI as FastMCPOpenAPINew
-    from fastmcp.server.openapi_new.routing import ComponentFn as OpenAPIComponentFnNew
-    from fastmcp.server.openapi_new.routing import RouteMap as RouteMapNew
-    from fastmcp.server.openapi_new.routing import RouteMapFn as OpenAPIRouteMapFnNew
     from fastmcp.server.proxy import FastMCPProxy
 logger = get_logger(__name__)
 
@@ -1886,8 +1890,9 @@ class FastMCP(Generic[LifespanResultT]):
         Create a FastMCP server from an OpenAPI specification.
         """
 
+        # Check if experimental parser is enabled
         if fastmcp.settings.experimental.enable_new_openapi_parser:
-            from .openapi_new import FastMCPOpenAPI
+            from fastmcp.experimental.server.openapi import FastMCPOpenAPI
 
             return FastMCPOpenAPI(
                 openapi_spec=openapi_spec,
@@ -1946,8 +1951,9 @@ class FastMCP(Generic[LifespanResultT]):
 
         name = name or app.title
 
+        # Check if experimental parser is enabled
         if fastmcp.settings.experimental.enable_new_openapi_parser:
-            from .openapi_new import FastMCPOpenAPI
+            from fastmcp.experimental.server.openapi import FastMCPOpenAPI
 
             return FastMCPOpenAPI(
                 openapi_spec=app.openapi(),

@@ -5,8 +5,8 @@ import time
 import httpx
 import pytest
 
+from fastmcp.experimental.server.openapi import FastMCPOpenAPI
 from fastmcp.server.openapi import FastMCPOpenAPI as LegacyFastMCPOpenAPI
-from fastmcp.server.openapi_new import FastMCPOpenAPI
 
 
 class TestPerformanceComparison:
