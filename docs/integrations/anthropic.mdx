@@ -24,7 +24,7 @@ from fastmcp import FastMCP
 
 mcp = FastMCP(name="Dice Roller")
 
-@mcp.tool
+@mcp.tool()
 def roll_dice(n_dice: int) -> list[int]:
     """Roll `n_dice` 6-sided dice and return the results."""
     return [random.randint(1, 6) for _ in range(n_dice)]
@@ -118,9 +118,9 @@ The MCP connector supports OAuth authentication through authorization tokens, wh
 
 ### Server Authentication
 
-The simplest way to add authentication to the server is to use a bearer token scheme. 
+The simplest way to add authentication to the server is to use a bearer token scheme.
 
-For this example, we'll quickly generate our own tokens with FastMCP's `RSAKeyPair` utility, but this may not be appropriate for production use. For more details, see the complete server-side [Bearer Auth](/servers/auth/bearer) documentation. 
+For this example, we'll quickly generate our own tokens with FastMCP's `RSAKeyPair` utility, but this may not be appropriate for production use. For more details, see the complete server-side [Bearer Auth](/servers/auth/bearer) documentation.
 
 We'll start by creating an RSA key pair to sign and verify tokens.
 
@@ -133,9 +133,9 @@ access_token = key_pair.create_token(audience="dice-server")
 
 <Warning>
 FastMCP's `RSAKeyPair` utility is for development and testing only.
-</Warning> 
+</Warning>
 
-Next, we'll create a `BearerAuthProvider` to authenticate the server. 
+Next, we'll create a `BearerAuthProvider` to authenticate the server.
 
 ```python
 from fastmcp import FastMCP
@@ -167,7 +167,7 @@ auth = BearerAuthProvider(
 
 mcp = FastMCP(name="Dice Roller", auth=auth)
 
-@mcp.tool
+@mcp.tool()
 def roll_dice(n_dice: int) -> list[int]:
     """Roll `n_dice` 6-sided dice and return the results."""
     return [random.randint(1, 6) for _ in range(n_dice)]
@@ -183,9 +183,9 @@ If you try to call the authenticated server with the same Anthropic code we wrot
 
 ```python
 Error code: 400 - {
-    "type": "error", 
+    "type": "error",
     "error": {
-        "type": "invalid_request_error", 
+        "type": "invalid_request_error",
         "message": "MCP server 'dice-server' requires authentication. Please provide an authorization_token.",
     },
 }

@@ -19,7 +19,7 @@ When testing or investigating FastMCP servers, **always prefer the in-memory tra
 # Create your FastMCP server
 mcp = FastMCP("TestServer")
 
-@mcp.tool
+@mcp.tool()
 def greet(name: str) -> str:
     return f"Hello, {name}!"
 

@@ -27,7 +27,7 @@ from fastmcp import FastMCP
 
 mcp = FastMCP(name="Dice Roller")
 
-@mcp.tool
+@mcp.tool()
 def roll_dice(n_dice: int) -> list[int]:
     """Roll `n_dice` 6-sided dice and return the results."""
     return [random.randint(1, 6) for _ in range(n_dice)]
@@ -165,9 +165,9 @@ Try asking Claude something like:
 Claude will automatically detect your `roll_dice` tool and use it to fulfill your request, returning something like:
 
 > I'll roll some dice for you! Here are your results: [4, 2, 6]
-> 
+>
 > You rolled three dice and got a 4, a 2, and a 6!
 
-Claude Code can now access all the tools, resources, and prompts you've defined in your FastMCP server. 
+Claude Code can now access all the tools, resources, and prompts you've defined in your FastMCP server.
 
 If your server provides resources, you can reference them with `@` mentions using the format `@server:protocol://resource/path`. If your server provides prompts, you can use them as slash commands with `/mcp__servername__promptname`.

@@ -9,7 +9,7 @@ If you haven't already installed FastMCP, follow the [installation instructions]
 
 ## Creating a FastMCP Server
 
-A FastMCP server is a collection of tools, resources, and other MCP components. To create a server, start by instantiating the `FastMCP` class. 
+A FastMCP server is a collection of tools, resources, and other MCP components. To create a server, start by instantiating the `FastMCP` class.
 
 Create a new file called `my_server.py` and add the following code:
 
@@ -25,14 +25,14 @@ That's it! You've created a FastMCP server, albeit a very boring one. Let's add 
 
 ## Adding a Tool
 
-To add a tool that returns a simple greeting, write a function and decorate it with `@mcp.tool` to register it with the server:
+To add a tool that returns a simple greeting, write a function and decorate it with `@mcp.tool()` to register it with the server:
 
 ```python my_server.py {5-7}
 from fastmcp import FastMCP
 
 mcp = FastMCP("My MCP Server")
 
-@mcp.tool
+@mcp.tool()
 def greet(name: str) -> str:
     return f"Hello, {name}!"
 ```
@@ -49,7 +49,7 @@ from fastmcp import FastMCP, Client
 
 mcp = FastMCP("My MCP Server")
 
-@mcp.tool
+@mcp.tool()
 def greet(name: str) -> str:
     return f"Hello, {name}!"
 
@@ -76,7 +76,7 @@ from fastmcp import FastMCP
 
 mcp = FastMCP("My MCP Server")
 
-@mcp.tool
+@mcp.tool()
 def greet(name: str) -> str:
     return f"Hello, {name}!"
 
@@ -94,7 +94,7 @@ Within the FastMCP ecosystem, this line may be unnecessary. However, including i
 
 ### Interacting with the Python server
 
-Now that the server can be executed with `python my_server.py`, we can interact with it like any other MCP server. 
+Now that the server can be executed with `python my_server.py`, we can interact with it like any other MCP server.
 
 In a new file, create a client and point it at the server file:
 

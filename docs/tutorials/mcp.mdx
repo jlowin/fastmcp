@@ -42,7 +42,7 @@ from fastmcp import FastMCP
 mcp = FastMCP()
 
 # This function is now an MCP tool named "get_weather"
-@mcp.tool
+@mcp.tool()
 def get_weather(city: str) -> dict:
     """Gets the current weather for a specific city."""
     # In a real app, this would call a weather API

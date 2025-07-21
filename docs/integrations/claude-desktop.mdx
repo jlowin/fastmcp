@@ -39,7 +39,7 @@ from fastmcp import FastMCP
 
 mcp = FastMCP(name="Dice Roller")
 
-@mcp.tool
+@mcp.tool()
 def roll_dice(n_dice: int) -> list[int]:
     """Roll `n_dice` 6-sided dice and return the results."""
     return [random.randint(1, 6) for _ in range(n_dice)]
@@ -189,7 +189,7 @@ When manually configuring dependencies, the recommended approach is to use `uv` 
         "run",
         "--with", "fastmcp",
         "--with", "pandas",
-        "--with", "requests", 
+        "--with", "requests",
         "fastmcp",
         "run",
         "path/to/your/server.py"
@@ -262,7 +262,7 @@ from fastmcp import FastMCP
 
 # Create a proxy to a remote server
 proxy = FastMCP.as_proxy(
-    "https://example.com/mcp/sse", 
+    "https://example.com/mcp/sse",
     name="Remote Server Proxy"
 )
 
@@ -290,4 +290,3 @@ proxy = FastMCP.as_proxy(client, name="Authenticated Proxy")
 if __name__ == "__main__":
     proxy.run()
 ```
-

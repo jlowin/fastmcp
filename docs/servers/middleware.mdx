@@ -549,7 +549,7 @@ mcp.add_middleware(RateLimitingMiddleware(max_requests_per_second=50))
 mcp.add_middleware(TimingMiddleware())  # Time actual execution
 mcp.add_middleware(LoggingMiddleware())  # Log everything
 
-@mcp.tool
+@mcp.tool()
 def my_tool(data: str) -> str:
     return f"Processed: {data}"
 ```

@@ -42,7 +42,7 @@ from fastmcp import FastMCP, Context
 
 mcp = FastMCP(name="Context Demo")
 
-@mcp.tool
+@mcp.tool()
 async def process_file(file_uri: str, ctx: Context) -> str:
     """Processes a file, using context for logging and resource access."""
     # Context is available as the ctx parameter
@@ -105,10 +105,10 @@ mcp = FastMCP(name="Dependency Demo")
 # Utility function that needs context but doesn't receive it as a parameter
 async def process_data(data: list[float]) -> dict:
     # Get the active context - only works when called within a request
-    ctx = get_context()    
+    ctx = get_context()
     await ctx.info(f"Processing {len(data)} data points")
-    
-@mcp.tool
+
+@mcp.tool()
 async def analyze_dataset(dataset_name: str) -> dict:
     # Call utility function that uses context internally
     data = load_data(dataset_name)
@@ -130,7 +130,7 @@ Send debug, info, warning, and error messages back to the MCP client for visibil
 
 ```python
 await ctx.debug("Starting analysis")
-await ctx.info(f"Processing {len(data)} items") 
+await ctx.info(f"Processing {len(data)} items")
 await ctx.warning("Deprecated parameter used")
 await ctx.error("Processing failed")
 ```
@@ -193,7 +193,7 @@ content = content_list[0].content
 FastMCP automatically sends list change notifications when components (such as tools, resources, or prompts) are added, removed, enabled, or disabled. In rare cases where you need to manually trigger these notifications, you can use the context methods:
 
 ```python
-@mcp.tool
+@mcp.tool()
 async def custom_tool_management(ctx: Context) -> str:
     """Example of manual notification after custom tool changes."""
     # After making custom changes to tools
@@ -210,7 +210,7 @@ These methods are primarily used internally by FastMCP's automatic notification 
 To access the underlying FastMCP server instance, you can use the `ctx.fastmcp` property:
 
 ```python
-@mcp.tool
+@mcp.tool()
 async def my_tool(ctx: Context) -> None:
     # Access the FastMCP server instance
     server_name = ctx.fastmcp.name
@@ -222,7 +222,7 @@ async def my_tool(ctx: Context) -> None:
 Access metadata about the current request and client.
 
 ```python
-@mcp.tool
+@mcp.tool()
 async def request_info(ctx: Context) -> dict:
     """Return information about the current request."""
     return {

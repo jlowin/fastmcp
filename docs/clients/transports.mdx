@@ -16,7 +16,7 @@ Think of transports as configurable adapters between your client code and MCP se
 ## Choosing the Right Transport
 
 - **Use [STDIO Transport](#stdio-transport)** when you need to run local MCP servers with full control over their environment and lifecycle
-- **Use [Remote Transports](#remote-transports)** when connecting to production services or shared MCP servers running independently  
+- **Use [Remote Transports](#remote-transports)** when connecting to production services or shared MCP servers running independently
 - **Use [In-Memory Transport](#in-memory-transport)** for testing FastMCP servers without subprocess or network overhead
 - **Use [MCP JSON Configuration](#mcp-json-configuration-transport)** when you need to connect to multiple servers defined in configuration files
 
@@ -110,8 +110,8 @@ from fastmcp.client.transports import StdioTransport
 
 required_vars = ["API_KEY", "DATABASE_URL", "REDIS_HOST"]
 env = {
-    var: os.environ[var] 
-    for var in required_vars 
+    var: os.environ[var]
+    for var in required_vars
     if var in os.environ
 }
 
@@ -156,7 +156,7 @@ client = Client(transport)
 async def efficient_multiple_operations():
     async with client:
         await client.ping()
-    
+
     async with client:  # Reuses the same subprocess
         await client.call_tool("process_data", {"file": "data.csv"})
 ```
@@ -179,7 +179,7 @@ Use `keep_alive=False` when you need complete isolation (e.g., in test suites) o
 FastMCP provides convenience transports that are thin wrappers around `StdioTransport` with pre-configured commands:
 
 - **`PythonStdioTransport`** - Uses `python` command for `.py` files
-- **`NodeStdioTransport`** - Uses `node` command for `.js` files  
+- **`NodeStdioTransport`** - Uses `node` command for `.js` files
 - **`UvxStdioTransport`** - Uses `uvx` for Python packages (uses `env_vars` parameter)
 - **`NpxStdioTransport`** - Uses `npx` for Node packages (uses `env_vars` parameter)
 
@@ -233,7 +233,7 @@ client = Client(
 
 Server-Sent Events transport is maintained for backward compatibility but is superseded by Streamable HTTP for new deployments.
 
-- **Class:** `SSETransport`  
+- **Class:** `SSETransport`
 - **Server compatibility:** FastMCP servers running with `mcp run --transport sse`
 
 SSE transport supports the same configuration options as Streamable HTTP:
@@ -266,7 +266,7 @@ import os
 
 mcp = FastMCP("TestServer")
 
-@mcp.tool
+@mcp.tool()
 def greet(name: str) -> str:
     prefix = os.environ.get("GREETING_PREFIX", "Hello")
     return f"{prefix}, {name}!"

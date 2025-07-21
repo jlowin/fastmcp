@@ -153,7 +153,7 @@ from fastmcp import FastMCP
 mcp = FastMCP.from_fastapi(app=app)
 
 # Add a new tool
-@mcp.tool
+@mcp.tool()
 def get_product(product_id: int) -> ProductResponse:
     """Get a product by ID."""
     return products_db[product_id]
@@ -185,7 +185,7 @@ async def demo():
         # List available tools
         tools = await client.list_tools()
         print(f"Available tools: {[t.name for t in tools]}")
-        
+
         # Create a product
         result = await client.call_tool(
             "create_product_products_post",
@@ -197,7 +197,7 @@ async def demo():
             }
         )
         print(f"Created product: {result.data}")
-        
+
         # List electronics under $100
         result = await client.call_tool(
             "list_products_products_get",
@@ -224,14 +224,14 @@ mcp = FastMCP.from_fastapi(
     route_maps=[
         # GET with path params → ResourceTemplates
         RouteMap(
-            methods=["GET"], 
-            pattern=r".*\{.*\}.*", 
+            methods=["GET"],
+            pattern=r".*\{.*\}.*",
             mcp_type=MCPType.RESOURCE_TEMPLATE
         ),
         # Other GETs → Resources
         RouteMap(
-            methods=["GET"], 
-            pattern=r".*", 
+            methods=["GET"],
+            pattern=r".*",
             mcp_type=MCPType.RESOURCE
         ),
         # POST/PUT/DELETE → Tools (default)
@@ -303,13 +303,13 @@ from fastapi import FastAPI
 # Create MCP server
 mcp = FastMCP("Analytics Tools")
 
-@mcp.tool
+@mcp.tool()
 def analyze_pricing(category: str) -> dict:
     """Analyze pricing for a category."""
     products = [p for p in products_db.values() if p.category == category]
     if not products:
         return {"error": f"No products in {category}"}
-    
+
     prices = [p.price for p in products]
     return {
         "category": category,

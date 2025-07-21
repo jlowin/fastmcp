@@ -61,7 +61,7 @@ Most notably, it introduces the highly requested (and Pythonic) "naked" decorato
 ```python {3}
 mcp = FastMCP()
 
-@mcp.tool
+@mcp.tool()
 def add(a: int, b: int) -> int:
     return a + b
 ```

@@ -75,7 +75,7 @@ from fastmcp import FastMCP
 
 mcp = FastMCP("MyServer")
 
-@mcp.tool
+@mcp.tool()
 def hello(name: str) -> str:
     return f"Hello, {name}!"
 
@@ -161,7 +161,7 @@ Run a MCP server with the [MCP Inspector](https://github.com/modelcontextprotoco
 fastmcp dev server.py
 ```
 
-<Tip> 
+<Tip>
 This command always runs your server via `uv run` subprocess (never your local environment) to work with the MCP Inspector. All dependencies must be explicitly specified using the `--with` and/or `--with-editable` options, or be available in a uv-managed project.
 </Tip>
 
@@ -304,7 +304,7 @@ fastmcp install mcp-json server.py --copy
 The `mcp-json` subcommand generates standard MCP JSON configuration that can be used with any MCP-compatible client. This is useful when:
 
 - Working with MCP clients not directly supported by FastMCP
-- Creating configuration for CI/CD environments  
+- Creating configuration for CI/CD environments
 - Sharing server configurations with others
 - Integration with custom tooling
 

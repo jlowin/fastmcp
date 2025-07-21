@@ -13,7 +13,7 @@ from fastmcp import FastMCP
 
 mcp = FastMCP("Demo 🚀")
 
-@mcp.tool
+@mcp.tool()
 def add(a: int, b: int) -> int:
     """Add two numbers"""
     return a + b
@@ -25,7 +25,7 @@ if __name__ == "__main__":
 
 ## Beyond the Protocol
 
-FastMCP is the standard framework for working with the Model Context Protocol. FastMCP 1.0 was incorporated into the [official MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk) in 2024. 
+FastMCP is the standard framework for working with the Model Context Protocol. FastMCP 1.0 was incorporated into the [official MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk) in 2024.
 
 This is FastMCP 2.0, the **actively maintained version** that provides a complete toolkit for working with the MCP ecosystem.
 
@@ -67,7 +67,7 @@ FastMCP is made with 💙 by [Prefect](https://www.prefect.io/).
 
 ## LLM-Friendly Docs
 
-This documentation is also available in [llms.txt format](https://llmstxt.org/), which is a simple markdown standard that LLMs can consume easily. 
+This documentation is also available in [llms.txt format](https://llmstxt.org/), which is a simple markdown standard that LLMs can consume easily.
 
 There are two ways to access the LLM-friendly documentation:
 - [llms.txt](https://gofastmcp.com/llms.txt) is essentially a sitemap, listing all the pages in the documentation.

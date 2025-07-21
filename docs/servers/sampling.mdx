@@ -29,7 +29,7 @@ from fastmcp import FastMCP, Context
 
 mcp = FastMCP("SamplingDemo")
 
-@mcp.tool
+@mcp.tool()
 async def analyze_sentiment(text: str, ctx: Context) -> dict:
     """Analyze the sentiment of text using the client's LLM."""
     prompt = f"""Analyze the sentiment of the following text as positive, negative, or neutral. 
@@ -97,7 +97,7 @@ async def analyze_sentiment(text: str, ctx: Context) -> dict:
 Generate text with simple string prompts:
 
 ```python {6}
-@mcp.tool
+@mcp.tool()
 async def generate_summary(content: str, ctx: Context) -> str:
     """Generate a summary of the provided content."""
     prompt = f"Please provide a concise summary of the following content:\n\n{content}"
@@ -111,7 +111,7 @@ async def generate_summary(content: str, ctx: Context) -> str:
 Use system prompts to guide the LLM's behavior:
 
 ```python {4-9}
-@mcp.tool
+@mcp.tool()
 async def generate_code_example(concept: str, ctx: Context) -> str:
     """Generate a Python code example for a given concept."""
     response = await ctx.sample(
@@ -131,7 +131,7 @@ async def generate_code_example(concept: str, ctx: Context) -> str:
 Specify model preferences for different use cases:
 
 ```python {4-8, 17-22}
-@mcp.tool
+@mcp.tool()
 async def creative_writing(topic: str, ctx: Context) -> str:
     """Generate creative content using a specific model."""
     response = await ctx.sample(
@@ -144,7 +144,7 @@ async def creative_writing(topic: str, ctx: Context) -> str:
     
     return response.text
 
-@mcp.tool
+@mcp.tool()
 async def technical_analysis(data: str, ctx: Context) -> str:
     """Perform technical analysis with a reasoning-focused model."""
     response = await ctx.sample(
@@ -164,7 +164,7 @@ Use structured messages for more complex interactions:
 ```python {1, 6-10}
 from fastmcp.client.sampling import SamplingMessage
 
-@mcp.tool
+@mcp.tool()
 async def multi_turn_analysis(user_query: str, context_data: str, ctx: Context) -> str:
     """Perform analysis using multi-turn conversation structure."""
     messages = [

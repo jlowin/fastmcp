@@ -28,7 +28,7 @@ import asyncio
 
 mcp = FastMCP("ProgressDemo")
 
-@mcp.tool
+@mcp.tool()
 async def process_items(items: list[str], ctx: Context) -> dict:
     """Process a list of items with progress updates."""
     total = len(items)
@@ -73,7 +73,7 @@ async def process_items(items: list[str], ctx: Context) -> dict:
 Report progress as a percentage (0-100):
 
 ```python {13-14}
-@mcp.tool
+@mcp.tool()
 async def download_file(url: str, ctx: Context) -> str:
     """Download a file with percentage progress."""
     total_size = 1000  # KB
@@ -98,7 +98,7 @@ async def download_file(url: str, ctx: Context) -> str:
 Report progress with absolute values:
 
 ```python {10}
-@mcp.tool
+@mcp.tool()
 async def backup_database(ctx: Context) -> str:
     """Backup database tables with absolute progress."""
     tables = ["users", "orders", "products", "inventory", "logs"]
@@ -120,7 +120,7 @@ async def backup_database(ctx: Context) -> str:
 Report progress without a known total for operations where the endpoint is unknown:
 
 ```python {11}
-@mcp.tool
+@mcp.tool()
 async def scan_directory(directory: str, ctx: Context) -> dict:
     """Scan directory with indeterminate progress."""
     files_found = 0
@@ -142,7 +142,7 @@ async def scan_directory(directory: str, ctx: Context) -> dict:
 Break complex operations into stages with progress for each:
 
 ```python
-@mcp.tool
+@mcp.tool()
 async def data_migration(source: str, destination: str, ctx: Context) -> str:
     """Migrate data with multi-stage progress reporting."""
     

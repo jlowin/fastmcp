@@ -29,7 +29,7 @@ from fastmcp import FastMCP
 
 mcp = FastMCP("MyServer")
 
-@mcp.tool
+@mcp.tool()
 def hello(name: str) -> str:
     return f"Hello, {name}!"
 
@@ -104,7 +104,7 @@ from starlette.routing import Mount
 # Create your FastMCP server
 mcp = FastMCP("MyServer")
 
-@mcp.tool
+@mcp.tool()
 def analyze(data: str) -> dict:
     return {"result": f"Analyzed: {data}"}
 
@@ -210,4 +210,3 @@ The patterns shown here work with any ASGI-compatible framework. The key require
 1. Mount the FastMCP ASGI app at your desired path
 2. Pass the lifespan context to your root application
 3. Configure any necessary middleware or authentication
-

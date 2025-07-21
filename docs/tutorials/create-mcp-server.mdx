@@ -50,7 +50,7 @@ from fastmcp import FastMCP
 
 mcp = FastMCP(name="My First MCP Server")
 
-@mcp.tool
+@mcp.tool()
 def add(a: int, b: int) -> int:
     """Adds two integer numbers together."""
     return a + b
@@ -74,7 +74,7 @@ from fastmcp import FastMCP
 
 mcp = FastMCP(name="My First MCP Server")
 
-@mcp.tool
+@mcp.tool()
 def add(a: int, b: int) -> int:
     """Adds two integer numbers together."""
     return a + b
@@ -98,7 +98,7 @@ from fastmcp import FastMCP
 
 mcp = FastMCP(name="My First MCP Server")
 
-@mcp.tool
+@mcp.tool()
 def add(a: int, b: int) -> int:
     """Adds two integer numbers together."""
     return a + b
@@ -129,7 +129,7 @@ from fastmcp import FastMCP
 
 mcp = FastMCP(name="My First MCP Server")
 
-@mcp.tool
+@mcp.tool()
 def add(a: int, b: int) -> int:
     """Adds two integer numbers together."""
     return a + b
@@ -165,7 +165,7 @@ from fastmcp import FastMCP
 mcp = FastMCP(name="My First MCP Server")
 
 # 2. Add a tool
-@mcp.tool
+@mcp.tool()
 def add(a: int, b: int) -> int:
     """Adds two integer numbers together."""
     return a + b

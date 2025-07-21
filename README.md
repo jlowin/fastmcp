@@ -37,7 +37,7 @@ from fastmcp import FastMCP
 
 mcp = FastMCP("Demo 🚀")
 
-@mcp.tool
+@mcp.tool()
 def add(a: int, b: int) -> int:
     """Add two numbers"""
     return a + b
@@ -152,7 +152,7 @@ Learn more in the [**FastMCP Server Documentation**](https://gofastmcp.com/serve
 Tools allow LLMs to perform actions by executing your Python functions (sync or async). Ideal for computations, API calls, or side effects (like `POST`/`PUT`). FastMCP handles schema generation from type hints and docstrings. Tools can return various types, including text, JSON-serializable objects, and even images or audio aided by the FastMCP media helper classes.
 
 ```python
-@mcp.tool
+@mcp.tool()
 def multiply(a: float, b: float) -> float:
     """Multiplies two numbers."""
     return a * b
@@ -167,7 +167,7 @@ Resources expose read-only data sources (like `GET` requests). Use `@mcp.resourc
 ```python
 # Static resource
 @mcp.resource("config://version")
-def get_version(): 
+def get_version():
     return "2.0.1"
 
 # Dynamic resource template
@@ -210,7 +210,7 @@ from fastmcp import FastMCP, Context
 
 mcp = FastMCP("My MCP Server")
 
-@mcp.tool
+@mcp.tool()
 async def process_data(uri: str, ctx: Context):
     # Log a message to the client
     await ctx.info(f"Processing {uri}...")
@@ -330,7 +330,7 @@ from fastmcp import FastMCP
 
 mcp = FastMCP("Demo 🚀")
 
-@mcp.tool
+@mcp.tool()
 def hello(name: str) -> str:
     return f"Hello, {name}!"
 
@@ -374,7 +374,7 @@ Contributions are the core of open source! We welcome improvements and features.
 1. Clone the repository:
 
    ```bash
-   git clone https://github.com/jlowin/fastmcp.git 
+   git clone https://github.com/jlowin/fastmcp.git
    cd fastmcp
    ```
 
