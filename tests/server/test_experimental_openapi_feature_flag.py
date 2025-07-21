@@ -55,7 +55,7 @@ class TestOpenAPIExperimentalFeatureFlag:
     ):
         """Test that from_openapi uses experimental parser with flag enabled."""
         # Create server with experimental flag enabled
-        with temporary_settings(experimental={"enable_new_openapi_parser": True}):
+        with temporary_settings(experimental__enable_new_openapi_parser=True):
             server = FastMCP.from_openapi(
                 openapi_spec=simple_openapi_spec, client=mock_client
             )
@@ -90,7 +90,7 @@ class TestOpenAPIExperimentalFeatureFlag:
             return {"message": "test"}
 
         # Create server with experimental flag enabled
-        with temporary_settings(experimental={"enable_new_openapi_parser": True}):
+        with temporary_settings(experimental__enable_new_openapi_parser=True):
             server = FastMCP.from_fastapi(app=app)
 
         # Should be the experimental implementation

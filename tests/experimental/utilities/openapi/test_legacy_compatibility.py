@@ -76,17 +76,12 @@ class TestLegacyCompatibility:
         assert "anyOf" not in legacy_schema["properties"]["required_param"]
         assert "anyOf" not in new_schema["properties"]["required_param"]
 
-        # Optional parameter should have anyOf with null
-        assert "anyOf" in legacy_schema["properties"]["optional_param"]
-        assert "anyOf" in new_schema["properties"]["optional_param"]
-
-        legacy_any_of = legacy_schema["properties"]["optional_param"]["anyOf"]
-        new_any_of = new_schema["properties"]["optional_param"]["anyOf"]
-
-        assert {"type": "string"} in legacy_any_of
-        assert {"type": "null"} in legacy_any_of
-        assert {"type": "string"} in new_any_of
-        assert {"type": "null"} in new_any_of
+        # Both implementations now correctly preserve original schema
+        # Neither should make optional parameters nullable - they can simply be omitted
+        assert "anyOf" not in legacy_schema["properties"]["optional_param"]
+        assert "anyOf" not in new_schema["properties"]["optional_param"]
+        assert legacy_schema["properties"]["optional_param"]["type"] == "string"
+        assert new_schema["properties"]["optional_param"]["type"] == "string"
 
         # Required lists should match
         assert set(legacy_schema["required"]) == set(new_schema["required"])
@@ -233,30 +228,18 @@ class TestLegacyCompatibility:
         legacy_schema = legacy_combine_schemas(legacy_route)
         new_schema, _ = _combine_schemas_and_map_params(new_route)
 
-        # Both should have anyOf with null for optional parameters
+        # Both implementations now correctly preserve original schema
         legacy_param = legacy_schema["properties"]["optional_param"]
         new_param = new_schema["properties"]["optional_param"]
 
-        assert "anyOf" in legacy_param
-        assert "anyOf" in new_param
-        assert {"type": "null"} in legacy_param["anyOf"]
-        assert {"type": "null"} in new_param["anyOf"]
+        # Both should preserve original schema without making it nullable
+        assert "anyOf" not in legacy_param
+        assert "anyOf" not in new_param
 
-        # Should contain the original type/schema
-        if "type" in param_type:
-            assert {"type": param_type["type"]} in legacy_param["anyOf"]
-            assert {"type": param_type["type"]} in new_param["anyOf"]
-        else:
-            # For complex schemas without simple type
-            original_in_legacy = any(
-                item.get("type") == param_type.get("type")
-                for item in legacy_param["anyOf"]
-            )
-            original_in_new = any(
-                item.get("type") == param_type.get("type")
-                for item in new_param["anyOf"]
-            )
-            assert original_in_legacy == original_in_new
+        # Both should match the original parameter schema (plus description in legacy)
+        for key, value in param_type.items():
+            assert legacy_param[key] == value
+            assert new_param[key] == value
 
     def test_no_parameters_no_body(self):
         """Test schema generation when there are no parameters or body."""

@@ -22,7 +22,7 @@ from fastmcp.server.server import (
 )
 from fastmcp.tools import FunctionTool
 from fastmcp.tools.tool import Tool
-from fastmcp.utilities.tests import temporary_settings
+from fastmcp.utilities.tests import caplog_for_fastmcp, temporary_settings
 
 
 class TestCreateServer:
@@ -1405,8 +1405,8 @@ class TestOpenAPIExperimentalFeatureFlag:
         self, simple_openapi_spec, mock_client, caplog
     ):
         """Test that from_openapi uses legacy parser by default and emits log message."""
-        # Capture all logs at INFO level and above
-        with caplog.at_level(logging.INFO):
+        # Capture all logs at INFO level and above using FastMCP's logger
+        with caplog_for_fastmcp(caplog), caplog.at_level(logging.INFO):
             # Create server using from_openapi (should use legacy by default)
             server = FastMCP.from_openapi(
                 openapi_spec=simple_openapi_spec, client=mock_client
@@ -1435,7 +1435,7 @@ class TestOpenAPIExperimentalFeatureFlag:
         # Capture all logs at INFO level and above
         with caplog.at_level(logging.INFO):
             # Create server with experimental flag enabled
-            with temporary_settings(experimental={"enable_new_openapi_parser": True}):
+            with temporary_settings(experimental__enable_new_openapi_parser=True):
                 server = FastMCP.from_openapi(
                     openapi_spec=simple_openapi_spec, client=mock_client
                 )
@@ -1453,8 +1453,8 @@ class TestOpenAPIExperimentalFeatureFlag:
 
     def test_from_fastapi_uses_legacy_by_default_and_logs_message(self, caplog):
         """Test that from_fastapi uses legacy parser by default and emits log message."""
-        # Capture all logs at INFO level and above
-        with caplog.at_level(logging.INFO):
+        # Capture all logs at INFO level and above using FastMCP's logger
+        with caplog_for_fastmcp(caplog), caplog.at_level(logging.INFO):
             # Create a simple FastAPI app
             app = FastAPI(title="Test API")
 
@@ -1493,7 +1493,7 @@ class TestOpenAPIExperimentalFeatureFlag:
                 return {"message": "test"}
 
             # Create server with experimental flag enabled
-            with temporary_settings(experimental={"enable_new_openapi_parser": True}):
+            with temporary_settings(experimental__enable_new_openapi_parser=True):
                 server = FastMCP.from_fastapi(app=app)
 
         # Should be the experimental implementation

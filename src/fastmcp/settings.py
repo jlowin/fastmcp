@@ -83,7 +83,34 @@ class Settings(BaseSettings):
         extra="ignore",
         env_nested_delimiter="__",
         nested_model_default_partial_update=True,
+        validate_assignment=True,
     )
+
+    def get_setting(self, attr: str) -> Any:
+        """
+        Get a setting. If the setting contains one or more `__`, it will be
+        treated as a nested setting.
+        """
+        settings = self
+        while "__" in attr:
+            parent_attr, attr = attr.split("__", 1)
+            if not hasattr(settings, parent_attr):
+                raise AttributeError(f"Setting {parent_attr} does not exist.")
+            settings = getattr(settings, parent_attr)
+        return getattr(settings, attr)
+
+    def set_setting(self, attr: str, value: Any) -> None:
+        """
+        Set a setting. If the setting contains one or more `__`, it will be
+        treated as a nested setting.
+        """
+        settings = self
+        while "__" in attr:
+            parent_attr, attr = attr.split("__", 1)
+            if not hasattr(settings, parent_attr):
+                raise AttributeError(f"Setting {parent_attr} does not exist.")
+            settings = getattr(settings, parent_attr)
+        setattr(settings, attr, value)
 
     @classmethod
     def settings_customise_sources(

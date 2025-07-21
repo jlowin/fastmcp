@@ -144,11 +144,11 @@ class TestEndToEndCompatibility:
                     assert "anyOf" not in legacy_prop
                     assert "anyOf" not in new_prop
                 else:
-                    # For optional parameters, should have anyOf with null
-                    assert "anyOf" in legacy_prop
-                    assert "anyOf" in new_prop
-                    assert {"type": "null"} in legacy_prop["anyOf"]
-                    assert {"type": "null"} in new_prop["anyOf"]
+                    # Both implementations now correctly preserve original schema without nullable behavior
+                    assert "anyOf" not in legacy_prop
+                    assert "anyOf" not in new_prop
+                    # Both should have the same type
+                    assert legacy_prop.get("type") == new_prop.get("type")
 
     async def test_collision_handling_compatibility(self, collision_spec):
         """Test that parameter collision handling is identical."""

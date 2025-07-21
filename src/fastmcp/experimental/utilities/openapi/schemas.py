@@ -141,12 +141,61 @@ def _make_optional_parameter_nullable(schema: dict[str, Any]) -> dict[str, Any]:
     if "type" in schema:
         original_type = schema["type"]
         if isinstance(original_type, str):
-            # Single type - make it a union with null
-            nullable_schema = schema.copy()
-            nullable_schema["anyOf"] = [{"type": original_type}, {"type": "null"}]
-            # Remove the original type since we're using anyOf
-            del nullable_schema["type"]
-            return nullable_schema
+            # Handle different types appropriately
+            if original_type in ("array", "object"):
+                # For complex types (array/object), preserve the full structure
+                # and allow null as an alternative
+                if original_type == "array" and "items" in schema:
+                    # Array with items - preserve items in anyOf branch
+                    array_schema = schema.copy()
+                    top_level_fields = ["default", "description", "title", "example"]
+                    nullable_schema = {}
+
+                    # Move top-level fields to the root
+                    for field in top_level_fields:
+                        if field in array_schema:
+                            nullable_schema[field] = array_schema.pop(field)
+
+                    nullable_schema["anyOf"] = [array_schema, {"type": "null"}]
+                    return nullable_schema
+
+                elif original_type == "object" and "properties" in schema:
+                    # Object with properties - preserve properties in anyOf branch
+                    object_schema = schema.copy()
+                    top_level_fields = ["default", "description", "title", "example"]
+                    nullable_schema = {}
+
+                    # Move top-level fields to the root
+                    for field in top_level_fields:
+                        if field in object_schema:
+                            nullable_schema[field] = object_schema.pop(field)
+
+                    nullable_schema["anyOf"] = [object_schema, {"type": "null"}]
+                    return nullable_schema
+                else:
+                    # Simple object/array without items/properties
+                    nullable_schema = {}
+                    original_schema = schema.copy()
+                    top_level_fields = ["default", "description", "title", "example"]
+
+                    for field in top_level_fields:
+                        if field in original_schema:
+                            nullable_schema[field] = original_schema.pop(field)
+
+                    nullable_schema["anyOf"] = [original_schema, {"type": "null"}]
+                    return nullable_schema
+            else:
+                # Simple types (string, integer, number, boolean)
+                top_level_fields = ["default", "description", "title", "example"]
+                nullable_schema = {}
+                original_schema = schema.copy()
+
+                for field in top_level_fields:
+                    if field in original_schema:
+                        nullable_schema[field] = original_schema.pop(field)
+
+                nullable_schema["anyOf"] = [original_schema, {"type": "null"}]
+                return nullable_schema
 
     return schema
 
@@ -223,9 +272,8 @@ def _combine_schemas_and_map_params(
             else:
                 param_schema["description"] = location_desc
 
-            # Make optional parameters nullable to allow None values
-            if not param.required:
-                param_schema = _make_optional_parameter_nullable(param_schema)
+            # Don't make optional parameters nullable - they can simply be omitted
+            # The OpenAPI specification doesn't require optional parameters to accept null values
 
             properties[suffixed_name] = param_schema
         else:
@@ -243,9 +291,8 @@ def _combine_schemas_and_map_params(
                 param.schema_.copy(), param.description
             )
 
-            # Make optional parameters nullable to allow None values
-            if not param.required:
-                param_schema = _make_optional_parameter_nullable(param_schema)
+            # Don't make optional parameters nullable - they can simply be omitted
+            # The OpenAPI specification doesn't require optional parameters to accept null values
 
             properties[param.name] = param_schema
 
