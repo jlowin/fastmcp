@@ -55,6 +55,25 @@ class ExtendedSettingsConfigDict(SettingsConfigDict, total=False):
     env_prefixes: list[str] | None
 
 
+class ExperimentalSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="FASTMCP_EXPERIMENTAL_",
+        extra="ignore",
+    )
+
+    enable_new_openapi_parser: Annotated[
+        bool,
+        Field(
+            description=inspect.cleandoc(
+                """
+                Whether to use the new OpenAPI parser. This parser was introduced
+                for testing in 2.11 and will become the default soon.
+                """
+            ),
+        ),
+    ] = False
+
+
 class Settings(BaseSettings):
     """FastMCP settings."""
 
@@ -108,6 +127,8 @@ class Settings(BaseSettings):
         if isinstance(v, str):
             return v.upper()
         return v
+
+    experimental: ExperimentalSettings = ExperimentalSettings()
 
     enable_rich_tracebacks: Annotated[
         bool,
