@@ -188,6 +188,8 @@ content = content_list[0].content
 
 ### State Management
 
+<VersionBadge version="2.11.0" />
+
 Store and share data across middleware and tool calls within a request. Context objects maintain a state dictionary that's especially useful for passing information from [middleware](/servers/middleware) to your tools.
 
 To store a value in the context state, use `ctx.set_state(key, value)`. To retrieve a value, use `ctx.get_state(key)`.
