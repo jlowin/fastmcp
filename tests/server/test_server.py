@@ -1,5 +1,5 @@
 import logging
-from typing import Annotated,Any
+from typing import Annotated, Any
 
 import httpx
 import pytest
@@ -1403,7 +1403,10 @@ class TestOpenAPIExperimentalFeatureFlag:
         return httpx.AsyncClient(base_url="https://api.example.com")
 
     def test_from_openapi_uses_legacy_by_default_and_logs_message(
-        self, simple_openapi_spec: dict[str, Any], mock_client: httpx.AsyncClient, caplog: LogCaptureFixture
+        self,
+        simple_openapi_spec: dict[str, Any],
+        mock_client: httpx.AsyncClient,
+        caplog: LogCaptureFixture,
     ):
         """Test that from_openapi uses legacy parser by default and emits log message."""
         # Capture all logs at INFO level and above using FastMCP's logger
@@ -1430,7 +1433,10 @@ class TestOpenAPIExperimentalFeatureFlag:
         )
 
     def test_from_openapi_uses_experimental_with_flag_and_no_log(
-        self, simple_openapi_spec: dict[str, Any], mock_client: httpx.AsyncClient, caplog: LogCaptureFixture
+        self,
+        simple_openapi_spec: dict[str, Any],
+        mock_client: httpx.AsyncClient,
+        caplog: LogCaptureFixture,
     ):
         """Test that from_openapi uses experimental parser with flag and emits no log."""
         # Capture all logs at INFO level and above
@@ -1452,7 +1458,9 @@ class TestOpenAPIExperimentalFeatureFlag:
         ]
         assert len(legacy_log_messages) == 0
 
-    def test_from_fastapi_uses_legacy_by_default_and_logs_message(self, caplog: LogCaptureFixture):
+    def test_from_fastapi_uses_legacy_by_default_and_logs_message(
+        self, caplog: LogCaptureFixture
+    ):
         """Test that from_fastapi uses legacy parser by default and emits log message."""
         # Capture all logs at INFO level and above using FastMCP's logger
         with caplog_for_fastmcp(caplog), caplog.at_level(logging.INFO):
@@ -1482,7 +1490,9 @@ class TestOpenAPIExperimentalFeatureFlag:
             in legacy_log_messages[0].message
         )
 
-    def test_from_fastapi_uses_experimental_with_flag_and_no_log(self, caplog: LogCaptureFixture):
+    def test_from_fastapi_uses_experimental_with_flag_and_no_log(
+        self, caplog: LogCaptureFixture
+    ):
         """Test that from_fastapi uses experimental parser with flag and emits no log."""
         # Capture all logs at INFO level and above
         with caplog.at_level(logging.INFO):
