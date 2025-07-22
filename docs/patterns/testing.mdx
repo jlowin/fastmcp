@@ -37,6 +37,51 @@ async def test_tool_functionality(mcp_server):
 
 This pattern creates a direct connection between the client and server, allowing you to test your server's functionality efficiently.
 
+You can also test your MCP servers with Bearer Token Authentication with this approach, by using the [Generating Tokens](https://gofastmcp.com/servers/auth/bearer#generating-tokens) functionality.
+
+```python
+import pytest
+
+from tools import mytool
+
+from fastmcp import FastMCP, Client
+from fastmcp.server.auth import BearerAuthProvider
+from fastmcp.server.auth.providers.bearer import RSAKeyPair
+
+@pytest.fixture(scope="module")
+def rsa_key_pair() -> RSAKeyPair:
+    return RSAKeyPair.generate()
+
+
+@pytest.fixture
+def bearer_provider(rsa_key_pair: RSAKeyPair) -> BearerAuthProvider:
+    return BearerAuthProvider(
+        public_key=rsa_key_pair.public_key,
+        issuer="https://test.example.com",
+        audience="https://api.example.com",
+    )
+
+@pytest.fixture
+def mcp_server(bearer_provider):
+    server = FastMCP("TestServer", auth=bearer_provider)
+    server.tool()(mytool.to_test)
+    return server
+
+async def test_my_tool_jwt_claims(mcp_server, rsa_key_pair):
+    async with Client(
+        mcp_server,
+        auth=rsa_key_pair.create_token(
+            subject="john.doe@example.com",
+            issuer="https://test.example.com",
+            audience="https://api.example.com",
+            additional_claims={
+                /* Add as many claims to be tested for your business logic as you want
+            }
+        )
+    ) as client:
+        ...
+```
+
 <Tip>
 If you're using pytest for async tests, as shown above, you may need to configure appropriate markers or set `asyncio_mode = "auto"` in your pytest configuration in order to handle async test functions automatically.
 </Tip> 
