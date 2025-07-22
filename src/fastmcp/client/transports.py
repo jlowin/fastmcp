@@ -679,13 +679,19 @@ class FastMCPTransport(ClientTransport):
     tests or scenarios where client and server run in the same runtime.
     """
 
-    def __init__(self, mcp: FastMCP | FastMCP1Server, raise_exceptions: bool = False):
+    def __init__(
+        self,
+        mcp: FastMCP | FastMCP1Server,
+        auth: str | None = None,
+        raise_exceptions: bool = False,
+    ):
         """Initialize a FastMCPTransport from a FastMCP server instance."""
 
         # Accept both FastMCP 2.x and FastMCP 1.0 servers. Both expose a
         # ``_mcp_server`` attribute pointing to the underlying MCP server
         # implementation, so we can treat them identically.
         self.server = mcp
+        self.auth = self._set_auth(auth)
         self.raise_exceptions = raise_exceptions
 
     @contextlib.asynccontextmanager
@@ -719,6 +725,11 @@ class FastMCPTransport(ClientTransport):
                         yield client_session
                 finally:
                     tg.cancel_scope.cancel()
+
+    def _set_auth(self, auth: BearerAuth | str | None):
+        if isinstance(auth, str):
+            auth = BearerAuth(auth)
+        self.auth = auth
 
     def __repr__(self) -> str:
         return f"<FastMCPTransport(server='{self.server.name}')>"
@@ -845,14 +856,16 @@ def infer_transport(transport: Path) -> PythonStdioTransport | NodeStdioTranspor
 
 
 def infer_transport(
-    transport: ClientTransport
-    | FastMCP
-    | FastMCP1Server
-    | AnyUrl
-    | Path
-    | MCPConfig
-    | dict[str, Any]
-    | str,
+    transport: (
+        ClientTransport
+        | FastMCP
+        | FastMCP1Server
+        | AnyUrl
+        | Path
+        | MCPConfig
+        | dict[str, Any]
+        | str
+    ),
 ) -> ClientTransport:
     """
     Infer the appropriate transport type from the given transport argument.

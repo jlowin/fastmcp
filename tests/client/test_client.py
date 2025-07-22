@@ -310,9 +310,7 @@ async def test_server_deserialization_error():
         with pytest.raises(McpError, match="Error rendering prompt"):
             await client.get_prompt(
                 "strict_typed_prompt",
-                {
-                    "numbers": "not valid json"  # This will fail server-side conversion
-                },
+                {"numbers": "not valid json"},  # This will fail server-side conversion
             )
 
 
@@ -984,6 +982,25 @@ class TestAuth:
         client = Client(transport=SSETransport("http://localhost:8000", auth="oauth"))
         assert isinstance(client.transport, SSETransport)
         assert isinstance(client.transport.auth, OAuthClientProvider)
+
+    def test_auth_string_sets_up_bearer_in_memory(self, fastmcp_server: FastMCP):
+        client = Client(
+            transport=FastMCPTransport(fastmcp_server),
+            auth="test_token",
+        )
+        assert isinstance(client.transport, FastMCPTransport)
+        assert isinstance(client.transport.auth, BearerAuth)
+        assert client.transport.auth.token.get_secret_value() == "test_token"
+
+    def test_auth_string_pass_direct_to_transport_in_memory(
+        self, fastmcp_server: FastMCP
+    ):
+        client = Client(
+            transport=FastMCPTransport(fastmcp_server, auth="test_token"),
+        )
+        assert isinstance(client.transport, FastMCPTransport)
+        assert isinstance(client.transport.auth, BearerAuth)
+        assert client.transport.auth.token.get_secret_value() == "test_token"
 
     def test_auth_string_sets_up_bearer_auth_shttp(self):
         client = Client(
