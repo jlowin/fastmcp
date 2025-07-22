@@ -772,7 +772,7 @@ class MCPConfigTransport(ClientTransport):
         ```
     """
 
-    def __init__(self, config: MCPConfig | dict, name_as_prefix: bool = True):
+    def __init__(self, config: MCPConfig | dict, name_as_prefix: bool = True, tools_cache_ttl: int | None = None):
         from fastmcp.utilities.mcp_config import composite_server_from_mcp_config
 
         if isinstance(config, dict):
@@ -791,7 +791,7 @@ class MCPConfigTransport(ClientTransport):
         else:
             self.transport = FastMCPTransport(
                 mcp=composite_server_from_mcp_config(
-                    self.config, name_as_prefix=name_as_prefix
+                    self.config, name_as_prefix=name_as_prefix, tools_cache_ttl=tools_cache_ttl
                 )
             )
 

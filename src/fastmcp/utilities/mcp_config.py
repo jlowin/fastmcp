@@ -3,10 +3,10 @@ from fastmcp.server.server import FastMCP
 
 
 def composite_server_from_mcp_config(
-    config: MCPConfig, name_as_prefix: bool = True
+    config: MCPConfig, name_as_prefix: bool = True, tools_cache_ttl: int | None = None
 ) -> FastMCP:
     """A utility function to create a composite server from an MCPConfig."""
-    composite_server = FastMCP()
+    composite_server = FastMCP(tools_cache_ttl=tools_cache_ttl)
 
     mount_mcp_config_into_server(config, composite_server, name_as_prefix)
 

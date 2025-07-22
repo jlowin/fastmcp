@@ -31,6 +31,7 @@ class ToolManager:
         duplicate_behavior: DuplicateBehavior | None = None,
         mask_error_details: bool | None = None,
         transformations: dict[str, ToolTransformConfig] | None = None,
+        tools_cache_ttl: int | None = None,
     ):
         self._tools: dict[str, Tool] = {}
         self._mounted_servers: list[MountedServer] = []
@@ -40,7 +41,7 @@ class ToolManager:
         # Caching for performance optimization
         self._tool_existence_cache: dict[str, bool] = {}
         self._load_tools_cache: dict[bool, tuple[float, dict[str, Tool]]] = {}
-        self._tools_cache_ttl: float = 300  # 5 minutes
+        self._tools_cache_ttl: int | None = tools_cache_ttl
 
         # Default to "warn" if None is provided
         if duplicate_behavior is None:
@@ -68,11 +69,12 @@ class ToolManager:
         """
         current_time = time.time()
 
-        # Check cache for this specific via_server parameter
-        if via_server in self._load_tools_cache:
+        # Check cache for this specific via_server parameter (only if caching enabled)
+        if self._tools_cache_ttl and via_server in self._load_tools_cache:
             cache_timestamp, cached_result = self._load_tools_cache[via_server]
             if current_time - cache_timestamp <= self._tools_cache_ttl:
                 return cached_result
+        
         all_tools: dict[str, Tool] = {}
 
         for mounted in self._mounted_servers:
@@ -107,20 +109,25 @@ class ToolManager:
             transformations=self.transformations,
         )
 
-        # Cache the result and clear existence cache
-        self._load_tools_cache[via_server] = (current_time, transformed_tools)
-        self._tool_existence_cache.clear()
+        # Cache the result and clear existence cache (only if caching enabled)
+        if self._tools_cache_ttl:
+            self._load_tools_cache[via_server] = (current_time, transformed_tools)
+            self._tool_existence_cache.clear()
 
         return transformed_tools
 
     async def has_tool(self, key: str) -> bool:
         """Check if a tool exists."""
-        if key in self._tool_existence_cache:
+        # Check existence cache first (only if caching enabled)
+        if self._tools_cache_ttl is not None and key in self._tool_existence_cache:
             return self._tool_existence_cache[key]
 
         tools = await self.get_tools()
         result = key in tools
-        self._tool_existence_cache[key] = result
+        
+        # Cache the result (only if caching enabled)
+        if self._tools_cache_ttl is not None:
+            self._tool_existence_cache[key] = result
         return result
 
     async def get_tool(self, key: str) -> Tool:

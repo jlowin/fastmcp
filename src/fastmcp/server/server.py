@@ -150,6 +150,7 @@ class FastMCP(Generic[LifespanResultT]):
         mask_error_details: bool | None = None,
         tools: list[Tool | Callable[..., Any]] | None = None,
         tool_transformations: dict[str, ToolTransformConfig] | None = None,
+        tools_cache_ttl: int | None = None,
         dependencies: list[str] | None = None,
         include_tags: set[str] | None = None,
         exclude_tags: set[str] | None = None,
@@ -180,6 +181,7 @@ class FastMCP(Generic[LifespanResultT]):
             duplicate_behavior=on_duplicate_tools,
             mask_error_details=mask_error_details,
             transformations=tool_transformations,
+            tools_cache_ttl=tools_cache_ttl,
         )
         self._resource_manager = ResourceManager(
             duplicate_behavior=on_duplicate_resources,
