@@ -1,5 +1,5 @@
 import logging
-from typing import Annotated, Any, Literal
+from typing import Annotated,Any
 
 import httpx
 import pytest
@@ -1021,7 +1021,7 @@ class TestResourcePrefixHelpers:
             ("resource://", "prefix", "resource://prefix/"),
         ],
     )
-    def test_add_resource_prefix(self, uri: Literal['resource://path/to/resource'] | Literal['resource:///absolute/path'] | Literal['file://path/to/file'] | Literal['http://example.com/path'] | Literal['resource://'], prefix: Literal['prefix'] | Literal[''] | Literal['pre.fix'] | Literal['pre/fix'], expected: Literal['resource://prefix/path/to/resource'] | Literal['resource://prefix//absolute/path'] | Literal['resource://path/to/resource'] | Literal['file://prefix/path/to/file'] | Literal['http://prefix/example.com/path'] | Literal['resource://pre.fix/path/to/resource'] | Literal['resource://pre/fix/path/to/resource'] | Literal['resource://prefix/']):
+    def test_add_resource_prefix(self, uri, prefix, expected):
         """Test that add_resource_prefix correctly adds prefixes to URIs."""
         result = add_resource_prefix(uri, prefix)
         assert result == expected
@@ -1035,7 +1035,7 @@ class TestResourcePrefixHelpers:
             "http:/missing-slash",
         ],
     )
-    def test_add_resource_prefix_invalid_uri(self, invalid_uri: Literal['not-a-uri'] | Literal['resource:no-slashes'] | Literal['missing-protocol'] | Literal['http:/missing-slash']):
+    def test_add_resource_prefix_invalid_uri(self, invalid_uri):
         """Test that add_resource_prefix raises ValueError for invalid URIs."""
         with pytest.raises(ValueError, match="Invalid URI format"):
             add_resource_prefix(invalid_uri, "prefix")
@@ -1076,7 +1076,7 @@ class TestResourcePrefixHelpers:
             ("resource://prefix/", "prefix", "resource://"),
         ],
     )
-    def test_remove_resource_prefix(self, uri: Literal['resource://prefix/path/to/resource'] | Literal['resource://prefix//absolute/path'] | Literal['resource://other/path/to/resource'] | Literal['resource://path/to/resource'] | Literal['file://prefix/path/to/file'] | Literal['resource://pre.fix/path/to/resource'] | Literal['resource://pre/fix/path/to/resource'] | Literal['resource://prefix/'], prefix: Literal['prefix'] | Literal[''] | Literal['pre.fix'] | Literal['pre/fix'], expected: Literal['resource://path/to/resource'] | Literal['resource:///absolute/path'] | Literal['resource://other/path/to/resource'] | Literal['file://path/to/file'] | Literal['resource://']):
+    def test_remove_resource_prefix(self, uri, prefix, expected):
         """Test that remove_resource_prefix correctly removes prefixes from URIs."""
         result = remove_resource_prefix(uri, prefix)
         assert result == expected
@@ -1090,7 +1090,7 @@ class TestResourcePrefixHelpers:
             "http:/missing-slash",
         ],
     )
-    def test_remove_resource_prefix_invalid_uri(self, invalid_uri: Literal['not-a-uri'] | Literal['resource:no-slashes'] | Literal['missing-protocol'] | Literal['http:/missing-slash']):
+    def test_remove_resource_prefix_invalid_uri(self, invalid_uri):
         """Test that remove_resource_prefix raises ValueError for invalid URIs."""
         with pytest.raises(ValueError, match="Invalid URI format"):
             remove_resource_prefix(invalid_uri, "prefix")
@@ -1114,7 +1114,7 @@ class TestResourcePrefixHelpers:
             ("resource://prefix/", "prefix", True),
         ],
     )
-    def test_has_resource_prefix(self, uri: Literal['resource://prefix/path/to/resource'] | Literal['resource://other/path/to/resource'] | Literal['resource://path/prefix/resource'] | Literal['resource://path/to/resource'] | Literal['file://prefix/path/to/file'] | Literal['resource://pre.fix/path/to/resource'] | Literal['resource://prefix/'], prefix: Literal['prefix'] | Literal[''] | Literal['pre.fix'], expected: bool):
+    def test_has_resource_prefix(self, uri, prefix, expected):
         """Test that has_resource_prefix correctly identifies prefixes in URIs."""
         result = has_resource_prefix(uri, prefix)
         assert result == expected
@@ -1128,7 +1128,7 @@ class TestResourcePrefixHelpers:
             "http:/missing-slash",
         ],
     )
-    def test_has_resource_prefix_invalid_uri(self, invalid_uri: Literal['not-a-uri'] | Literal['resource:no-slashes'] | Literal['missing-protocol'] | Literal['http:/missing-slash']):
+    def test_has_resource_prefix_invalid_uri(self, invalid_uri):
         """Test that has_resource_prefix raises ValueError for invalid URIs."""
         with pytest.raises(ValueError, match="Invalid URI format"):
             has_resource_prefix(invalid_uri, "prefix")
@@ -1211,7 +1211,7 @@ class TestResourcePrefixMounting:
         ],
     )
     async def test_mounted_server_matching_and_stripping(
-        self, uri: Literal['resource://prefix/path/to/resource'] | Literal['resource://prefix//absolute/path'] | Literal['resource://other/path/to/resource'] | Literal['http://prefix/example.com'], prefix: Literal['prefix'], expected_match: bool, expected_strip: Literal['resource://path/to/resource'] | Literal['resource:///absolute/path'] | Literal['resource://other/path/to/resource'] | Literal['http://example.com']
+        self, uri, prefix, expected_match, expected_strip
     ):
         """Test that resource prefix utility functions correctly match and strip resource prefixes."""
         from fastmcp.server.server import has_resource_prefix, remove_resource_prefix
