@@ -1,11 +1,12 @@
 import logging
-from typing import Annotated
+from typing import Annotated, Any, Literal
 
 import httpx
 import pytest
 from fastapi import FastAPI
 from mcp import McpError
 from pydantic import Field
+from pytest import LogCaptureFixture
 
 from fastmcp import Client, FastMCP
 from fastmcp.exceptions import NotFoundError
@@ -1020,7 +1021,7 @@ class TestResourcePrefixHelpers:
             ("resource://", "prefix", "resource://prefix/"),
         ],
     )
-    def test_add_resource_prefix(self, uri, prefix, expected):
+    def test_add_resource_prefix(self, uri: Literal['resource://path/to/resource'] | Literal['resource:///absolute/path'] | Literal['file://path/to/file'] | Literal['http://example.com/path'] | Literal['resource://'], prefix: Literal['prefix'] | Literal[''] | Literal['pre.fix'] | Literal['pre/fix'], expected: Literal['resource://prefix/path/to/resource'] | Literal['resource://prefix//absolute/path'] | Literal['resource://path/to/resource'] | Literal['file://prefix/path/to/file'] | Literal['http://prefix/example.com/path'] | Literal['resource://pre.fix/path/to/resource'] | Literal['resource://pre/fix/path/to/resource'] | Literal['resource://prefix/']):
         """Test that add_resource_prefix correctly adds prefixes to URIs."""
         result = add_resource_prefix(uri, prefix)
         assert result == expected
@@ -1034,7 +1035,7 @@ class TestResourcePrefixHelpers:
             "http:/missing-slash",
         ],
     )
-    def test_add_resource_prefix_invalid_uri(self, invalid_uri):
+    def test_add_resource_prefix_invalid_uri(self, invalid_uri: Literal['not-a-uri'] | Literal['resource:no-slashes'] | Literal['missing-protocol'] | Literal['http:/missing-slash']):
         """Test that add_resource_prefix raises ValueError for invalid URIs."""
         with pytest.raises(ValueError, match="Invalid URI format"):
             add_resource_prefix(invalid_uri, "prefix")
@@ -1075,7 +1076,7 @@ class TestResourcePrefixHelpers:
             ("resource://prefix/", "prefix", "resource://"),
         ],
     )
-    def test_remove_resource_prefix(self, uri, prefix, expected):
+    def test_remove_resource_prefix(self, uri: Literal['resource://prefix/path/to/resource'] | Literal['resource://prefix//absolute/path'] | Literal['resource://other/path/to/resource'] | Literal['resource://path/to/resource'] | Literal['file://prefix/path/to/file'] | Literal['resource://pre.fix/path/to/resource'] | Literal['resource://pre/fix/path/to/resource'] | Literal['resource://prefix/'], prefix: Literal['prefix'] | Literal[''] | Literal['pre.fix'] | Literal['pre/fix'], expected: Literal['resource://path/to/resource'] | Literal['resource:///absolute/path'] | Literal['resource://other/path/to/resource'] | Literal['file://path/to/file'] | Literal['resource://']):
         """Test that remove_resource_prefix correctly removes prefixes from URIs."""
         result = remove_resource_prefix(uri, prefix)
         assert result == expected
@@ -1089,7 +1090,7 @@ class TestResourcePrefixHelpers:
             "http:/missing-slash",
         ],
     )
-    def test_remove_resource_prefix_invalid_uri(self, invalid_uri):
+    def test_remove_resource_prefix_invalid_uri(self, invalid_uri: Literal['not-a-uri'] | Literal['resource:no-slashes'] | Literal['missing-protocol'] | Literal['http:/missing-slash']):
         """Test that remove_resource_prefix raises ValueError for invalid URIs."""
         with pytest.raises(ValueError, match="Invalid URI format"):
             remove_resource_prefix(invalid_uri, "prefix")
@@ -1113,7 +1114,7 @@ class TestResourcePrefixHelpers:
             ("resource://prefix/", "prefix", True),
         ],
     )
-    def test_has_resource_prefix(self, uri, prefix, expected):
+    def test_has_resource_prefix(self, uri: Literal['resource://prefix/path/to/resource'] | Literal['resource://other/path/to/resource'] | Literal['resource://path/prefix/resource'] | Literal['resource://path/to/resource'] | Literal['file://prefix/path/to/file'] | Literal['resource://pre.fix/path/to/resource'] | Literal['resource://prefix/'], prefix: Literal['prefix'] | Literal[''] | Literal['pre.fix'], expected: bool):
         """Test that has_resource_prefix correctly identifies prefixes in URIs."""
         result = has_resource_prefix(uri, prefix)
         assert result == expected
@@ -1127,7 +1128,7 @@ class TestResourcePrefixHelpers:
             "http:/missing-slash",
         ],
     )
-    def test_has_resource_prefix_invalid_uri(self, invalid_uri):
+    def test_has_resource_prefix_invalid_uri(self, invalid_uri: Literal['not-a-uri'] | Literal['resource:no-slashes'] | Literal['missing-protocol'] | Literal['http:/missing-slash']):
         """Test that has_resource_prefix raises ValueError for invalid URIs."""
         with pytest.raises(ValueError, match="Invalid URI format"):
             has_resource_prefix(invalid_uri, "prefix")
@@ -1210,7 +1211,7 @@ class TestResourcePrefixMounting:
         ],
     )
     async def test_mounted_server_matching_and_stripping(
-        self, uri, prefix, expected_match, expected_strip
+        self, uri: Literal['resource://prefix/path/to/resource'] | Literal['resource://prefix//absolute/path'] | Literal['resource://other/path/to/resource'] | Literal['http://prefix/example.com'], prefix: Literal['prefix'], expected_match: bool, expected_strip: Literal['resource://path/to/resource'] | Literal['resource:///absolute/path'] | Literal['resource://other/path/to/resource'] | Literal['http://example.com']
     ):
         """Test that resource prefix utility functions correctly match and strip resource prefixes."""
         from fastmcp.server.server import has_resource_prefix, remove_resource_prefix
@@ -1402,7 +1403,7 @@ class TestOpenAPIExperimentalFeatureFlag:
         return httpx.AsyncClient(base_url="https://api.example.com")
 
     def test_from_openapi_uses_legacy_by_default_and_logs_message(
-        self, simple_openapi_spec, mock_client, caplog
+        self, simple_openapi_spec: dict[str, Any], mock_client: httpx.AsyncClient, caplog: LogCaptureFixture
     ):
         """Test that from_openapi uses legacy parser by default and emits log message."""
         # Capture all logs at INFO level and above using FastMCP's logger
@@ -1429,7 +1430,7 @@ class TestOpenAPIExperimentalFeatureFlag:
         )
 
     def test_from_openapi_uses_experimental_with_flag_and_no_log(
-        self, simple_openapi_spec, mock_client, caplog
+        self, simple_openapi_spec: dict[str, Any], mock_client: httpx.AsyncClient, caplog: LogCaptureFixture
     ):
         """Test that from_openapi uses experimental parser with flag and emits no log."""
         # Capture all logs at INFO level and above
@@ -1451,7 +1452,7 @@ class TestOpenAPIExperimentalFeatureFlag:
         ]
         assert len(legacy_log_messages) == 0
 
-    def test_from_fastapi_uses_legacy_by_default_and_logs_message(self, caplog):
+    def test_from_fastapi_uses_legacy_by_default_and_logs_message(self, caplog: LogCaptureFixture):
         """Test that from_fastapi uses legacy parser by default and emits log message."""
         # Capture all logs at INFO level and above using FastMCP's logger
         with caplog_for_fastmcp(caplog), caplog.at_level(logging.INFO):
@@ -1481,7 +1482,7 @@ class TestOpenAPIExperimentalFeatureFlag:
             in legacy_log_messages[0].message
         )
 
-    def test_from_fastapi_uses_experimental_with_flag_and_no_log(self, caplog):
+    def test_from_fastapi_uses_experimental_with_flag_and_no_log(self, caplog: LogCaptureFixture):
         """Test that from_fastapi uses experimental parser with flag and emits no log."""
         # Capture all logs at INFO level and above
         with caplog.at_level(logging.INFO):
