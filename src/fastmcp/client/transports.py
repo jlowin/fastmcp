@@ -691,8 +691,9 @@ class FastMCPTransport(ClientTransport):
         # ``_mcp_server`` attribute pointing to the underlying MCP server
         # implementation, so we can treat them identically.
         self.server = mcp
-        self.auth = self._set_auth(auth)
         self.raise_exceptions = raise_exceptions
+
+        self._set_auth(auth)
 
     @contextlib.asynccontextmanager
     async def connect_session(
