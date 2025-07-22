@@ -63,3 +63,4 @@ dmypy.json
 
 # Claude worktree management
 .claude-wt/worktrees
+CLAUDE.md
