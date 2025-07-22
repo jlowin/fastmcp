@@ -233,6 +233,10 @@ Every hook receives two parameters:
    - `context.timestamp` - When the request was received
    - `context.fastmcp_context` - FastMCP Context object (if available)
 
+<Tip>
+Use the FastMCP Context object to store state data that your tools can access later. For example, middleware can authenticate a user and store their permissions in `context.fastmcp_context.set_state_value("permissions", ["read", "write"])`, then tools can access this with `ctx.get_state_value("permissions")`. See [Context State Management](/servers/context#state-management) for details.
+</Tip>
+
 2. **`call_next`** - A function that continues the middleware chain. You **must** call this to proceed, unless you want to stop processing entirely.
 
 ### Control Flow
