@@ -312,12 +312,42 @@ def _combine_schemas_and_map_params(
     }
     # Add schema definitions if available
     if route.schema_definitions:
-        result["$defs"] = route.schema_definitions
+        result["$defs"] = route.schema_definitions.copy()
 
-    # Use lightweight compression - only prune additionalProperties for cleaner schemas
-    # Skip expensive unused definition removal to maintain performance
+    # Use lightweight compression - prune additionalProperties and unused definitions
     if result.get("additionalProperties") is False:
         result.pop("additionalProperties")
+
+    # Remove unused definitions (lightweight approach - just check direct $ref usage)
+    if "$defs" in result:
+        used_refs = set()
+
+        def find_refs_in_value(value):
+            if isinstance(value, dict):
+                if "$ref" in value and isinstance(value["$ref"], str):
+                    ref = value["$ref"]
+                    if ref.startswith("#/$defs/"):
+                        used_refs.add(ref.split("/")[-1])
+                for v in value.values():
+                    find_refs_in_value(v)
+            elif isinstance(value, list):
+                for item in value:
+                    find_refs_in_value(item)
+
+        # Find refs in the main schema (excluding $defs section)
+        for key, value in result.items():
+            if key != "$defs":
+                find_refs_in_value(value)
+
+        # Remove unused definitions
+        if used_refs:
+            result["$defs"] = {
+                name: def_schema
+                for name, def_schema in result["$defs"].items()
+                if name in used_refs
+            }
+        else:
+            result.pop("$defs")
 
     return result, parameter_map
 
@@ -375,21 +405,27 @@ def _adjust_union_types(
         return schema
 
     if isinstance(schema, dict):
-        if "oneOf" in schema:
-            schema["anyOf"] = schema.pop("oneOf")
+        # Work on a copy to avoid mutating the input
+        result = schema.copy()
+        if "oneOf" in result:
+            result["anyOf"] = result.pop("oneOf")
         # OPTIMIZATION: Only recurse into values that could contain more schemas
-        for k, v in schema.items():
+        for k, v in result.items():
             if isinstance(v, dict | list) and k not in [
                 "examples",
                 "example",
                 "default",
             ]:
-                schema[k] = _adjust_union_types(v, _depth + 1)
+                result[k] = _adjust_union_types(v, _depth + 1)
+        return result
     elif isinstance(schema, list):
-        # OPTIMIZATION: Mutate list in-place + depth tracking
-        for i, item in enumerate(schema):
-            if isinstance(item, dict | list):
-                schema[i] = _adjust_union_types(item, _depth + 1)
+        # Process list items without mutating the input list
+        return [
+            _adjust_union_types(item, _depth + 1)
+            if isinstance(item, dict | list)
+            else item
+            for item in schema
+        ]
     return schema
 
 
@@ -476,12 +512,42 @@ def extract_output_schema_from_responses(
 
     # Add schema definitions if available
     if schema_definitions:
-        output_schema["$defs"] = schema_definitions
+        output_schema["$defs"] = schema_definitions.copy()
 
-    # Use lightweight compression - only prune additionalProperties for cleaner schemas
-    # Skip expensive unused definition removal to maintain performance
+    # Use lightweight compression - prune additionalProperties and unused definitions
     if output_schema.get("additionalProperties") is False:
         output_schema.pop("additionalProperties")
+
+    # Remove unused definitions (lightweight approach - just check direct $ref usage)
+    if "$defs" in output_schema:
+        used_refs = set()
+
+        def find_refs_in_value(value):
+            if isinstance(value, dict):
+                if "$ref" in value and isinstance(value["$ref"], str):
+                    ref = value["$ref"]
+                    if ref.startswith("#/$defs/"):
+                        used_refs.add(ref.split("/")[-1])
+                for v in value.values():
+                    find_refs_in_value(v)
+            elif isinstance(value, list):
+                for item in value:
+                    find_refs_in_value(item)
+
+        # Find refs in the main schema (excluding $defs section)
+        for key, value in output_schema.items():
+            if key != "$defs":
+                find_refs_in_value(value)
+
+        # Remove unused definitions
+        if used_refs:
+            output_schema["$defs"] = {
+                name: def_schema
+                for name, def_schema in output_schema["$defs"].items()
+                if name in used_refs
+            }
+        else:
+            output_schema.pop("$defs")
 
     # Adjust union types to handle overlapping unions
     output_schema = cast(dict[str, Any], _adjust_union_types(output_schema))

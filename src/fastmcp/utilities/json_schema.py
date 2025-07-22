@@ -47,7 +47,7 @@ def _single_pass_optimize(
 
     **Performance Benefits:**
     - Single tree traversal instead of multiple passes (2-3x faster)
-    - In-place mutations avoid object copying overhead
+    - Immutable design prevents shared reference bugs
     - Early termination prevents runaway recursion on deeply nested schemas
 
     **Algorithm Overview:**
@@ -56,13 +56,13 @@ def _single_pass_optimize(
     3. Remove unused definitions based on reference analysis
 
     Args:
-        schema: JSON schema dict to optimize (modified in-place)
+        schema: JSON schema dict to optimize (not modified)
         prune_titles: Remove title fields for cleaner output
         prune_additional_properties: Remove "additionalProperties": false constraints
         prune_defs: Remove unused $defs entries to reduce size
 
     Returns:
-        The optimized schema (same object, modified in-place)
+        A new optimized schema dict
 
     Example:
         >>> schema = {
