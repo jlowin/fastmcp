@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import copy
 import datetime
-import time
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -70,9 +69,6 @@ logger = get_logger(__name__)
 
 T = TypeVar("T", bound="ClientTransport")
 
-# Global cache for list_tools() results to minimize repeated schema fetching
-_GLOBAL_LIST_TOOLS_CACHE: dict[str, tuple[float, Any]] = {}
-
 
 @dataclass
 class ClientSessionState:
@@ -136,8 +132,6 @@ class Client(Generic[ClientTransportT]):
         timeout: Optional timeout for requests (seconds or timedelta)
         init_timeout: Optional timeout for initial connection (seconds or timedelta).
             Set to 0 to disable. If None, uses the value in the FastMCP global settings.
-        list_tools_cache_ttl: Optional cache TTL for list_tools() results (seconds or timedelta).
-            If None (default), caching is disabled. Specify a positive value to enable caching.
 
     Examples:
         ```python
@@ -223,7 +217,6 @@ class Client(Generic[ClientTransportT]):
         init_timeout: datetime.timedelta | float | int | None = None,
         client_info: mcp.types.Implementation | None = None,
         auth: httpx.Auth | Literal["oauth"] | str | None = None,
-        list_tools_cache_ttl: datetime.timedelta | float | int | None = None,
     ) -> None:
         self.transport = cast(ClientTransportT, infer_transport(transport))
         if auth is not None:
@@ -273,31 +266,8 @@ class Client(Generic[ClientTransportT]):
                 elicitation_handler
             )
 
-        # Handle list_tools cache TTL
-        if list_tools_cache_ttl is None:
-            self._list_tools_cache_ttl = None  # No caching by default
-        elif isinstance(list_tools_cache_ttl, datetime.timedelta):
-            self._list_tools_cache_ttl = list_tools_cache_ttl.total_seconds()
-        else:
-            self._list_tools_cache_ttl = float(list_tools_cache_ttl)
-
         # Session context management - see class docstring for detailed explanation
         self._session_state = ClientSessionState()
-
-    def _cleanup_expired_list_tools_cache(self) -> None:
-        """Remove expired list_tools cache entries."""
-        if self._list_tools_cache_ttl is None:
-            return  # No caching enabled
-
-        global _GLOBAL_LIST_TOOLS_CACHE
-        current_time = time.time()
-        expired_keys = [
-            key
-            for key, (timestamp, _) in _GLOBAL_LIST_TOOLS_CACHE.items()
-            if current_time - timestamp > self._list_tools_cache_ttl
-        ]
-        for key in expired_keys:
-            del _GLOBAL_LIST_TOOLS_CACHE[key]
 
     @property
     def session(self) -> ClientSession:
@@ -797,34 +767,10 @@ class Client(Generic[ClientTransportT]):
             mcp.types.ListToolsResult: The complete response object from the protocol,
                 containing the list of tools and any additional metadata.
 
-        Results can be cached to minimize repeated MCP server calls when enabled.
-        Use the list_tools_cache_ttl constructor parameter to enable caching.
-
         Raises:
             RuntimeError: If called while the client is not connected.
         """
-        # Skip caching if disabled
-        if self._list_tools_cache_ttl is None:
-            return await self.session.list_tools()
-
-        global _GLOBAL_LIST_TOOLS_CACHE
-
-        # Check cache first
-        cache_key = f"list_tools_{id(self.session)}"
-        current_time = time.time()
-
-        if cache_key in _GLOBAL_LIST_TOOLS_CACHE:
-            cache_timestamp, cached_result = _GLOBAL_LIST_TOOLS_CACHE[cache_key]
-            if current_time - cache_timestamp <= self._list_tools_cache_ttl:
-                return cached_result
-
-        # Cache miss - fetch from server
         result = await self.session.list_tools()
-
-        # Cache the result and cleanup expired entries
-        _GLOBAL_LIST_TOOLS_CACHE[cache_key] = (current_time, result)
-        self._cleanup_expired_list_tools_cache()
-
         return result
 
     async def list_tools(self) -> list[mcp.types.Tool]:
