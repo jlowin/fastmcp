@@ -18,8 +18,8 @@ fastmcp --help
 
 | Command | Purpose | Dependency Management |
 | ------- | ------- | --------------------- |
-| `run` | Run a FastMCP server directly | Uses your current environment; you are responsible for ensuring all dependencies are available |
-| `dev` | Run a server with the MCP Inspector for testing | Creates an isolated environment; dependencies must be explicitly specified with `--with` and/or `--with-editable` |
+| `run` | Run a FastMCP server directly | Default: Uses your local environment directly. With `--python`, `--with`, `--project`, or `--with-requirements`: Runs via `uv run` subprocess |
+| `dev` | Run a server with the MCP Inspector for testing | Always runs via `uv run` subprocess (never uses your local environment); dependencies must be specified or available in a uv-managed project |
 | `install` | Install a server in MCP client applications | Creates an isolated environment; dependencies must be explicitly specified with `--with` and/or `--with-editable` |
 | `inspect` | Generate a JSON report about a FastMCP server | Uses your current environment; you are responsible for ensuring all dependencies are available |
 | `version` | Display version information | N/A |
@@ -35,7 +35,7 @@ fastmcp run server.py
 ```
 
 <Tip>
-This command runs the server directly in your current Python environment. You are responsible for ensuring all dependencies are available.
+By default, this command runs the server directly in your current Python environment. You are responsible for ensuring all dependencies are available. When using `--python`, `--with`, `--project`, or `--with-requirements` options, it runs the server via `uv run` subprocess instead.
 </Tip>
 
 #### Options
@@ -48,15 +48,20 @@ This command runs the server directly in your current Python environment. You ar
 | Path | `--path` | Path to bind to when using http transport (default: `/mcp/` or `/sse/` for SSE) |
 | Log Level | `--log-level`, `-l` | Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL) |
 | No Banner | `--no-banner` | Disable the startup banner display |
+| Python Version | `--python` | Python version to use (e.g., 3.10, 3.11) |
+| Additional Packages | `--with` | Additional packages to install (can be used multiple times) |
+| Project Directory | `--project` | Run the command within the given project directory |
+| Requirements File | `--with-requirements` | Requirements file to install dependencies from |
 
 
 #### Server Specification
 <VersionBadge version="2.3.5" />
 
-The server can be specified in three ways:
+The server can be specified in four ways:
 1. `server.py` - imports the module and looks for a FastMCP object named `mcp`, `server`, or `app`. Errors if no such object is found.
 2. `server.py:custom_name` - imports and uses the specified server object
 3. `http://server-url/path` or `https://server-url/path` - connects to a remote server and creates a proxy
+4. `mcp.json` - runs servers defined in a standard MCP configuration file
 
 <Tip>
 When using `fastmcp run` with a local file, it **ignores** the `if __name__ == "__main__"` block entirely. Instead, it finds your server object and calls its `run()` method directly with the transport options you specify. This means you can use `fastmcp run` to override the transport specified in your code.
@@ -96,6 +101,56 @@ fastmcp run https://example.com/mcp-server
 
 # Connect to a remote server with specified log level
 fastmcp run https://example.com/mcp-server --log-level DEBUG
+
+# Run with a specific Python version
+fastmcp run server.py --python 3.11
+
+# Run with additional packages
+fastmcp run server.py --with pandas --with numpy
+
+# Run within a specific project directory
+fastmcp run server.py --project /path/to/project
+
+# Run with dependencies from a requirements file
+fastmcp run server.py --with-requirements requirements.txt
+```
+
+#### Running MCP Configuration Files
+
+FastMCP can run servers defined in standard MCP configuration files (typically named `mcp.json`). When you run an mcp.json file, FastMCP creates a proxy server that runs all the servers referenced in the configuration.
+
+**Example mcp.json:**
+```json
+{
+    "mcpServers": {
+        "fetch": {
+            "command": "uvx",
+            "args": [
+                "mcp-server-fetch"
+            ]
+        },
+        "filesystem": {
+            "command": "npx",
+            "args": [
+                "-y",
+                "@modelcontextprotocol/server-filesystem",
+                "/Users/username/Documents"
+            ]
+        }
+    }
+}
+```
+
+**Run the configuration:**
+```bash
+# Run with default stdio transport
+fastmcp run mcp.json
+
+# Run with HTTP transport on custom port
+fastmcp run mcp.json --transport http --port 8080
+
+# Run with SSE transport
+fastmcp run mcp.json --transport sse
 ```
 
 ### `dev`
@@ -107,7 +162,7 @@ fastmcp dev server.py
 ```
 
 <Tip> 
-This command runs your server in an isolated environment. All dependencies must be explicitly specified using the `--with` and/or `--with-editable` options.
+This command always runs your server via `uv run` subprocess (never your local environment) to work with the MCP Inspector. All dependencies must be explicitly specified using the `--with` and/or `--with-editable` options, or be available in a uv-managed project.
 </Tip>
 
 <Warning>
@@ -136,12 +191,24 @@ This command does not support HTTP testing. To test a server over Streamable HTT
 | Inspector Version | `--inspector-version` | Version of the MCP Inspector to use |
 | UI Port | `--ui-port` | Port for the MCP Inspector UI |
 | Server Port | `--server-port` | Port for the MCP Inspector Proxy server |
+| Python Version | `--python` | Python version to use (e.g., 3.10, 3.11) |
+| Project Directory | `--project` | Run the command within the given project directory |
+| Requirements File | `--with-requirements` | Requirements file to install dependencies from |
 
-**Example**
+**Examples**
 
 ```bash
 # Run dev server with editable mode and additional packages
 fastmcp dev server.py -e . --with pandas --with matplotlib
+
+# Run dev server with specific Python version
+fastmcp dev server.py --python 3.11
+
+# Run dev server with requirements file
+fastmcp dev server.py --with-requirements requirements.txt
+
+# Run dev server within a specific project directory
+fastmcp dev server.py --project /path/to/project
 ```
 
 ### `install`
@@ -167,6 +234,10 @@ Note that for security reasons, MCP clients usually run every server in a comple
 **`uv` must be installed and available in your system PATH**. Both Claude Desktop and Cursor run in isolated environments and need `uv` to manage dependencies. On macOS, install `uv` globally with Homebrew for Claude Desktop compatibility: `brew install uv`.
 </Warning>
 
+<Note>
+**Python Version Considerations**: The install commands now support the `--python` option to specify a Python version directly. You can also use `--project` to run within a specific project directory or `--with-requirements` to install dependencies from a requirements file.
+</Note>
+
 <Tip>
 **FastMCP `install` commands focus on local server files with STDIO transport.** For remote servers running with HTTP or SSE transport, use your client's native configuration - FastMCP's value is simplifying the complex local setup with dependencies and `uv` commands.
 </Tip>
@@ -185,8 +256,11 @@ The `install` command supports the same `file.py:object` notation as the `run` c
 | Server Name | `--name`, `-n` | Custom name for the server (defaults to server's name attribute or file name) |
 | Editable Package | `--with-editable`, `-e` | Directory containing pyproject.toml to install in editable mode |
 | Additional Packages | `--with` | Additional packages to install (can be used multiple times) |
-| Environment Variables | `--env-var`, `-v` | Environment variables in KEY=VALUE format (can be used multiple times) |
+| Environment Variables | `--env` | Environment variables in KEY=VALUE format (can be used multiple times) |
 | Environment File | `--env-file`, `-f` | Load environment variables from a .env file |
+| Python Version | `--python` | Python version to use (e.g., 3.10, 3.11) |
+| Project Directory | `--project` | Run the command within the given project directory |
+| Requirements File | `--with-requirements` | Requirements file to install dependencies from |
 
 **Examples**
 
@@ -198,16 +272,25 @@ fastmcp install claude-desktop server.py
 fastmcp install claude-desktop server.py:my_server
 
 # With custom name and dependencies
-fastmcp install claude-desktop server.py:my_server -n "My Analysis Server" --with pandas
+fastmcp install claude-desktop server.py:my_server --name "My Analysis Server" --with pandas
 
 # Install in Claude Code with environment variables
-fastmcp install claude-code server.py --env-var API_KEY=secret --env-var DEBUG=true
+fastmcp install claude-code server.py --env API_KEY=secret --env DEBUG=true
 
 # Install in Cursor with environment variables
-fastmcp install cursor server.py --env-var API_KEY=secret --env-var DEBUG=true
+fastmcp install cursor server.py --env API_KEY=secret --env DEBUG=true
 
 # Install with environment file
 fastmcp install cursor server.py --env-file .env
+
+# Install with specific Python version
+fastmcp install claude-desktop server.py --python 3.11
+
+# Install with requirements file
+fastmcp install claude-code server.py --with-requirements requirements.txt
+
+# Install within a project directory
+fastmcp install cursor server.py --project /path/to/project
 
 # Generate MCP JSON configuration
 fastmcp install mcp-json server.py --name "My Server" --with pandas
@@ -225,28 +308,30 @@ The `mcp-json` subcommand generates standard MCP JSON configuration that can be 
 - Sharing server configurations with others
 - Integration with custom tooling
 
-The generated JSON follows the standard `mcpServers` format used by Claude Desktop, VS Code, Cursor, and other MCP clients:
+The generated JSON follows the standard MCP server configuration format used by Claude Desktop, VS Code, Cursor, and other MCP clients, with the server name as the root key:
 
 ```json
 {
-  "mcpServers": {
-    "server-name": {
-      "command": "uv",
-      "args": [
-        "run",
-        "--with",
-        "fastmcp",
-        "fastmcp",
-        "run",
-        "/path/to/server.py"
-      ],
-      "env": {
-        "API_KEY": "value"
-      }
+  "server-name": {
+    "command": "uv",
+    "args": [
+      "run",
+      "--with",
+      "fastmcp",
+      "fastmcp",
+      "run",
+      "/path/to/server.py"
+    ],
+    "env": {
+      "API_KEY": "value"
     }
   }
 }
 ```
+
+<Note>
+To use this configuration with your MCP client, you'll typically need to add it to the client's `mcpServers` object. Consult your client's documentation for any specific configuration requirements or formatting needs.
+</Note>
 
 **Options specific to mcp-json:**
 

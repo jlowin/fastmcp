@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Any, Generic, Literal, TypeVar
+from typing import Any, Generic, Literal, TypeVar, cast
 
 from openapi_pydantic import (
     OpenAPI,
@@ -24,7 +24,6 @@ from openapi_pydantic.v3.v3_0 import Response as Response_30
 from openapi_pydantic.v3.v3_0 import Schema as Schema_30
 from pydantic import BaseModel, Field, ValidationError
 
-from fastmcp.utilities.json_schema import compress_schema
 from fastmcp.utilities.types import FastMCPBaseModel
 
 logger = logging.getLogger(__name__)
@@ -93,6 +92,40 @@ def format_array_parameter(
             return str_value
 
 
+def format_deep_object_parameter(
+    param_value: dict, parameter_name: str
+) -> dict[str, str]:
+    """
+    Format a dictionary parameter for deepObject style serialization.
+
+    According to OpenAPI 3.0 spec, deepObject style with explode=true serializes
+    object properties as separate query parameters with bracket notation.
+
+    For example: {"id": "123", "type": "user"} becomes:
+    param[id]=123&param[type]=user
+
+    Args:
+        param_value: Dictionary value to format
+        parameter_name: Name of the parameter
+
+    Returns:
+        Dictionary with bracketed parameter names as keys
+    """
+    if not isinstance(param_value, dict):
+        logger.warning(
+            f"deepObject style parameter '{parameter_name}' expected dict, got {type(param_value)}"
+        )
+        return {}
+
+    result = {}
+    for key, value in param_value.items():
+        # Format as param[key]=value
+        bracketed_key = f"{parameter_name}[{key}]"
+        result[bracketed_key] = str(value)
+
+    return result
+
+
 class ParameterInfo(FastMCPBaseModel):
     """Represents a single parameter for an HTTP operation in our IR."""
 
@@ -102,6 +135,7 @@ class ParameterInfo(FastMCPBaseModel):
     schema_: JsonSchema = Field(..., alias="schema")  # Target name in IR
     description: str | None = None
     explode: bool | None = None  # OpenAPI explode property for array parameters
+    style: str | None = None  # OpenAPI style property for parameter serialization
 
 
 class RequestBodyInfo(FastMCPBaseModel):
@@ -153,6 +187,7 @@ __all__ = [
     "JsonSchema",
     "parse_openapi_to_http_routes",
     "extract_output_schema_from_responses",
+    "format_deep_object_parameter",
 ]
 
 # Type variables for generic parser
@@ -415,8 +450,9 @@ class OpenAPIParser(
                         ):
                             param_schema_dict["default"] = resolved_media_schema.default
 
-                # Extract explode property if present
+                # Extract explode and style properties if present
                 explode = getattr(parameter, "explode", None)
+                style = getattr(parameter, "style", None)
 
                 # Create parameter info object
                 param_info = ParameterInfo(
@@ -426,6 +462,7 @@ class OpenAPIParser(
                     schema=param_schema_dict,
                     description=parameter.description,
                     explode=explode,
+                    style=style,
                 )
                 extracted_params.append(param_info)
             except Exception as e:
@@ -1030,15 +1067,16 @@ def _replace_ref_with_defs(
     """
     schema = info.copy()
     if ref_path := schema.get("$ref"):
-        if ref_path.startswith("#/components/schemas/"):
-            schema_name = ref_path.split("/")[-1]
-            schema["$ref"] = f"#/$defs/{schema_name}"
-        elif not ref_path.startswith("#/"):
-            raise ValueError(
-                f"External or non-local reference not supported: {ref_path}. "
-                f"FastMCP only supports local schema references starting with '#/'. "
-                f"Please include all schema definitions within the OpenAPI document."
-            )
+        if isinstance(ref_path, str):
+            if ref_path.startswith("#/components/schemas/"):
+                schema_name = ref_path.split("/")[-1]
+                schema["$ref"] = f"#/$defs/{schema_name}"
+            elif not ref_path.startswith("#/"):
+                raise ValueError(
+                    f"External or non-local reference not supported: {ref_path}. "
+                    f"FastMCP only supports local schema references starting with '#/'. "
+                    f"Please include all schema definitions within the OpenAPI document."
+                )
     elif properties := schema.get("properties"):
         if "$ref" in properties:
             schema["properties"] = _replace_ref_with_defs(properties)
@@ -1054,6 +1092,81 @@ def _replace_ref_with_defs(
             schema[section][i] = _replace_ref_with_defs(item)
     if info.get("description", description) and not schema.get("description"):
         schema["description"] = description
+    return schema
+
+
+def _make_optional_parameter_nullable(schema: dict[str, Any]) -> dict[str, Any]:
+    """
+    Make an optional parameter schema nullable to allow None values.
+
+    For optional parameters, we need to allow null values in addition to the
+    specified type to handle cases where None is passed for optional parameters.
+    """
+    # If schema already has multiple types or is already nullable, don't modify
+    if "anyOf" in schema or "oneOf" in schema or "allOf" in schema:
+        return schema
+
+    # If it's already nullable (type includes null), don't modify
+    if isinstance(schema.get("type"), list) and "null" in schema["type"]:
+        return schema
+
+    # Create a new schema that allows null in addition to the original type
+    if "type" in schema:
+        original_type = schema["type"]
+
+        if isinstance(original_type, str):
+            # Single type - make it a union with null
+            nullable_schema = schema.copy()
+
+            nested_non_nullable_schema = {
+                "type": original_type,
+            }
+
+            # If the original type is an array, move the array-specific properties into the now-nested schema
+            # https://json-schema.org/understanding-json-schema/reference/array
+            if original_type == "array":
+                for array_property in [
+                    "items",
+                    "prefixItems",
+                    "unevaluatedItems",
+                    "contains",
+                    "minContains",
+                    "maxContains",
+                    "minItems",
+                    "maxItems",
+                    "uniqueItems",
+                ]:
+                    if array_property in nullable_schema:
+                        nested_non_nullable_schema[array_property] = nullable_schema[
+                            array_property
+                        ]
+                        del nullable_schema[array_property]
+
+            # If the original type is an object, move the object-specific properties into the now-nested schema
+            # https://json-schema.org/understanding-json-schema/reference/object
+            elif original_type == "object":
+                for object_property in [
+                    "properties",
+                    "patternProperties",
+                    "additionalProperties",
+                    "unevaluatedProperties",
+                    "required",
+                    "propertyNames",
+                    "minProperties",
+                    "maxProperties",
+                ]:
+                    if object_property in nullable_schema:
+                        nested_non_nullable_schema[object_property] = nullable_schema[
+                            object_property
+                        ]
+                        del nullable_schema[object_property]
+
+            nullable_schema["anyOf"] = [nested_non_nullable_schema, {"type": "null"}]
+
+            # Remove the original type since we're using anyOf
+            del nullable_schema["type"]
+            return nullable_schema
+
     return schema
 
 
@@ -1118,14 +1231,22 @@ def _combine_schemas(route: HTTPRoute) -> dict[str, Any]:
             else:
                 param_schema["description"] = location_desc
 
+            # Don't make optional parameters nullable - they can simply be omitted
+            # The OpenAPI specification doesn't require optional parameters to accept null values
+
             properties[suffixed_name] = param_schema
         else:
             # No collision, use original name
             if param.required:
                 required.append(param.name)
-            properties[param.name] = _replace_ref_with_defs(
+            param_schema = _replace_ref_with_defs(
                 param.schema_.copy(), param.description
             )
+
+            # Don't make optional parameters nullable - they can simply be omitted
+            # The OpenAPI specification doesn't require optional parameters to accept null values
+
+            properties[param.name] = param_schema
 
     # Add request body properties (no suffixes for body parameters)
     if route.request_body and route.request_body.content_schema:
@@ -1142,12 +1263,61 @@ def _combine_schemas(route: HTTPRoute) -> dict[str, Any]:
     }
     # Add schema definitions if available
     if route.schema_definitions:
-        result["$defs"] = route.schema_definitions
+        result["$defs"] = route.schema_definitions.copy()
 
-    # Use compress_schema to remove unused definitions
-    result = compress_schema(result)
+    # Use lightweight compression - prune additionalProperties and unused definitions
+    if result.get("additionalProperties") is False:
+        result.pop("additionalProperties")
+
+    # Remove unused definitions (lightweight approach - just check direct $ref usage)
+    if "$defs" in result:
+        used_refs = set()
+
+        def find_refs_in_value(value):
+            if isinstance(value, dict):
+                if "$ref" in value and isinstance(value["$ref"], str):
+                    ref = value["$ref"]
+                    if ref.startswith("#/$defs/"):
+                        used_refs.add(ref.split("/")[-1])
+                for v in value.values():
+                    find_refs_in_value(v)
+            elif isinstance(value, list):
+                for item in value:
+                    find_refs_in_value(item)
+
+        # Find refs in the main schema (excluding $defs section)
+        for key, value in result.items():
+            if key != "$defs":
+                find_refs_in_value(value)
+
+        # Remove unused definitions
+        if used_refs:
+            result["$defs"] = {
+                name: def_schema
+                for name, def_schema in result["$defs"].items()
+                if name in used_refs
+            }
+        else:
+            result.pop("$defs")
 
     return result
+
+
+def _adjust_union_types(
+    schema: dict[str, Any] | list[Any],
+) -> dict[str, Any] | list[Any]:
+    """Recursively replace 'oneOf' with 'anyOf' in schema to handle overlapping unions."""
+    if isinstance(schema, dict):
+        # Work on a copy to avoid mutating the input
+        result = schema.copy()
+        if "oneOf" in result:
+            result["anyOf"] = result.pop("oneOf")
+        for k, v in result.items():
+            result[k] = _adjust_union_types(v)
+        return result
+    elif isinstance(schema, list):
+        return [_adjust_union_types(item) for item in schema]
+    return schema
 
 
 def extract_output_schema_from_responses(
@@ -1233,9 +1403,44 @@ def extract_output_schema_from_responses(
 
     # Add schema definitions if available
     if schema_definitions:
-        output_schema["$defs"] = schema_definitions
+        output_schema["$defs"] = schema_definitions.copy()
 
-    # Use compress_schema to remove unused definitions
-    output_schema = compress_schema(output_schema)
+    # Use lightweight compression - prune additionalProperties and unused definitions
+    if output_schema.get("additionalProperties") is False:
+        output_schema.pop("additionalProperties")
+
+    # Remove unused definitions (lightweight approach - just check direct $ref usage)
+    if "$defs" in output_schema:
+        used_refs = set()
+
+        def find_refs_in_value(value):
+            if isinstance(value, dict):
+                if "$ref" in value and isinstance(value["$ref"], str):
+                    ref = value["$ref"]
+                    if ref.startswith("#/$defs/"):
+                        used_refs.add(ref.split("/")[-1])
+                for v in value.values():
+                    find_refs_in_value(v)
+            elif isinstance(value, list):
+                for item in value:
+                    find_refs_in_value(item)
+
+        # Find refs in the main schema (excluding $defs section)
+        for key, value in output_schema.items():
+            if key != "$defs":
+                find_refs_in_value(value)
+
+        # Remove unused definitions
+        if used_refs:
+            output_schema["$defs"] = {
+                name: def_schema
+                for name, def_schema in output_schema["$defs"].items()
+                if name in used_refs
+            }
+        else:
+            output_schema.pop("$defs")
+
+    # Adjust union types to handle overlapping unions
+    output_schema = cast(dict[str, Any], _adjust_union_types(output_schema))
 
     return output_schema

@@ -4,14 +4,22 @@ import inspect
 from collections.abc import Callable
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from mcp.types import ToolAnnotations
 from pydantic import ConfigDict
+from pydantic.fields import Field
+from pydantic.functional_validators import BeforeValidator
 
 from fastmcp.tools.tool import ParsedFunction, Tool, ToolResult, _convert_to_content
+from fastmcp.utilities.components import FastMCPComponent, _convert_set_default_none
 from fastmcp.utilities.logging import get_logger
-from fastmcp.utilities.types import NotSet, NotSetT, get_cached_typeadapter
+from fastmcp.utilities.types import (
+    FastMCPBaseModel,
+    NotSet,
+    NotSetT,
+    get_cached_typeadapter,
+)
 
 logger = get_logger(__name__)
 
@@ -193,6 +201,30 @@ class ArgTransform:
             )
 
 
+class ArgTransformConfig(FastMCPBaseModel):
+    """A model for requesting a single argument transform."""
+
+    name: str | None = Field(default=None, description="The new name for the argument.")
+    description: str | None = Field(
+        default=None, description="The new description for the argument."
+    )
+    default: str | int | float | bool | None = Field(
+        default=None, description="The new default value for the argument."
+    )
+    hide: bool = Field(
+        default=False, description="Whether to hide the argument from the tool."
+    )
+    required: Literal[True] | None = Field(
+        default=None, description="Whether the argument is required."
+    )
+    examples: Any | None = Field(default=None, description="Examples of the argument.")
+
+    def to_arg_transform(self) -> ArgTransform:
+        """Convert the argument transform to a FastMCP argument transform."""
+
+        return ArgTransform(**self.model_dump(exclude_unset=True))  # pyright: ignore[reportAny]
+
+
 class TransformedTool(Tool):
     """A tool that is transformed from another tool.
 
@@ -325,7 +357,8 @@ class TransformedTool(Tool):
         cls,
         tool: Tool,
         name: str | None = None,
-        description: str | None = None,
+        title: str | None | NotSetT = NotSet,
+        description: str | None | NotSetT = NotSet,
         tags: set[str] | None = None,
         transform_fn: Callable[..., Any] | None = None,
         transform_args: dict[str, ArgTransform] | None = None,
@@ -343,6 +376,7 @@ class TransformedTool(Tool):
                 to call the parent tool. Functions with **kwargs receive transformed
                 argument names.
             name: New name for the tool. Defaults to parent tool's name.
+            title: New title for the tool. Defaults to parent tool's title.
             transform_args: Optional transformations for parent tool arguments.
                 Only specified arguments are transformed, others pass through unchanged:
                 - Simple rename (str)
@@ -507,13 +541,18 @@ class TransformedTool(Tool):
                     f"{', '.join(sorted(duplicates))}"
                 )
 
-        final_description = description if description is not None else tool.description
+        final_name = name or tool.name
+        final_description = (
+            description if not isinstance(description, NotSetT) else tool.description
+        )
+        final_title = title if not isinstance(title, NotSetT) else tool.title
 
         transformed_tool = cls(
             fn=final_fn,
             forwarding_fn=forwarding_fn,
             parent_tool=tool,
-            name=name or tool.name,
+            name=final_name,
+            title=final_title,
             description=final_description,
             parameters=final_schema,
             output_schema=final_output_schema,
@@ -793,3 +832,65 @@ class TransformedTool(Tool):
         return any(
             p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
         )
+
+
+class ToolTransformConfig(FastMCPComponent):
+    """Provides a way to transform a tool."""
+
+    name: str | None = Field(default=None, description="The new name for the tool.")
+
+    title: str | None = Field(
+        default=None,
+        description="The new title of the tool.",
+    )
+    description: str | None = Field(
+        default=None,
+        description="The new description of the tool.",
+    )
+    tags: Annotated[set[str], BeforeValidator(_convert_set_default_none)] = Field(
+        default_factory=set,
+        description="The new tags for the tool.",
+    )
+
+    enabled: bool = Field(
+        default=True,
+        description="Whether the tool is enabled.",
+    )
+
+    arguments: dict[str, ArgTransformConfig] = Field(
+        default_factory=dict,
+        description="A dictionary of argument transforms to apply to the tool.",
+    )
+
+    def apply(self, tool: Tool) -> TransformedTool:
+        """Create a TransformedTool from a provided tool and this transformation configuration."""
+
+        tool_changes = self.model_dump(exclude_unset=True, exclude={"arguments"})
+
+        return TransformedTool.from_tool(
+            tool=tool,
+            **tool_changes,
+            transform_args={k: v.to_arg_transform() for k, v in self.arguments.items()},
+        )
+
+
+def apply_transformations_to_tools(
+    tools: dict[str, Tool],
+    transformations: dict[str, ToolTransformConfig],
+) -> dict[str, Tool]:
+    """Apply a list of transformations to a list of tools. Tools that do not have any transforamtions
+    are left unchanged.
+    """
+
+    transformed_tools = {}
+
+    for tool_name, tool in tools.items():
+        if transformation := transformations.get(tool_name):
+            transformed_tools[transformation.name or tool_name] = transformation.apply(
+                tool
+            )
+            continue
+
+        transformed_tools[tool_name] = tool
+
+    return transformed_tools
