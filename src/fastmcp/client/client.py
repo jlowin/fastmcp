@@ -302,6 +302,16 @@ class Client(Generic[ClientTransportT]):
         for key in expired_keys:
             del _GLOBAL_LIST_TOOLS_CACHE[key]
 
+    async def _list_tools_for_schema_validation(self) -> None:
+        """Call list_tools bypassing cache to ensure server initialization.
+        
+        This is used during schema validation to guarantee that servers
+        are properly initialized, preventing the race condition where
+        cached results skip server initialization entirely.
+        """
+        # Always call the session directly, bypassing our client cache
+        await self.session.list_tools()
+
     @property
     def session(self) -> ClientSession:
         """Get the current active session. Raises RuntimeError if not connected."""
@@ -911,6 +921,10 @@ class Client(Generic[ClientTransportT]):
             ToolError: If the tool call results in an error.
             RuntimeError: If called while the client is not connected.
         """
+        # Ensure server is initialized before making any tool calls
+        if not hasattr(self.session, '_tool_output_schemas') or not self.session._tool_output_schemas:
+            await self._list_tools_for_schema_validation()
+            
         result = await self.call_tool_mcp(
             name=name,
             arguments=arguments or {},
@@ -924,7 +938,7 @@ class Client(Generic[ClientTransportT]):
         elif result.structuredContent:
             try:
                 if name not in self.session._tool_output_schemas:
-                    await self.session.list_tools()
+                    await self._list_tools_for_schema_validation()
                 if name in self.session._tool_output_schemas:
                     output_schema = self.session._tool_output_schemas.get(name)
                     if output_schema:
