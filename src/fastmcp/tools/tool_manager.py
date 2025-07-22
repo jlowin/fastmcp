@@ -37,10 +37,8 @@ class ToolManager:
         self.mask_error_details = mask_error_details or settings.mask_error_details
         self.transformations = transformations or {}
 
-        # Tool existence cache to minimize server calls during validation
+        # Caching for performance optimization
         self._tool_existence_cache: dict[str, bool] = {}
-
-        # Optimal caching at _load_tools level (catches both get_tools and list_tools)
         self._load_tools_cache: dict[bool, tuple[float, dict[str, Tool]]] = {}
         self._tools_cache_ttl: float = 300  # 5 minutes
 
@@ -68,22 +66,13 @@ class ToolManager:
         - via_server=False: Manager-to-manager path for complete, unfiltered inventory
         - via_server=True: Server-to-server path for filtered MCP requests
         """
-        import time
-        import datetime
-        timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
-        print(f"🔍 [{timestamp}] _load_tools(via_server={via_server}) CALLED")
-
         current_time = time.time()
 
         # Check cache for this specific via_server parameter
         if via_server in self._load_tools_cache:
             cache_timestamp, cached_result = self._load_tools_cache[via_server]
             if current_time - cache_timestamp <= self._tools_cache_ttl:
-                cache_age = current_time - cache_timestamp
-                print(f"🔍 [{timestamp}] _load_tools(via_server={via_server}) CACHE HIT - {len(cached_result)} tools (age: {cache_age:.1f}s)")
                 return cached_result
-
-        print(f"🔍 [{timestamp}] _load_tools(via_server={via_server}) CACHE MISS - loading from servers")
         all_tools: dict[str, Tool] = {}
 
         for mounted in self._mounted_servers:
@@ -118,101 +107,41 @@ class ToolManager:
             transformations=self.transformations,
         )
 
-        # Update cache
+        # Cache the result and clear existence cache
         self._load_tools_cache[via_server] = (current_time, transformed_tools)
-        self._tool_existence_cache.clear()  # Clear existence cache when tools change
+        self._tool_existence_cache.clear()
 
-        print(f"🔍 [{timestamp}] _load_tools(via_server={via_server}) COMPLETED - {len(transformed_tools)} tools (cached)")
         return transformed_tools
 
     async def has_tool(self, key: str) -> bool:
-        """Check if a tool exists - optimized with existence cache."""
-        import traceback
-        import datetime
-        timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
-        stack = traceback.extract_stack()
-        caller_info = f"{stack[-2].filename}:{stack[-2].lineno} in {stack[-2].name}"
-        print(f"🔍 [{timestamp}] has_tool('{key}') CALLED from: {caller_info}")
-
-        # Check existence cache first
+        """Check if a tool exists."""
         if key in self._tool_existence_cache:
-            result = self._tool_existence_cache[key]
-            print(f"🔍 [{timestamp}] has_tool('{key}') EXISTENCE CACHE HIT - {result}")
-            return result
+            return self._tool_existence_cache[key]
 
-        # Check local tools first (immediate)
-        if key in self._tools:
-            self._tool_existence_cache[key] = True
-            print(f"🔍 [{timestamp}] has_tool('{key}') COMPLETED - found in local tools")
-            return True
-
-        # Check mounted servers with prefix matching (targeted)
-        for mounted in self._mounted_servers:
-            if mounted.prefix:
-                if key.startswith(f"{mounted.prefix}_"):
-                    self._tool_existence_cache[key] = True
-                    print(f"🔍 [{timestamp}] has_tool('{key}') COMPLETED - prefix match for {mounted.prefix}")
-                    return True
-
-        # Fallback to full tool loading only if needed
         tools = await self.get_tools()
         result = key in tools
         self._tool_existence_cache[key] = result
-        print(f"🔍 [{timestamp}] has_tool('{key}') COMPLETED - {result} (full lookup, cached)")
         return result
 
     async def get_tool(self, key: str) -> Tool:
-        """Get tool by key - optimized for validation."""
-        import traceback
-        import datetime
-        timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
-        stack = traceback.extract_stack()
-        caller_info = f"{stack[-2].filename}:{stack[-2].lineno} in {stack[-2].name}"
-        print(f"🔍 [{timestamp}] get_tool('{key}') CALLED from: {caller_info}")
-
-        # Check local tools first (immediate)
-        if key in self._tools:
-            tool = self._tools[key]
-            print(f"🔍 [{timestamp}] get_tool('{key}') COMPLETED - found in local tools")
-            return tool
-
-        # For mounted servers, we still need full tool loading for the Tool object
-        # But this gives us visibility into the pattern
+        """Get tool by key."""
         tools = await self.get_tools()
         if key in tools:
-            print(f"🔍 [{timestamp}] get_tool('{key}') COMPLETED - found via full lookup")
             return tools[key]
-        print(f"🔍 [{timestamp}] get_tool('{key}') COMPLETED - NOT FOUND")
         raise NotFoundError(f"Tool {key!r} not found")
 
     async def get_tools(self) -> dict[str, Tool]:
         """
         Gets the complete, unfiltered inventory of all tools.
         """
-        import traceback
-        import datetime
-        timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
-        stack = traceback.extract_stack()
-        caller_info = f"{stack[-2].filename}:{stack[-2].lineno} in {stack[-2].name}"
-        print(f"🔍 [{timestamp}] get_tools() CALLED from: {caller_info}")
-        result = await self._load_tools(via_server=False)
-        print(f"🔍 [{timestamp}] get_tools() COMPLETED - {len(result)} tools")
-        return result
+        return await self._load_tools(via_server=False)
 
     async def list_tools(self) -> list[Tool]:
         """
         Lists all tools, applying protocol filtering.
         """
-        import traceback
-        import datetime
-        timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
-        stack = traceback.extract_stack()
-        caller_info = f"{stack[-2].filename}:{stack[-2].lineno} in {stack[-2].name}"
-        print(f"🔍 [{timestamp}] list_tools() CALLED from: {caller_info}")
         tools_dict = await self._load_tools(via_server=True)
-        result = list(tools_dict.values())
-        print(f"🔍 [{timestamp}] list_tools() COMPLETED - {len(result)} tools")
-        return result
+        return list(tools_dict.values())
 
     @property
     def _tools_transformed(self) -> list[str]:
@@ -304,29 +233,7 @@ class ToolManager:
         filtered protocol path.
         """
         # 1. Check local tools first. The server will have already applied its filter.
-        if key in self._tools:
-            # Direct access - avoid loading all tools from all servers
-            tool = self._tools[key]
-            try:
-                return await tool.run(arguments)
-
-            # raise ToolErrors as-is
-            except ToolError as e:
-                logger.exception(f"Error calling tool {key!r}")
-                raise e
-
-            # Handle other exceptions
-            except Exception as e:
-                logger.exception(f"Error calling tool {key!r}")
-                if self.mask_error_details:
-                    # Mask internal details
-                    raise ToolError(f"Error calling tool {key!r}") from e
-                else:
-                    # Include original error details
-                    raise ToolError(f"Error calling tool {key!r}: {e}") from e
-
-        # 1.1 Check transformed tools (these need the full tool resolution)
-        elif key in self._tools_transformed:
+        if key in self._tools or key in self._tools_transformed:
             tool = await self.get_tool(key)
             if not tool:
                 raise NotFoundError(f"Tool {key!r} not found")
