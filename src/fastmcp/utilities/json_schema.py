@@ -45,7 +45,7 @@ def _detect_self_reference(schema: dict) -> bool:
     return False
 
 
-def dereference_json_schema(schema: dict, max_depth: int = 5) -> dict:
+def dereference_json_schema(schema: dict, max_depth: int = 50) -> dict:
     """
     Dereference a JSON schema by resolving $ref references while preserving $defs only when corner cases occur.
 
