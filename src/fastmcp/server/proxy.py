@@ -566,11 +566,14 @@ class ProxyClient(Client[ClientTransportT]):
         A handler that forwards the elicitation request from the remote server to the proxy's connected clients and relays the response back to the remote server.
         """
         ctx = get_context()
-        result = await ctx.elicit(message, response_type)
-        if result.action == "accept":
-            return result.data
-        else:
-            return ElicitResult(action=result.action)
+        # Bypass schema conversion by calling session.elicit directly with the original schema
+        # This avoids the double conversion bug where fields with defaults become nullable
+        result = await ctx.session.elicit(
+            message=message,
+            requestedSchema=params.requestedSchema,
+            related_request_id=ctx.request_id,
+        )
+        return ElicitResult(action=result.action, content=result.content)
 
     @classmethod
     async def default_log_handler(cls, message: LogMessage) -> None:
