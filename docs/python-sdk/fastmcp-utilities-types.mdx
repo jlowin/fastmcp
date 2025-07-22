@@ -75,12 +75,14 @@ This is useful for transforming types when creating tools.
 - `old_type`: The type to replace.
 - `new_type`: The type to replace old_type with.
 
-**Examples:**
+Examples:
+```python
+>>> replace_type(list[int | bool], {int: str})
+list[str | bool]
 
->>> replace_type(list\[int | bool], {int: str})
-list\[str | bool]
->>> replace_type(list\[list\[int]], {int: str})
-list\[list\[str]]
+>>> replace_type(list[list[int]], {int: str})
+list[list[str]]
+```
 
 
 ## Classes
