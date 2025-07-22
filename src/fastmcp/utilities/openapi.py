@@ -24,7 +24,6 @@ from openapi_pydantic.v3.v3_0 import Response as Response_30
 from openapi_pydantic.v3.v3_0 import Schema as Schema_30
 from pydantic import BaseModel, Field, ValidationError
 
-from fastmcp.utilities.json_schema import compress_schema
 from fastmcp.utilities.types import FastMCPBaseModel
 
 logger = logging.getLogger(__name__)
@@ -1068,15 +1067,16 @@ def _replace_ref_with_defs(
     """
     schema = info.copy()
     if ref_path := schema.get("$ref"):
-        if ref_path.startswith("#/components/schemas/"):
-            schema_name = ref_path.split("/")[-1]
-            schema["$ref"] = f"#/$defs/{schema_name}"
-        elif not ref_path.startswith("#/"):
-            raise ValueError(
-                f"External or non-local reference not supported: {ref_path}. "
-                f"FastMCP only supports local schema references starting with '#/'. "
-                f"Please include all schema definitions within the OpenAPI document."
-            )
+        if isinstance(ref_path, str):
+            if ref_path.startswith("#/components/schemas/"):
+                schema_name = ref_path.split("/")[-1]
+                schema["$ref"] = f"#/$defs/{schema_name}"
+            elif not ref_path.startswith("#/"):
+                raise ValueError(
+                    f"External or non-local reference not supported: {ref_path}. "
+                    f"FastMCP only supports local schema references starting with '#/'. "
+                    f"Please include all schema definitions within the OpenAPI document."
+                )
     elif properties := schema.get("properties"):
         if "$ref" in properties:
             schema["properties"] = _replace_ref_with_defs(properties)
@@ -1113,10 +1113,56 @@ def _make_optional_parameter_nullable(schema: dict[str, Any]) -> dict[str, Any]:
     # Create a new schema that allows null in addition to the original type
     if "type" in schema:
         original_type = schema["type"]
+
         if isinstance(original_type, str):
             # Single type - make it a union with null
             nullable_schema = schema.copy()
-            nullable_schema["anyOf"] = [{"type": original_type}, {"type": "null"}]
+
+            nested_non_nullable_schema = {
+                "type": original_type,
+            }
+
+            # If the original type is an array, move the array-specific properties into the now-nested schema
+            # https://json-schema.org/understanding-json-schema/reference/array
+            if original_type == "array":
+                for array_property in [
+                    "items",
+                    "prefixItems",
+                    "unevaluatedItems",
+                    "contains",
+                    "minContains",
+                    "maxContains",
+                    "minItems",
+                    "maxItems",
+                    "uniqueItems",
+                ]:
+                    if array_property in nullable_schema:
+                        nested_non_nullable_schema[array_property] = nullable_schema[
+                            array_property
+                        ]
+                        del nullable_schema[array_property]
+
+            # If the original type is an object, move the object-specific properties into the now-nested schema
+            # https://json-schema.org/understanding-json-schema/reference/object
+            elif original_type == "object":
+                for object_property in [
+                    "properties",
+                    "patternProperties",
+                    "additionalProperties",
+                    "unevaluatedProperties",
+                    "required",
+                    "propertyNames",
+                    "minProperties",
+                    "maxProperties",
+                ]:
+                    if object_property in nullable_schema:
+                        nested_non_nullable_schema[object_property] = nullable_schema[
+                            object_property
+                        ]
+                        del nullable_schema[object_property]
+
+            nullable_schema["anyOf"] = [nested_non_nullable_schema, {"type": "null"}]
+
             # Remove the original type since we're using anyOf
             del nullable_schema["type"]
             return nullable_schema
@@ -1185,9 +1231,8 @@ def _combine_schemas(route: HTTPRoute) -> dict[str, Any]:
             else:
                 param_schema["description"] = location_desc
 
-            # Make optional parameters nullable to allow None values
-            if not param.required:
-                param_schema = _make_optional_parameter_nullable(param_schema)
+            # Don't make optional parameters nullable - they can simply be omitted
+            # The OpenAPI specification doesn't require optional parameters to accept null values
 
             properties[suffixed_name] = param_schema
         else:
@@ -1198,9 +1243,8 @@ def _combine_schemas(route: HTTPRoute) -> dict[str, Any]:
                 param.schema_.copy(), param.description
             )
 
-            # Make optional parameters nullable to allow None values
-            if not param.required:
-                param_schema = _make_optional_parameter_nullable(param_schema)
+            # Don't make optional parameters nullable - they can simply be omitted
+            # The OpenAPI specification doesn't require optional parameters to accept null values
 
             properties[param.name] = param_schema
 
@@ -1219,10 +1263,42 @@ def _combine_schemas(route: HTTPRoute) -> dict[str, Any]:
     }
     # Add schema definitions if available
     if route.schema_definitions:
-        result["$defs"] = route.schema_definitions
+        result["$defs"] = route.schema_definitions.copy()
 
-    # Use compress_schema to remove unused definitions
-    result = compress_schema(result)
+    # Use lightweight compression - prune additionalProperties and unused definitions
+    if result.get("additionalProperties") is False:
+        result.pop("additionalProperties")
+
+    # Remove unused definitions (lightweight approach - just check direct $ref usage)
+    if "$defs" in result:
+        used_refs = set()
+
+        def find_refs_in_value(value):
+            if isinstance(value, dict):
+                if "$ref" in value and isinstance(value["$ref"], str):
+                    ref = value["$ref"]
+                    if ref.startswith("#/$defs/"):
+                        used_refs.add(ref.split("/")[-1])
+                for v in value.values():
+                    find_refs_in_value(v)
+            elif isinstance(value, list):
+                for item in value:
+                    find_refs_in_value(item)
+
+        # Find refs in the main schema (excluding $defs section)
+        for key, value in result.items():
+            if key != "$defs":
+                find_refs_in_value(value)
+
+        # Remove unused definitions
+        if used_refs:
+            result["$defs"] = {
+                name: def_schema
+                for name, def_schema in result["$defs"].items()
+                if name in used_refs
+            }
+        else:
+            result.pop("$defs")
 
     return result
 
@@ -1232,10 +1308,13 @@ def _adjust_union_types(
 ) -> dict[str, Any] | list[Any]:
     """Recursively replace 'oneOf' with 'anyOf' in schema to handle overlapping unions."""
     if isinstance(schema, dict):
-        if "oneOf" in schema:
-            schema["anyOf"] = schema.pop("oneOf")
-        for k, v in schema.items():
-            schema[k] = _adjust_union_types(v)
+        # Work on a copy to avoid mutating the input
+        result = schema.copy()
+        if "oneOf" in result:
+            result["anyOf"] = result.pop("oneOf")
+        for k, v in result.items():
+            result[k] = _adjust_union_types(v)
+        return result
     elif isinstance(schema, list):
         return [_adjust_union_types(item) for item in schema]
     return schema
@@ -1324,10 +1403,42 @@ def extract_output_schema_from_responses(
 
     # Add schema definitions if available
     if schema_definitions:
-        output_schema["$defs"] = schema_definitions
+        output_schema["$defs"] = schema_definitions.copy()
 
-    # Use compress_schema to remove unused definitions
-    output_schema = compress_schema(output_schema)
+    # Use lightweight compression - prune additionalProperties and unused definitions
+    if output_schema.get("additionalProperties") is False:
+        output_schema.pop("additionalProperties")
+
+    # Remove unused definitions (lightweight approach - just check direct $ref usage)
+    if "$defs" in output_schema:
+        used_refs = set()
+
+        def find_refs_in_value(value):
+            if isinstance(value, dict):
+                if "$ref" in value and isinstance(value["$ref"], str):
+                    ref = value["$ref"]
+                    if ref.startswith("#/$defs/"):
+                        used_refs.add(ref.split("/")[-1])
+                for v in value.values():
+                    find_refs_in_value(v)
+            elif isinstance(value, list):
+                for item in value:
+                    find_refs_in_value(item)
+
+        # Find refs in the main schema (excluding $defs section)
+        for key, value in output_schema.items():
+            if key != "$defs":
+                find_refs_in_value(value)
+
+        # Remove unused definitions
+        if used_refs:
+            output_schema["$defs"] = {
+                name: def_schema
+                for name, def_schema in output_schema["$defs"].items()
+                if name in used_refs
+            }
+        else:
+            output_schema.pop("$defs")
 
     # Adjust union types to handle overlapping unions
     output_schema = cast(dict[str, Any], _adjust_union_types(output_schema))
