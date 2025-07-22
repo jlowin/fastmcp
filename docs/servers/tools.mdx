@@ -259,19 +259,12 @@ dynamic_tool.disable()
 dynamic_tool.enable()
 ```
 
-### Async Tools
+### Async and Synchronous Tools
 
-FastMCP seamlessly supports both standard (`def`) and asynchronous (`async def`) functions as tools.
+FastMCP is an async-first framework that seamlessly supports both asynchronous (`async def`) and synchronous (`def`) functions as tools. Async tools are preferred for I/O-bound operations to keep your server responsive.
 
 ```python
-# Synchronous tool (suitable for CPU-bound or quick tasks)
-@mcp.tool
-def calculate_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Calculate the distance between two coordinates."""
-    # Implementation...
-    return 42.5
-
-# Asynchronous tool (ideal for I/O-bound operations)
+# Asynchronous tool (preferred for I/O-bound operations)
 @mcp.tool
 async def fetch_weather(city: str) -> dict:
     """Retrieve current weather conditions for a city."""
@@ -282,9 +275,34 @@ async def fetch_weather(city: str) -> dict:
             # Check response status before returning
             response.raise_for_status()
             return await response.json()
+
+# Synchronous tool (suitable for quick, CPU-bound tasks)
+@mcp.tool
+def calculate_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Calculate the distance between two coordinates."""
+    # Implementation...
+    return 42.5
 ```
 
-Use `async def` when your tool needs to perform operations that might wait for external systems (network requests, database queries, file access) to keep your server responsive.
+While synchronous tools work seamlessly in FastMCP, they can block the event loop during execution. For CPU-intensive or potentially blocking synchronous operations, consider using `anyio` (which FastMCP already uses internally) to wrap them as async functions:
+
+```python
+import anyio
+import functools
+
+# For CPU-intensive synchronous functions
+def cpu_intensive_task(data: str) -> str:
+    # Some heavy computation that could block the event loop
+    return processed_data
+
+@mcp.tool
+@functools.wraps(cpu_intensive_task)
+async def wrapped_cpu_task(data: str) -> str:
+    """CPU-intensive task wrapped to prevent blocking."""
+    return await anyio.to_thread.run_sync(cpu_intensive_task, data)
+```
+
+Alternative approaches include using `asyncio.get_event_loop().run_in_executor()` or other threading techniques to manage blocking operations without impacting server responsiveness.
 
 ### Return Values
 
