@@ -47,33 +47,44 @@ def _detect_self_reference(schema: dict) -> bool:
 
 def dereference_json_schema(schema: dict, max_depth: int = 5) -> dict:
     """
-    Dereference a JSON schema by resolving $ref references while preserving $defs.
+    Dereference a JSON schema by resolving $ref references while preserving $defs only when corner cases occur.
 
     This function flattens schema properties by:
-    1. Check for self-reference - if found, return original schema
+    1. Check for self-reference - if found, return original schema with $defs
     2. When encountering $refs in properties, resolve them on-demand
     3. Track visited definitions globally to prevent circular expansion
-    4. Preserve original $defs in the final result
+    4. Only preserve original $defs if corner cases are encountered:
+       - Self-reference detected
+       - Circular references between definitions
+       - Reference depth exceeds max_depth
+       - Reference not found in $defs
 
     Args:
         schema: The JSON schema to flatten
         max_depth: Maximum depth for resolving references (default: 5)
 
     Returns:
-        Schema with references resolved in properties, keeping original $defs
+        Schema with references resolved in properties, keeping $defs only when corner cases occur
     """
     # Step 1: Check for self-reference
     if _detect_self_reference(schema):
-        # Self-referencing detected, return original schema
+        # Self-referencing detected, return original schema with $defs
         return schema
 
     # Make a deep copy to work with
     result = deepcopy(schema)
 
-    # Keep original $defs for the final result
+    # Keep original $defs for potential corner cases
     defs = deepcopy(schema.get("$defs", {}))
 
-    # Step 2: Define resolution function that tracks visits globally
+    # Track corner cases that require preserving $defs
+    corner_cases_detected = {
+        "circular_ref": False,
+        "max_depth_reached": False,
+        "ref_not_found": False,
+    }
+
+    # Step 2: Define resolution function that tracks visits globally and corner cases
     def resolve_refs_in_value(value: Any, depth: int, visiting: set[str]) -> Any:
         """
         Recursively resolve $refs in a value.
@@ -84,9 +95,10 @@ def dereference_json_schema(schema: dict, max_depth: int = 5) -> dict:
             visiting: Set of definitions currently being resolved (for cycle detection)
 
         Returns:
-            Value with $refs resolved (or kept if max depth reached)
+            Value with $refs resolved (or kept if corner cases occur)
         """
         if depth >= max_depth:
+            corner_cases_detected["max_depth_reached"] = True
             return value
 
         if isinstance(value, dict):
@@ -100,6 +112,7 @@ def dereference_json_schema(schema: dict, max_depth: int = 5) -> dict:
                     # Check for circular reference
                     if def_name in visiting:
                         # Circular reference detected, keep the $ref
+                        corner_cases_detected["circular_ref"] = True
                         return value
 
                     if def_name in defs:
@@ -123,6 +136,7 @@ def dereference_json_schema(schema: dict, max_depth: int = 5) -> dict:
                         return resolved
                     else:
                         # Definition not found, keep the $ref
+                        corner_cases_detected["ref_not_found"] = True
                         return value
                 else:
                     # External ref or other type - keep as is
@@ -147,9 +161,14 @@ def dereference_json_schema(schema: dict, max_depth: int = 5) -> dict:
             # This allows the same definition to be used in different contexts
             result[key] = resolve_refs_in_value(value, 0, set())
 
-    # Step 4: Preserve original $defs
-    if "$defs" in result:
-        result["$defs"] = defs
+    # Step 4: Conditionally preserve $defs based on corner cases
+    if any(corner_cases_detected.values()):
+        # Corner case detected, preserve original $defs
+        if "$defs" in schema:  # Only add if original schema had $defs
+            result["$defs"] = defs
+    else:
+        # No corner cases, remove $defs if it exists
+        result.pop("$defs", None)
 
     return result
 

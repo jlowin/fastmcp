@@ -497,7 +497,7 @@ class TestDereferenceJsonSchema:
         assert result == schema
 
     def test_basic_reference_resolution(self):
-        """Test basic reference resolution preserves $defs and resolves properties."""
+        """Test basic reference resolution removes $defs for simple schemas and resolves properties."""
         schema = {
             "$defs": {"Color": {"enum": ["red", "green", "blue"], "type": "string"}},
             "properties": {"color": {"$ref": "#/$defs/Color"}},
@@ -505,29 +505,53 @@ class TestDereferenceJsonSchema:
         result = dereference_json_schema(schema)
 
         expected = {
-            "$defs": {"Color": {"enum": ["red", "green", "blue"], "type": "string"}},
             "properties": {
                 "color": {"enum": ["red", "green", "blue"], "type": "string"}
             },
         }
         assert result == expected
-        assert "$defs" in result
+        assert "$defs" not in result  # No corner cases, so $defs should be removed
 
-    def test_self_reference_detection(self):
-        """Test that self-referencing schemas are returned unchanged."""
+    def test_max_depth_within_limit_removes_defs(self):
+        """Test that staying within max_depth limit removes $defs (no corner case)."""
+        # Create a 5-level chain with max_depth=6 (within limit)
         schema = {
             "$defs": {
-                "Node": {
-                    "type": "object",
-                    "properties": {"child": {"$ref": "#/$defs/Node"}},
-                }
+                "Level1": {"$ref": "#/$defs/Level2"},
+                "Level2": {"$ref": "#/$defs/Level3"},
+                "Level3": {"$ref": "#/$defs/Level4"},
+                "Level4": {"$ref": "#/$defs/Level5"},
+                "Level5": {"type": "string", "maxLength": 100},
             },
-            "properties": {"root": {"$ref": "#/$defs/Node"}},
+            "properties": {"depth_field": {"$ref": "#/$defs/Level1"}},
         }
-        result = dereference_json_schema(schema)
-        assert result == schema
+        result = dereference_json_schema(schema, max_depth=6)
 
-    def test_property_merging(self):
+        # Should resolve fully and remove $defs (within depth limit, no corner case)
+        expected = {
+            "properties": {"depth_field": {"type": "string", "maxLength": 100}},
+        }
+        assert result == expected
+        assert "$defs" not in result  # Within limit, should resolve fully
+
+        # Test with another case: 3-level chain with max_depth=4 (within limit)
+        simple_chain = {
+            "$defs": {
+                "A": {"$ref": "#/$defs/B"},
+                "B": {"$ref": "#/$defs/C"},
+                "C": {"type": "integer", "minimum": 0},
+            },
+            "properties": {"value": {"$ref": "#/$defs/A"}},
+        }
+        simple_result = dereference_json_schema(simple_chain, max_depth=4)
+
+        simple_expected = {
+            "properties": {"value": {"type": "integer", "minimum": 0}},
+        }
+        assert simple_result == simple_expected
+        assert "$defs" not in simple_result  # Within limit, should resolve fully
+
+    def test_property_merging_during_resolution(self):
         """Test that additional properties are merged when resolving references."""
         schema = {
             "$defs": {"BaseString": {"type": "string", "minLength": 1}},
@@ -543,7 +567,6 @@ class TestDereferenceJsonSchema:
         result = dereference_json_schema(schema)
 
         expected = {
-            "$defs": {"BaseString": {"type": "string", "minLength": 1}},
             "properties": {
                 "name": {
                     "type": "string",
@@ -555,9 +578,10 @@ class TestDereferenceJsonSchema:
             },
         }
         assert result == expected
+        assert "$defs" not in result  # Simple schema, no corner cases
 
-    def test_complex_schema_patterns(self):
-        """Test references in allOf, oneOf, and if/then/else patterns."""
+    def test_references_in_allof_anyof_oneof(self):
+        """Test dereferencing references within allOf, anyOf, and oneOf constructs."""
         schema = {
             "$defs": {
                 "Animal": {
@@ -565,21 +589,140 @@ class TestDereferenceJsonSchema:
                     "properties": {"name": {"type": "string"}},
                 },
                 "Dog": {"type": "object", "properties": {"breed": {"type": "string"}}},
-                "StringType": {"type": "string"},
+                "Cat": {"type": "object", "properties": {"color": {"type": "string"}}},
             },
             "properties": {
-                "pet": {"allOf": [{"$ref": "#/$defs/Animal"}, {"$ref": "#/$defs/Dog"}]}
+                "pet_allof": {
+                    "allOf": [{"$ref": "#/$defs/Animal"}, {"$ref": "#/$defs/Dog"}]
+                },
+                "pet_oneof": {
+                    "oneOf": [{"$ref": "#/$defs/Dog"}, {"$ref": "#/$defs/Cat"}]
+                },
             },
-            "if": {"$ref": "#/$defs/StringType"},
-            "then": {"minLength": 1},
         }
         result = dereference_json_schema(schema)
 
-        # Check that references were resolved
-        assert result["properties"]["pet"]["allOf"][0]["type"] == "object"
-        assert result["properties"]["pet"]["allOf"][1]["type"] == "object"
-        assert result["if"]["type"] == "string"
+        # Check that allOf references were resolved
+        assert result["properties"]["pet_allof"]["allOf"][0]["type"] == "object"
+        assert result["properties"]["pet_allof"]["allOf"][1]["type"] == "object"
+
+        # Check that oneOf references were resolved
+        assert result["properties"]["pet_oneof"]["oneOf"][0]["type"] == "object"
+        assert result["properties"]["pet_oneof"]["oneOf"][1]["type"] == "object"
+
+        assert "$defs" not in result  # Simple schema, no corner cases
+
+    def test_references_in_conditional_schemas(self):
+        """Test dereferencing references in if/then/else conditional schemas."""
+        schema = {
+            "$defs": {
+                "StringType": {"type": "string"},
+                "NumberType": {"type": "number"},
+                "NamePattern": {"pattern": "^[A-Za-z]+$"},
+            },
+            "if": {"$ref": "#/$defs/StringType"},
+            "then": {"$ref": "#/$defs/NamePattern"},
+            "else": {"$ref": "#/$defs/NumberType"},
+        }
+        result = dereference_json_schema(schema)
+
+        expected = {
+            "if": {"type": "string"},
+            "then": {"pattern": "^[A-Za-z]+$"},
+            "else": {"type": "number"},
+        }
+        assert result == expected
+        assert "$defs" not in result  # Simple schema, no corner cases
+
+    # ===== Corner Cases (where $defs is preserved) =====
+
+    def test_self_reference_preserves_defs(self):
+        """Test that self-referencing schemas preserve $defs (corner case)."""
+        schema = {
+            "$defs": {
+                "Node": {
+                    "type": "object",
+                    "properties": {"child": {"$ref": "#/$defs/Node"}},
+                }
+            },
+            "properties": {"root": {"$ref": "#/$defs/Node"}},
+        }
+        result = dereference_json_schema(schema)
+        assert result == schema  # Should be unchanged due to self-reference
         assert "$defs" in result
+
+    def test_circular_reference_preserves_defs(self):
+        """Test that circular references preserve $defs (corner case)."""
+        schema = {
+            "$defs": {
+                "NodeA": {
+                    "type": "object",
+                    "properties": {
+                        "value": {"type": "string"},
+                        "nodeB": {"$ref": "#/$defs/NodeB"},
+                    },
+                },
+                "NodeB": {
+                    "type": "object",
+                    "properties": {
+                        "value": {"type": "integer"},
+                        "nodeA": {"$ref": "#/$defs/NodeA"},  # Circular reference
+                    },
+                },
+            },
+            "properties": {"root": {"$ref": "#/$defs/NodeA"}},
+        }
+        result = dereference_json_schema(schema)
+        assert "$defs" in result  # Corner case detected, $defs preserved
+
+        # The function should do partial resolution but preserve circular refs
+        # Original $defs should be unchanged
+        assert result["$defs"] == schema["$defs"]
+
+        # Root should be partially resolved but contain circular ref
+        assert result["properties"]["root"]["type"] == "object"
+        assert result["properties"]["root"]["properties"]["value"]["type"] == "string"
+        assert "$ref" in str(
+            result["properties"]["root"]["properties"]["nodeB"]["properties"]["nodeA"]
+        )
+
+    def test_missing_reference_preserves_defs(self):
+        """Test that missing references preserve $defs (corner case)."""
+        schema = {
+            "$defs": {"Color": {"enum": ["red", "green", "blue"], "type": "string"}},
+            "properties": {
+                "color": {"$ref": "#/$defs/NonExistent"}
+            },  # Missing reference
+        }
+        result = dereference_json_schema(schema)
+        assert "$defs" in result  # Corner case detected, $defs preserved
+        assert result["properties"]["color"] == {
+            "$ref": "#/$defs/NonExistent"
+        }  # Ref preserved
+
+    def test_max_depth_exceeded_preserves_defs(self):
+        """Test that exceeding max_depth preserves $defs (corner case)."""
+        # Create a chain longer than max_depth (6 levels vs max_depth=5)
+        schema = {
+            "$defs": {
+                "Level1": {"$ref": "#/$defs/Level2"},
+                "Level2": {"$ref": "#/$defs/Level3"},
+                "Level3": {"$ref": "#/$defs/Level4"},
+                "Level4": {"$ref": "#/$defs/Level5"},
+                "Level5": {"$ref": "#/$defs/Level6"},
+                "Level6": {"type": "string", "maxLength": 100},
+            },
+            "properties": {"deep_field": {"$ref": "#/$defs/Level1"}},
+        }
+        result = dereference_json_schema(schema, max_depth=5)
+
+        # Should preserve $defs when max_depth is exceeded (corner case detected)
+        assert "$defs" in result
+        assert "deep_field" in result["properties"]
+
+        # Test with smaller max_depth to be more explicit
+        result_small_depth = dereference_json_schema(schema, max_depth=2)
+        assert "$defs" in result_small_depth  # Corner case: max_depth exceeded
 
 
 class TestSchemaFlatteniingIntegration:
@@ -605,9 +748,6 @@ class TestSchemaFlatteniingIntegration:
         )
 
         expected = {
-            "$defs": {
-                "Priority": {"enum": ["low", "medium", "high"], "type": "string"}
-            },
             "properties": {
                 "title": {"type": "string"},
                 "priority": {"enum": ["low", "medium", "high"], "type": "string"},
@@ -615,7 +755,7 @@ class TestSchemaFlatteniingIntegration:
             "required": ["title", "priority"],
         }
         assert result == expected
-        assert "$defs" in result
+        assert "$defs" not in result  # Simple schema, no corner cases, so $defs removed
         assert "context_param" not in result["properties"]
 
     def test_compress_schema_with_self_references(self):
@@ -688,10 +828,6 @@ class TestSchemaFlatteniingIntegration:
 
         expected = {
             "type": "object",
-            "$defs": {
-                "Status": {"enum": ["active", "inactive"], "type": "string"}
-                # UnusedType should be removed by prune_defs
-            },
             "properties": {
                 "name": {"type": "string"},  # Title removed
                 "status": {
@@ -702,11 +838,12 @@ class TestSchemaFlatteniingIntegration:
             "required": ["name", "status"],
             # additionalProperties: false should be removed
             # title should be removed
+            # $defs removed since no corner cases
         }
         assert result == expected
         assert "title" not in result
         assert "additionalProperties" not in result
-        assert "UnusedType" not in result["$defs"]
+        assert "$defs" not in result  # No corner cases, so $defs removed entirely
         assert "remove_me" not in result["properties"]
 
     def test_deep_nesting_references(self):
@@ -728,17 +865,6 @@ class TestSchemaFlatteniingIntegration:
         result = dereference_json_schema(schema)
 
         expected = {
-            "$defs": {
-                "Level3": {"type": "string", "enum": ["a", "b", "c"]},
-                "Level2": {
-                    "type": "object",
-                    "properties": {"level3": {"$ref": "#/$defs/Level3"}},
-                },
-                "Level1": {
-                    "type": "object",
-                    "properties": {"level2": {"$ref": "#/$defs/Level2"}},
-                },
-            },
             "properties": {
                 "root": {
                     "type": "object",
@@ -754,7 +880,7 @@ class TestSchemaFlatteniingIntegration:
             },
         }
         assert result == expected
-        assert "$defs" in result
+        assert "$defs" not in result  # Simple schema, no corner cases
 
     def test_mixed_refs_and_non_refs(self):
         """Test schema with mix of references and direct definitions."""
@@ -775,7 +901,6 @@ class TestSchemaFlatteniingIntegration:
         result = dereference_json_schema(schema)
 
         expected = {
-            "$defs": {"Status": {"enum": ["active", "inactive"], "type": "string"}},
             "properties": {
                 "id": {"type": "integer"},
                 "name": {"type": "string"},
@@ -789,7 +914,7 @@ class TestSchemaFlatteniingIntegration:
             },
         }
         assert result == expected
-        assert "$defs" in result
+        assert "$defs" not in result  # Simple schema, no corner cases
 
     def test_reference_in_oneof(self):
         """Test dereferencing references within oneOf constructs."""
@@ -805,10 +930,6 @@ class TestSchemaFlatteniingIntegration:
         result = dereference_json_schema(schema)
 
         expected = {
-            "$defs": {
-                "Dog": {"type": "object", "properties": {"breed": {"type": "string"}}},
-                "Cat": {"type": "object", "properties": {"color": {"type": "string"}}},
-            },
             "properties": {
                 "pet": {
                     "oneOf": [
@@ -839,13 +960,6 @@ class TestSchemaFlatteniingIntegration:
         result = dereference_json_schema(schema)
 
         expected = {
-            "$defs": {
-                "Base": {"type": "object", "properties": {"id": {"type": "integer"}}},
-                "Extended": {
-                    "type": "object",
-                    "properties": {"name": {"type": "string"}},
-                },
-            },
             "properties": {
                 "item": {
                     "allOf": [
@@ -878,13 +992,6 @@ class TestSchemaFlatteniingIntegration:
         result = dereference_json_schema(schema)
 
         expected = {
-            "$defs": {
-                "BaseType": {
-                    "type": "string",
-                    "title": "Base Title",
-                    "description": "Base description",
-                }
-            },
             "properties": {
                 "field": {
                     "title": "Override Title",  # Should keep the override
@@ -911,17 +1018,12 @@ class TestSchemaFlatteniingIntegration:
         result = dereference_json_schema(schema)
 
         expected = {
-            "$defs": {
-                "StringType": {"type": "string"},
-                "NumberType": {"type": "number"},
-                "NamePattern": {"pattern": "^[A-Za-z]+$"},
-            },
             "if": {"type": "string"},
             "then": {"pattern": "^[A-Za-z]+$"},
             "else": {"type": "number"},
         }
         assert result == expected
-        assert "$defs" in result
+        assert "$defs" not in result  # Simple schema, no corner cases
 
     def test_pattern_properties_with_refs(self):
         """Test dereferencing references within patternProperties."""
@@ -939,10 +1041,6 @@ class TestSchemaFlatteniingIntegration:
         result = dereference_json_schema(schema)
 
         expected = {
-            "$defs": {
-                "EmailType": {"type": "string", "format": "email"},
-                "PhoneType": {"type": "string", "pattern": "^\\+?[1-9]\\d{1,14}$"},
-            },
             "type": "object",
             "patternProperties": {
                 "^email": {"type": "string", "format": "email"},
@@ -970,15 +1068,6 @@ class TestSchemaFlatteniingIntegration:
         result = dereference_json_schema(schema)
 
         expected = {
-            "$defs": {
-                "FlexibleValue": {
-                    "oneOf": [
-                        {"type": "string"},
-                        {"type": "number"},
-                        {"type": "boolean"},
-                    ]
-                }
-            },
             "type": "object",
             "properties": {"name": {"type": "string"}},
             "additionalProperties": {
@@ -988,7 +1077,7 @@ class TestSchemaFlatteniingIntegration:
         assert result == expected
 
     def test_very_deep_reference_chain(self):
-        """Test dereferencing a very deep chain of references."""
+        """Test dereferencing a very deep chain of references (hits depth limit)."""
         schema = {
             "$defs": {
                 "Level1": {"$ref": "#/$defs/Level2"},
@@ -1001,6 +1090,7 @@ class TestSchemaFlatteniingIntegration:
         }
         result = dereference_json_schema(schema)
 
+        # Chain of 5 levels hits max_depth=5 limit, so should preserve $defs (corner case)
         expected = {
             "$defs": {
                 "Level1": {"$ref": "#/$defs/Level2"},
@@ -1012,6 +1102,15 @@ class TestSchemaFlatteniingIntegration:
             "properties": {"deep_field": {"type": "string", "maxLength": 100}},
         }
         assert result == expected
+        assert "$defs" in result  # Corner case: max_depth reached, $defs preserved
+
+        # Test with higher max_depth to show it can be fully resolved
+        result_high_depth = dereference_json_schema(schema, max_depth=10)
+        expected_high_depth = {
+            "properties": {"deep_field": {"type": "string", "maxLength": 100}},
+        }
+        assert result_high_depth == expected_high_depth
+        assert "$defs" not in result_high_depth  # No corner case with higher limit
 
     def test_refs_with_additional_keywords_complex(self):
         """Test references combined with many additional keywords."""
@@ -1033,7 +1132,6 @@ class TestSchemaFlatteniingIntegration:
         result = dereference_json_schema(schema)
 
         expected = {
-            "$defs": {"BaseString": {"type": "string", "minLength": 1}},
             "properties": {
                 "complex_field": {
                     "title": "Complex Field",
@@ -1084,25 +1182,6 @@ class TestSchemaFlatteniingIntegration:
         result = dereference_json_schema(schema)
 
         expected = {
-            "$defs": {
-                "Animal": {
-                    "type": "object",
-                    "properties": {"name": {"type": "string"}},
-                },
-                "Dog": {
-                    "type": "object",
-                    "properties": {
-                        "breed": {"type": "string"},
-                        "isGoodBoy": {"type": "boolean", "default": True},
-                    },
-                },
-                "Cat": {
-                    "type": "object",
-                    "properties": {
-                        "livesLeft": {"type": "integer", "minimum": 1, "maximum": 9}
-                    },
-                },
-            },
             "properties": {
                 "pet": {
                     "allOf": [
