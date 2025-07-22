@@ -106,9 +106,9 @@ Enable dereferencing in your server code:
 
 ```python server.py {3,4}
 from fastmcp import FastMCP
-from fastmcp.settings import settings
+import fastmcp
 
-settings.dereference_json_schemas = True
+fastmcp.settings.dereference_json_schema = True
 
 mcp = FastMCP(name="Compatible Test")
 
