@@ -472,11 +472,11 @@ class Context:
 
         return fastmcp.server.dependencies.get_http_request()
 
-    def set_state_value(self, key: str, value: Any) -> None:
+    def set_state(self, key: str, value: Any) -> None:
         """Set a value in the context state."""
         self._state[key] = value
 
-    def get_state_value(self, key: str) -> Any:
+    def get_state(self, key: str) -> Any:
         """Get a value from the context state. Returns None if the key is not found."""
         return self._state.get(key)
 
