@@ -228,6 +228,14 @@ class OpenAPIResource(Resource):
             headers = {}
             mcp_headers = get_http_headers()
             headers.update(mcp_headers)
+            # Get Headers from client
+            cli_headers = (
+                self._client.headers
+                if hasattr(self._client, "headers") and self._client.headers
+                else {}
+            )
+            # Merge with existing headers, _client headers take precedence
+            headers.update(cli_headers)
 
             response = await self._client.request(
                 method=self._route.method,
