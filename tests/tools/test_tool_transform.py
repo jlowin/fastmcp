@@ -1,6 +1,6 @@
 import re
 from dataclasses import dataclass
-from typing import Annotated, Any, Optional
+from typing import Annotated, Any
 
 import pytest
 from dirty_equals import IsList
@@ -200,7 +200,7 @@ async def test_hidden_param_prunes_defs():
         y: int
 
     @Tool.from_function
-    def tool_with_refs(a: VisibleType, b: Optional[HiddenType] = None) -> int:
+    def tool_with_refs(a: VisibleType, b: HiddenType | None = None) -> int:
         return a.x + (b.y if b else 0)
 
     # Hide parameter 'b'
