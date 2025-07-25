@@ -1,6 +1,176 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from copy import deepcopy
+from typing import Any
+
+
+def _detect_self_reference(schema: dict) -> bool:
+    """
+    Detect if the schema contains self-referencing definitions.
+
+    Args:
+        schema: The JSON schema to check
+
+    Returns:
+        True if self-referencing is detected
+    """
+    defs = schema.get("$defs", {})
+
+    def find_refs_in_value(value: Any, parent_def: str) -> bool:
+        """Check if a value contains a reference to its parent definition."""
+        if isinstance(value, dict):
+            if "$ref" in value:
+                ref_path = value["$ref"]
+                # Check if this references the parent definition
+                if ref_path == f"#/$defs/{parent_def}":
+                    return True
+            # Check all values in the dict
+            for v in value.values():
+                if find_refs_in_value(v, parent_def):
+                    return True
+        elif isinstance(value, list):
+            # Check all items in the list
+            for item in value:
+                if find_refs_in_value(item, parent_def):
+                    return True
+        return False
+
+    # Check each definition for self-reference
+    for def_name, def_content in defs.items():
+        if find_refs_in_value(def_content, def_name):
+            # Self-reference detected, return original schema
+            return True
+
+    return False
+
+
+def dereference_json_schema(schema: dict, max_depth: int = 50) -> dict:
+    """
+    Dereference a JSON schema by resolving $ref references while preserving $defs only when corner cases occur.
+
+    This function flattens schema properties by:
+    1. Check for self-reference - if found, return original schema with $defs
+    2. When encountering $refs in properties, resolve them on-demand
+    3. Track visited definitions globally to prevent circular expansion
+    4. Only preserve original $defs if corner cases are encountered:
+       - Self-reference detected
+       - Circular references between definitions
+       - Reference depth exceeds max_depth
+       - Reference not found in $defs
+
+    Args:
+        schema: The JSON schema to flatten
+        max_depth: Maximum depth for resolving references (default: 5)
+
+    Returns:
+        Schema with references resolved in properties, keeping $defs only when corner cases occur
+    """
+    # Step 1: Check for self-reference
+    if _detect_self_reference(schema):
+        # Self-referencing detected, return original schema with $defs
+        return schema
+
+    # Make a deep copy to work with
+    result = deepcopy(schema)
+
+    # Keep original $defs for potential corner cases
+    defs = deepcopy(schema.get("$defs", {}))
+
+    # Track corner cases that require preserving $defs
+    corner_cases_detected = {
+        "circular_ref": False,
+        "max_depth_reached": False,
+        "ref_not_found": False,
+    }
+
+    # Step 2: Define resolution function that tracks visits globally and corner cases
+    def resolve_refs_in_value(value: Any, depth: int, visiting: set[str]) -> Any:
+        """
+        Recursively resolve $refs in a value.
+
+        Args:
+            value: The value to process
+            depth: Current depth in resolution
+            visiting: Set of definitions currently being resolved (for cycle detection)
+
+        Returns:
+            Value with $refs resolved (or kept if corner cases occur)
+        """
+        if depth >= max_depth:
+            corner_cases_detected["max_depth_reached"] = True
+            return value
+
+        if isinstance(value, dict):
+            if "$ref" in value:
+                ref_path = value["$ref"]
+
+                # Only handle internal references to $defs
+                if ref_path.startswith("#/$defs/"):
+                    def_name = ref_path.split("/")[-1]
+
+                    # Check for circular reference
+                    if def_name in visiting:
+                        # Circular reference detected, keep the $ref
+                        corner_cases_detected["circular_ref"] = True
+                        return value
+
+                    if def_name in defs:
+                        # Add to visiting set
+                        visiting.add(def_name)
+
+                        # Get the definition and resolve any refs within it
+                        resolved = resolve_refs_in_value(
+                            deepcopy(defs[def_name]), depth + 1, visiting
+                        )
+
+                        # Remove from visiting set
+                        visiting.remove(def_name)
+
+                        # Merge resolved definition with additional properties
+                        # Additional properties from the original object take precedence
+                        for key, val in value.items():
+                            if key != "$ref":
+                                resolved[key] = val
+
+                        return resolved
+                    else:
+                        # Definition not found, keep the $ref
+                        corner_cases_detected["ref_not_found"] = True
+                        return value
+                else:
+                    # External ref or other type - keep as is
+                    return value
+            else:
+                # Regular dict - process all values
+                return {
+                    key: resolve_refs_in_value(val, depth, visiting)
+                    for key, val in value.items()
+                }
+        elif isinstance(value, list):
+            # Process each item in the list
+            return [resolve_refs_in_value(item, depth, visiting) for item in value]
+        else:
+            # Primitive value - return as is
+            return value
+
+    # Step 3: Process main schema properties with shared visiting set
+    for key, value in result.items():
+        if key != "$defs":
+            # Each top-level property gets its own visiting set
+            # This allows the same definition to be used in different contexts
+            result[key] = resolve_refs_in_value(value, 0, set())
+
+    # Step 4: Conditionally preserve $defs based on corner cases
+    if any(corner_cases_detected.values()):
+        # Corner case detected, preserve original $defs
+        if "$defs" in schema:  # Only add if original schema had $defs
+            result["$defs"] = defs
+    else:
+        # No corner cases, remove $defs if it exists
+        result.pop("$defs", None)
+
+    return result
 
 
 def _prune_param(schema: dict, param: str) -> dict:
@@ -186,6 +356,7 @@ def compress_schema(
     prune_defs: bool = True,
     prune_additional_properties: bool = True,
     prune_titles: bool = False,
+    dereference_refs: bool = False,
 ) -> dict:
     """
     Remove the given parameters from the schema.
@@ -196,6 +367,7 @@ def compress_schema(
         prune_defs: Whether to remove unused definitions
         prune_additional_properties: Whether to remove additionalProperties: false
         prune_titles: Whether to remove title fields from the schema
+        dereference_refs: Whether to completely flatten by inlining all $refs (fixes Claude Desktop crashes).
     """
     # Remove specific parameters if requested
     for param in prune_params or []:
@@ -209,5 +381,9 @@ def compress_schema(
             prune_additional_properties=prune_additional_properties,
             prune_defs=prune_defs,
         )
+
+    # Dereference all $refs if requested
+    if dereference_refs:
+        schema = dereference_json_schema(schema)
 
     return schema

@@ -14,6 +14,7 @@ from mcp.types import Prompt as MCPPrompt
 from mcp.types import PromptArgument as MCPPromptArgument
 from pydantic import Field, TypeAdapter
 
+import fastmcp
 from fastmcp.exceptions import PromptError
 from fastmcp.server.dependencies import get_context
 from fastmcp.utilities.components import FastMCPComponent
@@ -195,7 +196,11 @@ class FunctionPrompt(Prompt):
         else:
             prune_params = None
 
-        parameters = compress_schema(parameters, prune_params=prune_params)
+        parameters = compress_schema(
+            parameters,
+            prune_params=prune_params,
+            dereference_refs=fastmcp.settings.dereference_json_schemas,
+        )
 
         # Convert parameters to PromptArguments
         arguments: list[PromptArgument] = []

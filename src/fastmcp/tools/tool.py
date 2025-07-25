@@ -19,6 +19,7 @@ from mcp.types import ContentBlock, TextContent, ToolAnnotations
 from mcp.types import Tool as MCPTool
 from pydantic import Field, PydanticSchemaGenerationError
 
+import fastmcp
 from fastmcp.server.dependencies import get_context
 from fastmcp.utilities.components import FastMCPComponent
 from fastmcp.utilities.json_schema import compress_schema
@@ -376,7 +377,11 @@ class ParsedFunction:
 
         input_type_adapter = get_cached_typeadapter(fn)
         input_schema = input_type_adapter.json_schema()
-        input_schema = compress_schema(input_schema, prune_params=prune_params)
+        input_schema = compress_schema(
+            input_schema,
+            prune_params=prune_params,
+            dereference_refs=fastmcp.settings.dereference_json_schemas,
+        )
 
         output_schema = None
         # Get the return annotation from the signature
@@ -436,7 +441,10 @@ class ParsedFunction:
                 else:
                     output_schema = base_schema
 
-                output_schema = compress_schema(output_schema)
+                output_schema = compress_schema(
+                    output_schema,
+                    dereference_refs=fastmcp.settings.dereference_json_schemas,
+                )
 
             except PydanticSchemaGenerationError as e:
                 if "_UnserializableType" not in str(e):
