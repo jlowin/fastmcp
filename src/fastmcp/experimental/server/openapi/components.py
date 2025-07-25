@@ -68,19 +68,41 @@ class OpenAPITool(Tool):
                 else "http://localhost"
             )
 
+            # Get Headers from client
+            cli_headers = (
+                self._client.headers
+                if hasattr(self._client, "headers") and self._client.headers
+                else {}
+            )
+
             # Build the request using RequestDirector
             request = self._director.build(self._route, arguments, base_url)
 
-            # Add headers from the current MCP client HTTP request
+            # First add server headers (lowest precedence)
+            if cli_headers:
+                # Merge with existing headers, _client headers as base
+                if request.headers:
+                    # Start with request headers, then add client headers
+                    for key, value in cli_headers.items():
+                        if key not in request.headers:
+                            request.headers[key] = value
+                else:
+                    # Create new headers from cli_headers
+                    for key, value in cli_headers.items():
+                        request.headers[key] = value
+
+            # Then add MCP client transport headers (highest precedence)
             mcp_headers = get_http_headers()
             if mcp_headers:
-                # Merge with existing headers, MCP headers take precedence
+                # Merge with existing headers, MCP headers take precedence over all
                 if request.headers:
                     request.headers.update(mcp_headers)
                 else:
                     # Create new headers from mcp_headers
                     for key, value in mcp_headers.items():
                         request.headers[key] = value
+            # print logger
+            logger.debug(f"run - sending request; headers: {request.headers}")
 
             # Execute the request
             # Note: httpx.AsyncClient.send() doesn't accept timeout parameter
@@ -206,8 +228,17 @@ class OpenAPIResource(Resource):
                     if value is not None and value != "":
                         query_params[param.name] = value
 
-            # Prepare headers from MCP client request if available
+            # Prepare headers with correct precedence: server < client transport
             headers = {}
+            # Start with server headers (lowest precedence)
+            cli_headers = (
+                self._client.headers
+                if hasattr(self._client, "headers") and self._client.headers
+                else {}
+            )
+            headers.update(cli_headers)
+
+            # Add MCP client transport headers (highest precedence)
             mcp_headers = get_http_headers()
             headers.update(mcp_headers)
 
