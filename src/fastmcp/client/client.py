@@ -968,9 +968,9 @@ class Client(Generic[ClientTransportT]):
                     mcp_done = True
                     break
                 else:
-                    if type(mcp_data) == str:
+                    if isinstance(mcp_data, str):
                         yield mcp_data
-                    elif type(mcp_data) == CallToolResult:
+                    elif isinstance(mcp_data, CallToolResult):
 
                         data = {
                             "content": vars(mcp_data.content[0]),
