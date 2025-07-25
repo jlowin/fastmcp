@@ -91,35 +91,89 @@ class TestParseModelPreferences:
 class TestSessionId:
     def test_session_id_with_http_headers(self, context):
         """Test that session_id returns the value from mcp-session-id header."""
+        from mcp.server.lowlevel.server import request_ctx
+        from mcp.shared.context import RequestContext
+
         mock_headers = {"mcp-session-id": "test-session-123"}
 
-        with patch(
-            "fastmcp.server.dependencies.get_http_headers", return_value=mock_headers
-        ):
-            assert context.session_id == "test-session-123"
+        token = request_ctx.set(
+            RequestContext(
+                request_id=0,
+                meta=None,
+                session=MagicMock(wraps={}),
+                lifespan_context=MagicMock(),
+                request=MagicMock(headers=mock_headers),
+            )
+        )
+
+        assert context.session_id == "test-session-123"
+
+        request_ctx.reset(token)
 
     def test_session_id_without_http_headers(self, context):
-        """Test that session_id returns None when no HTTP headers are available."""
-        with patch(
-            "fastmcp.server.dependencies.get_http_headers",
-            side_effect=RuntimeError("No active HTTP request found."),
-        ):
-            assert context.session_id is None
+        """Test that session_id returns a UUID string when no HTTP headers are available."""
+        import uuid
 
-    def test_session_id_with_missing_header(self, context):
-        """Test that session_id returns None when mcp-session-id header is missing."""
-        mock_headers = {"other-header": "value"}
+        from mcp.server.lowlevel.server import request_ctx
+        from mcp.shared.context import RequestContext
 
-        with patch(
-            "fastmcp.server.dependencies.get_http_headers", return_value=mock_headers
-        ):
-            assert context.session_id is None
+        token = request_ctx.set(
+            RequestContext(
+                request_id=0,
+                meta=None,
+                session=MagicMock(wraps={}),
+                lifespan_context=MagicMock(),
+            )
+        )
 
-    def test_session_id_with_empty_header(self, context):
-        """Test that session_id returns None when mcp-session-id header is empty."""
-        mock_headers = {"mcp-session-id": ""}
+        assert uuid.UUID(context.session_id)
 
-        with patch(
-            "fastmcp.server.dependencies.get_http_headers", return_value=mock_headers
-        ):
-            assert context.session_id == ""  # Empty string is still returned as-is
+        request_ctx.reset(token)
+
+
+class TestContextState:
+    """Test suite for Context state functionality."""
+
+    @pytest.mark.asyncio
+    async def test_context_state(self):
+        """Test that state modifications in child contexts don't affect parent."""
+        mock_fastmcp = MagicMock()
+
+        async with Context(fastmcp=mock_fastmcp) as context:
+            assert context.get_state("test1") is None
+            assert context.get_state("test2") is None
+            context.set_state("test1", "value")
+            context.set_state("test2", 2)
+            assert context.get_state("test1") == "value"
+            assert context.get_state("test2") == 2
+            context.set_state("test1", "new_value")
+            assert context.get_state("test1") == "new_value"
+
+    @pytest.mark.asyncio
+    async def test_context_state_inheritance(self):
+        """Test that child contexts inherit parent state."""
+        mock_fastmcp = MagicMock()
+
+        async with Context(fastmcp=mock_fastmcp) as context1:
+            context1.set_state("key1", "key1-context1")
+            context1.set_state("key2", "key2-context1")
+            async with Context(fastmcp=mock_fastmcp) as context2:
+                # Override one key
+                context2.set_state("key1", "key1-context2")
+                assert context2.get_state("key1") == "key1-context2"
+                assert context1.get_state("key1") == "key1-context1"
+                assert context2.get_state("key2") == "key2-context1"
+
+                async with Context(fastmcp=mock_fastmcp) as context3:
+                    # Verify state was inherited
+                    assert context3.get_state("key1") == "key1-context2"
+                    assert context3.get_state("key2") == "key2-context1"
+
+                    # Add a new key and verify parents were not affected
+                    context3.set_state("key-context3-only", 1)
+                    assert context1.get_state("key-context3-only") is None
+                    assert context2.get_state("key-context3-only") is None
+                    assert context3.get_state("key-context3-only") == 1
+
+            assert context1.get_state("key1") == "key1-context1"
+            assert context1.get_state("key-context3-only") is None

@@ -31,6 +31,20 @@ from fastmcp.utilities.json_schema import compress_schema
 from fastmcp.utilities.types import Audio, File, Image
 
 
+def _normalize_anyof_order(schema):
+    """Normalize the order of items in anyOf arrays for consistent comparison."""
+    if isinstance(schema, dict):
+        if "anyOf" in schema:
+            # Sort anyOf items by their string representation for consistent ordering
+            schema = schema.copy()
+            schema["anyOf"] = sorted(schema["anyOf"], key=str)
+        # Recursively normalize nested objects
+        return {k: _normalize_anyof_order(v) for k, v in schema.items()}
+    elif isinstance(schema, list):
+        return [_normalize_anyof_order(item) for item in schema]
+    return schema
+
+
 class PersonTypedDict(TypedDict):
     name: str
     age: int
@@ -877,6 +891,18 @@ class TestToolParameters:
             ):
                 await client.call_tool("send_timedelta", {"x": 1000})
 
+    async def test_annotated_string_description(self):
+        mcp = FastMCP()
+
+        @mcp.tool
+        def f(x: Annotated[int, "A number"]):
+            return x
+
+        async with Client(mcp) as client:
+            tools = await client.list_tools()
+            assert len(tools) == 1
+            assert tools[0].inputSchema["properties"]["x"]["description"] == "A number"
+
 
 class TestToolOutputSchema:
     @pytest.mark.parametrize("annotation", [str, int, float, bool, list, AnyUrl])
@@ -917,7 +943,12 @@ class TestToolOutputSchema:
 
             type_schema = compress_schema(TypeAdapter(annotation).json_schema())
             assert len(tools) == 1
-            assert tools[0].outputSchema == type_schema
+
+            # Normalize anyOf ordering for comparison since union type order
+            # can vary between environments when using annotation resolution
+            actual_schema = _normalize_anyof_order(tools[0].outputSchema)
+            expected_schema = _normalize_anyof_order(type_schema)
+            assert actual_schema == expected_schema
 
     async def test_disabled_output_schema_no_structured_content(self):
         mcp = FastMCP()

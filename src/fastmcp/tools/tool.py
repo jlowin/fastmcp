@@ -3,7 +3,15 @@ from __future__ import annotations
 import inspect
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Annotated, Any, Generic, Literal, TypeVar
+from typing import (
+    TYPE_CHECKING,
+    Annotated,
+    Any,
+    Generic,
+    Literal,
+    TypeVar,
+    get_type_hints,
+)
 
 import mcp.types
 import pydantic_core
@@ -371,7 +379,20 @@ class ParsedFunction:
         input_schema = compress_schema(input_schema, prune_params=prune_params)
 
         output_schema = None
-        output_type = inspect.signature(fn).return_annotation
+        # Get the return annotation from the signature
+        sig = inspect.signature(fn)
+        output_type = sig.return_annotation
+
+        # If the annotation is a string (from __future__ annotations), resolve it
+        if isinstance(output_type, str):
+            try:
+                # Use get_type_hints to resolve the return type
+                # include_extras=True preserves Annotated metadata
+                type_hints = get_type_hints(fn, include_extras=True)
+                output_type = type_hints.get("return", output_type)
+            except Exception:
+                # If resolution fails, keep the string annotation
+                pass
 
         if output_type not in (inspect._empty, None, Any, ...):
             # there are a variety of types that we don't want to attempt to
@@ -399,7 +420,7 @@ class ParsedFunction:
 
             try:
                 type_adapter = get_cached_typeadapter(clean_output_type)
-                base_schema = type_adapter.json_schema()
+                base_schema = type_adapter.json_schema(mode="serialization")
 
                 # Generate schema for wrapped type if it's non-object
                 # because MCP requires that output schemas are objects
@@ -410,7 +431,7 @@ class ParsedFunction:
                     # Use the wrapped result schema directly
                     wrapped_type = _WrappedResult[clean_output_type]
                     wrapped_adapter = get_cached_typeadapter(wrapped_type)
-                    output_schema = wrapped_adapter.json_schema()
+                    output_schema = wrapped_adapter.json_schema(mode="serialization")
                     output_schema["x-fastmcp-wrap-result"] = True
                 else:
                     output_schema = base_schema
