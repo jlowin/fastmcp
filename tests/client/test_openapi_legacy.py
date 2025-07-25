@@ -7,19 +7,7 @@ from fastapi import FastAPI, Request
 from fastmcp import Client, FastMCP
 from fastmcp.client.transports import SSETransport, StreamableHttpTransport
 from fastmcp.server.openapi import MCPType, RouteMap
-from fastmcp.utilities.tests import run_server_in_process, temporary_settings
-
-
-@pytest.fixture(
-    params=[True, False],
-    ids=["experimental_parser", "legacy_parser"],
-    scope="module",
-    autouse=True,
-)
-def openapi_parser_mode(request):
-    """Fixture to run all tests with both experimental and legacy OpenAPI parsers."""
-    with temporary_settings(experimental__enable_new_openapi_parser=request.param):
-        yield
+from fastmcp.utilities.tests import run_server_in_process
 
 
 def fastmcp_server_for_headers() -> FastMCP:
