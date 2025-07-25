@@ -901,22 +901,20 @@ class Client(Generic[ClientTransportT]):
         progress_handler: ProgressHandler | None = None,
         raise_on_error: bool = True,
     ):
-
         mcp_progress_queue = asyncio.Queue()
 
-        async def custom_progress_handler(progress: float, total: float | None, message: str | None) -> None:
-
+        async def custom_progress_handler(
+            progress: float, total: float | None, message: str | None
+        ) -> None:
             try:
-                if message: 
+                if message:
                     await mcp_progress_queue.put(message)
 
             except ValueError as e:
                 logger.error(f"no message {str(e)}")
 
-
         async def fetch_mcp_progress():
             try:
-                 
                 result = await self.call_tool_mcp(
                     name=name,
                     arguments=arguments or {},
@@ -935,10 +933,12 @@ class Client(Generic[ClientTransportT]):
                             output_schema = self.session._tool_output_schemas.get(name)
                             if output_schema:
                                 if output_schema.get("x-fastmcp-wrap-result"):
-                                    output_schema = output_schema.get("properties", {}).get(
+                                    output_schema = output_schema.get(
+                                        "properties", {}
+                                    ).get("result")
+                                    structured_content = result.structuredContent.get(
                                         "result"
                                     )
-                                    structured_content = result.structuredContent.get("result")
                                 else:
                                     structured_content = result.structuredContent
                                 output_type = json_schema_to_type(output_schema)
@@ -949,7 +949,7 @@ class Client(Generic[ClientTransportT]):
                     except Exception as e:
                         logger.error(f"Error parsing structured content: {e}")
 
-                tempresult= CallToolResult(
+                tempresult = CallToolResult(
                     content=result.content,
                     structured_content=result.structuredContent,
                     data=data,
@@ -959,6 +959,7 @@ class Client(Generic[ClientTransportT]):
                 await mcp_progress_queue.put(None)
             except Exception as e:
                 logger.error(f"task failed: {str(e)}")
+
         mcp_task = asyncio.create_task(fetch_mcp_progress())
         mcp_done = False
         while not mcp_done:
@@ -971,20 +972,18 @@ class Client(Generic[ClientTransportT]):
                     if isinstance(mcp_data, str):
                         yield mcp_data
                     elif isinstance(mcp_data, CallToolResult):
-
                         data = {
                             "content": vars(mcp_data.content[0]),
                             "structured_content": mcp_data.structured_content,
                             "data": mcp_data.data,
-                            "is_error": mcp_data.is_error
+                            "is_error": mcp_data.is_error,
                         }
                         yield data
                     await asyncio.sleep(0.0001)
 
             except asyncio.QueueEmpty:
-                await asyncio.sleep(0.01)  
+                await asyncio.sleep(0.01)
         await asyncio.gather(mcp_task)
-
 
 
 @dataclass
