@@ -893,6 +893,99 @@ class Client(Generic[ClientTransportT]):
             is_error=result.isError,
         )
 
+    async def call_tool_stream_chunks(
+        self,
+        name: str,
+        arguments: dict[str, Any] | None = None,
+        timeout: datetime.timedelta | float | int | None = None,
+        progress_handler: ProgressHandler | None = None,
+        raise_on_error: bool = True,
+    ):
+
+        mcp_progress_queue = asyncio.Queue()
+
+        async def custom_progress_handler(progress: float, total: float | None, message: str | None) -> None:
+
+            try:
+                if message: 
+                    await mcp_progress_queue.put(message)
+
+            except ValueError as e:
+                logger.error(f"no message {str(e)}")
+
+
+        async def fetch_mcp_progress():
+            try:
+                 
+                result = await self.call_tool_mcp(
+                    name=name,
+                    arguments=arguments or {},
+                    timeout=timeout,
+                    progress_handler=custom_progress_handler,
+                )
+                data = None
+                if result.isError and raise_on_error:
+                    msg = cast(mcp.types.TextContent, result.content[0]).text
+                    raise ToolError(msg)
+                elif result.structuredContent:
+                    try:
+                        if name not in self.session._tool_output_schemas:
+                            await self.session.list_tools()
+                        if name in self.session._tool_output_schemas:
+                            output_schema = self.session._tool_output_schemas.get(name)
+                            if output_schema:
+                                if output_schema.get("x-fastmcp-wrap-result"):
+                                    output_schema = output_schema.get("properties", {}).get(
+                                        "result"
+                                    )
+                                    structured_content = result.structuredContent.get("result")
+                                else:
+                                    structured_content = result.structuredContent
+                                output_type = json_schema_to_type(output_schema)
+                                type_adapter = get_cached_typeadapter(output_type)
+                                data = type_adapter.validate_python(structured_content)
+                            else:
+                                data = result.structuredContent
+                    except Exception as e:
+                        logger.error(f"Error parsing structured content: {e}")
+
+                tempresult= CallToolResult(
+                    content=result.content,
+                    structured_content=result.structuredContent,
+                    data=data,
+                    is_error=result.isError,
+                )
+                await mcp_progress_queue.put(tempresult)
+                await mcp_progress_queue.put(None)
+            except Exception as e:
+                logger.error(f"task failed: {str(e)}")
+        mcp_task = asyncio.create_task(fetch_mcp_progress())
+        mcp_done = False
+        while not mcp_done:
+            try:
+                mcp_data = await mcp_progress_queue.get()
+                if mcp_data is None:
+                    mcp_done = True
+                    break
+                else:
+                    if type(mcp_data) == str:
+                        yield mcp_data
+                    elif type(mcp_data) == CallToolResult:
+
+                        data = {
+                            "content": vars(mcp_data.content[0]),
+                            "structured_content": mcp_data.structured_content,
+                            "data": mcp_data.data,
+                            "is_error": mcp_data.is_error
+                        }
+                        yield data
+                    await asyncio.sleep(0.0001)
+
+            except asyncio.QueueEmpty:
+                await asyncio.sleep(0.01)  
+        await asyncio.gather(mcp_task)
+
+
 
 @dataclass
 class CallToolResult:
