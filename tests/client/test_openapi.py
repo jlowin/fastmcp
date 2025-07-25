@@ -83,28 +83,28 @@ def proxy_server(shttp_server: str) -> Generator[str, None, None]:
         yield f"{url}/mcp/"
 
 
-async def test_openapi_client_headers_streamable_http_resource(shttp_server: str):
+async def test_fastapi_client_headers_streamable_http_resource(shttp_server: str):
     async with Client(transport=StreamableHttpTransport(shttp_server)) as client:
         result = await client.read_resource("resource://get_headers_headers_get")
         headers = json.loads(result[0].text)  # type: ignore[attr-defined]
         assert headers["x-server-header"] == "test-abc"
 
 
-async def test_openapi_client_headers_sse_resource(sse_server: str):
+async def test_fastapi_client_headers_sse_resource(sse_server: str):
     async with Client(transport=SSETransport(sse_server)) as client:
         result = await client.read_resource("resource://get_headers_headers_get")
         headers = json.loads(result[0].text)  # type: ignore[attr-defined]
         assert headers["x-server-header"] == "test-abc"
 
 
-async def test_openapi_client_headers_streamable_http_tool(shttp_server: str):
+async def test_fastapi_client_headers_streamable_http_tool(shttp_server: str):
     async with Client(transport=StreamableHttpTransport(shttp_server)) as client:
         result = await client.call_tool("post_headers_headers_post")
         headers: dict[str, str] = result.data
         assert headers["x-server-header"] == "test-abc"
 
 
-async def test_openapi_client_headers_sse_tool(sse_server: str):
+async def test_fastapi_client_headers_sse_tool(sse_server: str):
     async with Client(transport=SSETransport(sse_server)) as client:
         result = await client.call_tool("post_headers_headers_post")
         headers: dict[str, str] = result.data
@@ -205,3 +205,79 @@ async def test_client_headers_proxy(proxy_server: str):
         result = await client.read_resource("resource://get_headers_headers_get")
         headers = json.loads(result[0].text)  # type: ignore[attr-defined]
         assert headers["x-server-header"] == "test-abc"
+
+
+def openapi_server_for_headers() -> FastMCP:
+    """Create OpenAPI server that uses httpbin for testing headers - reproduces issue #1253"""
+    import httpx
+
+    # Create OpenAPI spec that uses httpbin endpoints
+    openapi_spec = {
+        "openapi": "3.0.0",
+        "info": {"title": "Headers Test API", "version": "1.0.0"},
+        "servers": [{"url": "https://httpbin.org"}],
+        "paths": {
+            "/headers": {
+                "get": {
+                    "operationId": "get_headers",
+                    "responses": {"200": {"description": "Get headers"}},
+                }
+            },
+            "/post": {
+                "post": {
+                    "operationId": "post_data",
+                    "responses": {"200": {"description": "Post data with headers"}},
+                }
+            },
+        },
+    }
+
+    # Create client with server headers (exactly like FastAPI test)
+    http_client = httpx.AsyncClient(
+        base_url="https://httpbin.org", headers={"x-server-header": "test-abc"}
+    )
+
+    mcp = FastMCP.from_openapi(
+        openapi_spec,
+        client=http_client,
+        route_maps=[
+            RouteMap(methods=["GET"], pattern=r".*", mcp_type=MCPType.RESOURCE),
+            RouteMap(methods=["POST"], pattern=r".*", mcp_type=MCPType.TOOL),
+        ],
+    )
+
+    return mcp
+
+
+def run_openapi_server(host: str, port: int, **kwargs) -> None:
+    openapi_server_for_headers().run(host=host, port=port, **kwargs)
+
+
+@pytest.fixture
+def openapi_shttp_server() -> Generator[str, None, None]:
+    with run_server_in_process(run_openapi_server, transport="http") as url:
+        yield f"{url}/mcp/"
+
+
+async def test_openapi_server_headers_streamable_http_resource(
+    openapi_shttp_server: str,
+):
+    """Test OpenAPI server preserves headers in HTTP resource - reproduces issue #1253"""
+    async with Client(
+        transport=StreamableHttpTransport(openapi_shttp_server)
+    ) as client:
+        result = await client.read_resource("resource://get_headers")
+        headers = json.loads(result[0].text)  # type: ignore[attr-defined]
+        assert headers["headers"]["X-Server-Header"] == "test-abc"
+
+
+async def test_openapi_server_headers_streamable_http_tool(openapi_shttp_server: str):
+    """Test OpenAPI server preserves headers in HTTP tool - reproduces issue #1253"""
+    async with Client(
+        transport=StreamableHttpTransport(openapi_shttp_server)
+    ) as client:
+        result = await client.call_tool("post_data")
+        headers = result.data["headers"]
+
+        # Headers from httpx client are properly preserved in both parsers
+        assert headers["X-Server-Header"] == "test-abc"
