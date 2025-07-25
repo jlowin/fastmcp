@@ -1,13 +1,14 @@
 import json
 from collections.abc import Generator
 
+import httpx
 import pytest
 from fastapi import FastAPI, Request
 
 import fastmcp
 from fastmcp import Client, FastMCP
 from fastmcp.client.transports import SSETransport, StreamableHttpTransport
-from fastmcp.server.openapi import MCPType, RouteMap
+from fastmcp.experimental.server.openapi import MCPType, RouteMap
 from fastmcp.utilities.tests import run_server_in_process
 
 
@@ -203,7 +204,8 @@ async def test_client_headers_proxy(proxy_server: str):
 
 def openapi_server_for_headers() -> FastMCP:
     """Create OpenAPI server that uses httpbin for testing headers - reproduces issue #1253"""
-    import httpx
+
+    fastmcp.settings.experimental.enable_new_openapi_parser = True
 
     # Create OpenAPI spec that uses httpbin endpoints
     openapi_spec = {
