@@ -11,7 +11,10 @@ from fastmcp.utilities.tests import run_server_in_process, temporary_settings
 
 
 @pytest.fixture(
-    params=[True, False], ids=["experimental_parser", "legacy_parser"], autouse=True
+    params=[True, False],
+    ids=["experimental_parser", "legacy_parser"],
+    scope="module",
+    autouse=True,
 )
 def openapi_parser_mode(request):
     """Fixture to run all tests with both experimental and legacy OpenAPI parsers."""
@@ -61,19 +64,19 @@ def run_proxy_server(host: str, port: int, shttp_url: str, **kwargs) -> None:
     app.run(host=host, port=port, **kwargs)
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def shttp_server() -> Generator[str, None, None]:
     with run_server_in_process(run_server, transport="http") as url:
         yield f"{url}/mcp/"
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def sse_server() -> Generator[str, None, None]:
     with run_server_in_process(run_server, transport="sse") as url:
         yield f"{url}/sse/"
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def proxy_server(shttp_server: str) -> Generator[str, None, None]:
     with run_server_in_process(
         run_proxy_server,
@@ -253,7 +256,7 @@ def run_openapi_server(host: str, port: int, **kwargs) -> None:
     openapi_server_for_headers().run(host=host, port=port, **kwargs)
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def openapi_shttp_server() -> Generator[str, None, None]:
     with run_server_in_process(run_openapi_server, transport="http") as url:
         yield f"{url}/mcp/"
