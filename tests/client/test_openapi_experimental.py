@@ -4,20 +4,16 @@ from collections.abc import Generator
 import pytest
 from fastapi import FastAPI, Request
 
+import fastmcp
 from fastmcp import Client, FastMCP
 from fastmcp.client.transports import SSETransport, StreamableHttpTransport
 from fastmcp.server.openapi import MCPType, RouteMap
-from fastmcp.utilities.tests import run_server_in_process, temporary_settings
-
-
-@pytest.fixture(scope="module", autouse=True)
-def openapi_parser_mode(request):
-    """Fixture to run all tests with both experimental and legacy OpenAPI parsers."""
-    with temporary_settings(experimental__enable_new_openapi_parser=True):
-        yield
+from fastmcp.utilities.tests import run_server_in_process
 
 
 def fastmcp_server_for_headers() -> FastMCP:
+    fastmcp.settings.experimental.enable_new_openapi_parser = True
+
     app = FastAPI()
 
     @app.get("/headers")
@@ -60,21 +56,19 @@ def run_proxy_server(host: str, port: int, shttp_url: str, **kwargs) -> None:
 
 
 @pytest.fixture(scope="module")
-def shttp_server(openapi_parser_mode: bool) -> Generator[str, None, None]:
+def shttp_server() -> Generator[str, None, None]:
     with run_server_in_process(run_server, transport="http") as url:
         yield f"{url}/mcp/"
 
 
 @pytest.fixture(scope="module")
-def sse_server(openapi_parser_mode: bool) -> Generator[str, None, None]:
+def sse_server() -> Generator[str, None, None]:
     with run_server_in_process(run_server, transport="sse") as url:
         yield f"{url}/sse/"
 
 
 @pytest.fixture(scope="module")
-def proxy_server(
-    shttp_server: str, openapi_parser_mode: bool
-) -> Generator[str, None, None]:
+def proxy_server(shttp_server: str) -> Generator[str, None, None]:
     with run_server_in_process(
         run_proxy_server,
         shttp_url=shttp_server,
@@ -254,7 +248,7 @@ def run_openapi_server(host: str, port: int, **kwargs) -> None:
 
 
 @pytest.fixture(scope="module")
-def openapi_shttp_server(openapi_parser_mode: bool) -> Generator[str, None, None]:
+def openapi_shttp_server() -> Generator[str, None, None]:
     with run_server_in_process(run_openapi_server, transport="http") as url:
         yield f"{url}/mcp/"
 
