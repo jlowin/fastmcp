@@ -1469,7 +1469,7 @@ class TestResource:
             assert len(resources) == 1
 
             resource = resources[0]
-            assert resource.uri == "http://example.com/data"
+            assert str(resource.uri) == "http://example.com/data"
 
             assert resource.annotations is not None
             assert hasattr(resource.annotations, "httpMethod")
