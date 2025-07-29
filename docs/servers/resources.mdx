@@ -98,7 +98,7 @@ def get_application_status() -> dict:
 </ParamField>
 
 <ParamField body="tags" type="set[str] | None">
-  A set of strings for categorization, potentially used by clients for filtering. Tags are available to clients in the resource's `meta._fastmcp.tags` field when the resource is listed (via `list_resources` or `list_resource_templates`). This can be controlled with the server's `include_fastmcp_meta` setting
+  A set of strings used to categorize the resource. These can be used by the server and, in some cases, by clients to filter or group available resources.
 </ParamField>
 
 <ParamField body="enabled" type="bool" default="True">

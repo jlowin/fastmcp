@@ -44,16 +44,38 @@ The `FastMCP` constructor accepts several arguments:
   An async context manager function for server startup and shutdown logic
 </ParamField>
 
-<ParamField body="tags" type="set[str] | None">
-  A set of strings to tag the server itself
-</ParamField>
-
 <ParamField body="tools" type="list[Tool | Callable] | None">
   A list of tools (or functions to convert to tools) to add to the server. In some cases, providing tools programmatically may be more convenient than using the `@mcp.tool` decorator
 </ParamField>
 
-<ParamField body="**settings" type="Any">
-  Keyword arguments corresponding to additional `ServerSettings` configuration
+<ParamField body="dependencies" type="list[str] | None">
+  Optional server dependencies list with package specifications
+</ParamField>
+
+<ParamField body="include_tags" type="set[str] | None">
+  Only expose components with at least one matching tag
+</ParamField>
+
+<ParamField body="exclude_tags" type="set[str] | None">
+  Hide components with any matching tag
+</ParamField>
+
+<ParamField body="on_duplicate_tools" type='Literal["error", "warn", "replace"]' default="error">
+  How to handle duplicate tool registrations
+</ParamField>
+
+<ParamField body="on_duplicate_resources" type='Literal["error", "warn", "replace"]' default="warn">
+  How to handle duplicate resource registrations
+</ParamField>
+
+<ParamField body="on_duplicate_prompts" type='Literal["error", "warn", "replace"]' default="replace">
+  How to handle duplicate prompt registrations
+</ParamField>
+
+<ParamField body="include_fastmcp_meta" type="bool" default="True">
+  <VersionBadge version="2.11.0" />
+  
+  Whether to include FastMCP metadata in component responses. When `True`, component tags and other FastMCP-specific metadata are included in the `_fastmcp` namespace within each component's `meta` field. When `False`, this metadata is omitted, resulting in cleaner integration with external systems. Can be overridden globally via `FASTMCP_INCLUDE_FASTMCP_META` environment variable
 </ParamField>
 </Card>
 ## Components
@@ -277,38 +299,6 @@ mcp = FastMCP(
     include_fastmcp_meta=False,                  # Disable FastMCP metadata for cleaner integration
 )
 ```
-
-### Constructor Parameters
-
-<Card icon="code" title="AdditionalFastMCP Constructor Parameters">
-<ParamField body="dependencies" type="list[str] | None">
-  Optional server dependencies list with package specifications
-</ParamField>
-
-<ParamField body="include_tags" type="set[str] | None">
-  Only expose components with at least one matching tag
-</ParamField>
-
-<ParamField body="exclude_tags" type="set[str] | None">
-  Hide components with any matching tag
-</ParamField>
-
-<ParamField body="on_duplicate_tools" type='Literal["error", "warn", "replace"]' default="error">
-  How to handle duplicate tool registrations
-</ParamField>
-
-<ParamField body="on_duplicate_resources" type='Literal["error", "warn", "replace"]' default="warn">
-  How to handle duplicate resource registrations
-</ParamField>
-
-<ParamField body="on_duplicate_prompts" type='Literal["error", "warn", "replace"]' default="replace">
-  How to handle duplicate prompt registrations
-</ParamField>
-
-<ParamField body="include_fastmcp_meta" type="bool" default="True">
-  Whether to include FastMCP metadata in component responses. When `True`, component tags and other FastMCP-specific metadata are included in the `_fastmcp` namespace within each component's `meta` field. When `False`, this metadata is omitted, resulting in cleaner integration with external systems. Can be overridden globally via `FASTMCP_INCLUDE_FASTMCP_META` environment variable
-</ParamField>
-</Card>
 
 ### Global Settings
 
