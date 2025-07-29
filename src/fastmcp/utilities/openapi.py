@@ -173,6 +173,7 @@ class HTTPRoute(FastMCPBaseModel):
         default_factory=dict
     )  # Store component schemas
     extensions: dict[str, Any] = Field(default_factory=dict)
+    openapi_version: str | None = None
 
 
 # Export public symbols
@@ -187,6 +188,7 @@ __all__ = [
     "parse_openapi_to_http_routes",
     "extract_output_schema_from_responses",
     "format_deep_object_parameter",
+    "_handle_nullable_fields",
 ]
 
 # Type variables for generic parser
@@ -226,6 +228,7 @@ def parse_openapi_to_http_routes(openapi_dict: dict[str, Any]) -> list[HTTPRoute
                 Response_30,
                 Operation_30,
                 PathItem_30,
+                openapi_version,
             )
             return parser.parse()
         else:
@@ -243,6 +246,7 @@ def parse_openapi_to_http_routes(openapi_dict: dict[str, Any]) -> list[HTTPRoute
                 Response,
                 Operation,
                 PathItem,
+                openapi_version,
             )
             return parser.parse()
     except ValidationError as e:
@@ -276,6 +280,7 @@ class OpenAPIParser(
         response_cls: type[TResponse],
         operation_cls: type[TOperation],
         path_item_cls: type[TPathItem],
+        openapi_version: str,
     ):
         """Initialize the parser with the OpenAPI schema and type classes."""
         self.openapi = openapi
@@ -286,6 +291,7 @@ class OpenAPIParser(
         self.response_cls = response_cls
         self.operation_cls = operation_cls
         self.path_item_cls = path_item_cls
+        self.openapi_version = openapi_version
 
     def _convert_to_parameter_location(self, param_in: str) -> ParameterLocation:
         """Convert string parameter location to our ParameterLocation type."""
@@ -708,6 +714,7 @@ class OpenAPIParser(
                             responses=responses,
                             schema_definitions=schema_definitions,
                             extensions=extensions,
+                            openapi_version=self.openapi_version,
                         )
                         routes.append(route)
                         logger.info(
@@ -1169,6 +1176,86 @@ def _make_optional_parameter_nullable(schema: dict[str, Any]) -> dict[str, Any]:
     return schema
 
 
+def _add_null_to_type(schema: dict[str, Any]) -> None:
+    """Add 'null' to the schema's type field or handle oneOf/anyOf/allOf constructs if not already present."""
+    if "type" in schema:
+        current_type = schema["type"]
+
+        if isinstance(current_type, str):
+            # Convert string type to array with null
+            schema["type"] = [current_type, "null"]
+        elif isinstance(current_type, list):
+            # Add null to array if not already present
+            if "null" not in current_type:
+                schema["type"] = current_type + ["null"]
+    elif "oneOf" in schema:
+        # Convert oneOf to anyOf with null type
+        schema["anyOf"] = schema.pop("oneOf") + [{"type": "null"}]
+    elif "anyOf" in schema:
+        # Add null type to anyOf if not already present
+        if not any(item.get("type") == "null" for item in schema["anyOf"]):
+            schema["anyOf"].append({"type": "null"})
+    elif "allOf" in schema:
+        # For allOf, wrap in anyOf with null - this means (all conditions) OR null
+        schema["anyOf"] = [{"allOf": schema.pop("allOf")}, {"type": "null"}]
+
+
+def _handle_nullable_fields(schema: dict[str, Any] | Any) -> dict[str, Any] | Any:
+    """Convert OpenAPI nullable fields to JSON Schema format: {"type": "string",
+    "nullable": true} -> {"type": ["string", "null"]}"""
+
+    if not isinstance(schema, dict):
+        return schema
+
+    # Check if we need to modify anything first to avoid unnecessary copying
+    has_root_nullable_field = "nullable" in schema
+    has_root_nullable_true = (
+        has_root_nullable_field
+        and schema["nullable"]
+        and (
+            "type" in schema
+            or "oneOf" in schema
+            or "anyOf" in schema
+            or "allOf" in schema
+        )
+    )
+
+    has_property_nullable_field = False
+    if "properties" in schema:
+        for prop_schema in schema["properties"].values():
+            if isinstance(prop_schema, dict) and "nullable" in prop_schema:
+                has_property_nullable_field = True
+                break
+
+    # If no nullable fields at all, return original schema unchanged
+    if not has_root_nullable_field and not has_property_nullable_field:
+        return schema
+
+    # Only copy if we need to modify
+    result = schema.copy()
+
+    # Handle root level nullable - always remove the field, convert type if true
+    if has_root_nullable_field:
+        result.pop("nullable")
+        if has_root_nullable_true:
+            _add_null_to_type(result)
+
+    # Handle properties nullable fields
+    if has_property_nullable_field and "properties" in result:
+        for prop_name, prop_schema in result["properties"].items():
+            if isinstance(prop_schema, dict) and "nullable" in prop_schema:
+                nullable_value = prop_schema.pop("nullable")
+                if nullable_value and (
+                    "type" in prop_schema
+                    or "oneOf" in prop_schema
+                    or "anyOf" in prop_schema
+                    or "allOf" in prop_schema
+                ):
+                    _add_null_to_type(prop_schema)
+
+    return result
+
+
 def _combine_schemas(route: HTTPRoute) -> dict[str, Any]:
     """
     Combines parameter and request body schemas into a single schema.
@@ -1320,7 +1407,9 @@ def _adjust_union_types(
 
 
 def extract_output_schema_from_responses(
-    responses: dict[str, ResponseInfo], schema_definitions: dict[str, Any] | None = None
+    responses: dict[str, ResponseInfo],
+    schema_definitions: dict[str, Any] | None = None,
+    openapi_version: str | None = None,
 ) -> dict[str, Any] | None:
     """
     Extract output schema from OpenAPI responses for use as MCP tool output schema.
@@ -1332,6 +1421,7 @@ def extract_output_schema_from_responses(
     Args:
         responses: Dictionary of ResponseInfo objects keyed by status code
         schema_definitions: Optional schema definitions to include in the output schema
+        openapi_version: OpenAPI version string, used to optimize nullable field handling
 
     Returns:
         dict: MCP-compliant output schema with potential wrapping, or None if no suitable schema found
@@ -1388,6 +1478,21 @@ def extract_output_schema_from_responses(
     # Clean and copy the schema
     output_schema = schema.copy()
 
+    # If schema has a $ref, resolve it first before processing nullable fields
+    if "$ref" in output_schema and schema_definitions:
+        ref_path = output_schema["$ref"]
+        if ref_path.startswith("#/components/schemas/"):
+            schema_name = ref_path.split("/")[-1]
+            if schema_name in schema_definitions:
+                # Replace $ref with the actual schema definition
+                output_schema = schema_definitions[schema_name].copy()
+
+    # Handle OpenAPI nullable fields by converting them to JSON Schema format
+    # This prevents "None is not of type 'string'" validation errors
+    # Only needed for OpenAPI 3.0 - 3.1 uses standard JSON Schema null types
+    if openapi_version and openapi_version.startswith("3.0"):
+        output_schema = _handle_nullable_fields(output_schema)
+
     # MCP requires output schemas to be objects. If this schema is not an object,
     # we need to wrap it similar to how ParsedFunction.from_function() does it
     if output_schema.get("type") != "object":
@@ -1400,9 +1505,17 @@ def extract_output_schema_from_responses(
         }
         output_schema = wrapped_schema
 
-    # Add schema definitions if available
-    if schema_definitions:
-        output_schema["$defs"] = schema_definitions.copy()
+    # Add schema definitions if available and handle nullable fields in them
+    # Only add $defs if we didn't resolve the $ref inline above
+    if schema_definitions and "$ref" not in schema.copy():
+        processed_defs = {}
+        for def_name, def_schema in schema_definitions.items():
+            # Only handle nullable fields for OpenAPI 3.0 - 3.1 uses standard JSON Schema null types
+            if openapi_version and openapi_version.startswith("3.0"):
+                processed_defs[def_name] = _handle_nullable_fields(def_schema)
+            else:
+                processed_defs[def_name] = def_schema
+        output_schema["$defs"] = processed_defs
 
     # Use lightweight compression - prune additionalProperties and unused definitions
     if output_schema.get("additionalProperties") is False:
