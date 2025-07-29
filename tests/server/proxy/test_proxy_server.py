@@ -54,11 +54,11 @@ def fastmcp_server():
     def wave() -> str:
         return "👋"
 
-    @server.resource(uri="data://users", tags={"users"})
+    @server.resource(uri="data://users")
     async def get_users() -> list[dict[str, Any]]:
         return USERS
 
-    @server.resource(uri="data://user/{user_id}")
+    @server.resource(uri="data://user/{user_id}", tags={"users"})
     async def get_user(user_id: str) -> dict[str, Any] | None:
         return next((user for user in USERS if user["id"] == user_id), None)
 
@@ -245,7 +245,7 @@ class TestResources:
 
     async def test_get_resources_meta(self, proxy_server):
         resources = await proxy_server.get_resources()
-        wave_resource = resources["wave"]
+        wave_resource = resources["resource://wave"]
         assert wave_resource.meta == {"tags": ["wave"]}
 
     async def test_list_resources_same_as_original(self, fastmcp_server, proxy_server):
@@ -344,7 +344,7 @@ class TestResourceTemplates:
 
     async def test_get_resource_templates_meta(self, proxy_server):
         templates = await proxy_server.get_resource_templates()
-        get_user_template = templates["get_user"]
+        get_user_template = templates["data://user/{user_id}"]
         assert get_user_template.meta == {"tags": ["users"]}
 
     async def test_list_resource_templates_same_as_original(
