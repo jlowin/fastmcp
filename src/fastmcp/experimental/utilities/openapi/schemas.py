@@ -511,7 +511,9 @@ def _adjust_union_types(
 
 
 def extract_output_schema_from_responses(
-    responses: dict[str, ResponseInfo], schema_definitions: dict[str, Any] | None = None
+    responses: dict[str, ResponseInfo],
+    schema_definitions: dict[str, Any] | None = None,
+    openapi_version: str | None = None,
 ) -> dict[str, Any] | None:
     """
     Extract output schema from OpenAPI responses for use as MCP tool output schema.
@@ -523,6 +525,7 @@ def extract_output_schema_from_responses(
     Args:
         responses: Dictionary of ResponseInfo objects keyed by status code
         schema_definitions: Optional schema definitions to include in the output schema
+        openapi_version: OpenAPI version string, used to optimize nullable field handling
 
     Returns:
         dict: MCP-compliant output schema with potential wrapping, or None if no suitable schema found
@@ -590,7 +593,9 @@ def extract_output_schema_from_responses(
 
     # Handle OpenAPI nullable fields by converting them to JSON Schema format
     # This prevents "None is not of type 'string'" validation errors
-    output_schema = _handle_nullable_fields(output_schema)
+    # Only needed for OpenAPI 3.0 - 3.1 uses standard JSON Schema null types
+    if openapi_version and openapi_version.startswith("3.0"):
+        output_schema = _handle_nullable_fields(output_schema)
 
     # MCP requires output schemas to be objects. If this schema is not an object,
     # we need to wrap it similar to how ParsedFunction.from_function() does it
@@ -609,7 +614,11 @@ def extract_output_schema_from_responses(
     if schema_definitions and "$ref" not in schema.copy():
         processed_defs = {}
         for def_name, def_schema in schema_definitions.items():
-            processed_defs[def_name] = _handle_nullable_fields(def_schema)
+            # Only handle nullable fields for OpenAPI 3.0 - 3.1 uses standard JSON Schema null types
+            if openapi_version and openapi_version.startswith("3.0"):
+                processed_defs[def_name] = _handle_nullable_fields(def_schema)
+            else:
+                processed_defs[def_name] = def_schema
         output_schema["$defs"] = processed_defs
 
     # Use lightweight compression - prune additionalProperties and unused definitions
