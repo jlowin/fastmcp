@@ -23,6 +23,14 @@ class PromptError(FastMCPError):
     """Error in prompt operations."""
 
 
+class AuthenticationError(FastMCPError):
+    """Error in authentication - invalid, expired, or malformed token."""
+
+
+class AuthorizationError(FastMCPError):
+    """Error in authorization - valid token but insufficient permissions/scope."""
+
+
 class InvalidSignature(Exception):
     """Invalid signature for use with FastMCP."""
 

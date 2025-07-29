@@ -113,6 +113,12 @@ class Tool(FastMCPComponent):
         Callable[[Any], str] | None,
         Field(description="Optional custom serializer for tool results"),
     ] = None
+    required_scope: Annotated[
+        str | None,
+        Field(
+            description="Required scope for tool authorization. If not provided, defaults to tool name"
+        ),
+    ] = None
 
     def enable(self) -> None:
         super().enable()
@@ -167,6 +173,7 @@ class Tool(FastMCPComponent):
         serializer: Callable[[Any], str] | None = None,
         meta: dict[str, Any] | None = None,
         enabled: bool | None = None,
+        required_scope: str | None = None,
     ) -> FunctionTool:
         """Create a Tool from a function."""
         return FunctionTool.from_function(
@@ -181,6 +188,7 @@ class Tool(FastMCPComponent):
             serializer=serializer,
             meta=meta,
             enabled=enabled,
+            required_scope=required_scope,
         )
 
     async def run(self, arguments: dict[str, Any]) -> ToolResult:
@@ -210,6 +218,7 @@ class Tool(FastMCPComponent):
         serializer: Callable[[Any], str] | None = None,
         meta: dict[str, Any] | None | NotSetT = NotSet,
         enabled: bool | None = None,
+        required_scope: str | None = None,
     ) -> TransformedTool:
         from fastmcp.tools.tool_transform import TransformedTool
 
@@ -226,6 +235,7 @@ class Tool(FastMCPComponent):
             serializer=serializer,
             meta=meta,
             enabled=enabled,
+            required_scope=required_scope,
         )
 
 
@@ -246,6 +256,7 @@ class FunctionTool(Tool):
         serializer: Callable[[Any], str] | None = None,
         meta: dict[str, Any] | None = None,
         enabled: bool | None = None,
+        required_scope: str | None = None,
     ) -> FunctionTool:
         """Create a Tool from a function."""
 
@@ -279,6 +290,7 @@ class FunctionTool(Tool):
             serializer=serializer,
             meta=meta,
             enabled=enabled if enabled is not None else True,
+            required_scope=required_scope,
         )
 
     async def run(self, arguments: dict[str, Any]) -> ToolResult:
