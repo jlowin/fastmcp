@@ -328,9 +328,22 @@ class OAuthProxy(OAuthProvider):
                 "client_id",
                 "client_secret",
             },  # These will be assigned by upstream
+            mode="json",  # Convert Pydantic types (like AnyUrl) to JSON-serializable values
         )
 
-        logger.debug("Forwarding DCR request to upstream: %s", registration_data)
+        # Ensure token_endpoint_auth_method is set to "none" for public clients
+        registration_data["token_endpoint_auth_method"] = "none"
+
+        # Convert scope string to array if needed for better DCR compatibility
+        if "scope" in registration_data and isinstance(registration_data["scope"], str):
+            scopes = registration_data["scope"].split()
+            registration_data["scope"] = " ".join(
+                scopes
+            )  # Keep as string but normalize
+            # Some providers may prefer scopes as an array
+            # registration_data["scopes"] = scopes
+
+        logger.info("Forwarding DCR request to upstream: %s", registration_data)
 
         if not self._registration_endpoint:
             raise TokenError("invalid_client", "DCR not supported")
@@ -357,18 +370,34 @@ class OAuthProxy(OAuthProvider):
                 upstream_client_data = response.json()
 
                 # Create registered client with upstream response
-                registered_client = OAuthClientInformationFull(**upstream_client_data)
+                upstream_client_data_dict = upstream_client_data
+                upstream_client_id = upstream_client_data_dict["client_id"]
+                original_client_id = client_info.client_id
 
-                # Store both the client and its real credentials
-                client_id = registered_client.client_id
-                self._clients[client_id] = registered_client
-                self._client_credentials[client_id] = (
-                    client_id,
-                    registered_client.client_secret or "",
+                # Create client with ORIGINAL client ID but upstream credentials
+                registered_client = OAuthClientInformationFull(
+                    **{**upstream_client_data_dict, "client_id": original_client_id}
+                )
+
+                # Store the registered client info under both IDs
+                self._clients[upstream_client_id] = registered_client
+                self._clients[original_client_id] = registered_client
+
+                # Store credentials mapping: original client ID -> upstream credentials
+                self._client_credentials[original_client_id] = (
+                    upstream_client_id,
+                    upstream_client_data_dict.get("client_secret", ""),
                 )
 
                 logger.info(
-                    "Successfully registered client %s via upstream DCR", client_id
+                    "Successfully registered client %s (upstream: %s) via upstream DCR",
+                    original_client_id,
+                    upstream_client_id,
+                )
+                logger.info(
+                    "DCR credentials mapping: %s -> %s",
+                    original_client_id,
+                    upstream_client_id,
                 )
 
                 return registered_client
@@ -405,8 +434,17 @@ class OAuthProxy(OAuthProvider):
         )
 
         # Store the client registration and its credentials
+        original_client_id = client_info.client_id
+
+        # Store client info under both IDs
         self._clients[configured_id] = registered_client
-        self._client_credentials[configured_id] = (configured_id, configured_secret)
+        self._clients[original_client_id] = registered_client
+
+        # Store credentials mapping: original client ID -> configured credentials
+        self._client_credentials[original_client_id] = (
+            configured_id,
+            configured_secret,
+        )
 
         logger.info(
             "Registered client %s with configured credentials (%d redirect URIs)",
@@ -440,7 +478,9 @@ class OAuthProxy(OAuthProvider):
         user authentication and consent flow.
         """
         # Get the actual credentials to use for this client
+        logger.info("Authorization request for client: %s", client.client_id)
         actual_client_id, _ = self._get_client_credentials(client.client_id)
+        logger.info("Mapped to upstream client: %s", actual_client_id)
 
         # Build query parameters for upstream authorization request
         query_params: dict[str, Any] = {
