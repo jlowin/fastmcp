@@ -221,6 +221,7 @@ def OAuth(
     client_name: str = "FastMCP Client",
     token_storage_cache_dir: Path | None = None,
     additional_client_metadata: dict[str, Any] | None = None,
+    callback_port: int | None = None,
 ) -> OAuthClientProvider:
     """
     Create an OAuthClientProvider for an MCP server.
@@ -235,6 +236,7 @@ def OAuth(
         client_name: Name for this client during registration
         token_storage_cache_dir: Directory for FileTokenStorage
         additional_client_metadata: Extra fields for OAuthClientMetadata
+        callback_port: Fixed port for OAuth callback (default: random available port)
 
     Returns:
         OAuthClientProvider
@@ -243,7 +245,7 @@ def OAuth(
     server_base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
 
     # Setup OAuth client
-    redirect_port = find_available_port()
+    redirect_port = callback_port or find_available_port()
     redirect_uri = f"http://127.0.0.1:{redirect_port}/callback"
 
     if isinstance(scopes, list):
