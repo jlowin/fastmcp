@@ -1,19 +1,21 @@
 """OAuth Proxy Provider for FastMCP.
 
 This provider acts as a transparent proxy to an upstream OAuth Authorization Server,
-handling Dynamic Client Registration locally while forwarding all other OAuth flows.
-This enables authentication with upstream providers that don't support DCR or have
-restricted client registration policies.
+automatically detecting and handling Dynamic Client Registration (DCR) capabilities.
+It works with both DCR-enabled providers (like WorkOS AuthKit) and legacy providers
+that only support static client registration.
 
 Key features:
+- Auto-detects DCR support via .well-known/oauth-authorization-server discovery
+- Forwards real DCR requests when upstream supports it
+- Falls back to local DCR simulation with fixed credentials for legacy providers
 - Proxies authorization and token endpoints to upstream server
-- Implements local Dynamic Client Registration with fixed upstream credentials
 - Validates tokens using upstream JWKS
 - Maintains minimal local state for bookkeeping
 - Enhanced logging with request correlation
 
 This implementation is based on the OAuth 2.1 specification and is designed for
-production use with enterprise identity providers.
+production use with both modern and enterprise identity providers.
 """
 
 from __future__ import annotations
@@ -62,25 +64,29 @@ class OAuthProxy(OAuthProvider):
     """OAuth provider that proxies requests to an upstream Authorization Server.
 
     This provider implements a transparent proxy pattern where:
-    - Client registration is handled locally with fixed upstream credentials
+    - Auto-detects DCR support via OAuth 2.0 discovery
+    - Forwards real DCR requests when upstream supports it
+    - Falls back to local DCR simulation with fixed credentials for legacy providers
     - Authorization flows redirect to the upstream server
     - Token exchange is forwarded to the upstream server
     - Token validation uses upstream JWKS
     - Minimal local state is maintained for bookkeeping
 
-    This approach allows FastMCP to work with enterprise identity providers
-    that don't support Dynamic Client Registration or have restricted policies.
+    This approach allows FastMCP to work with both modern providers (WorkOS AuthKit)
+    and enterprise identity providers that don't support Dynamic Client Registration.
     """
 
     def __init__(
         self,
         *,
-        # Upstream server configuration
-        upstream_authorization_endpoint: str,
-        upstream_token_endpoint: str,
-        upstream_client_id: str,
-        upstream_client_secret: str,
-        upstream_revocation_endpoint: str | None = None,
+        # Upstream OAuth endpoints (all explicit)
+        authorization_endpoint: str,
+        token_endpoint: str,
+        registration_endpoint: str | None = None,  # DCR enabled if provided
+        revocation_endpoint: str | None = None,
+        # Upstream client credentials
+        client_id: str,
+        client_secret: str,
         # Token validation
         token_verifier: TokenVerifier,
         # FastMCP server configuration
@@ -89,26 +95,54 @@ class OAuthProxy(OAuthProvider):
         client_registration_options: ClientRegistrationOptions | None = None,
         revocation_options: RevocationOptions | None = None,
     ):
-        """Initialize the OAuth proxy provider.
+        """Initialize the OAuth proxy provider with explicit endpoints.
 
         Args:
-            upstream_authorization_endpoint: URL of upstream authorization endpoint
-            upstream_token_endpoint: URL of upstream token endpoint
-            upstream_client_id: Client ID registered with upstream server
-            upstream_client_secret: Client secret for upstream server
-            upstream_revocation_endpoint: Optional upstream revocation endpoint
+            authorization_endpoint: Upstream authorization endpoint URL
+            token_endpoint: Upstream token endpoint URL
+            registration_endpoint: Optional DCR endpoint URL (enables real DCR if provided)
+            revocation_endpoint: Optional revocation endpoint URL
+            client_id: Client ID for upstream server (or fallback for DCR)
+            client_secret: Client secret for upstream server (or fallback for DCR)
             token_verifier: Token verifier for validating access tokens
             issuer_url: Public URL of this FastMCP server (used in metadata)
             service_documentation_url: Optional service documentation URL
             client_registration_options: Local client registration options
             revocation_options: Token revocation options
+
+        Use OAuthProxy.from_discovery() for auto-endpoint discovery.
         """
-        # Enable DCR by default since we implement it locally
+        # Store upstream configuration
+        self._authorization_endpoint = authorization_endpoint
+        self._token_endpoint = token_endpoint
+        self._registration_endpoint = registration_endpoint
+        self._revocation_endpoint = revocation_endpoint
+
+        # Client credentials
+        self._client_id = client_id
+        self._client_secret = SecretStr(client_secret)
+
+        # DCR support is simple: enabled if registration endpoint provided
+        self._supports_dcr = registration_endpoint is not None
+
+        # Token validator
+        self._token_validator = token_verifier
+
+        # Client and token storage
+        self._clients: dict[str, OAuthClientInformationFull] = {}
+        self._client_credentials: dict[
+            str, tuple[str, str]
+        ] = {}  # For DCR: client_id -> (actual_id, secret)
+        self._access_tokens: dict[str, AccessToken] = {}
+        self._refresh_tokens: dict[str, RefreshToken] = {}
+        self._access_to_refresh: dict[str, str] = {}
+        self._refresh_to_access: dict[str, str] = {}
+
+        # Configure DCR and revocation options
         if client_registration_options is None:
             client_registration_options = ClientRegistrationOptions(enabled=True)
 
-        # Set up revocation if upstream endpoint provided
-        if upstream_revocation_endpoint and revocation_options is None:
+        if revocation_endpoint and revocation_options is None:
             revocation_options = RevocationOptions(enabled=True)
 
         super().__init__(
@@ -119,32 +153,113 @@ class OAuthProxy(OAuthProvider):
             required_scopes=token_verifier.required_scopes,
         )
 
-        # Store upstream configuration
-        self._upstream_authorization_endpoint = upstream_authorization_endpoint
-        self._upstream_token_endpoint = upstream_token_endpoint
-        self._upstream_client_id = upstream_client_id
-        self._upstream_client_secret = SecretStr(upstream_client_secret)
-        self._upstream_revocation_endpoint = upstream_revocation_endpoint
+        logger.info(
+            "Initialized OAuth proxy provider (DCR: %s, revocation: %s)",
+            self._supports_dcr,
+            bool(revocation_endpoint),
+        )
 
-        # Local state for DCR and token bookkeeping
-        self._clients: dict[str, OAuthClientInformationFull] = {}
-        self._access_tokens: dict[str, AccessToken] = {}
-        self._refresh_tokens: dict[str, RefreshToken] = {}
+    @classmethod
+    async def from_discovery(
+        cls,
+        discovery_issuer_url: str,
+        *,
+        # Optional endpoint overrides (same names as constructor)
+        authorization_endpoint: str | None = None,
+        token_endpoint: str | None = None,
+        registration_endpoint: str | None = None,
+        revocation_endpoint: str | None = None,
+        # Required parameters (same as constructor)
+        client_id: str,
+        client_secret: str,
+        token_verifier: TokenVerifier,
+        **kwargs,  # Pass through any other constructor args
+    ) -> OAuthProxy:
+        """Create OAuth proxy by discovering endpoints from issuer URL.
 
-        # Token relation mappings for cleanup
-        self._access_to_refresh: dict[str, str] = {}
-        self._refresh_to_access: dict[str, str] = {}
+        Args:
+            discovery_issuer_url: Base URL of OAuth server for discovery
+            authorization_endpoint: Override discovered authorization endpoint
+            token_endpoint: Override discovered token endpoint
+            registration_endpoint: Override discovered registration endpoint (or force enable/disable DCR)
+            revocation_endpoint: Override discovered revocation endpoint
+            client_id: Client credentials for upstream server
+            client_secret: Client secret for upstream server
+            token_verifier: Token verifier for access token validation
+            **kwargs: Additional arguments passed to constructor (including issuer_url for FastMCP server)
 
-        # Use the provided token validator
-        self._token_validator = token_verifier
+        Returns:
+            Configured OAuthProxy instance
+
+        Raises:
+            ValueError: If discovery fails and no overrides provided
+            httpx.RequestError: If unable to connect to discovery endpoint
+        """
+        discovery_url = (
+            f"{discovery_issuer_url.rstrip('/')}/.well-known/oauth-authorization-server"
+        )
+        logger.debug("Discovering OAuth endpoints at %s", discovery_url)
+
+        try:
+            async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SECONDS) as http_client:
+                response = await http_client.get(discovery_url)
+
+                if response.status_code != 200:
+                    raise ValueError(
+                        f"Discovery failed with status {response.status_code}: {response.text[:200]}"
+                    )
+
+                metadata = response.json()
+                logger.info("Successfully discovered OAuth metadata")
+
+        except httpx.RequestError as e:
+            logger.error("Failed to connect to discovery endpoint: %s", e)
+            raise ValueError(
+                f"Discovery failed: unable to connect to {discovery_url}"
+            ) from e
+
+        # Extract endpoints with overrides taking precedence
+        final_authorization_endpoint = authorization_endpoint or metadata.get(
+            "authorization_endpoint"
+        )
+        final_token_endpoint = token_endpoint or metadata.get("token_endpoint")
+        final_registration_endpoint = registration_endpoint or metadata.get(
+            "registration_endpoint"
+        )
+        final_revocation_endpoint = revocation_endpoint or metadata.get(
+            "revocation_endpoint"
+        )
+
+        # Validate required endpoints
+        if not final_authorization_endpoint:
+            raise ValueError(
+                "No authorization_endpoint found in discovery or overrides"
+            )
+        if not final_token_endpoint:
+            raise ValueError("No token_endpoint found in discovery or overrides")
 
         logger.info(
-            "Initialized OAuth proxy provider with upstream server %s",
-            self._upstream_authorization_endpoint,
+            "Using endpoints: auth=%s, token=%s, dcr=%s, revoke=%s",
+            final_authorization_endpoint,
+            final_token_endpoint,
+            bool(final_registration_endpoint),
+            bool(final_revocation_endpoint),
+        )
+
+        # Create instance with discovered/overridden endpoints
+        return cls(
+            authorization_endpoint=final_authorization_endpoint,
+            token_endpoint=final_token_endpoint,
+            registration_endpoint=final_registration_endpoint,
+            revocation_endpoint=final_revocation_endpoint,
+            client_id=client_id,
+            client_secret=client_secret,
+            token_verifier=token_verifier,
+            **kwargs,
         )
 
     # -------------------------------------------------------------------------
-    # Client Registration (Local Implementation)
+    # Client Registration
     # -------------------------------------------------------------------------
 
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
@@ -192,18 +307,87 @@ class OAuthProxy(OAuthProvider):
     async def register_client(
         self, client_info: OAuthClientInformationFull
     ) -> OAuthClientInformationFull:
-        """Register a client locally using fixed upstream credentials.
+        """Register a client using DCR forwarding or configured credentials.
 
-        This implementation always returns the same client_id and client_secret
-        (from upstream configuration) regardless of what the client requests.
-        This ensures all clients use the same credentials that are registered
-        with the upstream server.
+        If registration_endpoint was provided, forwards the registration request.
+        Otherwise, uses configured credentials for all clients.
         """
-        # Always use the upstream credentials
-        upstream_id = self._upstream_client_id
-        upstream_secret = self._upstream_client_secret.get_secret_value()
+        if self._supports_dcr:
+            return await self._forward_dcr_registration(client_info)
+        else:
+            return await self._register_with_configured_credentials(client_info)
 
-        # Merge client metadata with fixed credentials
+    async def _forward_dcr_registration(
+        self, client_info: OAuthClientInformationFull
+    ) -> OAuthClientInformationFull:
+        """Forward DCR request to upstream server."""
+        # Prepare registration request
+        registration_data = client_info.model_dump(
+            exclude_none=True,
+            exclude={
+                "client_id",
+                "client_secret",
+            },  # These will be assigned by upstream
+        )
+
+        logger.debug("Forwarding DCR request to upstream: %s", registration_data)
+
+        if not self._registration_endpoint:
+            raise TokenError("invalid_client", "DCR not supported")
+
+        try:
+            async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SECONDS) as http_client:
+                response = await http_client.post(
+                    self._registration_endpoint,
+                    json=registration_data,
+                    headers={"Content-Type": "application/json"},
+                )
+
+                if response.status_code >= 400:
+                    logger.error(
+                        "Upstream DCR failed: %d - %s",
+                        response.status_code,
+                        response.text[:500],
+                    )
+                    raise TokenError(
+                        "invalid_client",
+                        f"Upstream registration failed: {response.status_code}",
+                    )
+
+                upstream_client_data = response.json()
+
+                # Create registered client with upstream response
+                registered_client = OAuthClientInformationFull(**upstream_client_data)
+
+                # Store both the client and its real credentials
+                client_id = registered_client.client_id
+                self._clients[client_id] = registered_client
+                self._client_credentials[client_id] = (
+                    client_id,
+                    registered_client.client_secret or "",
+                )
+
+                logger.info(
+                    "Successfully registered client %s via upstream DCR", client_id
+                )
+
+                return registered_client
+
+        except httpx.RequestError as e:
+            logger.error("Failed to connect to upstream DCR endpoint: %s", e)
+            raise TokenError(
+                "invalid_client", "Unable to connect to upstream registration server"
+            ) from e
+
+    async def _register_with_configured_credentials(
+        self, client_info: OAuthClientInformationFull
+    ) -> OAuthClientInformationFull:
+        """Register client using configured credentials (no DCR mode)."""
+        # Use the configured credentials
+        configured_id = self._client_id
+        configured_secret = self._client_secret.get_secret_value()
+
+        # Merge client metadata with configured credentials
         registered_client = OAuthClientInformationFull(
             **client_info.model_dump(
                 exclude={
@@ -213,19 +397,20 @@ class OAuthProxy(OAuthProvider):
                     "token_endpoint_auth_method",
                 }
             ),
-            client_id=upstream_id,
-            client_secret=upstream_secret,
+            client_id=configured_id,
+            client_secret=configured_secret,
             grant_types=client_info.grant_types
             or ["authorization_code", "refresh_token"],
             token_endpoint_auth_method="none",
         )
 
-        # Store the client registration
-        self._clients[upstream_id] = registered_client
+        # Store the client registration and its credentials
+        self._clients[configured_id] = registered_client
+        self._client_credentials[configured_id] = (configured_id, configured_secret)
 
         logger.info(
-            "Registered client %s with %d redirect URIs",
-            upstream_id,
+            "Registered client %s with configured credentials (%d redirect URIs)",
+            configured_id,
             len(registered_client.redirect_uris),
         )
 
@@ -234,6 +419,14 @@ class OAuthProxy(OAuthProvider):
     # -------------------------------------------------------------------------
     # Authorization Flow (Proxy to Upstream)
     # -------------------------------------------------------------------------
+
+    def _get_client_credentials(self, client_id: str) -> tuple[str, str]:
+        """Get the actual credentials to use for a client."""
+        if client_id in self._client_credentials:
+            return self._client_credentials[client_id]
+        else:
+            # Use the configured credentials
+            return self._client_id, self._client_secret.get_secret_value()
 
     async def authorize(
         self,
@@ -246,10 +439,13 @@ class OAuthProxy(OAuthProvider):
         and returns it for redirection. The upstream server handles the
         user authentication and consent flow.
         """
+        # Get the actual credentials to use for this client
+        actual_client_id, _ = self._get_client_credentials(client.client_id)
+
         # Build query parameters for upstream authorization request
         query_params: dict[str, Any] = {
             "response_type": "code",
-            "client_id": self._upstream_client_id,
+            "client_id": actual_client_id,
             "redirect_uri": str(params.redirect_uri),
             "state": params.state,
         }
@@ -264,9 +460,7 @@ class OAuthProxy(OAuthProvider):
             query_params["scope"] = " ".join(params.scopes)
 
         # Build the upstream authorization URL
-        upstream_url = (
-            f"{self._upstream_authorization_endpoint}?{urlencode(query_params)}"
-        )
+        upstream_url = f"{self._authorization_endpoint}?{urlencode(query_params)}"
 
         logger.info(
             "Redirecting authorization request to upstream server for client %s",
@@ -312,11 +506,16 @@ class OAuthProxy(OAuthProvider):
         Forwards the token request to the upstream server and returns the
         response. Also stores tokens locally for refresh and revocation tracking.
         """
+        # Get the actual credentials to use for this client
+        actual_client_id, actual_client_secret = self._get_client_credentials(
+            client.client_id
+        )
+
         # Base token request data
         token_data = {
             "grant_type": "authorization_code",
-            "client_id": self._upstream_client_id,
-            "client_secret": self._upstream_client_secret.get_secret_value(),
+            "client_id": actual_client_id,
+            "client_secret": actual_client_secret,
             "code": authorization_code.code,
         }
 
@@ -362,9 +561,7 @@ class OAuthProxy(OAuthProvider):
         # Make the token request to upstream server
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SECONDS) as http_client:
             try:
-                response = await http_client.post(
-                    self._upstream_token_endpoint, data=token_data
-                )
+                response = await http_client.post(self._token_endpoint, data=token_data)
 
                 logger.debug(
                     "Upstream token response: status=%d, body_preview=%s",
@@ -447,10 +644,15 @@ class OAuthProxy(OAuthProvider):
         scopes: list[str],
     ) -> OAuthToken:
         """Exchange refresh token for new access token with upstream server."""
+        # Get the actual credentials to use for this client
+        actual_client_id, actual_client_secret = self._get_client_credentials(
+            client.client_id
+        )
+
         refresh_data = {
             "grant_type": "refresh_token",
-            "client_id": self._upstream_client_id,
-            "client_secret": self._upstream_client_secret.get_secret_value(),
+            "client_id": actual_client_id,
+            "client_secret": actual_client_secret,
             "refresh_token": refresh_token.token,
         }
 
@@ -473,7 +675,7 @@ class OAuthProxy(OAuthProvider):
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SECONDS) as http_client:
             try:
                 response = await http_client.post(
-                    self._upstream_token_endpoint, data=refresh_data
+                    self._token_endpoint, data=refresh_data
                 )
 
                 logger.debug(
@@ -578,24 +780,26 @@ class OAuthProxy(OAuthProvider):
                 self._access_to_refresh.pop(paired_access, None)
 
         # Attempt upstream revocation if endpoint is configured
-        if self._upstream_revocation_endpoint:
+        if self._revocation_endpoint:
             try:
+                # Get the credentials that were used for this token's client
+                actual_client_id, actual_client_secret = self._get_client_credentials(
+                    token.client_id
+                )
+
                 async with httpx.AsyncClient(
                     timeout=HTTP_TIMEOUT_SECONDS
                 ) as http_client:
                     await http_client.post(
-                        self._upstream_revocation_endpoint,
+                        self._revocation_endpoint,
                         data={"token": token.token},
-                        auth=(
-                            self._upstream_client_id,
-                            self._upstream_client_secret.get_secret_value(),
-                        ),
+                        auth=(actual_client_id, actual_client_secret),
                     )
                     logger.info("Successfully revoked token with upstream server")
             except Exception as e:
                 logger.warning("Failed to revoke token with upstream server: %s", e)
         else:
-            logger.debug("No upstream revocation endpoint configured")
+            logger.debug("No revocation endpoint configured")
 
         logger.info("Token revoked successfully")
 
@@ -625,10 +829,16 @@ class OAuthProxy(OAuthProvider):
             }
             logger.debug("Proxy token request form data: %s", redacted_form)
 
+            # Extract client_id to determine which credentials to use
+            original_client_id = str(form_data.get("client_id", self._client_id))
+            actual_client_id, actual_client_secret = self._get_client_credentials(
+                original_client_id
+            )
+
             # Build the upstream request data
             upstream_data = {
-                "client_id": self._upstream_client_id,
-                "client_secret": self._upstream_client_secret.get_secret_value(),
+                "client_id": actual_client_id,
+                "client_secret": actual_client_secret,
             }
 
             # Forward all relevant form fields
@@ -660,7 +870,7 @@ class OAuthProxy(OAuthProvider):
             async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SECONDS) as http_client:
                 try:
                     response = await http_client.post(
-                        self._upstream_token_endpoint,
+                        self._token_endpoint,
                         data=upstream_data,
                         headers={"Content-Type": "application/x-www-form-urlencoded"},
                     )
@@ -700,7 +910,7 @@ class OAuthProxy(OAuthProvider):
                         upstream_data.get("grant_type") == "authorization_code"
                         and "access_token" in token_data
                     ):
-                        self._store_tokens_from_response(token_data)
+                        self._store_tokens_from_response(token_data, actual_client_id)
 
                     logger.info("Successfully proxied token request to upstream server")
                     return JSONResponse(content=token_data)
@@ -725,7 +935,9 @@ class OAuthProxy(OAuthProvider):
                 status_code=500,
             )
 
-    def _store_tokens_from_response(self, token_data: dict[str, Any]) -> None:
+    def _store_tokens_from_response(
+        self, token_data: dict[str, Any], client_id: str
+    ) -> None:
         """Store tokens from upstream response for local tracking."""
         try:
             access_token_value = token_data.get("access_token")
@@ -738,7 +950,7 @@ class OAuthProxy(OAuthProvider):
             if access_token_value:
                 access_token = AccessToken(
                     token=access_token_value,
-                    client_id=self._upstream_client_id,
+                    client_id=client_id,
                     scopes=[],  # Will be determined by token validation
                     expires_at=expires_at,
                 )
@@ -747,7 +959,7 @@ class OAuthProxy(OAuthProvider):
                 if refresh_token_value:
                     refresh_token = RefreshToken(
                         token=refresh_token_value,
-                        client_id=self._upstream_client_id,
+                        client_id=client_id,
                         scopes=[],
                         expires_at=None,
                     )

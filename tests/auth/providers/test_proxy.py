@@ -1,7 +1,9 @@
 """Tests for OAuth proxy provider."""
 
 from typing import cast
+from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
 from mcp.server.auth.provider import AccessToken, AuthorizationParams
 from mcp.shared.auth import OAuthClientInformationFull
@@ -42,20 +44,17 @@ class TestOAuthProxyInit:
         token_verifier = MockTokenVerifier()
 
         proxy = OAuthProxy(
-            upstream_authorization_endpoint="https://auth.example.com/authorize",
-            upstream_token_endpoint="https://auth.example.com/token",
-            upstream_client_id="upstream-client",
-            upstream_client_secret="upstream-secret",
+            authorization_endpoint="https://auth.example.com/authorize",
+            token_endpoint="https://auth.example.com/token",
+            client_id="upstream-client",
+            client_secret="upstream-secret",
             token_verifier=token_verifier,
             issuer_url="https://my-server.com",
         )
 
-        assert (
-            proxy._upstream_authorization_endpoint
-            == "https://auth.example.com/authorize"
-        )
-        assert proxy._upstream_token_endpoint == "https://auth.example.com/token"
-        assert proxy._upstream_client_id == "upstream-client"
+        assert proxy._authorization_endpoint == "https://auth.example.com/authorize"
+        assert proxy._token_endpoint == "https://auth.example.com/token"
+        assert proxy._client_id == "upstream-client"
         assert proxy._token_validator is token_verifier
 
     def test_inherits_required_scopes_from_token_verifier(self):
@@ -63,10 +62,10 @@ class TestOAuthProxyInit:
         token_verifier = MockTokenVerifier(required_scopes=["read", "write"])
 
         proxy = OAuthProxy(
-            upstream_authorization_endpoint="https://auth.example.com/authorize",
-            upstream_token_endpoint="https://auth.example.com/token",
-            upstream_client_id="upstream-client",
-            upstream_client_secret="upstream-secret",
+            authorization_endpoint="https://auth.example.com/authorize",
+            token_endpoint="https://auth.example.com/token",
+            client_id="upstream-client",
+            client_secret="upstream-secret",
             token_verifier=token_verifier,
             issuer_url="https://my-server.com",
         )
@@ -78,17 +77,181 @@ class TestOAuthProxyInit:
         token_verifier = MockTokenVerifier()
 
         proxy = OAuthProxy(
-            upstream_authorization_endpoint="https://auth.example.com/authorize",
-            upstream_token_endpoint="https://auth.example.com/token",
-            upstream_client_id="upstream-client",
-            upstream_client_secret="upstream-secret",
-            upstream_revocation_endpoint="https://auth.example.com/revoke",
+            authorization_endpoint="https://auth.example.com/authorize",
+            token_endpoint="https://auth.example.com/token",
+            client_id="upstream-client",
+            client_secret="upstream-secret",
+            revocation_endpoint="https://auth.example.com/revoke",
             token_verifier=token_verifier,
             issuer_url="https://my-server.com",
         )
 
         assert proxy.revocation_options is not None
         assert proxy.revocation_options.enabled is True
+
+
+class TestOAuthProxyFromDiscovery:
+    """Test the from_discovery factory method."""
+
+    @pytest.mark.asyncio
+    async def test_from_discovery_fetches_and_uses_metadata(self):
+        """Test that from_discovery fetches OAuth metadata and configures endpoints."""
+        token_verifier = MockTokenVerifier()
+
+        # Mock discovery response
+        mock_metadata = {
+            "authorization_endpoint": "https://discovered.example.com/authorize",
+            "token_endpoint": "https://discovered.example.com/token",
+            "registration_endpoint": "https://discovered.example.com/register",
+            "revocation_endpoint": "https://discovered.example.com/revoke",
+        }
+
+        with patch("httpx.AsyncClient") as mock_client:
+            mock_response = AsyncMock()
+            mock_response.status_code = 200
+            mock_response.json = lambda: mock_metadata
+
+            mock_http = AsyncMock()
+            mock_http.get.return_value = mock_response
+            mock_client.return_value.__aenter__.return_value = mock_http
+
+            proxy = await OAuthProxy.from_discovery(
+                discovery_issuer_url="https://example.com",
+                client_id="test-client",
+                client_secret="test-secret",
+                token_verifier=token_verifier,
+                issuer_url="https://my-server.com",
+            )
+
+            # Should have called discovery endpoint
+            mock_http.get.assert_called_once_with(
+                "https://example.com/.well-known/oauth-authorization-server"
+            )
+
+            # Should use discovered endpoints
+            assert (
+                proxy._authorization_endpoint
+                == "https://discovered.example.com/authorize"
+            )
+            assert proxy._token_endpoint == "https://discovered.example.com/token"
+            assert (
+                proxy._registration_endpoint
+                == "https://discovered.example.com/register"
+            )
+            assert proxy._revocation_endpoint == "https://discovered.example.com/revoke"
+            assert (
+                proxy._supports_dcr is True
+            )  # DCR enabled because registration_endpoint found
+
+    @pytest.mark.asyncio
+    async def test_from_discovery_with_overrides(self):
+        """Test that from_discovery respects endpoint overrides."""
+        token_verifier = MockTokenVerifier()
+
+        # Mock discovery response
+        mock_metadata = {
+            "authorization_endpoint": "https://discovered.example.com/authorize",
+            "token_endpoint": "https://discovered.example.com/token",
+        }
+
+        with patch("httpx.AsyncClient") as mock_client:
+            mock_response = AsyncMock()
+            mock_response.status_code = 200
+            mock_response.json = lambda: mock_metadata
+
+            mock_http = AsyncMock()
+            mock_http.get.return_value = mock_response
+            mock_client.return_value.__aenter__.return_value = mock_http
+
+            proxy = await OAuthProxy.from_discovery(
+                discovery_issuer_url="https://example.com",
+                client_id="test-client",
+                client_secret="test-secret",
+                token_verifier=token_verifier,
+                issuer_url="https://my-server.com",
+                # Override some endpoints
+                authorization_endpoint="https://custom.example.com/auth",
+                registration_endpoint="https://custom.example.com/register",
+            )
+
+            # Should use overrides where provided
+            assert proxy._authorization_endpoint == "https://custom.example.com/auth"
+            assert (
+                proxy._token_endpoint == "https://discovered.example.com/token"
+            )  # From discovery
+            assert proxy._registration_endpoint == "https://custom.example.com/register"
+            assert proxy._supports_dcr is True  # DCR enabled by override
+
+    @pytest.mark.asyncio
+    async def test_from_discovery_handles_missing_endpoints(self):
+        """Test that from_discovery handles missing required endpoints."""
+        token_verifier = MockTokenVerifier()
+
+        # Mock discovery response missing required endpoints
+        mock_metadata = {
+            "issuer": "https://example.com"
+            # Missing authorization_endpoint and token_endpoint
+        }
+
+        with patch("httpx.AsyncClient") as mock_client:
+            mock_response = AsyncMock()
+            mock_response.status_code = 200
+            mock_response.json = lambda: mock_metadata
+
+            mock_http = AsyncMock()
+            mock_http.get.return_value = mock_response
+            mock_client.return_value.__aenter__.return_value = mock_http
+
+            with pytest.raises(ValueError, match="No authorization_endpoint"):
+                await OAuthProxy.from_discovery(
+                    "https://example.com",
+                    client_id="test-client",
+                    client_secret="test-secret",
+                    token_verifier=token_verifier,
+                    issuer_url="https://my-server.com",
+                )
+
+    @pytest.mark.asyncio
+    async def test_from_discovery_handles_http_errors(self):
+        """Test that from_discovery handles HTTP errors gracefully."""
+        token_verifier = MockTokenVerifier()
+
+        with patch("httpx.AsyncClient") as mock_client:
+            mock_response = AsyncMock()
+            mock_response.status_code = 404
+            mock_response.text = "Not Found"
+
+            mock_http = AsyncMock()
+            mock_http.get.return_value = mock_response
+            mock_client.return_value.__aenter__.return_value = mock_http
+
+            with pytest.raises(ValueError, match="Discovery failed with status 404"):
+                await OAuthProxy.from_discovery(
+                    "https://example.com",
+                    client_id="test-client",
+                    client_secret="test-secret",
+                    token_verifier=token_verifier,
+                    issuer_url="https://my-server.com",
+                )
+
+    @pytest.mark.asyncio
+    async def test_from_discovery_handles_connection_errors(self):
+        """Test that from_discovery handles connection errors."""
+        token_verifier = MockTokenVerifier()
+
+        with patch("httpx.AsyncClient") as mock_client:
+            mock_http = AsyncMock()
+            mock_http.get.side_effect = httpx.RequestError("Connection failed")
+            mock_client.return_value.__aenter__.return_value = mock_http
+
+            with pytest.raises(ValueError, match="Discovery failed: unable to connect"):
+                await OAuthProxy.from_discovery(
+                    "https://example.com",
+                    client_id="test-client",
+                    client_secret="test-secret",
+                    token_verifier=token_verifier,
+                    issuer_url="https://my-server.com",
+                )
 
 
 class TestOAuthProxyClientRegistration:
@@ -99,10 +262,10 @@ class TestOAuthProxyClientRegistration:
         """Create a test proxy instance."""
         token_verifier = MockTokenVerifier()
         return OAuthProxy(
-            upstream_authorization_endpoint="https://auth.example.com/authorize",
-            upstream_token_endpoint="https://auth.example.com/token",
-            upstream_client_id="upstream-client",
-            upstream_client_secret="upstream-secret",
+            authorization_endpoint="https://auth.example.com/authorize",
+            token_endpoint="https://auth.example.com/token",
+            client_id="upstream-client",
+            client_secret="upstream-secret",
             token_verifier=token_verifier,
             issuer_url="https://my-server.com",
         )
@@ -125,6 +288,87 @@ class TestOAuthProxyClientRegistration:
         # But preserve other metadata
         assert registered_client.redirect_uris == client_info.redirect_uris
         assert registered_client.grant_types == ["authorization_code"]
+
+    async def test_register_client_with_dcr_forwards_request(self):
+        """Test that client registration forwards to upstream when DCR is enabled."""
+        token_verifier = MockTokenVerifier()
+        proxy = OAuthProxy(
+            authorization_endpoint="https://auth.example.com/authorize",
+            token_endpoint="https://auth.example.com/token",
+            registration_endpoint="https://auth.example.com/register",  # DCR enabled
+            client_id="fallback-client",
+            client_secret="fallback-secret",
+            token_verifier=token_verifier,
+            issuer_url="https://my-server.com",
+        )
+
+        client_info = OAuthClientInformationFull(
+            client_id="requested-client-id",
+            client_secret="requested-secret",
+            redirect_uris=[AnyUrl("https://app.example.com/callback")],
+            grant_types=["authorization_code"],
+            token_endpoint_auth_method="none",
+        )
+
+        # Mock upstream DCR response
+        upstream_response = {
+            "client_id": "dcr-generated-id",
+            "client_secret": "dcr-generated-secret",
+            "redirect_uris": ["https://app.example.com/callback"],
+            "grant_types": ["authorization_code"],
+            "token_endpoint_auth_method": "none",
+        }
+
+        with patch("httpx.AsyncClient") as mock_client:
+            mock_response = AsyncMock()
+            mock_response.status_code = 200
+            mock_response.json = (
+                lambda: upstream_response
+            )  # Use lambda instead of AsyncMock
+
+            mock_http = AsyncMock()
+            mock_http.post.return_value = mock_response
+            mock_client.return_value.__aenter__.return_value = mock_http
+
+            registered_client = await proxy.register_client(client_info)
+
+            # Should have called upstream DCR endpoint
+            mock_http.post.assert_called_once()
+            call_args = mock_http.post.call_args
+            assert call_args[0][0] == "https://auth.example.com/register"
+
+            # Should return upstream-generated credentials
+            assert registered_client.client_id == "dcr-generated-id"
+            assert registered_client.client_secret == "dcr-generated-secret"
+            assert registered_client.redirect_uris == client_info.redirect_uris
+
+    async def test_register_client_without_dcr_uses_configured_credentials(self):
+        """Test that without DCR endpoint, configured credentials are used."""
+        token_verifier = MockTokenVerifier()
+        proxy = OAuthProxy(
+            authorization_endpoint="https://auth.example.com/authorize",
+            token_endpoint="https://auth.example.com/token",
+            # No registration_endpoint = no DCR
+            client_id="configured-client",
+            client_secret="configured-secret",
+            token_verifier=token_verifier,
+            issuer_url="https://my-server.com",
+        )
+
+        client_info = OAuthClientInformationFull(
+            client_id="requested-client-id",
+            redirect_uris=[AnyUrl("https://app.example.com/callback")],
+            grant_types=["authorization_code"],
+            token_endpoint_auth_method="none",
+        )
+
+        registered_client = await proxy.register_client(client_info)
+
+        # Should use configured credentials (no upstream call)
+        assert registered_client.client_id == "configured-client"
+        assert registered_client.client_secret == "configured-secret"
+        assert registered_client.redirect_uris == client_info.redirect_uris
+        assert proxy._supports_dcr is False
 
     async def test_get_client_returns_registered_client(self, proxy):
         """Test that get_client returns previously registered clients."""
@@ -160,10 +404,10 @@ class TestOAuthProxyAuthorizationFlow:
         """Create a test proxy instance."""
         token_verifier = MockTokenVerifier()
         return OAuthProxy(
-            upstream_authorization_endpoint="https://auth.example.com/authorize",
-            upstream_token_endpoint="https://auth.example.com/token",
-            upstream_client_id="upstream-client",
-            upstream_client_secret="upstream-secret",
+            authorization_endpoint="https://auth.example.com/authorize",
+            token_endpoint="https://auth.example.com/token",
+            client_id="upstream-client",
+            client_secret="upstream-secret",
             token_verifier=token_verifier,
             issuer_url="https://my-server.com",
         )
@@ -219,10 +463,10 @@ class TestOAuthProxyTokenValidation:
         """Test that token validation is delegated to the token verifier."""
         token_verifier = MockTokenVerifier(should_validate=True)
         proxy = OAuthProxy(
-            upstream_authorization_endpoint="https://auth.example.com/authorize",
-            upstream_token_endpoint="https://auth.example.com/token",
-            upstream_client_id="upstream-client",
-            upstream_client_secret="upstream-secret",
+            authorization_endpoint="https://auth.example.com/authorize",
+            token_endpoint="https://auth.example.com/token",
+            client_id="upstream-client",
+            client_secret="upstream-secret",
             token_verifier=token_verifier,
             issuer_url="https://my-server.com",
         )
@@ -240,10 +484,10 @@ class TestOAuthProxyTokenValidation:
         """Test that invalid tokens return None."""
         token_verifier = MockTokenVerifier(should_validate=False)
         proxy = OAuthProxy(
-            upstream_authorization_endpoint="https://auth.example.com/authorize",
-            upstream_token_endpoint="https://auth.example.com/token",
-            upstream_client_id="upstream-client",
-            upstream_client_secret="upstream-secret",
+            authorization_endpoint="https://auth.example.com/authorize",
+            token_endpoint="https://auth.example.com/token",
+            client_id="upstream-client",
+            client_secret="upstream-secret",
             token_verifier=token_verifier,
             issuer_url="https://my-server.com",
         )
@@ -260,10 +504,10 @@ class TestOAuthProxyRouteCustomization:
         """Test that route customization replaces the token endpoint."""
         token_verifier = MockTokenVerifier()
         proxy = OAuthProxy(
-            upstream_authorization_endpoint="https://auth.example.com/authorize",
-            upstream_token_endpoint="https://auth.example.com/token",
-            upstream_client_id="upstream-client",
-            upstream_client_secret="upstream-secret",
+            authorization_endpoint="https://auth.example.com/authorize",
+            token_endpoint="https://auth.example.com/token",
+            client_id="upstream-client",
+            client_secret="upstream-secret",
             token_verifier=token_verifier,
             issuer_url="https://my-server.com",
         )
@@ -309,10 +553,10 @@ class TestOAuthProxyRouteCustomization:
         """Test that non-token routes are preserved unchanged."""
         token_verifier = MockTokenVerifier()
         proxy = OAuthProxy(
-            upstream_authorization_endpoint="https://auth.example.com/authorize",
-            upstream_token_endpoint="https://auth.example.com/token",
-            upstream_client_id="upstream-client",
-            upstream_client_secret="upstream-secret",
+            authorization_endpoint="https://auth.example.com/authorize",
+            token_endpoint="https://auth.example.com/token",
+            client_id="upstream-client",
+            client_secret="upstream-secret",
             token_verifier=token_verifier,
             issuer_url="https://my-server.com",
         )
@@ -349,10 +593,10 @@ class TestOAuthProxyIntegration:
 
         token_verifier = MockTokenVerifier(required_scopes=["api:read"])
         proxy = OAuthProxy(
-            upstream_authorization_endpoint="https://auth.example.com/authorize",
-            upstream_token_endpoint="https://auth.example.com/token",
-            upstream_client_id="upstream-client",
-            upstream_client_secret="upstream-secret",
+            authorization_endpoint="https://auth.example.com/authorize",
+            token_endpoint="https://auth.example.com/token",
+            client_id="upstream-client",
+            client_secret="upstream-secret",
             token_verifier=token_verifier,
             issuer_url="https://my-server.com",
         )
