@@ -98,7 +98,7 @@ def setup_auth_middleware_and_routes(
     if hasattr(auth, "issuer_url"):
         # OAuthProvider: create auth routes and get required scopes
         # We know this is an OAuthProvider because it has issuer_url
-        auth_routes = list(
+        standard_routes = list(
             create_auth_routes(
                 provider=auth,  # type: ignore[arg-type]
                 issuer_url=auth.issuer_url,  # type: ignore[attr-defined]
@@ -107,6 +107,8 @@ def setup_auth_middleware_and_routes(
                 revocation_options=auth.revocation_options,  # type: ignore[attr-defined]
             )
         )
+        # Allow provider to customize routes (e.g., for proxy behavior)
+        auth_routes = auth.customize_auth_routes(standard_routes)  # type: ignore[attr-defined]
         required_scopes = auth.required_scopes or []  # type: ignore[attr-defined]
     else:
         # TokenVerifier: no auth routes but may have required scopes

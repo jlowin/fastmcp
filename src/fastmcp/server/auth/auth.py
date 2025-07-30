@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from mcp.server.auth.provider import (
     AccessToken,
     AuthorizationCode,
@@ -12,6 +16,9 @@ from mcp.server.auth.settings import (
     RevocationOptions,
 )
 from pydantic import AnyHttpUrl
+
+if TYPE_CHECKING:
+    from starlette.routing import BaseRoute
 
 
 class TokenVerifier(TokenVerifierProtocol):
@@ -76,3 +83,33 @@ class OAuthProvider(
         self.client_registration_options = client_registration_options
         self.revocation_options = revocation_options
         self.required_scopes = required_scopes
+
+    async def verify_token(self, token: str) -> AccessToken | None:
+        """
+        Verify a bearer token and return access info if valid.
+
+        This method implements the TokenVerifier protocol by delegating
+        to our existing load_access_token method.
+
+        Args:
+            token: The token string to validate
+
+        Returns:
+            AccessToken object if valid, None if invalid or expired
+        """
+        return await self.load_access_token(token)
+
+    def customize_auth_routes(self, routes: list[BaseRoute]) -> list[BaseRoute]:
+        """Customize OAuth authentication routes after standard creation.
+
+        This method allows providers to modify the standard OAuth routes
+        returned by create_auth_routes. The default implementation returns
+        the routes unchanged.
+
+        Args:
+            routes: List of standard OAuth routes from create_auth_routes
+
+        Returns:
+            List of routes (potentially modified)
+        """
+        return routes

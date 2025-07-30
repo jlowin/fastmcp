@@ -93,7 +93,7 @@
                   {
                     "group": "Authentication",
                     "icon": "shield-check",
-                    "pages": ["servers/auth/verifiers"]
+                    "pages": ["servers/auth/verifiers", "servers/auth/proxy"]
                   }
                 ]
               },
