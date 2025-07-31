@@ -15,7 +15,6 @@ from fastmcp.contrib.external_resources import (
 )
 from fastmcp.exceptions import ToolError
 
-
 # Tests for ExternalResource and ExternalResourceTemplate specific features
 
 
