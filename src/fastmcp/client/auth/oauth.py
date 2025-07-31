@@ -246,7 +246,7 @@ def OAuth(
 
     # Setup OAuth client
     redirect_port = callback_port or find_available_port()
-    redirect_uri = f"http://127.0.0.1:{redirect_port}/callback"
+    redirect_uri = f"http://localhost:{redirect_port}/callback"
 
     if isinstance(scopes, list):
         scopes = " ".join(scopes)
@@ -288,7 +288,7 @@ def OAuth(
         async with anyio.create_task_group() as tg:
             tg.start_soon(server.serve)
             logger.info(
-                f"🎧 OAuth callback server started on http://127.0.0.1:{redirect_port}"
+                f"🎧 OAuth callback server started on http://localhost:{redirect_port}"
             )
 
             TIMEOUT = 300.0  # 5 minute timeout
