@@ -332,6 +332,39 @@ mcp = FastMCP.from_openapi(
 )
 ```
 
+#### OpenAPI Tags in Client Meta
+
+FastMCP automatically includes OpenAPI tags from your specification in the component's metadata. These tags are available to MCP clients through the `_meta._fastmcp.tags` field, allowing clients to filter and organize components based on the original OpenAPI tagging:
+
+<CodeGroup>
+```json {5} OpenAPI spec with tags
+{
+  "paths": {
+    "/users": {
+      "get": {
+        "tags": ["users", "public"],
+        "operationId": "list_users",
+        "summary": "List all users"
+      }
+    }
+  }
+}
+```
+```python {6-9} Access OpenAPI tags in MCP client
+async with client:
+    tools = await client.list_tools()
+    for tool in tools:
+        if hasattr(tool, '_meta') and tool._meta:
+            # OpenAPI tags are now available in _fastmcp namespace!
+            fastmcp_meta = tool._meta.get('_fastmcp', {})
+            openapi_tags = fastmcp_meta.get('tags', [])
+            if 'users' in openapi_tags:
+                print(f"Found user-related tool: {tool.name}")
+```
+</CodeGroup>
+
+This makes it easy for clients to understand and organize API endpoints based on their original OpenAPI categorization.
+
 ### Advanced Customization
 
 <VersionBadge version="2.5.0" />

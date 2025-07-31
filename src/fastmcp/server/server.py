@@ -25,6 +25,7 @@ from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.lowlevel.server import LifespanResultT, NotificationOptions
 from mcp.server.stdio import stdio_server
 from mcp.types import (
+    Annotations,
     AnyFunction,
     CallToolRequestParams,
     ContentBlock,
@@ -49,8 +50,8 @@ from fastmcp.prompts import Prompt, PromptManager
 from fastmcp.prompts.prompt import FunctionPrompt
 from fastmcp.resources import Resource, ResourceManager
 from fastmcp.resources.template import ResourceTemplate
-from fastmcp.server.auth.auth import OAuthProvider
-from fastmcp.server.auth.providers.bearer_env import EnvBearerAuthProvider
+from fastmcp.server.auth.auth import OAuthProvider, TokenVerifier
+from fastmcp.server.auth.verifiers import EnvJWTVerifier
 from fastmcp.server.http import (
     StarletteWithLifespan,
     create_sse_app,
@@ -132,7 +133,7 @@ class FastMCP(Generic[LifespanResultT]):
         instructions: str | None = None,
         *,
         version: str | None = None,
-        auth: OAuthProvider | None = None,
+        auth: OAuthProvider | TokenVerifier | None = None,
         middleware: list[Middleware] | None = None,
         lifespan: (
             Callable[
@@ -153,6 +154,7 @@ class FastMCP(Generic[LifespanResultT]):
         dependencies: list[str] | None = None,
         include_tags: set[str] | None = None,
         exclude_tags: set[str] | None = None,
+        include_fastmcp_meta: bool | None = None,
         # ---
         # ---
         # --- The following arguments are DEPRECATED ---
@@ -203,8 +205,9 @@ class FastMCP(Generic[LifespanResultT]):
             lifespan=_lifespan_wrapper(self, lifespan),
         )
 
-        if auth is None and fastmcp.settings.default_auth_provider == "bearer_env":
-            auth = EnvBearerAuthProvider()
+        if auth is None and fastmcp.settings.default_auth_provider == "jwt-env":
+            auth = EnvJWTVerifier()
+
         self.auth = auth
 
         if tools:
@@ -221,6 +224,12 @@ class FastMCP(Generic[LifespanResultT]):
         # Set up MCP protocol handlers
         self._setup_handlers()
         self.dependencies = dependencies or fastmcp.settings.server_dependencies
+
+        self.include_fastmcp_meta = (
+            include_fastmcp_meta
+            if include_fastmcp_meta is not None
+            else fastmcp.settings.include_fastmcp_meta
+        )
 
         # handle deprecated settings
         self._handle_deprecated_settings(
@@ -469,7 +478,13 @@ class FastMCP(Generic[LifespanResultT]):
 
         async with fastmcp.server.context.Context(fastmcp=self):
             tools = await self._list_tools()
-            return [tool.to_mcp_tool(name=tool.key) for tool in tools]
+            return [
+                tool.to_mcp_tool(
+                    name=tool.key,
+                    include_fastmcp_meta=self.include_fastmcp_meta,
+                )
+                for tool in tools
+            ]
 
     async def _list_tools(self) -> list[Tool]:
         """
@@ -508,7 +523,11 @@ class FastMCP(Generic[LifespanResultT]):
         async with fastmcp.server.context.Context(fastmcp=self):
             resources = await self._list_resources()
             return [
-                resource.to_mcp_resource(uri=resource.key) for resource in resources
+                resource.to_mcp_resource(
+                    uri=resource.key,
+                    include_fastmcp_meta=self.include_fastmcp_meta,
+                )
+                for resource in resources
             ]
 
     async def _list_resources(self) -> list[Resource]:
@@ -549,7 +568,10 @@ class FastMCP(Generic[LifespanResultT]):
         async with fastmcp.server.context.Context(fastmcp=self):
             templates = await self._list_resource_templates()
             return [
-                template.to_mcp_template(uriTemplate=template.key)
+                template.to_mcp_template(
+                    uriTemplate=template.key,
+                    include_fastmcp_meta=self.include_fastmcp_meta,
+                )
                 for template in templates
             ]
 
@@ -590,7 +612,13 @@ class FastMCP(Generic[LifespanResultT]):
 
         async with fastmcp.server.context.Context(fastmcp=self):
             prompts = await self._list_prompts()
-            return [prompt.to_mcp_prompt(name=prompt.key) for prompt in prompts]
+            return [
+                prompt.to_mcp_prompt(
+                    name=prompt.key,
+                    include_fastmcp_meta=self.include_fastmcp_meta,
+                )
+                for prompt in prompts
+            ]
 
     async def _list_prompts(self) -> list[Prompt]:
         """
@@ -844,6 +872,7 @@ class FastMCP(Generic[LifespanResultT]):
         output_schema: dict[str, Any] | None | NotSetT = NotSet,
         annotations: ToolAnnotations | dict[str, Any] | None = None,
         exclude_args: list[str] | None = None,
+        meta: dict[str, Any] | None = None,
         enabled: bool | None = None,
     ) -> FunctionTool: ...
 
@@ -859,6 +888,7 @@ class FastMCP(Generic[LifespanResultT]):
         output_schema: dict[str, Any] | None | NotSetT = NotSet,
         annotations: ToolAnnotations | dict[str, Any] | None = None,
         exclude_args: list[str] | None = None,
+        meta: dict[str, Any] | None = None,
         enabled: bool | None = None,
     ) -> Callable[[AnyFunction], FunctionTool]: ...
 
@@ -873,6 +903,7 @@ class FastMCP(Generic[LifespanResultT]):
         output_schema: dict[str, Any] | None | NotSetT = NotSet,
         annotations: ToolAnnotations | dict[str, Any] | None = None,
         exclude_args: list[str] | None = None,
+        meta: dict[str, Any] | None = None,
         enabled: bool | None = None,
     ) -> Callable[[AnyFunction], FunctionTool] | FunctionTool:
         """Decorator to register a tool.
@@ -896,6 +927,7 @@ class FastMCP(Generic[LifespanResultT]):
             output_schema: Optional JSON schema for the tool's output
             annotations: Optional annotations about the tool's behavior
             exclude_args: Optional list of argument names to exclude from the tool schema
+            meta: Optional meta information about the tool
             enabled: Optional boolean to enable or disable the tool
 
         Examples:
@@ -954,6 +986,7 @@ class FastMCP(Generic[LifespanResultT]):
                 output_schema=output_schema,
                 annotations=annotations,
                 exclude_args=exclude_args,
+                meta=meta,
                 serializer=self._tool_serializer,
                 enabled=enabled,
             )
@@ -986,6 +1019,7 @@ class FastMCP(Generic[LifespanResultT]):
             output_schema=output_schema,
             annotations=annotations,
             exclude_args=exclude_args,
+            meta=meta,
             enabled=enabled,
         )
 
@@ -1083,6 +1117,8 @@ class FastMCP(Generic[LifespanResultT]):
         mime_type: str | None = None,
         tags: set[str] | None = None,
         enabled: bool | None = None,
+        annotations: Annotations | dict[str, Any] | None = None,
+        meta: dict[str, Any] | None = None,
     ) -> Callable[[AnyFunction], Resource | ResourceTemplate]:
         """Decorator to register a function as a resource.
 
@@ -1106,6 +1142,8 @@ class FastMCP(Generic[LifespanResultT]):
             mime_type: Optional MIME type for the resource
             tags: Optional set of tags for categorizing the resource
             enabled: Optional boolean to enable or disable the resource
+            annotations: Optional annotations about the resource's behavior
+            meta: Optional meta information about the resource
 
         Examples:
             Register a resource with a custom name:
@@ -1134,6 +1172,9 @@ class FastMCP(Generic[LifespanResultT]):
                 return f"Weather for {city}: {data}"
             ```
         """
+        if isinstance(annotations, dict):
+            annotations = Annotations(**annotations)
+
         # Check if user passed function directly instead of calling decorator
         if inspect.isroutine(uri):
             raise TypeError(
@@ -1175,6 +1216,8 @@ class FastMCP(Generic[LifespanResultT]):
                     mime_type=mime_type,
                     tags=tags,
                     enabled=enabled,
+                    annotations=annotations,
+                    meta=meta,
                 )
                 self.add_template(template)
                 return template
@@ -1188,6 +1231,8 @@ class FastMCP(Generic[LifespanResultT]):
                     mime_type=mime_type,
                     tags=tags,
                     enabled=enabled,
+                    annotations=annotations,
+                    meta=meta,
                 )
                 self.add_resource(resource)
                 return resource
@@ -1232,6 +1277,7 @@ class FastMCP(Generic[LifespanResultT]):
         description: str | None = None,
         tags: set[str] | None = None,
         enabled: bool | None = None,
+        meta: dict[str, Any] | None = None,
     ) -> FunctionPrompt: ...
 
     @overload
@@ -1244,6 +1290,7 @@ class FastMCP(Generic[LifespanResultT]):
         description: str | None = None,
         tags: set[str] | None = None,
         enabled: bool | None = None,
+        meta: dict[str, Any] | None = None,
     ) -> Callable[[AnyFunction], FunctionPrompt]: ...
 
     def prompt(
@@ -1255,6 +1302,7 @@ class FastMCP(Generic[LifespanResultT]):
         description: str | None = None,
         tags: set[str] | None = None,
         enabled: bool | None = None,
+        meta: dict[str, Any] | None = None,
     ) -> Callable[[AnyFunction], FunctionPrompt] | FunctionPrompt:
         """Decorator to register a prompt.
 
@@ -1275,6 +1323,7 @@ class FastMCP(Generic[LifespanResultT]):
             description: Optional description of what the prompt does
             tags: Optional set of tags for categorizing the prompt
             enabled: Optional boolean to enable or disable the prompt
+            meta: Optional meta information about the prompt
 
         Examples:
 
@@ -1352,6 +1401,7 @@ class FastMCP(Generic[LifespanResultT]):
                 description=description,
                 tags=tags,
                 enabled=enabled,
+                meta=meta,
             )
             self.add_prompt(prompt)
 
@@ -1381,6 +1431,7 @@ class FastMCP(Generic[LifespanResultT]):
             description=description,
             tags=tags,
             enabled=enabled,
+            meta=meta,
         )
 
     async def run_stdio_async(self, show_banner: bool = True) -> None:

@@ -8,6 +8,7 @@ from collections.abc import Callable
 from typing import Any
 from urllib.parse import unquote
 
+from mcp.types import Annotations
 from mcp.types import ResourceTemplate as MCPResourceTemplate
 from pydantic import (
     Field,
@@ -61,6 +62,9 @@ class ResourceTemplate(FastMCPComponent):
     parameters: dict[str, Any] = Field(
         description="JSON schema for function parameters"
     )
+    annotations: Annotations | None = Field(
+        default=None, description="Optional annotations about the resource's behavior"
+    )
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(uri_template={self.uri_template!r}, name={self.name!r}, description={self.description!r}, tags={self.tags})"
@@ -91,6 +95,8 @@ class ResourceTemplate(FastMCPComponent):
         mime_type: str | None = None,
         tags: set[str] | None = None,
         enabled: bool | None = None,
+        annotations: Annotations | None = None,
+        meta: dict[str, Any] | None = None,
     ) -> FunctionResourceTemplate:
         return FunctionResourceTemplate.from_function(
             fn=fn,
@@ -101,6 +107,8 @@ class ResourceTemplate(FastMCPComponent):
             mime_type=mime_type,
             tags=tags,
             enabled=enabled,
+            annotations=annotations,
+            meta=meta,
         )
 
     @field_validator("mime_type", mode="before")
@@ -139,7 +147,12 @@ class ResourceTemplate(FastMCPComponent):
             enabled=self.enabled,
         )
 
-    def to_mcp_template(self, **overrides: Any) -> MCPResourceTemplate:
+    def to_mcp_template(
+        self,
+        *,
+        include_fastmcp_meta: bool | None = None,
+        **overrides: Any,
+    ) -> MCPResourceTemplate:
         """Convert the resource template to an MCPResourceTemplate."""
         kwargs = {
             "uriTemplate": self.uri_template,
@@ -147,6 +160,8 @@ class ResourceTemplate(FastMCPComponent):
             "description": self.description,
             "mimeType": self.mime_type,
             "title": self.title,
+            "annotations": self.annotations,
+            "_meta": self.get_meta(include_fastmcp_meta=include_fastmcp_meta),
         }
         return MCPResourceTemplate(**kwargs | overrides)
 
@@ -205,6 +220,8 @@ class FunctionResourceTemplate(ResourceTemplate):
         mime_type: str | None = None,
         tags: set[str] | None = None,
         enabled: bool | None = None,
+        annotations: Annotations | None = None,
+        meta: dict[str, Any] | None = None,
     ) -> FunctionResourceTemplate:
         """Create a template from a function."""
         from fastmcp.server.context import Context
@@ -289,4 +306,6 @@ class FunctionResourceTemplate(ResourceTemplate):
             parameters=parameters,
             tags=tags or set(),
             enabled=enabled if enabled is not None else True,
+            annotations=annotations,
+            meta=meta,
         )

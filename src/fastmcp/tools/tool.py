@@ -130,7 +130,12 @@ class Tool(FastMCPComponent):
         except RuntimeError:
             pass  # No context available
 
-    def to_mcp_tool(self, **overrides: Any) -> MCPTool:
+    def to_mcp_tool(
+        self,
+        *,
+        include_fastmcp_meta: bool | None = None,
+        **overrides: Any,
+    ) -> MCPTool:
         if self.title:
             title = self.title
         elif self.annotations and self.annotations.title:
@@ -145,6 +150,7 @@ class Tool(FastMCPComponent):
             "outputSchema": self.output_schema,
             "annotations": self.annotations,
             "title": title,
+            "_meta": self.get_meta(include_fastmcp_meta=include_fastmcp_meta),
         }
         return MCPTool(**kwargs | overrides)
 
@@ -159,6 +165,7 @@ class Tool(FastMCPComponent):
         exclude_args: list[str] | None = None,
         output_schema: dict[str, Any] | None | NotSetT | Literal[False] = NotSet,
         serializer: Callable[[Any], str] | None = None,
+        meta: dict[str, Any] | None = None,
         enabled: bool | None = None,
     ) -> FunctionTool:
         """Create a Tool from a function."""
@@ -172,6 +179,7 @@ class Tool(FastMCPComponent):
             exclude_args=exclude_args,
             output_schema=output_schema,
             serializer=serializer,
+            meta=meta,
             enabled=enabled,
         )
 
@@ -200,6 +208,7 @@ class Tool(FastMCPComponent):
         annotations: ToolAnnotations | None = None,
         output_schema: dict[str, Any] | None | Literal[False] = None,
         serializer: Callable[[Any], str] | None = None,
+        meta: dict[str, Any] | None | NotSetT = NotSet,
         enabled: bool | None = None,
     ) -> TransformedTool:
         from fastmcp.tools.tool_transform import TransformedTool
@@ -215,6 +224,7 @@ class Tool(FastMCPComponent):
             annotations=annotations,
             output_schema=output_schema,
             serializer=serializer,
+            meta=meta,
             enabled=enabled,
         )
 
@@ -234,6 +244,7 @@ class FunctionTool(Tool):
         exclude_args: list[str] | None = None,
         output_schema: dict[str, Any] | None | NotSetT | Literal[False] = NotSet,
         serializer: Callable[[Any], str] | None = None,
+        meta: dict[str, Any] | None = None,
         enabled: bool | None = None,
     ) -> FunctionTool:
         """Create a Tool from a function."""
@@ -266,6 +277,7 @@ class FunctionTool(Tool):
             annotations=annotations,
             tags=tags or set(),
             serializer=serializer,
+            meta=meta,
             enabled=enabled if enabled is not None else True,
         )
 

@@ -12,7 +12,8 @@ from pydantic.fields import Field
 from pydantic.functional_validators import BeforeValidator
 
 from fastmcp.tools.tool import ParsedFunction, Tool, ToolResult, _convert_to_content
-from fastmcp.utilities.components import FastMCPComponent, _convert_set_default_none
+from fastmcp.utilities.components import _convert_set_default_none
+from fastmcp.utilities.json_schema import compress_schema
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.types import (
     FastMCPBaseModel,
@@ -365,6 +366,7 @@ class TransformedTool(Tool):
         annotations: ToolAnnotations | None = None,
         output_schema: dict[str, Any] | None | Literal[False] = None,
         serializer: Callable[[Any], str] | None = None,
+        meta: dict[str, Any] | None | NotSetT = NotSet,
         enabled: bool | None = None,
     ) -> TransformedTool:
         """Create a transformed tool from a parent tool.
@@ -389,6 +391,10 @@ class TransformedTool(Tool):
                 - dict: Use custom output schema
                 - False: Disable output schema and structured outputs
             serializer: New serializer. Defaults to parent's serializer.
+            meta: Control meta information:
+                - NotSet (default): Inherit from parent tool
+                - dict: Use custom meta information
+                - None: Remove meta information
 
         Returns:
             TransformedTool with the specified transformations.
@@ -545,6 +551,7 @@ class TransformedTool(Tool):
             description if not isinstance(description, NotSetT) else tool.description
         )
         final_title = title if not isinstance(title, NotSetT) else tool.title
+        final_meta = meta if not isinstance(meta, NotSetT) else tool.meta
 
         transformed_tool = cls(
             fn=final_fn,
@@ -558,6 +565,7 @@ class TransformedTool(Tool):
             tags=tags or tool.tags,
             annotations=annotations or tool.annotations,
             serializer=serializer or tool.serializer,
+            meta=final_meta,
             transform_args=transform_args,
             enabled=enabled if enabled is not None else True,
         )
@@ -645,6 +653,7 @@ class TransformedTool(Tool):
 
         if parent_defs:
             schema["$defs"] = parent_defs
+            schema = compress_schema(schema, prune_defs=True)
 
         # Create forwarding function that closes over everything it needs
         async def _forward(**kwargs):
@@ -832,7 +841,7 @@ class TransformedTool(Tool):
         )
 
 
-class ToolTransformConfig(FastMCPComponent):
+class ToolTransformConfig(FastMCPBaseModel):
     """Provides a way to transform a tool."""
 
     name: str | None = Field(default=None, description="The new name for the tool.")
@@ -849,6 +858,10 @@ class ToolTransformConfig(FastMCPComponent):
         default_factory=set,
         description="The new tags for the tool.",
     )
+    meta: dict[str, Any] | None = Field(
+        default=None,
+        description="The new meta information for the tool.",
+    )
 
     enabled: bool = Field(
         default=True,
@@ -863,7 +876,9 @@ class ToolTransformConfig(FastMCPComponent):
     def apply(self, tool: Tool) -> TransformedTool:
         """Create a TransformedTool from a provided tool and this transformation configuration."""
 
-        tool_changes = self.model_dump(exclude_unset=True, exclude={"arguments"})
+        tool_changes: dict[str, Any] = self.model_dump(
+            exclude_unset=True, exclude={"arguments"}
+        )
 
         return TransformedTool.from_tool(
             tool=tool,
@@ -880,7 +895,7 @@ def apply_transformations_to_tools(
     are left unchanged.
     """
 
-    transformed_tools = {}
+    transformed_tools: dict[str, Tool] = {}
 
     for tool_name, tool in tools.items():
         if transformation := transformations.get(tool_name):
