@@ -13,99 +13,157 @@ Key features:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import time
+from typing import cast
 
-from mcp.server.auth.provider import AccessToken
-from mcp.server.auth.settings import (
-    ClientRegistrationOptions,
-    RevocationOptions,
+import httpx
+from mcp.server.auth.provider import (
+    AccessToken,
+    AuthorizationCode,
+    AuthorizationParams,
+    RefreshToken,
 )
+from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 from pydantic import AnyHttpUrl
+from starlette.responses import JSONResponse
+from starlette.routing import BaseRoute, Route
+from workos import WorkOSClient
 
-from fastmcp.server.auth.auth import AuthProvider
+from fastmcp.server.auth.auth import AuthProvider, TokenVerifier
 from fastmcp.server.auth.providers.proxy import OAuthProxy
 from fastmcp.server.auth.verifiers import JWTVerifier
+from fastmcp.utilities.logging import get_logger
 
-if TYPE_CHECKING:
-    from starlette.routing import BaseRoute
-
-    from fastmcp.server.auth.auth import TokenVerifier
+logger = get_logger(__name__)
 
 
-class WorkOSAuthProvider(OAuthProxy):
+class AuthKitProvider(OAuthProxy):
     """WorkOS AuthKit authentication provider.
 
     This provider implements WorkOS AuthKit integration using static client
-    credentials. It's designed specifically for WorkOS's expected OAuth flow
-    pattern and provides a simpler alternative to the generic OAuthProxy for
-    WorkOS integrations.
+    credentials. It uses the WorkOS client library for proper authorization
+    URL generation and provides a clean interface for WorkOS integrations.
 
     Example:
         ```python
-        from fastmcp.server.auth.providers.workos import WorkOSAuthProvider
+        from fastmcp.server.auth.providers.workos import AuthKitProvider
 
-        # Create WorkOS auth provider (JWT verifier created automatically)
-        workos_auth = WorkOSAuthProvider(
-            workos_domain="https://your-workos-domain.authkit.app",
+        # Create AuthKit provider (JWT verifier created automatically)
+        auth_provider = AuthKitProvider(
             client_id="your_workos_client_id",
-            client_secret="your_workos_client_secret",
-            issuer_url="https://your-fastmcp-server.com",
+            api_key="your_workos_api_key",
+            authkit_domain="https://your-app.authkit.app",
         )
 
         # Use with FastMCP
-        mcp = FastMCP("My App", auth=workos_auth)
+        mcp = FastMCP("My App", auth=auth_provider)
         ```
     """
 
     def __init__(
         self,
         *,
-        workos_domain: str,
         client_id: str,
-        client_secret: str,
-        token_verifier: TokenVerifier | None = None,
+        api_key: str,
+        authkit_domain: str,
         issuer_url: AnyHttpUrl | str,
-        service_documentation_url: AnyHttpUrl | str | None = None,
-        client_registration_options: ClientRegistrationOptions | None = None,
-        revocation_options: RevocationOptions | None = None,
+        token_verifier: TokenVerifier | None = None,
     ):
         """Initialize WorkOS AuthKit provider.
 
         Args:
-            workos_domain: Your WorkOS AuthKit domain (e.g., "https://your-app.authkit.app")
             client_id: WorkOS OAuth client ID
-            client_secret: WorkOS OAuth client secret
-            token_verifier: Optional token verifier. If None, creates default JWTVerifier for WorkOS
+            api_key: WorkOS API key
+            authkit_domain: Your AuthKit domain (e.g., "https://your-app.authkit.app")
+            token_verifier: Optional token verifier. If None, creates default JWTVerifier
             issuer_url: Public URL of this FastMCP server
-            service_documentation_url: Optional service documentation URL
-            client_registration_options: Optional client registration settings
-            revocation_options: Optional token revocation settings
         """
-        workos_domain = workos_domain.rstrip("/")
+        # Create WorkOS client
+        self.workos_client = WorkOSClient(api_key=api_key, client_id=client_id)
 
-        # Create default JWT verifier if none provided
         if token_verifier is None:
             token_verifier = JWTVerifier(
-                jwks_uri=f"{workos_domain}/oauth2/jwks",
-                issuer=workos_domain,
+                jwks_uri=f"{authkit_domain}/oauth2/jwks",
+                issuer="https://api.workos.com",
                 algorithm="RS256",
-                required_scopes=None,  # WorkOS doesn't include scope claims
+                required_scopes=None,
             )
 
-        # Initialize OAuthProxy with WorkOS endpoints (static credentials only)
+        # Initialize OAuthProxy with simple endpoints
+        # We'll override authorize() to use WorkOS client directly
         super().__init__(
-            authorization_endpoint=f"{workos_domain}/oauth2/authorize",
-            token_endpoint=f"{workos_domain}/oauth2/token",
-            revocation_endpoint=f"{workos_domain}/oauth2/revoke",
-            # No registration_endpoint = DCR disabled (static credentials only)
+            authorization_endpoint=f"{authkit_domain}/oauth2/authorize",
+            token_endpoint=f"{authkit_domain}/oauth2/token",
+            revocation_endpoint=f"{authkit_domain}/oauth2/revoke",
             client_id=client_id,
-            client_secret=client_secret,
-            token_verifier=token_verifier,
+            client_secret=api_key,
+            token_verifier=cast(TokenVerifier, token_verifier),
             issuer_url=issuer_url,
-            service_documentation_url=service_documentation_url,
-            client_registration_options=client_registration_options,
-            revocation_options=revocation_options,
         )
+
+    async def authorize(
+        self,
+        client: OAuthClientInformationFull,
+        params: AuthorizationParams,
+    ) -> str:
+        """Use WorkOS client library to generate authorization URL"""
+        return self.workos_client.user_management.get_authorization_url(
+            provider="authkit",
+            redirect_uri=str(params.redirect_uri),
+            state=params.state,
+            code_challenge=params.code_challenge,
+            provider_scopes=params.scopes,
+        )
+
+    async def _request_token_from_upstream(
+        self,
+        client: OAuthClientInformationFull,
+        authorization_code: AuthorizationCode,
+    ) -> OAuthToken:
+        # Use WorkOS client to exchange the code
+        auth_response = self.workos_client.user_management.authenticate_with_code(
+            code=authorization_code.code
+        )
+
+        if auth_response.oauth_tokens:
+            expires_in = int(auth_response.oauth_tokens.expires_at - time.time())
+            scope = " ".join(auth_response.oauth_tokens.scopes)
+        else:
+            expires_in = None
+            scope = None
+
+        # Convert WorkOS response to OAuthToken
+        return OAuthToken(
+            access_token=auth_response.access_token,
+            refresh_token=auth_response.refresh_token,
+            expires_in=expires_in,
+            scope=scope,
+        )
+
+    async def _request_refresh_token_from_upstream(
+        self,
+        client: OAuthClientInformationFull,
+        refresh_token: RefreshToken,
+        scopes: list[str],
+    ) -> OAuthToken:
+        """Refresh access token using WorkOS client library."""
+
+        # Use WorkOS client to refresh the token
+        refresh_response = (
+            self.workos_client.user_management.authenticate_with_refresh_token(
+                refresh_token=refresh_token.token,
+            )
+        )
+
+        # Convert WorkOS response to OAuthToken
+        return OAuthToken(
+            access_token=refresh_response.access_token,
+            refresh_token=refresh_response.refresh_token,
+            scope=" ".join(scopes),
+        )
+
+    async def revoke_token(self, token: AccessToken | RefreshToken) -> None:
+        return await super().revoke_token(token)
 
 
 class WorkOSMetadataProvider(AuthProvider):
@@ -160,7 +218,7 @@ class WorkOSMetadataProvider(AuthProvider):
             token_verifier: Optional token verifier. If None, creates JWT verifier for WorkOS
             issuer_url: Public URL of this FastMCP server
         """
-        super().__init__(resource_server_url=issuer_url)
+        super().__init__()
 
         self.workos_domain = workos_domain.rstrip("/")
         self.issuer_url = issuer_url if isinstance(issuer_url, str) else str(issuer_url)
@@ -187,9 +245,6 @@ class WorkOSMetadataProvider(AuthProvider):
         - /.well-known/oauth-authorization-server (forwards WorkOS metadata)
         - /.well-known/oauth-protected-resource (returns FastMCP resource info)
         """
-        import httpx
-        from starlette.responses import JSONResponse
-        from starlette.routing import Route
 
         async def oauth_authorization_server_metadata(request):
             """Forward WorkOS OAuth authorization server metadata with FastMCP customizations."""

@@ -5,7 +5,7 @@ import json
 import webbrowser
 from pathlib import Path
 from typing import Any, Literal
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urlparse
 
 import anyio
 import httpx
@@ -13,7 +13,6 @@ from mcp.client.auth import OAuthClientProvider, TokenStorage
 from mcp.shared.auth import (
     OAuthClientInformationFull,
     OAuthClientMetadata,
-    OAuthMetadata,
 )
 from mcp.shared.auth import (
     OAuthToken as OAuthToken,
@@ -148,41 +147,6 @@ class FileTokenStorage(TokenStorage):
             for file in cache_dir.glob(f"*_{file_type}.json"):
                 file.unlink(missing_ok=True)
         logger.info("Cleared all OAuth client cache data.")
-
-
-async def discover_oauth_metadata(
-    server_base_url: str, httpx_kwargs: dict[str, Any] | None = None
-) -> OAuthMetadata | None:
-    """
-    Discover OAuth metadata from the server using RFC 8414 well-known endpoint.
-
-    Args:
-        server_base_url: Base URL of the OAuth server (e.g., "https://example.com")
-        httpx_kwargs: Additional kwargs for httpx client
-
-    Returns:
-        OAuth metadata if found, None otherwise
-    """
-    well_known_url = urljoin(server_base_url, "/.well-known/oauth-authorization-server")
-    logger.debug(f"Discovering OAuth metadata from: {well_known_url}")
-
-    async with httpx.AsyncClient(**(httpx_kwargs or {})) as client:
-        try:
-            response = await client.get(well_known_url, timeout=10.0)
-            if response.status_code == 200:
-                logger.debug("Successfully discovered OAuth metadata")
-                return OAuthMetadata.model_validate(response.json())
-            elif response.status_code == 404:
-                logger.debug(
-                    "OAuth metadata not found (404) - server may not require auth"
-                )
-                return None
-            else:
-                logger.warning(f"OAuth metadata request failed: {response.status_code}")
-                return None
-        except (httpx.RequestError, json.JSONDecodeError, ValidationError) as e:
-            logger.debug(f"OAuth metadata discovery failed: {e}")
-            return None
 
 
 async def check_if_auth_required(

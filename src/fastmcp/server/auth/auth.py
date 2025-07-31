@@ -30,25 +30,9 @@ class AuthProvider:
     custom authentication routes.
     """
 
-    def __init__(
-        self,
-        resource_server_url: AnyHttpUrl | str | None = None,
-        required_scopes: list[str] | None = None,
-    ):
-        """Initialize the auth provider.
-
-        Args:
-            resource_server_url: The URL of this resource server (for RFC 8707 resource indicators)
-            required_scopes: Scopes that are required for all requests
-        """
-        self.resource_server_url: AnyHttpUrl | None
-        if resource_server_url is None:
-            self.resource_server_url = None
-        elif isinstance(resource_server_url, str):
-            self.resource_server_url = AnyHttpUrl(resource_server_url)
-        else:
-            self.resource_server_url = resource_server_url
-        self.required_scopes = required_scopes or []
+    def __init__(self):
+        """Initialize the auth provider."""
+        self.required_scopes: list[str] = []
 
     async def verify_token(self, token: str) -> AccessToken | None:
         """Verify a bearer token and return access info if valid.
@@ -97,8 +81,18 @@ class TokenVerifier(AuthProvider, TokenVerifierProtocol):
             resource_server_url: The URL of this resource server (for RFC 8707 resource indicators)
             required_scopes: Scopes that are required for all requests
         """
-        # Initialize AuthProvider with the same parameters
-        AuthProvider.__init__(self, resource_server_url, required_scopes)
+        # Initialize AuthProvider (no args needed)
+        AuthProvider.__init__(self)
+
+        # Handle our own resource_server_url and required_scopes
+        self.resource_server_url: AnyHttpUrl | None
+        if resource_server_url is None:
+            self.resource_server_url = None
+        elif isinstance(resource_server_url, str):
+            self.resource_server_url = AnyHttpUrl(resource_server_url)
+        else:
+            self.resource_server_url = resource_server_url
+        self.required_scopes = required_scopes or []
 
     async def verify_token(self, token: str) -> AccessToken | None:
         """Verify a bearer token and return access info if valid."""
@@ -135,12 +129,17 @@ class OAuthProvider(
             required_scopes: Scopes that are required for all requests.
             resource_server_url: The URL of this resource server (for RFC 8707 resource indicators)
         """
-        # Initialize AuthProvider - use issuer_url as resource_server_url if not provided
-        AuthProvider.__init__(
-            self,
-            resource_server_url=resource_server_url or issuer_url,
-            required_scopes=required_scopes,
-        )
+
+        super().__init__()
+
+        # Handle our own resource_server_url and required_scopes
+        if resource_server_url is None:
+            self.resource_server_url = issuer_url
+        elif isinstance(resource_server_url, str):
+            self.resource_server_url = AnyHttpUrl(resource_server_url)
+        else:
+            self.resource_server_url = resource_server_url
+        self.required_scopes = required_scopes or []
 
         # Initialize OAuth Authorization Server Provider
         OAuthAuthorizationServerProvider.__init__(self)
