@@ -25,7 +25,7 @@ from starlette.responses import Response
 from starlette.routing import BaseRoute, Mount, Route
 from starlette.types import Lifespan, Receive, Scope, Send
 
-from fastmcp.server.auth.auth import OAuthProvider, TokenVerifier
+from fastmcp.server.auth.auth import AuthProvider, OAuthProvider, TokenVerifier
 from fastmcp.utilities.logging import get_logger
 
 if TYPE_CHECKING:
@@ -72,12 +72,12 @@ class RequestContextMiddleware:
 
 
 def setup_auth_middleware_and_routes(
-    auth: OAuthProvider | TokenVerifier,
+    auth: AuthProvider,
 ) -> tuple[list[Middleware], list[BaseRoute], list[str]]:
     """Set up authentication middleware and routes if auth is enabled.
 
     Args:
-        auth: Either an OAuthProvider or TokenVerifier for authentication
+        auth: An AuthProvider for authentication (TokenVerifier or OAuthProvider)
 
     Returns:
         Tuple of (middleware, auth_routes, required_scopes)
@@ -91,28 +91,26 @@ def setup_auth_middleware_and_routes(
     ]
 
     auth_routes: list[BaseRoute] = []
-    required_scopes: list[str] = []
+    required_scopes: list[str] = auth.required_scopes or []
 
-    # Handle TokenVerifier vs OAuthProvider
-    # Check if it's an OAuthProvider by looking for issuer_url attribute
-    if hasattr(auth, "issuer_url"):
-        # OAuthProvider: create auth routes and get required scopes
-        # We know this is an OAuthProvider because it has issuer_url
+    # Check if it's an OAuthProvider (has OAuth server capability)
+    if isinstance(auth, OAuthProvider):
+        # OAuthProvider: create standard OAuth routes first
         standard_routes = list(
             create_auth_routes(
-                provider=auth,  # type: ignore[arg-type]
-                issuer_url=auth.issuer_url,  # type: ignore[attr-defined]
-                service_documentation_url=auth.service_documentation_url,  # type: ignore[attr-defined]
-                client_registration_options=auth.client_registration_options,  # type: ignore[attr-defined]
-                revocation_options=auth.revocation_options,  # type: ignore[attr-defined]
+                provider=auth,
+                issuer_url=auth.issuer_url,
+                service_documentation_url=auth.service_documentation_url,
+                client_registration_options=auth.client_registration_options,
+                revocation_options=auth.revocation_options,
             )
         )
-        # Allow provider to customize routes (e.g., for proxy behavior)
-        auth_routes = auth.customize_auth_routes(standard_routes)  # type: ignore[attr-defined]
-        required_scopes = auth.required_scopes or []  # type: ignore[attr-defined]
+        # Allow provider to customize routes (e.g., for proxy behavior or metadata endpoints)
+        auth_routes = auth.customize_auth_routes(standard_routes)
     else:
-        # TokenVerifier: no auth routes but may have required scopes
-        required_scopes = getattr(auth, "required_scopes", None) or []
+        # Simple AuthProvider or TokenVerifier: start with empty routes
+        # Allow provider to add custom routes (e.g., metadata endpoints)
+        auth_routes = auth.customize_auth_routes([])
 
     return middleware, auth_routes, required_scopes
 
@@ -149,7 +147,7 @@ def create_sse_app(
     server: FastMCP[LifespanResultT],
     message_path: str,
     sse_path: str,
-    auth: OAuthProvider | TokenVerifier | None = None,
+    auth: AuthProvider | None = None,
     debug: bool = False,
     routes: list[BaseRoute] | None = None,
     middleware: list[Middleware] | None = None,
@@ -160,7 +158,7 @@ def create_sse_app(
         server: The FastMCP server instance
         message_path: Path for SSE messages
         sse_path: Path for SSE connections
-        auth: Optional authentication provider (OAuthProvider or TokenVerifier)
+        auth: Optional authentication provider (AuthProvider)
         debug: Whether to enable debug mode
         routes: Optional list of custom routes
         middleware: Optional list of middleware
@@ -265,7 +263,7 @@ def create_streamable_http_app(
     server: FastMCP[LifespanResultT],
     streamable_http_path: str,
     event_store: EventStore | None = None,
-    auth: OAuthProvider | TokenVerifier | None = None,
+    auth: AuthProvider | None = None,
     json_response: bool = False,
     stateless_http: bool = False,
     debug: bool = False,
@@ -278,7 +276,7 @@ def create_streamable_http_app(
         server: The FastMCP server instance
         streamable_http_path: Path for StreamableHTTP connections
         event_store: Optional event store for session management
-        auth: Optional authentication provider (OAuthProvider or TokenVerifier)
+        auth: Optional authentication provider (AuthProvider)
         json_response: Whether to use JSON response format
         stateless_http: Whether to use stateless mode (new transport per request)
         debug: Whether to enable debug mode

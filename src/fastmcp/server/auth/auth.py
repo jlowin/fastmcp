@@ -21,16 +21,21 @@ if TYPE_CHECKING:
     from starlette.routing import BaseRoute
 
 
-class TokenVerifier(TokenVerifierProtocol):
-    """Base class for token verifiers (Resource Servers)."""
+class AuthProvider:
+    """Base class for all FastMCP authentication providers.
+
+    This class provides a unified interface for all authentication providers,
+    whether they are simple token verifiers or full OAuth authorization servers.
+    All providers must be able to verify tokens and can optionally provide
+    custom authentication routes.
+    """
 
     def __init__(
         self,
         resource_server_url: AnyHttpUrl | str | None = None,
         required_scopes: list[str] | None = None,
     ):
-        """
-        Initialize the token verifier.
+        """Initialize the auth provider.
 
         Args:
             resource_server_url: The URL of this resource server (for RFC 8707 resource indicators)
@@ -46,13 +51,70 @@ class TokenVerifier(TokenVerifierProtocol):
         self.required_scopes = required_scopes or []
 
     async def verify_token(self, token: str) -> AccessToken | None:
+        """Verify a bearer token and return access info if valid.
+
+        All auth providers must implement token verification.
+
+        Args:
+            token: The token string to validate
+
+        Returns:
+            AccessToken object if valid, None if invalid or expired
+        """
+        raise NotImplementedError("Subclasses must implement verify_token")
+
+    def customize_auth_routes(self, routes: list[BaseRoute]) -> list[BaseRoute]:
+        """Customize authentication routes after standard creation.
+
+        This method allows providers to modify or add to the standard OAuth routes.
+        The default implementation returns the routes unchanged.
+
+        Args:
+            routes: List of standard routes (may be empty for token-only providers)
+
+        Returns:
+            List of routes (potentially modified or extended)
+        """
+        return routes
+
+
+class TokenVerifier(AuthProvider, TokenVerifierProtocol):
+    """Base class for token verifiers (Resource Servers).
+
+    This class provides token verification capability without OAuth server functionality.
+    Token verifiers typically don't provide authentication routes by default.
+    """
+
+    def __init__(
+        self,
+        resource_server_url: AnyHttpUrl | str | None = None,
+        required_scopes: list[str] | None = None,
+    ):
+        """
+        Initialize the token verifier.
+
+        Args:
+            resource_server_url: The URL of this resource server (for RFC 8707 resource indicators)
+            required_scopes: Scopes that are required for all requests
+        """
+        # Initialize AuthProvider with the same parameters
+        AuthProvider.__init__(self, resource_server_url, required_scopes)
+
+    async def verify_token(self, token: str) -> AccessToken | None:
         """Verify a bearer token and return access info if valid."""
         raise NotImplementedError("Subclasses must implement verify_token")
 
 
 class OAuthProvider(
-    OAuthAuthorizationServerProvider[AuthorizationCode, RefreshToken, AccessToken]
+    AuthProvider,
+    OAuthAuthorizationServerProvider[AuthorizationCode, RefreshToken, AccessToken],
 ):
+    """OAuth Authorization Server provider.
+
+    This class provides full OAuth server functionality including client registration,
+    authorization flows, token issuance, and token verification.
+    """
+
     def __init__(
         self,
         issuer_url: AnyHttpUrl | str,
@@ -71,8 +133,18 @@ class OAuthProvider(
             client_registration_options: The client registration options.
             revocation_options: The revocation options.
             required_scopes: Scopes that are required for all requests.
+            resource_server_url: The URL of this resource server (for RFC 8707 resource indicators)
         """
-        super().__init__()
+        # Initialize AuthProvider - use issuer_url as resource_server_url if not provided
+        AuthProvider.__init__(
+            self,
+            resource_server_url=resource_server_url or issuer_url,
+            required_scopes=required_scopes,
+        )
+
+        # Initialize OAuth Authorization Server Provider
+        OAuthAuthorizationServerProvider.__init__(self)
+
         if isinstance(issuer_url, str):
             issuer_url = AnyHttpUrl(issuer_url)
         if isinstance(service_documentation_url, str):
@@ -82,7 +154,6 @@ class OAuthProvider(
         self.service_documentation_url = service_documentation_url
         self.client_registration_options = client_registration_options
         self.revocation_options = revocation_options
-        self.required_scopes = required_scopes
 
     async def verify_token(self, token: str) -> AccessToken | None:
         """
