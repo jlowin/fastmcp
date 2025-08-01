@@ -1,4 +1,4 @@
-"""Tests for TokenVerifier integration with FastMCP."""
+"""Tests for StaticTokenVerifier integration with FastMCP."""
 
 import httpx
 from mcp.server.auth.provider import AccessToken
@@ -7,8 +7,8 @@ from fastmcp.server import FastMCP
 from fastmcp.server.auth.providers.jwt import StaticTokenVerifier
 
 
-class TestTokenVerifierIntegration:
-    """Test TokenVerifier integration with FastMCP server."""
+class TestStaticTokenVerifier:
+    """Test StaticTokenVerifier integration with FastMCP server."""
 
     def test_static_token_verifier_creation(self):
         """Test creating a FastMCP server with StaticTokenVerifier."""
@@ -51,7 +51,7 @@ class TestTokenVerifierIntegration:
         assert result is None
 
     async def test_server_with_token_verifier_http_app(self):
-        """Test that FastMCP server works with TokenVerifier for HTTP requests."""
+        """Test that FastMCP server works with StaticTokenVerifier for HTTP requests."""
         verifier = StaticTokenVerifier(
             {"test-token": {"client_id": "test-client", "scopes": ["read", "write"]}}
         )
@@ -87,21 +87,3 @@ class TestTokenVerifierIntegration:
         # This should work - TokenVerifier
         server2 = FastMCP("Test2", auth=token_verifier)
         assert server2.auth is token_verifier
-
-
-class TestJWTVerifierImport:
-    """Test JWT token verifier can be imported and created."""
-
-    def test_jwt_verifier_requires_pyjwt(self):
-        """Test that JWTVerifier raises helpful error without PyJWT."""
-        # Since PyJWT is likely installed in test environment, we'll just test construction
-        from fastmcp.server.auth.providers.jwt import JWTVerifier
-
-        # This should work if PyJWT is available
-        try:
-            verifier = JWTVerifier(public_key="dummy-key")
-            assert verifier.public_key == "dummy-key"
-            assert verifier.algorithm == "RS256"
-        except ImportError as e:
-            # If PyJWT not available, should get helpful error
-            assert "PyJWT is required" in str(e)
