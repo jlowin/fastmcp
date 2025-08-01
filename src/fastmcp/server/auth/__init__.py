@@ -1,5 +1,5 @@
 from .auth import OAuthProvider, TokenVerifier
-from .verifiers import JWTVerifier, StaticTokenVerifier
+from .providers.jwt import JWTVerifier, StaticTokenVerifier
 
 
 __all__ = [

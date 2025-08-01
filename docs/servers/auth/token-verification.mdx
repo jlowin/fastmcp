@@ -24,7 +24,7 @@ The most common and flexible approach is to point the verifier at a **JSON Web K
 <CodeGroup>
 ```python Using a JWKS Endpoint (Recommended)
 from fastmcp import FastMCP
-from fastmcp.server.auth.verifiers import JWTVerifier
+from fastmcp.server.auth.providers.jwt import JWTVerifier
 
 # The verifier will periodically fetch keys from this URL 
 # to validate incoming tokens.
@@ -39,7 +39,7 @@ mcp = FastMCP(name="My Secure Server", auth=verifier)
 
 ```python Using a Static Public Key
 from fastmcp import FastMCP
-from fastmcp.server.auth.verifiers import JWTVerifier
+from fastmcp.server.auth.providers.jwt import JWTVerifier
 
 # This public key corresponds to the private key used by your token issuer.
 # Use this only if a JWKS endpoint is not available.
@@ -159,7 +159,7 @@ To use the static token verifier, you need to provide a dictionary of tokens and
 
 ```python
 from fastmcp import FastMCP
-from fastmcp.server.auth.verifiers import StaticTokenVerifier
+from fastmcp.server.auth.providers.jwt import StaticTokenVerifier
 
 verifier = StaticTokenVerifier(
     tokens={
@@ -184,7 +184,7 @@ To help test a `JWTVerifier`-protected server, FastMCP includes a simple `RSAKey
 
 ```python
 from fastmcp import FastMCP
-from fastmcp.server.auth.verifiers import JWTVerifier, RSAKeyPair
+from fastmcp.server.auth.providers.jwt import JWTVerifier, RSAKeyPair
 
 # 1. In a secure part of your test setup, generate a key pair.
 key_pair = RSAKeyPair.generate()

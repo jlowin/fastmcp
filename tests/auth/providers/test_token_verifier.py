@@ -4,7 +4,7 @@ import pytest
 from mcp.server.auth.provider import AccessToken
 
 from fastmcp.server.auth.providers.in_memory import InMemoryOAuthProvider
-from fastmcp.server.auth.verifiers import JWTVerifier, RSAKeyPair
+from fastmcp.server.auth.providers.jwt import JWTVerifier, RSAKeyPair
 
 
 class TestJWTVerifierTokenVerifier:

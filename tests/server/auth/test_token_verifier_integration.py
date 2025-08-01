@@ -4,7 +4,7 @@ import httpx
 from mcp.server.auth.provider import AccessToken
 
 from fastmcp.server import FastMCP
-from fastmcp.server.auth.verifiers import StaticTokenVerifier
+from fastmcp.server.auth.providers.jwt import StaticTokenVerifier
 
 
 class TestTokenVerifierIntegration:
@@ -95,7 +95,7 @@ class TestJWTVerifierImport:
     def test_jwt_verifier_requires_pyjwt(self):
         """Test that JWTVerifier raises helpful error without PyJWT."""
         # Since PyJWT is likely installed in test environment, we'll just test construction
-        from fastmcp.server.auth.verifiers import JWTVerifier
+        from fastmcp.server.auth.providers.jwt import JWTVerifier
 
         # This should work if PyJWT is available
         try:

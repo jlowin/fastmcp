@@ -54,7 +54,7 @@ Your provider must implement the `verify_token` method. For most modern identity
 
 ```python
 from fastmcp.server.auth.auth import AuthProvider
-from fastmcp.server.auth.verifiers import JWTVerifier
+from fastmcp.server.auth.providers.jwt import JWTVerifier
 from mcp.server.auth.provider import AccessToken
 
 class MyIdPAuthProvider(AuthProvider):

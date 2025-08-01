@@ -119,7 +119,7 @@ FastMCP provides a variety of `AuthProvider` classes that can be used to configu
 
 ```python Token Verification
 from fastmcp import FastMCP
-from fastmcp.server.auth.verifiers import JWTVerifier
+from fastmcp.server.auth.providers.jwt import JWTVerifier
 
 jwt_verifier = JWTVerifier(...)
 

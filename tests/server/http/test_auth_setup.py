@@ -7,7 +7,7 @@ from starlette.middleware import Middleware
 from starlette.middleware.authentication import AuthenticationMiddleware
 
 from fastmcp.server.auth.providers.in_memory import InMemoryOAuthProvider
-from fastmcp.server.auth.verifiers import JWTVerifier, RSAKeyPair
+from fastmcp.server.auth.providers.jwt import JWTVerifier, RSAKeyPair
 from fastmcp.server.http import setup_auth_middleware_and_routes
 
 

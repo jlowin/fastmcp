@@ -10,8 +10,8 @@ from starlette.responses import JSONResponse
 from starlette.routing import BaseRoute, Route
 
 from fastmcp.server.auth.auth import AuthProvider, TokenVerifier
+from fastmcp.server.auth.providers.jwt import JWTVerifier
 from fastmcp.server.auth.registry import register_provider
-from fastmcp.server.auth.verifiers import JWTVerifier
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.types import NotSet, NotSetT
 
