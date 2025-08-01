@@ -542,9 +542,6 @@ dependencies = [
 websockets = [
     { name = "websockets" },
 ]
-workos = [
-    { name = "workos" },
-]
 
 [package.dev-dependencies]
 dev = [
@@ -584,9 +581,8 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.1.0" },
     { name = "rich", specifier = ">=13.9.4" },
     { name = "websockets", marker = "extra == 'websockets'", specifier = ">=15.0.1" },
-    { name = "workos", marker = "extra == 'workos'", specifier = ">=5.24.0" },
 ]
-provides-extras = ["websockets", "workos"]
+provides-extras = ["websockets"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1364,15 +1360,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/4d/06/d7bfa9d8ab9af1fcc028c6cf7cace7ccf53324690094f66217eb286d75cd/pyinstrument-5.0.3-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:87a558b1f39dc556621ef7e9482c0d2884af7df2aae35b90edad02fe099d28ab", size = 145653, upload-time = "2025-07-02T14:13:34.927Z" },
     { url = "https://files.pythonhosted.org/packages/e7/9b/f6538ec597dcf810e393bd88da314e43e785b10f3fc7cc0756753f298792/pyinstrument-5.0.3-cp313-cp313-win32.whl", hash = "sha256:a71777ae66969a5c1a57ba06e81ac3f19e3234b4de30fea84eb12f0cf29d009e", size = 123551, upload-time = "2025-07-02T14:13:36.205Z" },
     { url = "https://files.pythonhosted.org/packages/20/55/a28db1dd0d29186e389705554a8f81ad5a66a858f13aedc47f815700f879/pyinstrument-5.0.3-cp313-cp313-win_amd64.whl", hash = "sha256:4a385975db0aa52a65fd4c1ea72158af3aaf03d704156551a28d2146bbb107ee", size = 124324, upload-time = "2025-07-02T14:13:37.419Z" },
-]
-
-[[package]]
-name = "pyjwt"
-version = "2.10.1"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/e7/46/bd74733ff231675599650d3e47f361794b22ef3e3770998dda30d3b63726/pyjwt-2.10.1.tar.gz", hash = "sha256:3cc5772eb20009233caf06e9d8a0577824723b44e6648ee0a2aedb6cf9381953", size = 87785, upload-time = "2024-11-28T03:43:29.933Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/61/ad/689f02752eeec26aed679477e80e632ef1b682313be70793d798c1d5fc8f/PyJWT-2.10.1-py3-none-any.whl", hash = "sha256:dcdd193e30abefd5debf142f9adfcdd2b58004e644f25406ffaebd50bd98dacb", size = 22997, upload-time = "2024-11-28T03:43:27.893Z" },
 ]
 
 [[package]]
@@ -2210,19 +2197,4 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/32/af/d4502dc713b4ccea7175d764718d5183caf8d0867a4f0190d5d4a45cea49/werkzeug-3.1.1.tar.gz", hash = "sha256:8cd39dfbdfc1e051965f156163e2974e52c210f130810e9ad36858f0fd3edad4", size = 806453, upload-time = "2024-11-01T16:40:45.462Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ee/ea/c67e1dee1ba208ed22c06d1d547ae5e293374bfc43e0eb0ef5e262b68561/werkzeug-3.1.1-py3-none-any.whl", hash = "sha256:a71124d1ef06008baafa3d266c02f56e1836a5984afd6dd6c9230669d60d9fb5", size = 224371, upload-time = "2024-11-01T16:40:43.994Z" },
-]
-
-[[package]]
-name = "workos"
-version = "5.24.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "cryptography" },
-    { name = "httpx" },
-    { name = "pydantic" },
-    { name = "pyjwt" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/4c/96/83f1448ea290663bd352b7381079c349b0fb86cb009f1be729d45dbe9466/workos-5.24.0.tar.gz", hash = "sha256:b4f09a6b11951cbe3ea71d4fd7f924314ddbf913debebf5146e60cb0fd664a9c", size = 80186, upload-time = "2025-07-08T14:38:06.297Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/f3/e7/23d081a34b97121998afb0cb03cd7ae098334fc6a29b5f1261bed4dfc41f/workos-5.24.0-py3-none-any.whl", hash = "sha256:223af02b488e4cbef6ec66998b634129aae09df04b5a85b771772c97f4c43c70", size = 89252, upload-time = "2025-07-08T14:38:04.945Z" },
 ]
