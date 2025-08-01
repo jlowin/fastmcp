@@ -50,7 +50,7 @@ Unauthenticated FastMCP servers run without any mechanisms to protect their comp
 
 ### Token Verification
 
-Token verification is the conceptually simplest approach to authentication, where your FastMCP server acts as a pure **Resource Server**. Your server validates `Bearer` tokens on incoming requests but has no knowledge of how those tokens were obtained. This is analogous to how a web server validates API keys on incoming requests. Read more in the [token verifiers documentation](/servers/auth/token-verifiers).
+Token verification is the conceptually simplest approach to authentication, where your FastMCP server acts as a pure **Resource Server**. Your server validates `Bearer` tokens on incoming requests but has no knowledge of how those tokens were obtained. This is analogous to how a web server validates API keys on incoming requests. Read more in the [token verification documentation](/servers/auth/token-verification).
 
 <Note>
 **Protocol Note:** While simple to implement, this pattern operates somewhat outside the formal MCP authentication flow, which expects OAuth-style interactions. It's best suited for internal systems or when you have full control over token generation.
@@ -69,7 +69,7 @@ Token verification is the conceptually simplest approach to authentication, wher
 
 ### Remote Authentication
 
-This is the **recommended pattern for most FastMCP users** and follows the 2025-6-18 MCP protocol update. Your FastMCP server acts as a **Resource Server** and integrates with an external, trusted **Authorization Server** like WorkOS, Auth0, or Okta. You can learn more about this pattern in the [remote authentication documentation](/servers/auth/remote-authorization).
+This is the **recommended pattern for most FastMCP users** and follows the 2025-6-18 MCP protocol update. Your FastMCP server acts as a **Resource Server** and integrates with an external, trusted **Authorization Server** like WorkOS, Auth0, or Okta. You can learn more about this pattern in the [remote authentication documentation](/servers/auth/remote-authentication).
 
 **Use this when:**
 - You want to integrate with external identity providers
