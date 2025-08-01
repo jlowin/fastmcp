@@ -217,6 +217,7 @@ class ToolManager:
                 raise NotFoundError(f"Tool {key!r} not found")
 
             try:
+                breakpoint()
                 return await tool.run(arguments)
 
             # raise ToolErrors as-is
