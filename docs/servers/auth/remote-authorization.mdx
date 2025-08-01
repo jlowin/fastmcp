@@ -9,99 +9,138 @@ import { VersionBadge } from "/snippets/version-badge.mdx"
 
 <VersionBadge version="2.11.0" />
 
-**Remote Authorization** is the most common pattern for securing user-facing applications. In this model, your FastMCP server acts as a **Resource Server (RS)** and integrates with an external, trusted **Authorization Server (AS)**, such as WorkOS, Auth0, or a corporate SSO system.
+**Remote Authorization** is the recommended pattern for securing most production applications. In this model, your FastMCP server acts as a **Resource Server (RS)** and integrates with an external, trusted **Authorization Server (AS)**, such as WorkOS, Auth0, or a corporate SSO system.
 
 This approach lets you leverage robust, feature-rich identity platforms for user management, multi-factor authentication, and social logins, while your FastMCP server focuses on its core job: providing tools and resources.
 
 ### How It Works
 
-The flow relies on the MCP client's ability to perform **Dynamic Client Registration (DCR)** with your FastMCP server.
+The flow relies on the MCP client's ability to discover your server's authentication requirements. Your server doesn't handle logins itself; it tells the client where to find the real identity provider.
 
-1.  An MCP client (like Claude Desktop) connects to your server and asks for its OAuth configuration.
-2.  Your FastMCP server, instead of providing its own login pages, provides the metadata of the trusted, external Authorization Server.
-3.  The client is redirected to the external provider (e.g., a WorkOS login page) to handle user authentication and consent.
-4.  After a successful login, the client receives a token *issued by the external provider*.
-5.  The client then makes requests to your FastMCP server using that token.
-6.  Your server uses its configured **Token Verifier** to validate the token's signature, issuer, and claims, granting access to its resources.
+The key endpoint is **`/.well-known/oauth-protected-resource`** which returns static metadata pointing to the authorization server. You can optionally also provide **`/.well-known/oauth-authorization-server`** that forwards the authorization server's metadata for convenience.
 
-### `AuthKitProvider` (WorkOS Integration)
+```mermaid
+sequenceDiagram
+    participant Client
+    participant FastMCPServer as FastMCP (RS)
+    participant ExternalIdP as External IdP (AS)
 
-FastMCP provides a built-in provider for **WorkOS AuthKit** that makes this pattern incredibly simple to implement. It handles the metadata forwarding and token validation for you.
+    Client->>FastMCPServer: 1. GET /.well-known/oauth-protected-resource
+    FastMCPServer-->>Client: 2. "Use https://my-idp.com for auth"
+    
+    note over Client, ExternalIdP: Client goes directly to the IdP
+    Client->>ExternalIdP: 3. GET /.well-known/oauth-authorization-server
+    ExternalIdP-->>Client: 4. OAuth endpoints & capabilities
+    
+    Client->>ExternalIdP: 5. User authenticates & gets token
+    ExternalIdP-->>Client: 
+    
+    Client->>FastMCPServer: 6. MCP request with Bearer token
+    note right of FastMCPServer: Server verifies the token
+    FastMCPServer->>FastMCPServer: 7. Verify token signature <br/> (using IdP's public keys)
+    FastMCPServer-->>Client: 8. MCP Response
+```
+
+## Building a Custom Provider
+
+To connect to any identity provider, you create a custom `AuthProvider` subclass. This class has two main responsibilities:
+
+1.  **Verifying Tokens:** Validate tokens issued by the external provider.
+2.  **Forwarding Metadata:** Tell MCP clients where to find the external provider's login pages and token endpoints.
+
+### Step 1: Verifying Tokens
+
+Your provider must implement the `verify_token` method. For most modern identity providers that issue JWTs, you can simply delegate this task to FastMCP's built-in `JWTVerifier`.
+
+```python
+from fastmcp.server.auth.auth import AuthProvider
+from fastmcp.server.auth.verifiers import JWTVerifier
+from mcp.server.auth.provider import AccessToken
+
+class MyIdPAuthProvider(AuthProvider):
+    def __init__(self):
+        super().__init__()
+        # The verifier validates tokens from the upstream provider.
+        self.token_verifier = JWTVerifier(
+            jwks_uri="https://my-idp.com/.well-known/jwks.json",
+            issuer="https://my-idp.com",
+            audience="my-fastmcp-api"
+        )
+
+    async def verify_token(self, token: str) -> AccessToken | None:
+        return await self.token_verifier.verify_token(token)
+```
+
+### Step 2: Adding Discovery Metadata
+
+Next, implement the `customize_auth_routes` method. The essential endpoint is `/.well-known/oauth-protected-resource` which tells clients where to find your authorization server. You can optionally add the authorization server forwarding endpoint for convenience.
+
+```python
+import httpx
+from starlette.responses import JSONResponse
+from starlette.routing import BaseRoute, Route
+
+class MyIdPAuthProvider(AuthProvider):
+    # ... (init and verify_token from above) ...
+    
+    def customize_auth_routes(self, routes: list[BaseRoute]) -> list[BaseRoute]:
+        # Essential: Tell clients which authorization server to use
+        async def protected_resource_metadata(request):
+            return JSONResponse({
+                "resource": "https://my-fastmcp-server.com",
+                "authorization_servers": ["https://my-idp.com"],
+                "bearer_methods_supported": ["header"],
+            })
+        
+        routes.append(Route("/.well-known/oauth-protected-resource", protected_resource_metadata))
+        
+        # Optional: Forward the authorization server's metadata for convenience
+        # (Clients can also fetch this directly from the IdP)
+        async def authorization_server_metadata(request):
+            async with httpx.AsyncClient() as client:
+                resp = await client.get("https://my-idp.com/.well-known/oauth-authorization-server")
+                resp.raise_for_status()
+                return JSONResponse(resp.json())
+
+        routes.append(Route("/.well-known/oauth-authorization-server", authorization_server_metadata))
+        return routes
+```
+
+### Step 3: Using Your Provider
+
+With these two methods implemented, your auth provider is now fully integrated with your identity provider. You can now use your custom provider with FastMCP by passing it to the `auth` parameter of your `FastMCP` instance:
+
+```python
+from fastmcp import FastMCP
+
+mcp = FastMCP(name="My Secure Server", auth=MyIdPAuthProvider())
+```
+
+
+## Example: WorkOS AuthKit Provider
+
+FastMCP provides a built-in provider for **WorkOS AuthKit** that handles this entire pattern for you. It's a perfect example of the remote authorization pattern in action.
 
 **Prerequisites:**
 1. A WorkOS account with an AuthKit project.
 2. **Dynamic Client Registration (DCR)** must be enabled in your WorkOS application settings.
-3. Your FastMCP server's public URL must be added as a **Redirect URI** in your WorkOS project dashboard.
+3. Your FastMCP server's URL must be added as a **Redirect URI** in your WorkOS project (can be localhost for development).
 
 ```python
 from fastmcp import FastMCP
 from fastmcp.server.auth.providers.workos import AuthKitProvider
 
-# The AuthKitProvider handles both forwarding metadata to WorkOS
-# and setting up a JWTVerifier to validate tokens issued by WorkOS.
+# The AuthKitProvider implements both metadata forwarding and token validation.
 auth_provider = AuthKitProvider(
     # Your unique AuthKit domain from the WorkOS dashboard
     authkit_domain="https://your-project.authkit.app",
-    # The public-facing URL of THIS FastMCP server
+    # The URL of THIS FastMCP server (can be localhost for development)
     base_url="https://your-fastmcp-server.com"
 )
 
 mcp = FastMCP(name="My WorkOS-Protected Server", auth=auth_provider)
-
-@mcp.tool
-def get_sensitive_data() -> str:
-    """This tool can only be accessed by users authenticated via WorkOS."""
-    return "This is sensitive data."
 ```
 
-When you use `AuthKitProvider`, it automatically configures a `JWTVerifier` internally using the JWKS endpoint provided by WorkOS (`{authkit_domain}/oauth2/jwks`), so you don't have to configure token validation separately.
-
-For a complete, step-by-step tutorial, see the [**WorkOS AuthKit Integration Guide**](/servers/auth/integrations/workos-authkit).
-
-### Building a Custom Provider for Other IdPs
-
-You can connect to other identity providers that support DCR by creating a custom `AuthProvider`. The process involves two key steps:
-
-1.  **Implement a Token Verifier:** Create a `TokenVerifier` that knows how to validate tokens from your chosen provider. For most providers, the standard `JWTVerifier` will work perfectly.
-2.  **Customize Routes for Metadata Forwarding:** Implement the `customize_auth_routes` method to add a `/.well-known/oauth-authorization-server` endpoint that fetches and forwards the metadata from your upstream provider.
-
-Here is a conceptual example for a fictional "CorpIdP" that uses JWTs:
-
-```python
-import httpx
-from fastmcp import FastMCP
-from fastmcp.server.auth.auth import AuthProvider
-from fastmcp.server.auth.verifiers import JWTVerifier
-from mcp.server.auth.provider import AccessToken
-from starlette.responses import JSONResponse
-from starlette.routing import BaseRoute, Route
-
-class CorpAuthProvider(AuthProvider):
-    def __init__(self):
-        super().__init__()
-        # 1. The verifier validates tokens from the upstream provider.
-        self.token_verifier = JWTVerifier(
-            jwks_uri="https://corpidp.com/.well-known/jwks.json",
-            issuer="https://corpidp.com",
-            audience="our-fastmcp-api"
-        )
-
-    async def verify_token(self, token: str) -> AccessToken | None:
-        return await self.token_verifier.verify_token(token)
-    
-    def customize_auth_routes(self, routes: list[BaseRoute]) -> list[BaseRoute]:
-        # 2. This endpoint tells MCP clients where to find the REAL auth server.
-        async def discovery_endpoint(request):
-            async with httpx.AsyncClient() as client:
-                resp = await client.get("https://corpidp.com/.well-known/oauth-authorization-server")
-                resp.raise_for_status()
-                return JSONResponse(resp.json())
-
-        routes.append(
-            Route("/.well-known/oauth-authorization-server", discovery_endpoint)
-        )
-        return routes
-
-# Now, use your custom provider with FastMCP
-mcp = FastMCP(name="Corporate Server", auth=CorpAuthProvider())
-```
+<Tip>
+For a complete, step-by-step tutorial on using this provider, see the [**WorkOS AuthKit Integration Guide**](/integrations/authkit).
+</Tip>

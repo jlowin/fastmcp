@@ -27,7 +27,7 @@ class AuthKitProviderSettings(BaseSettings):
 
     authkit_domain: str
     required_scopes: list[str] | None = None
-    base_url: AnyHttpUrl | str
+    base_url: AnyHttpUrl
 
 
 @register_provider("AUTHKIT")
@@ -95,11 +95,7 @@ class AuthKitProvider(AuthProvider):
         )
 
         self.authkit_domain = settings.authkit_domain.rstrip("/")
-        self.base_url = (
-            settings.base_url
-            if isinstance(settings.base_url, str)
-            else str(settings.base_url)
-        )
+        self.base_url = settings.base_url
 
         # Create default JWT verifier if none provided
         if token_verifier is None:
@@ -147,7 +143,7 @@ class AuthKitProvider(AuthProvider):
             """Return FastMCP resource server metadata."""
             return JSONResponse(
                 {
-                    "resource": self.base_url,
+                    "resource": str(self.base_url),
                     "authorization_servers": [self.authkit_domain],
                     "bearer_methods_supported": ["header"],
                 }

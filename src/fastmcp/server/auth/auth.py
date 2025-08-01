@@ -30,9 +30,9 @@ class AuthProvider:
     custom authentication routes.
     """
 
-    def __init__(self):
+    def __init__(self, required_scopes: list[str] | None = None):
         """Initialize the auth provider."""
-        self.required_scopes: list[str] = []
+        self.required_scopes: list[str] = required_scopes or []
 
     async def verify_token(self, token: str) -> AccessToken | None:
         """Verify a bearer token and return access info if valid.
@@ -82,7 +82,7 @@ class TokenVerifier(AuthProvider, TokenVerifierProtocol):
             required_scopes: Scopes that are required for all requests
         """
         # Initialize AuthProvider (no args needed)
-        AuthProvider.__init__(self)
+        AuthProvider.__init__(self, required_scopes=required_scopes)
 
         # Handle our own resource_server_url and required_scopes
         self.resource_server_url: AnyHttpUrl | None
@@ -92,7 +92,6 @@ class TokenVerifier(AuthProvider, TokenVerifierProtocol):
             self.resource_server_url = AnyHttpUrl(resource_server_url)
         else:
             self.resource_server_url = resource_server_url
-        self.required_scopes = required_scopes or []
 
     async def verify_token(self, token: str) -> AccessToken | None:
         """Verify a bearer token and return access info if valid."""

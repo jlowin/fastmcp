@@ -3,106 +3,96 @@ title: WorkOS AuthKit
 sidebarTitle: WorkOS AuthKit
 description: A step-by-step guide to securing your FastMCP server with WorkOS AuthKit for enterprise-ready authentication and SSO.
 icon: building-user
+tag: NEW
 ---
 
 import { VersionBadge } from "/snippets/version-badge.mdx"
 
 <VersionBadge version="2.11.0" />
 
-This guide will walk you through securing your FastMCP server using **WorkOS AuthKit**, a complete authentication and user management solution. This integration uses the [**Remote Authorization**](/servers/auth/remote-authorization) pattern, where WorkOS handles user login and your FastMCP server validates the tokens.
+This guide shows you how to secure your FastMCP server using **WorkOS AuthKit**, a complete authentication and user management solution. This integration uses the [**Remote Authorization**](/servers/auth/remote-authorization) pattern, where WorkOS handles user login and your FastMCP server validates the tokens.
 
-### Prerequisites
+## Prerequisites
 
 Before you begin, you will need:
 1.  A **WorkOS Account** and a new **Project**.
 2.  An **AuthKit** instance configured within your WorkOS project.
-3.  The public URL where your FastMCP server will be hosted (e.g., `https://my-fastmcp-app.com`).
+3.  Your FastMCP server's URL (can be localhost for development, e.g., `http://localhost:8000`).
 
-### Step 1: Configure Your AuthKit Instance
+## Step 1: Configure Your AuthKit Instance
 
 In your WorkOS Dashboard, navigate to your AuthKit instance and configure the following settings:
 
-1.  **Enable Dynamic Client Registration:**
-    -   Go to **Configuration**.
-    -   Toggle **Dynamic Client Registration** to the "Enabled" position. This allows MCP clients like Claude Desktop to register with your application automatically.
+<Steps>
+<Step title="Enable Dynamic Client Registration">
+    Go to **Applications → Configuration** and enable **Dynamic Client Registration**. This allows MCP clients register with your application automatically.
 
-2.  **Add Your Redirect URI:**
-    -   Go to the **Redirects** tab.
-    -   Add the public URL of your FastMCP server. This is the URL that WorkOS will redirect users back to after they log in. It must be the base URL of your server (e.g., `https://my-fastmcp-app.com`).
+    ![Enable Dynamic Client Registration](./images/authkit/enable_dcr.png)
+</Step>
 
-    ![WorkOS Redirect URI Configuration](https://example.com/workos_redirect.png) 
-    *(Note: Replace with an actual screenshot)*
+<Step title="Add Your Redirect URI">
+    Go to the **Redirects** tab and add your FastMCP server's URL. This is where WorkOS will redirect users after authentication.
+    
+    For development: `http://localhost:8000`  
+    For production: `https://my-fastmcp-app.com`
+</Step>
 
-3.  **Note Your AuthKit Domain:**
-    -   Find your **AuthKit Domain** on the configuration page. It will look something like `https://your-project-12345.authkit.app`. You will need this for your FastMCP server configuration.
+<Step title="Note Your AuthKit Domain">
+    Find your **AuthKit Domain** on the configuration page. It will look like `https://your-project-12345.authkit.app`. You'll need this for your FastMCP server configuration.
+</Step>
+</Steps>
 
-### Step 2: Configure Your FastMCP Server
+## Step 2: Configure Your FastMCP Server
 
-Now, create your FastMCP server file. The `AuthKitProvider` makes the integration simple.
+Create your FastMCP server file. The `AuthKitProvider` handles all the OAuth integration automatically:
 
 ```python server.py
 from fastmcp import FastMCP
 from fastmcp.server.auth.providers.workos import AuthKitProvider
 
-# The AuthKitProvider uses your AuthKit domain to automatically
-# discover endpoints and configure token validation.
+# The AuthKitProvider automatically discovers WorkOS endpoints
+# and configures JWT token validation
 auth_provider = AuthKitProvider(
     authkit_domain="https://your-project-12345.authkit.app",
-    base_url="https://my-fastmcp-app.com"
+    base_url="http://localhost:8000"  # Use your actual server URL
 )
 
-mcp = FastMCP(
-    name="WorkOS Secured App",
-    auth=auth_provider
-)
-
-@mcp.tool
-def get_organization_data() -> dict:
-    """A tool that can only be accessed by authenticated users."""
-    return {"org_id": "org_123", "data": "top secret"}
-
-# When running in production, ensure you use the correct host and port
-# that match your public URL.
-if __name__ == "__main__":
-    mcp.run(transport="http", host="0.0.0.0", port=8000)
+mcp = FastMCP(name="WorkOS Secured App", auth=auth_provider)
 ```
 
-### Step 3: Configure Environment Variables (Optional but Recommended)
+## Step 3: Environment Variables (Optional)
 
-For better security and flexibility, it's best to configure your `AuthKitProvider` using environment variables. The provider will automatically pick up these settings.
+For production deployments, set these environment variables however you prefer:
 
-Create a `.env` file in your project directory:
-```.env
+```bash
 FASTMCP_SERVER_AUTH=AUTHKIT
 FASTMCP_SERVER_AUTH_AUTHKITPROVIDER_AUTHKIT_DOMAIN="https://your-project-12345.authkit.app"
 FASTMCP_SERVER_AUTH_AUTHKITPROVIDER_BASE_URL="https://my-fastmcp-app.com"
 ```
 
-Now you can simplify your server code, as the auth provider will be created automatically:
+For clarity, you do **not** need to instantiate an auth provider when using environment variables:
 
 ```python server.py
 from fastmcp import FastMCP
 
-# FastMCP will automatically create and configure the AuthKitProvider
-# based on the environment variables.
+# FastMCP automatically creates the AuthKitProvider from environment variables
 mcp = FastMCP(name="WorkOS Secured App")
-
-@mcp.tool
-def get_organization_data() -> dict:
-    """A tool that can only be accessed by authenticated users."""
-    return {"org_id": "org_123", "data": "top secret"}
-
-if __name__ == "__main__":
-    mcp.run(transport="http", host="0.0.0.0", port=8000)
 ```
 
-### How It Works
+## How It Works
 
-1.  When an MCP client connects to your server, it discovers the OAuth metadata endpoint (`/.well-known/...`).
-2.  The `AuthKitProvider` responds by forwarding the metadata from WorkOS's own discovery endpoint.
-3.  The client, now knowing where the real Authorization Server is, initiates the OAuth flow and sends the user to your AuthKit login page.
-4.  After the user authenticates, WorkOS issues a JWT access token.
-5.  The client uses this JWT to make requests to your FastMCP server.
-6.  The `AuthKitProvider`'s internal `JWTVerifier` validates the token's signature against WorkOS's public keys (fetched from its JWKS endpoint), ensuring the token is authentic and not tampered with.
+The `AuthKitProvider` implements the remote authorization pattern by setting up discovery endpoints that point clients to WorkOS for authentication:
 
-Your server is now securely integrated with WorkOS, leveraging its enterprise-grade features like SSO, directory sync, and user management.
+1. **Discovery**: When an MCP client connects, it checks `/.well-known/oauth-protected-resource` and learns that WorkOS (`https://your-project.authkit.app`) handles authentication for this server.
+
+2. **Client Registration**: The client goes directly to WorkOS (using the forwarded metadata from `/.well-known/oauth-authorization-server`) and registers itself using Dynamic Client Registration.
+
+3. **User Authentication**: The client redirects the user to WorkOS's AuthKit login page for authentication and consent.
+
+4. **Token Issuance**: After successful login, WorkOS issues a JWT access token to the client.
+
+5. **Protected Requests**: The client makes MCP requests with the JWT token in the `Authorization: Bearer` header.
+
+6. **Token Verification**: Your FastMCP server validates each token using WorkOS's public keys (automatically fetched from their JWKS endpoint).
+
+Your server is now secured with WorkOS's enterprise-grade authentication, including SSO, directory sync, and user management capabilities.
