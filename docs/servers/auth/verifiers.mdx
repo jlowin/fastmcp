@@ -36,9 +36,6 @@ FastMCP provides three token verification approaches:
 ### JWTVerifier
 Validates JWT tokens using public key cryptography. Use when you have JWT tokens issued by an external identity provider (Auth0, Okta, Keycloak, etc.) and want self-contained validation without network calls.
 
-### IntrospectionTokenVerifier
-Validates tokens by calling a remote OAuth 2.0 authorization server's introspection endpoint (RFC 7662). Use when your authorization server is separate from your FastMCP server, you're using opaque tokens, or you need real-time token revocation.
-
 ### StaticTokenVerifier
 Validates tokens against a predefined dictionary. Use for development and testing only - never in production.
 
