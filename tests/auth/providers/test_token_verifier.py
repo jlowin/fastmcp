@@ -96,7 +96,7 @@ class TestInMemoryOAuthProviderTokenVerifier:
     def in_memory_provider(self) -> InMemoryOAuthProvider:
         """Create InMemoryOAuthProvider for testing."""
         return InMemoryOAuthProvider(
-            issuer_url="https://test.example.com",
+            base_url="https://test.example.com",
             required_scopes=["user"],
         )
 

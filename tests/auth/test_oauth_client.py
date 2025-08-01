@@ -19,7 +19,7 @@ def fastmcp_server(issuer_url: str):
     server = FastMCP(
         "TestServer",
         auth=InMemoryOAuthProvider(
-            issuer_url=issuer_url,
+            base_url=issuer_url,
             client_registration_options=ClientRegistrationOptions(enabled=True),
         ),
     )

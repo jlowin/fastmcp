@@ -154,7 +154,7 @@ class JWTVerifierSettings(BaseSettings):
     jwks_uri: str | None = None
     issuer: str | None = None
     algorithm: str | None = None
-    audience: str | None = None
+    audience: str | list[str] | None = None
     required_scopes: list[str] | None = None
     resource_server_url: AnyHttpUrl | str | None = None
 

@@ -78,12 +78,12 @@ Next, implement the `customize_auth_routes` method. The essential endpoint is `/
 ```python
 import httpx
 from starlette.responses import JSONResponse
-from starlette.routing import BaseRoute, Route
+from starlette.routing import Route
 
 class MyIdPAuthProvider(AuthProvider):
     # ... (init and verify_token from above) ...
     
-    def customize_auth_routes(self, routes: list[BaseRoute]) -> list[BaseRoute]:
+    def customize_auth_routes(self, routes: list[Route]) -> list[Route]:
         # Essential: Tell clients which authorization server to use
         async def protected_resource_metadata(request):
             return JSONResponse({

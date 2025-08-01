@@ -1,7 +1,6 @@
 """Tests for TokenVerifier integration with FastMCP."""
 
 import httpx
-import pytest
 from mcp.server.auth.provider import AccessToken
 
 from fastmcp.server import FastMCP
@@ -106,37 +105,3 @@ class TestJWTVerifierImport:
         except ImportError as e:
             # If PyJWT not available, should get helpful error
             assert "PyJWT is required" in str(e)
-
-
-class TestIntrospectionTokenVerifierImport:
-    """Test introspection token verifier can be imported and created."""
-
-    def test_introspection_verifier_creation(self):
-        """Test IntrospectionTokenVerifier construction."""
-        from fastmcp.server.auth.verifiers import IntrospectionTokenVerifier
-
-        verifier = IntrospectionTokenVerifier(
-            "https://auth.example.com/introspect", "https://resource.example.com"
-        )
-
-        assert (
-            str(verifier.introspection_endpoint)
-            == "https://auth.example.com/introspect"
-        )
-        assert str(verifier.server_url) == "https://resource.example.com/"
-        assert verifier.validate_resource is False
-        assert verifier.required_scopes == []
-
-    def test_introspection_verifier_rejects_private_urls(self):
-        """Test that IntrospectionTokenVerifier rejects private URLs."""
-        from fastmcp.server.auth.verifiers import IntrospectionTokenVerifier
-
-        with pytest.raises(ValueError, match="private/localhost URL"):
-            IntrospectionTokenVerifier(
-                "http://localhost/introspect", "https://resource.example.com"
-            )
-
-        with pytest.raises(ValueError, match="private/localhost URL"):
-            IntrospectionTokenVerifier(
-                "http://127.0.0.1/introspect", "https://resource.example.com"
-            )

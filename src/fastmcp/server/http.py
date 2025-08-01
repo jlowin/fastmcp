@@ -73,7 +73,7 @@ class RequestContextMiddleware:
 
 def setup_auth_middleware_and_routes(
     auth: AuthProvider,
-) -> tuple[list[Middleware], list[BaseRoute], list[str]]:
+) -> tuple[list[Middleware], list[Route], list[str]]:
     """Set up authentication middleware and routes if auth is enabled.
 
     Args:
@@ -90,7 +90,7 @@ def setup_auth_middleware_and_routes(
         Middleware(AuthContextMiddleware),
     ]
 
-    auth_routes: list[BaseRoute] = []
+    auth_routes: list[Route] = []
     required_scopes: list[str] = auth.required_scopes or []
 
     # Check if it's an OAuthProvider (has OAuth server capability)
@@ -105,6 +105,7 @@ def setup_auth_middleware_and_routes(
                 revocation_options=auth.revocation_options,
             )
         )
+
         # Allow provider to customize routes (e.g., for proxy behavior or metadata endpoints)
         auth_routes = auth.customize_auth_routes(standard_routes)
     else:

@@ -206,11 +206,13 @@ class FastMCP(Generic[LifespanResultT]):
         )
 
         # if auth is `NotSet`, try to create a provider from the environment
-        if auth is NotSet and fastmcp.settings.server_auth is not None:
-            provider_cls = get_registered_provider(fastmcp.settings.server_auth)
-            auth = provider_cls()
-
-        self.auth = auth
+        if auth is NotSet:
+            if fastmcp.settings.server_auth is not None:
+                provider_cls = get_registered_provider(fastmcp.settings.server_auth)
+                auth = provider_cls()
+            else:
+                auth = None
+        self.auth = cast(AuthProvider | None, auth)
 
         if tools:
             for tool in tools:

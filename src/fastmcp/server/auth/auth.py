@@ -16,9 +16,10 @@ from mcp.server.auth.settings import (
     RevocationOptions,
 )
 from pydantic import AnyHttpUrl
+from starlette.routing import Route
 
 if TYPE_CHECKING:
-    from starlette.routing import BaseRoute
+    pass
 
 
 class AuthProvider:
@@ -47,7 +48,7 @@ class AuthProvider:
         """
         raise NotImplementedError("Subclasses must implement verify_token")
 
-    def customize_auth_routes(self, routes: list[BaseRoute]) -> list[BaseRoute]:
+    def customize_auth_routes(self, routes: list[Route]) -> list[Route]:
         """Customize authentication routes after standard creation.
 
         This method allows providers to modify or add to the standard OAuth routes.
@@ -180,7 +181,7 @@ class OAuthProvider(
         """
         return await self.load_access_token(token)
 
-    def customize_auth_routes(self, routes: list[BaseRoute]) -> list[BaseRoute]:
+    def customize_auth_routes(self, routes: list[Route]) -> list[Route]:
         """Customize OAuth authentication routes after standard creation.
 
         This method allows providers to modify the standard OAuth routes
