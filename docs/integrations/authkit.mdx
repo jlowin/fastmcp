@@ -55,6 +55,29 @@ auth_provider = AuthKitProvider(
 mcp = FastMCP(name="AuthKit Secured App", auth=auth_provider)
 ```
 
+## Testing
+
+To test your server, you can use the `fastmcp` CLI to run it locally. Assuming you've saved the above code to `server.py` (after replacing the `authkit_domain` and `base_url` with your actual values!), you can run the following command:
+
+```bash
+fastmcp run server.py --transport http --port 8000
+```
+
+Now, you can use a FastMCP client to test that you can reach your server after authenticating:
+
+```python
+from fastmcp import Client
+import asyncio
+
+async def main():
+    async with Client("http://localhost:8000/mcp/", auth="oauth") as client:
+        assert await client.ping()
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+
 ## Environment Variables
 
 You can use environment variables to configure an AuthKit provider without instantiating the provider in your code.
