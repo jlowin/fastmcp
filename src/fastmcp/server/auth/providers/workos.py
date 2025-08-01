@@ -1,16 +1,3 @@
-"""WorkOS AuthKit provider for FastMCP.
-
-This provider implements WorkOS AuthKit integration using static credentials.
-Unlike the generic OAuthProxy, this provider is specifically designed for
-WorkOS AuthKit's expected integration pattern.
-
-Key features:
-- Static client credentials (no DCR required)
-- JWT token verification using WorkOS JWKS
-- Simplified OAuth flow optimized for WorkOS
-- Production-ready configuration
-"""
-
 from __future__ import annotations
 
 import httpx
@@ -18,16 +5,32 @@ from mcp.server.auth.provider import (
     AccessToken,
 )
 from pydantic import AnyHttpUrl
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from starlette.responses import JSONResponse
 from starlette.routing import BaseRoute, Route
 
 from fastmcp.server.auth.auth import AuthProvider, TokenVerifier
+from fastmcp.server.auth.registry import register_provider
 from fastmcp.server.auth.verifiers import JWTVerifier
 from fastmcp.utilities.logging import get_logger
+from fastmcp.utilities.types import NotSet, NotSetT
 
 logger = get_logger(__name__)
 
 
+class AuthKitProviderSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="FASTMCP_SERVER_AUTH_AUTHKITPROVIDER_",
+        env_file=".env",
+        extra="ignore",
+    )
+
+    authkit_domain: str
+    required_scopes: list[str] | None = None
+    base_url: AnyHttpUrl | str
+
+
+@register_provider("AUTHKIT")
 class AuthKitProvider(AuthProvider):
     """WorkOS AuthKit metadata provider for DCR (Dynamic Client Registration).
 
@@ -46,18 +49,13 @@ class AuthKitProvider(AuthProvider):
        - Add your server URL to the Redirects tab in WorkOS dashboard
        - Example: https://your-fastmcp-server.com/oauth2/callback
 
-    3. Use compatible authentication methods:
-       - "none" (public clients with PKCE) - RECOMMENDED for most use cases
-       - "client_secret_basic" (confidential clients with HTTP Basic auth)
-       - DO NOT use "client_secret_post" - WorkOS will reject it
-
     Example:
         ```python
-        from fastmcp.server.auth.providers.workos import WorkOSMetadataProvider
+        from fastmcp.server.auth.providers.workos import AuthKitProvider
 
         # Create WorkOS metadata provider (JWT verifier created automatically)
-        workos_auth = WorkOSMetadataProvider(
-            workos_domain="https://your-workos-domain.authkit.app",
+        workos_auth = AuthKitProvider(
+            authkit_domain="https://your-workos-domain.authkit.app",
             base_url="https://your-fastmcp-server.com",
         )
 
@@ -69,29 +67,47 @@ class AuthKitProvider(AuthProvider):
     def __init__(
         self,
         *,
-        workos_domain: str,
+        authkit_domain: str | NotSetT = NotSet,
         token_verifier: TokenVerifier | None = None,
-        base_url: AnyHttpUrl | str,
+        base_url: AnyHttpUrl | str | NotSetT = NotSet,
+        required_scopes: list[str] | None = None,
     ):
         """Initialize WorkOS metadata provider.
 
         Args:
-            workos_domain: Your WorkOS AuthKit domain (e.g., "https://your-app.authkit.app")
+            authkit_domain: Your WorkOS AuthKit domain (e.g., "https://your-app.authkit.app")
             token_verifier: Optional token verifier. If None, creates JWT verifier for WorkOS
             base_url: Public URL of this FastMCP server
+            required_scopes: Optional list of scopes to require for all requests
         """
         super().__init__()
 
-        self.workos_domain = workos_domain.rstrip("/")
-        self.base_url = base_url if isinstance(base_url, str) else str(base_url)
+        settings = AuthKitProviderSettings.model_validate(
+            {
+                k: v
+                for k, v in {
+                    "authkit_domain": authkit_domain,
+                    "base_url": base_url,
+                    "required_scopes": required_scopes,
+                }.items()
+                if v is not NotSet
+            }
+        )
 
-        # Create default JWT verifier if none provided (WorkOS recommended approach)
+        self.authkit_domain = settings.authkit_domain.rstrip("/")
+        self.base_url = (
+            settings.base_url
+            if isinstance(settings.base_url, str)
+            else str(settings.base_url)
+        )
+
+        # Create default JWT verifier if none provided
         if token_verifier is None:
             token_verifier = JWTVerifier(
-                jwks_uri=f"{self.workos_domain}/oauth2/jwks",
-                issuer=self.workos_domain,
+                jwks_uri=f"{self.authkit_domain}/oauth2/jwks",
+                issuer=self.authkit_domain,
                 algorithm="RS256",
-                required_scopes=None,  # WorkOS doesn't include scope claims
+                required_scopes=settings.required_scopes,
             )
 
         self.token_verifier = token_verifier
@@ -101,52 +117,28 @@ class AuthKitProvider(AuthProvider):
         return await self.token_verifier.verify_token(token)
 
     def customize_auth_routes(self, routes: list[BaseRoute]) -> list[BaseRoute]:
-        """Add WorkOS metadata endpoints.
+        """Add AuthKit metadata endpoints.
 
         This adds:
-        - /.well-known/oauth-authorization-server (forwards WorkOS metadata)
+        - /.well-known/oauth-authorization-server (forwards AuthKit metadata)
         - /.well-known/oauth-protected-resource (returns FastMCP resource info)
         """
 
         async def oauth_authorization_server_metadata(request):
-            """Forward WorkOS OAuth authorization server metadata with FastMCP customizations."""
+            """Forward AuthKit OAuth authorization server metadata with FastMCP customizations."""
             try:
                 async with httpx.AsyncClient() as client:
                     response = await client.get(
-                        f"{self.workos_domain}/.well-known/oauth-authorization-server"
+                        f"{self.authkit_domain}/.well-known/oauth-authorization-server"
                     )
                     response.raise_for_status()
                     metadata = response.json()
-
-                    # Customize metadata for FastMCP client compatibility
-                    # WorkOS only supports "none" and "client_secret_basic", NOT "client_secret_post"
-                    if "token_endpoint_auth_methods_supported" in metadata:
-                        # Filter out unsupported methods and ensure proper order
-                        auth_methods = metadata["token_endpoint_auth_methods_supported"]
-                        # WorkOS typically returns ["none", "client_secret_post", "client_secret_basic"]
-                        # but client_secret_post causes errors, so we filter it out
-                        supported_methods = []
-                        if "none" in auth_methods:
-                            supported_methods.append("none")
-                        if "client_secret_basic" in auth_methods:
-                            supported_methods.append("client_secret_basic")
-                        # Explicitly exclude client_secret_post as it's not actually supported
-                        metadata["token_endpoint_auth_methods_supported"] = (
-                            supported_methods
-                        )
-                    else:
-                        # Default to WorkOS-compatible methods only
-                        metadata["token_endpoint_auth_methods_supported"] = [
-                            "none",
-                            "client_secret_basic",
-                        ]
-
                     return JSONResponse(metadata)
             except Exception as e:
                 return JSONResponse(
                     {
                         "error": "server_error",
-                        "error_description": f"Failed to fetch WorkOS metadata: {e}",
+                        "error_description": f"Failed to fetch AuthKit metadata: {e}",
                     },
                     status_code=500,
                 )
@@ -156,17 +148,12 @@ class AuthKitProvider(AuthProvider):
             return JSONResponse(
                 {
                     "resource": self.base_url,
-                    "authorization_servers": [self.workos_domain],
+                    "authorization_servers": [self.authkit_domain],
                     "bearer_methods_supported": ["header"],
-                    # "resource_documentation": f"{self.base_url}/docs"
-                    # if hasattr(self, "service_documentation_url")
-                    # else None,
                 }
             )
 
-        # Add ONLY metadata routes - let WorkOS handle DCR directly
-        custom_routes = list(routes)  # Copy existing routes
-        custom_routes.extend(
+        routes.extend(
             [
                 Route(
                     "/.well-known/oauth-authorization-server",
@@ -181,4 +168,4 @@ class AuthKitProvider(AuthProvider):
             ]
         )
 
-        return custom_routes
+        return routes
