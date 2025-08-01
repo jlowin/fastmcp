@@ -91,9 +91,14 @@
                     ]
                   },
                   {
-                    "group": "Authentication",
+                    "group": "Auth",
                     "icon": "shield-check",
-                    "pages": ["servers/auth/verifiers", "servers/auth/proxy"]
+                    "pages": [
+                      "servers/auth/authentication",
+                      "servers/auth/token-verification",
+                      "servers/auth/remote-authorization",
+                      "servers/auth/full-oauth-server"
+                    ]
                   }
                 ]
               },
@@ -148,7 +153,8 @@
                   "integrations/openai",
                   "integrations/openapi",
                   "integrations/permit",
-                  "integrations/starlette"
+                  "integrations/starlette",
+                  "integrations/authkit"
                 ]
               },
               {
