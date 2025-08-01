@@ -53,6 +53,7 @@ class AuthKitProvider(OAuthProxy):
             client_id="your_workos_client_id",
             api_key="your_workos_api_key",
             authkit_domain="https://your-app.authkit.app",
+            base_url="https://your-fastmcp-server.com",
         )
 
         # Use with FastMCP
@@ -66,7 +67,7 @@ class AuthKitProvider(OAuthProxy):
         client_id: str,
         api_key: str,
         authkit_domain: str,
-        issuer_url: AnyHttpUrl | str,
+        base_url: AnyHttpUrl | str,
         token_verifier: TokenVerifier | None = None,
     ):
         """Initialize WorkOS AuthKit provider.
@@ -75,8 +76,8 @@ class AuthKitProvider(OAuthProxy):
             client_id: WorkOS OAuth client ID
             api_key: WorkOS API key
             authkit_domain: Your AuthKit domain (e.g., "https://your-app.authkit.app")
+            base_url: Public URL of this FastMCP server
             token_verifier: Optional token verifier. If None, creates default JWTVerifier
-            issuer_url: Public URL of this FastMCP server
         """
         # Create WorkOS client
         self.workos_client = WorkOSClient(api_key=api_key, client_id=client_id)
@@ -98,7 +99,7 @@ class AuthKitProvider(OAuthProxy):
             client_id=client_id,
             client_secret=api_key,
             token_verifier=cast(TokenVerifier, token_verifier),
-            issuer_url=issuer_url,
+            base_url=base_url,
         )
 
     async def authorize(
@@ -166,6 +167,69 @@ class AuthKitProvider(OAuthProxy):
         return await super().revoke_token(token)
 
 
+class AuthKitURLProvider(OAuthProxy):
+    """WorkOS AuthKit provider using pure URL-based proxy approach.
+
+    This provider uses WorkOS AuthKit endpoints directly without the WorkOS SDK.
+    It's simpler than AuthKitProvider and works for most use cases where you
+    just need basic OAuth flows without complex SDK features.
+
+    Example:
+        ```python
+        from fastmcp.server.auth.providers.workos import AuthKitURLProvider
+
+        # Create URL-based AuthKit provider
+        auth_provider = AuthKitURLProvider(
+            client_id="your_workos_client_id",
+            api_key="your_workos_api_key",
+            authkit_domain="https://your-app.authkit.app",
+            base_url="https://your-fastmcp-server.com",
+        )
+
+        # Use with FastMCP
+        mcp = FastMCP("My App", auth=auth_provider)
+        ```
+    """
+
+    def __init__(
+        self,
+        *,
+        client_id: str,
+        api_key: str,
+        authkit_domain: str,
+        base_url: AnyHttpUrl | str,
+        token_verifier: TokenVerifier | None = None,
+    ):
+        """Initialize WorkOS AuthKit URL provider.
+
+        Args:
+            client_id: WorkOS OAuth client ID
+            api_key: WorkOS API key
+            authkit_domain: Your AuthKit domain (e.g., "https://your-app.authkit.app")
+            base_url: Public URL of this FastMCP server
+            token_verifier: Optional token verifier. If None, creates default JWTVerifier
+        """
+        if token_verifier is None:
+            token_verifier = JWTVerifier(
+                jwks_uri=f"{authkit_domain}/oauth2/jwks",
+                issuer="https://api.workos.com",
+                algorithm="RS256",
+                required_scopes=None,
+            )
+
+        # Initialize OAuthProxy with WorkOS endpoints
+        super().__init__(
+            authorization_endpoint=f"{authkit_domain}/oauth2/authorize",
+            token_endpoint=f"{authkit_domain}/oauth2/token",
+            revocation_endpoint=f"{authkit_domain}/oauth2/revoke",
+            client_id=client_id,
+            client_secret=api_key,
+            token_verifier=cast(TokenVerifier, token_verifier),
+            base_url=base_url,
+            # issuer_url=authkit_domain,
+        )
+
+
 class WorkOSMetadataProvider(AuthProvider):
     """WorkOS AuthKit metadata provider for DCR (Dynamic Client Registration).
 
@@ -196,7 +260,7 @@ class WorkOSMetadataProvider(AuthProvider):
         # Create WorkOS metadata provider (JWT verifier created automatically)
         workos_auth = WorkOSMetadataProvider(
             workos_domain="https://your-workos-domain.authkit.app",
-            issuer_url="https://your-fastmcp-server.com",
+            base_url="https://your-fastmcp-server.com",
         )
 
         # Use with FastMCP
@@ -209,19 +273,19 @@ class WorkOSMetadataProvider(AuthProvider):
         *,
         workos_domain: str,
         token_verifier: TokenVerifier | None = None,
-        issuer_url: AnyHttpUrl | str,
+        base_url: AnyHttpUrl | str,
     ):
         """Initialize WorkOS metadata provider.
 
         Args:
             workos_domain: Your WorkOS AuthKit domain (e.g., "https://your-app.authkit.app")
             token_verifier: Optional token verifier. If None, creates JWT verifier for WorkOS
-            issuer_url: Public URL of this FastMCP server
+            base_url: Public URL of this FastMCP server
         """
         super().__init__()
 
         self.workos_domain = workos_domain.rstrip("/")
-        self.issuer_url = issuer_url if isinstance(issuer_url, str) else str(issuer_url)
+        self.base_url = base_url if isinstance(base_url, str) else str(base_url)
 
         # Create default JWT verifier if none provided (WorkOS recommended approach)
         if token_verifier is None:
@@ -293,10 +357,10 @@ class WorkOSMetadataProvider(AuthProvider):
             """Return FastMCP resource server metadata."""
             return JSONResponse(
                 {
-                    "resource": self.issuer_url,
+                    "resource": self.base_url,
                     "authorization_servers": [self.workos_domain],
                     "bearer_methods_supported": ["header"],
-                    # "resource_documentation": f"{self.issuer_url}/docs"
+                    # "resource_documentation": f"{self.base_url}/docs"
                     # if hasattr(self, "service_documentation_url")
                     # else None,
                 }

@@ -111,7 +111,9 @@ class OAuthProvider(
 
     def __init__(
         self,
-        issuer_url: AnyHttpUrl | str,
+        *,
+        base_url: AnyHttpUrl | str,
+        issuer_url: AnyHttpUrl | str | None = None,
         service_documentation_url: AnyHttpUrl | str | None = None,
         client_registration_options: ClientRegistrationOptions | None = None,
         revocation_options: RevocationOptions | None = None,
@@ -122,19 +124,32 @@ class OAuthProvider(
         Initialize the OAuth provider.
 
         Args:
-            issuer_url: The URL of the OAuth issuer.
+            base_url: The public URL of this FastMCP server
+            issuer_url: The issuer URL for OAuth metadata (defaults to base_url)
             service_documentation_url: The URL of the service documentation.
             client_registration_options: The client registration options.
             revocation_options: The revocation options.
             required_scopes: Scopes that are required for all requests.
-            resource_server_url: The URL of this resource server (for RFC 8707 resource indicators)
+            resource_server_url: The URL of this resource server (for RFC 8707 resource indicators, defaults to base_url)
         """
 
         super().__init__()
 
+        # Convert URLs to proper types
+        if isinstance(base_url, str):
+            base_url = AnyHttpUrl(base_url)
+        self.base_url = base_url
+
+        if issuer_url is None:
+            self.issuer_url = base_url
+        elif isinstance(issuer_url, str):
+            self.issuer_url = AnyHttpUrl(issuer_url)
+        else:
+            self.issuer_url = issuer_url
+
         # Handle our own resource_server_url and required_scopes
         if resource_server_url is None:
-            self.resource_server_url = issuer_url
+            self.resource_server_url = base_url
         elif isinstance(resource_server_url, str):
             self.resource_server_url = AnyHttpUrl(resource_server_url)
         else:
@@ -144,12 +159,9 @@ class OAuthProvider(
         # Initialize OAuth Authorization Server Provider
         OAuthAuthorizationServerProvider.__init__(self)
 
-        if isinstance(issuer_url, str):
-            issuer_url = AnyHttpUrl(issuer_url)
         if isinstance(service_documentation_url, str):
             service_documentation_url = AnyHttpUrl(service_documentation_url)
 
-        self.issuer_url = issuer_url
         self.service_documentation_url = service_documentation_url
         self.client_registration_options = client_registration_options
         self.revocation_options = revocation_options

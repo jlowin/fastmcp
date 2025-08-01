@@ -220,7 +220,7 @@ def OAuth(
         redirect_uris=[AnyHttpUrl(redirect_uri)],
         grant_types=["authorization_code", "refresh_token"],
         response_types=["code"],
-        token_endpoint_auth_method="client_secret_post",
+        # token_endpoint_auth_method="client_secret_post",
         scope=scopes,
         **(additional_client_metadata or {}),
     )

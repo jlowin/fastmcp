@@ -68,6 +68,25 @@ class OAuthProxy(OAuthProvider):
 
     This approach allows FastMCP to work with enterprise identity providers
     that only support static client registration.
+
+    IMPORTANT ARCHITECTURAL NOTE:
+    ============================
+    This class inherits from OAuthProvider to leverage the standard OAuth route
+    infrastructure provided by the MCP SDK. However, it uses a "bypass pattern"
+    where certain OAuth methods (like exchange_authorization_code) are not used
+    in the normal OAuth flow.
+
+    Instead, the customize_auth_routes() method replaces the standard /token
+    endpoint with a custom proxy handler (_handle_proxy_token_request) that
+    forwards requests directly to the upstream server. This is necessary because:
+
+    1. Standard OAuth validation requires local authorization code storage
+    2. Proxies cannot validate codes they never generated
+    3. All validation must be done by the upstream server
+    4. The proxy just forwards requests transparently
+
+    Methods like exchange_authorization_code() exist to satisfy the OAuthProvider
+    interface but are intentionally not used in the proxy flow.
     """
 
     def __init__(
@@ -82,7 +101,9 @@ class OAuthProxy(OAuthProvider):
         client_secret: str,
         # Token validation
         token_verifier: TokenVerifier,
-        issuer_url: AnyHttpUrl | str,
+        # URL configuration
+        base_url: AnyHttpUrl | str,  # This FastMCP server's URL
+        issuer_url: AnyHttpUrl | str | None = None,
         service_documentation_url: AnyHttpUrl | str | None = None,
         client_registration_options: ClientRegistrationOptions | None = None,
         revocation_options: RevocationOptions | None = None,
@@ -96,7 +117,8 @@ class OAuthProxy(OAuthProvider):
             client_id: Client ID for upstream server
             client_secret: Client secret for upstream server
             token_verifier: Token verifier for validating access tokens
-            issuer_url: Optional public URL of this FastMCP server
+            base_url: Public URL of this FastMCP server (for redirects, metadata, etc.)
+            issuer_url: Optional issuer URL for OAuth metadata (defaults to base_url)
             service_documentation_url: Optional service documentation URL
             client_registration_options: Local client registration options
             revocation_options: Token revocation options
@@ -110,24 +132,32 @@ class OAuthProxy(OAuthProvider):
         self._client_id = client_id
         self._client_secret = SecretStr(client_secret)
 
+        # Store base URL (this FastMCP server's URL)
+        if isinstance(base_url, str):
+            base_url = AnyHttpUrl(base_url)
+        self.base_url = base_url
+
         # Token validator
         self._token_validator = token_verifier
 
-        # Client and token storage
+        # Client storage and minimal token tracking for revocation
         self._clients: dict[str, OAuthClientInformationFull] = {}
+        # Simple token storage for revocation tracking only
+        # Note: Complex token relationships removed since proxy bypasses standard OAuth flows
         self._access_tokens: dict[str, AccessToken] = {}
         self._refresh_tokens: dict[str, RefreshToken] = {}
-        self._access_to_refresh: dict[str, str] = {}
-        self._refresh_to_access: dict[str, str] = {}
 
         # Configure client registration and revocation options
         if client_registration_options is None:
+            # Proxy mode supports client registration but always returns static credentials
+            # This allows clients to "register" and get back the configured static credentials
             client_registration_options = ClientRegistrationOptions(enabled=True)
 
         if revocation_endpoint and revocation_options is None:
             revocation_options = RevocationOptions(enabled=True)
 
         super().__init__(
+            base_url=base_url,
             issuer_url=issuer_url,
             service_documentation_url=service_documentation_url,
             client_registration_options=client_registration_options,
@@ -156,7 +186,7 @@ class OAuthProxy(OAuthProvider):
         if client is None:
             # Create a temporary client to allow OAuth flow validation
             # We'll use a permissive redirect_uri list since upstream will validate
-            redirect_uris: list[AnyUrl] = [self.issuer_url]  # type: ignore[list-item]
+            redirect_uris: list[AnyUrl] = [self.base_url]  # type: ignore[list-item]
 
             # Try to extract redirect_uri from current request context
             try:
@@ -189,11 +219,12 @@ class OAuthProxy(OAuthProvider):
     async def register_client(
         self, client_info: OAuthClientInformationFull
     ) -> OAuthClientInformationFull:
-        """Register a client using configured credentials.
+        """Register a client using configured static credentials.
 
-        Uses the configured client_id and client_secret for all client registrations.
+        Proxy mode does not support DCR - all clients use the static credentials
+        configured when the proxy was created.
         """
-        # Merge client metadata with configured credentials
+        # Use configured static credentials
         registered_client = OAuthClientInformationFull(
             **client_info.model_dump(
                 exclude={
@@ -231,6 +262,7 @@ class OAuthProxy(OAuthProvider):
         client: OAuthClientInformationFull,
         params: AuthorizationParams,
     ) -> str:
+        breakpoint()
         """Redirect authorization request to upstream server.
 
         Builds the upstream authorization URL with the client's parameters
@@ -285,7 +317,7 @@ class OAuthProxy(OAuthProvider):
         return AuthorizationCode(
             code=authorization_code,
             client_id=client.client_id,
-            redirect_uri=self.issuer_url,  # Placeholder - actual value extracted from request
+            redirect_uri=self.base_url,  # Placeholder - actual value extracted from request
             redirect_uri_provided_explicitly=False,
             scopes=[],  # Will be determined by upstream server
             expires_at=int(time.time() + DEFAULT_AUTH_CODE_EXPIRY_SECONDS),
@@ -299,8 +331,12 @@ class OAuthProxy(OAuthProvider):
     ) -> OAuthToken:
         """Request token from upstream server using authorization code.
 
-        This method handles the actual HTTP request to exchange the authorization
-        code for tokens. Subclasses can override this to use provider-specific APIs.
+        NOTE: This method is NOT used in the standard proxy flow. It exists for
+        subclasses (like WorkOS) that may want to override token exchange logic
+        for testing or SDK integration purposes.
+
+        The actual token exchange in proxy mode is handled by _handle_proxy_token_request
+        which forwards HTTP requests directly to the upstream server.
         """
         # Base token request data using configured credentials
         token_data = {
@@ -315,18 +351,6 @@ class OAuthProxy(OAuthProvider):
             req = get_http_request()
             if req.method == "POST":
                 form = await req.form()
-
-                # Log the incoming request (with sensitive data redacted)
-                redacted_form = {
-                    k: (
-                        str(v)[:8] + "..."
-                        if k in {"code", "code_verifier", "client_secret"} and v
-                        else str(v)
-                    )
-                    for k, v in form.items()
-                }
-                logger.debug("Token request form data: %s", redacted_form)
-
                 # Forward relevant fields to upstream
                 for field in ("redirect_uri", "code_verifier", "resource", "scope"):
                     if field in form and form[field]:
@@ -338,33 +362,14 @@ class OAuthProxy(OAuthProvider):
         if "redirect_uri" not in token_data:
             token_data["redirect_uri"] = str(authorization_code.redirect_uri)
 
-        # Log outgoing request (with sensitive data redacted)
-        redacted_data = {
-            k: (
-                "***"
-                if k == "client_secret"
-                else (str(v)[:8] + "..." if k in {"code", "code_verifier"} else str(v))
-            )
-            for k, v in token_data.items()
-        }
-        logger.debug("Forwarding token request to upstream: %s", redacted_data)
-
         # Make the token request to upstream server
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SECONDS) as http_client:
             try:
                 response = await http_client.post(self._token_endpoint, data=token_data)
 
-                logger.debug(
-                    "Upstream token response: status=%d, body_preview=%s",
-                    response.status_code,
-                    response.text[:200] + ("..." if len(response.text) > 200 else ""),
-                )
-
                 if response.status_code >= 400:
                     logger.error(
-                        "Upstream token exchange failed: %d - %s",
-                        response.status_code,
-                        response.text[:500],
+                        "Upstream token exchange failed: %d", response.status_code
                     )
                     raise TokenError(
                         "invalid_grant", f"Upstream token error {response.status_code}"
@@ -417,10 +422,6 @@ class OAuthProxy(OAuthProvider):
             )
             self._refresh_tokens[refresh_token_value] = refresh_token
 
-            # Maintain token relationships for cleanup
-            self._access_to_refresh[access_token_value] = refresh_token_value
-            self._refresh_to_access[refresh_token_value] = access_token_value
-
         logger.info(
             "Successfully stored tokens for tracking (client: %s)",
             client.client_id,
@@ -431,27 +432,20 @@ class OAuthProxy(OAuthProvider):
         client: OAuthClientInformationFull,
         authorization_code: AuthorizationCode,
     ) -> OAuthToken:
-        """Exchange authorization code for tokens with upstream server.
+        """Exchange authorization code for tokens - NOT USED IN PROXY MODE.
 
-        Requests tokens from upstream server and stores them locally for
-        refresh and revocation tracking. Subclasses can override
-        _request_token_from_upstream to customize the token request.
+        This method exists to satisfy the OAuthProvider interface but is never
+        called in the proxy flow. The customize_auth_routes() method replaces
+        the standard /token endpoint with _handle_proxy_token_request, which
+        bypasses this method entirely.
+
+        Token exchanges are handled directly by the proxy endpoint to avoid
+        OAuth validation that cannot be performed without local auth code storage.
         """
-        breakpoint()
-        # Request tokens from upstream (can be overridden by subclasses)
-        token_response = await self._request_token_from_upstream(
-            client, authorization_code
+        raise NotImplementedError(
+            "exchange_authorization_code is not used in proxy mode. "
+            "Token exchanges are handled by the custom proxy /token endpoint."
         )
-
-        # Store tokens locally for tracking (consistent across all implementations)
-        self._store_token_response(client, authorization_code, token_response)
-
-        logger.info(
-            "Successfully exchanged authorization code for tokens (client: %s)",
-            client.client_id,
-        )
-
-        return token_response
 
     # -------------------------------------------------------------------------
     # Refresh Token Flow
@@ -473,8 +467,13 @@ class OAuthProxy(OAuthProvider):
     ) -> OAuthToken:
         """Request new access token from upstream server using refresh token.
 
-        This method handles the actual HTTP request to refresh the access token.
-        Subclasses can override this to use provider-specific APIs.
+        NOTE: This method is NOT used in the standard proxy flow. It exists for
+        subclasses (like WorkOS) that may want to override refresh token logic
+        for testing or SDK integration purposes.
+
+        The actual refresh token exchange in proxy mode is handled by
+        _handle_proxy_token_request which forwards HTTP requests directly
+        to the upstream server.
         """
         refresh_data = {
             "grant_type": "refresh_token",
@@ -487,17 +486,6 @@ class OAuthProxy(OAuthProvider):
         if scopes:
             refresh_data["scope"] = " ".join(scopes)
 
-        # Log request (with sensitive data redacted)
-        redacted_data = {
-            k: (
-                "***"
-                if k == "client_secret"
-                else (str(v)[:8] + "..." if k == "refresh_token" else str(v))
-            )
-            for k, v in refresh_data.items()
-        }
-        logger.debug("Forwarding refresh token request to upstream: %s", redacted_data)
-
         # Make refresh request to upstream server
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SECONDS) as http_client:
             try:
@@ -505,17 +493,10 @@ class OAuthProxy(OAuthProvider):
                     self._token_endpoint, data=refresh_data
                 )
 
-                logger.debug(
-                    "Upstream refresh token response: status=%d, body_preview=%s",
-                    response.status_code,
-                    response.text[:200] + ("..." if len(response.text) > 200 else ""),
-                )
-
                 if response.status_code >= 400:
                     logger.error(
-                        "Upstream refresh token exchange failed: %d - %s",
+                        "Upstream refresh token exchange failed: %d",
                         response.status_code,
-                        response.text[:500],
                     )
                     raise TokenError(
                         "invalid_grant", "Upstream refresh token exchange failed"
@@ -562,24 +543,14 @@ class OAuthProxy(OAuthProvider):
             and token_response.refresh_token != old_refresh_token.token
         ):
             new_refresh_token = token_response.refresh_token
-            # Remove old refresh token
+            # Remove old refresh token and store new one
             self._refresh_tokens.pop(old_refresh_token.token, None)
-            old_access = self._refresh_to_access.pop(old_refresh_token.token, None)
-            if old_access:
-                self._access_to_refresh.pop(old_access, None)
-
-            # Store new refresh token
             self._refresh_tokens[new_refresh_token] = RefreshToken(
                 token=new_refresh_token,
                 client_id=client.client_id,
                 scopes=scopes,
                 expires_at=None,
             )
-            self._access_to_refresh[new_access_token] = new_refresh_token
-            self._refresh_to_access[new_refresh_token] = new_access_token
-        elif token_response.refresh_token:
-            # Same refresh token returned - update access token relationship
-            self._access_to_refresh[new_access_token] = token_response.refresh_token
 
         logger.info(
             "Successfully stored refreshed tokens for tracking (client: %s)",
@@ -592,27 +563,18 @@ class OAuthProxy(OAuthProvider):
         refresh_token: RefreshToken,
         scopes: list[str],
     ) -> OAuthToken:
-        """Exchange refresh token for new access token with upstream server.
+        """Exchange refresh token for new access token - NOT USED IN PROXY MODE.
 
-        Requests new tokens from upstream server and updates local storage for
-        tracking and revocation. Subclasses can override _request_refresh_token_from_upstream
-        to customize the refresh request.
+        This method exists to satisfy the OAuthProvider interface but is never
+        called in the proxy flow. The customize_auth_routes() method replaces
+        the standard /token endpoint with _handle_proxy_token_request, which
+        handles ALL token requests (authorization_code and refresh_token grants)
+        by forwarding them directly to the upstream server.
         """
-        # Request refreshed tokens from upstream (can be overridden by subclasses)
-        token_response = await self._request_refresh_token_from_upstream(
-            client, refresh_token, scopes
+        raise NotImplementedError(
+            "exchange_refresh_token is not used in proxy mode. "
+            "All token requests are handled by the custom proxy /token endpoint."
         )
-
-        # Store tokens locally for tracking (consistent across all implementations)
-        self._store_refresh_token_response(
-            client, refresh_token, scopes, token_response
-        )
-
-        logger.info(
-            "Successfully refreshed access token (client: %s)", client.client_id
-        )
-
-        return token_response
 
     # -------------------------------------------------------------------------
     # Token Validation
@@ -639,18 +601,8 @@ class OAuthProxy(OAuthProvider):
         # Clean up local token storage
         if isinstance(token, AccessToken):
             self._access_tokens.pop(token.token, None)
-            # Also remove associated refresh token
-            paired_refresh = self._access_to_refresh.pop(token.token, None)
-            if paired_refresh:
-                self._refresh_tokens.pop(paired_refresh, None)
-                self._refresh_to_access.pop(paired_refresh, None)
         else:  # RefreshToken
             self._refresh_tokens.pop(token.token, None)
-            # Also remove associated access token
-            paired_access = self._refresh_to_access.pop(token.token, None)
-            if paired_access:
-                self._access_tokens.pop(paired_access, None)
-                self._access_to_refresh.pop(paired_access, None)
 
         # Attempt upstream revocation if endpoint is configured
         if self._revocation_endpoint:
@@ -684,18 +636,7 @@ class OAuthProxy(OAuthProvider):
         try:
             # Parse the incoming request form data
             form_data = await request.form()
-
-            # Log the incoming request (with sensitive data redacted)
-            redacted_form = {
-                k: (
-                    str(v)[:8] + "..."
-                    if k in {"code", "code_verifier", "client_secret", "refresh_token"}
-                    and v
-                    else str(v)
-                )
-                for k, v in form_data.items()
-            }
-            logger.debug("Proxy token request form data: %s", redacted_form)
+            form_dict = dict(form_data)
 
             # Build the upstream request data with configured credentials
             upstream_data = {
@@ -703,90 +644,63 @@ class OAuthProxy(OAuthProvider):
                 "client_secret": self._client_secret.get_secret_value(),
             }
 
-            # Forward all relevant form fields
-            for key, value in form_data.items():
-                if key not in {
-                    "client_id",
-                    "client_secret",
-                }:  # Don't override our credentials
+            # Forward all relevant form fields (except our credentials)
+            for key, value in form_dict.items():
+                if key not in {"client_id", "client_secret"}:
                     upstream_data[key] = str(value)
-
-            # Log outgoing request (with sensitive data redacted)
-            redacted_upstream = {
-                k: (
-                    "***"
-                    if k == "client_secret"
-                    else (
-                        str(v)[:8] + "..."
-                        if k in {"code", "code_verifier", "refresh_token"}
-                        else str(v)
-                    )
-                )
-                for k, v in upstream_data.items()
-            }
-            logger.debug(
-                "Forwarding proxy token request to upstream: %s", redacted_upstream
-            )
 
             # Make the request to upstream server
             async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SECONDS) as http_client:
-                try:
-                    response = await http_client.post(
-                        self._token_endpoint,
-                        data=upstream_data,
-                        headers={"Content-Type": "application/x-www-form-urlencoded"},
+                response = await http_client.post(
+                    self._token_endpoint,
+                    data=upstream_data,
+                    headers={
+                        "Content-Type": "application/x-www-form-urlencoded",
+                        "Accept": "application/json",
+                    },
+                )
+
+                # Handle error responses
+                if response.status_code >= 400:
+                    logger.warning(
+                        "Upstream token request failed: %d", response.status_code
                     )
-
-                    logger.debug(
-                        "Upstream proxy token response: status=%d, body_preview=%s",
-                        response.status_code,
-                        response.text[:200]
-                        + ("..." if len(response.text) > 200 else ""),
-                    )
-
-                    # Return the upstream response directly
-                    if response.status_code >= 400:
-                        logger.warning(
-                            "Upstream token request failed: %d - %s",
-                            response.status_code,
-                            response.text[:500],
-                        )
-                        # Forward the error response
-                        try:
-                            error_data = response.json()
-                        except Exception:
-                            error_data = {
-                                "error": "server_error",
-                                "error_description": "Upstream server error",
-                            }
-
-                        return JSONResponse(
-                            content=error_data, status_code=response.status_code
-                        )
-
-                    # Success - forward the token response
-                    token_data = response.json()
-
-                    # Store tokens locally for tracking (if this is an authorization_code grant)
-                    if (
-                        upstream_data.get("grant_type") == "authorization_code"
-                        and "access_token" in token_data
-                    ):
-                        self._store_tokens_from_response(token_data, self._client_id)
-
-                    logger.info("Successfully proxied token request to upstream server")
-                    return JSONResponse(content=token_data)
-
-                except httpx.RequestError as e:
-                    logger.error("Failed to connect to upstream token endpoint: %s", e)
-                    return JSONResponse(
-                        content={
+                    try:
+                        error_data = response.json()
+                    except Exception:
+                        error_data = {
                             "error": "server_error",
-                            "error_description": "Unable to connect to upstream server",
-                        },
-                        status_code=503,
+                            "error_description": "Upstream server error",
+                        }
+                    return JSONResponse(
+                        content=error_data, status_code=response.status_code
                     )
 
+                # Success - process the token response
+                token_data = response.json()
+
+                # Store tokens locally for tracking (authorization_code grant only)
+                if (
+                    upstream_data.get("grant_type") == "authorization_code"
+                    and "access_token" in token_data
+                ):
+                    try:
+                        self._store_tokens_from_response(token_data, self._client_id)
+                    except Exception as e:
+                        logger.warning("Failed to store tokens: %s", e)
+
+                logger.info("Successfully proxied token request to upstream server")
+                return JSONResponse(content=token_data)
+
+        except httpx.RequestError as e:
+            logger.error("Failed to connect to upstream token endpoint: %s", e)
+            return JSONResponse(
+                content={
+                    "error": "server_error",
+                    "error_description": "Unable to connect to upstream server",
+                },
+                status_code=503,
+            )
         except Exception as e:
             logger.error("Error in proxy token handler: %s", e, exc_info=True)
             return JSONResponse(
@@ -827,10 +741,6 @@ class OAuthProxy(OAuthProvider):
                     )
                     self._refresh_tokens[refresh_token_value] = refresh_token
 
-                    # Maintain token relationships
-                    self._access_to_refresh[access_token_value] = refresh_token_value
-                    self._refresh_to_access[refresh_token_value] = access_token_value
-
                 logger.debug("Stored tokens from upstream response for tracking")
 
         except Exception as e:
@@ -862,10 +772,113 @@ class OAuthProxy(OAuthProvider):
                     )
                 )
             else:
-                # Keep all other routes unchanged
+                # Keep all other routes unchanged (including /register)
                 custom_routes.append(route)
 
         logger.info(
             "Customized OAuth routes for proxy behavior (replaced token endpoint)"
         )
         return custom_routes
+
+    # -------------------------------------------------------------------------
+    # Discovery Support
+    # -------------------------------------------------------------------------
+
+    @classmethod
+    async def from_discovery(
+        cls,
+        discovery_issuer_url: str,
+        *,
+        client_id: str,
+        client_secret: str,
+        token_verifier: TokenVerifier,
+        base_url: AnyHttpUrl | str,
+        # Optional endpoint overrides
+        authorization_endpoint: str | None = None,
+        token_endpoint: str | None = None,
+        revocation_endpoint: str | None = None,
+        # Other options
+        service_documentation_url: AnyHttpUrl | str | None = None,
+        client_registration_options: ClientRegistrationOptions | None = None,
+        revocation_options: RevocationOptions | None = None,
+    ) -> OAuthProxy:
+        """Create OAuthProxy using OpenID Connect Discovery.
+
+        Fetches OAuth server metadata from {discovery_issuer_url}/.well-known/oauth-authorization-server
+        and uses discovered endpoints unless explicitly overridden.
+
+        Args:
+            discovery_issuer_url: Base URL of the OAuth server (used for discovery)
+            client_id: Client ID for upstream server
+            client_secret: Client secret for upstream server
+            token_verifier: Token verifier for validating access tokens
+            base_url: Public URL of this FastMCP server
+            authorization_endpoint: Override discovered authorization endpoint
+            token_endpoint: Override discovered token endpoint
+            revocation_endpoint: Override discovered revocation endpoint
+            service_documentation_url: Optional service documentation URL
+            client_registration_options: Local client registration options
+            revocation_options: Token revocation options
+
+        Returns:
+            Configured OAuthProxy instance
+
+        Raises:
+            ValueError: If discovery fails or required endpoints are missing
+        """
+        discovery_url = (
+            f"{discovery_issuer_url.rstrip('/')}/.well-known/oauth-authorization-server"
+        )
+
+        try:
+            async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SECONDS) as http_client:
+                response = await http_client.get(discovery_url)
+                response.raise_for_status()
+                metadata = response.json()
+        except httpx.RequestError as e:
+            raise ValueError(
+                f"Discovery failed: unable to connect to {discovery_url}"
+            ) from e
+        except httpx.HTTPStatusError as e:
+            raise ValueError(
+                f"Discovery failed: {e.response.status_code} from {discovery_url}"
+            ) from e
+        except Exception as e:
+            raise ValueError(
+                f"Discovery failed: unable to parse metadata from {discovery_url}"
+            ) from e
+
+        # Use overrides or discovered endpoints
+        final_authorization_endpoint = authorization_endpoint or metadata.get(
+            "authorization_endpoint"
+        )
+        final_token_endpoint = token_endpoint or metadata.get("token_endpoint")
+        final_revocation_endpoint = revocation_endpoint or metadata.get(
+            "revocation_endpoint"
+        )
+
+        # Validate required endpoints
+        if not final_authorization_endpoint:
+            raise ValueError("No authorization_endpoint found in discovery metadata")
+        if not final_token_endpoint:
+            raise ValueError("No token_endpoint found in discovery metadata")
+
+        logger.info(
+            "Discovered OAuth endpoints: authorization=%s, token=%s, revocation=%s",
+            final_authorization_endpoint,
+            final_token_endpoint,
+            final_revocation_endpoint or "None",
+        )
+
+        return cls(
+            authorization_endpoint=final_authorization_endpoint,
+            token_endpoint=final_token_endpoint,
+            revocation_endpoint=final_revocation_endpoint,
+            client_id=client_id,
+            client_secret=client_secret,
+            token_verifier=token_verifier,
+            base_url=base_url,
+            service_documentation_url=service_documentation_url,
+            client_registration_options=client_registration_options,
+            revocation_options=revocation_options,
+        )
