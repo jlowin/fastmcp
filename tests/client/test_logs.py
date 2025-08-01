@@ -6,18 +6,23 @@ from mcp import LoggingLevel
 from fastmcp import Client, Context, FastMCP
 from fastmcp.client.logging import LogMessage
 
-LOGGING_LEVEL_MAP = logging.getLevelNamesMapping()  # pyright: ignore [reportAttributeAccessIssue]
-
 
 class LogHandler:
     def __init__(self):
         self.logs: list[LogMessage] = []
         self.logger = logging.getLogger(__name__)
+        # Backwards-compatible way to get the log level mapping
+        if hasattr(logging, "getLevelNamesMapping"):
+            # For Python 3.11+
+            self.LOGGING_LEVEL_MAP = logging.getLevelNamesMapping()  # pyright: ignore [reportAttributeAccessIssue]
+        else:
+            # For older Python versions
+            self.LOGGING_LEVEL_MAP = logging._nameToLevel
 
     async def handle_log(self, message: LogMessage) -> None:
         self.logs.append(message)
 
-        level = LOGGING_LEVEL_MAP[message.level.upper()]
+        level = self.LOGGING_LEVEL_MAP[message.level.upper()]
         msg = message.data.get("msg")
         extra = message.data.get("extra")
         self.logger.log(level, msg, extra=extra)

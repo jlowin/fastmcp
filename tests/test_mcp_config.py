@@ -321,7 +321,13 @@ async def test_multi_client_with_logging(tmp_path: Path, caplog):
     MESSAGES = []
 
     logger = logging.getLogger(__name__)
-    LOGGING_LEVEL_MAP = logging.getLevelNamesMapping()  # pyright: ignore [reportAttributeAccessIssue]
+    # Backwards-compatible way to get the log level mapping
+    if hasattr(logging, "getLevelNamesMapping"):
+        # For Python 3.11+
+        LOGGING_LEVEL_MAP = logging.getLevelNamesMapping()  # pyright: ignore [reportAttributeAccessIssue]
+    else:
+        # For older Python versions
+        LOGGING_LEVEL_MAP = logging._nameToLevel
 
     async def log_handler(message: LogMessage):
         MESSAGES.append(message)
