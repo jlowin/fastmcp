@@ -91,12 +91,12 @@
                     ]
                   },
                   {
-                    "group": "Auth",
+                    "group": "Authentication",
                     "icon": "shield-check",
                     "pages": [
                       "servers/auth/authentication",
                       "servers/auth/token-verification",
-                      "servers/auth/remote-authorization",
+                      "servers/auth/remote-authentication",
                       "servers/auth/full-oauth-server"
                     ]
                   }

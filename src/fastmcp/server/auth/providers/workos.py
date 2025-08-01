@@ -25,9 +25,9 @@ class AuthKitProviderSettings(BaseSettings):
         extra="ignore",
     )
 
-    authkit_domain: str
-    required_scopes: list[str] | None = None
+    authkit_domain: AnyHttpUrl
     base_url: AnyHttpUrl
+    required_scopes: list[str] | None = None
 
 
 @register_provider("AUTHKIT")
@@ -49,6 +49,9 @@ class AuthKitProvider(AuthProvider):
        - Add your server URL to the Redirects tab in WorkOS dashboard
        - Example: https://your-fastmcp-server.com/oauth2/callback
 
+    For detailed setup instructions, see:
+    https://workos.com/docs/authkit/mcp/integrating/token-verification
+
     Example:
         ```python
         from fastmcp.server.auth.providers.workos import AuthKitProvider
@@ -67,18 +70,18 @@ class AuthKitProvider(AuthProvider):
     def __init__(
         self,
         *,
-        authkit_domain: str | NotSetT = NotSet,
-        token_verifier: TokenVerifier | None = None,
+        authkit_domain: AnyHttpUrl | str | NotSetT = NotSet,
         base_url: AnyHttpUrl | str | NotSetT = NotSet,
-        required_scopes: list[str] | None = None,
+        required_scopes: list[str] | None | NotSetT = NotSet,
+        token_verifier: TokenVerifier | None = None,
     ):
         """Initialize WorkOS metadata provider.
 
         Args:
             authkit_domain: Your WorkOS AuthKit domain (e.g., "https://your-app.authkit.app")
-            token_verifier: Optional token verifier. If None, creates JWT verifier for WorkOS
             base_url: Public URL of this FastMCP server
             required_scopes: Optional list of scopes to require for all requests
+            token_verifier: Optional token verifier. If None, creates JWT verifier for WorkOS
         """
         super().__init__()
 
@@ -94,8 +97,8 @@ class AuthKitProvider(AuthProvider):
             }
         )
 
-        self.authkit_domain = settings.authkit_domain.rstrip("/")
-        self.base_url = settings.base_url
+        self.authkit_domain = str(settings.authkit_domain).rstrip("/")
+        self.base_url = str(settings.base_url).rstrip("/")
 
         # Create default JWT verifier if none provided
         if token_verifier is None:
@@ -143,7 +146,7 @@ class AuthKitProvider(AuthProvider):
             """Return FastMCP resource server metadata."""
             return JSONResponse(
                 {
-                    "resource": str(self.base_url),
+                    "resource": self.base_url,
                     "authorization_servers": [self.authkit_domain],
                     "bearer_methods_supported": ["header"],
                 }
