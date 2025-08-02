@@ -1,16 +1,12 @@
 from __future__ import annotations
 
 import httpx
-from mcp.server.auth.provider import (
-    AccessToken,
-)
-from mcp.server.auth.routes import create_protected_resource_routes
 from pydantic import AnyHttpUrl
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from starlette.responses import JSONResponse
-from starlette.routing import BaseRoute, Route
+from starlette.routing import Route
 
-from fastmcp.server.auth.auth import AuthProvider, TokenVerifier
+from fastmcp.server.auth.auth import RemoteAuthProvider, TokenVerifier
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 from fastmcp.server.auth.registry import register_provider
 from fastmcp.utilities.logging import get_logger
@@ -32,7 +28,7 @@ class AuthKitProviderSettings(BaseSettings):
 
 
 @register_provider("AUTHKIT")
-class AuthKitProvider(AuthProvider):
+class AuthKitProvider(RemoteAuthProvider):
     """AuthKit metadata provider for DCR (Dynamic Client Registration).
 
     This provider implements AuthKit integration using metadata forwarding
@@ -84,8 +80,6 @@ class AuthKitProvider(AuthProvider):
             required_scopes: Optional list of scopes to require for all requests
             token_verifier: Optional token verifier. If None, creates JWT verifier for AuthKit
         """
-        super().__init__()
-
         settings = AuthKitProviderSettings.model_validate(
             {
                 k: v
@@ -110,18 +104,18 @@ class AuthKitProvider(AuthProvider):
                 required_scopes=settings.required_scopes,
             )
 
-        self.token_verifier = token_verifier
+        # Initialize RemoteAuthProvider with AuthKit as the authorization server
+        super().__init__(
+            token_verifier=token_verifier,
+            authorization_servers=[AnyHttpUrl(self.authkit_domain)],
+            resource_server_url=self.base_url,
+        )
 
-    async def verify_token(self, token: str) -> AccessToken | None:
-        """Verify an AuthKit token using the configured token verifier."""
-        return await self.token_verifier.verify_token(token)
+    def get_oauth_authorization_server_routes(self) -> list[Route]:
+        """Add AuthKit OAuth authorization server metadata endpoint.
 
-    def get_routes(self) -> list[BaseRoute]:
-        """Add AuthKit metadata endpoints.
-
-        This adds:
-        - /.well-known/oauth-authorization-server (forwards AuthKit metadata)
-        - /.well-known/oauth-protected-resource (using standardized MCP SDK routes)
+        This forwards AuthKit's OAuth authorization server metadata to clients,
+        allowing them to discover AuthKit's capabilities.
         """
 
         async def oauth_authorization_server_metadata(request):
@@ -143,24 +137,10 @@ class AuthKitProvider(AuthProvider):
                     status_code=500,
                 )
 
-        # Create our routes list
-        routes = []
-
-        # Add AuthKit authorization server metadata endpoint
-        routes.append(
+        return [
             Route(
                 "/.well-known/oauth-authorization-server",
                 endpoint=oauth_authorization_server_metadata,
                 methods=["GET"],
             )
-        )
-
-        # Use standardized protected resource routes from MCP SDK
-        protected_resource_routes = create_protected_resource_routes(
-            resource_url=AnyHttpUrl(self.base_url),
-            authorization_servers=[AnyHttpUrl(self.authkit_domain)],
-            scopes_supported=getattr(self.token_verifier, "required_scopes", None),
-        )
-        routes.extend(protected_resource_routes)
-
-        return routes
+        ]

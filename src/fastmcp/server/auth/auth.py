@@ -148,9 +148,8 @@ class RemoteAuthProvider(AuthProvider):
         """Verify token using the configured token verifier."""
         return await self.token_verifier.verify_token(token)
 
-    def get_routes(self) -> list[Route]:
+    def get_oauth_protected_resource_routes(self) -> list[Route]:
         """Get standardized OAuth 2.0 Protected Resource routes."""
-
         assert self.resource_server_url is not None
 
         return create_protected_resource_routes(
@@ -158,6 +157,26 @@ class RemoteAuthProvider(AuthProvider):
             authorization_servers=self.authorization_servers,
             scopes_supported=self.token_verifier.required_scopes,
         )
+
+    def get_oauth_authorization_server_routes(self) -> list[Route]:
+        """Get OAuth authorization server metadata routes.
+
+        Override this method to provide custom OAuth authorization server endpoints.
+        By default, returns an empty list (no authorization server functionality).
+        """
+        return []
+
+    def get_routes(self) -> list[Route]:
+        """Get all OAuth routes (authorization server + protected resource)."""
+        routes = []
+
+        # Add protected resource routes
+        routes.extend(self.get_oauth_protected_resource_routes())
+
+        # Add OAuth authorization server routes (if any)
+        routes.extend(self.get_oauth_authorization_server_routes())
+
+        return routes
 
 
 class OAuthProvider(
