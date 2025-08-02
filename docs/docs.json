@@ -96,7 +96,7 @@
                     "pages": [
                       "servers/auth/authentication",
                       "servers/auth/token-verification",
-                      "servers/auth/remote-authentication",
+                      "servers/auth/remote-oauth",
                       "servers/auth/full-oauth-server"
                     ]
                   }

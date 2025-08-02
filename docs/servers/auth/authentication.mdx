@@ -67,9 +67,9 @@ Token verification is the conceptually simplest approach to authentication, wher
 - Ensuring tokens are securely transmitted to your server
 - Managing token lifecycle in your issuing system
 
-### Remote Authentication
+### Remote OAuth
 
-This is the **recommended pattern for most FastMCP users** and follows the 2025-6-18 MCP protocol update. Your FastMCP server acts as a **Resource Server** and integrates with an external, trusted **Authorization Server** like WorkOS, Auth0, or Okta. You can learn more about this pattern in the [remote authentication documentation](/servers/auth/remote-authentication).
+This is the **recommended pattern for most FastMCP users** and follows the 2025-6-18 MCP protocol update. Your FastMCP server acts as a **Resource Server** and integrates with an external, trusted **Authorization Server** like WorkOS, Auth0, or Okta. You can learn more about this pattern in the [remote OAuth documentation](/servers/auth/remote-oauth).
 
 **Use this when:**
 - You want to integrate with external identity providers
@@ -126,7 +126,7 @@ jwt_verifier = JWTVerifier(...)
 mcp = FastMCP(name="My Server", auth=jwt_verifier)
 ```
 
-```python Remote Authentication
+```python Remote OAuth
 from fastmcp import FastMCP
 from fastmcp.server.auth.providers.workos import AuthKitProvider
 
