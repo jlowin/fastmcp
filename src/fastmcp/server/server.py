@@ -69,6 +69,7 @@ from fastmcp.utilities.types import NotSet, NotSetT
 
 if TYPE_CHECKING:
     from fastmcp.client import Client
+    from fastmcp.client.sampling import SamplingHandler
     from fastmcp.client.transports import ClientTransport, ClientTransportT
     from fastmcp.experimental.server.openapi import FastMCPOpenAPI as FastMCPOpenAPINew
     from fastmcp.experimental.server.openapi.routing import (
@@ -167,6 +168,8 @@ class FastMCP(Generic[LifespanResultT]):
         streamable_http_path: str | None = None,
         json_response: bool | None = None,
         stateless_http: bool | None = None,
+        sampling_handler: SamplingHandler[LifespanResultT] | None = None,
+        sampling_handler_behavior: Literal["default", "fallback"] = "fallback",
     ):
         self.resource_prefix_format: Literal["protocol", "path"] = (
             resource_prefix_format or fastmcp.settings.resource_prefix_format
@@ -224,6 +227,8 @@ class FastMCP(Generic[LifespanResultT]):
         self._setup_handlers()
         self.dependencies = dependencies or fastmcp.settings.server_dependencies
 
+        self.sampling_handler = sampling_handler
+        self.sampling_handler_behavior = sampling_handler_behavior
         self.include_fastmcp_meta = (
             include_fastmcp_meta
             if include_fastmcp_meta is not None

@@ -5,6 +5,7 @@ from typing import TypeAlias
 import mcp.types
 from mcp import ClientSession, CreateMessageResult
 from mcp.client.session import SamplingFnT
+from mcp.server.session import ServerSession
 from mcp.shared.context import LifespanContextT, RequestContext
 from mcp.types import CreateMessageRequestParams as SamplingParams
 from mcp.types import SamplingMessage
@@ -16,7 +17,8 @@ SamplingHandler: TypeAlias = Callable[
     [
         list[SamplingMessage],
         SamplingParams,
-        RequestContext[ClientSession, LifespanContextT],
+        RequestContext[ClientSession, LifespanContextT]
+        | RequestContext[ServerSession, LifespanContextT],
     ],
     str | CreateMessageResult | Awaitable[str | CreateMessageResult],
 ]
