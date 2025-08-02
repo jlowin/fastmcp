@@ -194,12 +194,8 @@ def create_sse_app(
 
         # Determine resource_metadata_url for TokenVerifier
         resource_metadata_url = None
-        if isinstance(auth, TokenVerifier) and auth.resource_server_url:
-            # Add .well-known path for RFC 9728 compliance
-            resource_metadata_url = AnyHttpUrl(
-                str(auth.resource_server_url).rstrip("/")
-                + "/.well-known/oauth-protected-resource"
-            )
+        if isinstance(auth, TokenVerifier):
+            resource_metadata_url = auth.get_resource_metadata_url()
 
         # Auth is enabled, wrap endpoints with RequireAuthMiddleware
         server_routes.append(

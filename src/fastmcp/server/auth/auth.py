@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from mcp.server.auth.provider import (
     AccessToken,
     AuthorizationCode,
@@ -17,9 +15,6 @@ from mcp.server.auth.settings import (
 )
 from pydantic import AnyHttpUrl
 from starlette.routing import Route
-
-if TYPE_CHECKING:
-    pass
 
 
 class AuthProvider:
@@ -97,6 +92,18 @@ class TokenVerifier(AuthProvider, TokenVerifierProtocol):
     async def verify_token(self, token: str) -> AccessToken | None:
         """Verify a bearer token and return access info if valid."""
         raise NotImplementedError("Subclasses must implement verify_token")
+
+    def get_resource_metadata_url(self) -> AnyHttpUrl | None:
+        """Get the resource metadata URL for RFC 9728 compliance."""
+        if self.resource_server_url is None:
+            return None
+
+        # Add .well-known path for RFC 9728 compliance
+        resource_metadata_url = AnyHttpUrl(
+            str(self.resource_server_url).rstrip("/")
+            + "/.well-known/oauth-protected-resource"
+        )
+        return resource_metadata_url
 
 
 class OAuthProvider(
