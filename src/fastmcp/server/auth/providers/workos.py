@@ -4,6 +4,7 @@ import httpx
 from mcp.server.auth.provider import (
     AccessToken,
 )
+from mcp.server.auth.routes import create_protected_resource_routes
 from pydantic import AnyHttpUrl
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from starlette.responses import JSONResponse
@@ -115,12 +116,12 @@ class AuthKitProvider(AuthProvider):
         """Verify an AuthKit token using the configured token verifier."""
         return await self.token_verifier.verify_token(token)
 
-    def customize_auth_routes(self, routes: list[BaseRoute]) -> list[BaseRoute]:
+    def get_routes(self) -> list[BaseRoute]:
         """Add AuthKit metadata endpoints.
 
         This adds:
         - /.well-known/oauth-authorization-server (forwards AuthKit metadata)
-        - /.well-known/oauth-protected-resource (returns FastMCP resource info)
+        - /.well-known/oauth-protected-resource (using standardized MCP SDK routes)
         """
 
         async def oauth_authorization_server_metadata(request):
@@ -142,29 +143,24 @@ class AuthKitProvider(AuthProvider):
                     status_code=500,
                 )
 
-        async def oauth_protected_resource_metadata(request):
-            """Return FastMCP resource server metadata."""
-            return JSONResponse(
-                {
-                    "resource": self.base_url,
-                    "authorization_servers": [self.authkit_domain],
-                    "bearer_methods_supported": ["header"],
-                }
-            )
+        # Create our routes list
+        routes = []
 
-        routes.extend(
-            [
-                Route(
-                    "/.well-known/oauth-authorization-server",
-                    endpoint=oauth_authorization_server_metadata,
-                    methods=["GET"],
-                ),
-                Route(
-                    "/.well-known/oauth-protected-resource",
-                    endpoint=oauth_protected_resource_metadata,
-                    methods=["GET"],
-                ),
-            ]
+        # Add AuthKit authorization server metadata endpoint
+        routes.append(
+            Route(
+                "/.well-known/oauth-authorization-server",
+                endpoint=oauth_authorization_server_metadata,
+                methods=["GET"],
+            )
         )
+
+        # Use standardized protected resource routes from MCP SDK
+        protected_resource_routes = create_protected_resource_routes(
+            resource_url=AnyHttpUrl(self.base_url),
+            authorization_servers=[AnyHttpUrl(self.authkit_domain)],
+            scopes_supported=getattr(self.token_verifier, "required_scopes", None),
+        )
+        routes.extend(protected_resource_routes)
 
         return routes
