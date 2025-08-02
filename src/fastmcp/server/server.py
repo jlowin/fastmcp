@@ -153,6 +153,7 @@ class FastMCP(Generic[LifespanResultT]):
         include_tags: set[str] | None = None,
         exclude_tags: set[str] | None = None,
         include_fastmcp_meta: bool | None = None,
+        component_filter: Callable[[set[str]], bool | Awaitable[bool]] | None = None,
         # ---
         # ---
         # --- The following arguments are DEPRECATED ---
@@ -217,6 +218,7 @@ class FastMCP(Generic[LifespanResultT]):
 
         self.include_tags = include_tags
         self.exclude_tags = exclude_tags
+        self.component_filter = component_filter
 
         self.middleware = middleware or []
 
@@ -498,7 +500,7 @@ class FastMCP(Generic[LifespanResultT]):
 
             mcp_tools: list[Tool] = []
             for tool in tools:
-                if self._should_enable_component(tool):
+                if await self._should_enable_component(tool):
                     mcp_tools.append(tool)
 
             return mcp_tools
@@ -543,7 +545,7 @@ class FastMCP(Generic[LifespanResultT]):
 
             mcp_resources: list[Resource] = []
             for resource in resources:
-                if self._should_enable_component(resource):
+                if await self._should_enable_component(resource):
                     mcp_resources.append(resource)
 
             return mcp_resources
@@ -588,7 +590,7 @@ class FastMCP(Generic[LifespanResultT]):
 
             mcp_templates: list[ResourceTemplate] = []
             for template in templates:
-                if self._should_enable_component(template):
+                if await self._should_enable_component(template):
                     mcp_templates.append(template)
 
             return mcp_templates
@@ -633,7 +635,7 @@ class FastMCP(Generic[LifespanResultT]):
 
             mcp_prompts: list[Prompt] = []
             for prompt in prompts:
-                if self._should_enable_component(prompt):
+                if await self._should_enable_component(prompt):
                     mcp_prompts.append(prompt)
 
             return mcp_prompts
@@ -686,7 +688,7 @@ class FastMCP(Generic[LifespanResultT]):
             context: MiddlewareContext[mcp.types.CallToolRequestParams],
         ) -> ToolResult:
             tool = await self._tool_manager.get_tool(context.message.name)
-            if not self._should_enable_component(tool):
+            if not await self._should_enable_component(tool):
                 raise NotFoundError(f"Unknown tool: {context.message.name!r}")
 
             return await self._tool_manager.call_tool(
@@ -729,7 +731,7 @@ class FastMCP(Generic[LifespanResultT]):
             context: MiddlewareContext[mcp.types.ReadResourceRequestParams],
         ) -> list[ReadResourceContents]:
             resource = await self._resource_manager.get_resource(context.message.uri)
-            if not self._should_enable_component(resource):
+            if not await self._should_enable_component(resource):
                 raise NotFoundError(f"Unknown resource: {str(context.message.uri)!r}")
 
             content = await self._resource_manager.read_resource(context.message.uri)
@@ -786,7 +788,7 @@ class FastMCP(Generic[LifespanResultT]):
             context: MiddlewareContext[mcp.types.GetPromptRequestParams],
         ) -> GetPromptResult:
             prompt = await self._prompt_manager.get_prompt(context.message.name)
-            if not self._should_enable_component(prompt):
+            if not await self._should_enable_component(prompt):
                 raise NotFoundError(f"Unknown prompt: {context.message.name!r}")
 
             return await self._prompt_manager.render_prompt(
@@ -2109,7 +2111,7 @@ class FastMCP(Generic[LifespanResultT]):
 
         return cls.as_proxy(client, **settings)
 
-    def _should_enable_component(
+    async def _should_enable_component(
         self,
         component: FastMCPComponent,
     ) -> bool:
@@ -2118,6 +2120,7 @@ class FastMCP(Generic[LifespanResultT]):
 
         Rules:
             - If the component's enabled property is False, always return False.
+            - If component_filter is provided, use it to check if the component should be enabled.
             - If both include_tags and exclude_tags are None, return True.
             - If exclude_tags is provided, check each exclude tag:
                 - If the exclude tag is a string, it must be present in the input tags to exclude.
@@ -2128,6 +2131,16 @@ class FastMCP(Generic[LifespanResultT]):
         """
         if not component.enabled:
             return False
+
+        # Check custom component filter if provided
+        if self.component_filter is not None:
+            result = self.component_filter(component.tags)
+            if inspect.iscoroutine(result):
+                filter_result = await result
+            else:
+                filter_result = result
+            if not filter_result:
+                return False
 
         if self.include_tags is None and self.exclude_tags is None:
             return True

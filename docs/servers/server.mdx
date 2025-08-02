@@ -64,6 +64,12 @@ The `FastMCP` constructor accepts several arguments:
   Hide components with any matching tag
 </ParamField>
 
+<ParamField body="component_filter" type="Callable[[set[str]], bool | Awaitable[bool]] | None">
+  <VersionBadge version="2.12.0" />
+  
+  A custom function to determine component availability based on tags. Receives a component's tags and returns `True` to enable or `False` to disable the component. Supports both sync and async functions. This filter is applied in addition to `include_tags` and `exclude_tags`, enabling dynamic per-request filtering based on user permissions, request context, or complex tag logic
+</ParamField>
+
 <ParamField body="on_duplicate_tools" type='Literal["error", "warn", "replace"]' default="error">
   How to handle duplicate tool registrations
 </ParamField>
@@ -182,6 +188,50 @@ mcp = FastMCP(include_tags={"admin"}, exclude_tags={"deprecated"})
 ```
 
 This filtering applies to all component types (tools, resources, resource templates, and prompts) and affects both listing and access.
+
+### Advanced Component Filtering
+
+<VersionBadge version="2.12.0" />
+
+For more sophisticated filtering beyond static tags, the `component_filter` parameter accepts a custom function that receives component tags and returns whether the component should be enabled. This enables **per-request dynamic filtering** based on user permissions, request context, or complex tag logic.
+
+```python
+from fastmcp import FastMCP
+from fastmcp.server.dependencies import get_http_request
+
+def permission_filter(tags: set[str]) -> bool:
+    """Filter components based on current request context."""
+    request = get_http_request()  # Access current HTTP request
+    user_role = request.headers.get("X-User-Role", "guest")
+    
+    if user_role == "admin":
+        return True  # Admins see everything
+    elif user_role == "user":
+        return "public" in tags  # Users only see public components
+    else:
+        return False  # Guests see nothing
+
+mcp = FastMCP(
+    include_tags={"api"},  # Must have 'api' tag (ANY logic)
+    component_filter=permission_filter  # Plus custom per-request logic
+)
+
+@mcp.tool(tags={"api", "public"})
+def public_api() -> str:
+    """Available to users and admins."""
+    return "Public API data"
+
+@mcp.tool(tags={"api", "admin"})
+def admin_api() -> str:
+    """Available only to admins."""
+    return "Admin-only data"
+```
+
+The component filter supports both sync and async functions, and is applied in addition to `include_tags` and `exclude_tags`. Unlike `include_tags` which uses ANY matching logic, custom filters enable complex requirements like requiring ALL tags or conditional logic based on request context.
+
+<Tip>
+Component filters are powerful for multi-tenant applications, user role-based access control, feature flags, and any scenario requiring dynamic component availability based on request context. As it also supports async functions, you can perform database queries, API calls, or other asynchronous operations to determine component availability.
+</Tip>
 
 ## Running the Server
 

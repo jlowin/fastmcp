@@ -7,6 +7,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
+import anyio
 import pytest
 from mcp import McpError
 from mcp.types import (
@@ -268,6 +269,181 @@ class TestToolTags:
 
             result_2 = await client.call_tool("tool_2", {})
             assert result_2.data == 2
+
+
+class TestComponentFilterIntegration:
+    """Test component_filter integration with actual MCP operations."""
+
+    def create_server_with_filter(
+        self, component_filter=None, include_tags=None, exclude_tags=None
+    ):
+        """Helper to create server with filter and components."""
+        mcp = FastMCP(
+            component_filter=component_filter,
+            include_tags=include_tags,
+            exclude_tags=exclude_tags,
+        )
+
+        @mcp.tool(tags={"api", "v1"})
+        def api_v1_tool() -> int:
+            return 1
+
+        @mcp.tool(tags={"api", "v2"})
+        def api_v2_tool() -> int:
+            return 2
+
+        @mcp.tool(tags={"database", "v1"})
+        def db_tool() -> int:
+            return 3
+
+        @mcp.resource("resource://api/v1", tags={"api", "v1"})
+        def api_v1_resource() -> str:
+            return "api_v1_data"
+
+        @mcp.resource("resource://api/v2", tags={"api", "v2"})
+        def api_v2_resource() -> str:
+            return "api_v2_data"
+
+        @mcp.resource("resource://db", tags={"database", "v1"})
+        def db_resource() -> str:
+            return "db_data"
+
+        @mcp.prompt(tags={"api", "v1"})
+        def api_v1_prompt() -> str:
+            return "api_v1_prompt"
+
+        @mcp.prompt(tags={"api", "v2"})
+        def api_v2_prompt() -> str:
+            return "api_v2_prompt"
+
+        @mcp.prompt(tags={"database", "v1"})
+        def db_prompt() -> str:
+            return "db_prompt"
+
+        return mcp
+
+    async def test_sync_filter_tools_integration(self):
+        """Test sync filter with tools through full MCP client."""
+
+        def filter_api_only(tags: set[str]) -> bool:
+            return "api" in tags
+
+        mcp = self.create_server_with_filter(component_filter=filter_api_only)
+
+        async with Client(mcp) as client:
+            tools = await client.list_tools()
+            tool_names = {t.name for t in tools}
+            assert tool_names == {"api_v1_tool", "api_v2_tool"}
+
+    async def test_async_filter_tools_integration(self):
+        """Test async filter with tools through full MCP client."""
+
+        async def filter_v1_only(tags: set[str]) -> bool:
+            await anyio.sleep(0)  # Simulate async work
+            return "v1" in tags
+
+        mcp = self.create_server_with_filter(component_filter=filter_v1_only)
+
+        async with Client(mcp) as client:
+            tools = await client.list_tools()
+            tool_names = {t.name for t in tools}
+            assert tool_names == {"api_v1_tool", "db_tool"}
+
+    async def test_filter_resources_integration(self):
+        """Test filter with resources through full MCP client."""
+
+        def filter_api_only(tags: set[str]) -> bool:
+            return "api" in tags
+
+        mcp = self.create_server_with_filter(component_filter=filter_api_only)
+
+        async with Client(mcp) as client:
+            resources = await client.list_resources()
+            resource_names = {r.name for r in resources}
+            assert resource_names == {"api_v1_resource", "api_v2_resource"}
+
+    async def test_filter_prompts_integration(self):
+        """Test filter with prompts through full MCP client."""
+
+        def filter_v2_only(tags: set[str]) -> bool:
+            return "v2" in tags
+
+        mcp = self.create_server_with_filter(component_filter=filter_v2_only)
+
+        async with Client(mcp) as client:
+            prompts = await client.list_prompts()
+            prompt_names = {p.name for p in prompts}
+            assert prompt_names == {"api_v2_prompt"}
+
+    async def test_filter_with_include_exclude_integration(self):
+        """Test filter combined with include_tags and exclude_tags."""
+
+        def filter_api_only(tags: set[str]) -> bool:
+            return "api" in tags
+
+        mcp = self.create_server_with_filter(
+            component_filter=filter_api_only,
+            include_tags={"v1", "v2"},
+            exclude_tags={"v2"},
+        )
+
+        async with Client(mcp) as client:
+            tools = await client.list_tools()
+            tool_names = {t.name for t in tools}
+            # Should only include api tools with v1 tags (v2 excluded)
+            assert tool_names == {"api_v1_tool"}
+
+    async def test_call_filtered_tool(self):
+        """Test calling tools that pass through the filter."""
+
+        def filter_api_only(tags: set[str]) -> bool:
+            return "api" in tags
+
+        mcp = self.create_server_with_filter(component_filter=filter_api_only)
+
+        async with Client(mcp) as client:
+            # Should work - api tool passes filter
+            result = await client.call_tool("api_v1_tool", {})
+            assert result.data == 1
+
+            # Should fail - db tool doesn't pass filter
+            with pytest.raises(Exception, match="Unknown tool"):
+                await client.call_tool("db_tool", {})
+
+    async def test_read_filtered_resource(self):
+        """Test reading resources that pass through the filter."""
+
+        def filter_v1_only(tags: set[str]) -> bool:
+            return "v1" in tags
+
+        mcp = self.create_server_with_filter(component_filter=filter_v1_only)
+
+        async with Client(mcp) as client:
+            # Should work - v1 resource passes filter
+            result = await client.read_resource(AnyUrl("resource://api/v1"))
+            assert result[0].text == "api_v1_data"  # type: ignore[attr-defined]
+
+            # Should fail - v2 resource doesn't pass filter
+            with pytest.raises(Exception, match="Unknown resource"):
+                await client.read_resource(AnyUrl("resource://api/v2"))
+
+    async def test_get_filtered_prompt(self):
+        """Test getting prompts that pass through the filter."""
+
+        async def filter_database_only(tags: set[str]) -> bool:
+            await anyio.sleep(0)  # Simulate async work
+            return "database" in tags
+
+        mcp = self.create_server_with_filter(component_filter=filter_database_only)
+
+        async with Client(mcp) as client:
+            # Should work - database prompt passes filter
+            result = await client.get_prompt("db_prompt")
+            assert result.messages[0].content.text == "db_prompt"  # type: ignore[attr-defined]
+
+            # Should fail - api prompt doesn't pass filter
+            with pytest.raises(Exception, match="Unknown prompt"):
+                await client.get_prompt("api_v1_prompt")
 
 
 class TestToolReturnTypes:

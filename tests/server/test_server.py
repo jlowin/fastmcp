@@ -1,6 +1,7 @@
 import logging
 from typing import Annotated, Any
 
+import anyio
 import httpx
 import pytest
 from fastapi import FastAPI
@@ -1336,106 +1337,260 @@ class TestResourcePrefixMounting:
 
 
 class TestShouldIncludeComponent:
-    def test_no_filters_returns_true(self):
+    async def test_no_filters_returns_true(self):
         """Test that when no include or exclude filters are provided, always returns True."""
         tool = Tool(name="test_tool", tags={"tag1", "tag2"}, parameters={})
         mcp = FastMCP(tools=[tool])
-        result = mcp._should_enable_component(tool)
+        result = await mcp._should_enable_component(tool)
         assert result is True
 
-    def test_exclude_string_tag_present_returns_false(self):
+    async def test_exclude_string_tag_present_returns_false(self):
         """Test that when an exclude string tag is present in tags, returns False."""
         tool = Tool(
             name="test_tool", tags={"tag1", "tag2", "exclude_me"}, parameters={}
         )
         mcp = FastMCP(tools=[tool], exclude_tags={"exclude_me"})
-        result = mcp._should_enable_component(tool)
+        result = await mcp._should_enable_component(tool)
         assert result is False
 
-    def test_exclude_string_tag_absent_returns_true(self):
+    async def test_exclude_string_tag_absent_returns_true(self):
         """Test that when an exclude string tag is not present in tags, returns True."""
         tool = Tool(name="test_tool", tags={"tag1", "tag2"}, parameters={})
         mcp = FastMCP(tools=[tool], exclude_tags={"exclude_me"})
-        result = mcp._should_enable_component(tool)
+        result = await mcp._should_enable_component(tool)
         assert result is True
 
-    def test_multiple_exclude_tags_any_match_returns_false(self):
+    async def test_multiple_exclude_tags_any_match_returns_false(self):
         """Test that when any exclude tag matches, returns False."""
         tool = Tool(name="test_tool", tags={"tag1", "tag2", "tag3"}, parameters={})
         mcp = FastMCP(
             tools=[tool], exclude_tags={"not_present", "tag2", "also_not_present"}
         )
-        result = mcp._should_enable_component(tool)
+        result = await mcp._should_enable_component(tool)
         assert result is False
 
-    def test_include_string_tag_present_returns_true(self):
+    async def test_include_string_tag_present_returns_true(self):
         """Test that when an include string tag is present in tags, returns True."""
         tool = Tool(
             name="test_tool", tags={"tag1", "include_me", "tag2"}, parameters={}
         )
         mcp = FastMCP(tools=[tool], include_tags={"include_me"})
-        result = mcp._should_enable_component(tool)
+        result = await mcp._should_enable_component(tool)
         assert result is True
 
-    def test_include_string_tag_absent_returns_false(self):
+    async def test_include_string_tag_absent_returns_false(self):
         """Test that when an include string tag is not present in tags, returns False."""
         tool = Tool(name="test_tool", tags={"tag1", "tag2"}, parameters={})
         mcp = FastMCP(tools=[tool], include_tags={"include_me"})
-        result = mcp._should_enable_component(tool)
+        result = await mcp._should_enable_component(tool)
         assert result is False
 
-    def test_multiple_include_tags_any_match_returns_true(self):
+    async def test_multiple_include_tags_any_match_returns_true(self):
         """Test that when any include tag matches, returns True."""
         tool = Tool(name="test_tool", tags={"tag1", "tag2", "tag3"}, parameters={})
         mcp = FastMCP(
             tools=[tool], include_tags={"not_present", "tag2", "also_not_present"}
         )
-        result = mcp._should_enable_component(tool)
+        result = await mcp._should_enable_component(tool)
         assert result is True
 
-    def test_multiple_include_tags_none_match_returns_false(self):
+    async def test_multiple_include_tags_none_match_returns_false(self):
         """Test that when no include tags match, returns False."""
         tool = Tool(name="test_tool", tags={"tag1", "tag2", "tag3"}, parameters={})
         mcp = FastMCP(tools=[tool], include_tags={"not_present", "also_not_present"})
-        result = mcp._should_enable_component(tool)
+        result = await mcp._should_enable_component(tool)
         assert result is False
 
-    def test_exclude_takes_precedence_over_include(self):
+    async def test_exclude_takes_precedence_over_include(self):
         """Test that exclude tags take precedence over include tags."""
         tool = Tool(
             name="test_tool", tags={"tag1", "tag2", "exclude_me"}, parameters={}
         )
         mcp = FastMCP(tools=[tool], include_tags={"tag1"}, exclude_tags={"exclude_me"})
-        result = mcp._should_enable_component(tool)
+        result = await mcp._should_enable_component(tool)
         assert result is False
 
-    def test_empty_include_exclude_sets(self):
+    async def test_empty_include_exclude_sets(self):
         """Test behavior with empty include/exclude sets."""
         # Empty include set means nothing matches
         tool1 = Tool(name="test_tool", tags={"tag1", "tag2"}, parameters={})
         mcp1 = FastMCP(tools=[tool1], include_tags=set())
-        result = mcp1._should_enable_component(tool1)
+        result = await mcp1._should_enable_component(tool1)
         assert result is False
 
         # Empty exclude set means nothing excluded
         tool2 = Tool(name="test_tool", tags={"tag1", "tag2"}, parameters={})
         mcp2 = FastMCP(tools=[tool2], exclude_tags=set())
-        result = mcp2._should_enable_component(tool2)
+        result = await mcp2._should_enable_component(tool2)
         assert result is True
 
-    def test_empty_tags_with_filters(self):
+    async def test_empty_tags_with_filters(self):
         """Test behavior when input tags are empty."""
         # With include filters, empty tags should not match
         tool1 = Tool(name="test_tool", tags=set(), parameters={})
         mcp1 = FastMCP(tools=[tool1], include_tags={"required_tag"})
-        result = mcp1._should_enable_component(tool1)
+        result = await mcp1._should_enable_component(tool1)
         assert result is False
 
         # With exclude filters but no include, empty tags should pass
         tool2 = Tool(name="test_tool", tags=set(), parameters={})
         mcp2 = FastMCP(tools=[tool2], exclude_tags={"bad_tag"})
-        result = mcp2._should_enable_component(tool2)
+        result = await mcp2._should_enable_component(tool2)
         assert result is True
+
+
+class TestComponentFilter:
+    """Test the component_filter parameter functionality."""
+
+    async def test_sync_filter_allow_all(self):
+        """Test sync filter function that allows all components."""
+
+        def allow_all_filter(tags: set[str]) -> bool:
+            return True
+
+        tool = Tool(name="test_tool", tags={"tag1", "tag2"}, parameters={})
+        mcp = FastMCP(tools=[tool], component_filter=allow_all_filter)
+        result = await mcp._should_enable_component(tool)
+        assert result is True
+
+    async def test_sync_filter_deny_all(self):
+        """Test sync filter function that denies all components."""
+
+        def deny_all_filter(tags: set[str]) -> bool:
+            return False
+
+        tool = Tool(name="test_tool", tags={"tag1", "tag2"}, parameters={})
+        mcp = FastMCP(tools=[tool], component_filter=deny_all_filter)
+        result = await mcp._should_enable_component(tool)
+        assert result is False
+
+    async def test_async_filter_allow_all(self):
+        """Test async filter function that allows all components."""
+
+        async def allow_all_filter(tags: set[str]) -> bool:
+            return True
+
+        tool = Tool(name="test_tool", tags={"tag1", "tag2"}, parameters={})
+        mcp = FastMCP(tools=[tool], component_filter=allow_all_filter)
+        result = await mcp._should_enable_component(tool)
+        assert result is True
+
+    async def test_async_filter_deny_all(self):
+        """Test async filter function that denies all components."""
+
+        async def deny_all_filter(tags: set[str]) -> bool:
+            return False
+
+        tool = Tool(name="test_tool", tags={"tag1", "tag2"}, parameters={})
+        mcp = FastMCP(tools=[tool], component_filter=deny_all_filter)
+        result = await mcp._should_enable_component(tool)
+        assert result is False
+
+    async def test_sync_filter_by_tag(self):
+        """Test sync filter function that filters based on specific tags."""
+
+        def filter_by_production(tags: set[str]) -> bool:
+            return "production" in tags
+
+        production_tool = Tool(
+            name="prod_tool", tags={"production", "db"}, parameters={}
+        )
+        dev_tool = Tool(name="dev_tool", tags={"development", "db"}, parameters={})
+
+        mcp = FastMCP(
+            tools=[production_tool, dev_tool], component_filter=filter_by_production
+        )
+
+        assert await mcp._should_enable_component(production_tool) is True
+        assert await mcp._should_enable_component(dev_tool) is False
+
+    async def test_async_filter_by_tag(self):
+        """Test async filter function that filters based on specific tags."""
+
+        async def filter_by_admin(tags: set[str]) -> bool:
+            # Simulate async operation
+            await anyio.sleep(0)
+            return "admin" in tags
+
+        admin_tool = Tool(
+            name="admin_tool", tags={"admin", "privileged"}, parameters={}
+        )
+        user_tool = Tool(name="user_tool", tags={"user", "basic"}, parameters={})
+
+        mcp = FastMCP(tools=[admin_tool, user_tool], component_filter=filter_by_admin)
+
+        assert await mcp._should_enable_component(admin_tool) is True
+        assert await mcp._should_enable_component(user_tool) is False
+
+    async def test_filter_with_include_tags_both_pass(self):
+        """Test component_filter combined with include_tags when both pass."""
+
+        def filter_by_api(tags: set[str]) -> bool:
+            return "api" in tags
+
+        tool = Tool(name="test_tool", tags={"api", "v1"}, parameters={})
+        mcp = FastMCP(tools=[tool], include_tags={"v1"}, component_filter=filter_by_api)
+        result = await mcp._should_enable_component(tool)
+        assert result is True
+
+    async def test_filter_with_include_tags_filter_fails(self):
+        """Test component_filter combined with include_tags when filter fails."""
+
+        def filter_by_api(tags: set[str]) -> bool:
+            return "api" in tags
+
+        tool = Tool(name="test_tool", tags={"database", "v1"}, parameters={})
+        mcp = FastMCP(tools=[tool], include_tags={"v1"}, component_filter=filter_by_api)
+        result = await mcp._should_enable_component(tool)
+        assert result is False
+
+    async def test_filter_with_include_tags_include_fails(self):
+        """Test component_filter combined with include_tags when include fails."""
+
+        def filter_by_api(tags: set[str]) -> bool:
+            return "api" in tags
+
+        tool = Tool(name="test_tool", tags={"api", "v2"}, parameters={})
+        mcp = FastMCP(tools=[tool], include_tags={"v1"}, component_filter=filter_by_api)
+        result = await mcp._should_enable_component(tool)
+        assert result is False
+
+    async def test_filter_with_exclude_tags_both_pass(self):
+        """Test component_filter combined with exclude_tags when both pass."""
+
+        def filter_by_api(tags: set[str]) -> bool:
+            return "api" in tags
+
+        tool = Tool(name="test_tool", tags={"api", "v1"}, parameters={})
+        mcp = FastMCP(
+            tools=[tool], exclude_tags={"deprecated"}, component_filter=filter_by_api
+        )
+        result = await mcp._should_enable_component(tool)
+        assert result is True
+
+    async def test_filter_with_exclude_tags_exclude_fails(self):
+        """Test component_filter combined with exclude_tags when exclude fails."""
+
+        def filter_by_api(tags: set[str]) -> bool:
+            return "api" in tags
+
+        tool = Tool(name="test_tool", tags={"api", "deprecated"}, parameters={})
+        mcp = FastMCP(
+            tools=[tool], exclude_tags={"deprecated"}, component_filter=filter_by_api
+        )
+        result = await mcp._should_enable_component(tool)
+        assert result is False
+
+    async def test_filter_disabled_component(self):
+        """Test that disabled components are still filtered out even with passing filter."""
+
+        def allow_all_filter(tags: set[str]) -> bool:
+            return True
+
+        tool = Tool(name="test_tool", tags={"api"}, parameters={}, enabled=False)
+        mcp = FastMCP(tools=[tool], component_filter=allow_all_filter)
+        result = await mcp._should_enable_component(tool)
+        assert result is False
 
 
 class TestOpenAPIExperimentalFeatureFlag:
