@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import warnings
+import weakref
 from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
@@ -119,6 +120,7 @@ class Context:
         self._tokens: list[Token] = []
         self._notification_queue: set[str] = set()  # Dedupe notifications
         self._state: dict[str, Any] = {}
+        self._background_tasks: weakref.WeakSet[asyncio.Task] = weakref.WeakSet()
 
     async def __aenter__(self) -> Context:
         """Enter the context manager and set this context as the current context."""
@@ -136,6 +138,16 @@ class Context:
         """Exit the context manager and reset the most recent token."""
         # Flush any remaining notifications before exiting
         await self._flush_notifications()
+
+        # Cancel and wait for any remaining background tasks
+        remaining_tasks = list(self._background_tasks)
+        for task in remaining_tasks:
+            if not task.done():
+                task.cancel()
+
+        # Wait for tasks to complete cancellation
+        if remaining_tasks:
+            await asyncio.gather(*remaining_tasks, return_exceptions=True)
 
         if self._tokens:
             token = self._tokens.pop()
@@ -558,8 +570,11 @@ class Context:
             loop = asyncio.get_running_loop()
             if loop and not loop.is_running():
                 return
-            # Schedule flush as a task (fire-and-forget)
-            asyncio.create_task(self._flush_notifications())
+            # Schedule flush as a tracked task to prevent memory leaks
+            task = asyncio.create_task(self._flush_notifications())
+            self._background_tasks.add(task)
+            # Remove task from tracking when it completes
+            task.add_done_callback(lambda t: self._background_tasks.discard(t))
         except RuntimeError:
             # No event loop - will flush later
             pass
