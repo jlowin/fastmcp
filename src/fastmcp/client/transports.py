@@ -858,6 +858,10 @@ class MCPConfigTransport(ClientTransport):
         async with self.transport.connect_session(**session_kwargs) as session:
             yield session
 
+    async def close(self):
+        """Close the underlying transport to ensure proper cleanup of subprocesses."""
+        await self.transport.close()
+
     def __repr__(self) -> str:
         return f"<MCPConfigTransport(config='{self.config}')>"
 
