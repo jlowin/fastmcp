@@ -30,6 +30,19 @@ class AuthProvider(TokenVerifierProtocol):
     custom authentication routes.
     """
 
+    def __init__(self, resource_server_url: AnyHttpUrl | str | None = None):
+        """
+        Initialize the auth provider.
+
+        Args:
+            resource_server_url: The URL of this resource server. This is used
+            for RFC 8707 resource indicators, including creating the WWW-Authenticate
+            header.
+        """
+        if isinstance(resource_server_url, str):
+            resource_server_url = AnyHttpUrl(resource_server_url)
+        self.resource_server_url = resource_server_url
+
     async def verify_token(self, token: str) -> AccessToken | None:
         """Verify a bearer token and return access info if valid.
 
@@ -57,6 +70,18 @@ class AuthProvider(TokenVerifierProtocol):
         """
         return []
 
+    def get_resource_metadata_url(self) -> AnyHttpUrl | None:
+        """Get the resource metadata URL for RFC 9728 compliance."""
+        if self.resource_server_url is None:
+            return None
+
+        # Add .well-known path for RFC 9728 compliance
+        resource_metadata_url = AnyHttpUrl(
+            str(self.resource_server_url).rstrip("/")
+            + "/.well-known/oauth-protected-resource"
+        )
+        return resource_metadata_url
+
 
 class TokenVerifier(AuthProvider):
     """Base class for token verifiers (Resource Servers).
@@ -74,37 +99,17 @@ class TokenVerifier(AuthProvider):
         Initialize the token verifier.
 
         Args:
-            resource_server_url: The URL of this resource server (for RFC 8707 resource indicators)
+            resource_server_url: The URL of this resource server. This is used
+            for RFC 8707 resource indicators, including creating the WWW-Authenticate
+            header.
             required_scopes: Scopes that are required for all requests
         """
-        super().__init__()
-
+        super().__init__(resource_server_url=resource_server_url)
         self.required_scopes = required_scopes or []
-
-        # Handle our own resource_server_url and required_scopes
-        self.resource_server_url: AnyHttpUrl | None
-        if resource_server_url is None:
-            self.resource_server_url = None
-        elif isinstance(resource_server_url, str):
-            self.resource_server_url = AnyHttpUrl(resource_server_url)
-        else:
-            self.resource_server_url = resource_server_url
 
     async def verify_token(self, token: str) -> AccessToken | None:
         """Verify a bearer token and return access info if valid."""
         raise NotImplementedError("Subclasses must implement verify_token")
-
-    def get_resource_metadata_url(self) -> AnyHttpUrl | None:
-        """Get the resource metadata URL for RFC 9728 compliance."""
-        if self.resource_server_url is None:
-            return None
-
-        # Add .well-known path for RFC 9728 compliance
-        resource_metadata_url = AnyHttpUrl(
-            str(self.resource_server_url).rstrip("/")
-            + "/.well-known/oauth-protected-resource"
-        )
-        return resource_metadata_url
 
 
 class RemoteAuthProvider(AuthProvider):
@@ -124,34 +129,29 @@ class RemoteAuthProvider(AuthProvider):
         self,
         token_verifier: TokenVerifier,
         authorization_servers: list[AnyHttpUrl],
-        resource_server_url: AnyHttpUrl,
+        resource_server_url: AnyHttpUrl | str,
     ):
         """Initialize the remote auth provider.
 
         Args:
             token_verifier: TokenVerifier instance for token validation
             authorization_servers: List of authorization servers that issue valid tokens
-            resource_server_url: URL of this resource server
-            scopes_supported: Scopes supported by this resource (defaults to token_verifier.required_scopes)
+            resource_server_url: URL of this resource server. This is used
+            for RFC 8707 resource indicators, including creating the WWW-Authenticate
+            header.
         """
-        super().__init__()
+        super().__init__(resource_server_url=resource_server_url)
         self.token_verifier = token_verifier
         self.authorization_servers = authorization_servers
-        self.resource_server_url = resource_server_url
 
     async def verify_token(self, token: str) -> AccessToken | None:
         """Verify token using the configured token verifier."""
         return await self.token_verifier.verify_token(token)
 
-    def get_resource_metadata_url(self) -> AnyHttpUrl:
-        """Get the resource metadata URL for RFC 9728 compliance."""
-        return AnyHttpUrl(
-            str(self.resource_server_url).rstrip("/")
-            + "/.well-known/oauth-protected-resource"
-        )
-
     def get_routes(self) -> list[Route]:
         """Get standardized OAuth 2.0 Protected Resource routes."""
+
+        assert self.resource_server_url is not None
 
         return create_protected_resource_routes(
             resource_url=self.resource_server_url,

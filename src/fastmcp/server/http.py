@@ -15,7 +15,6 @@ from mcp.server.lowlevel.server import LifespanResultT
 from mcp.server.sse import SseServerTransport
 from mcp.server.streamable_http import EventStore
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
-from pydantic import AnyHttpUrl
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.middleware.authentication import AuthenticationMiddleware
@@ -152,12 +151,8 @@ def create_sse_app(
         auth_routes = auth.get_routes()
         required_scopes = getattr(auth, "required_scopes", None) or []
 
-        # Get resource metadata URL for WWW-Authenticate header if available
-        resource_metadata_url: AnyHttpUrl | None = None
-        try:
-            resource_metadata_url = auth.get_resource_metadata_url()  # type: ignore
-        except AttributeError:
-            pass
+        # Get resource metadata URL for WWW-Authenticate header
+        resource_metadata_url = auth.get_resource_metadata_url()
 
         server_routes.extend(auth_routes)
         server_middleware.extend(auth_middleware)
@@ -302,12 +297,8 @@ def create_streamable_http_app(
         auth_routes = auth.get_routes()
         required_scopes = getattr(auth, "required_scopes", None) or []
 
-        # Get resource metadata URL for WWW-Authenticate header if available
-        resource_metadata_url: AnyHttpUrl | None = None
-        try:
-            resource_metadata_url = auth.get_resource_metadata_url()  # type: ignore
-        except AttributeError:
-            pass
+        # Get resource metadata URL for WWW-Authenticate header
+        resource_metadata_url = auth.get_resource_metadata_url()
 
         server_routes.extend(auth_routes)
         server_middleware.extend(auth_middleware)
