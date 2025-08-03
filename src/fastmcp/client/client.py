@@ -217,6 +217,7 @@ class Client(Generic[ClientTransportT]):
         init_timeout: datetime.timedelta | float | int | None = None,
         client_info: mcp.types.Implementation | None = None,
         auth: httpx.Auth | Literal["oauth"] | str | None = None,
+        keep_alive: bool = False,
     ) -> None:
         self.transport = cast(ClientTransportT, infer_transport(transport))
         if auth is not None:
@@ -265,6 +266,8 @@ class Client(Generic[ClientTransportT]):
             self._session_kwargs["elicitation_callback"] = create_elicitation_callback(
                 elicitation_handler
             )
+
+        self.keep_alive = keep_alive
 
         # Session context management - see class docstring for detailed explanation
         self._session_state = ClientSessionState()
@@ -359,6 +362,11 @@ class Client(Generic[ClientTransportT]):
                     self._session_state.initialize_result = None
 
     async def __aenter__(self):
+        # If keep-alive is true, we perform a connect without a corresponding disconnect on exit
+        # this ensures that the client remains connected until the proxy client is explicitly closed or deleted
+        if self.keep_alive:
+            await self._connect()
+
         return await self._connect()
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):

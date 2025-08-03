@@ -30,21 +30,25 @@ class TestKeepAlive:
         return script_file
 
     async def test_keep_alive_default_true(self):
-        client = Client(transport=StdioTransport(command="python", args=[""]))
+        client = Client(
+            transport=StdioTransport(command="python", args=[""]), keep_alive=True
+        )
 
-        assert client.transport.keep_alive is True
+        assert client.keep_alive is True
 
     async def test_keep_alive_set_false(self):
         client = Client(
-            transport=StdioTransport(command="python", args=[""], keep_alive=False)
+            transport=StdioTransport(command="python", args=[""]), keep_alive=False
         )
-        assert client.transport.keep_alive is False
+        assert client.keep_alive is False
 
     async def test_keep_alive_maintains_session_across_multiple_calls(
         self, stdio_script
     ):
-        client = Client(transport=PythonStdioTransport(script_path=stdio_script))
-        assert client.transport.keep_alive is True
+        client = Client(
+            transport=PythonStdioTransport(script_path=stdio_script), keep_alive=True
+        )
+        assert client.keep_alive is True
 
         async with client:
             result1 = await client.call_tool("pid")
@@ -60,9 +64,9 @@ class TestKeepAlive:
         self, stdio_script
     ):
         client = Client(
-            transport=PythonStdioTransport(script_path=stdio_script, keep_alive=False)
+            transport=PythonStdioTransport(script_path=stdio_script), keep_alive=False
         )
-        assert client.transport.keep_alive is False
+        assert client.keep_alive is False
 
         async with client:
             result1 = await client.call_tool("pid")
@@ -75,8 +79,10 @@ class TestKeepAlive:
         assert pid1 != pid2
 
     async def test_keep_alive_starts_new_session_if_manually_closed(self, stdio_script):
-        client = Client(transport=PythonStdioTransport(script_path=stdio_script))
-        assert client.transport.keep_alive is True
+        client = Client(
+            transport=PythonStdioTransport(script_path=stdio_script), keep_alive=True
+        )
+        assert client.keep_alive is True
 
         async with client:
             result1 = await client.call_tool("pid")
@@ -91,8 +97,10 @@ class TestKeepAlive:
         assert pid1 != pid2
 
     async def test_keep_alive_maintains_session_if_reentered(self, stdio_script):
-        client = Client(transport=PythonStdioTransport(script_path=stdio_script))
-        assert client.transport.keep_alive is True
+        client = Client(
+            transport=PythonStdioTransport(script_path=stdio_script), keep_alive=True
+        )
+        assert client.keep_alive is True
 
         async with client:
             result1 = await client.call_tool("pid")
@@ -108,8 +116,10 @@ class TestKeepAlive:
         assert pid1 == pid2 == pid3
 
     async def test_close_session_and_try_to_use_client_raises_error(self, stdio_script):
-        client = Client(transport=PythonStdioTransport(script_path=stdio_script))
-        assert client.transport.keep_alive is True
+        client = Client(
+            transport=PythonStdioTransport(script_path=stdio_script), keep_alive=True
+        )
+        assert client.keep_alive is True
 
         async with client:
             await client.close()

@@ -1,6 +1,10 @@
 from typing import Any
 
-from fastmcp.mcp_config import MCPConfig
+from fastmcp.mcp_config import (
+    MCPConfig,
+    TransformingRemoteMCPServer,
+    TransformingStdioMCPServer,
+)
 from fastmcp.server.server import FastMCP
 
 
@@ -22,7 +26,16 @@ def mount_mcp_config_into_server(
 ) -> None:
     """A utility function to mount the servers from an MCPConfig into a FastMCP server."""
     for name, mcp_server in config.mcpServers.items():
-        server.mount(
-            prefix=name if name_as_prefix else None,
-            server=FastMCP.as_proxy(backend=mcp_server.to_transport()),
-        )
+        if isinstance(
+            mcp_server, TransformingStdioMCPServer | TransformingRemoteMCPServer
+        ):
+            server.mount(
+                prefix=name if name_as_prefix else None,
+                server=mcp_server.to_server(),
+                as_proxy=True,
+            )
+        else:
+            server.mount(
+                prefix=name if name_as_prefix else None,
+                server=FastMCP.as_proxy(mcp_server.to_transport()),
+            )

@@ -140,7 +140,7 @@ client = Client(transport)
 
 ### Session Persistence
 
-STDIO transports maintain sessions across multiple client contexts by default (`keep_alive=True`). This improves performance by reusing the same subprocess for multiple connections, but can be controlled when you need isolation.
+STDIO transports do not maintain sessions across multiple client contexts unless `keep_alive=True` is passed to the client. This improves performance by reusing the same subprocess for multiple connections, but can be controlled when you need isolation.
 
 By default, the subprocess persists between connections:
 
@@ -151,7 +151,7 @@ transport = StdioTransport(
     command="python",
     args=["server.py"]
 )
-client = Client(transport)
+client = Client(transport, keep_alive=True)
 
 async def efficient_multiple_operations():
     async with client:
@@ -167,9 +167,8 @@ For complete isolation between connections, disable session persistence:
 transport = StdioTransport(
     command="python",
     args=["server.py"],
-    keep_alive=False
 )
-client = Client(transport)
+client = Client(transport, keep_alive=False)
 ```
 
 Use `keep_alive=False` when you need complete isolation (e.g., in test suites) or when server state could cause issues between connections.

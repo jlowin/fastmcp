@@ -389,7 +389,7 @@ async def test_multi_client_with_transforms(tmp_path: Path):
         }
     }
 
-    client = Client[MCPConfigTransport](config)
+    client: Client[MCPConfigTransport] = Client(config, keep_alive=True)
 
     async with client:
         tools = await client.list_tools()
