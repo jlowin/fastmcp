@@ -78,7 +78,7 @@ Most applications can use `RemoteAuthProvider` directly without subclassing. The
 
 ```python
 from fastmcp import FastMCP
-from fastmcp.server.auth.auth import RemoteAuthProvider
+from fastmcp.server.auth import RemoteAuthProvider
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 from pydantic import AnyHttpUrl
 
