@@ -111,12 +111,14 @@ class AuthKitProvider(RemoteAuthProvider):
             resource_server_url=self.base_url,
         )
 
-    def get_oauth_authorization_server_routes(self) -> list[Route]:
-        """Add AuthKit OAuth authorization server metadata endpoint.
+    def get_routes(self) -> list[Route]:
+        """Get OAuth routes including AuthKit authorization server metadata forwarding.
 
-        This forwards AuthKit's OAuth authorization server metadata to clients,
-        allowing them to discover AuthKit's capabilities.
+        This returns the standard protected resource routes plus an authorization server
+        metadata endpoint that forwards AuthKit's OAuth metadata to clients.
         """
+        # Get the standard protected resource routes from RemoteAuthProvider
+        routes = super().get_routes()
 
         async def oauth_authorization_server_metadata(request):
             """Forward AuthKit OAuth authorization server metadata with FastMCP customizations."""
@@ -137,10 +139,13 @@ class AuthKitProvider(RemoteAuthProvider):
                     status_code=500,
                 )
 
-        return [
+        # Add AuthKit authorization server metadata forwarding
+        routes.append(
             Route(
                 "/.well-known/oauth-authorization-server",
                 endpoint=oauth_authorization_server_metadata,
                 methods=["GET"],
             )
-        ]
+        )
+
+        return routes
