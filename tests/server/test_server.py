@@ -1,6 +1,7 @@
 import logging
 from typing import Annotated, Any
 
+import anyio
 import httpx
 import pytest
 from fastapi import FastAPI
@@ -9,6 +10,7 @@ from pydantic import Field
 from pytest import LogCaptureFixture
 
 from fastmcp import Client, FastMCP
+from fastmcp.client.transports import StreamableHttpTransport
 from fastmcp.exceptions import NotFoundError
 from fastmcp.experimental.server.openapi import (
     FastMCPOpenAPI as ExperimentalFastMCPOpenAPI,
@@ -17,6 +19,7 @@ from fastmcp.prompts.prompt import FunctionPrompt, Prompt
 from fastmcp.resources import Resource, ResourceTemplate
 from fastmcp.server.openapi import FastMCPOpenAPI as LegacyFastMCPOpenAPI
 from fastmcp.server.server import (
+    PingConfig,
     add_resource_prefix,
     has_resource_prefix,
     remove_resource_prefix,
@@ -1578,3 +1581,91 @@ class TestOpenAPIExperimentalFeatureFlag:
             if "Using legacy OpenAPI parser" in record.message
         ]
         assert len(legacy_log_messages) == 0
+
+
+def create_ping_server(host: str, port: int) -> None:
+    """Create and run a server with ping enabled."""
+    server = FastMCP(
+        name="Test Server",
+        version="1.0.0",
+        ping=PingConfig(enabled=True, interval_ms=500),  # Faster for testing
+    )
+
+    @server.tool
+    def test_tool() -> str:
+        return "Test result"
+
+    server.run(host=host, port=port, transport="http")
+
+
+def create_ping_via_run_server(host: str, port: int) -> None:
+    """Create and run a server with ping configured via run parameter."""
+    server = FastMCP(name="Test Server")
+    # This tests the main requested feature: ping parameter in run()
+    server.run(host=host, port=port, transport="http", ping=250)
+
+
+def create_no_ping_server(host: str, port: int) -> None:
+    """Create and run a server with ping disabled."""
+    server = FastMCP(
+        name="Test Server",
+        ping=PingConfig(enabled=False, interval_ms=100),
+    )
+
+    @server.tool
+    def test_tool() -> str:
+        return "Test result"
+
+    server.run(host=host, port=port, transport="http")
+
+
+class TestServerSideConfigurablePing:
+    async def test_ping_integration_with_server(self):
+        """Test the server-side configurable ping."""
+        import logging
+
+        from fastmcp.utilities.tests import run_server_in_process
+
+        ping_count = 0
+
+        class PingDetectorHandler(logging.Handler):
+            """Custom logging handler that detects ping messages from debug logs."""
+
+            def __init__(self):
+                super().__init__()
+                self.ping_count = 0
+                self.setLevel(logging.DEBUG)
+
+            def emit(self, record):
+                nonlocal ping_count
+                # Look for ping messages in the debug logs
+                if (
+                    record.name == "mcp.client.streamable_http"
+                    and "SSE message: root=JSONRPCRequest(method='ping'"
+                    in record.getMessage()
+                ):
+                    ping_count += 1
+
+        # Set up ping detection via logging
+        ping_detector = PingDetectorHandler()
+        mcp_logger = logging.getLogger("mcp.client.streamable_http")
+        mcp_logger.addHandler(ping_detector)
+        mcp_logger.setLevel(logging.DEBUG)
+
+        try:
+            # run server in separate process
+            with run_server_in_process(create_ping_server) as server_url:
+                transport = StreamableHttpTransport(f"{server_url}/mcp/")
+
+                # setup & run the client to receive the ping
+                async with Client(transport=transport) as client:
+                    await anyio.sleep(0.2)
+                    result = await client.call_tool("test_tool", {})
+                    assert result.data == "Test result"
+
+                    await anyio.sleep(1.5)
+
+                    print(f"Ping count received: {ping_count}")
+                    assert ping_count >= 1
+        finally:
+            mcp_logger.removeHandler(ping_detector)

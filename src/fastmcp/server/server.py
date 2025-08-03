@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import re
 import warnings
@@ -20,6 +21,7 @@ import anyio
 import httpx
 import mcp.types
 import uvicorn
+from mcp import ServerSession
 from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.lowlevel.server import LifespanResultT, NotificationOptions
 from mcp.server.stdio import stdio_server
@@ -92,6 +94,14 @@ Transport = Literal["stdio", "http", "sse", "streamable-http"]
 URI_PATTERN = re.compile(r"^([^:]+://)(.*?)$")
 
 
+@dataclass
+class PingConfig:
+    """Configuration for ping functionality"""
+
+    enabled: bool | None = None
+    interval_ms: int = 5000
+
+
 @asynccontextmanager
 async def default_lifespan(server: FastMCP[LifespanResultT]) -> AsyncIterator[Any]:
     """Default lifespan context manager that does nothing.
@@ -153,6 +163,7 @@ class FastMCP(Generic[LifespanResultT]):
         include_tags: set[str] | None = None,
         exclude_tags: set[str] | None = None,
         include_fastmcp_meta: bool | None = None,
+        ping: PingConfig | None = None,
         # ---
         # ---
         # --- The following arguments are DEPRECATED ---
@@ -242,6 +253,10 @@ class FastMCP(Generic[LifespanResultT]):
             json_response=json_response,
             stateless_http=stateless_http,
         )
+
+        # store ping configurations & ping tasks
+        self.ping_config = ping
+        self._ping_tasks: dict[Any, asyncio.Task[None]] = {}
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}({self.name!r})"
@@ -338,6 +353,7 @@ class FastMCP(Generic[LifespanResultT]):
         self,
         transport: Transport | None = None,
         show_banner: bool = True,
+        ping: int | None = None,
         **transport_kwargs: Any,
     ) -> None:
         """Run the FastMCP server. Note this is a synchronous function.
@@ -346,6 +362,8 @@ class FastMCP(Generic[LifespanResultT]):
             transport: Transport protocol to use ("stdio", "sse", or "streamable-http")
         """
 
+        if ping is not None:
+            self.ping_config = PingConfig(enabled=True, interval_ms=ping)
         anyio.run(
             partial(
                 self.run_async,
@@ -365,12 +383,58 @@ class FastMCP(Generic[LifespanResultT]):
         self._mcp_server.read_resource()(self._mcp_read_resource)
         self._mcp_server.get_prompt()(self._mcp_get_prompt)
 
+    async def _ping_loop(self, session: ServerSession) -> None:
+        """Background task that sends periodic pings to the client"""
+        if not self.ping_config or not self.ping_config.enabled:
+            return
+
+        interval_seconds = self.ping_config.interval_ms / 1000.0
+
+        try:
+            while True:
+                await asyncio.sleep(interval_seconds)
+                try:
+                    # uses the built-in send_ping method from the mcp library
+                    await session.send_ping()
+                    logger.debug(
+                        f"Sent ping to client (interval: {self.ping_config}ms)"
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to send ping: {e}")
+                    break
+        except Exception as e:
+            logger.error(f"Ping loop error: {e}")
+
     async def _apply_middleware(
         self,
         context: MiddlewareContext[Any],
         call_next: Callable[[MiddlewareContext[Any]], Awaitable[Any]],
     ) -> Any:
         """Builds and executes the middleware chain."""
+        if (
+            self.ping_config
+            and self.ping_config.enabled
+            and hasattr(context, "fastmcp_context")
+            and context.fastmcp_context
+        ):
+            session = context.fastmcp_context.session
+            if session not in self._ping_tasks:
+                ping_task = asyncio.create_task(self._ping_loop(session))
+                self._ping_tasks[session] = ping_task
+
+                # clean up ping task when session ends
+                async def _cleanup_ping_task():
+                    if session in self._ping_tasks:
+                        task = self._ping_tasks.pop(session)
+                        task.cancel()
+                        try:
+                            await task
+                        except asyncio.CancelledError:
+                            pass  # this is an expected cancellation
+                        logger.debug(f"Cleaned up ping task for session {session}")
+
+                session._exit_stack.push_async_callback(_cleanup_ping_task)  # type: ignore[attr-defined]
+
         chain = call_next
         for mw in reversed(self.middleware):
             chain = partial(mw, call_next=chain)
