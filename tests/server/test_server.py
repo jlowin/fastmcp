@@ -1598,27 +1598,6 @@ def create_ping_server(host: str, port: int) -> None:
     server.run(host=host, port=port, transport="http")
 
 
-def create_ping_via_run_server(host: str, port: int) -> None:
-    """Create and run a server with ping configured via run parameter."""
-    server = FastMCP(name="Test Server")
-    # This tests the main requested feature: ping parameter in run()
-    server.run(host=host, port=port, transport="http", ping=250)
-
-
-def create_no_ping_server(host: str, port: int) -> None:
-    """Create and run a server with ping disabled."""
-    server = FastMCP(
-        name="Test Server",
-        ping=PingConfig(enabled=False, interval_ms=100),
-    )
-
-    @server.tool
-    def test_tool() -> str:
-        return "Test result"
-
-    server.run(host=host, port=port, transport="http")
-
-
 class TestServerSideConfigurablePing:
     async def test_ping_integration_with_server(self):
         """Test the server-side configurable ping."""
