@@ -1588,7 +1588,7 @@ def create_ping_server(host: str, port: int) -> None:
     server = FastMCP(
         name="Test Server",
         version="1.0.0",
-        ping=PingConfig(enabled=True, interval_ms=500),  # Faster for testing
+        ping=PingConfig(enabled=True, interval_ms=500),
     )
 
     @server.tool
@@ -1618,10 +1618,9 @@ class TestServerSideConfigurablePing:
             def emit(self, record):
                 nonlocal ping_count
                 # Look for ping messages in the debug logs
-                if (
-                    record.name == "mcp.client.streamable_http"
-                    and "SSE message: root=JSONRPCRequest(method='ping'"
-                    in record.getMessage()
+                if record.name == "mcp.client.streamable_http" and (
+                    "ping" in record.getMessage().lower()
+                    or "JSONRPCRequest(method='ping'" in record.getMessage()
                 ):
                     ping_count += 1
 

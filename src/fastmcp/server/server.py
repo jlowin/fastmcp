@@ -397,7 +397,7 @@ class FastMCP(Generic[LifespanResultT]):
                     # uses the built-in send_ping method from the mcp library
                     await session.send_ping()
                     logger.debug(
-                        f"Sent ping to client (interval: {self.ping_config}ms)"
+                        f"Sent ping to client (interval: {self.ping_config.interval_ms}ms)"
                     )
                 except Exception as e:
                     logger.error(f"Failed to send ping: {e}")
