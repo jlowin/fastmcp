@@ -1,5 +1,5 @@
 import json
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from anyio import create_task_group
@@ -109,8 +109,9 @@ def test_as_proxy_with_url():
     """FastMCP.as_proxy should accept a URL without connecting."""
     proxy = FastMCP.as_proxy("http://example.com/mcp/")
     assert isinstance(proxy, FastMCPProxy)
-    assert isinstance(proxy.client_factory().transport, StreamableHttpTransport)
-    assert proxy.client_factory().transport.url == "http://example.com/mcp/"  # type: ignore[attr-defined]
+    client = cast(Client, proxy.client_factory())
+    assert isinstance(client.transport, StreamableHttpTransport)
+    assert client.transport.url == "http://example.com/mcp/"  # type: ignore[attr-defined]
 
 
 class TestTools:
