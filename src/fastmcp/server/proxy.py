@@ -60,10 +60,10 @@ class ProxyManagerMixin:
 
     async def _get_client(self) -> Client:
         """Gets a client instance by calling the sync or async factory."""
-        if inspect.iscoroutinefunction(self.client_factory):
-            return await self.client_factory()
-        else:
-            return cast(Callable[[], Client], self.client_factory)()
+        client = self.client_factory()
+        if inspect.isawaitable(client):
+            client = await client
+        return client
 
 
 class ProxyToolManager(ToolManager, ProxyManagerMixin):
