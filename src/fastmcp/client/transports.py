@@ -551,10 +551,10 @@ class UvStdioTransport(StdioTransport):
         command: str,
         args: list[str] | None = None,
         module: bool = False,
-        project_directory: str | None = None,
+        project_directory: Path | None = None,
         python_version: str | None = None,
         with_packages: list[str] | None = None,
-        with_requirements: str | None = None,
+        with_requirements: Path | None = None,
         env_vars: dict[str, str] | None = None,
         keep_alive: bool | None = None,
     ):
@@ -598,6 +598,9 @@ class UvStdioTransport(StdioTransport):
             cwd=None,  # Use --directory flag instead of cwd
             keep_alive=keep_alive,
         )
+
+    def to_cli(self) -> str:
+        return " ".join([self.command, *self.args])
 
 
 class UvxStdioTransport(StdioTransport):

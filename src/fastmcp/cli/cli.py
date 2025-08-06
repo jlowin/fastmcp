@@ -2,8 +2,10 @@
 
 import importlib.metadata
 import importlib.util
+import json
 import os
 import platform
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -11,13 +13,23 @@ from typing import Annotated, Literal
 
 import cyclopts
 import pyperclip
-from pydantic import TypeAdapter
+from pydantic import BaseModel, Field, TypeAdapter
 from rich.console import Console
 from rich.table import Table
 
 import fastmcp
 from fastmcp.cli import run as run_module
 from fastmcp.cli.install import install_app
+from fastmcp.client.client import Client
+from fastmcp.client.transports import (
+    FastMCPTransport,
+    NodeStdioTransport,
+    PythonStdioTransport,
+    SSETransport,
+    StreamableHttpTransport,
+    UvStdioTransport,
+)
+from fastmcp.server.proxy import FastMCPProxy
 from fastmcp.server.server import FastMCP
 from fastmcp.utilities.inspect import FastMCPInfo, inspect_fastmcp
 from fastmcp.utilities.logging import get_logger
@@ -31,72 +43,215 @@ app = cyclopts.App(
     version=fastmcp.__version__,
 )
 
+list_app = cyclopts.App(
+    name="list",
+)
+app.command(list_app)
 
-def _get_npx_command():
-    """Get the correct npx command for the current platform."""
-    if sys.platform == "win32":
-        # Try both npx.cmd and npx.exe on Windows
-        for cmd in ["npx.cmd", "npx.exe", "npx"]:
-            try:
-                subprocess.run(
-                    [cmd, "--version"], check=True, capture_output=True, shell=True
-                )
-                return cmd
-            except subprocess.CalledProcessError:
-                continue
-        return None
-    return "npx"  # On Unix-like systems, just use npx
+call_app = cyclopts.App(
+    name="call",
+)
+app.command(call_app)
 
 
-def _parse_env_var(env_var: str) -> tuple[str, str]:
-    """Parse environment variable string in format KEY=VALUE."""
-    if "=" not in env_var:
-        logger.error("Invalid environment variable format. Must be KEY=VALUE")
-        sys.exit(1)
-    key, value = env_var.split("=", 1)
-    return key.strip(), value.strip()
+class StdioSettings(BaseModel):
+    def run_server(self, server: FastMCP) -> None:
+        server.run()
 
 
-def _build_uv_command(
-    server_spec: str,
-    with_editable: Path | None = None,
-    with_packages: list[str] | None = None,
-    no_banner: bool = False,
-    python_version: str | None = None,
-    with_requirements: Path | None = None,
-    project: Path | None = None,
-) -> list[str]:
-    """Build the uv run command that runs a MCP server through mcp run."""
-    cmd = ["uv", "run"]
+class HttpSettings(BaseModel):
+    transport: Literal["http", "sse", "streamable-http"] = Field(default="http")
+    host: str | None = Field(default=None)
+    port: int | None = Field(default=None)
+    path: str | None = Field(default=None)
+    no_banner: bool = Field(default=False)
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] | None = Field(
+        default=None
+    )
 
-    # Add Python version if specified
-    if python_version:
-        cmd.extend(["--python", python_version])
+    def run_server(self, server: FastMCP) -> None:
+        server.run(
+            transport=self.transport,
+            host=self.host,
+            port=self.port,
+            path=self.path,
+            log_level=self.log_level,
+        )
 
-    # Add project if specified
-    if project:
-        cmd.extend(["--project", str(project)])
 
-    cmd.extend(["--with", "fastmcp"])
+class InspectableCliServer(BaseModel):
+    server_spec: str
 
-    if with_editable:
-        cmd.extend(["--with-editable", str(with_editable)])
+    @staticmethod
+    def is_url(path: str) -> bool:
+        """Check if a string is a URL."""
+        url_pattern = re.compile(r"^https?://")
+        return bool(url_pattern.match(path))
 
-    if with_packages:
-        for pkg in with_packages:
-            if pkg:
-                cmd.extend(["--with", pkg])
+    @property
+    def path_and_server_object(self) -> tuple[Path, str | None]:
+        """Parse a file path that may include a server object specification.
 
-    if with_requirements:
-        cmd.extend(["--with-requirements", str(with_requirements)])
+        Args:
+            server_spec: Path to file, optionally with :object suffix
 
-    # Add mcp run command
-    cmd.extend(["fastmcp", "run", server_spec])
+        Returns:
+            Tuple of (file_path, server_object)
+        """
+        # First check if we have a Windows path (e.g., C:\...)
+        has_windows_drive = len(self.server_spec) > 1 and self.server_spec[1] == ":"
 
-    if no_banner:
-        cmd.append("--no-banner")
+        # Split on the last colon, but only if it's not part of the Windows drive letter
+        # and there's actually another colon in the string after the drive letter
+        if ":" in (self.server_spec[2:] if has_windows_drive else self.server_spec):
+            file_str, server_object = self.server_spec.rsplit(":", 1)
+        else:
+            file_str, server_object = self.server_spec, None
 
-    return cmd
+        # Resolve the file path
+        file_path = Path(file_str).expanduser().resolve()
+        if not file_path.exists():
+            logger.error(f"File not found: {file_path}")
+            sys.exit(1)
+        if not file_path.is_file():
+            logger.error(f"Not a file: {file_path}")
+            sys.exit(1)
+
+        return file_path, server_object
+
+    @property
+    def server_should_use_remote_client(self) -> bool:
+        return self.is_url(self.server_spec)
+
+    @property
+    def server_should_use_mcp_config(self) -> bool:
+        return self.server_spec.endswith(".json")
+
+    @property
+    def server_should_use_direct_import(self) -> bool:
+        return not any(
+            [self.server_should_use_remote_client, self.server_should_use_mcp_config]
+        )
+
+
+class CliServer(InspectableCliServer):
+    server_args: list[str] = Field(default_factory=list)
+
+    def build_server_with_mcp_config(self) -> FastMCP:
+        mcp_config_path = Path(self.server_spec)
+        with mcp_config_path.open() as src:
+            mcp_config = json.load(src)
+
+        server = FastMCP.as_proxy(mcp_config)
+        return server
+
+    def build_server_with_remote_client(self) -> FastMCP:
+        client: Client[
+            PythonStdioTransport
+            | NodeStdioTransport
+            | SSETransport
+            | StreamableHttpTransport
+        ] = fastmcp.Client(self.server_spec)
+        server: FastMCPProxy = fastmcp.FastMCP.from_client(client)
+        return server
+
+    def build_server_with_direct_import(self) -> FastMCP:
+        file, server_object = self.path_and_server_object
+        server = run_module.import_server_with_args(
+            file, server_object, self.server_args
+        )
+        return server
+
+    @property
+    def server(self) -> FastMCP:
+        if self.server_should_use_remote_client:
+            return self.build_server_with_remote_client()
+        elif self.server_should_use_mcp_config:
+            return self.build_server_with_mcp_config()
+        else:
+            return self.build_server_with_direct_import()
+
+    @property
+    def transport(self) -> FastMCPTransport:
+        return FastMCPTransport(mcp=self.server)
+
+    @property
+    def client(self) -> Client:
+        return Client(transport=self.transport)
+
+
+class UvCliServer(CliServer):
+    python: str | None = Field(default=None)
+    with_packages: list[str] = Field(default_factory=list)
+    project: Path | None = Field(default=None)
+    with_requirements: Path | None = Field(default=None)
+    transport_settings: Annotated[
+        HttpSettings | StdioSettings, cyclopts.Parameter(name="*")
+    ] = Field(default=StdioSettings())
+
+    @property
+    def transport(self) -> UvStdioTransport:
+        return UvStdioTransport(
+            command=self.server_spec,
+            args=["--with", "fastmcp", *self.server_args],
+            with_packages=self.with_packages,
+            with_requirements=self.with_requirements,
+            project_directory=self.project,
+            python_version=self.python,
+            env_vars=os.environ.copy(),
+        )
+
+    def command(self) -> str:
+        return self.transport.to_cli()
+
+
+class RunnableCliServer(CliServer):
+    transport_settings: Annotated[
+        HttpSettings | StdioSettings, cyclopts.Parameter(name="*")
+    ] = Field(default=StdioSettings())
+
+    def run_server(self) -> None:
+        self.transport_settings.run_server(server=self.server)
+
+
+class RunnableUvCliServer(UvCliServer):
+    transport_settings: Annotated[
+        HttpSettings | StdioSettings, cyclopts.Parameter(name="*")
+    ] = Field(default=StdioSettings())
+
+    def run_server(self) -> None:
+        self.transport_settings.run_server(server=self.server)
+
+
+class InspectorCliServer(UvCliServer):
+    inspector_version: str | None = Field(default=None)
+    ui_port: int | None = Field(default=None)
+    server_port: int | None = Field(default=None)
+
+    @classmethod
+    def _get_npx_command(cls) -> str:
+        """Get the correct npx command for the current platform."""
+        if sys.platform == "win32":
+            # Try both npx.cmd and npx.exe on Windows
+            for cmd in ["npx.cmd", "npx.exe", "npx"]:
+                try:
+                    subprocess.run(
+                        [cmd, "--version"], check=True, capture_output=True, shell=True
+                    )
+                    return cmd
+                except subprocess.CalledProcessError:
+                    continue
+            raise FileNotFoundError("npx not found")
+        return "npx"  # On Unix-like systems, just use npx
+
+    def to_env_vars(self) -> dict[str, str]:
+        return {
+            "CLIENT_PORT": str(self.ui_port),
+            "SERVER_PORT": str(self.server_port),
+        }
+
+    def to_inspector_command(self) -> str:
+        return f"{self._get_npx_command()} @modelcontextprotocol/inspector@{self.inspector_version}"
 
 
 @app.command
@@ -139,134 +294,31 @@ def version(
 
 @app.command
 def dev(
-    server_spec: str,
-    *,
-    with_editable: Annotated[
-        Path | None,
-        cyclopts.Parameter(
-            name=["--with-editable", "-e"],
-            help="Directory containing pyproject.toml to install in editable mode",
-        ),
-    ] = None,
-    with_packages: Annotated[
-        list[str],
-        cyclopts.Parameter(
-            "--with",
-            help="Additional packages to install",
-            negative=False,
-        ),
-    ] = [],
-    inspector_version: Annotated[
-        str | None,
-        cyclopts.Parameter(
-            "--inspector-version",
-            help="Version of the MCP Inspector to use",
-        ),
-    ] = None,
-    ui_port: Annotated[
-        int | None,
-        cyclopts.Parameter(
-            "--ui-port",
-            help="Port for the MCP Inspector UI",
-        ),
-    ] = None,
-    server_port: Annotated[
-        int | None,
-        cyclopts.Parameter(
-            "--server-port",
-            help="Port for the MCP Inspector Proxy server",
-        ),
-    ] = None,
-    python: Annotated[
-        str | None,
-        cyclopts.Parameter(
-            "--python",
-            help="Python version to use (e.g., 3.10, 3.11)",
-        ),
-    ] = None,
-    with_requirements: Annotated[
-        Path | None,
-        cyclopts.Parameter(
-            "--with-requirements",
-            help="Requirements file to install dependencies from",
-        ),
-    ] = None,
-    project: Annotated[
-        Path | None,
-        cyclopts.Parameter(
-            "--project",
-            help="Run the command within the given project directory",
-        ),
-    ] = None,
+    inspector_cli_server: Annotated[InspectorCliServer, cyclopts.Parameter(name="*")],
 ) -> None:
     """Run an MCP server with the MCP Inspector for development.
 
     Args:
         server_spec: Python file to run, optionally with :object suffix
     """
-    file, server_object = run_module.parse_file_path(server_spec)
+    inspector_cmd = inspector_cli_server.to_inspector_command()
 
-    logger.debug(
-        "Starting dev server",
-        extra={
-            "file": str(file),
-            "server_object": server_object,
-            "with_editable": str(with_editable) if with_editable else None,
-            "with_packages": with_packages,
-            "ui_port": ui_port,
-            "server_port": server_port,
-        },
-    )
+    uv_cmd = inspector_cli_server.transport.to_cli()
 
     try:
-        # Import server to get dependencies
-        server: FastMCP = run_module.import_server(file, server_object)
-        if server.dependencies is not None:
-            with_packages = list(set(with_packages + server.dependencies))
-
-        env_vars = {}
-        if ui_port:
-            env_vars["CLIENT_PORT"] = str(ui_port)
-        if server_port:
-            env_vars["SERVER_PORT"] = str(server_port)
-
-        # Get the correct npx command
-        npx_cmd = _get_npx_command()
-        if not npx_cmd:
-            logger.error(
-                "npx not found. Please ensure Node.js and npm are properly installed "
-                "and added to your system PATH."
-            )
-            sys.exit(1)
-
-        inspector_cmd = "@modelcontextprotocol/inspector"
-        if inspector_version:
-            inspector_cmd += f"@{inspector_version}"
-
-        uv_cmd = _build_uv_command(
-            server_spec,
-            with_editable,
-            with_packages,
-            no_banner=True,
-            python_version=python,
-            with_requirements=with_requirements,
-            project=project,
-        )
-
-        # Run the MCP Inspector command with shell=True on Windows
         shell = sys.platform == "win32"
         process = subprocess.run(
-            [npx_cmd, inspector_cmd] + uv_cmd,
+            [inspector_cmd, uv_cmd],
             check=True,
             shell=shell,
-            env=dict(os.environ.items()) | env_vars,
+            env=dict(os.environ.items()) | inspector_cli_server.to_env_vars(),
         )
         sys.exit(process.returncode)
     except subprocess.CalledProcessError as e:
         logger.error(
             "Dev server failed",
             extra={
-                "file": str(file),
+                "file": str(inspector_cli_server.server_spec),
                 "error": str(e),
                 "returncode": e.returncode,
             },
@@ -277,87 +329,17 @@ def dev(
             "npx not found. Please ensure Node.js and npm are properly installed "
             "and added to your system PATH. You may need to restart your terminal "
             "after installation.",
-            extra={"file": str(file)},
+            extra={"file": str(inspector_cli_server.server_spec)},
         )
         sys.exit(1)
 
 
 @app.command
 def run(
-    server_spec: str,
+    cli_server: Annotated[
+        RunnableUvCliServer | RunnableCliServer, cyclopts.Parameter(name="*")
+    ],
     *server_args: str,
-    transport: Annotated[
-        run_module.TransportType | None,
-        cyclopts.Parameter(
-            name=["--transport", "-t"],
-            help="Transport protocol to use",
-        ),
-    ] = None,
-    host: Annotated[
-        str | None,
-        cyclopts.Parameter(
-            "--host",
-            help="Host to bind to when using http transport (default: 127.0.0.1)",
-        ),
-    ] = None,
-    port: Annotated[
-        int | None,
-        cyclopts.Parameter(
-            name=["--port", "-p"],
-            help="Port to bind to when using http transport (default: 8000)",
-        ),
-    ] = None,
-    path: Annotated[
-        str | None,
-        cyclopts.Parameter(
-            "--path",
-            help="The route path for the server (default: /mcp/ for http transport, /sse/ for sse transport)",
-        ),
-    ] = None,
-    log_level: Annotated[
-        Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] | None,
-        cyclopts.Parameter(
-            name=["--log-level", "-l"],
-            help="Log level",
-        ),
-    ] = None,
-    no_banner: Annotated[
-        bool,
-        cyclopts.Parameter(
-            "--no-banner",
-            help="Don't show the server banner",
-            negative=False,
-        ),
-    ] = False,
-    python: Annotated[
-        str | None,
-        cyclopts.Parameter(
-            "--python",
-            help="Python version to use (e.g., 3.10, 3.11)",
-        ),
-    ] = None,
-    with_packages: Annotated[
-        list[str],
-        cyclopts.Parameter(
-            "--with",
-            help="Additional packages to install (can be used multiple times)",
-            negative=False,
-        ),
-    ] = [],
-    project: Annotated[
-        Path | None,
-        cyclopts.Parameter(
-            "--project",
-            help="Run the command within the given project directory",
-        ),
-    ] = None,
-    with_requirements: Annotated[
-        Path | None,
-        cyclopts.Parameter(
-            "--with-requirements",
-            help="Requirements file to install dependencies from",
-        ),
-    ] = None,
 ) -> None:
     """Run an MCP server or connect to a remote one.
 
@@ -373,71 +355,92 @@ def run(
     Args:
         server_spec: Python file, object specification (file:obj), MCPConfig file, or URL
     """
-    logger.debug(
-        "Running server or client",
-        extra={
-            "server_spec": server_spec,
-            "transport": transport,
-            "host": host,
-            "port": port,
-            "path": path,
-            "log_level": log_level,
-            "server_args": list(server_args),
-        },
-    )
 
-    # If any uv-specific options are provided, use uv run
-    if python or with_packages or with_requirements or project:
-        try:
-            run_module.run_with_uv(
-                server_spec=server_spec,
-                python_version=python,
-                with_packages=with_packages,
-                with_requirements=with_requirements,
-                project=project,
-                transport=transport,
-                host=host,
-                port=port,
-                path=path,
-                log_level=log_level,
-                show_banner=not no_banner,
-            )
-        except Exception as e:
-            logger.error(
-                f"Failed to run: {e}",
-                extra={
-                    "server_spec": server_spec,
-                    "error": str(e),
-                },
-            )
-            sys.exit(1)
-    else:
-        # Use direct import for backwards compatibility
-        try:
-            run_module.run_command(
-                server_spec=server_spec,
-                transport=transport,
-                host=host,
-                port=port,
-                path=path,
-                log_level=log_level,
-                server_args=list(server_args),
-                show_banner=not no_banner,
-            )
-        except Exception as e:
-            logger.error(
-                f"Failed to run: {e}",
-                extra={
-                    "server_spec": server_spec,
-                    "error": str(e),
-                },
-            )
-            sys.exit(1)
+    cli_server.server_args.extend(server_args)
+
+    cli_server.run_server()
+
+
+@list_app.command(name="tools")
+async def list_tools(
+    cli_server: Annotated[UvCliServer | CliServer, cyclopts.Parameter(name="*")],
+    *server_args: str,
+) -> None:
+    """List tools on the server."""
+
+    cli_server.server_args.extend(server_args)
+
+    async with cli_server.client as client:
+        tools = await client.list_tools()
+
+        for tool in tools:
+            console.print(f"{tool.name}: {tool.description}")
+
+        await client.close()
+
+
+@list_app.command(name="resources")
+async def list_resources(
+    cli_server: Annotated[UvCliServer | CliServer, cyclopts.Parameter(name="*")],
+    *server_args: str,
+) -> None:
+    """List resources on the server."""
+
+    cli_server.server_args.extend(server_args)
+
+    async with cli_server.client as client:
+        resources = await client.list_resources()
+
+        for resource in resources:
+            console.print(f"{resource.name}: {resource.description}")
+
+        await client.close()
+
+
+@list_app.command(name="prompts")
+async def list_prompts(
+    cli_server: Annotated[UvCliServer | CliServer, cyclopts.Parameter(name="*")],
+    *server_args: str,
+) -> None:
+    """List prompts on the server."""
+
+    cli_server.server_args.extend(server_args)
+
+    async with cli_server.client as client:
+        prompts = await client.list_prompts()
+
+        for prompt in prompts:
+            console.print(f"{prompt.name}: {prompt.description}")
+
+        await client.close()
+
+
+# @list_app.command(name="tools")
+# async def call_tools(
+#     cli_server: Annotated[
+#         UvCliServer | CliServer, cyclopts.Parameter(name="*")
+#     ],
+#     tool: str,
+#     json_args: str | None = None,
+#     *server_args: str,
+# ) -> None:
+#     """List tools on the server."""
+
+#     cli_server.server_args.extend(server_args)
+
+#     async with cli_server.client:
+#         tools = await cli_server.client.list_tools()
+
+#         args = json.loads(json_args) if json_args else {}
+
+#         result = await cli_server.client.call_tool(tool, args)
+
+#         console.print(result)
 
 
 @app.command
 async def inspect(
-    server_spec: str,
+    cli_server: Annotated[InspectableCliServer, cyclopts.Parameter(name="*")],
     *,
     output: Annotated[
         Path,
@@ -463,12 +466,17 @@ async def inspect(
         server_spec: Python file to inspect, optionally with :object suffix
     """
     # Parse the server specification
-    file, server_object = run_module.parse_file_path(server_spec)
+
+    inspectable_server: InspectableCliServer = InspectableCliServer(
+        server_spec=cli_server.server_spec
+    )
+
+    file_path, server_object = inspectable_server.path_and_server_object
 
     logger.debug(
         "Inspecting server",
         extra={
-            "file": str(file),
+            "file": str(file_path),
             "server_object": server_object,
             "output": str(output),
         },
@@ -476,7 +484,7 @@ async def inspect(
 
     try:
         # Import the server
-        server = run_module.import_server(file, server_object)
+        server = run_module.import_server(file_path, server_object)
 
         # Get server information - using native async support
         info = await inspect_fastmcp(server)
@@ -506,7 +514,7 @@ async def inspect(
         logger.error(
             f"Failed to inspect server: {e}",
             extra={
-                "server_spec": server_spec,
+                "server_spec": cli_server.server_spec,
                 "error": str(e),
             },
         )
