@@ -1,20 +1,20 @@
 import httpx
 import pytest
-from mcp.server.auth.provider import AccessToken
 from pydantic import AnyHttpUrl
 
 from fastmcp import FastMCP
 from fastmcp.server.auth.auth import RemoteAuthProvider, TokenVerifier
+from fastmcp.server.auth.models import AccessTokenWithClaims
 
 
 class SimpleTokenVerifier(TokenVerifier):
     """Simple token verifier for testing."""
 
-    def __init__(self, valid_tokens: dict[str, AccessToken] | None = None):
+    def __init__(self, valid_tokens: dict[str, AccessTokenWithClaims] | None = None):
         super().__init__()
         self.valid_tokens = valid_tokens or {}
 
-    async def verify_token(self, token: str) -> AccessToken | None:
+    async def verify_token(self, token: str) -> AccessTokenWithClaims | None:
         return self.valid_tokens.get(token)
 
 
@@ -38,7 +38,7 @@ class TestRemoteAuthProvider:
 
     async def test_verify_token_delegates_to_verifier(self):
         """Test that verify_token delegates to the token verifier."""
-        access_token = AccessToken(
+        access_token = AccessTokenWithClaims(
             token="valid_token", client_id="test-client", scopes=[]
         )
         token_verifier = SimpleTokenVerifier({"valid_token": access_token})
@@ -265,7 +265,7 @@ class TestRemoteAuthProviderIntegration:
         # endpoint correctly reports the resource server URL, which is tested above
 
         # This is primarily testing that the token verifier integration works
-        access_token = AccessToken(
+        access_token = AccessTokenWithClaims(
             token="valid_token", client_id="test-client", scopes=[]
         )
         token_verifier = SimpleTokenVerifier({"valid_token": access_token})
@@ -285,7 +285,7 @@ class TestRemoteAuthProviderIntegration:
 
     async def test_token_verification_with_invalid_auth_fails(self):
         """Test that the provider correctly rejects invalid tokens."""
-        access_token = AccessToken(
+        access_token = AccessTokenWithClaims(
             token="valid_token", client_id="test-client", scopes=[]
         )
         token_verifier = SimpleTokenVerifier({"valid_token": access_token})
