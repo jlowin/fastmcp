@@ -36,7 +36,9 @@ class TestStaticTokenVerifier:
         # Test valid token
         result = await verifier.verify_token("valid-token")
         assert isinstance(result, AccessToken)
-        assert isinstance(result, AccessTokenWithClaims)  # Ensure it has claims - subclass of AccessToken
+        assert isinstance(
+            result, AccessTokenWithClaims
+        )  # Ensure it has claims - subclass of AccessToken
         assert result.client_id == "test-client"
         assert result.scopes == ["read", "write"]
         assert result.token == "valid-token"
