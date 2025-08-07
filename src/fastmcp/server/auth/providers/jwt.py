@@ -370,7 +370,7 @@ class JWTVerifier(TokenVerifier):
             token: The JWT token string to validate
 
         Returns:
-            AccessToken object if valid, None if invalid or expired
+            AccessTokenWithClaims object if valid, None if invalid or expired
         """
         try:
             # Get verification key (static or from JWKS)
@@ -464,7 +464,7 @@ class JWTVerifier(TokenVerifier):
             self.logger.debug("Token validation failed: %s", str(e))
             return None
 
-    async def verify_token(self, token: str) -> AccessToken | None:
+    async def verify_token(self, token: str) -> AccessTokenWithClaims | None:
         """
         Verify a bearer token and return access info if valid.
 
@@ -475,7 +475,7 @@ class JWTVerifier(TokenVerifier):
             token: The JWT token string to validate
 
         Returns:
-            AccessToken object if valid, None if invalid or expired
+            AccessTokenWithClaims object if valid, None if invalid or expired
         """
         return await self.load_access_token(token)
 
@@ -514,7 +514,7 @@ class StaticTokenVerifier(TokenVerifier):
         super().__init__(required_scopes=required_scopes)
         self.tokens = tokens
 
-    async def verify_token(self, token: str) -> AccessToken | None:
+    async def verify_token(self, token: str) -> AccessTokenWithClaims | None:
         """Verify token against static token dictionary."""
         token_data = self.tokens.get(token)
         if not token_data:
@@ -537,9 +537,10 @@ class StaticTokenVerifier(TokenVerifier):
                 )
                 return None
 
-        return AccessToken(
+        return AccessTokenWithClaims(
             token=token,
             client_id=token_data["client_id"],
             scopes=scopes,
             expires_at=expires_at,
+            claims=token_data,
         )
