@@ -141,6 +141,12 @@ class RSAKeyPair:
         return token_bytes.decode("utf-8")
 
 
+class AccessTokenWithClaims(AccessToken):
+    """AccessToken that includes all JWT claims."""
+
+    claims: dict[str, Any] = {}
+
+
 class JWTVerifierSettings(BaseSettings):
     """Settings for JWT token verification."""
 
@@ -356,7 +362,7 @@ class JWTVerifier(TokenVerifier):
 
         return []
 
-    async def load_access_token(self, token: str) -> AccessToken | None:
+    async def load_access_token(self, token: str) -> AccessTokenWithClaims | None:
         """
         Validates the provided JWT bearer token.
 
@@ -443,11 +449,12 @@ class JWTVerifier(TokenVerifier):
                     self.logger.info("Bearer token rejected for client %s", client_id)
                     return None
 
-            return AccessToken(
+            return AccessTokenWithClaims(
                 token=token,
                 client_id=str(client_id),
                 scopes=scopes,
                 expires_at=int(exp) if exp else None,
+                claims=claims,
             )
 
         except JoseError:
