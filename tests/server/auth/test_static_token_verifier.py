@@ -4,6 +4,7 @@ import httpx
 from mcp.server.auth.provider import AccessToken
 
 from fastmcp.server import FastMCP
+from fastmcp.server.auth.models import AccessTokenWithClaims
 from fastmcp.server.auth.providers.jwt import StaticTokenVerifier
 
 
@@ -35,6 +36,7 @@ class TestStaticTokenVerifier:
         # Test valid token
         result = await verifier.verify_token("valid-token")
         assert isinstance(result, AccessToken)
+        assert isinstance(result, AccessTokenWithClaims)  # Ensure it has claims - subclass of AccessToken
         assert result.client_id == "test-client"
         assert result.scopes == ["read", "write"]
         assert result.token == "valid-token"
@@ -43,6 +45,7 @@ class TestStaticTokenVerifier:
         # Test token with different scopes
         result = await verifier.verify_token("scoped-token")
         assert isinstance(result, AccessToken)
+        assert isinstance(result, AccessTokenWithClaims)
         assert result.client_id == "limited-client"
         assert result.scopes == ["read"]
 
