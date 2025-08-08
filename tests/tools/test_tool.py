@@ -44,6 +44,22 @@ class TestToolFromFunction:
         }
         assert tool.output_schema == expected_schema
 
+    def test_meta_parameter(self):
+        """Test that meta parameter is properly handled."""
+
+        def multiply(a: int, b: int) -> int:
+            """Multiply two numbers."""
+            return a * b
+
+        meta_data = {"version": "1.0", "author": "test"}
+        tool = Tool.from_function(multiply, meta=meta_data)
+
+        assert tool.meta == meta_data
+        mcp_tool = tool.to_mcp_tool()
+        # MCP tool includes fastmcp meta, so check that our meta is included
+        assert mcp_tool.meta is not None
+        assert meta_data.items() <= mcp_tool.meta.items()
+
     async def test_async_function(self):
         """Test registering and running an async function."""
 
@@ -1289,6 +1305,88 @@ class TestUnionReturnTypes:
         # Test returning string
         result2 = await tool.run({"return_error": True})
         assert result2.structured_content == {"result": "error occurred"}
+
+
+class TestSerializationAlias:
+    """Tests for Pydantic field serialization alias support in tool output schemas."""
+
+    def test_output_schema_respects_serialization_alias(self):
+        """Test that Tool.from_function generates output schema using serialization alias."""
+        from pydantic import AliasChoices, BaseModel, Field
+
+        class Component(BaseModel):
+            """Model with multiple validation aliases but specific serialization alias."""
+
+            component_id: str = Field(
+                validation_alias=AliasChoices("id", "componentId"),
+                serialization_alias="componentId",
+                description="The ID of the component",
+            )
+
+        async def get_component(
+            component_id: str,
+        ) -> Annotated[Component, Field(description="The component.")]:
+            # API returns data with 'id' field
+            api_data = {"id": component_id}
+            return Component.model_validate(api_data)
+
+        tool = Tool.from_function(get_component, name="get-component")
+
+        # The output schema should use the serialization alias 'componentId'
+        # not the first validation alias 'id'
+        assert tool.output_schema is not None
+
+        # Check the wrapped result schema
+        assert "properties" in tool.output_schema
+        assert "result" in tool.output_schema["properties"]
+        assert "$defs" in tool.output_schema
+
+        # Find the Component definition
+        component_def = list(tool.output_schema["$defs"].values())[0]
+
+        # Should have 'componentId' not 'id' in properties
+        assert "componentId" in component_def["properties"]
+        assert "id" not in component_def["properties"]
+
+        # Should require 'componentId' not 'id'
+        assert "componentId" in component_def["required"]
+        assert "id" not in component_def.get("required", [])
+
+    async def test_tool_execution_with_serialization_alias(self):
+        """Test that tool execution works correctly with serialization aliases."""
+        from pydantic import AliasChoices, BaseModel, Field
+
+        from fastmcp import Client, FastMCP
+
+        class Component(BaseModel):
+            """Model with multiple validation aliases but specific serialization alias."""
+
+            component_id: str = Field(
+                validation_alias=AliasChoices("id", "componentId"),
+                serialization_alias="componentId",
+                description="The ID of the component",
+            )
+
+        mcp = FastMCP("TestServer")
+
+        @mcp.tool
+        async def get_component(
+            component_id: str,
+        ) -> Annotated[Component, Field(description="The component.")]:
+            # API returns data with 'id' field
+            api_data = {"id": component_id}
+            return Component.model_validate(api_data)
+
+        async with Client(mcp) as client:
+            # Execute the tool - this should work without validation errors
+            result = await client.call_tool(
+                "get_component", {"component_id": "test123"}
+            )
+
+            # The result should contain the serialized form with 'componentId'
+            assert result.structured_content is not None
+            assert result.structured_content["result"]["componentId"] == "test123"
+            assert "id" not in result.structured_content["result"]
 
 
 class TestToolTitle:

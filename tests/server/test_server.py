@@ -1,8 +1,12 @@
-from typing import Annotated
+import logging
+from typing import Annotated, Any
 
+import httpx
 import pytest
+from fastapi import FastAPI
 from mcp import McpError
 from pydantic import Field
+from pytest import LogCaptureFixture
 
 import json
 import sqlite3
@@ -15,8 +19,12 @@ from unittest.mock import patch
 
 from fastmcp import Client, FastMCP
 from fastmcp.exceptions import NotFoundError
+from fastmcp.experimental.server.openapi import (
+    FastMCPOpenAPI as ExperimentalFastMCPOpenAPI,
+)
 from fastmcp.prompts.prompt import FunctionPrompt, Prompt
 from fastmcp.resources import Resource, ResourceTemplate
+from fastmcp.server.openapi import FastMCPOpenAPI as LegacyFastMCPOpenAPI
 from fastmcp.server.server import (
     OAuth2Storage, 
     _sanitize_metadata_response, 
@@ -27,6 +35,7 @@ from fastmcp.server.server import (
 )
 from fastmcp.tools import FunctionTool
 from fastmcp.tools.tool import Tool
+from fastmcp.utilities.tests import caplog_for_fastmcp, temporary_settings
 
 
 class TestCreateServer:
@@ -424,6 +433,22 @@ class TestToolDecorator:
             def my_function(x: int) -> str:
                 return f"Result: {x}"
 
+    async def test_tool_decorator_with_meta(self):
+        """Test that meta parameter is passed through the tool decorator."""
+        mcp = FastMCP()
+
+        meta_data = {"version": "1.0", "author": "test"}
+
+        @mcp.tool(meta=meta_data)
+        def multiply(a: int, b: int) -> int:
+            """Multiply two numbers."""
+            return a * b
+
+        tools_dict = await mcp.get_tools()
+        tool = tools_dict["multiply"]
+
+        assert tool.meta == meta_data
+
 
 class TestResourceDecorator:
     async def test_no_resources_before_decorator(self):
@@ -587,6 +612,21 @@ class TestResourceDecorator:
             result = await client.read_resource("resource://data")
             assert result[0].text == "Static Hello, world!"  # type: ignore[attr-defined]
 
+    async def test_resource_decorator_with_meta(self):
+        """Test that meta parameter is passed through the resource decorator."""
+        mcp = FastMCP()
+
+        meta_data = {"version": "1.0", "author": "test"}
+
+        @mcp.resource("resource://data", meta=meta_data)
+        def get_data() -> str:
+            return "Hello, world!"
+
+        resources_dict = await mcp.get_resources()
+        resource = resources_dict["resource://data"]
+
+        assert resource.meta == meta_data
+
 
 class TestTemplateDecorator:
     async def test_template_decorator(self):
@@ -735,6 +775,21 @@ class TestTemplateDecorator:
         template = templates_dict["resource://{param*}"]
         assert template.uri_template == "resource://{param*}"
         assert template.name == "template_resource"
+
+    async def test_template_decorator_with_meta(self):
+        """Test that meta parameter is passed through the template decorator."""
+        mcp = FastMCP()
+
+        meta_data = {"version": "2.0", "template": "test"}
+
+        @mcp.resource("resource://{param}/data", meta=meta_data)
+        def get_template_data(param: str) -> str:
+            return f"Data for {param}"
+
+        templates_dict = await mcp.get_resource_templates()
+        template = templates_dict["resource://{param}/data"]
+
+        assert template.meta == meta_data
 
 
 class TestPromptDecorator:
@@ -990,6 +1045,21 @@ class TestPromptDecorator:
             assert len(result.messages) == 1
             message = result.messages[0]
             assert message.content.text == "Static Hello, world!"  # type: ignore[attr-defined]
+
+    async def test_prompt_decorator_with_meta(self):
+        """Test that meta parameter is passed through the prompt decorator."""
+        mcp = FastMCP()
+
+        meta_data = {"version": "3.0", "type": "prompt"}
+
+        @mcp.prompt(meta=meta_data)
+        def test_prompt(message: str) -> str:
+            return f"Response: {message}"
+
+        prompts_dict = await mcp.get_prompts()
+        prompt = prompts_dict["test_prompt"]
+
+        assert prompt.meta == meta_data
 
 
 class TestResourcePrefixHelpers:
@@ -2049,3 +2119,144 @@ class TestOAuth2Integration:
         assert "jwks_uri" in oauth2
         
         assert metadata["server_capabilities"]["experimental"]["oauth2_dynamic_registration"] is False
+=======
+class TestOpenAPIExperimentalFeatureFlag:
+    """Test experimental OpenAPI parser feature flag behavior."""
+
+    @pytest.fixture
+    def simple_openapi_spec(self):
+        """Simple OpenAPI spec for testing."""
+        return {
+            "openapi": "3.0.0",
+            "info": {"title": "Test API", "version": "1.0.0"},
+            "paths": {
+                "/test": {
+                    "get": {
+                        "operationId": "test_operation",
+                        "summary": "Test operation",
+                        "responses": {"200": {"description": "Success"}},
+                    }
+                }
+            },
+        }
+
+    @pytest.fixture
+    def mock_client(self):
+        """Mock HTTP client."""
+        return httpx.AsyncClient(base_url="https://api.example.com")
+
+    def test_from_openapi_uses_legacy_by_default_and_logs_message(
+        self,
+        simple_openapi_spec: dict[str, Any],
+        mock_client: httpx.AsyncClient,
+        caplog: LogCaptureFixture,
+    ):
+        """Test that from_openapi uses legacy parser by default and emits log message."""
+        # Capture all logs at INFO level and above using FastMCP's logger
+        with caplog_for_fastmcp(caplog), caplog.at_level(logging.INFO):
+            # Create server using from_openapi (should use legacy by default)
+            server = FastMCP.from_openapi(
+                openapi_spec=simple_openapi_spec, client=mock_client
+            )
+
+        # Should be the legacy implementation
+        assert isinstance(server, LegacyFastMCPOpenAPI)
+
+        # Should have logged the message about using legacy parser
+        legacy_log_messages = [
+            record
+            for record in caplog.records
+            if "Using legacy OpenAPI parser" in record.message
+        ]
+        assert len(legacy_log_messages) == 1
+        assert legacy_log_messages[0].levelno == logging.INFO
+        assert (
+            "FASTMCP_EXPERIMENTAL_ENABLE_NEW_OPENAPI_PARSER=true"
+            in legacy_log_messages[0].message
+        )
+
+    def test_from_openapi_uses_experimental_with_flag_and_no_log(
+        self,
+        simple_openapi_spec: dict[str, Any],
+        mock_client: httpx.AsyncClient,
+        caplog: LogCaptureFixture,
+    ):
+        """Test that from_openapi uses experimental parser with flag and emits no log."""
+        # Capture all logs at INFO level and above
+        with caplog.at_level(logging.INFO):
+            # Create server with experimental flag enabled
+            with temporary_settings(experimental__enable_new_openapi_parser=True):
+                server = FastMCP.from_openapi(
+                    openapi_spec=simple_openapi_spec, client=mock_client
+                )
+
+        # Should be the experimental implementation
+        assert isinstance(server, ExperimentalFastMCPOpenAPI)
+
+        # Should not have logged the legacy parser message
+        legacy_log_messages = [
+            record
+            for record in caplog.records
+            if "Using legacy OpenAPI parser" in record.message
+        ]
+        assert len(legacy_log_messages) == 0
+
+    def test_from_fastapi_uses_legacy_by_default_and_logs_message(
+        self, caplog: LogCaptureFixture
+    ):
+        """Test that from_fastapi uses legacy parser by default and emits log message."""
+        # Capture all logs at INFO level and above using FastMCP's logger
+        with caplog_for_fastmcp(caplog), caplog.at_level(logging.INFO):
+            # Create a simple FastAPI app
+            app = FastAPI(title="Test API")
+
+            @app.get("/test")
+            def test_endpoint():
+                return {"message": "test"}
+
+            # Create server using from_fastapi (should use legacy by default)
+            server = FastMCP.from_fastapi(app=app)
+
+        # Should be the legacy implementation
+        assert isinstance(server, LegacyFastMCPOpenAPI)
+
+        # Should have logged the message about using legacy parser
+        legacy_log_messages = [
+            record
+            for record in caplog.records
+            if "Using legacy OpenAPI parser" in record.message
+        ]
+        assert len(legacy_log_messages) == 1
+        assert legacy_log_messages[0].levelno == logging.INFO
+        assert (
+            "FASTMCP_EXPERIMENTAL_ENABLE_NEW_OPENAPI_PARSER=true"
+            in legacy_log_messages[0].message
+        )
+
+    def test_from_fastapi_uses_experimental_with_flag_and_no_log(
+        self, caplog: LogCaptureFixture
+    ):
+        """Test that from_fastapi uses experimental parser with flag and emits no log."""
+        # Capture all logs at INFO level and above
+        with caplog.at_level(logging.INFO):
+            # Create a simple FastAPI app
+            app = FastAPI(title="Test API")
+
+            @app.get("/test")
+            def test_endpoint():
+                return {"message": "test"}
+
+            # Create server with experimental flag enabled
+            with temporary_settings(experimental__enable_new_openapi_parser=True):
+                server = FastMCP.from_fastapi(app=app)
+
+        # Should be the experimental implementation
+        assert isinstance(server, ExperimentalFastMCPOpenAPI)
+
+        # Should not have logged the legacy parser message
+        legacy_log_messages = [
+            record
+            for record in caplog.records
+            if "Using legacy OpenAPI parser" in record.message
+        ]
+        assert len(legacy_log_messages) == 0

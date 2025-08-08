@@ -1,5 +1,6 @@
+import inspect
 import json
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from anyio import create_task_group
@@ -12,6 +13,9 @@ from fastmcp.client import Client
 from fastmcp.client.transports import FastMCPTransport, StreamableHttpTransport
 from fastmcp.exceptions import ToolError
 from fastmcp.server.proxy import FastMCPProxy, ProxyClient
+from fastmcp.tools.tool_transform import (
+    ToolTransformConfig,
+)
 
 USERS = [
     {"id": "1", "name": "Alice", "active": True},
@@ -26,7 +30,7 @@ def fastmcp_server():
 
     # --- Tools ---
 
-    @server.tool
+    @server.tool(tags={"greet"})
     def greet(name: str) -> str:
         """Greet someone by name."""
         return f"Hello, {name}!"
@@ -47,7 +51,7 @@ def fastmcp_server():
 
     # --- Resources ---
 
-    @server.resource(uri="resource://wave")
+    @server.resource(uri="resource://wave", tags={"wave"})
     def wave() -> str:
         return "👋"
 
@@ -55,13 +59,13 @@ def fastmcp_server():
     async def get_users() -> list[dict[str, Any]]:
         return USERS
 
-    @server.resource(uri="data://user/{user_id}")
+    @server.resource(uri="data://user/{user_id}", tags={"users"})
     async def get_user(user_id: str) -> dict[str, Any] | None:
         return next((user for user in USERS if user["id"] == user_id), None)
 
     # --- Prompts ---
 
-    @server.prompt
+    @server.prompt(tags={"welcome"})
     def welcome(name: str) -> str:
         return f"Welcome to FastMCP, {name}!"
 
@@ -106,8 +110,24 @@ def test_as_proxy_with_url():
     """FastMCP.as_proxy should accept a URL without connecting."""
     proxy = FastMCP.as_proxy("http://example.com/mcp/")
     assert isinstance(proxy, FastMCPProxy)
-    assert isinstance(proxy.client_factory().transport, StreamableHttpTransport)
-    assert proxy.client_factory().transport.url == "http://example.com/mcp/"  # type: ignore[attr-defined]
+    client = cast(Client, proxy.client_factory())
+    assert isinstance(client.transport, StreamableHttpTransport)
+    assert client.transport.url == "http://example.com/mcp/"  # type: ignore[attr-defined]
+
+
+async def test_proxy_with_async_client_factory():
+    """FastMCPProxy should accept an async client_factory."""
+
+    async def async_factory():
+        return Client("http://example.com/mcp/")
+
+    proxy = FastMCPProxy(client_factory=async_factory)
+    assert isinstance(proxy, FastMCPProxy)
+    assert inspect.iscoroutinefunction(proxy.client_factory)
+    client = await proxy.client_factory()
+    assert isinstance(client, Client)
+    assert isinstance(client.transport, StreamableHttpTransport)
+    assert client.transport.url == "http://example.com/mcp/"  # type: ignore[attr-defined]
 
 
 class TestTools:
@@ -117,6 +137,35 @@ class TestTools:
         assert "add" in tools
         assert "error_tool" in tools
         assert "tool_without_description" in tools
+
+    async def test_get_tools_meta(self, proxy_server):
+        tools = await proxy_server.get_tools()
+        greet_tool = tools["greet"]
+        assert greet_tool.meta == {"_fastmcp": {"tags": ["greet"]}}
+
+    async def test_get_transformed_tools(
+        self, fastmcp_server: FastMCP, proxy_server: FastMCPProxy
+    ):
+        """An explicit None description should change the tool description to None."""
+
+        fastmcp_server.add_tool_transformation(
+            "add", ToolTransformConfig(name="add_transformed")
+        )
+        tools = await proxy_server.get_tools()
+        assert "add_transformed" in tools
+        assert "add" not in tools
+
+    async def test_call_transformed_tools(
+        self, fastmcp_server: FastMCP, proxy_server: FastMCPProxy
+    ):
+        """An explicit None description should change the tool description to None."""
+
+        fastmcp_server.add_tool_transformation(
+            "add", ToolTransformConfig(name="add_transformed")
+        )
+        async with Client(proxy_server) as client:
+            result = await client.call_tool("add_transformed", {"a": 1, "b": 2})
+        assert result.data == 3
 
     async def test_tool_without_description(self, proxy_server):
         tools = await proxy_server.get_tools()
@@ -211,6 +260,11 @@ class TestResources:
         )
         assert [r.name for r in resources.values()] == Contains("get_users", "wave")
 
+    async def test_get_resources_meta(self, proxy_server):
+        resources = await proxy_server.get_resources()
+        wave_resource = resources["resource://wave"]
+        assert wave_resource.meta == {"_fastmcp": {"tags": ["wave"]}}
+
     async def test_list_resources_same_as_original(self, fastmcp_server, proxy_server):
         assert (
             await proxy_server._mcp_list_resources()
@@ -304,6 +358,11 @@ class TestResourceTemplates:
     async def test_get_resource_templates(self, proxy_server):
         templates = await proxy_server.get_resource_templates()
         assert [t.name for t in templates.values()] == Contains("get_user")
+
+    async def test_get_resource_templates_meta(self, proxy_server):
+        templates = await proxy_server.get_resource_templates()
+        get_user_template = templates["data://user/{user_id}"]
+        assert get_user_template.meta == {"_fastmcp": {"tags": ["users"]}}
 
     async def test_list_resource_templates_same_as_original(
         self, fastmcp_server, proxy_server
@@ -403,6 +462,11 @@ class TestPrompts:
     async def test_get_prompts_server_method(self, proxy_server: FastMCPProxy):
         prompts = await proxy_server.get_prompts()
         assert [p.name for p in prompts.values()] == Contains("welcome")
+
+    async def test_get_prompts_meta(self, proxy_server):
+        prompts = await proxy_server.get_prompts()
+        welcome_prompt = prompts["welcome"]
+        assert welcome_prompt.meta == {"_fastmcp": {"tags": ["welcome"]}}
 
     async def test_list_prompts_same_as_original(self, fastmcp_server, proxy_server):
         async with Client(fastmcp_server) as client:

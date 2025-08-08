@@ -28,7 +28,22 @@ from fastmcp.resources import FileResource, ResourceTemplate
 from fastmcp.resources.resource import FunctionResource
 from fastmcp.tools.tool import Tool, ToolResult
 from fastmcp.utilities.json_schema import compress_schema
+from fastmcp.utilities.tests import temporary_settings
 from fastmcp.utilities.types import Audio, File, Image
+
+
+def _normalize_anyof_order(schema):
+    """Normalize the order of items in anyOf arrays for consistent comparison."""
+    if isinstance(schema, dict):
+        if "anyOf" in schema:
+            # Sort anyOf items by their string representation for consistent ordering
+            schema = schema.copy()
+            schema["anyOf"] = sorted(schema["anyOf"], key=str)
+        # Recursively normalize nested objects
+        return {k: _normalize_anyof_order(v) for k, v in schema.items()}
+    elif isinstance(schema, list):
+        return [_normalize_anyof_order(item) for item in schema]
+    return schema
 
 
 class PersonTypedDict(TypedDict):
@@ -877,6 +892,18 @@ class TestToolParameters:
             ):
                 await client.call_tool("send_timedelta", {"x": 1000})
 
+    async def test_annotated_string_description(self):
+        mcp = FastMCP()
+
+        @mcp.tool
+        def f(x: Annotated[int, "A number"]):
+            return x
+
+        async with Client(mcp) as client:
+            tools = await client.list_tools()
+            assert len(tools) == 1
+            assert tools[0].inputSchema["properties"]["x"]["description"] == "A number"
+
 
 class TestToolOutputSchema:
     @pytest.mark.parametrize("annotation", [str, int, float, bool, list, AnyUrl])
@@ -917,7 +944,12 @@ class TestToolOutputSchema:
 
             type_schema = compress_schema(TypeAdapter(annotation).json_schema())
             assert len(tools) == 1
-            assert tools[0].outputSchema == type_schema
+
+            # Normalize anyOf ordering for comparison since union type order
+            # can vary between environments when using annotation resolution
+            actual_schema = _normalize_anyof_order(tools[0].outputSchema)
+            expected_schema = _normalize_anyof_order(type_schema)
+            assert actual_schema == expected_schema
 
     async def test_disabled_output_schema_no_structured_content(self):
         mcp = FastMCP()
@@ -1419,6 +1451,33 @@ class TestResource:
             result = await client.read_resource(AnyUrl("file://test.bin"))
             assert result[0].blob == base64.b64encode(b"Binary file data").decode()  # type: ignore[attr-defined]
 
+    async def test_resource_with_annotations(self):
+        mcp = FastMCP()
+
+        @mcp.resource(
+            "http://example.com/data",
+            name="test",
+            annotations={
+                "httpMethod": "GET",
+                "Cache-Control": "max-age=3600",
+            },
+        )
+        def get_data() -> str:
+            return "Hello, world!"
+
+        async with Client(mcp) as client:
+            resources = await client.list_resources()
+            assert len(resources) == 1
+
+            resource = resources[0]
+            assert str(resource.uri) == "http://example.com/data"
+
+            assert resource.annotations is not None
+            assert hasattr(resource.annotations, "httpMethod")
+            assert getattr(resource.annotations, "httpMethod") == "GET"
+            assert hasattr(resource.annotations, "Cache-Control")
+            assert getattr(resource.annotations, "Cache-Control") == "max-age=3600"
+
 
 class TestResourceTags:
     def create_server(self, include_tags=None, exclude_tags=None):
@@ -1816,6 +1875,30 @@ class TestResourceTemplates:
 
             result = await client.read_resource(AnyUrl("resource://a/b"))
             assert result[0].text == "Template resource 1: a/b"  # type: ignore[attr-defined]
+
+    async def test_resource_template_with_annotations(self):
+        """Test that resource template annotations are visible to clients."""
+        mcp = FastMCP()
+
+        @mcp.resource(
+            "api://users/{user_id}",
+            annotations={"httpMethod": "GET", "Cache-Control": "no-cache"},
+        )
+        def get_user(user_id: str) -> str:
+            return f"User {user_id} data"
+
+        async with Client(mcp) as client:
+            templates = await client.list_resource_templates()
+            assert len(templates) == 1
+
+            template = templates[0]
+            assert template.uriTemplate == "api://users/{user_id}"
+
+            assert template.annotations is not None
+            assert hasattr(template.annotations, "httpMethod")
+            assert getattr(template.annotations, "httpMethod") == "GET"
+            assert hasattr(template.annotations, "Cache-Control")
+            assert getattr(template.annotations, "Cache-Control") == "no-cache"
 
 
 class TestResourceTemplatesTags:
@@ -2454,3 +2537,191 @@ class TestPromptTags:
 
             result = await client.get_prompt("prompt_2")
             assert result.messages[0].content.text == "2"  # type: ignore[attr-defined]
+
+
+class TestMeta:
+    """Test that include_fastmcp_meta controls whether _fastmcp key is present in meta."""
+
+    async def test_tool_tags_in_meta_with_default_setting(self):
+        """Test that tool tags appear in meta under _fastmcp key with default setting."""
+        mcp = FastMCP()
+
+        @mcp.tool(tags={"tool-example", "test-tool-tag"})
+        def sample_tool(x: int) -> int:
+            """A sample tool."""
+            return x * 2
+
+        async with Client(mcp) as client:
+            tools = await client.list_tools()
+            tool = next(t for t in tools if t.name == "sample_tool")
+            assert tool.meta is not None
+            assert set(tool.meta["_fastmcp"]["tags"]) == {
+                "tool-example",
+                "test-tool-tag",
+            }
+
+    async def test_resource_tags_in_meta_with_default_setting(self):
+        """Test that resource tags appear in meta under _fastmcp key with default setting."""
+        mcp = FastMCP()
+
+        @mcp.resource(
+            uri="test://resource", tags={"resource-example", "test-resource-tag"}
+        )
+        def sample_resource() -> str:
+            """A sample resource."""
+            return "resource content"
+
+        async with Client(mcp) as client:
+            resources = await client.list_resources()
+            resource = next(r for r in resources if str(r.uri) == "test://resource")
+            assert resource.meta is not None
+            assert set(resource.meta["_fastmcp"]["tags"]) == {
+                "resource-example",
+                "test-resource-tag",
+            }
+
+    async def test_resource_template_tags_in_meta_with_default_setting(self):
+        """Test that resource template tags appear in meta under _fastmcp key with default setting."""
+        mcp = FastMCP()
+
+        @mcp.resource(
+            "test://template/{id}", tags={"template-example", "test-template-tag"}
+        )
+        def sample_template(id: str) -> str:
+            """A sample resource template."""
+            return f"template content for {id}"
+
+        async with Client(mcp) as client:
+            templates = await client.list_resource_templates()
+            template = next(
+                t for t in templates if t.uriTemplate == "test://template/{id}"
+            )
+            assert template.meta is not None
+            assert set(template.meta["_fastmcp"]["tags"]) == {
+                "template-example",
+                "test-template-tag",
+            }
+
+    async def test_prompt_tags_in_meta_with_default_setting(self):
+        """Test that prompt tags appear in meta under _fastmcp key with default setting."""
+        mcp = FastMCP()
+
+        @mcp.prompt(tags={"example", "test-tag"})
+        def sample_prompt() -> str:
+            return "Hello, world!"
+
+        async with Client(mcp) as client:
+            prompts = await client.list_prompts()
+            prompt = next(p for p in prompts if p.name == "sample_prompt")
+            assert prompt.meta is not None
+            assert set(prompt.meta["_fastmcp"]["tags"]) == {"example", "test-tag"}
+
+    async def test_tool_meta_with_include_fastmcp_meta_false(self):
+        mcp = FastMCP(include_fastmcp_meta=False)
+
+        @mcp.tool(tags={"tool-example", "test-tool-tag"})
+        def sample_tool(x: int) -> int:
+            """A sample tool."""
+            return x * 2
+
+        async with Client(mcp) as client:
+            tools = await client.list_tools()
+            tool = next(t for t in tools if t.name == "sample_tool")
+            # Meta should be None when include_fastmcp_meta is False and no explicit meta is set
+            assert tool.meta is None
+
+    async def test_resource_meta_with_include_fastmcp_meta_false(self):
+        mcp = FastMCP(include_fastmcp_meta=False)
+
+        @mcp.resource(
+            uri="test://resource", tags={"resource-example", "test-resource-tag"}
+        )
+        def sample_resource() -> str:
+            """A sample resource."""
+            return "resource content"
+
+        async with Client(mcp) as client:
+            resources = await client.list_resources()
+            resource = next(r for r in resources if str(r.uri) == "test://resource")
+            # Meta should be None when include_fastmcp_meta is False and no explicit meta is set
+            assert resource.meta is None
+
+    async def test_resource_template_meta_with_include_fastmcp_meta_false(self):
+        mcp = FastMCP(include_fastmcp_meta=False)
+
+        @mcp.resource(
+            "test://template/{id}", tags={"template-example", "test-template-tag"}
+        )
+        def sample_template(id: str) -> str:
+            """A sample resource template."""
+            return f"template content for {id}"
+
+        async with Client(mcp) as client:
+            templates = await client.list_resource_templates()
+            template = next(
+                t for t in templates if t.uriTemplate == "test://template/{id}"
+            )
+            # Meta should be None when include_fastmcp_meta is False and no explicit meta is set
+            assert template.meta is None
+
+    async def test_prompt_meta_with_include_fastmcp_meta_false(self):
+        mcp = FastMCP(include_fastmcp_meta=False)
+
+        @mcp.prompt(tags={"example", "test-tag"})
+        def sample_prompt() -> str:
+            return "Hello, world!"
+
+        async with Client(mcp) as client:
+            prompts = await client.list_prompts()
+            prompt = next(p for p in prompts if p.name == "sample_prompt")
+            # Meta should be None when include_fastmcp_meta is False and no explicit meta is set
+            assert prompt.meta is None
+
+    async def test_global_settings_inheritance(self):
+        """Test that servers inherit the global include_fastmcp_meta setting."""
+        with temporary_settings(include_fastmcp_meta=False):
+            # Server should inherit global setting
+            mcp = FastMCP()
+
+            @mcp.tool(tags={"test-tag"})
+            def sample_tool(x: int) -> int:
+                return x * 2
+
+            async with Client(mcp) as client:
+                tools = await client.list_tools()
+                tool = next(t for t in tools if t.name == "sample_tool")
+                # Meta should be None because global setting is False
+                assert tool.meta is None
+
+        # Verify that default behavior is restored
+        mcp2 = FastMCP()
+
+        @mcp2.tool(tags={"test-tag"})
+        def another_tool(x: int) -> int:
+            return x * 2
+
+        async with Client(mcp2) as client:
+            tools = await client.list_tools()
+            tool = next(t for t in tools if t.name == "another_tool")
+            # Meta should have _fastmcp key because global setting is back to default (True)
+            assert tool.meta is not None
+            assert "_fastmcp" in tool.meta
+            assert tool.meta["_fastmcp"]["tags"] == ["test-tag"]
+
+    async def test_explicit_override_of_global_setting(self):
+        """Test that explicit include_fastmcp_meta parameter overrides global setting."""
+        with temporary_settings(include_fastmcp_meta=False):
+            # Explicitly override global setting to True
+            mcp = FastMCP(include_fastmcp_meta=True)
+
+            @mcp.tool(tags={"test-tag"})
+            def sample_tool(x: int) -> int:
+                return x * 2
+
+            async with Client(mcp) as client:
+                tools = await client.list_tools()
+                tool = next(t for t in tools if t.name == "sample_tool")
+                # Meta should have _fastmcp key because explicit setting overrides global
+                assert tool.meta is not None
+                assert "_fastmcp" in tool.meta
+                assert tool.meta["_fastmcp"]["tags"] == ["test-tag"]

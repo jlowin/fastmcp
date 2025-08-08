@@ -14,6 +14,7 @@ dependencies = [
     "authlib>=1.5.2",
     "pydantic[email]>=2.11.7",
     "pyperclip>=1.9.0",
+    "openapi-core>=0.19.5",
 ]
 requires-python = ">=3.10"
 readme = "README.md"
@@ -72,7 +73,6 @@ Documentation = "https://gofastmcp.com"
 [project.optional-dependencies]
 websockets = ["websockets>=15.0.1"]
 
-
 [build-system]
 requires = ["hatchling", "uv-dynamic-versioning>=0.7.0"]
 build-backend = "hatchling.build"
@@ -100,7 +100,18 @@ env = [
     "FASTMCP_TEST_MODE=1",
     'D:FASTMCP_LOG_LEVEL=DEBUG',
     'D:FASTMCP_ENABLE_RICH_TRACEBACKS=0',
+
 ]
+markers = [
+    "integration: marks tests as integration tests (deselect with '-m \"not integration\"')",
+    "client_process: marks tests that spawn client processes via stdio transport. These can create issues when run in the same CI environment as other subprocess-based tests.",
+]
+# Automatically mark all tests in integration_tests folder
+pythonpath = ["."]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
 
 [tool.pyright]
 include = ["src", "tests"]

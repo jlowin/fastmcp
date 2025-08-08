@@ -85,7 +85,12 @@ class Prompt(FastMCPComponent, ABC):
         except RuntimeError:
             pass  # No context available
 
-    def to_mcp_prompt(self, **overrides: Any) -> MCPPrompt:
+    def to_mcp_prompt(
+        self,
+        *,
+        include_fastmcp_meta: bool | None = None,
+        **overrides: Any,
+    ) -> MCPPrompt:
         """Convert the prompt to an MCP prompt."""
         arguments = [
             MCPPromptArgument(
@@ -100,6 +105,7 @@ class Prompt(FastMCPComponent, ABC):
             "description": self.description,
             "arguments": arguments,
             "title": self.title,
+            "_meta": self.get_meta(include_fastmcp_meta=include_fastmcp_meta),
         }
         return MCPPrompt(**kwargs | overrides)
 
@@ -111,6 +117,7 @@ class Prompt(FastMCPComponent, ABC):
         description: str | None = None,
         tags: set[str] | None = None,
         enabled: bool | None = None,
+        meta: dict[str, Any] | None = None,
     ) -> FunctionPrompt:
         """Create a Prompt from a function.
 
@@ -127,6 +134,7 @@ class Prompt(FastMCPComponent, ABC):
             description=description,
             tags=tags,
             enabled=enabled,
+            meta=meta,
         )
 
     @abstractmethod
@@ -152,6 +160,7 @@ class FunctionPrompt(Prompt):
         description: str | None = None,
         tags: set[str] | None = None,
         enabled: bool | None = None,
+        meta: dict[str, Any] | None = None,
     ) -> FunctionPrompt:
         """Create a Prompt from a function.
 
@@ -246,6 +255,7 @@ class FunctionPrompt(Prompt):
             tags=tags or set(),
             enabled=enabled if enabled is not None else True,
             fn=fn,
+            meta=meta,
         )
 
     def _convert_string_arguments(self, kwargs: dict[str, Any]) -> dict[str, Any]:

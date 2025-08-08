@@ -4,6 +4,7 @@ from typing import cast
 import pytest
 from anyio import create_task_group
 from mcp.types import LoggingLevel, ModelHint, ModelPreferences, TextContent
+from pydantic import BaseModel, Field
 
 from fastmcp import Client, Context, FastMCP
 from fastmcp.client.elicitation import ElicitRequestParams, ElicitResult
@@ -17,6 +18,10 @@ from fastmcp.server.proxy import ProxyClient
 def fastmcp_server():
     mcp = FastMCP("TestServer")
 
+    @mcp.tool(tags={"echo"})
+    def echo(message: str) -> str:
+        return f"echo: {message}"
+
     @mcp.tool
     async def list_roots(context: Context) -> list[str]:
         roots = await context.list_roots()
@@ -29,6 +34,7 @@ def fastmcp_server():
         result = await context.sample(
             "Hello, world!",
             system_prompt="You love FastMCP",
+            include_context="thisServer",
             temperature=0.5,
             max_tokens=100,
             model_preferences="gpt-4o",
@@ -78,6 +84,15 @@ async def proxy_server(fastmcp_server: FastMCP):
 
 
 class TestProxyClient:
+    async def test_forward_tool_meta(self, proxy_server: FastMCP):
+        """
+        Test that the proxy client correctly forwards the `echo` tool meta.
+        """
+        async with Client(proxy_server) as client:
+            tools = await client.list_tools()
+            echo_tool = next(t for t in tools if t.name == "echo")
+            assert echo_tool.meta == {"_fastmcp": {"tags": ["echo"]}}
+
     async def test_forward_error_response(self, proxy_server: FastMCP):
         """
         Test that the proxy client correctly forwards an error response.
@@ -328,6 +343,50 @@ class TestProxyClient:
 
         assert results["elicitation_a"] == "Hello, Alice!"
         assert results["elicitation_b"] == "Hello, Bob!"
+
+    async def test_elicit_with_default_values(self, fastmcp_server: FastMCP):
+        """
+        Test that the proxy client correctly handles elicitation with default values (fixes #1167).
+        """
+
+        @fastmcp_server.tool
+        async def elicit_with_defaults(context: Context) -> str:
+            class TestModel(BaseModel):
+                content: str = Field(description="Your reply content")
+                acknowledge: bool = Field(
+                    default=False, description="Send immediately or save as draft"
+                )
+
+            result = await context.elicit(
+                "Please provide input:", response_type=TestModel
+            )
+
+            if result.action == "accept":
+                return f"Content: {result.data.content}, Acknowledge: {result.data.acknowledge}"
+            else:
+                return f"Elicitation {result.action}"
+
+        proxy_server = FastMCP.as_proxy(ProxyClient(fastmcp_server))
+
+        # Test that elicitation works correctly through the proxy
+        async def elicitation_handler(
+            message: str,
+            response_type: type,
+            params: ElicitRequestParams,
+            ctx: RequestContext,
+        ):
+            # Verify the schema is correct - acknowledge should have default=False, not be nullable
+            schema = params.requestedSchema
+            assert schema["properties"]["acknowledge"]["type"] == "boolean"
+            assert schema["properties"]["acknowledge"]["default"] is False
+
+            return {"content": "Test content", "acknowledge": True}
+
+        async with Client(
+            proxy_server, elicitation_handler=elicitation_handler
+        ) as client:
+            result = await client.call_tool("elicit_with_defaults", {})
+            assert result.data == "Content: Test content, Acknowledge: True"
 
     async def test_client_factory_creates_fresh_sessions(self, fastmcp_server: FastMCP):
         """Test that the client factory pattern creates fresh sessions for each request."""

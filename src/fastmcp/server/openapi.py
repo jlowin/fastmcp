@@ -459,9 +459,7 @@ class OpenAPITool(Tool):
                     params_to_exclude.add(p.name)
 
             body_params = {
-                k: v
-                for k, v in arguments.items()
-                if k not in params_to_exclude and k != "context"
+                k: v for k, v in arguments.items() if k not in params_to_exclude
             }
 
             if body_params:
@@ -894,7 +892,7 @@ class FastMCPOpenAPI(FastMCP):
 
         # Extract output schema from OpenAPI responses
         output_schema = extract_output_schema_from_responses(
-            route.responses, route.schema_definitions
+            route.responses, route.schema_definitions, route.openapi_version
         )
 
         # Get a unique tool name

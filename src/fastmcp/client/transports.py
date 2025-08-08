@@ -6,7 +6,7 @@ import os
 import shutil
 import sys
 import warnings
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any, Literal, TypeVar, cast, overload
 
@@ -22,6 +22,7 @@ from mcp.client.session import (
     SamplingFnT,
 )
 from mcp.server.fastmcp import FastMCP as FastMCP1Server
+from mcp.shared._httpx_utils import McpHttpClientFactory
 from mcp.shared.memory import create_client_server_memory_streams
 from pydantic import AnyUrl
 from typing_extensions import TypedDict, Unpack
@@ -48,6 +49,7 @@ __all__ = [
     "FastMCPStdioTransport",
     "NodeStdioTransport",
     "UvxStdioTransport",
+    "UvStdioTransport",
     "NpxStdioTransport",
     "FastMCPTransport",
     "infer_transport",
@@ -160,7 +162,7 @@ class SSETransport(ClientTransport):
         headers: dict[str, str] | None = None,
         auth: httpx.Auth | Literal["oauth"] | str | None = None,
         sse_read_timeout: datetime.timedelta | float | int | None = None,
-        httpx_client_factory: Callable[[], httpx.AsyncClient] | None = None,
+        httpx_client_factory: McpHttpClientFactory | None = None,
     ):
         if isinstance(url, AnyUrl):
             url = str(url)
@@ -232,7 +234,7 @@ class StreamableHttpTransport(ClientTransport):
         headers: dict[str, str] | None = None,
         auth: httpx.Auth | Literal["oauth"] | str | None = None,
         sse_read_timeout: datetime.timedelta | float | int | None = None,
-        httpx_client_factory: Callable[[], httpx.AsyncClient] | None = None,
+        httpx_client_factory: McpHttpClientFactory | None = None,
     ):
         if isinstance(url, AnyUrl):
             url = str(url)
@@ -542,6 +544,63 @@ class NodeStdioTransport(StdioTransport):
         self.script_path = script_path
 
 
+class UvStdioTransport(StdioTransport):
+    """Transport for running commands via the uv tool."""
+
+    def __init__(
+        self,
+        command: str,
+        args: list[str] | None = None,
+        module: bool = False,
+        project_directory: str | None = None,
+        python_version: str | None = None,
+        with_packages: list[str] | None = None,
+        with_requirements: str | None = None,
+        env_vars: dict[str, str] | None = None,
+        keep_alive: bool | None = None,
+    ):
+        # Basic validation
+        if project_directory and not Path(project_directory).exists():
+            raise NotADirectoryError(
+                f"Project directory not found: {project_directory}"
+            )
+
+        # Build uv arguments
+        uv_args: list[str] = ["run"]
+        if project_directory:
+            uv_args.extend(["--directory", str(project_directory)])
+        if python_version:
+            uv_args.extend(["--python", python_version])
+        for pkg in with_packages or []:
+            uv_args.extend(["--with", pkg])
+        if with_requirements:
+            uv_args.extend(["--with-requirements", str(with_requirements)])
+        if module:
+            uv_args.append("--module")
+
+        if not args:
+            args = []
+
+        uv_args.extend([command, *args])
+
+        # Get environment with any additional variables
+        env: dict[str, str] | None = None
+        if env_vars or project_directory:
+            env = os.environ.copy()
+            if project_directory:
+                env["UV_PROJECT_DIR"] = str(project_directory)
+            if env_vars:
+                env.update(env_vars)
+
+        super().__init__(
+            command="uv",
+            args=uv_args,
+            env=env,
+            cwd=None,  # Use --directory flag instead of cwd
+            keep_alive=keep_alive,
+        )
+
+
 class UvxStdioTransport(StdioTransport):
     """Transport for running commands via the uvx tool."""
 
@@ -579,7 +638,7 @@ class UvxStdioTransport(StdioTransport):
             )
 
         # Build uvx arguments
-        uvx_args = []
+        uvx_args: list[str] = []
         if python_version:
             uvx_args.extend(["--python", python_version])
         if from_package:
@@ -592,11 +651,9 @@ class UvxStdioTransport(StdioTransport):
         if tool_args:
             uvx_args.extend(tool_args)
 
-        # Get environment with any additional variables
-        env = None
+        env: dict[str, str] | None = None
         if env_vars:
             env = os.environ.copy()
-            env.update(env_vars)
 
         super().__init__(
             command="uvx",
@@ -605,7 +662,7 @@ class UvxStdioTransport(StdioTransport):
             cwd=project_directory,
             keep_alive=keep_alive,
         )
-        self.tool_name = tool_name
+        self.tool_name: str = tool_name
 
 
 class NpxStdioTransport(StdioTransport):
@@ -732,7 +789,7 @@ class MCPConfigTransport(ClientTransport):
 
     1. If the MCPConfig contains exactly one server, it creates a direct transport to that server.
     2. If the MCPConfig contains multiple servers, it creates a composite client by mounting
-       all servers on a single FastMCP instance, with each server's name used as its mounting prefix.
+       all servers on a single FastMCP instance, with each server's name, by default, used as its mounting prefix.
 
     In the multi-server case, tools are accessible with the prefix pattern `{server_name}_{tool_name}`
     and resources with the pattern `protocol://{server_name}/path/to/resource`.
@@ -772,7 +829,9 @@ class MCPConfigTransport(ClientTransport):
         ```
     """
 
-    def __init__(self, config: MCPConfig | dict):
+    def __init__(self, config: MCPConfig | dict, name_as_prefix: bool = True):
+        from fastmcp.utilities.mcp_config import composite_server_from_mcp_config
+
         if isinstance(config, dict):
             config = MCPConfig.from_dict(config)
         self.config = config
@@ -787,15 +846,11 @@ class MCPConfigTransport(ClientTransport):
 
         # otherwise create a composite client
         else:
-            composite_server = FastMCP()
-
-            for name, server in self.config.mcpServers.items():
-                composite_server.mount(
-                    prefix=name,
-                    server=FastMCP.as_proxy(backend=server.to_transport()),
+            self.transport = FastMCPTransport(
+                mcp=composite_server_from_mcp_config(
+                    self.config, name_as_prefix=name_as_prefix
                 )
-
-            self.transport = FastMCPTransport(mcp=composite_server)
+            )
 
     @contextlib.asynccontextmanager
     async def connect_session(

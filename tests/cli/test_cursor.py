@@ -306,7 +306,7 @@ class TestCursorCommand:
 
     @patch("fastmcp.cli.install.cursor.install_cursor")
     @patch("fastmcp.cli.install.cursor.process_common_args")
-    def test_cursor_command_basic(self, mock_process_args, mock_install):
+    async def test_cursor_command_basic(self, mock_process_args, mock_install):
         """Test basic cursor command execution."""
         mock_process_args.return_value = (
             Path("server.py"),
@@ -318,7 +318,7 @@ class TestCursorCommand:
         mock_install.return_value = True
 
         with patch("sys.exit") as mock_exit:
-            cursor_command("server.py")
+            await cursor_command("server.py")
 
         mock_install.assert_called_once_with(
             file=Path("server.py"),
@@ -327,12 +327,15 @@ class TestCursorCommand:
             with_editable=None,
             with_packages=[],
             env_vars={},
+            python_version=None,
+            with_requirements=None,
+            project=None,
         )
         mock_exit.assert_not_called()
 
     @patch("fastmcp.cli.install.cursor.install_cursor")
     @patch("fastmcp.cli.install.cursor.process_common_args")
-    def test_cursor_command_failure(self, mock_process_args, mock_install):
+    async def test_cursor_command_failure(self, mock_process_args, mock_install):
         """Test cursor command when installation fails."""
         mock_process_args.return_value = (
             Path("server.py"),
@@ -344,6 +347,6 @@ class TestCursorCommand:
         mock_install.return_value = False
 
         with pytest.raises(SystemExit) as exc_info:
-            cursor_command("server.py")
+            await cursor_command("server.py")
 
         assert exc_info.value.code == 1

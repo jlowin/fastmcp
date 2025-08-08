@@ -1,10 +1,20 @@
+import inspect
+import json
+from pathlib import Path
+
 import pytest
+from pydantic import ValidationError
 
 from fastmcp.cli.run import (
+    create_mcp_config_server,
     import_server,
     is_url,
     parse_file_path,
 )
+from fastmcp.client.client import Client
+from fastmcp.client.transports import FastMCPTransport
+from fastmcp.mcp_config import MCPConfig, StdioMCPServer
+from fastmcp.server.server import FastMCP
 
 
 class TestUrlDetection:
@@ -80,6 +90,57 @@ class TestFilePathParsing:
         assert exc_info.value.code == 1
 
 
+class TestMCPConfig:
+    """Test MCPConfig functionality."""
+
+    async def test_run_mcp_config(self, tmp_path: Path):
+        """Test creating a server from an MCPConfig file."""
+        server_script = inspect.cleandoc("""
+            from fastmcp import FastMCP
+
+            mcp = FastMCP()
+
+            @mcp.tool
+            def add(a: int, b: int) -> int:
+                return a + b
+
+            if __name__ == '__main__':
+                mcp.run()
+            """)
+
+        script_path: Path = tmp_path / "test.py"
+        script_path.write_text(server_script)
+
+        mcp_config_path = tmp_path / "mcp_config.json"
+
+        mcp_config = MCPConfig(
+            mcpServers={
+                "test_server": StdioMCPServer(command="python", args=[str(script_path)])
+            }
+        )
+        mcp_config.write_to_file(mcp_config_path)
+
+        server: FastMCP[None] = create_mcp_config_server(mcp_config_path)
+
+        client = Client[FastMCPTransport](server)
+
+        async with client:
+            tools = await client.list_tools()
+            assert len(tools) == 1
+
+    async def test_validate_mcp_config(self, tmp_path: Path):
+        """Test creating a server from an MCPConfig file."""
+
+        mcp_config_path = tmp_path / "mcp_config.json"
+
+        mcp_config = {"mcpServers": {"test_server": dict(x=1, y=2)}}
+        with mcp_config_path.open("w") as f:
+            json.dump(mcp_config, f)
+
+        with pytest.raises(ValidationError, match="validation errors for MCPConfig"):
+            create_mcp_config_server(mcp_config_path)
+
+
 class TestServerImport:
     """Test server import functionality using real files."""
 
@@ -96,7 +157,7 @@ def greet(name: str) -> str:
     return f"Hello, {name}!"
 """)
 
-        server = import_server(test_file)
+        server = await import_server(test_file)
         assert server.name == "TestServer"
         tools = await server.get_tools()
         assert "greet" in tools
@@ -117,12 +178,12 @@ if __name__ == "__main__":
     app.run()
 """)
 
-        server = import_server(test_file)
+        server = await import_server(test_file)
         assert server.name == "MainServer"
         tools = await server.get_tools()
         assert "calculate" in tools
 
-    def test_import_server_standard_names(self, tmp_path):
+    async def test_import_server_standard_names(self, tmp_path):
         """Test automatic detection of standard names (mcp, server, app)."""
         # Test with 'mcp' name
         mcp_file = tmp_path / "mcp_server.py"
@@ -131,7 +192,7 @@ import fastmcp
 mcp = fastmcp.FastMCP("MCPServer")
 """)
 
-        server = import_server(mcp_file)
+        server = await import_server(mcp_file)
         assert server.name == "MCPServer"
 
         # Test with 'server' name
@@ -141,7 +202,7 @@ import fastmcp
 server = fastmcp.FastMCP("ServerServer")
 """)
 
-        server = import_server(server_file)
+        server = await import_server(server_file)
         assert server.name == "ServerServer"
 
         # Test with 'app' name
@@ -151,7 +212,7 @@ import fastmcp
 app = fastmcp.FastMCP("AppServer")
 """)
 
-        server = import_server(app_file)
+        server = await import_server(app_file)
         assert server.name == "AppServer"
 
     async def test_import_server_nonstandard_name(self, tmp_path):
@@ -167,12 +228,12 @@ def custom_tool() -> str:
     return "custom"
 """)
 
-        server = import_server(test_file, "my_custom_server")
+        server = await import_server(test_file, "my_custom_server")
         assert server.name == "CustomServer"
         tools = await server.get_tools()
         assert "custom_tool" in tools
 
-    def test_import_server_no_standard_names_fails(self, tmp_path):
+    async def test_import_server_no_standard_names_fails(self, tmp_path):
         """Test importing server when no standard names exist fails."""
         test_file = tmp_path / "server.py"
         test_file.write_text("""
@@ -182,10 +243,10 @@ other_name = fastmcp.FastMCP("OtherServer")
 """)
 
         with pytest.raises(SystemExit) as exc_info:
-            import_server(test_file)
+            await import_server(test_file)
         assert exc_info.value.code == 1
 
-    def test_import_server_nonexistent_object_fails(self, tmp_path):
+    async def test_import_server_nonexistent_object_fails(self, tmp_path):
         """Test importing nonexistent server object fails."""
         test_file = tmp_path / "server.py"
         test_file.write_text("""
@@ -195,5 +256,5 @@ mcp = fastmcp.FastMCP("TestServer")
 """)
 
         with pytest.raises(SystemExit) as exc_info:
-            import_server(test_file, "nonexistent")
+            await import_server(test_file, "nonexistent")
         assert exc_info.value.code == 1

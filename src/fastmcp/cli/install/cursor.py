@@ -72,6 +72,9 @@ def install_cursor(
     with_editable: Path | None = None,
     with_packages: list[str] | None = None,
     env_vars: dict[str, str] | None = None,
+    python_version: str | None = None,
+    with_requirements: Path | None = None,
+    project: Path | None = None,
 ) -> bool:
     """Install FastMCP server in Cursor.
 
@@ -82,12 +85,23 @@ def install_cursor(
         with_editable: Optional directory to install in editable mode
         with_packages: Optional list of additional packages to install
         env_vars: Optional dictionary of environment variables
+        python_version: Optional Python version to use
+        with_requirements: Optional requirements file to install from
+        project: Optional project directory to run within
 
     Returns:
         True if installation was successful, False otherwise
     """
     # Build uv run command
     args = ["run"]
+
+    # Add Python version if specified
+    if python_version:
+        args.extend(["--python", python_version])
+
+    # Add project if specified
+    if project:
+        args.extend(["--project", str(project)])
 
     # Collect all packages in a set to deduplicate
     packages = {"fastmcp"}
@@ -100,6 +114,9 @@ def install_cursor(
 
     if with_editable:
         args.extend(["--with-editable", str(with_editable)])
+
+    if with_requirements:
+        args.extend(["--with-requirements", str(with_requirements)])
 
     # Build server spec from parsed components
     if server_object:
@@ -133,13 +150,13 @@ def install_cursor(
         return False
 
 
-def cursor_command(
+async def cursor_command(
     server_spec: str,
     *,
     server_name: Annotated[
         str | None,
         cyclopts.Parameter(
-            name=["--server-name", "-n"],
+            name=["--name", "-n"],
             help="Custom name for the server in Cursor",
         ),
     ] = None,
@@ -173,13 +190,34 @@ def cursor_command(
             help="Load environment variables from .env file",
         ),
     ] = None,
+    python: Annotated[
+        str | None,
+        cyclopts.Parameter(
+            "--python",
+            help="Python version to use (e.g., 3.10, 3.11)",
+        ),
+    ] = None,
+    with_requirements: Annotated[
+        Path | None,
+        cyclopts.Parameter(
+            "--with-requirements",
+            help="Requirements file to install dependencies from",
+        ),
+    ] = None,
+    project: Annotated[
+        Path | None,
+        cyclopts.Parameter(
+            "--project",
+            help="Run the command within the given project directory",
+        ),
+    ] = None,
 ) -> None:
     """Install an MCP server in Cursor.
 
     Args:
         server_spec: Python file to install, optionally with :object suffix
     """
-    file, server_object, name, with_packages, env_dict = process_common_args(
+    file, server_object, name, with_packages, env_dict = await process_common_args(
         server_spec, server_name, with_packages, env_vars, env_file
     )
 
@@ -190,6 +228,9 @@ def cursor_command(
         with_editable=with_editable,
         with_packages=with_packages,
         env_vars=env_dict,
+        python_version=python,
+        with_requirements=with_requirements,
+        project=project,
     )
 
     if not success:

@@ -8,6 +8,8 @@ from fastmcp import FastMCP
 from fastmcp.client import Client
 from fastmcp.client.transports import FastMCPTransport, SSETransport
 from fastmcp.server.proxy import FastMCPProxy
+from fastmcp.tools.tool import Tool
+from fastmcp.tools.tool_transform import TransformedTool
 from fastmcp.utilities.tests import caplog_for_fastmcp
 
 
@@ -18,22 +20,29 @@ class TestBasicMount:
         """Test mounting a simple server and accessing its tool."""
         # Create main app and sub-app
         main_app = FastMCP("MainApp")
-        sub_app = FastMCP("SubApp")
 
         # Add a tool to the sub-app
-        @sub_app.tool
-        def sub_tool() -> str:
+        def tool() -> str:
             return "This is from the sub app"
+
+        sub_tool = Tool.from_function(tool)
+
+        transformed_tool = TransformedTool.from_tool(
+            name="transformed_tool", tool=sub_tool
+        )
+
+        sub_app = FastMCP("SubApp", tools=[transformed_tool, sub_tool])
 
         # Mount the sub-app to the main app
         main_app.mount(sub_app, "sub")
 
         # Get tools from main app, should include sub_app's tools
         tools = await main_app.get_tools()
-        assert "sub_sub_tool" in tools
+        assert "sub_tool" in tools
+        assert "sub_transformed_tool" in tools
 
         async with Client(main_app) as client:
-            result = await client.call_tool("sub_sub_tool", {})
+            result = await client.call_tool("sub_tool", {})
             assert result.data == "This is from the sub app"
 
     async def test_mount_with_custom_separator(self):
@@ -317,15 +326,18 @@ class TestMultipleServerMount:
             record.message for record in caplog.records if record.levelname == "WARNING"
         ]
         assert any(
-            "Failed to get tools from mounted server 'unreachable'" in msg
+            "Failed to get tools from server: 'FastMCP', mounted at: 'unreachable'"
+            in msg
             for msg in warning_messages
         )
         assert any(
-            "Failed to get resources from mounted server 'unreachable'" in msg
+            "Failed to get resources from server: 'FastMCP', mounted at: 'unreachable'"
+            in msg
             for msg in warning_messages
         )
         assert any(
-            "Failed to get prompts from mounted server 'unreachable'" in msg
+            "Failed to get prompts from server: 'FastMCP', mounted at: 'unreachable'"
+            in msg
             for msg in warning_messages
         )
 
@@ -625,23 +637,8 @@ class TestDynamicChanges:
         sub_app._tool_manager._tools.pop("temp_tool")
 
         # The tool should no longer be accessible
-        # Refresh the cache by clearing it
-        main_app._cache.cache.clear()
         tools = await main_app.get_tools()
         assert "sub_temp_tool" not in tools
-
-    async def test_cache_expiration(self):
-        main_app = FastMCP("MainApp", cache_expiration_seconds=2)
-        sub_app = FastMCP("SubApp")
-        tools = await main_app.get_tools()
-        assert len(tools) == 0
-
-        @sub_app.tool
-        def sub_tool():
-            return "sub_tool"
-
-        tools = await main_app.get_tools()
-        assert len(tools) == 0
 
 
 class TestResourcesAndTemplates:

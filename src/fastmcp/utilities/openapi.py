@@ -1,5 +1,4 @@
 import json
-import logging
 from typing import Any, Generic, Literal, TypeVar, cast
 
 from openapi_pydantic import (
@@ -24,10 +23,10 @@ from openapi_pydantic.v3.v3_0 import Response as Response_30
 from openapi_pydantic.v3.v3_0 import Schema as Schema_30
 from pydantic import BaseModel, Field, ValidationError
 
-from fastmcp.utilities.json_schema import compress_schema
+from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.types import FastMCPBaseModel
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # --- Intermediate Representation (IR) Definition ---
 # (IR models remain the same)
@@ -83,13 +82,9 @@ def format_array_parameter(
             return values
         else:
             # For path parameters, fallback to string representation without Python syntax
-            str_value = (
-                str(values)
-                .replace("[", "")
-                .replace("]", "")
-                .replace("'", "")
-                .replace('"', "")
-            )
+            # Use str.translate() for efficient character removal
+            translation_table = str.maketrans("", "", "[]'\"")
+            str_value = str(values).translate(translation_table)
             return str_value
 
 
@@ -102,8 +97,7 @@ def format_deep_object_parameter(
     According to OpenAPI 3.0 spec, deepObject style with explode=true serializes
     object properties as separate query parameters with bracket notation.
 
-    For example: {"id": "123", "type": "user"} becomes:
-    param[id]=123&param[type]=user
+    For example: `{"id": "123", "type": "user"}` becomes `param[id]=123&param[type]=user`.
 
     Args:
         param_value: Dictionary value to format
@@ -175,6 +169,7 @@ class HTTPRoute(FastMCPBaseModel):
         default_factory=dict
     )  # Store component schemas
     extensions: dict[str, Any] = Field(default_factory=dict)
+    openapi_version: str | None = None
 
 
 # Export public symbols
@@ -189,6 +184,7 @@ __all__ = [
     "parse_openapi_to_http_routes",
     "extract_output_schema_from_responses",
     "format_deep_object_parameter",
+    "_handle_nullable_fields",
 ]
 
 # Type variables for generic parser
@@ -228,6 +224,7 @@ def parse_openapi_to_http_routes(openapi_dict: dict[str, Any]) -> list[HTTPRoute
                 Response_30,
                 Operation_30,
                 PathItem_30,
+                openapi_version,
             )
             return parser.parse()
         else:
@@ -245,6 +242,7 @@ def parse_openapi_to_http_routes(openapi_dict: dict[str, Any]) -> list[HTTPRoute
                 Response,
                 Operation,
                 PathItem,
+                openapi_version,
             )
             return parser.parse()
     except ValidationError as e:
@@ -278,6 +276,7 @@ class OpenAPIParser(
         response_cls: type[TResponse],
         operation_cls: type[TOperation],
         path_item_cls: type[TPathItem],
+        openapi_version: str,
     ):
         """Initialize the parser with the OpenAPI schema and type classes."""
         self.openapi = openapi
@@ -288,6 +287,7 @@ class OpenAPIParser(
         self.response_cls = response_cls
         self.operation_cls = operation_cls
         self.path_item_cls = path_item_cls
+        self.openapi_version = openapi_version
 
     def _convert_to_parameter_location(self, param_in: str) -> ParameterLocation:
         """Convert string parameter location to our ParameterLocation type."""
@@ -710,6 +710,7 @@ class OpenAPIParser(
                             responses=responses,
                             schema_definitions=schema_definitions,
                             extensions=extensions,
+                            openapi_version=self.openapi_version,
                         )
                         routes.append(route)
                         logger.info(
@@ -1068,15 +1069,16 @@ def _replace_ref_with_defs(
     """
     schema = info.copy()
     if ref_path := schema.get("$ref"):
-        if ref_path.startswith("#/components/schemas/"):
-            schema_name = ref_path.split("/")[-1]
-            schema["$ref"] = f"#/$defs/{schema_name}"
-        elif not ref_path.startswith("#/"):
-            raise ValueError(
-                f"External or non-local reference not supported: {ref_path}. "
-                f"FastMCP only supports local schema references starting with '#/'. "
-                f"Please include all schema definitions within the OpenAPI document."
-            )
+        if isinstance(ref_path, str):
+            if ref_path.startswith("#/components/schemas/"):
+                schema_name = ref_path.split("/")[-1]
+                schema["$ref"] = f"#/$defs/{schema_name}"
+            elif not ref_path.startswith("#/"):
+                raise ValueError(
+                    f"External or non-local reference not supported: {ref_path}. "
+                    f"FastMCP only supports local schema references starting with '#/'. "
+                    f"Please include all schema definitions within the OpenAPI document."
+                )
     elif properties := schema.get("properties"):
         if "$ref" in properties:
             schema["properties"] = _replace_ref_with_defs(properties)
@@ -1113,15 +1115,136 @@ def _make_optional_parameter_nullable(schema: dict[str, Any]) -> dict[str, Any]:
     # Create a new schema that allows null in addition to the original type
     if "type" in schema:
         original_type = schema["type"]
+
         if isinstance(original_type, str):
             # Single type - make it a union with null
-            nullable_schema = schema.copy()
-            nullable_schema["anyOf"] = [{"type": original_type}, {"type": "null"}]
-            # Remove the original type since we're using anyOf
-            del nullable_schema["type"]
+            # Optimize: avoid full schema copy by building directly
+            nested_non_nullable_schema = {
+                "type": original_type,
+            }
+            nullable_schema = {}
+
+            # Define type-specific properties that should move to nested schema
+            type_specific_properties = set()
+            if original_type == "array":
+                # https://json-schema.org/understanding-json-schema/reference/array
+                type_specific_properties = {
+                    "items",
+                    "prefixItems",
+                    "unevaluatedItems",
+                    "contains",
+                    "minContains",
+                    "maxContains",
+                    "minItems",
+                    "maxItems",
+                    "uniqueItems",
+                }
+            elif original_type == "object":
+                # https://json-schema.org/understanding-json-schema/reference/object
+                type_specific_properties = {
+                    "properties",
+                    "patternProperties",
+                    "additionalProperties",
+                    "unevaluatedProperties",
+                    "required",
+                    "propertyNames",
+                    "minProperties",
+                    "maxProperties",
+                }
+
+            # Efficiently distribute properties without copying the entire schema
+            for key, value in schema.items():
+                if key == "type":
+                    continue  # Already handled
+                elif key in type_specific_properties:
+                    nested_non_nullable_schema[key] = value
+                else:
+                    nullable_schema[key] = value
+
+            nullable_schema["anyOf"] = [nested_non_nullable_schema, {"type": "null"}]
             return nullable_schema
 
     return schema
+
+
+def _add_null_to_type(schema: dict[str, Any]) -> None:
+    """Add 'null' to the schema's type field or handle oneOf/anyOf/allOf constructs if not already present."""
+    if "type" in schema:
+        current_type = schema["type"]
+
+        if isinstance(current_type, str):
+            # Convert string type to array with null
+            schema["type"] = [current_type, "null"]
+        elif isinstance(current_type, list):
+            # Add null to array if not already present
+            if "null" not in current_type:
+                schema["type"] = current_type + ["null"]
+    elif "oneOf" in schema:
+        # Convert oneOf to anyOf with null type
+        schema["anyOf"] = schema.pop("oneOf") + [{"type": "null"}]
+    elif "anyOf" in schema:
+        # Add null type to anyOf if not already present
+        if not any(item.get("type") == "null" for item in schema["anyOf"]):
+            schema["anyOf"].append({"type": "null"})
+    elif "allOf" in schema:
+        # For allOf, wrap in anyOf with null - this means (all conditions) OR null
+        schema["anyOf"] = [{"allOf": schema.pop("allOf")}, {"type": "null"}]
+
+
+def _handle_nullable_fields(schema: dict[str, Any] | Any) -> dict[str, Any] | Any:
+    """Convert OpenAPI nullable fields to JSON Schema format: {"type": "string",
+    "nullable": true} -> {"type": ["string", "null"]}"""
+
+    if not isinstance(schema, dict):
+        return schema
+
+    # Check if we need to modify anything first to avoid unnecessary copying
+    has_root_nullable_field = "nullable" in schema
+    has_root_nullable_true = (
+        has_root_nullable_field
+        and schema["nullable"]
+        and (
+            "type" in schema
+            or "oneOf" in schema
+            or "anyOf" in schema
+            or "allOf" in schema
+        )
+    )
+
+    has_property_nullable_field = False
+    if "properties" in schema:
+        for prop_schema in schema["properties"].values():
+            if isinstance(prop_schema, dict) and "nullable" in prop_schema:
+                has_property_nullable_field = True
+                break
+
+    # If no nullable fields at all, return original schema unchanged
+    if not has_root_nullable_field and not has_property_nullable_field:
+        return schema
+
+    # Only copy if we need to modify
+    result = schema.copy()
+
+    # Handle root level nullable - always remove the field, convert type if true
+    if has_root_nullable_field:
+        result.pop("nullable")
+        if has_root_nullable_true:
+            _add_null_to_type(result)
+
+    # Handle properties nullable fields
+    if has_property_nullable_field and "properties" in result:
+        for prop_name, prop_schema in result["properties"].items():
+            if isinstance(prop_schema, dict) and "nullable" in prop_schema:
+                nullable_value = prop_schema.pop("nullable")
+                if nullable_value and (
+                    "type" in prop_schema
+                    or "oneOf" in prop_schema
+                    or "anyOf" in prop_schema
+                    or "allOf" in prop_schema
+                ):
+                    _add_null_to_type(prop_schema)
+
+    return result
 
 
 def _combine_schemas(route: HTTPRoute) -> dict[str, Any]:
@@ -1185,9 +1308,8 @@ def _combine_schemas(route: HTTPRoute) -> dict[str, Any]:
             else:
                 param_schema["description"] = location_desc
 
-            # Make optional parameters nullable to allow None values
-            if not param.required:
-                param_schema = _make_optional_parameter_nullable(param_schema)
+            # Don't make optional parameters nullable - they can simply be omitted
+            # The OpenAPI specification doesn't require optional parameters to accept null values
 
             properties[suffixed_name] = param_schema
         else:
@@ -1198,9 +1320,8 @@ def _combine_schemas(route: HTTPRoute) -> dict[str, Any]:
                 param.schema_.copy(), param.description
             )
 
-            # Make optional parameters nullable to allow None values
-            if not param.required:
-                param_schema = _make_optional_parameter_nullable(param_schema)
+            # Don't make optional parameters nullable - they can simply be omitted
+            # The OpenAPI specification doesn't require optional parameters to accept null values
 
             properties[param.name] = param_schema
 
@@ -1219,10 +1340,42 @@ def _combine_schemas(route: HTTPRoute) -> dict[str, Any]:
     }
     # Add schema definitions if available
     if route.schema_definitions:
-        result["$defs"] = route.schema_definitions
+        result["$defs"] = route.schema_definitions.copy()
 
-    # Use compress_schema to remove unused definitions
-    result = compress_schema(result)
+    # Use lightweight compression - prune additionalProperties and unused definitions
+    if result.get("additionalProperties") is False:
+        result.pop("additionalProperties")
+
+    # Remove unused definitions (lightweight approach - just check direct $ref usage)
+    if "$defs" in result:
+        used_refs = set()
+
+        def find_refs_in_value(value):
+            if isinstance(value, dict):
+                if "$ref" in value and isinstance(value["$ref"], str):
+                    ref = value["$ref"]
+                    if ref.startswith("#/$defs/"):
+                        used_refs.add(ref.split("/")[-1])
+                for v in value.values():
+                    find_refs_in_value(v)
+            elif isinstance(value, list):
+                for item in value:
+                    find_refs_in_value(item)
+
+        # Find refs in the main schema (excluding $defs section)
+        for key, value in result.items():
+            if key != "$defs":
+                find_refs_in_value(value)
+
+        # Remove unused definitions
+        if used_refs:
+            result["$defs"] = {
+                name: def_schema
+                for name, def_schema in result["$defs"].items()
+                if name in used_refs
+            }
+        else:
+            result.pop("$defs")
 
     return result
 
@@ -1232,17 +1385,41 @@ def _adjust_union_types(
 ) -> dict[str, Any] | list[Any]:
     """Recursively replace 'oneOf' with 'anyOf' in schema to handle overlapping unions."""
     if isinstance(schema, dict):
-        if "oneOf" in schema:
-            schema["anyOf"] = schema.pop("oneOf")
-        for k, v in schema.items():
-            schema[k] = _adjust_union_types(v)
+        # Optimize: only copy if we need to modify something
+        has_one_of = "oneOf" in schema
+        needs_recursive_processing = False
+
+        # Check if we need recursive processing
+        for v in schema.values():
+            if isinstance(v, dict | list):
+                needs_recursive_processing = True
+                break
+
+        # If nothing to change, return original
+        if not has_one_of and not needs_recursive_processing:
+            return schema
+
+        # Work on a copy only when modification is needed
+        result = schema.copy()
+        if has_one_of:
+            result["anyOf"] = result.pop("oneOf")
+
+        # Only recurse where needed
+        if needs_recursive_processing:
+            for k, v in result.items():
+                if isinstance(v, dict | list):
+                    result[k] = _adjust_union_types(v)
+
+        return result
     elif isinstance(schema, list):
         return [_adjust_union_types(item) for item in schema]
     return schema
 
 
 def extract_output_schema_from_responses(
-    responses: dict[str, ResponseInfo], schema_definitions: dict[str, Any] | None = None
+    responses: dict[str, ResponseInfo],
+    schema_definitions: dict[str, Any] | None = None,
+    openapi_version: str | None = None,
 ) -> dict[str, Any] | None:
     """
     Extract output schema from OpenAPI responses for use as MCP tool output schema.
@@ -1254,6 +1431,7 @@ def extract_output_schema_from_responses(
     Args:
         responses: Dictionary of ResponseInfo objects keyed by status code
         schema_definitions: Optional schema definitions to include in the output schema
+        openapi_version: OpenAPI version string, used to optimize nullable field handling
 
     Returns:
         dict: MCP-compliant output schema with potential wrapping, or None if no suitable schema found
@@ -1310,6 +1488,21 @@ def extract_output_schema_from_responses(
     # Clean and copy the schema
     output_schema = schema.copy()
 
+    # If schema has a $ref, resolve it first before processing nullable fields
+    if "$ref" in output_schema and schema_definitions:
+        ref_path = output_schema["$ref"]
+        if ref_path.startswith("#/components/schemas/"):
+            schema_name = ref_path.split("/")[-1]
+            if schema_name in schema_definitions:
+                # Replace $ref with the actual schema definition
+                output_schema = schema_definitions[schema_name].copy()
+
+    # Handle OpenAPI nullable fields by converting them to JSON Schema format
+    # This prevents "None is not of type 'string'" validation errors
+    # Only needed for OpenAPI 3.0 - 3.1 uses standard JSON Schema null types
+    if openapi_version and openapi_version.startswith("3.0"):
+        output_schema = _handle_nullable_fields(output_schema)
+
     # MCP requires output schemas to be objects. If this schema is not an object,
     # we need to wrap it similar to how ParsedFunction.from_function() does it
     if output_schema.get("type") != "object":
@@ -1322,12 +1515,52 @@ def extract_output_schema_from_responses(
         }
         output_schema = wrapped_schema
 
-    # Add schema definitions if available
-    if schema_definitions:
-        output_schema["$defs"] = schema_definitions
+    # Add schema definitions if available and handle nullable fields in them
+    # Only add $defs if we didn't resolve the $ref inline above
+    if schema_definitions and "$ref" not in schema.copy():
+        processed_defs = {}
+        for def_name, def_schema in schema_definitions.items():
+            # Only handle nullable fields for OpenAPI 3.0 - 3.1 uses standard JSON Schema null types
+            if openapi_version and openapi_version.startswith("3.0"):
+                processed_defs[def_name] = _handle_nullable_fields(def_schema)
+            else:
+                processed_defs[def_name] = def_schema
+        output_schema["$defs"] = processed_defs
 
-    # Use compress_schema to remove unused definitions
-    output_schema = compress_schema(output_schema)
+    # Use lightweight compression - prune additionalProperties and unused definitions
+    if output_schema.get("additionalProperties") is False:
+        output_schema.pop("additionalProperties")
+
+    # Remove unused definitions (lightweight approach - just check direct $ref usage)
+    if "$defs" in output_schema:
+        used_refs = set()
+
+        def find_refs_in_value(value):
+            if isinstance(value, dict):
+                if "$ref" in value and isinstance(value["$ref"], str):
+                    ref = value["$ref"]
+                    if ref.startswith("#/$defs/"):
+                        used_refs.add(ref.split("/")[-1])
+                for v in value.values():
+                    find_refs_in_value(v)
+            elif isinstance(value, list):
+                for item in value:
+                    find_refs_in_value(item)
+
+        # Find refs in the main schema (excluding $defs section)
+        for key, value in output_schema.items():
+            if key != "$defs":
+                find_refs_in_value(value)
+
+        # Remove unused definitions
+        if used_refs:
+            output_schema["$defs"] = {
+                name: def_schema
+                for name, def_schema in output_schema["$defs"].items()
+                if name in used_refs
+            }
+        else:
+            output_schema.pop("$defs")
 
     # Adjust union types to handle overlapping unions
     output_schema = cast(dict[str, Any], _adjust_union_types(output_schema))

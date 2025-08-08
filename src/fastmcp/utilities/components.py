@@ -1,12 +1,19 @@
+from __future__ import annotations
+
 from collections.abc import Sequence
-from typing import Annotated, Any, TypeVar
+from typing import Annotated, Any, TypedDict, TypeVar
 
 from pydantic import BeforeValidator, Field, PrivateAttr
 from typing_extensions import Self
 
+import fastmcp
 from fastmcp.utilities.types import FastMCPBaseModel
 
 T = TypeVar("T")
+
+
+class FastMCPMeta(TypedDict, total=False):
+    tags: list[str]
 
 
 def _convert_set_default_none(maybe_set: set[T] | Sequence[T] | None) -> set[T]:
@@ -36,7 +43,9 @@ class FastMCPComponent(FastMCPBaseModel):
         default_factory=set,
         description="Tags for the component.",
     )
-
+    meta: dict[str, Any] | None = Field(
+        default=None, description="Meta information about the component"
+    )
     enabled: bool = Field(
         default=True,
         description="Whether the component is enabled.",
@@ -58,8 +67,37 @@ class FastMCPComponent(FastMCPBaseModel):
         """
         return self._key or self.name
 
+    def get_meta(
+        self, include_fastmcp_meta: bool | None = None
+    ) -> dict[str, Any] | None:
+        """
+        Get the meta information about the component.
+
+        If include_fastmcp_meta is True, a `_fastmcp` key will be added to the
+        meta, containing a `tags` field with the tags of the component.
+        """
+
+        if include_fastmcp_meta is None:
+            include_fastmcp_meta = fastmcp.settings.include_fastmcp_meta
+
+        meta = self.meta or {}
+
+        if include_fastmcp_meta:
+            fastmcp_meta = FastMCPMeta(tags=sorted(self.tags))
+            # overwrite any existing _fastmcp meta with keys from the new one
+            if upstream_meta := meta.get("_fastmcp"):
+                fastmcp_meta = upstream_meta | fastmcp_meta
+            meta["_fastmcp"] = fastmcp_meta
+
+        return meta or None
+
     def with_key(self, key: str) -> Self:
-        return self.model_copy(update={"_key": key})
+        # `model_copy` has an `update` parameter but it doesn't work for certain private attributes
+        # https://github.com/pydantic/pydantic/issues/12116
+        # So we manually set the private attribute here instead
+        copy = self.model_copy()
+        copy._key = key
+        return copy
 
     def __eq__(self, other: object) -> bool:
         if type(self) is not type(other):

@@ -5,65 +5,9 @@ sidebarTitle: bearer
 
 # `fastmcp.server.auth.providers.bearer`
 
-## Classes
 
-### `JWKData` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/auth/providers/bearer.py#L29"><Icon icon="github" size="14" /></a></sup>
+Backwards compatibility shim for BearerAuthProvider.
 
-
-JSON Web Key data structure.
-
-
-### `JWKSData` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/auth/providers/bearer.py#L42"><Icon icon="github" size="14" /></a></sup>
-
-
-JSON Web Key Set data structure.
-
-
-### `RSAKeyPair` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/auth/providers/bearer.py#L49"><Icon icon="github" size="14" /></a></sup>
-
-**Methods:**
-
-#### `generate` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/auth/providers/bearer.py#L54"><Icon icon="github" size="14" /></a></sup>
-
-```python
-generate(cls) -> 'RSAKeyPair'
-```
-
-Generate an RSA key pair for testing.
-
-**Returns:**
-- (private_key_pem, public_key_pem)
-
-
-#### `create_token` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/auth/providers/bearer.py#L88"><Icon icon="github" size="14" /></a></sup>
-
-```python
-create_token(self, subject: str = 'fastmcp-user', issuer: str = 'https://fastmcp.example.com', audience: str | list[str] | None = None, scopes: list[str] | None = None, expires_in_seconds: int = 3600, additional_claims: dict[str, Any] | None = None, kid: str | None = None) -> str
-```
-
-Generate a test JWT token for testing purposes.
-
-**Args:**
-- `private_key_pem`: RSA private key in PEM format
-- `subject`: Subject claim (usually user ID)
-- `issuer`: Issuer claim
-- `audience`: Audience claim - can be a string or list of strings (optional)
-- `scopes`: List of scopes to include
-- `expires_in_seconds`: Token expiration time in seconds
-- `additional_claims`: Any additional claims to include
-- `kid`: Key ID for JWKS lookup (optional)
-
-**Returns:**
-- Signed JWT token string
-
-
-### `BearerAuthProvider` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/auth/providers/bearer.py#L149"><Icon icon="github" size="14" /></a></sup>
-
-
-Simple JWT Bearer Token validator for hosted MCP servers.
-Uses RS256 asymmetric encryption. Supports either static public key
-or JWKS URI for key rotation.
-
-Note that this provider DOES NOT permit client registration or revocation, or any OAuth flows.
-It is intended to be used with a control plane that manages clients and tokens.
+The BearerAuthProvider class has been moved to fastmcp.server.auth.providers.jwt.JWTVerifier
+for better organization. This module provides a backwards-compatible import.
 

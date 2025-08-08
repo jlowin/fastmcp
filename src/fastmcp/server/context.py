@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import warnings
-from collections.abc import Generator
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
@@ -16,6 +17,7 @@ from mcp.shared.context import RequestContext
 from mcp.types import (
     ContentBlock,
     CreateMessageResult,
+    IncludeContext,
     ModelHint,
     ModelPreferences,
     Root,
@@ -43,6 +45,18 @@ logger = get_logger(__name__)
 T = TypeVar("T")
 _current_context: ContextVar[Context | None] = ContextVar("context", default=None)
 _flush_lock = asyncio.Lock()
+
+
+@dataclass
+class LogData:
+    """Data object for passing log arguments to client-side handlers.
+
+    This provides an interface to match the Python standard library logging,
+    for compatibility with structured logging.
+    """
+
+    msg: str
+    extra: Mapping[str, Any] | None = None
 
 
 @contextmanager
@@ -82,8 +96,18 @@ class Context:
         request_id = ctx.request_id
         client_id = ctx.client_id
 
+        # Manage state across the request
+        ctx.set_state("key", "value")
+        value = ctx.get_state("key")
+
         return str(x)
     ```
+
+    State Management:
+    Context objects maintain a state dictionary that can be used to store and share
+    data across middleware and tool calls within a request. When a new context
+    is created (nested contexts), it inherits a copy of its parent's state, ensuring
+    that modifications in child contexts don't affect parent contexts.
 
     The context parameter name can be anything as long as it's annotated with Context.
     The context is optional - tools that don't need it can omit the parameter.
@@ -94,9 +118,15 @@ class Context:
         self.fastmcp = fastmcp
         self._tokens: list[Token] = []
         self._notification_queue: set[str] = set()  # Dedupe notifications
+        self._state: dict[str, Any] = {}
 
     async def __aenter__(self) -> Context:
         """Enter the context manager and set this context as the current context."""
+        parent_context = _current_context.get(None)
+        if parent_context is not None:
+            # Inherit state from parent context
+            self._state = copy.deepcopy(parent_context._state)
+
         # Always set this context and save the token
         token = _current_context.set(self)
         self._tokens.append(token)
@@ -112,7 +142,7 @@ class Context:
             _current_context.reset(token)
 
     @property
-    def request_context(self) -> RequestContext:
+    def request_context(self) -> RequestContext[ServerSession, Any, Request]:
         """Access to the underlying request context.
 
         If called outside of a request context, this will raise a ValueError.
@@ -166,6 +196,7 @@ class Context:
         message: str,
         level: LoggingLevel | None = None,
         logger_name: str | None = None,
+        extra: Mapping[str, Any] | None = None,
     ) -> None:
         """Send a log message to the client.
 
@@ -174,12 +205,14 @@ class Context:
             level: Optional log level. One of "debug", "info", "notice", "warning", "error", "critical",
                 "alert", or "emergency". Default is "info".
             logger_name: Optional logger name
+            extra: Optional mapping for additional arguments
         """
         if level is None:
             level = "info"
+        data = LogData(msg=message, extra=extra)
         await self.session.send_log_message(
             level=level,
-            data=message,
+            data=data,
             logger=logger_name,
             related_request_id=self.request_id,
         )
@@ -199,35 +232,48 @@ class Context:
         return str(self.request_context.request_id)
 
     @property
-    def session_id(self) -> str | None:
-        """Get the MCP session ID for HTTP transports.
+    def session_id(self) -> str:
+        """Get the MCP session ID for ALL transports.
 
         Returns the session ID that can be used as a key for session-based
         data storage (e.g., Redis) to share data between tool calls within
         the same client session.
 
         Returns:
-            The session ID for HTTP transports (SSE, StreamableHTTP), or None
-            for stdio and in-memory transports which don't use session IDs.
+            The session ID for StreamableHTTP transports, or a generated ID
+            for other transports.
 
         Example:
             ```python
             @server.tool
             def store_data(data: dict, ctx: Context) -> str:
-                if session_id := ctx.session_id:
-                    redis_client.set(f"session:{session_id}:data", json.dumps(data))
-                    return f"Data stored for session {session_id}"
-                return "No session ID available (stdio/memory transport)"
+                session_id = ctx.session_id
+                redis_client.set(f"session:{session_id}:data", json.dumps(data))
+                return f"Data stored for session {session_id}"
             ```
         """
-        try:
-            from fastmcp.server.dependencies import get_http_headers
+        request_ctx = self.request_context
+        session = request_ctx.session
 
-            headers = get_http_headers(include_all=True)
-            return headers.get("mcp-session-id")
-        except RuntimeError:
-            # No HTTP context available (stdio/in-memory transport)
-            return None
+        # Try to get the session ID from the session attributes
+        session_id = getattr(session, "_fastmcp_id", None)
+        if session_id is not None:
+            return session_id
+
+        # Try to get the session ID from the http request headers
+        request = request_ctx.request
+        if request:
+            session_id = request.headers.get("mcp-session-id")
+
+        # Generate a session ID if it doesn't exist.
+        if session_id is None:
+            from uuid import uuid4
+
+            session_id = str(uuid4())
+
+        # Save the session id to the session attributes
+        setattr(session, "_fastmcp_id", session_id)
+        return session_id
 
     @property
     def session(self) -> ServerSession:
@@ -235,21 +281,49 @@ class Context:
         return self.request_context.session
 
     # Convenience methods for common log levels
-    async def debug(self, message: str, logger_name: str | None = None) -> None:
+    async def debug(
+        self,
+        message: str,
+        logger_name: str | None = None,
+        extra: Mapping[str, Any] | None = None,
+    ) -> None:
         """Send a debug log message."""
-        await self.log(level="debug", message=message, logger_name=logger_name)
+        await self.log(
+            level="debug", message=message, logger_name=logger_name, extra=extra
+        )
 
-    async def info(self, message: str, logger_name: str | None = None) -> None:
+    async def info(
+        self,
+        message: str,
+        logger_name: str | None = None,
+        extra: Mapping[str, Any] | None = None,
+    ) -> None:
         """Send an info log message."""
-        await self.log(level="info", message=message, logger_name=logger_name)
+        await self.log(
+            level="info", message=message, logger_name=logger_name, extra=extra
+        )
 
-    async def warning(self, message: str, logger_name: str | None = None) -> None:
+    async def warning(
+        self,
+        message: str,
+        logger_name: str | None = None,
+        extra: Mapping[str, Any] | None = None,
+    ) -> None:
         """Send a warning log message."""
-        await self.log(level="warning", message=message, logger_name=logger_name)
+        await self.log(
+            level="warning", message=message, logger_name=logger_name, extra=extra
+        )
 
-    async def error(self, message: str, logger_name: str | None = None) -> None:
+    async def error(
+        self,
+        message: str,
+        logger_name: str | None = None,
+        extra: Mapping[str, Any] | None = None,
+    ) -> None:
         """Send an error log message."""
-        await self.log(level="error", message=message, logger_name=logger_name)
+        await self.log(
+            level="error", message=message, logger_name=logger_name, extra=extra
+        )
 
     async def list_roots(self) -> list[Root]:
         """List the roots available to the server, as indicated by the client."""
@@ -272,6 +346,7 @@ class Context:
         self,
         messages: str | list[str | SamplingMessage],
         system_prompt: str | None = None,
+        include_context: IncludeContext | None = None,
         temperature: float | None = None,
         max_tokens: int | None = None,
         model_preferences: ModelPreferences | str | list[str] | None = None,
@@ -304,6 +379,7 @@ class Context:
         result: CreateMessageResult = await self.session.create_message(
             messages=sampling_messages,
             system_prompt=system_prompt,
+            include_context=include_context,
             temperature=temperature,
             max_tokens=max_tokens,
             model_preferences=self._parse_model_preferences(model_preferences),
@@ -451,6 +527,14 @@ class Context:
             )
 
         return fastmcp.server.dependencies.get_http_request()
+
+    def set_state(self, key: str, value: Any) -> None:
+        """Set a value in the context state."""
+        self._state[key] = value
+
+    def get_state(self, key: str) -> Any:
+        """Get a value from the context state. Returns None if the key is not found."""
+        return self._state.get(key)
 
     def _queue_tool_list_changed(self) -> None:
         """Queue a tool list changed notification."""
