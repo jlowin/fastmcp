@@ -7,9 +7,11 @@ from pydantic import BeforeValidator, Field, PrivateAttr
 from typing_extensions import Self
 
 import fastmcp
+from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.types import FastMCPBaseModel
 
 T = TypeVar("T")
+logger = get_logger(__name__)
 
 
 class FastMCPMeta(TypedDict, total=False):
@@ -91,12 +93,15 @@ class FastMCPComponent(FastMCPBaseModel):
 
         return meta or None
 
-    def with_key(self, key: str) -> Self:
+    def with_key(self, key: str, **extra_kv) -> Self:
         # `model_copy` has an `update` parameter but it doesn't work for certain private attributes
         # https://github.com/pydantic/pydantic/issues/12116
         # So we manually set the private attribute here instead
         copy = self.model_copy()
         copy._key = key
+        for k, v in extra_kv.items():
+            setattr(copy, k, v)
+        logger.debug(f"FastMCPComponent::with_key() {copy=}")
         return copy
 
     def __eq__(self, other: object) -> bool:
