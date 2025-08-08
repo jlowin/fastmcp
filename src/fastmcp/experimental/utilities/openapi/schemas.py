@@ -320,7 +320,7 @@ def _combine_schemas_and_map_params(
     if result.get("additionalProperties") is False:
         result.pop("additionalProperties")
 
-    # Remove unused definitions (lightweight approach - just check direct $ref usage)
+    # Remove unused definitions - recursively find all referenced schemas
     if "$defs" in result:
         used_refs = set()
 
@@ -341,12 +341,28 @@ def _combine_schemas_and_map_params(
             if key != "$defs":
                 find_refs_in_value(value)
 
+        # Recursively find refs in all transitively referenced definitions
+        # This ensures nested refs (A->B->C) are all included
+        all_used_refs = set(used_refs)
+        refs_to_check = list(used_refs)
+
+        while refs_to_check:
+            ref_name = refs_to_check.pop()
+            if ref_name in result.get("$defs", {}):
+                # Find refs within this definition
+                find_refs_in_value(result["$defs"][ref_name])
+                # Add any newly found refs to check
+                for new_ref in used_refs:
+                    if new_ref not in all_used_refs:
+                        all_used_refs.add(new_ref)
+                        refs_to_check.append(new_ref)
+
         # Remove unused definitions
-        if used_refs:
+        if all_used_refs:
             result["$defs"] = {
                 name: def_schema
                 for name, def_schema in result["$defs"].items()
-                if name in used_refs
+                if name in all_used_refs
             }
         else:
             result.pop("$defs")
