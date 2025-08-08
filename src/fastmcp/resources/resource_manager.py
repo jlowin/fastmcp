@@ -102,7 +102,13 @@ class ResourceManager:
                             uri, mounted.prefix, mounted.resource_prefix_format
                         )
                         # Create a copy of the resource with the prefixed key
-                        prefixed_resource = resource.with_key(prefixed_uri)
+                        prefixed_resource = resource.with_key(
+                            prefixed_uri,
+                            name=f"{mounted.prefix}_{resource.name}",
+                        )
+                        logger.debug(
+                            f"ResourceManager::_load_resources {prefixed_resource=}"
+                        )
                         all_resources[prefixed_uri] = prefixed_resource
                 else:
                     all_resources.update(child_resources)
@@ -150,7 +156,13 @@ class ResourceManager:
                             uri_template, mounted.prefix, mounted.resource_prefix_format
                         )
                         # Create a copy of the template with the prefixed key
-                        prefixed_template = template.with_key(prefixed_uri_template)
+                        prefixed_template = template.with_key(
+                            prefixed_uri_template,
+                            name=f"{mounted.prefix}_{template.name}",
+                        )
+                        logger.debug(
+                            f"ResourceManager::_load_resource_templates {prefixed_template=}"
+                        )
                         all_templates[prefixed_uri_template] = prefixed_template
                 else:
                     all_templates.update(child_dict)
