@@ -65,6 +65,12 @@ async with Client(transport=StreamableHttpTransport(server_url)) as client:
 - Apply PR labels: bugs/breaking/enhancements/features
 - Improvements = enhancements (not features) unless specified
 
+### Commit Messages and Agent Attribution
+- **NEVER** include agent attribution in commit messages or PR titles/descriptions (no "🤖 Generated with [tool]", "with Claude", etc.)
+- Agent attribution is ONLY allowed in Co-authored-by lines in commits
+- Keep commit messages brief - ideally just headlines, not detailed messages
+- Focus on what changed, not how or why
+
 ### Code Standards
 - Python ≥ 3.10 with full type annotations
 - Follow existing patterns and maintain consistency
