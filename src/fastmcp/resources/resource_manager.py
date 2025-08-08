@@ -103,6 +103,10 @@ class ResourceManager:
                         )
                         # Create a copy of the resource with the prefixed key
                         prefixed_resource = resource.with_key(prefixed_uri)
+                        # Also prefix the name field to match tool/prompt behavior
+                        prefixed_resource = prefixed_resource.model_copy(
+                            update={"name": f"{mounted.prefix}_{resource.name}"}
+                        )
                         all_resources[prefixed_uri] = prefixed_resource
                 else:
                     all_resources.update(child_resources)
@@ -151,6 +155,10 @@ class ResourceManager:
                         )
                         # Create a copy of the template with the prefixed key
                         prefixed_template = template.with_key(prefixed_uri_template)
+                        # Also prefix the name field to match tool/prompt behavior
+                        prefixed_template = prefixed_template.model_copy(
+                            update={"name": f"{mounted.prefix}_{template.name}"}
+                        )
                         all_templates[prefixed_uri_template] = prefixed_template
                 else:
                     all_templates.update(child_dict)
