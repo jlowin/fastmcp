@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+from typing import Any
+
 from mcp.server.auth.provider import (
-    AccessToken,
+    AccessToken as _SDKAccessToken,
+)
+from mcp.server.auth.provider import (
     AuthorizationCode,
     OAuthAuthorizationServerProvider,
     RefreshToken,
@@ -20,7 +24,11 @@ from mcp.server.auth.settings import (
 from pydantic import AnyHttpUrl
 from starlette.routing import Route
 
-from fastmcp.server.auth.models import AccessTokenWithClaims
+
+class AccessToken(_SDKAccessToken):
+    """AccessToken that includes all JWT claims."""
+
+    claims: dict[str, Any] = {}
 
 
 class AuthProvider(TokenVerifierProtocol):
@@ -109,7 +117,7 @@ class TokenVerifier(AuthProvider):
         super().__init__(resource_server_url=resource_server_url)
         self.required_scopes = required_scopes or []
 
-    async def verify_token(self, token: str) -> AccessTokenWithClaims | None:
+    async def verify_token(self, token: str) -> AccessToken | None:
         """Verify a bearer token and return access info if valid."""
         raise NotImplementedError("Subclasses must implement verify_token")
 
@@ -146,7 +154,7 @@ class RemoteAuthProvider(AuthProvider):
         self.token_verifier = token_verifier
         self.authorization_servers = authorization_servers
 
-    async def verify_token(self, token: str) -> AccessTokenWithClaims | None:
+    async def verify_token(self, token: str) -> AccessToken | None:
         """Verify token using the configured token verifier."""
         return await self.token_verifier.verify_token(token)
 

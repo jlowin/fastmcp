@@ -16,7 +16,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing_extensions import TypedDict
 
 from fastmcp.server.auth import TokenVerifier
-from fastmcp.server.auth.models import AccessTokenWithClaims
+from fastmcp.server.auth.auth import AccessToken
 from fastmcp.server.auth.registry import register_provider
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.types import NotSet, NotSetT
@@ -356,7 +356,7 @@ class JWTVerifier(TokenVerifier):
 
         return []
 
-    async def load_access_token(self, token: str) -> AccessTokenWithClaims | None:
+    async def load_access_token(self, token: str) -> AccessToken | None:
         """
         Validates the provided JWT bearer token.
 
@@ -364,7 +364,7 @@ class JWTVerifier(TokenVerifier):
             token: The JWT token string to validate
 
         Returns:
-            AccessTokenWithClaims object if valid, None if invalid or expired
+            AccessToken object if valid, None if invalid or expired
         """
         try:
             # Get verification key (static or from JWKS)
@@ -443,7 +443,7 @@ class JWTVerifier(TokenVerifier):
                     self.logger.info("Bearer token rejected for client %s", client_id)
                     return None
 
-            return AccessTokenWithClaims(
+            return AccessToken(
                 token=token,
                 client_id=str(client_id),
                 scopes=scopes,
@@ -458,7 +458,7 @@ class JWTVerifier(TokenVerifier):
             self.logger.debug("Token validation failed: %s", str(e))
             return None
 
-    async def verify_token(self, token: str) -> AccessTokenWithClaims | None:
+    async def verify_token(self, token: str) -> AccessToken | None:
         """
         Verify a bearer token and return access info if valid.
 
@@ -469,7 +469,7 @@ class JWTVerifier(TokenVerifier):
             token: The JWT token string to validate
 
         Returns:
-            AccessTokenWithClaims object if valid, None if invalid or expired
+            AccessToken object if valid, None if invalid or expired
         """
         return await self.load_access_token(token)
 
@@ -508,7 +508,7 @@ class StaticTokenVerifier(TokenVerifier):
         super().__init__(required_scopes=required_scopes)
         self.tokens = tokens
 
-    async def verify_token(self, token: str) -> AccessTokenWithClaims | None:
+    async def verify_token(self, token: str) -> AccessToken | None:
         """Verify token against static token dictionary."""
         token_data = self.tokens.get(token)
         if not token_data:
@@ -531,7 +531,7 @@ class StaticTokenVerifier(TokenVerifier):
                 )
                 return None
 
-        return AccessTokenWithClaims(
+        return AccessToken(
             token=token,
             client_id=token_data["client_id"],
             scopes=scopes,
