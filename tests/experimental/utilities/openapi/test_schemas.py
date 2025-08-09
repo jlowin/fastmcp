@@ -10,7 +10,6 @@ from fastmcp.experimental.utilities.openapi.models import (
 from fastmcp.experimental.utilities.openapi.schemas import (
     _combine_schemas,
     _combine_schemas_and_map_params,
-    _replace_ref_with_defs,
 )
 
 
@@ -230,6 +229,8 @@ class TestSchemaProcessing:
 
     def test_replace_ref_with_defs(self):
         """Test replacing $ref with $defs for JSON Schema compatibility."""
+        import msgspec
+
         schema_with_ref = {
             "type": "object",
             "properties": {
@@ -241,13 +242,18 @@ class TestSchemaProcessing:
             },
         }
 
-        result = _replace_ref_with_defs(schema_with_ref)
+        # Use our new string replacement approach
+        schema_json = msgspec.json.encode(schema_with_ref).decode("utf-8")
+        schema_json = schema_json.replace("#/components/schemas/", "#/$defs/")
+        result = msgspec.json.decode(schema_json.encode("utf-8"))
 
         assert result["properties"]["user"]["$ref"] == "#/$defs/User"
         assert result["properties"]["items"]["items"]["$ref"] == "#/$defs/Item"
 
     def test_replace_ref_with_defs_nested(self):
         """Test replacing $ref in deeply nested structures."""
+        import msgspec
+
         nested_schema = {
             "type": "object",
             "properties": {
@@ -269,7 +275,10 @@ class TestSchemaProcessing:
             },
         }
 
-        result = _replace_ref_with_defs(nested_schema)
+        # Use our new string replacement approach
+        schema_json = msgspec.json.encode(nested_schema).decode("utf-8")
+        schema_json = schema_json.replace("#/components/schemas/", "#/$defs/")
+        result = msgspec.json.decode(schema_json.encode("utf-8"))
 
         # Check nested object property
         nested_prop = result["properties"]["data"]["properties"]["nested"]

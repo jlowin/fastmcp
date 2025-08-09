@@ -34,7 +34,7 @@ from .models import (
     RequestBodyInfo,
     ResponseInfo,
 )
-from .schemas import _combine_schemas_and_map_params, _replace_ref_with_defs
+from .schemas import _combine_schemas_and_map_params
 
 logger = get_logger(__name__)
 
@@ -220,7 +220,16 @@ class OpenAPIParser(
                 )
                 result = {}
 
-            return _replace_ref_with_defs(result)
+            # Convert refs from OpenAPI format to JSON Schema format
+            # Only convert if there are OpenAPI refs present
+            import msgspec
+
+            result_str = str(result)
+            if "#/components/schemas/" in result_str:
+                result_json = msgspec.json.encode(result).decode("utf-8")
+                result_json = result_json.replace("#/components/schemas/", "#/$defs/")
+                result = msgspec.json.decode(result_json.encode("utf-8"))
+            return result
         except ValueError as e:
             # Re-raise ValueError for external reference errors and other validation issues
             if "External or non-local reference not supported" in str(e):
@@ -498,6 +507,12 @@ class OpenAPIParser(
                         logger.warning(
                             f"Failed to extract schema definition '{name}': {e}"
                         )
+
+        # Convert schema definitions refs from OpenAPI to JSON Schema format (once)
+        if schema_definitions:
+            from .schemas import _convert_refs_to_defs_format_simple
+
+            _convert_refs_to_defs_format_simple(schema_definitions)
 
         # Process paths and operations
         for path_str, path_item_obj in self.openapi.paths.items():
