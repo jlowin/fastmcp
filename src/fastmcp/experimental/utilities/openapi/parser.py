@@ -207,7 +207,7 @@ class OpenAPIParser(
         try:
             resolved_schema = self._resolve_ref(schema_obj)
 
-            if isinstance(resolved_schema, (self.schema_cls)):
+            if isinstance(resolved_schema, self.schema_cls):
                 # Convert schema to dictionary
                 result = resolved_schema.model_dump(
                     mode="json", by_alias=True, exclude_none=True
@@ -586,9 +586,6 @@ class OpenAPIParser(
                             }
                             route.parameter_map = {}
                         routes.append(route)
-                        logger.debug(
-                            f"Successfully extracted route: {method_upper} {path_str}"
-                        )
                     except ValueError as op_error:
                         # Re-raise ValueError for external reference errors
                         if "External or non-local reference not supported" in str(
