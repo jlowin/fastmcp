@@ -98,3 +98,178 @@ async def test_optional_parameter_preserves_schema_for_all_types(param_schema):
     for key, value in param_schema.items():
         assert optional_param_schema[key] == value
     assert optional_param_schema.get("description") == "Optional parameter"
+
+
+async def test_transitive_ref_dependencies_preserved():
+    """Test that nested $refs are preserved in $defs when schemas reference other schemas transitively.
+
+    This reproduces issue #1372 where Address was missing from $defs because:
+    - User references Profile
+    - Profile references Address
+    - But only Profile was included in $defs, Address was pruned incorrectly
+    """
+    from fastmcp.utilities.openapi import RequestBodyInfo
+
+    # Create schema definitions that reference each other
+    schema_definitions = {
+        "User": {
+            "type": "object",
+            "properties": {
+                "id": {"type": "string"},
+                "profile": {"$ref": "#/$defs/Profile"},
+            },
+            "required": ["id", "profile"],
+        },
+        "Profile": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "address": {"$ref": "#/$defs/Address"},
+            },
+            "required": ["name", "address"],
+        },
+        "Address": {
+            "type": "object",
+            "properties": {
+                "street": {"type": "string"},
+                "city": {"type": "string"},
+                "zipcode": {"type": "string"},
+            },
+            "required": ["street", "city", "zipcode"],
+        },
+    }
+
+    # Create request body that references User
+    request_body = RequestBodyInfo(
+        required=True,
+        content_schema={
+            "application/json": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "profile": {"$ref": "#/$defs/Profile"},
+                },
+                "required": ["id", "profile"],
+            }
+        },
+    )
+
+    route = HTTPRoute(
+        method="POST",
+        path="/users",
+        parameters=[],
+        request_body=request_body,
+        responses={},
+        summary="Create a user",
+        description=None,
+        schema_definitions=schema_definitions,
+    )
+
+    # Generate combined schema
+    schema = _combine_schemas(route)
+
+    # Verify that all referenced schemas are preserved in $defs
+    assert "$defs" in schema, "Schema should contain $defs section"
+
+    defs = schema["$defs"]
+
+    # All three schemas should be present because of transitive dependencies
+    assert "Profile" in defs, "Profile should be in $defs (directly referenced)"
+    assert "Address" in defs, "Address should be in $defs (referenced by Profile)"
+
+    # Verify the schemas contain the expected structure
+    profile_schema = defs["Profile"]
+    assert profile_schema["properties"]["address"]["$ref"] == "#/$defs/Address"
+
+    address_schema = defs["Address"]
+    assert "street" in address_schema["properties"]
+    assert "city" in address_schema["properties"]
+    assert "zipcode" in address_schema["properties"]
+
+
+async def test_deeper_transitive_ref_dependencies():
+    """Test transitive dependencies work with deeper nesting levels."""
+    from fastmcp.utilities.openapi import RequestBodyInfo
+
+    # Create schema definitions with 4 levels of nesting
+    schema_definitions = {
+        "User": {
+            "type": "object",
+            "properties": {
+                "id": {"type": "string"},
+                "profile": {"$ref": "#/$defs/Profile"},
+            },
+            "required": ["id", "profile"],
+        },
+        "Profile": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "address": {"$ref": "#/$defs/Address"},
+            },
+            "required": ["name", "address"],
+        },
+        "Address": {
+            "type": "object",
+            "properties": {
+                "street": {"type": "string"},
+                "location": {"$ref": "#/$defs/Location"},
+            },
+            "required": ["street", "location"],
+        },
+        "Location": {
+            "type": "object",
+            "properties": {"coordinates": {"$ref": "#/$defs/Coordinates"}},
+            "required": ["coordinates"],
+        },
+        "Coordinates": {
+            "type": "object",
+            "properties": {"lat": {"type": "number"}, "lng": {"type": "number"}},
+            "required": ["lat", "lng"],
+        },
+        "UnusedSchema": {
+            "type": "object",
+            "properties": {"unused": {"type": "string"}},
+        },
+    }
+
+    request_body = RequestBodyInfo(
+        required=True,
+        content_schema={
+            "application/json": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "profile": {"$ref": "#/$defs/Profile"},
+                },
+                "required": ["id", "profile"],
+            }
+        },
+    )
+
+    route = HTTPRoute(
+        method="POST",
+        path="/users",
+        parameters=[],
+        request_body=request_body,
+        responses={},
+        summary="Create a user",
+        description=None,
+        schema_definitions=schema_definitions,
+    )
+
+    # Generate combined schema
+    schema = _combine_schemas(route)
+
+    # Verify that all transitively referenced schemas are preserved
+    assert "$defs" in schema
+    defs = schema["$defs"]
+
+    # All nested schemas should be preserved
+    assert "Profile" in defs, "Profile should be preserved (level 1)"
+    assert "Address" in defs, "Address should be preserved (level 2)"
+    assert "Location" in defs, "Location should be preserved (level 3)"
+    assert "Coordinates" in defs, "Coordinates should be preserved (level 4)"
+
+    # Unused schema should be removed
+    assert "UnusedSchema" not in defs, "UnusedSchema should be removed"

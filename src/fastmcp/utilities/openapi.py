@@ -1346,7 +1346,7 @@ def _combine_schemas(route: HTTPRoute) -> dict[str, Any]:
     if result.get("additionalProperties") is False:
         result.pop("additionalProperties")
 
-    # Remove unused definitions (lightweight approach - just check direct $ref usage)
+    # Remove unused definitions (recursive approach - check transitive dependencies)
     if "$defs" in result:
         used_refs = set()
 
@@ -1366,6 +1366,18 @@ def _combine_schemas(route: HTTPRoute) -> dict[str, Any]:
         for key, value in result.items():
             if key != "$defs":
                 find_refs_in_value(value)
+
+        # Recursively find transitive dependencies in the $defs section
+        # Keep adding until no new refs are found (transitive closure)
+        previous_size = 0
+        while len(used_refs) > previous_size:
+            previous_size = len(used_refs)
+            # Check each currently used definition for additional refs
+            for ref_name in list(
+                used_refs
+            ):  # Copy to avoid modification during iteration
+                if ref_name in result["$defs"]:
+                    find_refs_in_value(result["$defs"][ref_name])
 
         # Remove unused definitions
         if used_refs:
