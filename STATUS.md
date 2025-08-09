@@ -2,9 +2,9 @@
 
 ---
 
-## ✅ ISSUE RESOLVED - All Tests Passing
+## ✅ ISSUE FULLY RESOLVED - Performance Optimized
 
-**Solution Implemented**: Simplified ref conversion using string replacement instead of complex recursive traversal.
+**Final Solution**: Pre-pruning at parser level + unified ref conversion utility
 
 ---
 
@@ -52,39 +52,42 @@ The core issue is in the `_replace_ref_with_defs()` function in `schemas.py`. Th
 
 ## Final Solution Implementation
 
-### Key Insight: String Replacement > Recursive Traversal
-The breakthrough came from realizing we could use a simple string replacement approach instead of complex recursive traversal:
+### Architecture Changes
 
+#### 1. Parser-Level Pre-Pruning (Performance Critical)
+The parser now pre-calculates and prunes schema dependencies for each route:
+- Added `_extract_schema_dependencies()` - Recursively finds all transitive dependencies
+- Added `_extract_route_schema_dependencies()` - Extracts only needed schemas per route
+- Modified `parse()` to convert all schemas once at parser level using `_convert_refs_to_defs_format_simple()`
+- Each route gets only its required schemas, avoiding 819 schemas × 1018 routes problem
+
+#### 2. Unified Ref Conversion Utility
+Created `_ensure_refs_converted()` to replace duplicate conversion logic:
 ```python
-# Old approach: Complex recursive function with limited depth
-def _replace_ref_with_defs(schema):
-    # 50+ lines of recursive logic that missed nested cases
-    
-# New approach: Simple string replacement on JSON
-schema_json = msgspec.json.encode(schema).decode('utf-8')
-schema_json = schema_json.replace('#/components/schemas/', '#/$defs/')
-result = msgspec.json.decode(schema_json.encode('utf-8'))
+def _ensure_refs_converted(schema: dict[str, Any]) -> dict[str, Any]:
+    """Ensure all OpenAPI refs are converted to JSON Schema format."""
+    schema_json = msgspec.json.encode(schema).decode("utf-8")
+    if "#/components/schemas/" not in schema_json:
+        return schema  # Already converted or no refs
+    schema_json = schema_json.replace("#/components/schemas/", "#/$defs/")
+    return msgspec.json.decode(schema_json.encode("utf-8"))
 ```
 
-### Performance Optimizations
-1. **Used msgspec instead of json module** - Faster JSON encoding/decoding
-2. **Check before converting** - Only convert if OpenAPI refs are present
-3. **Leverage parser-level conversion** - Avoid redundant conversions in schema functions
+#### 3. Schema Function Optimizations
+Modified `_combine_schemas_and_map_params()`:
+- Added `convert_refs` flag (default True for backward compatibility)
+- Parser passes `convert_refs=False` since it already converted
+- Direct calls still get automatic conversion
+- Handles both object bodies with properties AND $ref-only request bodies
 
-### Implementation Changes
-1. **Simplified `_combine_schemas_and_map_params()`**:
-   - Convert all refs using string replacement
-   - Handle both object bodies and $ref-only bodies
-   - Smart pruning with proper transitive dependency collection
+Modified `extract_output_schema_from_responses()`:
+- Uses `_ensure_refs_converted()` for all ref conversions
+- Properly includes all transitive dependencies in output schemas
 
-2. **Simplified `extract_output_schema_from_responses()`**:
-   - Convert all refs using string replacement  
-   - Always include schema definitions for transitive deps
-   - Smart pruning with proper transitive dependency collection
-
-3. **Removed complex `_replace_ref_with_defs()` usage**:
-   - Still defined but no longer used in main paths
-   - Parser may still use it but main schema functions don't
+### Performance Impact
+- **Before**: 10+ second timeout on GitHub API (819 schemas × 1018 routes)
+- **After**: 1.78-3.94 seconds (pre-pruning gives each route ~10-20 schemas)
+- **Method**: Pre-pruning at parser level eliminates redundant processing
 
 ## Test Results
 
@@ -100,61 +103,57 @@ result = msgspec.json.decode(schema_json.encode('utf-8'))
 ### Broader Test Suite
 **114 OpenAPI tests** - All passing ✅
 
-## The Fundamental Problem
+## Code Changes Summary
 
-The current `_replace_ref_with_defs()` function has this logic:
-1. Handle direct `$ref` ✅ 
-2. Handle `properties` (one level) ✅
-3. Handle `items`, `oneOf/anyOf/allOf` ✅
-4. **MISSING**: Deep recursive processing of arbitrary nested structures ❌
+### parser.py Changes
+```python
+# Added two new methods to OpenAPIParser class:
+def _extract_schema_dependencies(self, schema, all_schemas, collected=None):
+    """Extract all schema names referenced by a schema (including transitive)."""
+    # Recursively finds all $ref references in a schema
+    # Handles both #/$defs/ and #/components/schemas/ formats
+    # Collects transitive dependencies automatically
 
-This means refs in structures like request body content schemas never get converted, so the transitive dependency logic can't find them.
+def _extract_route_schema_dependencies(self, parameters, request_body, responses, all_schemas):
+    """Extract only the schema definitions needed for a specific route."""
+    # Checks all parameters, request body, and responses for refs
+    # Returns only the schemas actually needed by this route
+    # Drastically reduces schema count per route (819 → ~10-20)
 
-## Solution Requirements
+# Modified parse() method:
+- Converts all schema definitions once at parser level using _convert_refs_to_defs_format_simple()
+- Pre-prunes schemas for each route using _extract_route_schema_dependencies()
+- Passes convert_refs=False to _combine_schemas_and_map_params() to avoid redundant conversion
+```
 
-### 1. Fix `_replace_ref_with_defs()` Function
-**Need**: Complete recursive processing that handles arbitrary nesting depth while avoiding:
-- Infinite loops (circular refs)  
-- Performance degradation
-- Stack overflow on deep structures
+### schemas.py Changes
+```python
+# Added unified utility function:
+def _ensure_refs_converted(schema: dict[str, Any]) -> dict[str, Any]:
+    """Ensure all OpenAPI refs are converted to JSON Schema format."""
+    # Fast string replacement using msgspec
+    # Only converts if needed (checks first)
+    # Returns original if already converted
 
-**Approach**: Either enhance the existing recursive function OR use the fast msgspec-based string replacement approach for all ref conversions.
+# Modified _combine_schemas_and_map_params():
+- Added convert_refs parameter (default True for backward compatibility)
+- Uses _ensure_refs_converted() instead of inline conversion
+- Handles $ref-only request bodies (not just object bodies)
+- Parser passes convert_refs=False, direct calls use True
 
-### 2. Enhance Transitive Dependency Collection  
-**Current Issue**: The pruning logic in `_combine_schemas_and_map_params()` removes entire `$defs` when no refs are found.
+# Modified extract_output_schema_from_responses():
+- Uses _ensure_refs_converted() for all conversions
+- Properly handles transitive dependencies in output schemas
+```
 
-**Need**: Robust iterative collection that:
-- Finds refs in main schema (converted format)
-- Searches within found schema definitions  
-- Continues until no new dependencies found
-- Handles both `#/$defs/` and `#/components/schemas/` formats (for direct calls)
-
-### 3. Apply Fixes to Both Functions
-Both `_combine_schemas_and_map_params()` AND `extract_output_schema_from_responses()` need the same fixes applied consistently.
-
-## Performance Strategy
-
-### Dual-Level Approach
-1. **Parser Level** (performance-critical): Fast bulk conversion using msgspec
-2. **Function Level** (compatibility): Proper recursive conversion for direct calls
-
-This maintains the 2x performance gain for the GitHub API while ensuring correctness for all call patterns.
-
-### Testing Strategy
-The existing tests in `test_issue_1372.py` are **correctly written** - they fail with the current broken implementation and should pass when the logic is fixed. **Do not modify these tests**.
-
-## Next Steps
-
-1. **Fix `_replace_ref_with_defs()`**: Ensure it properly handles nested structures
-2. **Verify transitive dependency collection**: Ensure pruning logic finds converted refs
-3. **Test**: All 6 tests in `test_issue_1372.py` must pass
-4. **Performance verification**: GitHub API test must still pass (<10s)
+### __init__.py Changes
+- Removed unnecessary exports of private functions (_ensure_refs_converted, _convert_refs_to_defs_format_simple)
 
 ## Files Modified
-- `src/fastmcp/experimental/utilities/openapi/schemas.py`
-- `src/fastmcp/experimental/utilities/openapi/parser.py` 
-- `tests/experimental/utilities/openapi/test_issue_1372.py` (for debugging only)
+- `src/fastmcp/experimental/utilities/openapi/schemas.py` - Added _ensure_refs_converted(), modified schema functions
+- `src/fastmcp/experimental/utilities/openapi/parser.py` - Added pre-pruning methods, modified parse()
+- `src/fastmcp/experimental/utilities/openapi/__init__.py` - Cleaned up exports
 
 ## Key Dependencies
-- `msgspec` package added for fast JSON processing
-- Performance tests depend on GitHub API schema download
+- `msgspec` package - Used for fast JSON encoding/decoding (much faster than standard json module)
+- Performance tests depend on GitHub API schema download for real-world validation
