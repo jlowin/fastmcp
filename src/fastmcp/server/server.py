@@ -1900,7 +1900,9 @@ class FastMCP(Generic[LifespanResultT]):
                 resource_key = add_resource_prefix(
                     key, prefix, self.resource_prefix_format
                 )
-                resource = resource.model_copy(key=resource_key)
+                resource = resource.model_copy(
+                    update={"name": f"{prefix}_{resource.name}"}, key=resource_key
+                )
             self._resource_manager.add_resource(resource)
 
         for key, template in (await server.get_resource_templates()).items():
@@ -1908,7 +1910,9 @@ class FastMCP(Generic[LifespanResultT]):
                 template_key = add_resource_prefix(
                     key, prefix, self.resource_prefix_format
                 )
-                template = template.model_copy(key=template_key)
+                template = template.model_copy(
+                    update={"name": f"{prefix}_{template.name}"}, key=template_key
+                )
             self._resource_manager.add_template(template)
 
         # Import prompts from the server
