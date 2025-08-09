@@ -20,6 +20,8 @@ from mcp.server.auth.settings import (
 from pydantic import AnyHttpUrl
 from starlette.routing import Route
 
+from fastmcp.server.auth.models import AccessTokenWithClaims
+
 
 class AuthProvider(TokenVerifierProtocol):
     """Base class for all FastMCP authentication providers.
@@ -107,7 +109,7 @@ class TokenVerifier(AuthProvider):
         super().__init__(resource_server_url=resource_server_url)
         self.required_scopes = required_scopes or []
 
-    async def verify_token(self, token: str) -> AccessToken | None:
+    async def verify_token(self, token: str) -> AccessTokenWithClaims | None:
         """Verify a bearer token and return access info if valid."""
         raise NotImplementedError("Subclasses must implement verify_token")
 
@@ -144,7 +146,7 @@ class RemoteAuthProvider(AuthProvider):
         self.token_verifier = token_verifier
         self.authorization_servers = authorization_servers
 
-    async def verify_token(self, token: str) -> AccessToken | None:
+    async def verify_token(self, token: str) -> AccessTokenWithClaims | None:
         """Verify token using the configured token verifier."""
         return await self.token_verifier.verify_token(token)
 

@@ -11,12 +11,12 @@ from authlib.jose import JsonWebKey, JsonWebToken
 from authlib.jose.errors import JoseError
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from mcp.server.auth.provider import AccessToken
 from pydantic import AnyHttpUrl, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing_extensions import TypedDict
 
 from fastmcp.server.auth import TokenVerifier
+from fastmcp.server.auth.models import AccessTokenWithClaims
 from fastmcp.server.auth.registry import register_provider
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.types import NotSet, NotSetT
@@ -356,7 +356,7 @@ class JWTVerifier(TokenVerifier):
 
         return []
 
-    async def load_access_token(self, token: str) -> AccessToken | None:
+    async def load_access_token(self, token: str) -> AccessTokenWithClaims | None:
         """
         Validates the provided JWT bearer token.
 
@@ -364,7 +364,7 @@ class JWTVerifier(TokenVerifier):
             token: The JWT token string to validate
 
         Returns:
-            AccessToken object if valid, None if invalid or expired
+            AccessTokenWithClaims object if valid, None if invalid or expired
         """
         try:
             # Get verification key (static or from JWKS)
@@ -443,11 +443,12 @@ class JWTVerifier(TokenVerifier):
                     self.logger.info("Bearer token rejected for client %s", client_id)
                     return None
 
-            return AccessToken(
+            return AccessTokenWithClaims(
                 token=token,
                 client_id=str(client_id),
                 scopes=scopes,
                 expires_at=int(exp) if exp else None,
+                claims=claims,
             )
 
         except JoseError:
@@ -457,7 +458,7 @@ class JWTVerifier(TokenVerifier):
             self.logger.debug("Token validation failed: %s", str(e))
             return None
 
-    async def verify_token(self, token: str) -> AccessToken | None:
+    async def verify_token(self, token: str) -> AccessTokenWithClaims | None:
         """
         Verify a bearer token and return access info if valid.
 
@@ -468,7 +469,7 @@ class JWTVerifier(TokenVerifier):
             token: The JWT token string to validate
 
         Returns:
-            AccessToken object if valid, None if invalid or expired
+            AccessTokenWithClaims object if valid, None if invalid or expired
         """
         return await self.load_access_token(token)
 
@@ -507,7 +508,7 @@ class StaticTokenVerifier(TokenVerifier):
         super().__init__(required_scopes=required_scopes)
         self.tokens = tokens
 
-    async def verify_token(self, token: str) -> AccessToken | None:
+    async def verify_token(self, token: str) -> AccessTokenWithClaims | None:
         """Verify token against static token dictionary."""
         token_data = self.tokens.get(token)
         if not token_data:
@@ -530,9 +531,10 @@ class StaticTokenVerifier(TokenVerifier):
                 )
                 return None
 
-        return AccessToken(
+        return AccessTokenWithClaims(
             token=token,
             client_id=token_data["client_id"],
             scopes=scopes,
             expires_at=expires_at,
+            claims=token_data,
         )
