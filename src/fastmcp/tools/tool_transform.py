@@ -475,6 +475,14 @@ class TransformedTool(Tool):
                     ).return_annotation
                     if return_annotation is ToolResult:
                         final_output_schema = None
+                    elif return_annotation is inspect._empty:
+                        # No return annotation at all - raise an error
+                        raise ValueError(
+                            f"Transform function '{transform_fn.__name__}' is missing a return type annotation. "
+                            f"Please add a return type annotation (e.g., '-> str', '-> dict', '-> ToolResult') "
+                            f"to ensure proper output handling. Without a return annotation, the tool cannot "
+                            f"determine how to serialize the output correctly."
+                        )
                     else:
                         final_output_schema = tool.output_schema
             else:

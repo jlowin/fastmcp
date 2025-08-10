@@ -1190,18 +1190,22 @@ class TestTransformToolOutputSchema:
         # Should wrap string result
         assert result.structured_content == {"result": 'Custom: {"value":3}'}
 
-    def test_transform_custom_function_fallback_to_parent(self, base_string_tool):
-        """Test that custom function without output annotation falls back to parent."""
+    def test_transform_custom_function_without_annotation_raises_error(
+        self, base_string_tool
+    ):
+        """Test that custom function without output annotation raises an error."""
 
         async def custom_fn(x: int):
-            # No return annotation - should fallback to parent schema
+            # No return annotation - should raise an error
             result = await forward(x=x)
             return result
 
-        new_tool = Tool.from_tool(base_string_tool, transform_fn=custom_fn)
+        # Should raise ValueError for missing return annotation
+        with pytest.raises(ValueError) as exc_info:
+            Tool.from_tool(base_string_tool, transform_fn=custom_fn)
 
-        # Should use parent's schema since custom function has no annotation
-        assert new_tool.output_schema == base_string_tool.output_schema
+        assert "missing a return type annotation" in str(exc_info.value)
+        assert "custom_fn" in str(exc_info.value)
 
     def test_transform_custom_function_explicit_overrides(self, base_string_tool):
         """Test that explicit output_schema overrides both custom function and parent."""
@@ -1267,7 +1271,7 @@ class TestTransformToolOutputSchema:
     ):
         """Test transformation handling of mixed content types."""
 
-        async def custom_fn(x: int):
+        async def custom_fn(x: int) -> Any:
             # Return mixed content including ToolResult
             if x == 1:
                 return ["text", {"data": x}]
