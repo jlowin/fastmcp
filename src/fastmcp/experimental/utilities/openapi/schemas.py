@@ -2,8 +2,6 @@
 
 from typing import Any
 
-import msgspec
-
 from fastmcp.utilities.logging import get_logger
 
 from .models import HTTPRoute, JsonSchema, ResponseInfo
@@ -73,37 +71,60 @@ def clean_schema_for_display(schema: JsonSchema | None) -> JsonSchema | None:
     return cleaned
 
 
-def _convert_refs_to_defs_format_simple(defs: dict[str, Any]) -> None:
+def _replace_ref_with_defs_recursive(
+    info: dict[str, Any], description: str | None = None
+) -> dict[str, Any]:
     """
-    Ultra-fast ref conversion using direct JSON processing.
-    Converts #/components/schemas/X to #/$defs/X for all refs in schema definitions.
+    Replace openapi $ref with jsonschema $defs recursively.
+
+    Examples:
+    - {"type": "object", "properties": {"$ref": "#/components/schemas/..."}}
+    - {"$ref": "#/components/schemas/..."}
+    - {"items": {"$ref": "#/components/schemas/..."}}
+    - {"anyOf": [{"$ref": "#/components/schemas/..."}]}
+    - {"allOf": [{"$ref": "#/components/schemas/..."}]}
+    - {"oneOf": [{"$ref": "#/components/schemas/..."}]}
 
     Args:
-        defs: Schema definitions dict to convert (modified in-place)
+        info: dict[str, Any]
+        description: str | None
+
+    Returns:
+        dict[str, Any]
     """
-    import re
-
-    # Convert entire $defs to JSON string and check if it contains any refs
-    defs_json = msgspec.json.encode(defs).decode("utf-8")
-
-    # Quick check if there are any refs to replace - if not, skip entirely
-    if "#/components/schemas/" not in defs_json:
-        return
-
-    # Single regex to replace all refs at once
-    updated_json = re.sub(r'"#/components/schemas/([^"]+)"', r'"#/$defs/\1"', defs_json)
-
-    # Parse back and update in place using msgspec
-    updated_defs = msgspec.json.decode(updated_json.encode("utf-8"))
-    defs.clear()
-    defs.update(updated_defs)
+    schema = info.copy()
+    if ref_path := schema.get("$ref"):
+        if isinstance(ref_path, str):
+            if ref_path.startswith("#/components/schemas/"):
+                schema_name = ref_path.split("/")[-1]
+                schema["$ref"] = f"#/$defs/{schema_name}"
+            elif not ref_path.startswith("#/"):
+                raise ValueError(
+                    f"External or non-local reference not supported: {ref_path}. "
+                    f"FastMCP only supports local schema references starting with '#/'. "
+                    f"Please include all schema definitions within the OpenAPI document."
+                )
+    elif properties := schema.get("properties"):
+        if "$ref" in properties:
+            schema["properties"] = _replace_ref_with_defs_recursive(properties)
+        else:
+            schema["properties"] = {
+                prop_name: _replace_ref_with_defs_recursive(prop_schema)
+                for prop_name, prop_schema in properties.items()
+            }
+    elif item_schema := schema.get("items"):
+        schema["items"] = _replace_ref_with_defs_recursive(item_schema)
+    for section in ["anyOf", "allOf", "oneOf"]:
+        for i, item in enumerate(schema.get(section, [])):
+            schema[section][i] = _replace_ref_with_defs_recursive(item)
+    if info.get("description", description) and not schema.get("description"):
+        schema["description"] = description
+    return schema
 
 
 def _ensure_refs_converted(schema: dict[str, Any]) -> dict[str, Any]:
     """
-    Ensure all OpenAPI refs are converted to JSON Schema format.
-
-    This is a fast operation that only does work if needed.
+    Ensure all OpenAPI refs are converted to JSON Schema format using recursive approach.
 
     Args:
         schema: Schema that may contain OpenAPI refs
@@ -111,16 +132,7 @@ def _ensure_refs_converted(schema: dict[str, Any]) -> dict[str, Any]:
     Returns:
         Schema with all refs converted to JSON Schema format
     """
-    # Serialize once
-    schema_json = msgspec.json.encode(schema).decode("utf-8")
-
-    # Quick check if conversion is needed
-    if "#/components/schemas/" not in schema_json:
-        return schema  # Already converted or no refs
-
-    # Do the conversion
-    schema_json = schema_json.replace("#/components/schemas/", "#/$defs/")
-    return msgspec.json.decode(schema_json.encode("utf-8"))
+    return _replace_ref_with_defs_recursive(schema)
 
 
 def _make_optional_parameter_nullable(schema: dict[str, Any]) -> dict[str, Any]:
@@ -368,7 +380,11 @@ def _combine_schemas_and_map_params(
     if route.schema_definitions:
         if convert_refs:
             # Need to convert refs and prune
-            all_defs = _ensure_refs_converted(route.schema_definitions)
+            all_defs = route.schema_definitions.copy()
+            # Convert each schema definition recursively
+            for name, schema in all_defs.items():
+                if isinstance(schema, dict):
+                    all_defs[name] = _replace_ref_with_defs_recursive(schema)
 
             # Prune to only needed schemas
             used_refs = set()
@@ -533,7 +549,11 @@ def extract_output_schema_from_responses(
     # Add schema definitions if available
     if schema_definitions:
         # Convert refs if needed
-        processed_defs = _ensure_refs_converted(schema_definitions)
+        processed_defs = schema_definitions.copy()
+        # Convert each schema definition recursively
+        for name, schema in processed_defs.items():
+            if isinstance(schema, dict):
+                processed_defs[name] = _replace_ref_with_defs_recursive(schema)
 
         # Convert OpenAPI schema definitions to JSON Schema format if needed
         if openapi_version and openapi_version.startswith("3.0"):

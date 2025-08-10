@@ -34,7 +34,10 @@ from .models import (
     RequestBodyInfo,
     ResponseInfo,
 )
-from .schemas import _combine_schemas_and_map_params
+from .schemas import (
+    _combine_schemas_and_map_params,
+    _replace_ref_with_defs_recursive,
+)
 
 logger = get_logger(__name__)
 
@@ -220,15 +223,9 @@ class OpenAPIParser(
                 )
                 result = {}
 
-            # Convert refs from OpenAPI format to JSON Schema format
-            # Only convert if there are OpenAPI refs present
-            import msgspec
+            # Convert refs from OpenAPI format to JSON Schema format using recursive approach
 
-            result_str = str(result)
-            if "#/components/schemas/" in result_str:
-                result_json = msgspec.json.encode(result).decode("utf-8")
-                result_json = result_json.replace("#/components/schemas/", "#/$defs/")
-                result = msgspec.json.decode(result_json.encode("utf-8"))
+            result = _replace_ref_with_defs_recursive(result)
             return result
         except ValueError as e:
             # Re-raise ValueError for external reference errors and other validation issues
@@ -606,9 +603,10 @@ class OpenAPIParser(
 
         # Convert schema definitions refs from OpenAPI to JSON Schema format (once)
         if schema_definitions:
-            from .schemas import _convert_refs_to_defs_format_simple
-
-            _convert_refs_to_defs_format_simple(schema_definitions)
+            # Convert each schema definition recursively
+            for name, schema in schema_definitions.items():
+                if isinstance(schema, dict):
+                    schema_definitions[name] = _replace_ref_with_defs_recursive(schema)
 
         # Process paths and operations
         for path_str, path_item_obj in self.openapi.paths.items():
