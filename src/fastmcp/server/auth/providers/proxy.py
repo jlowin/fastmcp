@@ -18,6 +18,7 @@ production use with enterprise identity providers.
 
 from __future__ import annotations
 
+import secrets
 import time
 from typing import TYPE_CHECKING, Any, Final
 from urllib.parse import urlencode
@@ -38,7 +39,7 @@ from mcp.server.auth.settings import (
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 from pydantic import AnyHttpUrl, AnyUrl, SecretStr, ValidationError
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, RedirectResponse
 from starlette.routing import Route
 
 from fastmcp.server.auth.auth import OAuthProvider, TokenVerifier
@@ -139,6 +140,7 @@ class OAuthProxy(OAuthProvider):
         # Token relation mappings for cleanup
         self._access_to_refresh: dict[str, str] = {}
         self._refresh_to_access: dict[str, str] = {}
+        
 
         # Use the provided token validator
         self._token_validator = token_verifier
@@ -258,9 +260,14 @@ class OAuthProxy(OAuthProvider):
             query_params["code_challenge"] = params.code_challenge
             query_params["code_challenge_method"] = "S256"
 
-        # Add scopes if present
-        if params.scopes:
-            query_params["scope"] = " ".join(params.scopes)
+        # Add scopes - use params.scopes if provided, otherwise use required_scopes
+        scopes_to_use = params.scopes or self.required_scopes or []
+        # Google requires at least some scope parameter, so provide a minimal one if none specified
+        if not scopes_to_use and "google" in self._upstream_authorization_endpoint.lower():
+            scopes_to_use = ["openid"]  # Minimal scope for Google
+        
+        if scopes_to_use:
+            query_params["scope"] = " ".join(scopes_to_use)
 
         # Build the upstream authorization URL
         upstream_url = (
@@ -758,3 +765,258 @@ class OAuthProxy(OAuthProvider):
             f"✅ OAuth routes customized: replaced={token_route_found}, total routes={len(custom_routes)}"
         )
         return custom_routes
+
+
+class ServerMediatedOAuthProxy(OAuthProxy):
+    """OAuth proxy with server-mediated flow for production deployments.
+    
+    This extends the basic OAuthProxy with server-mediated OAuth endpoints
+    that eliminate the need for client-side callback servers. This is ideal
+    for production deployments but adds complexity and may not be compatible
+    with all MCP clients.
+    
+    Additional endpoints provided:
+    - POST /oauth/sessions - Create OAuth session
+    - GET /oauth/sessions/{id} - Get session status/tokens  
+    - GET /oauth/callback - Handle OAuth provider callback
+    
+    Usage:
+        proxy = ServerMediatedOAuthProxy(
+            upstream_authorization_endpoint="https://github.com/login/oauth/authorize",
+            upstream_token_endpoint="https://github.com/login/oauth/access_token",
+            upstream_client_id="your-client-id",
+            upstream_client_secret="your-client-secret",
+            token_verifier=GitHubTokenVerifier(),
+            base_url="https://your-server.com",
+        )
+    """
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Server-mediated OAuth session storage
+        self._oauth_sessions: dict[str, dict[str, Any]] = {}  # session_id -> session_data
+    
+    def get_routes(self) -> list[Route]:
+        """Get OAuth routes with server-mediated endpoints."""
+        # Get base routes from parent
+        routes = super().get_routes()
+        
+        # Add server-mediated OAuth endpoints
+        routes.extend([
+            Route(
+                path="/oauth/sessions",
+                endpoint=self._handle_create_oauth_session,
+                methods=["POST"],
+            ),
+            Route(
+                path="/oauth/sessions/{session_id}",
+                endpoint=self._handle_get_oauth_session,
+                methods=["GET"],
+            ),
+            Route(
+                path="/oauth/callback",
+                endpoint=self._handle_oauth_callback,
+                methods=["GET"],
+            ),
+        ])
+        
+        logger.info(f"✅ Server-mediated OAuth routes added, total routes: {len(routes)}")
+        return routes
+
+    # -------------------------------------------------------------------------
+    # Server-Mediated OAuth Flow
+    # -------------------------------------------------------------------------
+
+    async def _handle_create_oauth_session(self, request: Request) -> JSONResponse:
+        """Create a new OAuth session for server-mediated flow."""
+        try:
+            # Parse request body
+            try:
+                body = await request.json()
+            except Exception:
+                body = {}
+            
+            scopes = body.get("scopes", [])
+            
+            # Generate unique session ID
+            session_id = secrets.token_urlsafe(32)
+            
+            # Generate state for OAuth security
+            state = secrets.token_urlsafe(16)
+            
+            # Build authorization URL pointing to our callback
+            redirect_uri = f"{str(self.base_url).rstrip('/')}/oauth/callback"
+            query_params = {
+                "response_type": "code",
+                "client_id": self._upstream_client_id,
+                "redirect_uri": redirect_uri,
+                "state": state,
+            }
+            
+            # Use provided scopes or fallback logic
+            scopes_to_use = scopes or self.required_scopes or []
+            if not scopes_to_use and "google" in self._upstream_authorization_endpoint.lower():
+                scopes_to_use = ["openid"]  # Minimal scope for Google
+            
+            if scopes_to_use:
+                query_params["scope"] = " ".join(scopes_to_use)
+            
+            auth_url = f"{self._upstream_authorization_endpoint}?{urlencode(query_params)}"
+            
+            # Store session data
+            self._oauth_sessions[session_id] = {
+                "state": state,
+                "scopes": scopes_to_use,
+                "created_at": time.time(),
+                "status": "pending",  # pending -> completed -> expired
+                "auth_url": auth_url,
+                "redirect_uri": redirect_uri,  # Store for consistency check
+            }
+            
+            logger.info(f"Created OAuth session {session_id} with scopes: {scopes_to_use}")
+            
+            return JSONResponse({
+                "session_id": session_id,
+                "auth_url": auth_url,
+                "expires_in": 300,  # 5 minutes
+            })
+            
+        except Exception as e:
+            logger.error("Error creating OAuth session: %s", e, exc_info=True)
+            return JSONResponse(
+                content={"error": "server_error", "error_description": "Failed to create OAuth session"},
+                status_code=500,
+            )
+
+    async def _handle_get_oauth_session(self, request: Request) -> JSONResponse:
+        """Get OAuth session status and tokens if completed."""
+        try:
+            session_id = request.path_params["session_id"]
+            session = self._oauth_sessions.get(session_id)
+            
+            if not session:
+                return JSONResponse(
+                    content={"error": "invalid_session", "error_description": "Session not found"},
+                    status_code=404,
+                )
+            
+            # Check if session expired (5 minutes)
+            if time.time() - session["created_at"] > 300:
+                session["status"] = "expired"
+                self._oauth_sessions.pop(session_id, None)
+                return JSONResponse(
+                    content={"error": "session_expired", "error_description": "OAuth session expired"},
+                    status_code=410,
+                )
+            
+            response_data = {
+                "session_id": session_id,
+                "status": session["status"],
+                "expires_in": max(0, int(300 - (time.time() - session["created_at"]))),
+            }
+            
+            # Include tokens if completed
+            if session["status"] == "completed" and "tokens" in session:
+                response_data["tokens"] = session["tokens"]
+                # Clean up completed session
+                self._oauth_sessions.pop(session_id, None)
+            
+            return JSONResponse(response_data)
+            
+        except Exception as e:
+            logger.error("Error getting OAuth session: %s", e, exc_info=True)
+            return JSONResponse(
+                content={"error": "server_error", "error_description": "Failed to get OAuth session"},
+                status_code=500,
+            )
+
+    async def _handle_oauth_callback(self, request: Request) -> RedirectResponse:
+        """Handle OAuth callback from upstream provider."""
+        try:
+            code = request.query_params.get("code")
+            state = request.query_params.get("state")
+            error = request.query_params.get("error")
+            
+            if error:
+                logger.error("OAuth callback error: %s - %s", error, request.query_params.get("error_description"))
+                return RedirectResponse(
+                    url=f"data:text/html,<h1>OAuth Error</h1><p>{error}: {request.query_params.get('error_description', 'Unknown error')}</p>",
+                    status_code=302,
+                )
+            
+            if not code or not state:
+                logger.error("OAuth callback missing code or state")
+                return RedirectResponse(
+                    url="data:text/html,<h1>OAuth Error</h1><p>Missing authorization code or state parameter</p>",
+                    status_code=302,
+                )
+            
+            # Find session by state
+            session_id = None
+            session = None
+            for sid, sess in self._oauth_sessions.items():
+                if sess.get("state") == state:
+                    session_id = sid
+                    session = sess
+                    break
+            
+            if not session:
+                logger.error("OAuth callback with invalid state: %s", state)
+                return RedirectResponse(
+                    url="data:text/html,<h1>OAuth Error</h1><p>Invalid or expired session</p>",
+                    status_code=302,
+                )
+            
+            # Check if session is already completed (prevent duplicate processing)
+            if session.get("status") in ["completed", "error"]:
+                logger.warning(f"OAuth callback for already processed session {session_id}")
+                return RedirectResponse(
+                    url="data:text/html,<h1>OAuth Already Completed</h1><p>This OAuth session has already been processed.</p>",
+                    status_code=302,
+                )
+            
+            # Exchange code for tokens using authlib
+            oauth_client = AsyncOAuth2Client(
+                client_id=self._upstream_client_id,
+                client_secret=self._upstream_client_secret.get_secret_value(),
+                timeout=HTTP_TIMEOUT_SECONDS,
+            )
+            
+            try:
+                # Use the same redirect_uri that was used in the authorization request
+                redirect_uri = session["redirect_uri"]
+                logger.debug(f"Exchanging code for tokens with redirect_uri: {redirect_uri}")
+                
+                token_response = await oauth_client.fetch_token(
+                    url=self._upstream_token_endpoint,
+                    code=code,
+                    redirect_uri=redirect_uri,
+                )
+                
+                # Store tokens in session
+                session["tokens"] = token_response
+                session["status"] = "completed"
+                
+                logger.info(f"OAuth session {session_id} completed successfully")
+                
+                return RedirectResponse(
+                    url="about:blank",  # Simple blank page that works in all browsers
+                    status_code=302,
+                )
+                
+            except Exception as e:
+                logger.error("Token exchange failed in OAuth callback: %s", e)
+                session["status"] = "error"
+                session["error"] = str(e)
+                
+                return RedirectResponse(
+                    url=f"data:text/html,<h1>OAuth Error</h1><p>Token exchange failed: {e}</p>",
+                    status_code=302,
+                )
+            
+        except Exception as e:
+            logger.error("Error in OAuth callback: %s", e, exc_info=True)
+            return RedirectResponse(
+                url="data:text/html,<h1>OAuth Error</h1><p>Internal server error during OAuth callback</p>",
+                status_code=302,
+            )
