@@ -10,9 +10,11 @@ from typing import (
     Generic,
     Literal,
     TypeVar,
+    cast,
     get_type_hints,
 )
 
+import jsonref
 import mcp.types
 import pydantic_core
 from mcp.types import ContentBlock, TextContent, ToolAnnotations
@@ -388,6 +390,11 @@ class ParsedFunction:
 
         input_type_adapter = get_cached_typeadapter(fn)
         input_schema = input_type_adapter.json_schema()
+
+        # dereference definitions so tool calling in downstream agents (e.g.
+        # claude code) work. do this before compressing the schema so defs get
+        # cleaned up.
+        input_schema = cast(dict[str, Any], jsonref.replace_refs(input_schema, proxies=False))
         input_schema = compress_schema(input_schema, prune_params=prune_params)
 
         output_schema = None

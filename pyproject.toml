@@ -16,6 +16,7 @@ dependencies = [
     "pyperclip>=1.9.0",
     "openapi-core>=0.19.5",
     "msgspec>=0.19.0",
+    "jsonref>=1.1.0",
 ]
 requires-python = ">=3.10"
 readme = "README.md"
