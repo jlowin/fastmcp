@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+from typing import Any
+
 from mcp.server.auth.provider import (
-    AccessToken,
+    AccessToken as _SDKAccessToken,
+)
+from mcp.server.auth.provider import (
     AuthorizationCode,
     OAuthAuthorizationServerProvider,
     RefreshToken,
@@ -19,6 +23,12 @@ from mcp.server.auth.settings import (
 )
 from pydantic import AnyHttpUrl
 from starlette.routing import Route
+
+
+class AccessToken(_SDKAccessToken):
+    """AccessToken that includes all JWT claims."""
+
+    claims: dict[str, Any] = {}
 
 
 class AuthProvider(TokenVerifierProtocol):
@@ -130,6 +140,8 @@ class RemoteAuthProvider(AuthProvider):
         token_verifier: TokenVerifier,
         authorization_servers: list[AnyHttpUrl],
         resource_server_url: AnyHttpUrl | str,
+        resource_name: str | None = None,
+        resource_documentation: AnyHttpUrl | None = None,
     ):
         """Initialize the remote auth provider.
 
@@ -143,6 +155,8 @@ class RemoteAuthProvider(AuthProvider):
         super().__init__(resource_server_url=resource_server_url)
         self.token_verifier = token_verifier
         self.authorization_servers = authorization_servers
+        self.resource_name = resource_name
+        self.resource_documentation = resource_documentation
 
     async def verify_token(self, token: str) -> AccessToken | None:
         """Verify token using the configured token verifier."""
@@ -161,6 +175,8 @@ class RemoteAuthProvider(AuthProvider):
             resource_url=self.resource_server_url,
             authorization_servers=self.authorization_servers,
             scopes_supported=self.token_verifier.required_scopes,
+            resource_name=self.resource_name,
+            resource_documentation=self.resource_documentation,
         )
 
 
