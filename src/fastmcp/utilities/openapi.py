@@ -1531,36 +1531,20 @@ def extract_output_schema_from_responses(
     if output_schema.get("additionalProperties") is False:
         output_schema.pop("additionalProperties")
 
-    # Remove unused definitions (lightweight approach - just check direct $ref usage)
+    # Remove unused definitions using recursive prune that respects $defs→$defs refs
     if "$defs" in output_schema:
-        used_refs = set()
+        try:
+            from fastmcp.utilities.json_schema import compress_schema
 
-        def find_refs_in_value(value):
-            if isinstance(value, dict):
-                if "$ref" in value and isinstance(value["$ref"], str):
-                    ref = value["$ref"]
-                    if ref.startswith("#/$defs/"):
-                        used_refs.add(ref.split("/")[-1])
-                for v in value.values():
-                    find_refs_in_value(v)
-            elif isinstance(value, list):
-                for item in value:
-                    find_refs_in_value(item)
-
-        # Find refs in the main schema (excluding $defs section)
-        for key, value in output_schema.items():
-            if key != "$defs":
-                find_refs_in_value(value)
-
-        # Remove unused definitions
-        if used_refs:
-            output_schema["$defs"] = {
-                name: def_schema
-                for name, def_schema in output_schema["$defs"].items()
-                if name in used_refs
-            }
-        else:
-            output_schema.pop("$defs")
+            output_schema = compress_schema(
+                output_schema,
+                prune_defs=True,
+                prune_additional_properties=True,
+                prune_titles=False,
+            )
+        except Exception:
+            # Fallback: keep existing $defs without aggressive pruning
+            pass
 
     # Adjust union types to handle overlapping unions
     output_schema = cast(dict[str, Any], _adjust_union_types(output_schema))

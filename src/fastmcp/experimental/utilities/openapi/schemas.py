@@ -546,14 +546,40 @@ def extract_output_schema_from_responses(
         }
         output_schema = wrapped_schema
 
-    # Add schema definitions if available
+    # Add schema definitions if available (and include transitive dependencies)
     if schema_definitions:
         # Convert refs if needed
-        processed_defs = schema_definitions.copy()
-        # Convert each schema definition recursively
-        for name, schema in processed_defs.items():
+        all_defs = schema_definitions.copy()
+        for name, schema in list(all_defs.items()):
             if isinstance(schema, dict):
-                processed_defs[name] = _replace_ref_with_defs_recursive(schema)
+                all_defs[name] = _replace_ref_with_defs_recursive(schema)
+
+        # Ensure transitive dependencies referenced from A are included
+        def collect_needed_defs(root_schema: dict[str, Any]) -> set[str]:
+            needed: set[str] = set()
+
+            def walk(node: Any) -> None:
+                if isinstance(node, dict):
+                    ref = node.get("$ref")
+                    if isinstance(ref, str) and ref.startswith("#/$defs/"):
+                        name = ref.split("/")[-1]
+                        if name not in needed:
+                            needed.add(name)
+                            walk(all_defs.get(name, {}))
+                    for v in node.values():
+                        walk(v)
+                elif isinstance(node, list):
+                    for item in node:
+                        walk(item)
+
+            walk(root_schema)
+            return needed
+
+        needed_defs = collect_needed_defs(output_schema)
+
+        processed_defs = {
+            name: all_defs[name] for name in needed_defs if name in all_defs
+        }
 
         # Convert OpenAPI schema definitions to JSON Schema format if needed
         if openapi_version and openapi_version.startswith("3.0"):
