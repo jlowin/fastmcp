@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any, Final
 from urllib.parse import urlencode
 
 import httpx
+from authlib.integrations.httpx_client import AsyncOAuth2Client
 from mcp.server.auth.provider import (
     AccessToken,
     AuthorizationCode,
@@ -307,20 +308,16 @@ class OAuthProxy(OAuthProvider):
         client: OAuthClientInformationFull,
         authorization_code: AuthorizationCode,
     ) -> OAuthToken:
-        """Exchange authorization code for tokens with upstream server.
+        """Exchange authorization code for tokens with upstream server using authlib.
 
-        Forwards the token request to the upstream server and returns the
-        response. Also stores tokens locally for refresh and revocation tracking.
+        Uses authlib's AsyncOAuth2Client to handle the token exchange, which
+        automatically handles both JSON and form-encoded responses, PKCE, and
+        other OAuth complexities.
         """
-        # Base token request data
-        token_data = {
-            "grant_type": "authorization_code",
-            "client_id": self._upstream_client_id,
-            "client_secret": self._upstream_client_secret.get_secret_value(),
-            "code": authorization_code.code,
-        }
-
         # Extract additional parameters from the current request
+        code_verifier = None
+        redirect_uri = str(authorization_code.redirect_uri)
+        
         try:
             from fastmcp.server.dependencies import (
                 get_http_request,  # local import to avoid circular dependency
@@ -328,6 +325,14 @@ class OAuthProxy(OAuthProvider):
             req = get_http_request()
             if req.method == "POST":
                 form = await req.form()
+
+                # Extract PKCE code_verifier if present
+                if "code_verifier" in form:
+                    code_verifier = str(form["code_verifier"])
+                
+                # Extract redirect_uri if present
+                if "redirect_uri" in form:
+                    redirect_uri = str(form["redirect_uri"])
 
                 # Log the incoming request (with sensitive data redacted)
                 redacted_form = {
@@ -340,58 +345,38 @@ class OAuthProxy(OAuthProvider):
                 }
                 logger.debug("Token request form data: %s", redacted_form)
 
-                # Forward relevant fields to upstream
-                for field in ("redirect_uri", "code_verifier", "resource", "scope"):
-                    if field in form and form[field]:
-                        token_data[field] = str(form[field])
         except Exception as e:
             logger.warning("Could not extract form data from request: %s", e)
 
-        # Ensure redirect_uri is present (required by some providers)
-        if "redirect_uri" not in token_data:
-            token_data["redirect_uri"] = str(authorization_code.redirect_uri)
+        # Use authlib's AsyncOAuth2Client for token exchange
+        oauth_client = AsyncOAuth2Client(
+            client_id=self._upstream_client_id,
+            client_secret=self._upstream_client_secret.get_secret_value(),
+            timeout=HTTP_TIMEOUT_SECONDS,
+        )
 
-        # Log outgoing request (with sensitive data redacted)
-        redacted_data = {
-            k: (
-                "***"
-                if k == "client_secret"
-                else (str(v)[:8] + "..." if k in {"code", "code_verifier"} else str(v))
+        try:
+            logger.debug("Using authlib to fetch token from upstream")
+            
+            # Let authlib handle the token exchange - it automatically handles
+            # JSON/form-encoded responses, PKCE, error handling, etc.
+            token_response = await oauth_client.fetch_token(
+                url=self._upstream_token_endpoint,
+                code=authorization_code.code,
+                redirect_uri=redirect_uri,
+                code_verifier=code_verifier,
             )
-            for k, v in token_data.items()
-        }
-        logger.debug("Forwarding token request to upstream: %s", redacted_data)
 
-        # Make the token request to upstream server
-        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SECONDS) as http_client:
-            try:
-                response = await http_client.post(
-                    self._upstream_token_endpoint, data=token_data
-                )
+            logger.info(
+                "Successfully exchanged authorization code via authlib (client: %s)",
+                client.client_id,
+            )
 
-                logger.debug(
-                    "Upstream token response: status=%d, body_preview=%s",
-                    response.status_code,
-                    response.text[:200] + ("..." if len(response.text) > 200 else ""),
-                )
-
-                if response.status_code >= 400:
-                    logger.error(
-                        "Upstream token exchange failed: %d - %s",
-                        response.status_code,
-                        response.text[:500],
-                    )
-                    raise TokenError(
-                        "invalid_grant", f"Upstream token error {response.status_code}"
-                    )
-
-                token_response: Mapping[str, Any] = response.json()
-
-            except httpx.RequestError as e:
-                logger.error("Failed to connect to upstream token endpoint: %s", e)
-                raise TokenError(
-                    "invalid_grant", "Unable to connect to upstream server"
-                ) from e
+        except Exception as e:
+            logger.error("Authlib token exchange failed: %s", e)
+            raise TokenError(
+                "invalid_grant", f"Upstream token exchange failed: {e}"
+            ) from e
 
         # Extract token information
         access_token_value = token_response["access_token"]
@@ -424,11 +409,6 @@ class OAuthProxy(OAuthProvider):
             self._access_to_refresh[access_token_value] = refresh_token_value
             self._refresh_to_access[refresh_token_value] = access_token_value
 
-        logger.info(
-            "Successfully exchanged authorization code for tokens (client: %s)",
-            client.client_id,
-        )
-
         return OAuthToken(**token_response)  # type: ignore[arg-type]
 
     # -------------------------------------------------------------------------
@@ -449,59 +429,35 @@ class OAuthProxy(OAuthProvider):
         refresh_token: RefreshToken,
         scopes: list[str],
     ) -> OAuthToken:
-        """Exchange refresh token for new access token with upstream server."""
-        refresh_data = {
-            "grant_type": "refresh_token",
-            "client_id": self._upstream_client_id,
-            "client_secret": self._upstream_client_secret.get_secret_value(),
-            "refresh_token": refresh_token.token,
-        }
+        """Exchange refresh token for new access token using authlib."""
+        
+        # Use authlib's AsyncOAuth2Client for refresh token exchange
+        oauth_client = AsyncOAuth2Client(
+            client_id=self._upstream_client_id,
+            client_secret=self._upstream_client_secret.get_secret_value(),
+            timeout=HTTP_TIMEOUT_SECONDS,
+        )
 
-        # Add scopes if requested
-        if scopes:
-            refresh_data["scope"] = " ".join(scopes)
-
-        # Log request (with sensitive data redacted)
-        redacted_data = {
-            k: (
-                "***"
-                if k == "client_secret"
-                else (str(v)[:8] + "..." if k == "refresh_token" else str(v))
+        try:
+            logger.debug("Using authlib to refresh token from upstream")
+            
+            # Let authlib handle the refresh token exchange
+            token_response = await oauth_client.refresh_token(
+                url=self._upstream_token_endpoint,
+                refresh_token=refresh_token.token,
+                scope=" ".join(scopes) if scopes else None,
             )
-            for k, v in refresh_data.items()
-        }
-        logger.debug("Forwarding refresh token request to upstream: %s", redacted_data)
 
-        # Make refresh request to upstream server
-        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SECONDS) as http_client:
-            try:
-                response = await http_client.post(
-                    self._upstream_token_endpoint, data=refresh_data
-                )
+            logger.info(
+                "Successfully refreshed access token via authlib (client: %s)", 
+                client.client_id
+            )
 
-                logger.debug(
-                    "Upstream refresh token response: status=%d, body_preview=%s",
-                    response.status_code,
-                    response.text[:200] + ("..." if len(response.text) > 200 else ""),
-                )
-
-                if response.status_code >= 400:
-                    logger.error(
-                        "Upstream refresh token exchange failed: %d - %s",
-                        response.status_code,
-                        response.text[:500],
-                    )
-                    raise TokenError(
-                        "invalid_grant", "Upstream refresh token exchange failed"
-                    )
-
-                token_response: Mapping[str, Any] = response.json()
-
-            except httpx.RequestError as e:
-                logger.error("Failed to connect to upstream token endpoint: %s", e)
-                raise TokenError(
-                    "invalid_grant", "Unable to connect to upstream server"
-                ) from e
+        except Exception as e:
+            logger.error("Authlib refresh token exchange failed: %s", e)
+            raise TokenError(
+                "invalid_grant", f"Upstream refresh token exchange failed: {e}"
+            ) from e
 
         # Update local token storage
         new_access_token = token_response["access_token"]
@@ -535,10 +491,6 @@ class OAuthProxy(OAuthProvider):
                 )
                 self._access_to_refresh[new_access_token] = new_refresh_token
                 self._refresh_to_access[new_refresh_token] = new_access_token
-
-        logger.info(
-            "Successfully refreshed access token (client: %s)", client.client_id
-        )
 
         return OAuthToken(**token_response)  # type: ignore[arg-type]
 
@@ -607,10 +559,10 @@ class OAuthProxy(OAuthProvider):
     # -------------------------------------------------------------------------
 
     async def _handle_proxy_token_request(self, request: Request) -> JSONResponse:
-        """Custom token endpoint that forwards requests to upstream server.
+        """Custom token endpoint using authlib for upstream requests.
 
-        This handler intercepts token requests and forwards them to the upstream
-        OAuth server while preserving all request parameters (including PKCE).
+        This handler uses authlib's OAuth2Client to forward token requests to the
+        upstream OAuth server, automatically handling response format differences.
         """
         try:
             # Parse the incoming request form data
@@ -628,151 +580,73 @@ class OAuthProxy(OAuthProvider):
             }
             logger.debug("Proxy token request form data: %s", redacted_form)
 
-            # Build the upstream request data
-            upstream_data = {
-                "client_id": self._upstream_client_id,
-                "client_secret": self._upstream_client_secret.get_secret_value(),
-            }
-
-            # Forward all relevant form fields
-            for key, value in form_data.items():
-                if key not in {
-                    "client_id",
-                    "client_secret",
-                }:  # Don't override our credentials
-                    upstream_data[key] = str(value)
-
-            # Log outgoing request (with sensitive data redacted)
-            redacted_upstream = {
-                k: (
-                    "***"
-                    if k == "client_secret"
-                    else (
-                        str(v)[:8] + "..."
-                        if k in {"code", "code_verifier", "refresh_token"}
-                        else str(v)
-                    )
-                )
-                for k, v in upstream_data.items()
-            }
-            logger.error(
-                "Forwarding proxy token request to upstream: %s", redacted_upstream
+            # Create authlib OAuth2 client
+            oauth_client = AsyncOAuth2Client(
+                client_id=self._upstream_client_id,
+                client_secret=self._upstream_client_secret.get_secret_value(),
+                timeout=HTTP_TIMEOUT_SECONDS,
             )
-            logger.error("Full upstream URL: %s", self._upstream_token_endpoint)
 
-            # Make the request to upstream server
-            async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SECONDS) as http_client:
+            grant_type = str(form_data.get("grant_type", ""))
+            
+            if grant_type == "authorization_code":
+                # Authorization code grant
                 try:
-                    response = await http_client.post(
-                        self._upstream_token_endpoint,
-                        data=upstream_data,
-                        headers={"Content-Type": "application/x-www-form-urlencoded"},
+                    token_data = await oauth_client.fetch_token(
+                        url=self._upstream_token_endpoint,
+                        code=str(form_data.get("code", "")),
+                        redirect_uri=str(form_data.get("redirect_uri", "")),
+                        code_verifier=str(form_data.get("code_verifier")) if "code_verifier" in form_data else None,
                     )
-
-                    logger.debug(
-                        "Upstream proxy token response: status=%d, body_preview=%s",
-                        response.status_code,
-                        response.text[:200]
-                        + ("..." if len(response.text) > 200 else ""),
-                    )
-
-                    # Return the upstream response directly
-                    if response.status_code >= 400:
-                        logger.warning(
-                            "Upstream token request failed: %d - %s",
-                            response.status_code,
-                            response.text[:500],
-                        )
-                        # Forward the error response
-                        try:
-                            error_data = response.json()
-                        except Exception:
-                            error_data = {
-                                "error": "server_error",
-                                "error_description": "Upstream server error",
-                            }
-
-                        return JSONResponse(
-                            content=error_data, status_code=response.status_code
-                        )
-
-                    # Success - parse the token response
-                    content_type = response.headers.get("content-type", "").lower()
                     
-                    if "application/json" in content_type:
-                        # Standard JSON response
-                        try:
-                            token_data = response.json()
-                        except Exception as json_error:
-                            logger.error(
-                                "Failed to parse JSON token response: %s", json_error
-                            )
-                            return JSONResponse(
-                                content={
-                                    "error": "server_error", 
-                                    "error_description": "Invalid JSON from upstream server",
-                                },
-                                status_code=502,
-                            )
-                    elif "application/x-www-form-urlencoded" in content_type:
-                        # GitHub-style form-encoded response
-                        from urllib.parse import parse_qs
-                        try:
-                            # Parse the form-encoded response
-                            parsed_data = parse_qs(response.text)
-                            
-                            # Convert to standard OAuth JSON format
-                            token_data = {}
-                            for key, values in parsed_data.items():
-                                # parse_qs returns lists, but we want single values for OAuth tokens
-                                token_data[key] = values[0] if values else ""
-                            
-                            logger.info("Successfully parsed form-encoded token response")
-                            
-                        except Exception as parse_error:
-                            logger.error(
-                                "Failed to parse form-encoded token response: %s", parse_error
-                            )
-                            logger.error("Raw response text: %s", response.text[:500])
-                            return JSONResponse(
-                                content={
-                                    "error": "server_error",
-                                    "error_description": "Invalid form-encoded response from upstream",
-                                },
-                                status_code=502,
-                            )
-                    else:
-                        logger.error(
-                            "Unexpected content type from upstream: %s", content_type
-                        )
-                        logger.error("Raw response text: %s", response.text[:500])
-                        return JSONResponse(
-                            content={
-                                "error": "server_error",
-                                "error_description": "Unexpected response format from upstream server",
-                            },
-                            status_code=502,
-                        )
-
-                    # Store tokens locally for tracking (if this is an authorization_code grant)
-                    if (
-                        upstream_data.get("grant_type") == "authorization_code"
-                        and "access_token" in token_data
-                    ):
+                    # Store tokens locally for tracking
+                    if "access_token" in token_data:
                         self._store_tokens_from_response(token_data)
-
-                    logger.info("Successfully proxied token request to upstream server")
-                    return JSONResponse(content=token_data)
-
-                except httpx.RequestError as e:
-                    logger.error("Failed to connect to upstream token endpoint: %s", e)
+                        
+                    logger.info("Successfully proxied authorization code exchange via authlib")
+                    
+                except Exception as e:
+                    logger.error("Authlib authorization code exchange failed: %s", e)
                     return JSONResponse(
                         content={
-                            "error": "server_error",
-                            "error_description": "Unable to connect to upstream server",
+                            "error": "invalid_grant",
+                            "error_description": f"Authorization code exchange failed: {e}",
                         },
-                        status_code=503,
+                        status_code=400,
                     )
+                    
+            elif grant_type == "refresh_token":
+                # Refresh token grant
+                try:
+                    token_data = await oauth_client.refresh_token(
+                        url=self._upstream_token_endpoint,
+                        refresh_token=str(form_data.get("refresh_token", "")),
+                        scope=str(form_data.get("scope")) if "scope" in form_data else None,
+                    )
+                    
+                    logger.info("Successfully proxied refresh token exchange via authlib")
+                    
+                except Exception as e:
+                    logger.error("Authlib refresh token exchange failed: %s", e)
+                    return JSONResponse(
+                        content={
+                            "error": "invalid_grant",
+                            "error_description": f"Refresh token exchange failed: {e}",
+                        },
+                        status_code=400,
+                    )
+            else:
+                # Unsupported grant type
+                logger.error("Unsupported grant type: %s", grant_type)
+                return JSONResponse(
+                    content={
+                        "error": "unsupported_grant_type",
+                        "error_description": f"Grant type '{grant_type}' not supported by proxy",
+                    },
+                    status_code=400,
+                )
+
+            return JSONResponse(content=token_data)
 
         except Exception as e:
             logger.error("Error in proxy token handler: %s", e, exc_info=True)
