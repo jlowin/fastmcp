@@ -516,14 +516,8 @@ def extract_output_schema_from_responses(
     # Convert refs if needed
     output_schema = _ensure_refs_converted(schema)
 
-    # If schema has a $ref, resolve it first before processing nullable fields
-    if "$ref" in output_schema and schema_definitions:
-        ref_path = output_schema["$ref"]
-        if ref_path.startswith("#/$defs/"):
-            schema_name = ref_path.split("/")[-1]
-            if schema_name in schema_definitions:
-                # Replace $ref with the actual schema definition
-                output_schema = _ensure_refs_converted(schema_definitions[schema_name])
+    # Don't resolve top-level $refs inline - let the dependency collector handle them
+    # This ensures referenced schemas remain in $defs rather than being inlined
 
     # Convert OpenAPI schema to JSON Schema format
     # Only needed for OpenAPI 3.0 - 3.1 uses standard JSON Schema null types
