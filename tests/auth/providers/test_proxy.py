@@ -1,6 +1,5 @@
 """Tests for OAuth Proxy Provider."""
 
-import pytest
 from pydantic import AnyHttpUrl
 
 from fastmcp.server.auth.providers.jwt import JWTVerifier
@@ -30,10 +29,14 @@ class TestOAuthProxy:
         )
 
         # Verify initialization
-        assert proxy._upstream_authorization_endpoint == "https://upstream.com/authorize"
+        assert (
+            proxy._upstream_authorization_endpoint == "https://upstream.com/authorize"
+        )
         assert proxy._upstream_token_endpoint == "https://upstream.com/token"
         assert proxy._upstream_client_id == "upstream-client-id"
-        assert proxy._upstream_client_secret.get_secret_value() == "upstream-client-secret"
+        assert (
+            proxy._upstream_client_secret.get_secret_value() == "upstream-client-secret"
+        )
         assert proxy.base_url == AnyHttpUrl("https://fastmcp.com")
         assert proxy._token_validator == jwt_verifier
 

@@ -19,7 +19,6 @@ production use with enterprise identity providers.
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Final
 from urllib.parse import urlencode
 
@@ -46,7 +45,7 @@ from fastmcp.server.auth.auth import OAuthProvider, TokenVerifier
 from fastmcp.utilities.logging import get_logger
 
 if TYPE_CHECKING:
-    from starlette.routing import BaseRoute
+    pass
 
 logger = get_logger(__name__)
 
@@ -172,6 +171,7 @@ class OAuthProxy(OAuthProvider):
                 from fastmcp.server.dependencies import (
                     get_http_request,  # local import to avoid circular dependency
                 )
+
                 req = get_http_request()
                 maybe_redirect = req.query_params.get("redirect_uri")
                 if maybe_redirect:
@@ -198,15 +198,13 @@ class OAuthProxy(OAuthProvider):
 
         return client
 
-    async def register_client(
-        self, client_info: OAuthClientInformationFull
-    ) -> None:
+    async def register_client(self, client_info: OAuthClientInformationFull) -> None:
         """Register a client locally using fixed upstream credentials.
 
         This implementation always uses the upstream client_id and client_secret
         regardless of what the client requests. It modifies the client_info object
         in place since the MCP framework ignores return values.
-        
+
         This ensures all clients use the same credentials that are registered
         with the upstream server.
         """
@@ -218,7 +216,7 @@ class OAuthProxy(OAuthProvider):
         client_info.client_id = upstream_id
         client_info.client_secret = upstream_secret
         client_info.token_endpoint_auth_method = "none"
-        
+
         # Ensure correct grant types
         if not client_info.grant_types:
             client_info.grant_types = ["authorization_code", "refresh_token"]
@@ -317,11 +315,12 @@ class OAuthProxy(OAuthProvider):
         # Extract additional parameters from the current request
         code_verifier = None
         redirect_uri = str(authorization_code.redirect_uri)
-        
+
         try:
             from fastmcp.server.dependencies import (
                 get_http_request,  # local import to avoid circular dependency
             )
+
             req = get_http_request()
             if req.method == "POST":
                 form = await req.form()
@@ -329,7 +328,7 @@ class OAuthProxy(OAuthProvider):
                 # Extract PKCE code_verifier if present
                 if "code_verifier" in form:
                     code_verifier = str(form["code_verifier"])
-                
+
                 # Extract redirect_uri if present
                 if "redirect_uri" in form:
                     redirect_uri = str(form["redirect_uri"])
@@ -357,10 +356,10 @@ class OAuthProxy(OAuthProvider):
 
         try:
             logger.debug("Using authlib to fetch token from upstream")
-            
+
             # Let authlib handle the token exchange - it automatically handles
             # JSON/form-encoded responses, PKCE, error handling, etc.
-            token_response = await oauth_client.fetch_token(
+            token_response: dict[str, Any] = await oauth_client.fetch_token(  # type: ignore[misc]
                 url=self._upstream_token_endpoint,
                 code=authorization_code.code,
                 redirect_uri=redirect_uri,
@@ -430,7 +429,7 @@ class OAuthProxy(OAuthProvider):
         scopes: list[str],
     ) -> OAuthToken:
         """Exchange refresh token for new access token using authlib."""
-        
+
         # Use authlib's AsyncOAuth2Client for refresh token exchange
         oauth_client = AsyncOAuth2Client(
             client_id=self._upstream_client_id,
@@ -440,17 +439,17 @@ class OAuthProxy(OAuthProvider):
 
         try:
             logger.debug("Using authlib to refresh token from upstream")
-            
+
             # Let authlib handle the refresh token exchange
-            token_response = await oauth_client.refresh_token(
+            token_response: dict[str, Any] = await oauth_client.refresh_token(  # type: ignore[misc]
                 url=self._upstream_token_endpoint,
                 refresh_token=refresh_token.token,
                 scope=" ".join(scopes) if scopes else None,
             )
 
             logger.info(
-                "Successfully refreshed access token via authlib (client: %s)", 
-                client.client_id
+                "Successfully refreshed access token via authlib (client: %s)",
+                client.client_id,
             )
 
         except Exception as e:
@@ -588,23 +587,27 @@ class OAuthProxy(OAuthProvider):
             )
 
             grant_type = str(form_data.get("grant_type", ""))
-            
+
             if grant_type == "authorization_code":
                 # Authorization code grant
                 try:
-                    token_data = await oauth_client.fetch_token(
+                    token_data: dict[str, Any] = await oauth_client.fetch_token(  # type: ignore[misc]
                         url=self._upstream_token_endpoint,
                         code=str(form_data.get("code", "")),
                         redirect_uri=str(form_data.get("redirect_uri", "")),
-                        code_verifier=str(form_data.get("code_verifier")) if "code_verifier" in form_data else None,
+                        code_verifier=str(form_data.get("code_verifier"))
+                        if "code_verifier" in form_data
+                        else None,
                     )
-                    
+
                     # Store tokens locally for tracking
                     if "access_token" in token_data:
                         self._store_tokens_from_response(token_data)
-                        
-                    logger.info("Successfully proxied authorization code exchange via authlib")
-                    
+
+                    logger.info(
+                        "Successfully proxied authorization code exchange via authlib"
+                    )
+
                 except Exception as e:
                     logger.error("Authlib authorization code exchange failed: %s", e)
                     return JSONResponse(
@@ -614,18 +617,22 @@ class OAuthProxy(OAuthProvider):
                         },
                         status_code=400,
                     )
-                    
+
             elif grant_type == "refresh_token":
                 # Refresh token grant
                 try:
-                    token_data = await oauth_client.refresh_token(
+                    token_data: dict[str, Any] = await oauth_client.refresh_token(  # type: ignore[misc]
                         url=self._upstream_token_endpoint,
                         refresh_token=str(form_data.get("refresh_token", "")),
-                        scope=str(form_data.get("scope")) if "scope" in form_data else None,
+                        scope=str(form_data.get("scope"))
+                        if "scope" in form_data
+                        else None,
                     )
-                    
-                    logger.info("Successfully proxied refresh token exchange via authlib")
-                    
+
+                    logger.info(
+                        "Successfully proxied refresh token exchange via authlib"
+                    )
+
                 except Exception as e:
                     logger.error("Authlib refresh token exchange failed: %s", e)
                     return JSONResponse(
@@ -706,11 +713,15 @@ class OAuthProxy(OAuthProvider):
         custom_routes = []
         token_route_found = False
 
-        logger.info(f"get_routes called - replacing token endpoint in {len(routes)} routes")
-        
+        logger.info(
+            f"get_routes called - replacing token endpoint in {len(routes)} routes"
+        )
+
         for i, route in enumerate(routes):
-            logger.debug(f"Route {i}: {route} - path: {getattr(route, 'path', 'N/A')}, methods: {getattr(route, 'methods', 'N/A')}")
-            
+            logger.debug(
+                f"Route {i}: {route} - path: {getattr(route, 'path', 'N/A')}, methods: {getattr(route, 'methods', 'N/A')}"
+            )
+
             # Replace the token endpoint with our proxy handler
             if (
                 isinstance(route, Route)
@@ -732,7 +743,9 @@ class OAuthProxy(OAuthProvider):
                 custom_routes.append(route)
 
         if not token_route_found:
-            logger.warning("⚠️  No /token POST route found to replace! Adding proxy handler.")
+            logger.warning(
+                "⚠️  No /token POST route found to replace! Adding proxy handler."
+            )
             custom_routes.append(
                 Route(
                     path="/token",
