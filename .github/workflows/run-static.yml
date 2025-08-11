@@ -46,3 +46,16 @@ jobs:
         uses: pre-commit/action@v3.0.1
         env:
           SKIP: no-commit-to-branch
+      - name: Check SDK documentation is up to date
+        run: |
+          echo "Checking if SDK documentation is up to date..."
+          git_status_before=$(git status --porcelain docs/python-sdk/ docs/docs.json 2>/dev/null || true)
+          just api-ref-all > /dev/null 2>&1
+          git_status_after=$(git status --porcelain docs/python-sdk/ docs/docs.json 2>/dev/null || true)
+          if [[ "$git_status_before" != "$git_status_after" ]]; then
+            echo "❌ SDK documentation is out of date!"
+            echo "Run 'just api-ref-all' and commit the changes."
+            git status --porcelain docs/python-sdk/ docs/docs.json
+            exit 1
+          fi
+          echo "✅ SDK documentation is up to date"
