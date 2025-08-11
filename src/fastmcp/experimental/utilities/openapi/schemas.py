@@ -363,11 +363,12 @@ def _combine_schemas_and_map_params(
         "properties": properties,
         "required": required,
     }
-    # Add schema definitions if available
-    if route.schema_definitions:
+    # Add schema definitions if available (prefer request-specific, fall back to general)
+    schema_defs = route.request_schemas or route.schema_definitions
+    if schema_defs:
         if convert_refs:
             # Need to convert refs and prune
-            all_defs = route.schema_definitions.copy()
+            all_defs = schema_defs.copy()
             # Convert each schema definition recursively
             for name, schema in all_defs.items():
                 if isinstance(schema, dict):
@@ -409,7 +410,7 @@ def _combine_schemas_and_map_params(
                 }
         else:
             # From parser - already converted and pruned
-            result["$defs"] = route.schema_definitions
+            result["$defs"] = schema_defs
 
     return result, parameter_map
 

@@ -267,7 +267,9 @@ class FastMCPOpenAPI(FastMCP):
 
         # Extract output schema from OpenAPI responses
         output_schema = extract_output_schema_from_responses(
-            route.responses, route.schema_definitions, route.openapi_version
+            route.responses,
+            route.response_schemas or route.schema_definitions,
+            route.openapi_version,
         )
 
         # Get a unique tool name
