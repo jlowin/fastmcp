@@ -85,6 +85,7 @@ class OAuthProxy(OAuthProvider):
         token_verifier: TokenVerifier,
         # FastMCP server configuration
         base_url: AnyHttpUrl | str,
+        callback_path: str = "/oauth/callback",
         issuer_url: AnyHttpUrl | str | None = None,
         service_documentation_url: AnyHttpUrl | str | None = None,
         client_registration_options: ClientRegistrationOptions | None = None,
@@ -101,6 +102,7 @@ class OAuthProxy(OAuthProvider):
             upstream_revocation_endpoint: Optional upstream revocation endpoint
             token_verifier: Token verifier for validating access tokens
             base_url: Public URL of this FastMCP server
+            callback_path: Callback path for upstream IdP (defaults to "/oauth/callback")
             issuer_url: Issuer URL for OAuth metadata (defaults to base_url)
             service_documentation_url: Optional service documentation URL
             client_registration_options: Local client registration options
@@ -131,6 +133,9 @@ class OAuthProxy(OAuthProvider):
         self._upstream_client_id = upstream_client_id
         self._upstream_client_secret = SecretStr(upstream_client_secret)
         self._upstream_revocation_endpoint = upstream_revocation_endpoint
+        
+        # Store callback configuration
+        self._callback_path = callback_path if callback_path.startswith("/") else f"/{callback_path}"
 
         # Local state for DCR and token bookkeeping
         self._clients: dict[str, OAuthClientInformationFull] = {}
@@ -171,7 +176,9 @@ class OAuthProxy(OAuthProvider):
         if client is None:
             # Create a temporary client to allow OAuth flow validation
             # We'll use a permissive redirect_uri list since upstream will validate
-            redirect_uris: list[AnyUrl] = [self.base_url]  # type: ignore[list-item]
+            # Use the full callback URL, not just base_url
+            callback_url = f"{str(self.base_url).rstrip('/')}{self._callback_path}"
+            redirect_uris: list[AnyUrl] = [AnyUrl(callback_url)]  # type: ignore[list-item]
 
             # Try to extract redirect_uri from current request context
             try:
@@ -272,7 +279,7 @@ class OAuthProxy(OAuthProvider):
         query_params: dict[str, Any] = {
             "response_type": "code",
             "client_id": self._upstream_client_id,
-            "redirect_uri": f"{str(self.base_url).rstrip('/')}/oauth/callback",
+            "redirect_uri": f"{str(self.base_url).rstrip('/')}{self._callback_path}",
             "state": txn_id,  # Use txn_id as IdP state
         }
 
@@ -742,7 +749,7 @@ class OAuthProxy(OAuthProvider):
         # Add OAuth callback endpoint for forwarding to client callbacks
         custom_routes.append(
             Route(
-                path="/oauth/callback",
+                path=self._callback_path,
                 endpoint=self._handle_idp_callback,
                 methods=["GET"],
             )
@@ -807,7 +814,7 @@ class OAuthProxy(OAuthProvider):
             )
 
             try:
-                idp_redirect_uri = f"{str(self.base_url).rstrip('/')}/oauth/callback"
+                idp_redirect_uri = f"{str(self.base_url).rstrip('/')}{self._callback_path}"
                 logger.debug(
                     f"Exchanging IdP code for tokens with redirect_uri: {idp_redirect_uri}"
                 )
