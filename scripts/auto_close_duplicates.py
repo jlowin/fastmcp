@@ -1,4 +1,10 @@
 #!/usr/bin/env python
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#     "httpx",
+# ]
+# ///
 """
 Auto-close duplicate GitHub issues.
 
@@ -8,7 +14,7 @@ marked as duplicates and haven't received any preventing activity.
 
 import os
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import httpx
 
@@ -210,7 +216,7 @@ def should_close_as_duplicate(
     comment_date = datetime.fromisoformat(
         duplicate_comment.created_at.replace("Z", "+00:00")
     )
-    three_days_ago = datetime.utcnow() - timedelta(days=3)
+    three_days_ago = datetime.now(timezone.utc) - timedelta(days=3)
 
     if comment_date > three_days_ago:
         return False
@@ -257,7 +263,7 @@ def main():
     client = GitHubClient(token, owner, repo)
 
     # Get issues created more than 3 days ago
-    three_days_ago = datetime.utcnow() - timedelta(days=3)
+    three_days_ago = datetime.now(timezone.utc) - timedelta(days=3)
 
     all_issues = []
     page = 1
