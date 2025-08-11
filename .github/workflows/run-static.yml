@@ -57,6 +57,9 @@ jobs:
           if ! git diff --quiet docs/python-sdk/ docs/docs.json; then
             echo "❌ SDK documentation is out of date!"
             echo ""
+            echo "Showing diff of changed files:"
+            git diff docs/python-sdk/ docs/docs.json
+            echo ""
             echo "Run 'just api-ref-all' and commit the changes."
             echo ""
             exit 1
