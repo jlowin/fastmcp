@@ -12,7 +12,7 @@ from pydantic import AnyUrl
 
 from fastmcp.server.auth.auth import AccessToken
 from fastmcp.server.auth.providers.jwt import JWTVerifier
-from fastmcp.server.auth.providers.proxy import OAuthProxy
+from fastmcp.server.auth.proxy import OAuthProxy
 
 
 class TestOAuthProxyComprehensive:

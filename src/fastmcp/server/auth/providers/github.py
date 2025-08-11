@@ -29,7 +29,7 @@ from pydantic import AnyHttpUrl
 
 from fastmcp.server.auth import TokenVerifier
 from fastmcp.server.auth.auth import AccessToken
-from fastmcp.server.auth.providers.proxy import OAuthProxy
+from fastmcp.server.auth.proxy import OAuthProxy
 from fastmcp.server.auth.registry import register_provider
 from fastmcp.utilities.logging import get_logger
 
