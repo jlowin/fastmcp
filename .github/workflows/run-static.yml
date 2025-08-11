@@ -44,30 +44,8 @@ jobs:
         run: uv sync --dev
       - name: Install just
         uses: extractions/setup-just@v3
-      - name: Check SDK documentation is up to date
-        run: |
-          echo "Checking if SDK documentation is up to date..."
-          echo "Git status before:"
-          git status --porcelain docs/python-sdk/ docs/docs.json
-          echo "Running just api-ref-all..."
-          just api-ref-all > /dev/null 2>&1
-          echo "Git status after:"
-          git status --porcelain docs/python-sdk/ docs/docs.json
-          echo "Git diff check:"
-          if ! git diff --quiet docs/python-sdk/ docs/docs.json; then
-            echo "❌ SDK documentation is out of date!"
-            echo ""
-            echo "Showing diff of changed files:"
-            git diff docs/python-sdk/ docs/docs.json
-            echo ""
-            echo "Run 'just api-ref-all' and commit the changes."
-            echo ""
-            exit 1
-          fi
-          echo "✅ SDK documentation is up to date"
       - name: Check lockfile is up to date
         run: |
-          echo "Checking if lockfile is up to date..."
           if ! uv lock --check; then
             echo "❌ Lockfile is out of date!"
             echo "To update the lockfile, run 'uv lock'."
@@ -78,3 +56,15 @@ jobs:
         uses: pre-commit/action@v3.0.1
         env:
           SKIP: no-commit-to-branch
+      - name: Check SDK documentation is up to date
+        run: |
+          just api-ref-all > /dev/null 2>&1
+          if ! git diff --quiet docs/python-sdk/ docs/docs.json; then
+            echo "❌ SDK documentation is out of date!"
+            echo "Files that were updated:"
+            git diff --name-only docs/python-sdk/ docs/docs.json
+            echo ""
+            echo "Run 'just api-ref-all' and commit the changes."
+            exit 1
+          fi
+          echo "✅ SDK documentation is up to date"
