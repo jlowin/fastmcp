@@ -140,7 +140,12 @@ class OAuthProxy(OAuthProvider):
         # Token relation mappings for cleanup
         self._access_to_refresh: dict[str, str] = {}
         self._refresh_to_access: dict[str, str] = {}
-        
+
+        # OAuth transaction storage for IdP callback forwarding
+        self._oauth_transactions: dict[
+            str, dict[str, Any]
+        ] = {}  # txn_id -> transaction_data
+        self._client_codes: dict[str, dict[str, Any]] = {}  # client_code -> code_data
 
         # Use the provided token validator
         self._token_validator = token_verifier
@@ -241,31 +246,45 @@ class OAuthProxy(OAuthProvider):
         client: OAuthClientInformationFull,
         params: AuthorizationParams,
     ) -> str:
-        """Redirect authorization request to upstream server.
+        """Start OAuth transaction and redirect to upstream IdP.
 
-        Builds the upstream authorization URL with the client's parameters
-        and returns it for redirection. The upstream server handles the
-        user authentication and consent flow.
+        This implements the DCR-compliant proxy pattern:
+        1. Store transaction with client details and PKCE challenge
+        2. Use transaction ID as state for IdP
+        3. Redirect to IdP with our fixed callback URL
         """
-        # Build query parameters for upstream authorization request
+        # Generate transaction ID for this authorization request
+        txn_id = secrets.token_urlsafe(32)
+
+        # Store transaction data for IdP callback processing
+        self._oauth_transactions[txn_id] = {
+            "client_id": client.client_id,
+            "client_redirect_uri": str(params.redirect_uri),
+            "client_state": params.state,
+            "code_challenge": params.code_challenge,
+            "code_challenge_method": getattr(params, "code_challenge_method", "S256"),
+            "scopes": params.scopes or [],
+            "created_at": time.time(),
+        }
+
+        # Build query parameters for upstream IdP authorization request
+        # Use our fixed IdP callback and transaction ID as state
         query_params: dict[str, Any] = {
             "response_type": "code",
             "client_id": self._upstream_client_id,
-            "redirect_uri": str(params.redirect_uri),
-            "state": params.state,
+            "redirect_uri": f"{str(self.base_url).rstrip('/')}/oauth/callback",
+            "state": txn_id,  # Use txn_id as IdP state
         }
 
-        # Add PKCE parameters if present
-        if params.code_challenge:
-            query_params["code_challenge"] = params.code_challenge
-            query_params["code_challenge_method"] = "S256"
-
-        # Add scopes - use params.scopes if provided, otherwise use required_scopes
+        # Add scopes - use client scopes or fallback to required scopes
         scopes_to_use = params.scopes or self.required_scopes or []
         # Google requires at least some scope parameter, so provide a minimal one if none specified
-        if not scopes_to_use and "google" in self._upstream_authorization_endpoint.lower():
+        if (
+            not scopes_to_use
+            and "google" in self._upstream_authorization_endpoint.lower()
+        ):
             scopes_to_use = ["openid"]  # Minimal scope for Google
-        
+
         if scopes_to_use:
             query_params["scope"] = " ".join(scopes_to_use)
 
@@ -275,10 +294,11 @@ class OAuthProxy(OAuthProvider):
         )
 
         logger.info(
-            "Redirecting authorization request to upstream server for client %s",
+            "Starting OAuth transaction %s for client %s, redirecting to IdP",
+            txn_id,
             client.client_id,
         )
-        logger.debug("Upstream authorization URL: %s", upstream_url)
+        logger.debug("IdP authorization URL: %s", upstream_url)
 
         return upstream_url
 
@@ -293,19 +313,39 @@ class OAuthProxy(OAuthProvider):
     ) -> AuthorizationCode | None:
         """Load authorization code for validation.
 
-        Since we can't introspect codes from the upstream server, we create
-        a minimal AuthorizationCode object that will be used in the token
-        exchange process.
+        Look up our client code and return authorization code object
+        with PKCE challenge for validation.
         """
-        # Create a minimal authorization code object for the exchange process
+        # Look up client code data
+        code_data = self._client_codes.get(authorization_code)
+        if not code_data:
+            logger.debug("Authorization code not found: %s", authorization_code)
+            return None
+
+        # Check if code expired
+        if time.time() > code_data["expires_at"]:
+            logger.debug("Authorization code expired: %s", authorization_code)
+            self._client_codes.pop(authorization_code, None)
+            return None
+
+        # Verify client ID matches
+        if code_data["client_id"] != client.client_id:
+            logger.debug(
+                "Authorization code client ID mismatch: %s vs %s",
+                code_data["client_id"],
+                client.client_id,
+            )
+            return None
+
+        # Create authorization code object with PKCE challenge
         return AuthorizationCode(
             code=authorization_code,
             client_id=client.client_id,
-            redirect_uri=self.base_url,  # Placeholder - actual value extracted from request
-            redirect_uri_provided_explicitly=False,
-            scopes=[],  # Will be determined by upstream server
-            expires_at=int(time.time() + DEFAULT_AUTH_CODE_EXPIRY_SECONDS),
-            code_challenge="",  # Placeholder - not validated in proxy mode
+            redirect_uri=code_data["redirect_uri"],
+            redirect_uri_provided_explicitly=True,
+            scopes=code_data["scopes"],
+            expires_at=code_data["expires_at"],
+            code_challenge=code_data.get("code_challenge", ""),
         )
 
     async def exchange_authorization_code(
@@ -313,82 +353,31 @@ class OAuthProxy(OAuthProvider):
         client: OAuthClientInformationFull,
         authorization_code: AuthorizationCode,
     ) -> OAuthToken:
-        """Exchange authorization code for tokens with upstream server using authlib.
+        """Exchange authorization code for stored IdP tokens.
 
-        Uses authlib's AsyncOAuth2Client to handle the token exchange, which
-        automatically handles both JSON and form-encoded responses, PKCE, and
-        other OAuth complexities.
+        For the DCR-compliant proxy flow, we return the IdP tokens that were obtained
+        during the IdP callback exchange. PKCE validation is handled by the MCP framework.
         """
-        # Extract additional parameters from the current request
-        code_verifier = None
-        redirect_uri = str(authorization_code.redirect_uri)
-
-        try:
-            from fastmcp.server.dependencies import (
-                get_http_request,  # local import to avoid circular dependency
+        # Look up stored code data
+        code_data = self._client_codes.get(authorization_code.code)
+        if not code_data:
+            logger.error(
+                "Authorization code not found in client codes: %s",
+                authorization_code.code,
             )
+            raise TokenError("invalid_grant", "Authorization code not found")
 
-            req = get_http_request()
-            if req.method == "POST":
-                form = await req.form()
+        # Get stored IdP tokens
+        idp_tokens = code_data["idp_tokens"]
 
-                # Extract PKCE code_verifier if present
-                if "code_verifier" in form:
-                    code_verifier = str(form["code_verifier"])
+        # Clean up client code (one-time use)
+        self._client_codes.pop(authorization_code.code, None)
 
-                # Extract redirect_uri if present
-                if "redirect_uri" in form:
-                    redirect_uri = str(form["redirect_uri"])
-
-                # Log the incoming request (with sensitive data redacted)
-                redacted_form = {
-                    k: (
-                        str(v)[:8] + "..."
-                        if k in {"code", "code_verifier", "client_secret"} and v
-                        else str(v)
-                    )
-                    for k, v in form.items()
-                }
-                logger.debug("Token request form data: %s", redacted_form)
-
-        except Exception as e:
-            logger.warning("Could not extract form data from request: %s", e)
-
-        # Use authlib's AsyncOAuth2Client for token exchange
-        oauth_client = AsyncOAuth2Client(
-            client_id=self._upstream_client_id,
-            client_secret=self._upstream_client_secret.get_secret_value(),
-            timeout=HTTP_TIMEOUT_SECONDS,
-        )
-
-        try:
-            logger.debug("Using authlib to fetch token from upstream")
-
-            # Let authlib handle the token exchange - it automatically handles
-            # JSON/form-encoded responses, PKCE, error handling, etc.
-            token_response: dict[str, Any] = await oauth_client.fetch_token(  # type: ignore[misc]
-                url=self._upstream_token_endpoint,
-                code=authorization_code.code,
-                redirect_uri=redirect_uri,
-                code_verifier=code_verifier,
-            )
-
-            logger.info(
-                "Successfully exchanged authorization code via authlib (client: %s)",
-                client.client_id,
-            )
-
-        except Exception as e:
-            logger.error("Authlib token exchange failed: %s", e)
-            raise TokenError(
-                "invalid_grant", f"Upstream token exchange failed: {e}"
-            ) from e
-
-        # Extract token information
-        access_token_value = token_response["access_token"]
-        refresh_token_value = token_response.get("refresh_token")
+        # Extract token information for local tracking
+        access_token_value = idp_tokens["access_token"]
+        refresh_token_value = idp_tokens.get("refresh_token")
         expires_in = int(
-            token_response.get("expires_in", DEFAULT_ACCESS_TOKEN_EXPIRY_SECONDS)
+            idp_tokens.get("expires_in", DEFAULT_ACCESS_TOKEN_EXPIRY_SECONDS)
         )
         expires_at = int(time.time() + expires_in)
 
@@ -415,7 +404,12 @@ class OAuthProxy(OAuthProvider):
             self._access_to_refresh[access_token_value] = refresh_token_value
             self._refresh_to_access[refresh_token_value] = access_token_value
 
-        return OAuthToken(**token_response)  # type: ignore[arg-type]
+        logger.info(
+            "Successfully exchanged client code for stored IdP tokens (client: %s)",
+            client.client_id,
+        )
+
+        return OAuthToken(**idp_tokens)  # type: ignore[arg-type]
 
     # -------------------------------------------------------------------------
     # Refresh Token Flow
@@ -721,7 +715,7 @@ class OAuthProxy(OAuthProvider):
         token_route_found = False
 
         logger.info(
-            f"get_routes called - replacing token endpoint in {len(routes)} routes"
+            f"get_routes called - configuring OAuth routes in {len(routes)} routes"
         )
 
         for i, route in enumerate(routes):
@@ -729,294 +723,154 @@ class OAuthProxy(OAuthProvider):
                 f"Route {i}: {route} - path: {getattr(route, 'path', 'N/A')}, methods: {getattr(route, 'methods', 'N/A')}"
             )
 
-            # Replace the token endpoint with our proxy handler
+            # Keep all standard OAuth routes unchanged - our DCR-compliant flow handles everything
+            custom_routes.append(route)
+
             if (
                 isinstance(route, Route)
                 and route.path == "/token"
                 and route.methods is not None
                 and "POST" in route.methods
             ):
-                logger.info("🔄 REPLACING standard token endpoint with proxy handler")
                 token_route_found = True
-                custom_routes.append(
-                    Route(
-                        path="/token",
-                        endpoint=self._handle_proxy_token_request,
-                        methods=["POST"],
-                    )
-                )
-            else:
-                # Keep all other routes unchanged
-                custom_routes.append(route)
+                logger.info("✅ KEEPING standard token endpoint for DCR-compliant flow")
 
         if not token_route_found:
-            logger.warning(
-                "⚠️  No /token POST route found to replace! Adding proxy handler."
+            logger.warning("⚠️  No /token POST route found!")
+            # This shouldn't happen with standard OAuth provider
+
+        # Add OAuth callback endpoint for forwarding to client callbacks
+        custom_routes.append(
+            Route(
+                path="/oauth/callback",
+                endpoint=self._handle_idp_callback,
+                methods=["GET"],
             )
-            custom_routes.append(
-                Route(
-                    path="/token",
-                    endpoint=self._handle_proxy_token_request,
-                    methods=["POST"],
-                )
-            )
+        )
 
         logger.info(
-            f"✅ OAuth routes customized: replaced={token_route_found}, total routes={len(custom_routes)}"
+            f"✅ OAuth routes configured: token_endpoint={token_route_found}, total routes={len(custom_routes)} (includes OAuth callback)"
         )
         return custom_routes
 
-
-class ServerMediatedOAuthProxy(OAuthProxy):
-    """OAuth proxy with server-mediated flow for production deployments.
-    
-    This extends the basic OAuthProxy with server-mediated OAuth endpoints
-    that eliminate the need for client-side callback servers. This is ideal
-    for production deployments but adds complexity and may not be compatible
-    with all MCP clients.
-    
-    Additional endpoints provided:
-    - POST /oauth/sessions - Create OAuth session
-    - GET /oauth/sessions/{id} - Get session status/tokens  
-    - GET /oauth/callback - Handle OAuth provider callback
-    
-    Usage:
-        proxy = ServerMediatedOAuthProxy(
-            upstream_authorization_endpoint="https://github.com/login/oauth/authorize",
-            upstream_token_endpoint="https://github.com/login/oauth/access_token",
-            upstream_client_id="your-client-id",
-            upstream_client_secret="your-client-secret",
-            token_verifier=GitHubTokenVerifier(),
-            base_url="https://your-server.com",
-        )
-    """
-    
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        # Server-mediated OAuth session storage
-        self._oauth_sessions: dict[str, dict[str, Any]] = {}  # session_id -> session_data
-    
-    def get_routes(self) -> list[Route]:
-        """Get OAuth routes with server-mediated endpoints."""
-        # Get base routes from parent
-        routes = super().get_routes()
-        
-        # Add server-mediated OAuth endpoints
-        routes.extend([
-            Route(
-                path="/oauth/sessions",
-                endpoint=self._handle_create_oauth_session,
-                methods=["POST"],
-            ),
-            Route(
-                path="/oauth/sessions/{session_id}",
-                endpoint=self._handle_get_oauth_session,
-                methods=["GET"],
-            ),
-            Route(
-                path="/oauth/callback",
-                endpoint=self._handle_oauth_callback,
-                methods=["GET"],
-            ),
-        ])
-        
-        logger.info(f"✅ Server-mediated OAuth routes added, total routes: {len(routes)}")
-        return routes
-
     # -------------------------------------------------------------------------
-    # Server-Mediated OAuth Flow
+    # IdP Callback Forwarding
     # -------------------------------------------------------------------------
 
-    async def _handle_create_oauth_session(self, request: Request) -> JSONResponse:
-        """Create a new OAuth session for server-mediated flow."""
-        try:
-            # Parse request body
-            try:
-                body = await request.json()
-            except Exception:
-                body = {}
-            
-            scopes = body.get("scopes", [])
-            
-            # Generate unique session ID
-            session_id = secrets.token_urlsafe(32)
-            
-            # Generate state for OAuth security
-            state = secrets.token_urlsafe(16)
-            
-            # Build authorization URL pointing to our callback
-            redirect_uri = f"{str(self.base_url).rstrip('/')}/oauth/callback"
-            query_params = {
-                "response_type": "code",
-                "client_id": self._upstream_client_id,
-                "redirect_uri": redirect_uri,
-                "state": state,
-            }
-            
-            # Use provided scopes or fallback logic
-            scopes_to_use = scopes or self.required_scopes or []
-            if not scopes_to_use and "google" in self._upstream_authorization_endpoint.lower():
-                scopes_to_use = ["openid"]  # Minimal scope for Google
-            
-            if scopes_to_use:
-                query_params["scope"] = " ".join(scopes_to_use)
-            
-            auth_url = f"{self._upstream_authorization_endpoint}?{urlencode(query_params)}"
-            
-            # Store session data
-            self._oauth_sessions[session_id] = {
-                "state": state,
-                "scopes": scopes_to_use,
-                "created_at": time.time(),
-                "status": "pending",  # pending -> completed -> expired
-                "auth_url": auth_url,
-                "redirect_uri": redirect_uri,  # Store for consistency check
-            }
-            
-            logger.info(f"Created OAuth session {session_id} with scopes: {scopes_to_use}")
-            
-            return JSONResponse({
-                "session_id": session_id,
-                "auth_url": auth_url,
-                "expires_in": 300,  # 5 minutes
-            })
-            
-        except Exception as e:
-            logger.error("Error creating OAuth session: %s", e, exc_info=True)
-            return JSONResponse(
-                content={"error": "server_error", "error_description": "Failed to create OAuth session"},
-                status_code=500,
-            )
+    async def _handle_idp_callback(self, request: Request) -> RedirectResponse:
+        """Handle callback from upstream IdP and forward to client.
 
-    async def _handle_get_oauth_session(self, request: Request) -> JSONResponse:
-        """Get OAuth session status and tokens if completed."""
+        This implements the DCR-compliant callback forwarding:
+        1. Receive IdP callback with code and txn_id as state
+        2. Exchange IdP code for tokens (server-side)
+        3. Generate our own client code bound to PKCE challenge
+        4. Redirect to client's callback with client code and original state
+        """
         try:
-            session_id = request.path_params["session_id"]
-            session = self._oauth_sessions.get(session_id)
-            
-            if not session:
-                return JSONResponse(
-                    content={"error": "invalid_session", "error_description": "Session not found"},
-                    status_code=404,
-                )
-            
-            # Check if session expired (5 minutes)
-            if time.time() - session["created_at"] > 300:
-                session["status"] = "expired"
-                self._oauth_sessions.pop(session_id, None)
-                return JSONResponse(
-                    content={"error": "session_expired", "error_description": "OAuth session expired"},
-                    status_code=410,
-                )
-            
-            response_data = {
-                "session_id": session_id,
-                "status": session["status"],
-                "expires_in": max(0, int(300 - (time.time() - session["created_at"]))),
-            }
-            
-            # Include tokens if completed
-            if session["status"] == "completed" and "tokens" in session:
-                response_data["tokens"] = session["tokens"]
-                # Clean up completed session
-                self._oauth_sessions.pop(session_id, None)
-            
-            return JSONResponse(response_data)
-            
-        except Exception as e:
-            logger.error("Error getting OAuth session: %s", e, exc_info=True)
-            return JSONResponse(
-                content={"error": "server_error", "error_description": "Failed to get OAuth session"},
-                status_code=500,
-            )
-
-    async def _handle_oauth_callback(self, request: Request) -> RedirectResponse:
-        """Handle OAuth callback from upstream provider."""
-        try:
-            code = request.query_params.get("code")
-            state = request.query_params.get("state")
+            idp_code = request.query_params.get("code")
+            txn_id = request.query_params.get("state")
             error = request.query_params.get("error")
-            
+
             if error:
-                logger.error("OAuth callback error: %s - %s", error, request.query_params.get("error_description"))
+                logger.error(
+                    "IdP callback error: %s - %s",
+                    error,
+                    request.query_params.get("error_description"),
+                )
+                # TODO: Forward error to client callback
                 return RedirectResponse(
                     url=f"data:text/html,<h1>OAuth Error</h1><p>{error}: {request.query_params.get('error_description', 'Unknown error')}</p>",
                     status_code=302,
                 )
-            
-            if not code or not state:
-                logger.error("OAuth callback missing code or state")
+
+            if not idp_code or not txn_id:
+                logger.error("IdP callback missing code or transaction ID")
                 return RedirectResponse(
-                    url="data:text/html,<h1>OAuth Error</h1><p>Missing authorization code or state parameter</p>",
+                    url="data:text/html,<h1>OAuth Error</h1><p>Missing authorization code or transaction ID</p>",
                     status_code=302,
                 )
-            
-            # Find session by state
-            session_id = None
-            session = None
-            for sid, sess in self._oauth_sessions.items():
-                if sess.get("state") == state:
-                    session_id = sid
-                    session = sess
-                    break
-            
-            if not session:
-                logger.error("OAuth callback with invalid state: %s", state)
+
+            # Look up transaction data
+            transaction = self._oauth_transactions.get(txn_id)
+            if not transaction:
+                logger.error("IdP callback with invalid transaction ID: %s", txn_id)
                 return RedirectResponse(
-                    url="data:text/html,<h1>OAuth Error</h1><p>Invalid or expired session</p>",
+                    url="data:text/html,<h1>OAuth Error</h1><p>Invalid or expired transaction</p>",
                     status_code=302,
                 )
-            
-            # Check if session is already completed (prevent duplicate processing)
-            if session.get("status") in ["completed", "error"]:
-                logger.warning(f"OAuth callback for already processed session {session_id}")
-                return RedirectResponse(
-                    url="data:text/html,<h1>OAuth Already Completed</h1><p>This OAuth session has already been processed.</p>",
-                    status_code=302,
-                )
-            
-            # Exchange code for tokens using authlib
+
+            # Exchange IdP code for tokens (server-side)
             oauth_client = AsyncOAuth2Client(
                 client_id=self._upstream_client_id,
                 client_secret=self._upstream_client_secret.get_secret_value(),
                 timeout=HTTP_TIMEOUT_SECONDS,
             )
-            
+
             try:
-                # Use the same redirect_uri that was used in the authorization request
-                redirect_uri = session["redirect_uri"]
-                logger.debug(f"Exchanging code for tokens with redirect_uri: {redirect_uri}")
-                
-                token_response = await oauth_client.fetch_token(
+                idp_redirect_uri = f"{str(self.base_url).rstrip('/')}/oauth/callback"
+                logger.debug(
+                    f"Exchanging IdP code for tokens with redirect_uri: {idp_redirect_uri}"
+                )
+
+                idp_tokens: dict[str, Any] = await oauth_client.fetch_token(  # type: ignore[misc]
                     url=self._upstream_token_endpoint,
-                    code=code,
-                    redirect_uri=redirect_uri,
+                    code=idp_code,
+                    redirect_uri=idp_redirect_uri,
                 )
-                
-                # Store tokens in session
-                session["tokens"] = token_response
-                session["status"] = "completed"
-                
-                logger.info(f"OAuth session {session_id} completed successfully")
-                
-                return RedirectResponse(
-                    url="about:blank",  # Simple blank page that works in all browsers
-                    status_code=302,
+
+                logger.info(
+                    f"Successfully exchanged IdP code for tokens (transaction: {txn_id})"
                 )
-                
+
             except Exception as e:
-                logger.error("Token exchange failed in OAuth callback: %s", e)
-                session["status"] = "error"
-                session["error"] = str(e)
-                
+                logger.error("IdP token exchange failed: %s", e)
+                # TODO: Forward error to client callback
                 return RedirectResponse(
                     url=f"data:text/html,<h1>OAuth Error</h1><p>Token exchange failed: {e}</p>",
                     status_code=302,
                 )
-            
+
+            # Generate our own authorization code for the client
+            client_code = secrets.token_urlsafe(32)
+            code_expires_at = int(time.time() + DEFAULT_AUTH_CODE_EXPIRY_SECONDS)
+
+            # Store client code with PKCE challenge and IdP tokens
+            self._client_codes[client_code] = {
+                "client_id": transaction["client_id"],
+                "redirect_uri": transaction["client_redirect_uri"],
+                "code_challenge": transaction["code_challenge"],
+                "code_challenge_method": transaction["code_challenge_method"],
+                "scopes": transaction["scopes"],
+                "idp_tokens": idp_tokens,
+                "expires_at": code_expires_at,
+                "created_at": time.time(),
+            }
+
+            # Clean up transaction
+            self._oauth_transactions.pop(txn_id, None)
+
+            # Build client callback URL with our code and original state
+            client_redirect_uri = transaction["client_redirect_uri"]
+            client_state = transaction["client_state"]
+
+            callback_params = {
+                "code": client_code,
+                "state": client_state,
+            }
+
+            # Add query parameters to client redirect URI
+            separator = "&" if "?" in client_redirect_uri else "?"
+            client_callback_url = (
+                f"{client_redirect_uri}{separator}{urlencode(callback_params)}"
+            )
+
+            logger.info(f"Forwarding to client callback: {client_callback_url}")
+
+            return RedirectResponse(url=client_callback_url, status_code=302)
+
         except Exception as e:
-            logger.error("Error in OAuth callback: %s", e, exc_info=True)
+            logger.error("Error in IdP callback handler: %s", e, exc_info=True)
             return RedirectResponse(
-                url="data:text/html,<h1>OAuth Error</h1><p>Internal server error during OAuth callback</p>",
+                url="data:text/html,<h1>OAuth Error</h1><p>Internal server error during IdP callback</p>",
                 status_code=302,
             )
