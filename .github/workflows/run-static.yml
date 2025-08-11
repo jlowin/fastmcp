@@ -59,3 +59,12 @@ jobs:
             exit 1
           fi
           echo "✅ SDK documentation is up to date"
+      - name: Check lockfile is up to date
+        run: |
+          echo "Checking if lockfile is up to date..."
+          if ! uv lock --check; then
+            echo "❌ Lockfile is out of date!"
+            echo "To update the lockfile, run 'uv lock'."
+            exit 1
+          fi
+          echo "✅ Lockfile is up to date"
