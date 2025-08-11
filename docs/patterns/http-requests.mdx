@@ -79,9 +79,80 @@ async def safe_header_info() -> dict:
 
 By default, `get_http_headers()` excludes problematic headers like `host` and `content-length`. To include all headers, use `get_http_headers(include_all=True)`.
 
+## Accessing Access Tokens
+
+When using authentication with your FastMCP server, you can access the authenticated user's access token information using the `get_access_token()` dependency function:
+
+```python {2, 3, 11}
+from fastmcp import FastMCP
+from fastmcp.server.dependencies import get_access_token, AccessToken
+from typing import Optional
+
+mcp = FastMCP(name="Auth Token Demo")
+
+@mcp.tool
+async def get_user_info() -> dict:
+    """Get information about the authenticated user."""
+    # Get the access token (None if not authenticated)
+    token: Optional[AccessToken] = get_access_token()
+    
+    if token is None:
+        return {"authenticated": False}
+    
+    return {
+        "authenticated": True,
+        "client_id": token.client_id,
+        "scopes": token.scopes,
+        "expires_at": token.expires_at,
+        "token_claims": token.claims,  # JWT claims or custom token data
+    }
+```
+
+This is particularly useful when you need to:
+
+1. **Access user identification** - Get the `client_id` or subject from token claims
+2. **Check permissions** - Verify scopes or custom claims before performing operations
+3. **Multi-tenant applications** - Extract tenant information from token claims
+4. **Audit logging** - Track which user performed which actions
+
+### Working with Token Claims
+
+The `claims` field contains all the data from the original token (JWT claims for JWT tokens, or custom data for other token types):
+
+```python {2, 3, 12, 15, 18}
+from fastmcp import FastMCP
+from fastmcp.server.dependencies import get_access_token
+from typing import Optional
+
+mcp = FastMCP(name="Multi-tenant Demo")
+
+@mcp.tool
+async def get_tenant_data(resource_id: str) -> dict:
+    """Get tenant-specific data using token claims."""
+    token = get_access_token()
+    
+    # Extract tenant ID from token claims
+    tenant_id = token.claims.get("tenant_id") if token else None
+    
+    # Extract user ID from standard JWT subject claim
+    user_id = token.claims.get("sub") if token else None
+    
+    # Use tenant and user info to authorize and filter data
+    if not tenant_id:
+        raise ValueError("No tenant information in token")
+    
+    return {
+        "resource_id": resource_id,
+        "tenant_id": tenant_id,
+        "user_id": user_id,
+        "data": f"Tenant-specific data for {tenant_id}",
+    }
+```
+
 ## Important Notes
 
-- HTTP requests are only available when FastMCP is running as part of a web application
+- HTTP requests and access tokens are only available when FastMCP is running as part of a web application
 - Accessing the HTTP request with `get_http_request()` outside of a web request context will raise a `RuntimeError`
 - The `get_http_headers()` function **never raises errors** - it returns an empty dict when no request context is available
+- The `get_access_token()` function returns `None` when no authenticated user is present (unauthenticated requests)
 - The `get_http_request()` function returns a standard [Starlette Request](https://www.starlette.io/requests/) object
