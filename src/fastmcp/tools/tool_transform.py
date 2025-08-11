@@ -6,6 +6,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Annotated, Any, Literal
 
+import pydantic_core
 from mcp.types import ToolAnnotations
 from pydantic import ConfigDict
 from pydantic.fields import Field
@@ -312,11 +313,9 @@ class TransformedTool(Tool):
                         # Custom function returns ToolResult - preserve its content
                         return result
                     else:
-                        # Forwarded call with disabled schema - strip structured content
-                        return ToolResult(
-                            content=result.content,
-                            structured_content=None,
-                        )
+                        # Forwarded call with no explicit schema - preserve parent's structured content
+                        # The parent tool may have generated structured content via its own fallback logic
+                        return result
                 elif self.output_schema.get(
                     "type"
                 ) != "object" and not self.output_schema.get("x-fastmcp-wrap-result"):
@@ -334,17 +333,23 @@ class TransformedTool(Tool):
                 result, serializer=self.serializer
             )
 
-            # Handle structured content based on output schema
+            structured_output = None
+            # First handle structured content based on output schema, if any
             if self.output_schema is not None:
                 if self.output_schema.get("x-fastmcp-wrap-result"):
                     # Schema says wrap - always wrap in result key
                     structured_output = {"result": result}
                 else:
-                    # Object schemas - use result directly
-                    # User is responsible for returning dict-compatible data
                     structured_output = result
-            else:
-                structured_output = None
+            # If no output schema, try to serialize the result. If it is a dict, use
+            # it as structured content. If it is not a dict, ignore it.
+            if structured_output is None:
+                try:
+                    structured_output = pydantic_core.to_jsonable_python(result)
+                    if not isinstance(structured_output, dict):
+                        structured_output = None
+                except Exception:
+                    pass
 
             return ToolResult(
                 content=unstructured_result,
@@ -464,7 +469,7 @@ class TransformedTool(Tool):
             # Explicit schema provided - use as-is
             final_output_schema = output_schema
         else:
-            # Smart fallback: try custom function, then parent, then None
+            # Use smart fallback: try custom function, then parent
             if transform_fn is not None:
                 parsed_fn = ParsedFunction.from_function(transform_fn, validate=False)
                 final_output_schema = parsed_fn.output_schema
