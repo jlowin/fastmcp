@@ -1,6 +1,7 @@
-| allowed-tools | description |
-|--------------|-------------|
-| Bash(gh issue view:*), Bash(gh search:*), Bash(gh issue list:*), Bash(gh api:*), Bash(gh issue comment:*), Task | Find duplicate GitHub issues |
+---
+allowed-tools: Bash(gh issue view:*), Bash(gh search:*), Bash(gh issue list:*), Bash(gh api:*), Bash(gh issue comment:*), Task
+description: Find duplicate GitHub issues
+---
 
 Find up to 3 likely duplicate issues for a given GitHub issue.
 
