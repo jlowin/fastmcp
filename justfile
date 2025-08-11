@@ -16,7 +16,7 @@ docs:
 
 # Generate API reference documentation for all modules
 api-ref-all:
-    uvx --with-editable . --refresh-package mdxify mdxify@latest --all --root-module fastmcp --anchor-name "Python SDK" --exclude fastmcp.contrib
+    uvx --with-editable . --refresh-package mdxify mdxify@latest --all --root-module fastmcp --anchor-name "Python SDK" --exclude fastmcp.contrib --exclude fastmcp.server.auth.providers.jwt
 
 # Generate API reference for specific modules (e.g., just api-ref prefect.flows prefect.tasks)
 api-ref *MODULES:
