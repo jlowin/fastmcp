@@ -42,6 +42,8 @@ jobs:
           python-version: "3.12"
       - name: Install dependencies
         run: uv sync --dev
+      - name: Install just
+        uses: extractions/setup-just@v3
       - name: Run pre-commit
         uses: pre-commit/action@v3.0.1
         env:
