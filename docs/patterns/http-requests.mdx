@@ -52,7 +52,7 @@ This approach works anywhere within a request's execution flow, not just within 
 
 If you only need request headers and want to avoid potential errors, you can use the `get_http_headers()` helper:
 
-```python {2}
+```python {2, 10}
 from fastmcp import FastMCP
 from fastmcp.server.dependencies import get_http_headers
 
@@ -83,10 +83,9 @@ By default, `get_http_headers()` excludes problematic headers like `host` and `c
 
 When using authentication with your FastMCP server, you can access the authenticated user's access token information using the `get_access_token()` dependency function:
 
-```python {2, 3, 11}
+```python {2, 10}
 from fastmcp import FastMCP
 from fastmcp.server.dependencies import get_access_token, AccessToken
-from typing import Optional
 
 mcp = FastMCP(name="Auth Token Demo")
 
@@ -94,7 +93,7 @@ mcp = FastMCP(name="Auth Token Demo")
 async def get_user_info() -> dict:
     """Get information about the authenticated user."""
     # Get the access token (None if not authenticated)
-    token: Optional[AccessToken] = get_access_token()
+    token: AccessToken | None = get_access_token()
     
     if token is None:
         return {"authenticated": False}
@@ -119,17 +118,16 @@ This is particularly useful when you need to:
 
 The `claims` field contains all the data from the original token (JWT claims for JWT tokens, or custom data for other token types):
 
-```python {2, 3, 12, 15, 18}
+```python {2, 3, 9, 12, 15}
 from fastmcp import FastMCP
 from fastmcp.server.dependencies import get_access_token
-from typing import Optional
 
 mcp = FastMCP(name="Multi-tenant Demo")
 
 @mcp.tool
 async def get_tenant_data(resource_id: str) -> dict:
     """Get tenant-specific data using token claims."""
-    token = get_access_token()
+    token: AccessToken | None = get_access_token()
     
     # Extract tenant ID from token claims
     tenant_id = token.claims.get("tenant_id") if token else None
