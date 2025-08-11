@@ -363,8 +363,8 @@ def _combine_schemas_and_map_params(
         "properties": properties,
         "required": required,
     }
-    # Add schema definitions if available (prefer request-specific, fall back to general)
-    schema_defs = route.request_schemas or route.schema_definitions
+    # Add schema definitions if available
+    schema_defs = route.request_schemas
     if schema_defs:
         if convert_refs:
             # Need to convert refs and prune

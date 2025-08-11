@@ -742,7 +742,6 @@ class OpenAPIParser(
                             parameters=parameters,
                             request_body=request_body_info,
                             responses=responses,
-                            schema_definitions={},  # Keep for backwards compatibility
                             request_schemas=input_schemas,
                             response_schemas=output_schemas,
                             extensions=extensions,

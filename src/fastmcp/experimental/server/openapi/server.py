@@ -11,7 +11,7 @@ from jsonschema_path import SchemaPath
 from fastmcp.experimental.utilities.openapi import (
     HTTPRoute,
     extract_output_schema_from_responses,
-    format_description_with_responses,
+    format_simple_description,
     parse_openapi_to_http_routes,
 )
 from fastmcp.experimental.utilities.openapi.director import RequestDirector
@@ -268,7 +268,7 @@ class FastMCPOpenAPI(FastMCP):
         # Extract output schema from OpenAPI responses
         output_schema = extract_output_schema_from_responses(
             route.responses,
-            route.response_schemas or route.schema_definitions,
+            route.response_schemas,
             route.openapi_version,
         )
 
@@ -281,10 +281,9 @@ class FastMCPOpenAPI(FastMCP):
             or f"Executes {route.method} {route.path}"
         )
 
-        # Format enhanced description with parameters and request body
-        enhanced_description = format_description_with_responses(
+        # Use simplified description formatter for tools
+        enhanced_description = format_simple_description(
             base_description=base_description,
-            responses=route.responses,
             parameters=route.parameters,
             request_body=route.request_body,
         )
@@ -333,10 +332,9 @@ class FastMCPOpenAPI(FastMCP):
             route.description or route.summary or f"Represents {route.path}"
         )
 
-        # Format enhanced description with parameters and request body
-        enhanced_description = format_description_with_responses(
+        # Use simplified description for resources
+        enhanced_description = format_simple_description(
             base_description=base_description,
-            responses=route.responses,
             parameters=route.parameters,
             request_body=route.request_body,
         )
@@ -390,10 +388,9 @@ class FastMCPOpenAPI(FastMCP):
             route.description or route.summary or f"Template for {route.path}"
         )
 
-        # Format enhanced description with parameters and request body
-        enhanced_description = format_description_with_responses(
+        # Use simplified description for resource templates
+        enhanced_description = format_simple_description(
             base_description=base_description,
-            responses=route.responses,
             parameters=route.parameters,
             request_body=route.request_body,
         )

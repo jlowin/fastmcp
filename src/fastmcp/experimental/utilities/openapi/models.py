@@ -58,9 +58,6 @@ class HTTPRoute(FastMCPBaseModel):
     responses: dict[str, ResponseInfo] = Field(
         default_factory=dict
     )  # Key: status code str
-    schema_definitions: dict[str, JsonSchema] = Field(
-        default_factory=dict
-    )  # Store component schemas (deprecated - use input/output specific)
     request_schemas: dict[str, JsonSchema] = Field(
         default_factory=dict
     )  # Store schemas needed for input (parameters/request body)

@@ -36,7 +36,7 @@ class TestTransitiveAndNestedReferences:
                     }
                 },
             ),
-            schema_definitions={
+            request_schemas={
                 "User": {
                     "type": "object",
                     "properties": {"profile": {"$ref": "#/components/schemas/Profile"}},
@@ -184,7 +184,7 @@ class TestTransitiveAndNestedReferences:
                     "application/json": {"$ref": "#/components/schemas/Profile"}
                 },
             ),
-            schema_definitions={
+            request_schemas={
                 "Profile": {
                     "type": "object",
                     "properties": {
@@ -235,7 +235,7 @@ class TestTransitiveAndNestedReferences:
                     "application/json": {"$ref": "#/components/schemas/User"}
                 },
             ),
-            schema_definitions={
+            request_schemas={
                 "User": {
                     "type": "object",
                     "properties": {
@@ -298,7 +298,7 @@ class TestTransitiveAndNestedReferences:
                     }
                 },
             ),
-            schema_definitions={
+            request_schemas={
                 "User": {
                     "type": "object",
                     "properties": {"profile": {"$ref": "#/components/schemas/Profile"}},
@@ -353,7 +353,7 @@ class TestTransitiveAndNestedReferences:
                     }
                 },
             ),
-            schema_definitions={
+            request_schemas={
                 "TypeA": {
                     "type": "object",
                     "properties": {"nested": {"$ref": "#/components/schemas/Nested"}},
@@ -404,7 +404,7 @@ class TestTransitiveAndNestedReferences:
                     "application/json": {"$ref": "#/components/schemas/Level1"}
                 },
             ),
-            schema_definitions={
+            request_schemas={
                 "Level1": {
                     "type": "object",
                     "properties": {"level2": {"$ref": "#/components/schemas/Level2"}},
@@ -471,7 +471,7 @@ class TestTransitiveAndNestedReferences:
                     "application/json": {"$ref": "#/components/schemas/Node"}
                 },
             ),
-            schema_definitions={
+            request_schemas={
                 "Node": {
                     "type": "object",
                     "properties": {
@@ -512,7 +512,7 @@ class TestTransitiveAndNestedReferences:
                     }
                 },
             ),
-            schema_definitions={
+            request_schemas={
                 "Left": {
                     "type": "object",
                     "properties": {"shared": {"$ref": "#/components/schemas/Shared"}},
@@ -559,7 +559,7 @@ class TestTransitiveAndNestedReferences:
                     "application/json": {"$ref": "#/components/schemas/Content"}
                 },
             ),
-            schema_definitions={
+            request_schemas={
                 "Content": {
                     "type": "object",
                     "properties": {
@@ -613,7 +613,7 @@ class TestTransitiveAndNestedReferences:
                     }
                 },
             ),
-            schema_definitions={
+            request_schemas={
                 "SimpleString": {"type": "string"},
                 "EmptyObject": {"type": "object"},
                 "UnreferencedSchema": {"type": "number"},
@@ -646,7 +646,7 @@ class TestTransitiveAndNestedReferences:
                     "application/json": {"$ref": "#/components/schemas/DirectBody"}
                 },
             ),
-            schema_definitions={
+            request_schemas={
                 "DirectBody": {
                     "type": "object",
                     "properties": {
