@@ -11,7 +11,7 @@ To do this, follow these steps precisely:
 
 2. Use an agent to view a Github issue, and ask the agent to return a summary of the issue
 
-3. Then, launch 5 parallel agents to search Github for duplicates of this issue, using diverse keywords and search approaches, using the summary from #1
+3. Then, launch 3 parallel agents to search Github for duplicates of this issue, using diverse keywords and search approaches, using the summary from #1
 
 4. Next, feed the results from #1 and #2 into another agent, so that it can filter out false positives, that are likely not actually duplicates of the original issue. If there are no duplicates remaining, do not proceed.
 
