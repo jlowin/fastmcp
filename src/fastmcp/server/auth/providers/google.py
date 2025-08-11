@@ -8,13 +8,13 @@ Example:
     ```python
     from fastmcp import FastMCP
     from fastmcp.server.auth.providers.google import GoogleProvider
-    
+
     # Simple Google OAuth protection
     auth = GoogleProvider(
         client_id="your-google-client-id.apps.googleusercontent.com",
         client_secret="your-google-client-secret"
     )
-    
+
     mcp = FastMCP("My Protected Server", auth=auth)
     ```
 """
@@ -22,7 +22,6 @@ Example:
 from __future__ import annotations
 
 import time
-from typing import Any
 
 import httpx
 from pydantic import AnyHttpUrl
@@ -38,11 +37,11 @@ logger = get_logger(__name__)
 
 class GoogleTokenVerifier(TokenVerifier):
     """Token verifier for Google OAuth tokens.
-    
+
     Google OAuth tokens are opaque (not JWTs), so we verify them
     by calling Google's tokeninfo API to check if they're valid and get user info.
     """
-    
+
     def __init__(
         self,
         *,
@@ -50,14 +49,14 @@ class GoogleTokenVerifier(TokenVerifier):
         timeout_seconds: int = 10,
     ):
         """Initialize the Google token verifier.
-        
+
         Args:
             required_scopes: Required OAuth scopes (e.g., ['openid', 'email'])
             timeout_seconds: HTTP request timeout
         """
         super().__init__(required_scopes=required_scopes)
         self.timeout_seconds = timeout_seconds
-        
+
     async def verify_token(self, token: str) -> AccessToken | None:
         """Verify Google OAuth token by calling Google's tokeninfo API."""
         try:
@@ -68,27 +67,29 @@ class GoogleTokenVerifier(TokenVerifier):
                     params={"access_token": token},
                     headers={"User-Agent": "FastMCP-Google-OAuth"},
                 )
-                
+
                 if response.status_code != 200:
                     logger.debug(
                         "Google token verification failed: %d - %s",
                         response.status_code,
-                        response.text[:200]
+                        response.text[:200],
                     )
                     return None
-                
+
                 token_info = response.json()
-                
+
                 # Check if token is expired
                 expires_in = token_info.get("expires_in")
                 if expires_in and int(expires_in) <= 0:
                     logger.debug("Google token has expired")
                     return None
-                
+
                 # Extract scopes from token info
                 scope_string = token_info.get("scope", "")
-                token_scopes = [scope.strip() for scope in scope_string.split(" ") if scope.strip()]
-                
+                token_scopes = [
+                    scope.strip() for scope in scope_string.split(" ") if scope.strip()
+                ]
+
                 # Check required scopes
                 if self.required_scopes:
                     token_scopes_set = set(token_scopes)
@@ -100,7 +101,7 @@ class GoogleTokenVerifier(TokenVerifier):
                             required_scopes_set,
                         )
                         return None
-                
+
                 # Get additional user info if we have the right scopes
                 user_data = {}
                 if "openid" in token_scopes or "profile" in token_scopes:
@@ -110,26 +111,29 @@ class GoogleTokenVerifier(TokenVerifier):
                             headers={
                                 "Authorization": f"Bearer {token}",
                                 "User-Agent": "FastMCP-Google-OAuth",
-                            }
+                            },
                         )
                         if userinfo_response.status_code == 200:
                             user_data = userinfo_response.json()
                     except Exception as e:
                         logger.debug("Failed to fetch Google user info: %s", e)
-                
+
                 # Calculate expiration time
                 expires_at = None
                 if expires_in:
                     expires_at = int(time.time() + int(expires_in))
-                
+
                 # Create AccessToken with Google user info
                 return AccessToken(
                     token=token,
-                    client_id=token_info.get("audience", "unknown"),  # Use audience as client_id
+                    client_id=token_info.get(
+                        "audience", "unknown"
+                    ),  # Use audience as client_id
                     scopes=token_scopes,
                     expires_at=expires_at,
                     claims={
-                        "sub": user_data.get("id") or token_info.get("user_id", "unknown"),
+                        "sub": user_data.get("id")
+                        or token_info.get("user_id", "unknown"),
                         "email": user_data.get("email"),
                         "name": user_data.get("name"),
                         "picture": user_data.get("picture"),
@@ -138,9 +142,9 @@ class GoogleTokenVerifier(TokenVerifier):
                         "locale": user_data.get("locale"),
                         "google_user_data": user_data,
                         "google_token_info": token_info,
-                    }
+                    },
                 )
-                
+
         except httpx.RequestError as e:
             logger.debug("Failed to verify Google token: %s", e)
             return None
@@ -152,32 +156,32 @@ class GoogleTokenVerifier(TokenVerifier):
 @register_provider("Google")
 class GoogleProvider(OAuthProxy):
     """Complete Google OAuth provider for FastMCP.
-    
+
     This provider makes it trivial to add Google OAuth protection to any
     FastMCP server. Just provide your Google OAuth app credentials and
     a base URL, and you're ready to go.
-    
+
     Features:
     - Transparent OAuth proxy to Google
     - Automatic token validation via Google's tokeninfo API
     - User information extraction from Google APIs
     - Minimal configuration required
-    
+
     Example:
         ```python
         from fastmcp import FastMCP
         from fastmcp.server.auth.providers.google import GoogleProvider
-        
+
         auth = GoogleProvider(
             client_id="123456789.apps.googleusercontent.com",
             client_secret="GOCSPX-abc123...",
             base_url="https://my-server.com"  # Optional, defaults to http://localhost:8000
         )
-        
+
         mcp = FastMCP("My App", auth=auth)
         ```
     """
-    
+
     def __init__(
         self,
         *,
@@ -188,7 +192,7 @@ class GoogleProvider(OAuthProxy):
         timeout_seconds: int = 10,
     ):
         """Initialize Google OAuth provider.
-        
+
         Args:
             client_id: Google OAuth client ID (e.g., "123456789.apps.googleusercontent.com")
             client_secret: Google OAuth client secret (e.g., "GOCSPX-abc123...")
@@ -201,13 +205,13 @@ class GoogleProvider(OAuthProxy):
         if required_scopes is None:
             required_scopes = ["openid", "email"]
         # If empty list passed explicitly, keep it empty (no scope requirements)
-        
+
         # Create Google token verifier
         token_verifier = GoogleTokenVerifier(
             required_scopes=required_scopes,
             timeout_seconds=timeout_seconds,
         )
-        
+
         # Initialize OAuth proxy with Google endpoints
         super().__init__(
             upstream_authorization_endpoint="https://accounts.google.com/o/oauth2/v2/auth",
@@ -218,7 +222,7 @@ class GoogleProvider(OAuthProxy):
             base_url=base_url,
             issuer_url=base_url,  # We act as the issuer for client registration
         )
-        
+
         logger.info(
             "Initialized Google OAuth provider for client %s with scopes: %s",
             client_id,
