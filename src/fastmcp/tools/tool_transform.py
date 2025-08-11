@@ -368,9 +368,9 @@ class TransformedTool(Tool):
         tags: set[str] | None = None,
         transform_fn: Callable[..., Any] | None = None,
         transform_args: dict[str, ArgTransform] | None = None,
-        annotations: ToolAnnotations | None = None,
-        output_schema: dict[str, Any] | None | Literal[False] = None,
-        serializer: Callable[[Any], str] | None = None,
+        annotations: ToolAnnotations | None | NotSetT = NotSet,
+        output_schema: dict[str, Any] | None | NotSetT = NotSet,
+        serializer: Callable[[Any], str] | None | NotSetT = NotSet,
         meta: dict[str, Any] | None | NotSetT = NotSet,
         enabled: bool | None = None,
     ) -> TransformedTool:
@@ -450,6 +450,11 @@ class TransformedTool(Tool):
         """
         transform_args = transform_args or {}
 
+        if transform_fn is not None:
+            parsed_fn = ParsedFunction.from_function(transform_fn, validate=False)
+        else:
+            parsed_fn = None
+
         # Validate transform_args
         parent_params = set(tool.parameters.get("properties", {}).keys())
         unknown_args = set(transform_args.keys()) - parent_params
@@ -462,16 +467,11 @@ class TransformedTool(Tool):
         # Always create the forwarding transform
         schema, forwarding_fn = cls._create_forwarding_transform(tool, transform_args)
 
-        # Handle output schema with smart fallback
-        if output_schema is False:
-            final_output_schema = None
-        elif output_schema is not None:
-            # Explicit schema provided - use as-is
-            final_output_schema = output_schema
-        else:
+        # Handle output schema
+        if output_schema is NotSet:
             # Use smart fallback: try custom function, then parent
             if transform_fn is not None:
-                parsed_fn = ParsedFunction.from_function(transform_fn, validate=False)
+                assert parsed_fn is not None
                 final_output_schema = parsed_fn.output_schema
                 if final_output_schema is None:
                     # Check if function returns ToolResult - if so, don't fall back to parent
@@ -484,15 +484,17 @@ class TransformedTool(Tool):
                         final_output_schema = tool.output_schema
             else:
                 final_output_schema = tool.output_schema
+        else:
+            assert isinstance(output_schema, dict | None)
+            final_output_schema = output_schema
 
         if transform_fn is None:
             # User wants pure transformation - use forwarding_fn as the main function
             final_fn = forwarding_fn
             final_schema = schema
         else:
+            assert parsed_fn is not None
             # User provided custom function - merge schemas
-            if "parsed_fn" not in locals():
-                parsed_fn = ParsedFunction.from_function(transform_fn, validate=False)
             final_fn = transform_fn
 
             has_kwargs = cls._function_has_kwargs(transform_fn)
@@ -557,6 +559,13 @@ class TransformedTool(Tool):
         )
         final_title = title if not isinstance(title, NotSetT) else tool.title
         final_meta = meta if not isinstance(meta, NotSetT) else tool.meta
+        final_annotations = (
+            annotations if not isinstance(annotations, NotSetT) else tool.annotations
+        )
+        final_serializer = (
+            serializer if not isinstance(serializer, NotSetT) else tool.serializer
+        )
+        final_enabled = enabled if enabled is not None else tool.enabled
 
         transformed_tool = cls(
             fn=final_fn,
@@ -568,11 +577,11 @@ class TransformedTool(Tool):
             parameters=final_schema,
             output_schema=final_output_schema,
             tags=tags or tool.tags,
-            annotations=annotations or tool.annotations,
-            serializer=serializer or tool.serializer,
+            annotations=final_annotations,
+            serializer=final_serializer,
             meta=final_meta,
             transform_args=transform_args,
-            enabled=enabled if enabled is not None else True,
+            enabled=final_enabled,
         )
 
         return transformed_tool
