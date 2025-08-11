@@ -172,7 +172,7 @@ class GitHubProvider(OAuthProxy):
         client_id: str,
         client_secret: str,
         base_url: AnyHttpUrl | str = "http://localhost:8000",
-        callback_path: str = "/oauth/callback",
+        redirect_path: str = "/oauth/callback",
         required_scopes: list[str] | None = None,
         timeout_seconds: int = 10,
     ):
@@ -182,7 +182,7 @@ class GitHubProvider(OAuthProxy):
             client_id: GitHub OAuth app client ID (e.g., "Ov23li...")
             client_secret: GitHub OAuth app client secret
             base_url: Public URL of your FastMCP server (for OAuth callbacks)
-            callback_path: Callback path for GitHub OAuth app (defaults to "/oauth/callback")
+            redirect_path: Redirect path configured in GitHub OAuth app (defaults to "/oauth/callback")
             required_scopes: Required GitHub scopes (defaults to ["user"])
             timeout_seconds: HTTP request timeout for GitHub API calls
         """
@@ -204,7 +204,7 @@ class GitHubProvider(OAuthProxy):
             upstream_client_secret=client_secret,
             token_verifier=token_verifier,
             base_url=base_url,
-            callback_path=callback_path,
+            redirect_path=redirect_path,
             issuer_url=base_url,  # We act as the issuer for client registration
         )
         

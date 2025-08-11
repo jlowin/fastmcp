@@ -30,45 +30,104 @@ This creates a fundamental incompatibility: MCP clients expect to register dynam
 
 ## How OAuth Proxy Works
 
-The OAuth Proxy implements a transparent forwarding pattern that makes non-DCR providers compatible with MCP's authentication flow:
+The OAuth Proxy implements an intelligent callback forwarding pattern that solves both the DCR problem and the redirect URI mismatch issue:
 
 ```mermaid
 sequenceDiagram
-    participant Client as MCP Client
-    participant Proxy as FastMCP OAuth Proxy
-    participant Provider as OAuth Provider (GitHub, etc.)
+    participant Client as MCP Client<br/>(localhost:random)
+    participant Proxy as FastMCP OAuth Proxy<br/>(server:8000)
+    participant Provider as OAuth Provider<br/>(GitHub, etc.)
 
     Note over Client, Proxy: Dynamic Registration (Local)
-    Client->>Proxy: 1. POST /register (DCR request)
+    Client->>Proxy: 1. POST /register<br/>redirect_uri: localhost:54321/callback
     Proxy-->>Client: 2. Returns fixed upstream credentials
 
-    Note over Client, Provider: Authorization Flow (Forwarded)
-    Client->>Proxy: 3. GET /authorize
-    Proxy->>Provider: 4. Redirect to provider's /authorize
-    Provider-->>Client: 5. Authorization code via redirect
-
-    Note over Client, Provider: Token Exchange (Proxied)
-    Client->>Proxy: 6. POST /token (with code)
-    Proxy->>Provider: 7. Exchange code using fixed credentials
-    Provider-->>Proxy: 8. Access token
-    Proxy-->>Client: 9. Access token
-
-    Note over Client, Proxy: Token Validation
-    Client->>Proxy: 10. MCP request with token
-    Proxy->>Proxy: 11. Validate token with provider
-    Proxy-->>Client: 12. MCP response
+    Note over Client, Proxy: Authorization with Callback Forwarding
+    Client->>Proxy: 3. GET /authorize<br/>redirect_uri=localhost:54321/callback
+    Note over Proxy: Store transaction with client callback
+    Proxy->>Provider: 4. Redirect to provider<br/>redirect_uri=server:8000/oauth/callback
+    
+    Note over Provider, Proxy: Provider Callback
+    Provider->>Proxy: 5. GET /oauth/callback<br/>with authorization code
+    Proxy->>Provider: 6. Exchange code for tokens
+    Provider-->>Proxy: 7. Access & refresh tokens
+    
+    Note over Proxy, Client: Client Callback Forwarding
+    Proxy->>Client: 8. Redirect to localhost:54321/callback<br/>with new authorization code
+    
+    Note over Client, Proxy: Token Exchange
+    Client->>Proxy: 9. POST /token with code
+    Proxy-->>Client: 10. Returns stored provider tokens
 ```
 
-The key insight is that the proxy handles DCR locally - always returning the same fixed credentials you've configured - while transparently forwarding the actual OAuth flow to your provider. This gives MCP clients the DCR experience they expect while working with providers that don't support it.
+### The Callback Forwarding Breakthrough
+
+The OAuth Proxy solves the fundamental redirect URI problem that has plagued OAuth integrations:
+
+**The Problem:**
+- MCP clients use dynamic localhost ports (e.g., `http://localhost:54321/callback`)
+- OAuth providers require pre-registered, fixed redirect URIs
+- Result: "redirect_uri not associated with application" errors
+
+**The Solution:**
+1. **Client Registration**: Client registers with any localhost callback URL
+2. **Transaction Storage**: Proxy stores client's callback URL and PKCE challenge
+3. **Provider Redirect**: Proxy redirects to provider with its own fixed callback (`/oauth/callback`)
+4. **Server-Side Exchange**: Proxy receives provider callback and exchanges code for tokens
+5. **Client Forwarding**: Proxy redirects to client's original callback with a new code
+6. **Token Delivery**: Client exchanges the new code for the provider's tokens
+
+This enables any MCP client to work with any OAuth provider, regardless of redirect URI restrictions.
 
 ## Basic Implementation
 
-The `OAuthProxy` class provides the complete proxy implementation. To use it, you need:
+The `OAuthProxy` class provides the complete proxy implementation:
 
-- **OAuth endpoints**: Your provider's authorization and token endpoints
-- **App credentials**: The client ID and secret from your registered OAuth application  
-- **Token verifier**: A [`TokenVerifier`](/servers/auth/token-verification) instance to validate the provider's tokens
-- **Server URL**: Your FastMCP server's base URL
+<Card icon="code" title="OAuthProxy Constructor Parameters">
+<ParamField body="upstream_authorization_endpoint" type="str" required>
+  URL of your OAuth provider's authorization endpoint (e.g., `https://github.com/login/oauth/authorize`)
+</ParamField>
+
+<ParamField body="upstream_token_endpoint" type="str" required>
+  URL of your OAuth provider's token endpoint (e.g., `https://github.com/login/oauth/access_token`)
+</ParamField>
+
+<ParamField body="upstream_client_id" type="str" required>
+  Client ID from your registered OAuth application
+</ParamField>
+
+<ParamField body="upstream_client_secret" type="str" required>
+  Client secret from your registered OAuth application
+</ParamField>
+
+<ParamField body="token_verifier" type="TokenVerifier" required>
+  A [`TokenVerifier`](/servers/auth/token-verification) instance to validate the provider's tokens
+</ParamField>
+
+<ParamField body="base_url" type="AnyHttpUrl | str" required>
+  Public URL of your FastMCP server (e.g., `https://your-server.com`)
+</ParamField>
+
+<ParamField body="redirect_path" type="str" default="/oauth/callback">
+  Path for OAuth callbacks. Must match the redirect URI configured in your OAuth application
+</ParamField>
+
+<ParamField body="upstream_revocation_endpoint" type="str | None">
+  Optional URL of provider's token revocation endpoint
+</ParamField>
+
+<ParamField body="issuer_url" type="AnyHttpUrl | str | None">
+  Issuer URL for OAuth metadata (defaults to base_url)
+</ParamField>
+
+<ParamField body="service_documentation_url" type="AnyHttpUrl | str | None">
+  Optional URL to your service documentation
+</ParamField>
+
+<ParamField body="resource_server_url" type="AnyHttpUrl | str | None">
+  Resource server URL (defaults to base_url)
+</ParamField>
+</Card>
 
 ```python
 from fastmcp import FastMCP
@@ -82,7 +141,7 @@ token_verifier = JWTVerifier(
     audience="your-app-id"
 )
 
-# Create the OAuth proxy
+# Create the OAuth proxy (accepts strings for URLs)
 auth = OAuthProxy(
     # Upstream provider endpoints
     upstream_authorization_endpoint="https://your-provider.com/oauth/authorize",
@@ -95,18 +154,44 @@ auth = OAuthProxy(
     # Token validation
     token_verifier=token_verifier,
     
-    # Your FastMCP server URL
-    base_url="https://your-server.com"
+    # Your FastMCP server URL (string automatically converted to AnyHttpUrl)
+    base_url="https://your-server.com",
+    
+    # Optional: customize callback path (defaults to "/oauth/callback")
+    redirect_path="/oauth/callback"
 )
 
 mcp = FastMCP(name="My Server", auth=auth)
 ```
 
+### OAuth Provider Configuration
+
+When registering your application with your OAuth provider, configure the redirect/callback URL as:
+
+```
+https://your-server.com/oauth/callback
+```
+
+For local development with providers that support it (like GitHub):
+
+```
+http://localhost:8000/oauth/callback
+```
+
 The proxy automatically:
 - Implements DCR by returning your fixed credentials to any client that registers
-- Forwards authorization requests to your provider
-- Exchanges authorization codes using your registered credentials
+- Handles callback forwarding between dynamic client callbacks and your fixed provider callback
+- Exchanges authorization codes server-side for enhanced security
 - Validates tokens using your provider's public keys or API
+- Maintains PKCE security throughout the flow
+
+## Client Compatibility
+
+<Tip>
+The OAuth Proxy's callback forwarding enables **any MCP client** to authenticate with **any OAuth provider**, regardless of redirect URI restrictions. Clients can use dynamic localhost ports while providers see their expected fixed callbacks.
+</Tip>
+
+This breakthrough means that MCP clients no longer need to worry about registering specific callback URLs with OAuth providers. The proxy handles the complexity of bridging dynamic client callbacks with the fixed URLs that providers require. The entire flow maintains OAuth 2.1 and PKCE (RFC-7636) compliance for security.
 
 ## Token Verification
 

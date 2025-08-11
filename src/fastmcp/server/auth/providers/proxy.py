@@ -85,11 +85,9 @@ class OAuthProxy(OAuthProvider):
         token_verifier: TokenVerifier,
         # FastMCP server configuration
         base_url: AnyHttpUrl | str,
-        callback_path: str = "/oauth/callback",
+        redirect_path: str = "/oauth/callback",
         issuer_url: AnyHttpUrl | str | None = None,
         service_documentation_url: AnyHttpUrl | str | None = None,
-        client_registration_options: ClientRegistrationOptions | None = None,
-        revocation_options: RevocationOptions | None = None,
         resource_server_url: AnyHttpUrl | str | None = None,
     ):
         """Initialize the OAuth proxy provider.
@@ -102,29 +100,41 @@ class OAuthProxy(OAuthProvider):
             upstream_revocation_endpoint: Optional upstream revocation endpoint
             token_verifier: Token verifier for validating access tokens
             base_url: Public URL of this FastMCP server
-            callback_path: Callback path for upstream IdP (defaults to "/oauth/callback")
+            redirect_path: Redirect path configured in upstream OAuth app (defaults to "/oauth/callback")
             issuer_url: Issuer URL for OAuth metadata (defaults to base_url)
             service_documentation_url: Optional service documentation URL
-            client_registration_options: Local client registration options
-            revocation_options: Token revocation options
             resource_server_url: Resource server URL (defaults to base_url)
         """
-        # Enable DCR by default since we implement it locally
-        if client_registration_options is None:
-            client_registration_options = ClientRegistrationOptions(enabled=True)
+        # Convert string URLs to AnyHttpUrl for parent class
+        base_url_parsed = AnyHttpUrl(base_url) if isinstance(base_url, str) else base_url
+        issuer_url_parsed = (
+            AnyHttpUrl(issuer_url) if isinstance(issuer_url, str) else issuer_url
+        ) if issuer_url else None
+        service_documentation_url_parsed = (
+            AnyHttpUrl(service_documentation_url) if isinstance(service_documentation_url, str) else service_documentation_url
+        ) if service_documentation_url else None
+        resource_server_url_parsed = (
+            AnyHttpUrl(resource_server_url) if isinstance(resource_server_url, str) else resource_server_url
+        ) if resource_server_url else None
 
-        # Set up revocation if upstream endpoint provided
-        if upstream_revocation_endpoint and revocation_options is None:
-            revocation_options = RevocationOptions(enabled=True)
+        # Always enable DCR since we implement it locally for MCP clients
+        client_registration_options = ClientRegistrationOptions(enabled=True)
+
+        # Enable revocation only if upstream endpoint provided
+        revocation_options = (
+            RevocationOptions(enabled=True)
+            if upstream_revocation_endpoint
+            else None
+        )
 
         super().__init__(
-            base_url=base_url,
-            issuer_url=issuer_url,
-            service_documentation_url=service_documentation_url,
+            base_url=base_url_parsed,
+            issuer_url=issuer_url_parsed,
+            service_documentation_url=service_documentation_url_parsed,
             client_registration_options=client_registration_options,
             revocation_options=revocation_options,
             required_scopes=token_verifier.required_scopes,
-            resource_server_url=resource_server_url,
+            resource_server_url=resource_server_url_parsed,
         )
 
         # Store upstream configuration
@@ -134,8 +144,8 @@ class OAuthProxy(OAuthProvider):
         self._upstream_client_secret = SecretStr(upstream_client_secret)
         self._upstream_revocation_endpoint = upstream_revocation_endpoint
         
-        # Store callback configuration
-        self._callback_path = callback_path if callback_path.startswith("/") else f"/{callback_path}"
+        # Store redirect configuration
+        self._redirect_path = redirect_path if redirect_path.startswith("/") else f"/{redirect_path}"
 
         # Local state for DCR and token bookkeeping
         self._clients: dict[str, OAuthClientInformationFull] = {}
@@ -177,7 +187,7 @@ class OAuthProxy(OAuthProvider):
             # Create a temporary client to allow OAuth flow validation
             # We'll use a permissive redirect_uri list since upstream will validate
             # Use the full callback URL, not just base_url
-            callback_url = f"{str(self.base_url).rstrip('/')}{self._callback_path}"
+            callback_url = f"{str(self.base_url).rstrip('/')}{self._redirect_path}"
             redirect_uris: list[AnyUrl] = [AnyUrl(callback_url)]  # type: ignore[list-item]
 
             # Try to extract redirect_uri from current request context
@@ -279,7 +289,7 @@ class OAuthProxy(OAuthProvider):
         query_params: dict[str, Any] = {
             "response_type": "code",
             "client_id": self._upstream_client_id,
-            "redirect_uri": f"{str(self.base_url).rstrip('/')}{self._callback_path}",
+            "redirect_uri": f"{str(self.base_url).rstrip('/')}{self._redirect_path}",
             "state": txn_id,  # Use txn_id as IdP state
         }
 
@@ -749,7 +759,7 @@ class OAuthProxy(OAuthProvider):
         # Add OAuth callback endpoint for forwarding to client callbacks
         custom_routes.append(
             Route(
-                path=self._callback_path,
+                path=self._redirect_path,
                 endpoint=self._handle_idp_callback,
                 methods=["GET"],
             )
@@ -814,7 +824,7 @@ class OAuthProxy(OAuthProvider):
             )
 
             try:
-                idp_redirect_uri = f"{str(self.base_url).rstrip('/')}{self._callback_path}"
+                idp_redirect_uri = f"{str(self.base_url).rstrip('/')}{self._redirect_path}"
                 logger.debug(
                     f"Exchanging IdP code for tokens with redirect_uri: {idp_redirect_uri}"
                 )
