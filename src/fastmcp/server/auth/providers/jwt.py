@@ -108,8 +108,6 @@ class RSAKeyPair:
             additional_claims: Any additional claims to include
             kid: Key ID to include in header
         """
-        import time
-
         # Create header
         header = {"alg": "RS256"}
         if kid:
