@@ -16,8 +16,7 @@
     "decoration": "windows"
   },
   "thumbnails": {
-    "appearance": "light",
-    "background": "/assets/brand/card-background.png"
+    "appearance": "light"
   },
   "banner": {
     "content": "Remote MCP that just works. &nbsp; [Try FastMCP Cloud ->](https://fastmcp.link/IhmBxWn)"
