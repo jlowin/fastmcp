@@ -478,20 +478,20 @@ class FastMCP(Generic[LifespanResultT]):
 
     def _get_additional_http_routes(self) -> list[BaseRoute]:
         """Get all additional HTTP routes including from mounted servers.
-        
-        Returns a list of all custom HTTP routes from this server and 
+
+        Returns a list of all custom HTTP routes from this server and
         recursively from all mounted servers.
-        
+
         Returns:
             List of Starlette BaseRoute objects
         """
         routes = list(self._additional_http_routes)
-        
+
         # Recursively get routes from mounted servers
         for mounted_server in self._mounted_servers:
             mounted_routes = mounted_server.server._get_additional_http_routes()
             routes.extend(mounted_routes)
-            
+
         return routes
 
     async def _mcp_list_tools(self) -> list[MCPTool]:

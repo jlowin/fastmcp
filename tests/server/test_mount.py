@@ -1037,11 +1037,12 @@ class TestCustomRouteForwarding:
         @server.custom_route("/test", methods=["GET"])
         async def test_route(request):
             from starlette.responses import JSONResponse
+
             return JSONResponse({"message": "test"})
 
         routes = server._get_additional_http_routes()
         assert len(routes) == 1
-        assert routes[0].path == "/test"
+        assert routes[0].path == "/test"  # type: ignore[attr-defined]
 
     async def test_get_additional_http_routes_with_mounted_server(self):
         """Test _get_additional_http_routes includes routes from mounted servers."""
@@ -1051,6 +1052,7 @@ class TestCustomRouteForwarding:
         @sub_server.custom_route("/sub-route", methods=["GET"])
         async def sub_route(request):
             from starlette.responses import JSONResponse
+
             return JSONResponse({"message": "from sub"})
 
         # Mount the sub server
@@ -1058,7 +1060,7 @@ class TestCustomRouteForwarding:
 
         routes = main_server._get_additional_http_routes()
         assert len(routes) == 1
-        assert routes[0].path == "/sub-route"
+        assert routes[0].path == "/sub-route"  # type: ignore[attr-defined]
 
     async def test_get_additional_http_routes_recursive(self):
         """Test _get_additional_http_routes works recursively with nested mounts."""
@@ -1069,16 +1071,19 @@ class TestCustomRouteForwarding:
         @main_server.custom_route("/main-route", methods=["GET"])
         async def main_route(request):
             from starlette.responses import JSONResponse
+
             return JSONResponse({"message": "from main"})
 
         @sub_server.custom_route("/sub-route", methods=["GET"])
         async def sub_route(request):
             from starlette.responses import JSONResponse
+
             return JSONResponse({"message": "from sub"})
 
         @nested_server.custom_route("/nested-route", methods=["GET"])
         async def nested_route(request):
             from starlette.responses import JSONResponse
+
             return JSONResponse({"message": "from nested"})
 
         # Create nested mounting: main -> sub -> nested
@@ -1086,10 +1091,10 @@ class TestCustomRouteForwarding:
         main_server.mount(sub_server, "sub")
 
         routes = main_server._get_additional_http_routes()
-        
+
         # Should include all routes
         assert len(routes) == 3
-        route_paths = [route.path for route in routes]
+        route_paths = [route.path for route in routes]  # type: ignore[attr-defined]
         assert "/main-route" in route_paths
         assert "/sub-route" in route_paths
         assert "/nested-route" in route_paths
@@ -1122,15 +1127,17 @@ class TestCustomRouteForwarding:
         @server.custom_route("/route1", methods=["GET"])
         async def route1(request):
             from starlette.responses import JSONResponse
+
             return JSONResponse({"message": "route1"})
 
         @server.custom_route("/route2", methods=["POST"])
         async def route2(request):
             from starlette.responses import JSONResponse
+
             return JSONResponse({"message": "route2"})
 
         routes = server._get_additional_http_routes()
         assert len(routes) == 2
-        route_paths = [route.path for route in routes]
+        route_paths = [route.path for route in routes]  # type: ignore[attr-defined]
         assert "/route1" in route_paths
         assert "/route2" in route_paths
