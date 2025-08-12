@@ -311,3 +311,73 @@ server = FastMCP("NewServer", resource_prefix_format="path")
 ```
 
 When mounting or importing servers, the prefix format of the parent server is used.
+
+## Custom HTTP Route Forwarding
+
+<VersionBadge version="2.10.0" />
+
+When mounting servers, FastMCP automatically forwards custom HTTP routes (defined with `@server.custom_route()`) from mounted servers to the parent server. This enables OAuth callbacks, webhooks, and other HTTP endpoints to be accessible through the parent server.
+
+### How Route Forwarding Works
+
+Custom routes defined on mounted servers are automatically included when the parent server creates its HTTP application:
+
+```python
+from fastmcp import FastMCP
+from starlette.responses import JSONResponse
+
+# Define a subserver with custom routes
+auth_server = FastMCP("AuthServer")
+
+@auth_server.custom_route("/oauth/callback", methods=["GET"])
+async def oauth_callback(request):
+    """Handle OAuth callback."""
+    return JSONResponse({"status": "success"})
+
+@auth_server.custom_route("/webhook", methods=["POST"])
+async def webhook(request):
+    """Handle webhook."""
+    return JSONResponse({"received": True})
+
+# Mount the auth server
+main_server = FastMCP("MainServer")
+main_server.mount(auth_server, prefix="auth")
+
+# Routes are now accessible through main_server:
+# - /oauth/callback
+# - /webhook
+```
+
+### Recursive Route Forwarding
+
+Route forwarding works recursively with nested mounts, so deeply nested custom routes are accessible through the top-level server:
+
+```python
+# Nested server structure: main -> auth -> payment
+payment_server = FastMCP("PaymentServer")
+
+@payment_server.custom_route("/stripe/webhook", methods=["POST"])
+async def stripe_webhook(request):
+    return JSONResponse({"handled": True})
+
+auth_server.mount(payment_server, prefix="payment")
+main_server.mount(auth_server, prefix="auth")
+
+# Route /stripe/webhook is accessible through main_server
+```
+
+<Warning>
+Custom route forwarding does not automatically handle route path prefixing or shadowing. If multiple mounted servers define routes with the same path, the behavior is undefined. Consider using unique route paths or implementing your own routing logic if you need to avoid conflicts.
+</Warning>
+
+### Route Forwarding vs Import/Mount Behavior
+
+Unlike tools, resources, and prompts which are prefixed when mounting servers, **custom routes are forwarded as-is** without path modification. This preserves the original route structure needed for external integrations like OAuth providers:
+
+| Component Type | Import Behavior | Mount Behavior | Custom Routes |
+|----------------|------------------|----------------|---------------|
+| **Tools** | `prefix_toolname` | `prefix_toolname` | N/A |
+| **Resources** | `resource://prefix/path` | `resource://prefix/path` | N/A |
+| **Custom Routes** | Not copied | **Forwarded as-is** | `/original/path` |
+
+This design ensures that OAuth callbacks registered as `/auth/callback` remain accessible at that exact path through the parent server, maintaining compatibility with external services.
