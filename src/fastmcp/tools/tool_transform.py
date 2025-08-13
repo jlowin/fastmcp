@@ -5,7 +5,7 @@ import warnings
 from collections.abc import Callable
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, cast
 
 import pydantic_core
 from mcp.types import ToolAnnotations
@@ -473,8 +473,8 @@ class TransformedTool(Tool):
         if output_schema is NotSet:
             # Use smart fallback: try custom function, then parent
             if transform_fn is not None:
-                assert parsed_fn is not None
-                final_output_schema = parsed_fn.output_schema
+                # parsed fn is not none here
+                final_output_schema = cast(ParsedFunction, parsed_fn).output_schema
                 if final_output_schema is None:
                     # Check if function returns ToolResult - if so, don't fall back to parent
                     return_annotation = inspect.signature(
@@ -496,15 +496,15 @@ class TransformedTool(Tool):
                 )
             final_output_schema = None
         else:
-            assert isinstance(output_schema, dict | None)
-            final_output_schema = output_schema
+            final_output_schema = cast(dict | None, output_schema)
 
         if transform_fn is None:
             # User wants pure transformation - use forwarding_fn as the main function
             final_fn = forwarding_fn
             final_schema = schema
         else:
-            assert parsed_fn is not None
+            # parsed fn is not none here
+            parsed_fn = cast(ParsedFunction, parsed_fn)
             # User provided custom function - merge schemas
             final_fn = transform_fn
 
