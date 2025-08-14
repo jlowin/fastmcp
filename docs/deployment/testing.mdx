@@ -1,0 +1,137 @@
+---
+title: Testing Your Server
+sidebarTitle: Testing
+description: Test your FastMCP servers effectively using the deterministic FastMCP Client
+icon: vial
+---
+
+The FastMCP Client is a non-LLM, deterministic MCP client that allows you to test all aspects of your server thoroughly. It provides complete control over MCP operations, making it ideal for unit tests, integration tests, and deployment verification.
+
+<Tip>
+**Best Practice**: Use in-memory testing whenever possible for speed and simplicity. Only test deployed servers when you need to verify authentication, network connectivity, or production configuration.
+</Tip>
+
+## In-Memory Testing (Recommended)
+
+The most efficient way to test your MCP server is to pass your FastMCP server instance directly to the Client. This creates an in-memory connection without network overhead or separate processes. The client and server communicate directly in the same Python process, making tests fast and deterministic.
+
+```python
+import pytest
+from fastmcp import FastMCP, Client
+
+@pytest.fixture
+def mcp_server():
+    server = FastMCP("TestServer")
+    
+    @server.tool
+    def greet(name: str) -> str:
+        return f"Hello, {name}!"
+        
+    return server
+
+async def test_tool_functionality(mcp_server):
+    # Pass the server directly to the Client constructor
+    async with Client(mcp_server) as client:
+        result = await client.call_tool("greet", {"name": "World"})
+        assert result.data == "Hello, World!"
+```
+
+This pattern eliminates all the complexity of network communication, process management, and transport configuration. Your tests run quickly and reliably, focusing on the actual functionality rather than infrastructure concerns.
+
+### Testing Resources and Prompts
+
+Resources and prompts work the same way with in-memory testing. You can define them in your test fixtures and verify their behavior directly:
+
+```python
+async def test_resources_and_prompts(mcp_server):
+    @mcp_server.resource("test://data")
+    def get_data() -> str:
+        return "Test data content"
+    
+    @mcp_server.prompt("test_prompt")
+    def prompt_template(name: str) -> str:
+        return f"Hello, {name}!"
+    
+    async with Client(mcp_server) as client:
+        # Test resources
+        content = await client.read_resource("test://data")
+        assert content[0].text == "Test data content"
+        
+        # Test prompts
+        result = await client.get_prompt("test_prompt", {"name": "World"})
+        assert result.messages[0].content.text == "Hello, World!"
+```
+
+## Testing Deployed Servers
+
+While in-memory testing covers most scenarios, some situations require testing against a deployed server. You might need to verify that authentication is working correctly, test network behavior like timeouts and retries, validate your full deployment stack, or interact with remote servers that you don't control.
+
+### Local HTTP Testing
+
+When you need to test HTTP transport behavior, run your server in one terminal:
+
+```bash
+python server.py  # Assumes server.py uses mcp.run(transport="http")
+```
+
+Then run your test script in another terminal:
+
+```python test_http.py
+import asyncio
+from fastmcp import Client
+
+async def test_http_server():
+    async with Client("http://localhost:8000/mcp/") as client:
+        await client.ping()
+        tools = await client.list_tools()
+        assert len(tools) > 0
+        print("✓ Server test passed")
+
+asyncio.run(test_http_server())
+```
+
+### Testing with Authentication
+
+Authentication adds complexity to testing, but it's crucial to verify in production scenarios. The FastMCP client supports various authentication methods. For OAuth authentication, the client will handle the OAuth flow automatically, opening a browser if needed for user authorization. For simpler bearer token authentication, you can pass the token directly in the headers:
+
+```python
+async def test_authenticated_server():
+    # For OAuth
+    client = Client("https://api.example.com/mcp", auth="oauth")
+    
+    # For Bearer token
+    client = Client(
+        "https://api.example.com/mcp",
+        headers={"Authorization": "Bearer your-token"}
+    )
+    
+    async with client:
+        # OAuth flow will open browser if needed
+        await client.ping()
+        tools = await client.list_tools()
+```
+
+
+## Mocking and Standard Testing Patterns
+
+FastMCP servers are standard Python objects, which means all your familiar testing patterns apply. You can use mocks, patches, and fixtures just as you would with any Python code. This is particularly useful when your MCP tools depend on external services or databases that you don't want to call during tests:
+
+```python
+from unittest.mock import Mock, patch
+
+async def test_with_mocking():
+    mcp = FastMCP("TestServer")
+    
+    # Mock external dependencies
+    mock_database = Mock()
+    mock_database.query.return_value = [{"id": 1, "name": "Test"}]
+    
+    @mcp.tool
+    def get_data() -> list:
+        return mock_database.query("SELECT * FROM users")
+    
+    async with Client(mcp) as client:
+        result = await client.call_tool("get_data", {})
+        assert result.data == [{"id": 1, "name": "Test"}]
+        mock_database.query.assert_called_once()
+```

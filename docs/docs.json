@@ -20,7 +20,7 @@
     "background": "/assets/brand/card-background.png"
   },
   "banner": {
-    "content": "Remote MCP that just works. &nbsp; [Try FastMCP Cloud ->](https://fastmcp.link/IhmBxWn)"
+    "content": "Remote MCP that just works:  [FastMCP Cloud is here!](https://fastmcp.link/IhmBxWn) "
   },
   "colors": {
     "dark": "#f72585",
@@ -70,11 +70,7 @@
               {
                 "group": "Servers",
                 "pages": [
-                  {
-                    "group": "Essentials",
-                    "icon": "cube",
-                    "pages": ["servers/server", "deployment/running-server"]
-                  },
+                  "servers/server",
                   {
                     "group": "Core Components",
                     "icon": "toolbox",
@@ -106,6 +102,16 @@
                       "servers/auth/remote-oauth",
                       "servers/auth/token-verification",
                       "servers/auth/full-oauth-server"
+                    ]
+                  },
+                  {
+                    "group": "Deployment",
+                    "icon": "rocket",
+                    "pages": [
+                      "deployment/running-server",
+                      "deployment/testing",
+                      "deployment/self-hosted",
+                      "deployment/fastmcp-cloud"
                     ]
                   }
                 ]
@@ -170,7 +176,6 @@
                 "pages": [
                   "patterns/tool-transformation",
                   "patterns/decorating-methods",
-                  "patterns/testing",
                   "patterns/cli",
                   "patterns/contrib"
                 ]
