@@ -163,6 +163,7 @@
                   "integrations/cursor",
                   "integrations/eunomia-authorization",
                   "integrations/fastapi",
+                  "deployment/fastmcp-cloud",
                   "integrations/gemini",
                   "integrations/mcp-json-configuration",
                   "integrations/openai",
