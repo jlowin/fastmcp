@@ -10,7 +10,7 @@ FastMCP CLI tools using Cyclopts.
 
 ## Functions
 
-### `version` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/cli/cli.py#L103" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+### `version` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/cli/cli.py#L106" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 ```python
 version()
@@ -20,7 +20,7 @@ version()
 Display version information and platform details.
 
 
-### `dev` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/cli/cli.py#L141" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+### `dev` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/cli/cli.py#L144" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 ```python
 dev(server_spec: str) -> None
@@ -33,7 +33,7 @@ Run an MCP server with the MCP Inspector for development.
 - `server_spec`: Python file to run, optionally with \:object suffix
 
 
-### `run` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/cli/cli.py#L286" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+### `run` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/cli/cli.py#L289" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 ```python
 run(server_spec: str, *server_args: str) -> None
@@ -55,25 +55,28 @@ fastmcp run server.py -- --config config.json --debug
 - `server_spec`: Python file, object specification (file\:obj), MCPConfig file, or URL
 
 
-### `inspect` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/cli/cli.py#L439" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+### `inspect` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/cli/cli.py#L442" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 ```python
 inspect(server_spec: str) -> None
 ```
 
 
-Inspect an MCP server and generate a JSON report.
+Inspect an MCP server and display information or generate a JSON report.
 
-This command analyzes an MCP server and generates a comprehensive JSON report
-containing information about the server's name, instructions, version, tools,
-prompts, resources, templates, and capabilities.
+This command analyzes an MCP server. Without flags, it displays a text summary.
+Use --format to output complete JSON data.
 
 **Examples:**
 
+# Show text summary
 fastmcp inspect server.py
-fastmcp inspect server.py -o report.json
-fastmcp inspect server.py:mcp -o analysis.json
-fastmcp inspect path/to/server.py:app -o /tmp/server-info.json
+
+# Output FastMCP format JSON to stdout
+fastmcp inspect server.py --format fastmcp
+
+# Save MCP protocol format to file (format required with -o)
+fastmcp inspect server.py --format mcp -o manifest.json
 
 **Args:**
 - `server_spec`: Python file to inspect, optionally with \:object suffix
