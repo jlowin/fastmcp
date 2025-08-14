@@ -1,137 +1,159 @@
 ---
 title: Testing Your Server
 sidebarTitle: Testing
-description: Test your FastMCP servers effectively using the deterministic FastMCP Client
+description: Unit test your MCP servers with the FastMCP Client's deterministic testing capabilities
 icon: vial
 ---
 
-The FastMCP Client is a non-LLM, deterministic MCP client that allows you to test all aspects of your server thoroughly. It provides complete control over MCP operations, making it ideal for unit tests, integration tests, and deployment verification.
+The [FastMCP Client](/clients/client) is a deterministic testing tool that gives you complete programmatic control over MCP server interactions. You call specific tools with exact arguments, verify responses, and test edge cases - making it ideal for unit testing your MCP servers.
 
-<Tip>
-**Best Practice**: Use in-memory testing whenever possible for speed and simplicity. Only test deployed servers when you need to verify authentication, network connectivity, or production configuration.
-</Tip>
+## In-Memory Testing
 
-## In-Memory Testing (Recommended)
+The FastMCP Client's standout feature is in-memory testing. Instead of deploying your server or managing network connections, you pass your server instance directly to the client. This creates a zero-overhead connection that runs entirely in memory.
 
-The most efficient way to test your MCP server is to pass your FastMCP server instance directly to the Client. This creates an in-memory connection without network overhead or separate processes. The client and server communicate directly in the same Python process, making tests fast and deterministic.
+What makes this approach so powerful is that everything runs in the same Python process. You can set breakpoints anywhere - in your test code or inside your server handlers - and step through with your debugger. There's no server startup scripts, no port management, no cleanup between tests. Tests execute instantly without network overhead.
+
+```python
+from fastmcp import FastMCP, Client
+
+# Create your server
+server = FastMCP("WeatherServer")
+
+@server.tool
+def get_temperature(city: str) -> dict:
+    """Get current temperature for a city"""
+    temps = {"NYC": 72, "LA": 85, "Chicago": 68}
+    return {"city": city, "temp": temps.get(city, 70)}
+
+@server.resource("weather://forecast")
+def get_forecast() -> dict:
+    """Get 5-day forecast"""
+    return {"days": 5, "conditions": "sunny"}
+
+async def test_weather_operations():
+    # Pass server directly - no deployment needed
+    async with Client(server) as client:
+        # Test tool execution
+        result = await client.call_tool("get_temperature", {"city": "NYC"})
+        assert result.data == {"city": "NYC", "temp": 72}
+        
+        # Test resource retrieval
+        forecast = await client.read_resource("weather://forecast")
+        assert forecast.contents[0].data == {"days": 5, "conditions": "sunny"}
+```
+
+The in-memory approach transforms MCP testing from a deployment challenge into standard unit testing. You focus on testing your server's behavior, not wrestling with infrastructure.
+
+## Testing with Frameworks
+
+The FastMCP Client works seamlessly with any Python testing framework. Whether you prefer pytest, unittest, or another framework, the pattern remains consistent: create a server, pass it to the client, and verify behavior.
 
 ```python
 import pytest
 from fastmcp import FastMCP, Client
 
 @pytest.fixture
-def mcp_server():
-    server = FastMCP("TestServer")
+def weather_server():
+    server = FastMCP("WeatherServer")
     
     @server.tool
-    def greet(name: str) -> str:
-        return f"Hello, {name}!"
-        
+    def get_temperature(city: str) -> dict:
+        temps = {"NYC": 72, "LA": 85, "Chicago": 68}
+        return {"city": city, "temp": temps.get(city, 70)}
+    
     return server
 
-async def test_tool_functionality(mcp_server):
-    # Pass the server directly to the Client constructor
-    async with Client(mcp_server) as client:
-        result = await client.call_tool("greet", {"name": "World"})
-        assert result.data == "Hello, World!"
+@pytest.mark.asyncio
+async def test_temperature_tool(weather_server):
+    async with Client(weather_server) as client:
+        result = await client.call_tool("get_temperature", {"city": "LA"})
+        assert result.data == {"city": "LA", "temp": 85}
+
+@pytest.mark.asyncio
+async def test_unknown_city(weather_server):
+    async with Client(weather_server) as client:
+        result = await client.call_tool("get_temperature", {"city": "Paris"})
+        assert result.data["temp"] == 70  # Default temperature
 ```
 
-This pattern eliminates all the complexity of network communication, process management, and transport configuration. Your tests run quickly and reliably, focusing on the actual functionality rather than infrastructure concerns.
+## Mocking External Dependencies
 
-### Testing Resources and Prompts
-
-Resources and prompts work the same way with in-memory testing. You can define them in your test fixtures and verify their behavior directly:
+FastMCP servers are standard Python objects, so you can mock external dependencies using your preferred mocking approach. Replace databases, APIs, or any external service with test doubles to keep your tests fast and deterministic.
 
 ```python
-async def test_resources_and_prompts(mcp_server):
-    @mcp_server.resource("test://data")
-    def get_data() -> str:
-        return "Test data content"
+from unittest.mock import AsyncMock
+
+async def test_database_tool():
+    server = FastMCP("DataServer")
     
-    @mcp_server.prompt("test_prompt")
-    def prompt_template(name: str) -> str:
-        return f"Hello, {name}!"
+    # Mock the database
+    mock_db = AsyncMock()
+    mock_db.fetch_users.return_value = [
+        {"id": 1, "name": "Alice"},
+        {"id": 2, "name": "Bob"}
+    ]
     
-    async with Client(mcp_server) as client:
-        # Test resources
-        content = await client.read_resource("test://data")
-        assert content[0].text == "Test data content"
-        
-        # Test prompts
-        result = await client.get_prompt("test_prompt", {"name": "World"})
-        assert result.messages[0].content.text == "Hello, World!"
+    @server.tool
+    async def list_users() -> list:
+        return await mock_db.fetch_users()
+    
+    async with Client(server) as client:
+        result = await client.call_tool("list_users", {})
+        assert len(result.data) == 2
+        assert result.data[0]["name"] == "Alice"
+        mock_db.fetch_users.assert_called_once()
 ```
 
 ## Testing Deployed Servers
 
-While in-memory testing covers most scenarios, some situations require testing against a deployed server. You might need to verify that authentication is working correctly, test network behavior like timeouts and retries, validate your full deployment stack, or interact with remote servers that you don't control.
+While in-memory testing covers most unit testing needs, you'll occasionally need to test against a deployed server - to verify authentication, test network behavior, or validate deployments.
 
-### Local HTTP Testing
+### HTTP Transport Testing
 
-When you need to test HTTP transport behavior, run your server in one terminal:
+When you need to test actual network behavior or verify a deployment, connect to your running server using its URL:
 
-```bash
-python server.py  # Assumes server.py uses mcp.run(transport="http")
-```
-
-Then run your test script in another terminal:
-
-```python test_http.py
-import asyncio
+```python
 from fastmcp import Client
 
-async def test_http_server():
+async def test_deployed_server():
+    # Connect to a running server
     async with Client("http://localhost:8000/mcp/") as client:
         await client.ping()
+        
+        # Test with real network transport
         tools = await client.list_tools()
         assert len(tools) > 0
-        print("✓ Server test passed")
-
-asyncio.run(test_http_server())
+        
+        result = await client.call_tool("greet", {"name": "World"})
+        assert "Hello" in result.data
 ```
 
-### Testing with Authentication
+### Testing Authentication
 
-Authentication adds complexity to testing, but it's crucial to verify in production scenarios. The FastMCP client supports various authentication methods. For OAuth authentication, the client will handle the OAuth flow automatically, opening a browser if needed for user authorization. For simpler bearer token authentication, you can pass the token directly in the headers:
+The FastMCP Client handles authentication transparently, making it easy to test secured servers:
 
 ```python
 async def test_authenticated_server():
-    # For OAuth
-    client = Client("https://api.example.com/mcp", auth="oauth")
-    
-    # For Bearer token
-    client = Client(
+    # Bearer token authentication
+    async with Client(
         "https://api.example.com/mcp",
-        headers={"Authorization": "Bearer your-token"}
-    )
-    
-    async with client:
-        # OAuth flow will open browser if needed
+        headers={"Authorization": "Bearer test-token"}
+    ) as client:
         await client.ping()
         tools = await client.list_tools()
+        
+    # OAuth flow (opens browser for authorization)
+    async with Client("https://api.example.com/mcp", auth="oauth") as client:
+        result = await client.call_tool("protected_tool", {})
+        assert result.data is not None
 ```
 
+## Best Practices
 
-## Mocking and Standard Testing Patterns
+1. **Default to in-memory testing** - It's faster, more reliable, and easier to debug
+2. **Test behavior, not implementation** - Call tools and verify responses rather than testing internals
+3. **Use framework fixtures** - Create reusable server configurations for your test suite
+4. **Mock external dependencies** - Keep tests fast and deterministic by mocking databases, APIs, etc.
+5. **Test error cases** - Verify your server handles invalid inputs and edge cases properly
 
-FastMCP servers are standard Python objects, which means all your familiar testing patterns apply. You can use mocks, patches, and fixtures just as you would with any Python code. This is particularly useful when your MCP tools depend on external services or databases that you don't want to call during tests:
-
-```python
-from unittest.mock import Mock, patch
-
-async def test_with_mocking():
-    mcp = FastMCP("TestServer")
-    
-    # Mock external dependencies
-    mock_database = Mock()
-    mock_database.query.return_value = [{"id": 1, "name": "Test"}]
-    
-    @mcp.tool
-    def get_data() -> list:
-        return mock_database.query("SELECT * FROM users")
-    
-    async with Client(mcp) as client:
-        result = await client.call_tool("get_data", {})
-        assert result.data == [{"id": 1, "name": "Test"}]
-        mock_database.query.assert_called_once()
-```
+The FastMCP Client transforms MCP server testing from a deployment challenge into a straightforward unit testing task. With in-memory connections and deterministic control, you can build comprehensive test suites that run in milliseconds.
