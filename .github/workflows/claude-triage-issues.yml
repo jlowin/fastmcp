@@ -1,10 +1,10 @@
-name: Marvin Issue Triage
+name: Marvin Label Triage
 description: Automatically triage GitHub issues and PRs using Marvin
 on:
   issues:
     types: [opened]
   pull_request:
-    types: [opened]
+    types: [opened, synchronize]
   workflow_dispatch:
     inputs:
       issue_number:
