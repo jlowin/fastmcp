@@ -1,0 +1,27 @@
+{
+  "servers": {
+    "main": {
+      "name": "main-server",
+      "entrypoint": "echo.py:mcp",
+      "transport": "http",
+      "port": 8000,
+      "description": "Main application server"
+    },
+    "worker": {
+      "name": "worker-server",
+      "entrypoint": "memory.py:mcp",
+      "transport": "stdio",
+      "description": "Background worker server"
+    },
+    "api": {
+      "name": "api-server",
+      "entrypoint": "simple_echo.py",
+      "transport": "streamable-http",
+      "port": 8001,
+      "path": "/api",
+      "dependencies": ["fastapi", "uvicorn"],
+      "description": "API server"
+    }
+  },
+  "default": "main"
+}

@@ -284,8 +284,20 @@ async def dev(
 
 @app.command
 async def run(
-    server_spec: str,
+    server_spec: Annotated[
+        str | None,
+        cyclopts.Parameter(
+            help="Server to run (file, file:obj, URL, or JSON config). Defaults to fastmcp.json if present."
+        ),
+    ] = None,
     *server_args: str,
+    config: Annotated[
+        str | None,
+        cyclopts.Parameter(
+            name=["--config", "-c"],
+            help="Path to fastmcp.json configuration file",
+        ),
+    ] = None,
     transport: Annotated[
         run_module.TransportType | None,
         cyclopts.Parameter(
@@ -361,22 +373,29 @@ async def run(
 ) -> None:
     """Run an MCP server or connect to a remote one.
 
-    The server can be specified in four ways:
+    The server can be specified in five ways:
     1. Module approach: "server.py" - runs the module directly, looking for an object named 'mcp', 'server', or 'app'
     2. Import approach: "server.py:app" - imports and runs the specified server object
     3. URL approach: "http://server-url" - connects to a remote server and creates a proxy
     4. MCPConfig file: "mcp.json" - runs as a proxy server for the MCP Servers in the MCPConfig file
+    5. FastMCP config: "fastmcp.json" or no arguments - uses fastmcp.json configuration
 
     Server arguments can be passed after -- :
     fastmcp run server.py -- --config config.json --debug
 
     Args:
-        server_spec: Python file, object specification (file:obj), MCPConfig file, or URL
+        server_spec: Python file, object specification (file:obj), MCPConfig file, URL, or None for fastmcp.json
+        config: Path to fastmcp.json configuration file (overrides default fastmcp.json)
     """
+    # Handle config flag
+    if config:
+        server_spec = config
+
     logger.debug(
         "Running server or client",
         extra={
             "server_spec": server_spec,
+            "config": config,
             "transport": transport,
             "host": host,
             "port": port,

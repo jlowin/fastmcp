@@ -12,6 +12,7 @@ from typing import Any, Literal
 
 from mcp.server.fastmcp import FastMCP as FastMCP1x
 
+from fastmcp.server.config import FastMCPServerConfig, load_fastmcp_config
 from fastmcp.server.server import FastMCP
 from fastmcp.utilities.logging import get_logger
 
@@ -57,6 +58,64 @@ def parse_file_path(server_spec: str) -> tuple[Path, str | None]:
         sys.exit(1)
 
     return file_path, server_object
+
+
+def parse_entrypoint(entrypoint: str) -> tuple[Path, str | None, list[str]]:
+    """Parse an entrypoint string to file, object, and args.
+
+    Examples:
+    - "server.py" -> (Path("server.py"), None, [])
+    - "server.py:mcp" -> (Path("server.py"), "mcp", [])
+    - "myapp.server:create_server" -> (Path("myapp/server.py"), "create_server", [])
+    - "myapp.server:create_server()" -> (Path("myapp/server.py"), "create_server", [])
+
+    Args:
+        entrypoint: Entrypoint string
+
+    Returns:
+        Tuple of (file_path, object_name, args)
+    """
+    args = []
+
+    # Check for function call syntax
+    if "(" in entrypoint and entrypoint.endswith(")"):
+        # Extract function call and arguments
+        base, call_part = entrypoint.rsplit("(", 1)
+        call_part = call_part.rstrip(")")
+        if call_part:
+            # Parse simple args (for now, just split by comma)
+            args = [arg.strip() for arg in call_part.split(",")]
+        entrypoint = base
+
+    # Check if it's a module path (contains dots but no file extension)
+    if (
+        ":" in entrypoint
+        and "." in entrypoint.split(":")[0]
+        and not entrypoint.split(":")[0].endswith(".py")
+    ):
+        # Module path like "myapp.server:create_server"
+        module_path, obj_name = entrypoint.split(":", 1)
+
+        # Convert module path to file path
+        module_parts = module_path.split(".")
+
+        # Try to find the module file
+        possible_paths = [
+            Path(*module_parts) / "__init__.py",
+            Path(*module_parts[:-1]) / f"{module_parts[-1]}.py",
+            Path(f"{module_parts[-1]}.py") if len(module_parts) == 1 else None,
+        ]
+
+        for path in possible_paths:
+            if path and path.exists():
+                return path, obj_name, args
+
+        # If not found, assume it's a file that will be resolved later
+        return Path(module_path.replace(".", "/") + ".py"), obj_name, args
+
+    # Regular file path handling
+    file_path, obj_name = parse_file_path(entrypoint)
+    return file_path, obj_name, args
 
 
 async def import_server(file: Path, server_or_factory: str | None = None) -> Any:
@@ -172,7 +231,7 @@ async def _resolve_server_or_factory(obj: Any, file: Path, name: str) -> Any:
 
 
 def run_with_uv(
-    server_spec: str,
+    server_spec: str | None = None,
     python_version: str | None = None,
     with_packages: list[str] | None = None,
     with_requirements: Path | None = None,
@@ -187,7 +246,7 @@ def run_with_uv(
     """Run a MCP server using uv run subprocess.
 
     Args:
-        server_spec: Python file, object specification (file:obj), or URL
+        server_spec: Python file, object specification (file:obj), fastmcp.json, or URL
         python_version: Python version to use (e.g. "3.10")
         with_packages: Additional packages to install
         with_requirements: Requirements file to use
@@ -199,6 +258,26 @@ def run_with_uv(
         log_level: Log level
         show_banner: Whether to show the server banner
     """
+    # Load config if using fastmcp.json
+    config: FastMCPServerConfig | None = None
+    if server_spec is None or server_spec == "fastmcp.json":
+        config = load_fastmcp_config(server_spec)
+        if config:
+            # Apply dependencies from config
+            dep_args = config.get_dependencies_args()
+            python_version = python_version or dep_args.get("python_version")
+            with_packages = with_packages or dep_args.get("with_packages", [])
+            with_requirements = with_requirements or dep_args.get("with_requirements")
+
+            # Apply other config values
+            server_spec = server_spec or "fastmcp.json"
+            transport = transport or config.transport  # type: ignore
+            host = host or config.host
+            port = port or config.port
+            path = path or config.path
+            log_level = log_level or config.log_level  # type: ignore
+            show_banner = show_banner if show_banner is not None else config.show_banner
+
     cmd = ["uv", "run"]
 
     # Add Python version if specified
@@ -223,7 +302,9 @@ def run_with_uv(
         cmd.extend(["--with-requirements", str(with_requirements)])
 
     # Add fastmcp run command
-    cmd.extend(["fastmcp", "run", server_spec])
+    cmd.extend(["fastmcp", "run"])
+    if server_spec:
+        cmd.append(server_spec)
 
     # Add transport options
     if transport:
@@ -307,7 +388,7 @@ async def import_server_with_args(
 
 
 async def run_command(
-    server_spec: str,
+    server_spec: str | None = None,
     transport: TransportType | None = None,
     host: str | None = None,
     port: int | None = None,
@@ -320,7 +401,8 @@ async def run_command(
     """Run a MCP server or connect to a remote one.
 
     Args:
-        server_spec: Python file, object specification (file:obj), MCPConfig file, or URL
+        server_spec: Python file, object specification (file:obj), fastmcp.json, MCPConfig file, or URL.
+                    If None or "fastmcp.json", attempts to load fastmcp.json from current directory.
         transport: Transport protocol to use
         host: Host to bind to when using http transport
         port: Port to bind to when using http transport
@@ -330,15 +412,114 @@ async def run_command(
         show_banner: Whether to show the server banner
         use_direct_import: Whether to use direct import instead of subprocess
     """
-    if is_url(server_spec):
-        # Handle URL case
+    # Check for fastmcp.json configuration
+    config: FastMCPServerConfig | None = None
+
+    # If no server_spec or explicitly fastmcp.json, try to load config
+    if server_spec is None or server_spec == "fastmcp.json":
+        config = load_fastmcp_config(server_spec)
+        if config:
+            logger.debug("Loaded configuration from fastmcp.json")
+
+            # Apply config values (CLI args take precedence)
+            server_spec = config.entrypoint
+            transport = transport or config.transport  # type: ignore
+            host = host or config.host
+            port = port or config.port
+            path = path or config.path
+            log_level = log_level or config.log_level  # type: ignore
+            show_banner = show_banner if show_banner is not None else config.show_banner
+
+            # Set environment variables from config
+            if config.env:
+                import os
+
+                for key, value in config.env.items():
+                    os.environ[key] = value
+
+            # Change working directory if specified
+            if config.cwd:
+                import os
+
+                os.chdir(config.cwd)
+        elif server_spec is None or server_spec == "fastmcp.json":
+            # No config found and no alternative spec provided
+            logger.error("No fastmcp.json found and no server specified")
+            sys.exit(1)
+
+    # Handle URL case
+    if server_spec and is_url(server_spec):
         server = create_client_server(server_spec)
         logger.debug(f"Created client proxy server for {server_spec}")
-    elif server_spec.endswith(".json"):
-        server = create_mcp_config_server(Path(server_spec))
+    # Handle fastmcp.json or custom config files (but not regular MCPConfig)
+    elif server_spec and server_spec.endswith(".json"):
+        # Try to determine if it's a fastmcp.json or MCPConfig
+        json_path = Path(server_spec)
+        if json_path.exists():
+            with json_path.open() as f:
+                data = json.load(f)
+
+            # Check if it's a fastmcp.json format (has 'entrypoint' field)
+            if "entrypoint" in data or "servers" in data:
+                # It's a fastmcp.json format
+                if not config:
+                    # Re-load as fastmcp config
+                    config = load_fastmcp_config(server_spec)
+                    if config:
+                        # Apply config values (CLI args take precedence)
+                        transport = transport or config.transport  # type: ignore
+                        host = host or config.host
+                        port = port or config.port
+                        path = path or config.path
+                        log_level = log_level or config.log_level  # type: ignore
+                        show_banner = (
+                            show_banner
+                            if show_banner is not None
+                            else config.show_banner
+                        )
+
+                        file, server_or_factory, entrypoint_args = parse_entrypoint(
+                            config.entrypoint
+                        )
+                        if entrypoint_args:
+                            server_args = (server_args or []) + entrypoint_args
+                        server = await import_server_with_args(
+                            file, server_or_factory, server_args
+                        )
+                        logger.debug(f'Found server "{server.name}" in {file}')
+                    else:
+                        logger.error(f"Failed to load config from {server_spec}")
+                        sys.exit(1)
+                else:
+                    # Config was already loaded and values applied
+                    file, server_or_factory, entrypoint_args = parse_entrypoint(
+                        config.entrypoint
+                    )
+                    if entrypoint_args:
+                        server_args = (server_args or []) + entrypoint_args
+                    server = await import_server_with_args(
+                        file, server_or_factory, server_args
+                    )
+                    logger.debug(f'Found server "{server.name}" in {file}')
+            else:
+                # It's a regular MCPConfig file
+                server = create_mcp_config_server(json_path)
+        else:
+            logger.error(f"Config file not found: {server_spec}")
+            sys.exit(1)
     else:
-        # Handle file case
-        file, server_or_factory = parse_file_path(server_spec)
+        # Handle file/entrypoint case
+        if config and config.entrypoint:
+            # Parse entrypoint from config
+            file, server_or_factory, entrypoint_args = parse_entrypoint(
+                config.entrypoint
+            )
+            if entrypoint_args:
+                server_args = (server_args or []) + entrypoint_args
+        else:
+            # Parse from server_spec
+            file, server_or_factory = parse_file_path(server_spec)  # type: ignore
+
         server = await import_server_with_args(file, server_or_factory, server_args)
         logger.debug(f'Found server "{server.name}" in {file}')
 
@@ -349,20 +530,29 @@ async def run_command(
         run_v1_server(server, host=host, port=port, transport=transport)
         return
 
+    # Build kwargs for run_async
     kwargs = {}
     if transport:
         kwargs["transport"] = transport
-    if host:
-        kwargs["host"] = host
-    if port:
-        kwargs["port"] = port
-    if path:
-        kwargs["path"] = path
-    if log_level:
-        kwargs["log_level"] = log_level
-
+    
     if not show_banner:
         kwargs["show_banner"] = False
+    
+    # Add transport-specific parameters based on the transport type
+    # stdio transport doesn't accept host/port/path/log_level
+    if transport != "stdio":
+        if host:
+            kwargs["host"] = host
+        if port:
+            kwargs["port"] = port
+        if path:
+            kwargs["path"] = path
+        if log_level:
+            kwargs["log_level"] = log_level
+    else:
+        # For stdio, we can't pass these parameters
+        # They would need to be set on the server instance directly if needed
+        pass
 
     try:
         await server.run_async(**kwargs)

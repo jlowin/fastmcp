@@ -1,0 +1,8 @@
+{
+  "name": "example-server",
+  "version": "1.0.0",
+  "entrypoint": "echo.py:mcp",
+  "description": "Simple echo server example",
+  "transport": "stdio",
+  "log_level": "INFO"
+}
