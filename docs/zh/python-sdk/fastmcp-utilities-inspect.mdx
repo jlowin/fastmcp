@@ -1,0 +1,94 @@
+---
+title: inspect
+sidebarTitle: inspect
+---
+
+# `fastmcp.utilities.inspect`
+
+
+Utilities for inspecting FastMCP instances.
+
+## Functions
+
+### `inspect_fastmcp_v2` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/utilities/inspect.py#L83" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+inspect_fastmcp_v2(mcp: FastMCP[Any]) -> FastMCPInfo
+```
+
+
+Extract information from a FastMCP v2.x instance.
+
+**Args:**
+- `mcp`: The FastMCP v2.x instance to inspect
+
+**Returns:**
+- FastMCPInfo dataclass containing the extracted information
+
+
+### `inspect_fastmcp_v1` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/utilities/inspect.py#L185" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+inspect_fastmcp_v1(mcp: FastMCP1x) -> FastMCPInfo
+```
+
+
+Extract information from a FastMCP v1.x instance using a Client.
+
+**Args:**
+- `mcp`: The FastMCP v1.x instance to inspect
+
+**Returns:**
+- FastMCPInfo dataclass containing the extracted information
+
+
+### `inspect_fastmcp` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/utilities/inspect.py#L306" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+inspect_fastmcp(mcp: FastMCP[Any] | FastMCP1x) -> FastMCPInfo
+```
+
+
+Extract information from a FastMCP instance into a dataclass.
+
+This function automatically detects whether the instance is FastMCP v1.x or v2.x
+and uses the appropriate extraction method.
+
+**Args:**
+- `mcp`: The FastMCP instance to inspect (v1.x or v2.x)
+
+**Returns:**
+- FastMCPInfo dataclass containing the extracted information
+
+
+## Classes
+
+### `ToolInfo` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/utilities/inspect.py#L17" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+
+Information about a tool.
+
+
+### `PromptInfo` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/utilities/inspect.py#L30" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+
+Information about a prompt.
+
+
+### `ResourceInfo` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/utilities/inspect.py#L42" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+
+Information about a resource.
+
+
+### `TemplateInfo` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/utilities/inspect.py#L55" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+
+Information about a resource template.
+
+
+### `FastMCPInfo` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/utilities/inspect.py#L68" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+
+Information extracted from a FastMCP instance.
+

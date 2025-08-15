@@ -1,0 +1,48 @@
+---
+title: workos
+sidebarTitle: workos
+---
+
+# `fastmcp.server.auth.providers.workos`
+
+## Classes
+
+### `AuthKitProviderSettings` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/auth/providers/workos.py#L18" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+### `AuthKitProvider` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/auth/providers/workos.py#L31" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+
+AuthKit metadata provider for DCR (Dynamic Client Registration).
+
+This provider implements AuthKit integration using metadata forwarding
+instead of OAuth proxying. This is the recommended approach for WorkOS DCR
+as it allows WorkOS to handle the OAuth flow directly while FastMCP acts
+as a resource server.
+
+IMPORTANT SETUP REQUIREMENTS:
+
+1. Enable Dynamic Client Registration in WorkOS Dashboard:
+   - Go to Applications → Configuration
+   - Toggle "Dynamic Client Registration" to enabled
+
+2. Configure your FastMCP server URL as a callback:
+   - Add your server URL to the Redirects tab in WorkOS dashboard
+   - Example: https://your-fastmcp-server.com/oauth2/callback
+
+For detailed setup instructions, see:
+https://workos.com/docs/authkit/mcp/integrating/token-verification
+
+
+**Methods:**
+
+#### `get_routes` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/auth/providers/workos.py#L114" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+get_routes(self) -> list[Route]
+```
+
+Get OAuth routes including AuthKit authorization server metadata forwarding.
+
+This returns the standard protected resource routes plus an authorization server
+metadata endpoint that forwards AuthKit's OAuth metadata to clients.
+

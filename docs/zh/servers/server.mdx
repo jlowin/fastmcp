@@ -1,0 +1,417 @@
+---
+title: FastMCP 服务端
+sidebarTitle: 概述
+description: 用于构建具有工具、资源和提示的 MCP 应用程序的核心 FastMCP 服务器类。
+icon: server
+---
+
+import { VersionBadge } from "/snippets/version-badge.mdx"
+
+FastMCP 应用程序的核心部分是 `FastMCP` 服务器类。此类充当应用程序工具、资源和提示的主要容器，并管理与 MCP 客户端的通信。
+
+## 创建服务
+
+实例化服务器很简单。通常您为服务提供一个名称，这有助于在客户端应用程序或日志中识别它。
+
+```python
+from fastmcp import FastMCP
+
+# 创建基本服务器实例
+mcp = FastMCP(name="MyAssistantServer")
+
+# 您也可以添加如何与服务器交互的说明
+mcp_with_instructions = FastMCP(
+    name="HelpfulAssistant",
+    instructions="""
+        此服务器提供数据分析工具。
+        调用 get_average() 来分析数值数据。
+    """,
+)
+```
+
+`FastMCP` 构造函数接受几个参数：
+
+<Card icon="code" title="FastMCP 构造函数参数">
+<ParamField body="name" type="str" default="FastMCP">
+  服务的可读名称
+</ParamField>
+
+<ParamField body="instructions" type="str | None">
+  如何与此服务器交互的描述。这些说明帮助客户端了解服务器的用途和可用功能
+</ParamField>
+
+<ParamField body="auth" type="OAuthProvider | TokenVerifier | None">
+  用于保护基于 HTTP 的传输的认证提供程序。配置选项请参见[认证](/zh/servers/auth/authentication)
+</ParamField>
+
+<ParamField body="lifespan" type="AsyncContextManager | None">
+  用于服务器启动和关闭逻辑的异步上下文管理器函数
+</ParamField>
+
+<ParamField body="tools" type="list[Tool | Callable] | None">
+  要添加到服务器的工具列表（或要转换为工具的函数）。在某些情况下，以编程方式提供工具可能比使用 `@mcp.tool` 装饰器更方便
+</ParamField>
+
+<ParamField body="dependencies" type="list[str] | None">
+  带有包规范的可选服务器依赖列表
+</ParamField>
+
+<ParamField body="include_tags" type="set[str] | None">
+  仅暴露至少有一个匹配标签的组件
+</ParamField>
+
+<ParamField body="exclude_tags" type="set[str] | None">
+  隐藏具有任何匹配标签的组件
+</ParamField>
+
+<ParamField body="on_duplicate_tools" type='Literal["error", "warn", "replace"]' default="error">
+  如何处理重复的工具注册
+</ParamField>
+
+<ParamField body="on_duplicate_resources" type='Literal["error", "warn", "replace"]' default="warn">
+  如何处理重复的资源注册
+</ParamField>
+
+<ParamField body="on_duplicate_prompts" type='Literal["error", "warn", "replace"]' default="replace">
+  如何处理重复的提示注册
+</ParamField>
+
+<ParamField body="include_fastmcp_meta" type="bool" default="True">
+  <VersionBadge version="2.11.0" />
+  
+  是否在组件响应中包含 FastMCP 元数据。当为 `True` 时，组件标签和其他 FastMCP 特定的元数据包含在每个组件的 `meta` 字段的 `_fastmcp` 命名空间中。当为 `False` 时，此元数据被省略，从而实现与外部系统的更清晰的集成。可通过 `FASTMCP_INCLUDE_FASTMCP_META` 环境变量全局覆盖
+</ParamField>
+</Card>
+## 组件
+
+FastMCP 服务器向客户端暴露如下几种类型的组件：
+
+### 工具
+
+工具是客户端可以调用来执行操作或访问外部系统的函数。
+
+```python
+@mcp.tool
+def multiply(a: float, b: float) -> float:
+    """将两个数字相乘。"""
+    return a * b
+```
+
+详细文档请参见[工具](/zh/servers/tools)。
+
+### 资源
+
+资源暴露是客户端可以读取的数据源。
+
+```python
+@mcp.resource("data://config")
+def get_config() -> dict:
+    """提供应用程序配置。"""
+    return {"theme": "dark", "version": "1.0"}
+```
+
+详细文档请参见[资源和模板](/zh/servers/resources)。
+
+### 资源模板
+
+资源模板是参数化的资源，允许客户端请求特定数据。
+
+```python
+@mcp.resource("users://{user_id}/profile")
+def get_user_profile(user_id: int) -> dict:
+    """根据 ID 检索用户的个人资料。"""
+    # URI 中的 {user_id} 被提取并传递给此函数
+    return {"id": user_id, "name": f"User {user_id}", "status": "active"}
+```
+
+详细文档请参见[资源和模板](/zh/servers/resources)。
+
+### 提示
+
+提示是用于指导 LLM 的可重用消息模板。
+
+```python
+@mcp.prompt
+def analyze_data(data_points: list[float]) -> str:
+    """创建一个要求分析数值数据的提示。"""
+    formatted_data = ", ".join(str(point) for point in data_points)
+    return f"请分析这些数据点：{formatted_data}"
+```
+
+详细文档请参见[提示](/zh/servers/prompts)。
+
+## 基于标签的过滤
+
+<VersionBadge version="2.8.0" />
+
+FastMCP 支持基于标签的过滤，可以根据可配置的包含/排除标签集选择性地暴露组件。这对于为不同环境或用户创建服务器的不同视图很有用。
+
+组件可以在定义时使用 `tags` 参数进行标记：
+
+```python
+@mcp.tool(tags={"public", "utility"})
+def public_tool() -> str:
+    return "This tool is public"
+
+@mcp.tool(tags={"internal", "admin"})
+def admin_tool() -> str:
+    return "This tool is for admins only"
+```
+
+
+过滤逻辑如下工作：
+- **包含标签**：如果指定，只有至少有一个匹配标签的组件才会被暴露
+- **排除标签**：具有任何匹配标签的组件会被过滤掉
+- **优先级**：排除标签总是优先于包含标签
+
+<Tip>
+要确保组件永远不被暴露，您可以在组件本身上设置 `enabled=False`。要了解更多信息，请参见特定组件的文档。
+</Tip>
+
+您在创建服务器时配置基于标签的过滤：
+
+```python
+# 只暴露标记为 "public" 的组件
+mcp = FastMCP(include_tags={"public"})
+
+# 隐藏标记为 "internal" 或 "deprecated" 的组件
+mcp = FastMCP(exclude_tags={"internal", "deprecated"})
+
+# 组合两者：显示管理工具但隐藏已弃用的工具
+mcp = FastMCP(include_tags={"admin"}, exclude_tags={"deprecated"})
+```
+
+此过滤适用于所有组件类型（工具、资源、资源模板和提示），并影响列表和访问。
+
+## 运行服务器
+
+FastMCP 服务器需要传输机制来与客户端通信。您通常通过在 `FastMCP` 实例上调用 `mcp.run()` 方法来启动服务器，通常在主服务器脚本的 `if __name__ == "__main__":` 块中。这种模式确保与各种 MCP 客户端的兼容性。
+
+```python
+# my_server.py
+from fastmcp import FastMCP
+
+mcp = FastMCP(name="MyServer")
+
+@mcp.tool
+def greet(name: str) -> str:
+    """按名称向用户打招呼。"""
+    return f"Hello, {name}!"
+
+if __name__ == "__main__":
+    # 这会运行服务器，默认使用 STDIO 传输
+    mcp.run()
+    
+    # 要使用不同的传输，例如 Streamable HTTP：
+    # mcp.run(transport="http", host="127.0.0.1", port=9000)
+```
+
+FastMCP 支持几种传输选项：
+- STDIO（默认，用于本地工具）
+- Streamable HTTP（推荐用于 Web 服务）
+- SSE（传统 Web 传输，已弃用）
+
+服务器也可以使用 FastMCP CLI 运行。
+
+有关每种传输的详细信息、如何配置它们（主机、端口、路径）以及何时使用哪种传输，请参阅[**运行您的 FastMCP 服务器**](/zh/deployment/running-server)指南。
+
+## 自定义路由
+
+当使用 HTTP 传输运行服务器时，您可以使用 `@custom_route` 装饰器在 MCP 端点旁边添加自定义 Web 路由。这对于需要与 MCP 服务器一起提供的健康检查等简单端点很有用：
+
+```python
+from fastmcp import FastMCP
+from starlette.requests import Request
+from starlette.responses import PlainTextResponse
+
+mcp = FastMCP("MyServer")
+
+@mcp.custom_route("/health", methods=["GET"])
+async def health_check(request: Request) -> PlainTextResponse:
+    return PlainTextResponse("OK")
+
+if __name__ == "__main__":
+    mcp.run(transport="http")  # 健康检查 http://localhost:8000/health
+```
+
+自定义路由与您的 MCP 端点一起提供，对以下用途很有用：
+- 用于监控的健康检查端点
+- 简单的状态或信息端点
+- 基本的 Webhook 或回调
+
+对于更复杂的 Web 应用程序，请考虑[将您的 MCP 服务器挂载到 FastAPI 或 Starlette 应用程序中](/zh/deployment/self-hosted#integration-with-web-frameworks)。
+
+## 组合服务器
+
+<VersionBadge version="2.2.0" />
+
+FastMCP 支持使用 `import_server`（静态复制）和 `mount`（实时链接）将多个服务器组合在一起。这允许您将大型应用程序组织成模块化组件或重用现有服务器。
+
+有关完整详细信息、最佳实践和示例，请参阅[服务器组合](/zh/servers/composition)指南。
+
+```python
+# 示例：导入子服务器
+from fastmcp import FastMCP
+import asyncio
+
+main = FastMCP(name="Main")
+sub = FastMCP(name="Sub")
+
+@sub.tool
+def hello(): 
+    return "hi"
+
+# 直接挂载
+main.mount(sub, prefix="sub")
+```
+
+## 代理服务器
+
+<VersionBadge version="2.0.0" />
+
+FastMCP 可以使用 `FastMCP.as_proxy` 充当任何 MCP 服务器（本地或远程）的代理，让您桥接传输或为现有服务器添加前端。例如，您可以通过 stdio 在本地暴露远程 SSE 服务器，反之亦然。
+
+代理通过在使用断开连接的客户端时为每个请求创建新的会话来自动安全地处理并发操作。
+
+有关详细信息和高级用法，请参阅[代理服务器](/zh/servers/proxy)指南。
+
+```python
+from fastmcp import FastMCP, Client
+
+backend = Client("http://example.com/mcp/sse")
+proxy = FastMCP.as_proxy(backend, name="ProxyServer")
+# 现在像使用任何 FastMCP 服务器一样使用代理
+```
+
+## OpenAPI 集成
+
+<VersionBadge version="2.0.0" />
+
+FastMCP 可以使用 `FastMCP.from_openapi()` 和 `FastMCP.from_fastapi()` 从 OpenAPI 规范或现有 FastAPI 应用程序自动生成服务器。这允许您立即将现有 API 转换为 MCP 服务器，而无需手动创建工具。
+
+有关详细示例和配置选项，请参阅 [FastAPI 集成](/zh/integrations/fastapi)和 [OpenAPI 集成](/zh/integrations/openapi)指南。
+
+```python
+import httpx
+from fastmcp import FastMCP
+
+# 从 OpenAPI 规范
+spec = httpx.get("https://api.example.com/openapi.json").json()
+mcp = FastMCP.from_openapi(openapi_spec=spec, client=httpx.AsyncClient())
+
+# 从 FastAPI 应用程序
+from fastapi import FastAPI
+app = FastAPI()
+mcp = FastMCP.from_fastapi(app=app)
+```
+
+## 服务器配置
+
+服务器可以使用初始化参数、全局设置和传输特定设置的组合进行配置。
+
+### 服务器特定配置
+
+服务器特定设置在创建 `FastMCP` 实例时传递并控制服务器行为：
+
+```python
+from fastmcp import FastMCP
+
+# 配置服务器特定设置
+mcp = FastMCP(
+    name="ConfiguredServer",
+    dependencies=["requests", "pandas>=2.0.0"],  # 可选的服务器依赖
+    include_tags={"public", "api"},              # 只暴露这些标记的组件
+    exclude_tags={"internal", "deprecated"},     # 隐藏这些标记的组件
+    on_duplicate_tools="error",                  # 处理重复注册
+    on_duplicate_resources="warn",
+    on_duplicate_prompts="replace",
+    include_fastmcp_meta=False,                  # 禁用 FastMCP 元数据以实现更清洁的集成
+)
+```
+
+### 全局设置
+
+全局设置影响所有 FastMCP 服务器，可以通过环境变量（前缀为 `FASTMCP_`）或在 `.env` 文件中配置：
+
+```python
+import fastmcp
+
+# 访问全局设置
+print(fastmcp.settings.log_level)        # 默认："INFO"
+print(fastmcp.settings.mask_error_details)  # 默认：False
+print(fastmcp.settings.resource_prefix_format)  # 默认："path"
+print(fastmcp.settings.include_fastmcp_meta)   # 默认：True
+```
+
+常见的全局设置包括：
+- **`log_level`**：日志级别（"DEBUG"、"INFO"、"WARNING"、"ERROR"、"CRITICAL"），使用 `FASTMCP_LOG_LEVEL` 设置
+- **`mask_error_details`**：是否向客户端隐藏详细错误信息，使用 `FASTMCP_MASK_ERROR_DETAILS` 设置
+- **`resource_prefix_format`**：格式化资源前缀（"path" 或 "protocol"），使用 `FASTMCP_RESOURCE_PREFIX_FORMAT` 设置
+- **`include_fastmcp_meta`**：是否在组件响应中包含 FastMCP 元数据（默认：True），使用 `FASTMCP_INCLUDE_FASTMCP_META` 设置
+
+### 传输特定配置
+
+传输设置在运行服务器时提供并控制网络行为：
+
+```python
+# 运行时配置传输
+mcp.run(
+    transport="http",
+    host="0.0.0.0",           # 绑定到所有接口
+    port=9000,                # 自定义端口
+    log_level="DEBUG",        # 覆盖全局日志级别
+)
+
+# 或用于异步使用
+await mcp.run_async(
+    transport="http", 
+    host="127.0.0.1",
+    port=8080,
+)
+```
+
+### 设置全局配置
+
+全局 FastMCP 设置可以通过环境变量（前缀为 `FASTMCP_`）配置：
+
+```bash
+# 配置全局 FastMCP 行为
+export FASTMCP_LOG_LEVEL=DEBUG
+export FASTMCP_MASK_ERROR_DETAILS=True
+export FASTMCP_RESOURCE_PREFIX_FORMAT=protocol
+export FASTMCP_INCLUDE_FASTMCP_META=False
+```
+
+### 自定义工具序列化
+
+<VersionBadge version="2.2.7" />
+
+默认情况下，当需要将工具返回值转换为文本时，FastMCP 将其序列化为 JSON。您可以通过在创建服务器时提供 `tool_serializer` 函数来自定义此行为：
+
+```python
+import yaml
+from fastmcp import FastMCP
+
+# 定义一个将字典格式化为 YAML 的自定义序列化器
+def yaml_serializer(data):
+    return yaml.dump(data, sort_keys=False)
+
+# 使用自定义序列化器创建服务器
+mcp = FastMCP(name="MyServer", tool_serializer=yaml_serializer)
+
+@mcp.tool
+def get_config():
+    """以 YAML 格式返回配置。"""
+    return {"api_key": "abc123", "debug": True, "rate_limit": 100}
+```
+
+序列化器函数接受任何数据对象并返回字符串表示。这适用于工具的**所有非字符串返回值**。已经返回字符串的工具会绕过序列化器。
+
+此自定义在以下情况下很有用：
+- 以特定方式格式化数据（如 YAML 或自定义格式）
+- 控制特定的序列化选项（如缩进或排序）
+- 在将数据发送给客户端之前添加元数据或转换数据
+
+<Tip>
+如果序列化器函数引发异常，工具将回退到默认的 JSON 序列化以避免破坏服务器。
+</Tip>

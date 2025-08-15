@@ -1,0 +1,110 @@
+---
+title: 安装
+icon: arrow-down-to-line
+---
+## 安装 FastMCP
+
+我们推荐使用 [uv](https://docs.astral.sh/uv/getting-started/installation/) 来安装和管理 FastMCP。
+
+如果您计划在项目中使用 FastMCP，可以将其添加为依赖：
+
+```bash
+uv add fastmcp
+```
+
+或者，您也可以直接使用 `pip` 或 `uv pip` 安装：
+<CodeGroup>
+    ```bash uv
+    uv pip install fastmcp
+    ```
+
+    ```bash pip
+    pip install fastmcp
+    ```
+</CodeGroup>
+
+### 验证安装
+
+要验证 FastMCP 是否正确安装，您可以运行以下命令：
+
+```bash
+fastmcp version
+```
+
+您应该看到类似以下的输出：
+
+```bash
+$ fastmcp version
+
+FastMCP version:                           2.11.3
+MCP version:                               1.12.4
+Python version:                            3.12.2
+Platform:            macOS-15.3.1-arm64-arm-64bit
+FastMCP root path:            ~/Developer/fastmcp
+```
+## 从官方 MCP SDK 升级
+
+从官方 MCP SDK 的 FastMCP 1.0 升级到 FastMCP 2.0 通常很简单。核心服务器 API 高度兼容，在大多数情况下，将导入语句从 `from mcp.server.fastmcp import FastMCP` 更改为 `from fastmcp import FastMCP` 就足够了。
+
+
+```python {5}
+# 之前
+# from mcp.server.fastmcp import FastMCP
+
+# 之后
+from fastmcp import FastMCP
+
+mcp = FastMCP("My MCP Server")
+```
+
+<Warning>
+在 `fastmcp==2.3.0` 和 `mcp==1.8.0` 之前，2.x API 始终镜像官方 1.0 API。然而，随着项目的分化，这无法保证。如果您尝试在 FastMCP 2.x 中使用 1.0 API，可能会看到弃用警告。请参考此文档了解新功能的详细信息。
+</Warning>
+
+## 版本控制和破坏性变更
+
+虽然我们尽力不在公共 API 和行为上引入向后不兼容的变更，但 FastMCP 存在于一个快速发展的 MCP 生态环境中。我们致力于为用户带来最前沿的功能，这偶尔需要对现有功能进行变更。
+
+作为实践，破坏性变更只会在大版本号变更时发生（例如，从 2.3.x 到 2.4.0）。大版本号变更表示以下任一情况：
+- 重要的新功能集合，新的大版本
+- 引入可能影响升级行为的破坏性变更
+
+对于关心生产环境稳定性的用户，我们建议在依赖项中将 FastMCP 固定到特定版本。
+
+只要可能，当用户尝试使用已弃用或将来会删除的 API 时，FastMCP 会发出弃用警告。这些警告将至少维持 1 个大版本发布，可能会维持更长时间。
+
+请注意，"公共 API" 包括 `FastMCP` 服务器的公共功能、核心 FastMCP 组件如 `Tool`、`Prompt`、`Resource` 和 `ResourceTemplate`，以及它们各自的公共方法。它不包括私有方法、工具或作为私有属性存储的对象，因为我们不期望用户依赖这些实现细节。
+
+## 开发环境安装
+
+如果您计划为 FastMCP 做贡献，您应该首先克隆仓库并使用 uv 安装所有依赖项（开发依赖项会自动安装）：
+
+```bash
+git clone https://github.com/jlowin/fastmcp.git
+cd fastmcp
+uv sync
+```
+
+这将安装所有依赖项，包括开发依赖项，并创建虚拟环境，您可以正常激活和使用。
+
+### 单元测试
+
+FastMCP 有一个全面的单元测试套件，所有 PR 必须引入并通过适当的测试。要运行测试，请使用 pytest：
+
+```bash
+pytest
+```
+
+### Pre-Commit 钩子
+
+FastMCP 使用 pre-commit 来管理代码质量，包括格式化、代码检查和类型安全。所有 PR 必须通过 pre-commit 钩子，这些钩子作为 CI 流程的一部分运行。要安装 pre-commit 钩子，请运行：
+
+```bash
+uv run pre-commit install
+```
+
+或者，要在任何时候手动运行 pre-commit，请使用：
+
+```bash
+pre-commit run --all-files
+```

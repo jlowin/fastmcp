@@ -1,0 +1,192 @@
+---
+title: "FastMCP 更新时间线"
+sidebarTitle: "更新"
+icon: "sparkles"
+tag: NEW
+---
+
+<Update label="FastMCP 2.9" description="2025年6月23日" tags={["发布", "博客文章"]}>
+<Card 
+title="FastMCP 2.9: MCP 原生中间件" href="https://www.jlowin.dev/blog/fastmcp-2-9-middleware" 
+img="https://jlowin.dev/_image?href=%2F_astro%2Fhero.BkVTdeBk.jpg&w=1200&h=630&f=png" 
+cta="阅读更多"  
+>
+FastMCP 2.9 是一个重大版本，引入了两个超越基本 MCP 协议的重要功能。
+
+🤝 *MCP 中间件* 带来了一个灵活的中间件系统，用于拦截和控制服务器操作 - 包括认证、日志记录、速率限制和自定义业务逻辑，无需触及核心协议代码。
+
+✨ *服务器端类型转换* 用于提示解决了开发者的一个主要痛点：虽然 MCP 需要字符串参数，但您的函数现在可以使用原生 Python 类型如列表和字典，自动转换处理复杂性。
+
+这些功能将 FastMCP 从简单的协议实现转变为构建复杂 MCP 应用程序的强大框架。结合新的 `File` 二进制数据工具以及认证和序列化的改进，此版本使 FastMCP 在保持完整协议合规性的同时变得更加灵活和开发者友好。
+</Card>
+</Update>
+
+<Update label="FastMCP 2.8" description="2025年6月11日" tags={["发布", "博客文章"]}>
+<Card 
+title="FastMCP 2.8: 变换升级" href="https://www.jlowin.dev/blog/fastmcp-2-8-tool-transformation" 
+img="https://www.jlowin.dev/_image?href=%2F_astro%2Fhero.su3kspkP.png&w=1000&h=500&f=webp" 
+cta="阅读更多"  
+>
+FastMCP 2.8 已发布，这个版本专注于让您完全掌控您的工具。
+
+此版本为打造完美的 LLM 体验提供了众多新功能：
+
+🛠️ 工具变换
+
+标题功能让您可以包装任何工具——来自您自己的代码、第三方库或 OpenAPI 规范——创建增强的、LLM 友好的版本。您可以重命名参数、重写描述和隐藏参数，而无需触及原始代码。
+
+此功能是与 Bill Easton 密切合作开发的。正如 Bill 精辟地[所说](https://www.linkedin.com/posts/williamseaston_huge-thanks-to-william-easton-for-providing-activity-7338011349525983232-Mw6T?utm_source=share&utm_medium=member_desktop&rcm=ACoAAAAd6d0B3uL9zpCsq9eYWKi3HIvb8eN_r_Q)："工具变换颠覆了提示工程：停止编写工具友好的 LLM 提示，开始提供 LLM 友好的工具。"
+
+🏷️ 组件控制
+
+既然您在变换工具，就需要一种隐藏旧工具的方法！在 FastMCP 2.8 中，您可以程序化地启用/禁用任何组件，对于所有一直在问 FastMCP 标签用途的人——它们终于有用处了！您现在可以使用标签声明性地过滤向客户端暴露哪些组件。
+
+🚀 默认实用
+
+最后，为了确保与生态系统的最大兼容性，我们做出了实用的决定，将所有 OpenAPI 路由默认为工具模式，使您的整个 API 立即可被任何使用工具的代理访问。当整个相关行业跟上步伐并支持相关资源时，我们将恢复原来的默认设置——但在 OpenAI、Anthropic 或 Google 实现之前，您无需做任何额外工作！
+
+</Card>
+</Update>
+
+<Update label="FastMCP 2.7" description="2025年6月6日" tags={["发布"]}>
+<Card 
+title="FastMCP 2.7: 精简编程" href="https://github.com/jlowin/fastmcp/releases/tag/v2.7.0" 
+img="/assets/updates/release-2-7.png"
+cta="阅读发布说明"  
+>
+FastMCP 2.7 已发布！
+
+最值得注意的是，它引入了备受期待的（也是 Pythonic 的）"naked"装饰器用法：
+
+```python {3}
+mcp = FastMCP()
+
+@mcp.tool
+def add(a: int, b: int) -> int:
+    return a + b
+```
+
+此外，装饰器现在返回它们创建的对象，而不是被装饰的函数。这是一个重要的可用性增强。
+
+更新的主要部分专注于改进 FastMCP 内部结构，包括对私有 API 的一些破坏性内部更改。自 1.0 以来一直保留的许多函数现在已被弃用。
+</Card>
+</Update>
+
+
+
+<Update label="FastMCP 2.6" description="2025年6月2日" tags={["发布", "博客文章"]}>
+<Card 
+title="FastMCP 2.6: 强力认证" href="https://www.jlowin.dev/blog/fastmcp-2-6" 
+img="https://www.jlowin.dev/_image?href=%2F_astro%2Fhero.Bsu8afiw.png&w=1000&h=500&f=webp" 
+cta="阅读更多"  
+>
+FastMCP 2.6 已发布！
+
+此版本为 MCP 服务器和客户端引入了一流的认证支持，包括实用的 Bearer 令牌支持和无缝衔接 OAuth 2.1 集成。此版本与主要 AI 平台今天采用 MCP 的方式保持一致，使您比以往任何时候都更容易安全地将您的工具连接到真实世界的 AI 模型。深入了解此更新，以最小的阻力保护您的技术栈。
+</Card>
+</Update>
+
+<Update description="2025年5月21日" label="氛围测试" tags={["博客文章", "教程"]}>
+<Card
+title="停止对您的 MCP 服务器进行试探性测试(Vibe-Testing)"
+href="https://www.jlowin.dev/blog/stop-vibe-testing-mcp-servers"
+img="https://www.jlowin.dev/_image?href=%2F_astro%2Fhero.BUPy9I9c.png&w=1000&h=500&f=webp"
+cta="阅读更多"
+>
+
+您的测试很糟糕，您应该感到羞愧。
+
+停止通过 LLM 猜测工作对您的 MCP 服务器进行试探性测试。FastMCP 2.0 引入了内存测试，用于快速、确定性和完全 Pythonic 的 MCP 逻辑验证——无需网络、无需子进程、无需社交试探性。
+
+</Card>
+</Update>
+
+
+<Update description="2025年5月8日" label="10,000 颗星" tags={["博客文章"]}>
+<Card
+title="FastMCP 达到1万颗星的反思 🌟"
+href="https://www.jlowin.dev/blog/fastmcp-2-10k-stars"
+img="https://www.jlowin.dev/_image?href=%2F_astro%2Fhero.Cnvci9Q_.png&w=1000&h=500&f=webp"
+cta="阅读更多"
+>
+
+自重新启动以来仅六周时间，FastMCP 就超过了 10,000 个 GitHub 星标——成为我们周围增长最快的 OSS 项目。从个人需求开始，现在已成为基于 Python 的 MCP 服务器的支柱，为快速扩展的生态系统提供动力。虽然协议本身在不断发展，但 FastMCP 继续以清晰性、开发者体验和有见解的工具引领着发展。让我们期待下一步的发展。
+
+</Card>
+</Update>
+
+<Update description="2025年5月8日" label="FastMCP 2.3" tags={["博客文章", "发布"]}>
+<Card
+title="流式传输正式上线：FastMCP 2.3"
+href="https://www.jlowin.dev/blog/fastmcp-2-3-streamable-http"
+img="https://www.jlowin.dev/_image?href=%2F_astro%2Fhero.M_hv6gEB.png&w=1000&h=500&f=webp"
+cta="阅读更多"
+>
+
+FastMCP 2.3 引入了对 Streamable HTTP 的完整支持，这是 SSE 的现代替代方案，简化了通过 Web 部署 MCP 的过程。它高效、可靠，现在是默认的 HTTP 传输方式。只需使用 transport="http" 运行您的服务器，并通过标准 URL 连接客户端——FastMCP 处理其余工作。无需特殊设置。此版本使部署 MCP 服务器比以往任何时候都更容易、更便携。
+
+</Card>
+</Update>
+
+<Update description="2025年4月23日" label="代理服务器" tags={["博客文章", "教程"]}>
+<Card
+title="使用 FastMCP 2.0 的 MCP 代理服务器"
+href="https://www.jlowin.dev/blog/fastmcp-proxy"
+img="https://www.jlowin.dev/_image?href=%2F_astro%2Frobot-hero.DpmAqgui.png&w=1000&h=500&f=webp"
+cta="阅读更多"
+>
+
+即使是 AI 也需要一个好的旅行适配器(翻译注Tip：现实生活中出国旅游的时候，为了适配当地的电器插排，需要一个插头转换器，用于编程中可以理解成代理) 🔌
+
+
+FastMCP 现在支持代理任意 MCP 服务器，让您运行本地 FastMCP 实例，透明地将请求转发到任何远程或第三方服务器——无论传输方式如何。这实现了传输桥接（例如，stdio ⇄ SSE）、简化的客户端配置和强大的网关模式。代理与其他 FastMCP 服务器完全可组合，让您可以像本地服务器一样挂载或导入它们。使用 `FastMCP.from_client()` 将任何后端包装在一个干净的 Pythonic 代理中。
+</Card>
+</Update>
+
+<Update label="FastMCP 2.0" description="2025年4月16日" tags={["发布", "博客文章"]}>
+<Card
+title="介绍 FastMCP 2.0 🚀"
+href="https://www.jlowin.dev/blog/fastmcp-2"
+img="https://www.jlowin.dev/_image?href=%2F_astro%2Fhero.DpbmGNrr.png&w=1000&h=500&f=webp"
+cta="阅读更多"
+>
+
+这个重大版本将 FastMCP 重新构想为一个完整的生态系统平台，具有强大的新功能，用于组合、集成和客户端交互。您现在可以组合本地和远程服务器，代理任意 MCP 服务器（带传输转换），并从 OpenAPI 或 FastAPI 应用程序生成 MCP 服务器。新的客户端基础设施支持 LLM 采样等高级工作流。
+
+FastMCP 2.0 在 v1 成功的基础上构建，具有更清洁、更灵活的基座——今天就试试吧！
+</Card>
+</Update>
+
+
+
+<Update label="官方 SDK" description="2024年12月3日" tags={["公告"]}>
+<Card
+title="FastMCP 正在加入官方 MCP Python SDK！"
+href="https://bsky.app/profile/jlowin.dev/post/3lch4xk5cf22c"
+icon="sparkles"
+cta="阅读公告"
+>
+FastMCP 1.0 将成为官方 MCP Python SDK 的一部分！
+</Card>
+</Update>
+
+
+
+<Update label="FastMCP 1.0" description="2024年12月1日" tags={["发布", "博客文章"]}>
+<Card
+title="介绍 FastMCP 🚀"
+href="https://www.jlowin.dev/blog/introducing-fastmcp"
+img="https://www.jlowin.dev/_image?href=%2F_astro%2Ffastmcp.Bep7YlTw.png&w=1000&h=500&f=webp"
+cta="阅读更多"
+>
+人生苦短，何必浪费在重复代码上。
+(翻译注：这个不知道用什么翻译更好，也许下面几个选择都是不错的
+- 人生苦短，告别千篇一律。
+- 生命有限，不应该花费在机械的造轮子上。
+)
+
+这就是一切开始的地方。FastMCP 的发布文章介绍了一种干净的、Pythonic 的方式来构建 MCP 服务器，而无需协议开销。只需编写函数；FastMCP 处理其余部分。从一个周末项目开始，迅速成为不断增长的生态系统的基础。
+（翻译注：梦开始的地方！）
+</Card>
+</Update>
+
