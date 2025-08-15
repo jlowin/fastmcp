@@ -4,7 +4,7 @@ on:
   issues:
     types: [opened]
   pull_request:
-    types: [opened, synchronize]
+    types: [opened]
   workflow_dispatch:
     inputs:
       issue_number:
@@ -53,7 +53,7 @@ jobs:
           2. Retrieve issue/PR details using GitHub tools:
              - mcp__github__get_issue: Get the issue/PR details
              - mcp__github__get_issue_comments: Read any discussion
-             - mcp__github__search_issues: Find similar issues for context
+             - If the issue/PR mentions other issues (e.g., "fixes #123", "related to #456"), use mcp__github__get_issue to read those linked issues for additional context
 
           3. Analyze and apply labels based on these guidelines:
 
@@ -136,7 +136,7 @@ jobs:
         uses: anthropics/claude-code-base-action@beta
         with:
           prompt_file: /tmp/claude-prompts/triage-prompt.txt
-          allowed_tools: "Bash(gh label list),mcp__github__get_issue,mcp__github__get_issue_comments,mcp__github__update_issue,mcp__github__search_issues,mcp__github__list_issues"
+          allowed_tools: "Bash(gh label list),mcp__github__get_issue,mcp__github__get_issue_comments,mcp__github__update_issue"
           timeout_minutes: "5"
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           mcp_config: /tmp/mcp-config/mcp-servers.json
