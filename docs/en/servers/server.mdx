@@ -41,7 +41,7 @@ The `FastMCP` constructor accepts several arguments:
 </ParamField>
 
 <ParamField body="auth" type="OAuthProvider | TokenVerifier | None">
-  Authentication provider for securing HTTP-based transports. See [Authentication](/servers/auth/authentication) for configuration options
+  Authentication provider for securing HTTP-based transports. See [Authentication](/en/servers/auth/authentication) for configuration options
 </ParamField>
 
 <ParamField body="lifespan" type="AsyncContextManager | None">
@@ -97,7 +97,7 @@ def multiply(a: float, b: float) -> float:
     return a * b
 ```
 
-See [Tools](/servers/tools) for detailed documentation.
+See [Tools](/en/servers/tools) for detailed documentation.
 
 ### Resources
 
@@ -110,7 +110,7 @@ def get_config() -> dict:
     return {"theme": "dark", "version": "1.0"}
 ```
 
-See [Resources & Templates](/servers/resources) for detailed documentation.
+See [Resources & Templates](/en/servers/resources) for detailed documentation.
 
 ### Resource Templates
 
@@ -124,7 +124,7 @@ def get_user_profile(user_id: int) -> dict:
     return {"id": user_id, "name": f"User {user_id}", "status": "active"}
 ```
 
-See [Resources & Templates](/servers/resources) for detailed documentation.
+See [Resources & Templates](/en/servers/resources) for detailed documentation.
 
 ### Prompts
 
@@ -138,7 +138,7 @@ def analyze_data(data_points: list[float]) -> str:
     return f"Please analyze these data points: {formatted_data}"
 ```
 
-See [Prompts](/servers/prompts) for detailed documentation.
+See [Prompts](/en/servers/prompts) for detailed documentation.
 
 ## Tag-Based Filtering
 
@@ -213,7 +213,7 @@ FastMCP supports several transport options:
 
 The server can also be run using the FastMCP CLI.
 
-For detailed information on each transport, how to configure them (host, port, paths), and when to use which, please refer to the [**Running Your FastMCP Server**](/deployment/running-server) guide.
+For detailed information on each transport, how to configure them (host, port, paths), and when to use which, please refer to the [**Running Your FastMCP Server**](/en/deployment/running-server) guide.
 
 ## Custom Routes
 
@@ -239,7 +239,7 @@ Custom routes are served alongside your MCP endpoint and are useful for:
 - Simple status or info endpoints
 - Basic webhooks or callbacks
 
-For more complex web applications, consider [mounting your MCP server into a FastAPI or Starlette app](/deployment/self-hosted#integration-with-web-frameworks).
+For more complex web applications, consider [mounting your MCP server into a FastAPI or Starlette app](/en/deployment/self-hosted#integration-with-web-frameworks).
 
 ## Composing Servers
 
@@ -247,7 +247,7 @@ For more complex web applications, consider [mounting your MCP server into a Fas
 
 FastMCP supports composing multiple servers together using `import_server` (static copy) and `mount` (live link). This allows you to organize large applications into modular components or reuse existing servers.
 
-See the [Server Composition](/servers/composition) guide for full details, best practices, and examples.
+See the [Server Composition](/en/servers/composition) guide for full details, best practices, and examples.
 
 ```python
 # Example: Importing a subserver
@@ -273,7 +273,7 @@ FastMCP can act as a proxy for any MCP server (local or remote) using `FastMCP.a
 
 Proxies automatically handle concurrent operations safely by creating fresh sessions for each request when using disconnected clients.
 
-See the [Proxying Servers](/servers/proxy) guide for details and advanced usage.
+See the [Proxying Servers](/en/servers/proxy) guide for details and advanced usage.
 
 ```python
 from fastmcp import FastMCP, Client
@@ -289,7 +289,7 @@ proxy = FastMCP.as_proxy(backend, name="ProxyServer")
 
 FastMCP can automatically generate servers from OpenAPI specifications or existing FastAPI applications using `FastMCP.from_openapi()` and `FastMCP.from_fastapi()`. This allows you to instantly convert existing APIs into MCP servers without manual tool creation.
 
-See the [FastAPI Integration](/integrations/fastapi) and [OpenAPI Integration](/integrations/openapi) guides for detailed examples and configuration options.
+See the [FastAPI Integration](/en/integrations/fastapi) and [OpenAPI Integration](/en/integrations/openapi) guides for detailed examples and configuration options.
 
 ```python
 import httpx

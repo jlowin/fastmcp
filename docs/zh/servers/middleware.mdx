@@ -46,7 +46,7 @@ The key insight is that middleware forms a chain where each piece decides whethe
 
 If you're familiar with ASGI middleware, the basic structure of FastMCP middleware will feel familiar. At its core, middleware is a callable class that receives a context object containing information about the current JSON-RPC message and a handler function to continue the middleware chain.
 
-It's important to understand that MCP operates on the [JSON-RPC specification](https://spec.modelcontextprotocol.io/specification/basic/transports/). While FastMCP presents requests and responses in a familiar way, these are fundamentally JSON-RPC messages, not HTTP request/response pairs like you might be used to in web applications. FastMCP middleware works with all [transport types](/clients/transports), including local stdio transport and HTTP transports, though not all middleware implementations are compatible across all transports (e.g., middleware that inspects HTTP headers won't work with stdio transport).
+It's important to understand that MCP operates on the [JSON-RPC specification](https://spec.modelcontextprotocol.io/specification/basic/transports/). While FastMCP presents requests and responses in a familiar way, these are fundamentally JSON-RPC messages, not HTTP request/response pairs like you might be used to in web applications. FastMCP middleware works with all [transport types](/zh/clients/transports), including local stdio transport and HTTP transports, though not all middleware implementations are compatible across all transports (e.g., middleware that inspects HTTP headers won't work with stdio transport).
 
 The most fundamental way to implement middleware is by overriding the `__call__` method on the `Middleware` base class:
 
@@ -257,7 +257,7 @@ class ToolCallMiddleware(Middleware):
 ```
 
 <Tip>
-For more complex tool rewriting scenarios, consider using [Tool Transformation](/patterns/tool-transformation) patterns which provide a more structured approach to creating modified tool variants.
+For more complex tool rewriting scenarios, consider using [Tool Transformation](/zh/patterns/tool-transformation) patterns which provide a more structured approach to creating modified tool variants.
 </Tip>
 
 ### Anatomy of a Hook
@@ -306,7 +306,7 @@ You have complete control over the request flow:
 
 <VersionBadge version="2.11.0" />
 
-In addition to modifying the request and response, you can also store state data that your tools can (optionally) access later. To do so, use the FastMCP Context to either `set_state` or `get_state` as appropriate. For more information, see the [Context State Management](/servers/context#state-management) docs.
+In addition to modifying the request and response, you can also store state data that your tools can (optionally) access later. To do so, use the FastMCP Context to either `set_state` or `get_state` as appropriate. For more information, see the [Context State Management](/zh/servers/context#state-management) docs.
 
 ## Creating Middleware
 
@@ -369,7 +369,7 @@ This creates the following execution flow:
 
 ## Server Composition and Middleware
 
-When using [Server Composition](/servers/composition) with `mount` or `import_server`, middleware behavior follows these rules:
+When using [Server Composition](/zh/servers/composition) with `mount` or `import_server`, middleware behavior follows these rules:
 
 1. **Parent server middleware** runs for all requests, including those routed to mounted servers
 2. **Mounted server middleware** only runs for requests handled by that specific server

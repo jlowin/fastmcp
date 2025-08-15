@@ -1,30 +1,30 @@
 ---
-title: Tools
-sidebarTitle: Tools
-description: Expose functions as executable capabilities for your MCP client.
+title: 工具
+sidebarTitle: 工具
+description: 将函数作为可执行功能暴露给您的 MCP 客户端。
 icon: wrench
 ---
 
 import { VersionBadge } from '/snippets/version-badge.mdx'
 
-Tools are the core building blocks that allow your LLM to interact with external systems, execute code, and access data that isn't in its training data. In FastMCP, tools are Python functions exposed to LLMs through the MCP protocol.
+工具是核心构建块，允许您的 LLM 与外部系统交互、执行代码并访问不在其训练数据中的数据。在 FastMCP 中，工具是通过 MCP 协议暴露给 LLM 的 Python 函数。
 
-## What Are Tools?
+## 什么是工具？
 
-Tools in FastMCP transform regular Python functions into capabilities that LLMs can invoke during conversations. When an LLM decides to use a tool:
+FastMCP 中的工具将常规 Python 函数转换为 LLM 在对话期间可以调用的功能。当 LLM 决定使用工具时：
 
-1.  It sends a request with parameters based on the tool's schema.
-2.  FastMCP validates these parameters against your function's signature.
-3.  Your function executes with the validated inputs.
-4.  The result is returned to the LLM, which can use it in its response.
+1.  它发送一个基于工具架构的带参数的请求。
+2.  FastMCP 根据您函数的签名验证这些参数。
+3.  您的函数使用验证的输入执行。
+4.  结果返回给 LLM，LLM 可以在其响应中使用它。
 
-This allows LLMs to perform tasks like querying databases, calling APIs, making calculations, or accessing files—extending their capabilities beyond what's in their training data.
+这允许 LLM 执行查询数据库、调用 API、进行计算或访问文件等任务——将其功能扩展到训练数据之外。
 
-## Tools
+## 工具
 
-### The `@tool` Decorator
+### `@tool` 装饰器
 
-Creating a tool is as simple as decorating a Python function with `@mcp.tool`:
+创建工具就像用 `@mcp.tool` 装饰 Python 函数一样简单：
 
 ```python
 from fastmcp import FastMCP
@@ -33,78 +33,78 @@ mcp = FastMCP(name="CalculatorServer")
 
 @mcp.tool
 def add(a: int, b: int) -> int:
-    """Adds two integer numbers together."""
+    """将两个整数相加。"""
     return a + b
 ```
 
-When this tool is registered, FastMCP automatically:
-- Uses the function name (`add`) as the tool name.
-- Uses the function's docstring (`Adds two integer numbers...`) as the tool description.
-- Generates an input schema based on the function's parameters and type annotations.
-- Handles parameter validation and error reporting.
+当此工具注册时，FastMCP 自动：
+- 使用函数名称（`add`）作为工具名称。
+- 使用函数的文档字符串（`将两个整数相加...`）作为工具描述。
+- 基于函数的参数和类型注解生成输入架构。
+- 处理参数验证和错误报告。
 
-The way you define your Python function dictates how the tool appears and behaves for the LLM client.
+您定义 Python 函数的方式决定了工具如何为 LLM 客户端进行展示和执行行为。
 
 <Tip>
-Functions with `*args` or `**kwargs` are not supported as tools. This restriction exists because FastMCP needs to generate a complete parameter schema for the MCP protocol, which isn't possible with variable argument lists.
+不支持带有 `*args` 或 `**kwargs` 的函数作为工具。存在此限制是因为 FastMCP 需要为 MCP 协议生成完整的参数架构，这对于可变参数列表是不可能的。
 </Tip>
 
-#### Decorator Arguments
+#### 装饰器参数
 
-While FastMCP infers the name and description from your function, you can override these and add additional metadata using arguments to the `@mcp.tool` decorator:
+虽然 FastMCP 从您的函数中推断名称和描述，但您可以使用 `@mcp.tool` 装饰器的参数来覆盖这些并添加额外的元数据：
 
 ```python
 @mcp.tool(
-    name="find_products",           # Custom tool name for the LLM
-    description="Search the product catalog with optional category filtering.", # Custom description
-    tags={"catalog", "search"},      # Optional tags for organization/filtering
-    meta={"version": "1.2", "author": "product-team"}  # Custom metadata
+    name="find_products",           # LLM 的自定义工具名称
+    description="搜索产品目录，可选择类别过滤。", # 自定义描述
+    tags={"catalog", "search"},      # 用于组织/过滤的可选标签
+    meta={"version": "1.2", "author": "product-team"}  # 自定义元数据
 )
 def search_products_implementation(query: str, category: str | None = None) -> list[dict]:
-    """Internal function description (ignored if description is provided above)."""
-    # Implementation...
+    """内部函数描述（如果上面提供了描述则忽略）。"""
+    # 实现...
     print(f"Searching for '{query}' in category '{category}'")
     return [{"id": 2, "name": "Another Product"}]
 ```
 
-<Card icon="code" title="@tool Decorator Arguments">
+<Card icon="code" title="@tool 装饰器参数">
 <ParamField body="name" type="str | None">
-  Sets the explicit tool name exposed via MCP. If not provided, uses the function name
+  设置通过 MCP 暴露的显式工具名称。如果未提供，则使用函数名称
 </ParamField>
 
 <ParamField body="description" type="str | None">
-  Provides the description exposed via MCP. If set, the function's docstring is ignored for this purpose
+  提供通过 MCP 暴露的描述。如果设置，函数的文档字符串将被忽略
 </ParamField>
 
 <ParamField body="tags" type="set[str] | None">
-  A set of strings used to categorize the tool. These can be used by the server and, in some cases, by clients to filter or group available tools.
+  用于对工具进行分类的字符串集合。服务器和在某些情况下客户端可以使用这些来过滤或分组可用工具。
 </ParamField>
 
 <ParamField body="enabled" type="bool" default="True">
-  A boolean to enable or disable the tool. See [Disabling Tools](#disabling-tools) for more information
+  启用或禁用工具的布尔值。更多信息请参阅[禁用工具](#disabling-tools)
 </ParamField>
 
 <ParamField body="exclude_args" type="list[str] | None">
-  A list of argument names to exclude from the tool schema shown to the LLM. See [Excluding Arguments](#excluding-arguments) for more information
+  要从显示给 LLM 的工具架构中排除的参数名称列表。更多信息请参阅[排除参数](#excluding-arguments)
 </ParamField>
 
 <ParamField body="annotations" type="ToolAnnotations | dict | None">
-    An optional `ToolAnnotations` object or dictionary to add additional metadata about the tool.
-  <Expandable title="ToolAnnotations attributes">
+    可选的 `ToolAnnotations` 对象或字典，用于添加关于工具的额外元数据。
+  <Expandable title="ToolAnnotations 属性">
     <ParamField body="title" type="str | None">
-      A human-readable title for the tool.
+      工具的人类可读标题。
     </ParamField>
     <ParamField body="readOnlyHint" type="bool | None">
-      If true, the tool does not modify its environment.
+      如果为 true，工具不会修改其环境。
     </ParamField>
     <ParamField body="destructiveHint" type="bool | None">
-      If true, the tool may perform destructive updates to its environment.
+      如果为 true，工具可能对其环境执行破坏性更新。
     </ParamField>
     <ParamField body="idempotentHint" type="bool | None">
-      If true, calling the tool repeatedly with the same arguments will have no additional effect on the its environment.
+      如果为 true，使用相同参数重复调用工具对其环境不会产生额外影响。
     </ParamField>
     <ParamField body="openWorldHint" type="bool | None">
-      If true, this tool may interact with an "open world" of external entities. If false, the tool's domain of interaction is closed.
+      如果为 true，此工具可能与外部实体的"开放世界"交互。如果为 false，工具的交互域是封闭的。
     </ParamField>
   </Expandable>
 </ParamField>
@@ -112,16 +112,16 @@ def search_products_implementation(query: str, category: str | None = None) -> l
 <ParamField body="meta" type="dict[str, Any] | None">
   <VersionBadge version="2.11.0" />
   
-  Optional meta information about the tool. This data is passed through to the MCP client as the `_meta` field of the client-side tool object and can be used for custom metadata, versioning, or other application-specific purposes.
+  关于工具的可选元信息。此数据作为客户端工具对象的 `_meta` 字段传递给 MCP 客户端，可用于自定义元数据、版本控制或其他应用程序特定目的。
 </ParamField>
 </Card>
 
 
-### Async and Synchronous Tools
+### 异步和同步工具
 
-FastMCP is an async-first framework that seamlessly supports both asynchronous (`async def`) and synchronous (`def`) functions as tools. Async tools are preferred for I/O-bound operations to keep your server responsive.
+FastMCP 是一个异步优先的框架，无缝支持异步（`async def`）和同步（`def`）函数作为工具。对于 I/O 绑定操作，首选异步工具以保持服务器响应。
 
-While synchronous tools work seamlessly in FastMCP, they can block the event loop during execution. For CPU-intensive or potentially blocking synchronous operations, consider alternative strategies. One approach is to use `anyio` (which FastMCP already uses internally) to wrap them as async functions, for example:
+虽然同步工具在 FastMCP 中无缝工作，但它们在执行期间可能会阻塞事件循环。对于 CPU 密集型或可能阻塞的同步操作，请考虑替代策略。一种方法是使用 `anyio`（FastMCP 内部已经使用）将它们包装为异步函数，例如：
 
 ```python {1, 13}
 import anyio
@@ -130,19 +130,19 @@ from fastmcp import FastMCP
 mcp = FastMCP()
 
 def cpu_intensive_task(data: str) -> str:
-    # Some heavy computation that could block the event loop
+    # 一些可能阻塞事件循环的重型计算
     return processed_data
 
 @mcp.tool
 async def wrapped_cpu_task(data: str) -> str:
-    """CPU-intensive task wrapped to prevent blocking."""
+    """包装的 CPU 密集型任务以防止阻塞。"""
     return await anyio.to_thread.run_sync(cpu_intensive_task, data)
 ```
 
-Alternative approaches include using `asyncio.get_event_loop().run_in_executor()` or other threading techniques to manage blocking operations without impacting server responsiveness. For example, here's a recipe for using the `asyncer` library (not included in FastMCP) to create a decorator that wraps synchronous functions, courtesy of [@hsheth2](https://github.com/jlowin/fastmcp/issues/864#issuecomment-3103678258):
+替代方法包括使用 `asyncio.get_event_loop().run_in_executor()` 或其他线程技术来管理阻塞操作，而不影响服务器响应性。例如，这里有一个使用 `asyncer` 库（不包含在 FastMCP 中）创建包装同步函数的装饰器的方法，感谢 [@hsheth2](https://github.com/jlowin/fastmcp/issues/864#issuecomment-3103678258)：
 
 <CodeGroup>
-```python Decorator Recipe
+```python 装饰器方法
 import asyncer
 import functools
 from typing import Callable, ParamSpec, TypeVar, Awaitable
@@ -158,7 +158,7 @@ def make_async_background(fn: Callable[_P, _R]) -> Callable[_P, Awaitable[_R]]:
     return wrapper
 ```
 
-```python Using the Decorator {6}
+```python 使用装饰器 {6}
 from fastmcp import FastMCP
 
 mcp = FastMCP()
@@ -171,14 +171,14 @@ def my_tool() -> None:
 </CodeGroup>
 
 
-### Type Annotations
+### 类型注解
 
-Type annotations for parameters are essential for proper tool functionality. They:
-1. Inform the LLM about the expected data types for each parameter
-2. Enable FastMCP to validate input data from clients
-3. Generate accurate JSON schemas for the MCP protocol
+参数的类型注解对于正确的工具功能至关重要。它们：
+1. 向 LLM 通知每个参数的预期数据类型
+2. 使 FastMCP 能够验证来自客户端的输入数据
+3. 为 MCP 协议生成准确的 JSON 架构
 
-Use standard Python type annotations for parameters:
+对参数使用标准 Python 类型注解：
 
 ```python
 @mcp.tool
@@ -187,59 +187,59 @@ def analyze_text(
     max_tokens: int = 100,
     language: str | None = None
 ) -> dict:
-    """Analyze the provided text."""
-    # Implementation...
+    """分析提供的文本。"""
+    # 实现...
 ```
 
-FastMCP supports a wide range of type annotations, including all Pydantic types:
+FastMCP 支持广泛的类型注解，包括所有 Pydantic 类型：
 
-| Type Annotation         | Example                       | Description                         |
+| 类型注解                 | 示例                          | 描述                               |
 | :---------------------- | :---------------------------- | :---------------------------------- |
-| Basic types             | `int`, `float`, `str`, `bool` | Simple scalar values - see [Built-in Types](#built-in-types) |
-| Binary data             | `bytes`                       | Binary content - see [Binary Data](#binary-data) |
-| Date and Time           | `datetime`, `date`, `timedelta` | Date and time objects - see [Date and Time Types](#date-and-time-types) |
-| Collection types        | `list[str]`, `dict[str, int]`, `set[int]` | Collections of items - see [Collection Types](#collection-types) |
-| Optional types          | `float \| None`, `Optional[float]`| Parameters that may be null/omitted - see [Union and Optional Types](#union-and-optional-types) |
-| Union types             | `str \| int`, `Union[str, int]`| Parameters accepting multiple types - see [Union and Optional Types](#union-and-optional-types) |
-| Constrained types       | `Literal["A", "B"]`, `Enum`   | Parameters with specific allowed values - see [Constrained Types](#constrained-types) |
-| Paths                   | `Path`                        | File system paths - see [Paths](#paths) |
-| UUIDs                   | `UUID`                        | Universally unique identifiers - see [UUIDs](#uuids) |
-| Pydantic models         | `UserData`                    | Complex structured data - see [Pydantic Models](#pydantic-models) |
+| 基本类型                | `int`, `float`, `str`, `bool` | 简单标量值 - 请参阅[内置类型](#built-in-types) |
+| 二进制数据              | `bytes`                       | 二进制内容 - 请参阅[二进制数据](#binary-data) |
+| 日期和时间              | `datetime`, `date`, `timedelta` | 日期和时间对象 - 请参阅[日期和时间类型](#date-and-time-types) |
+| 集合类型                | `list[str]`, `dict[str, int]`, `set[int]` | 项目集合 - 请参阅[集合类型](#collection-types) |
+| 可选类型                | `float \| None`, `Optional[float]`| 可能为空/省略的参数 - 请参阅[联合和可选类型](#union-and-optional-types) |
+| 联合类型                | `str \| int`, `Union[str, int]`| 接受多种类型的参数 - 请参阅[联合和可选类型](#union-and-optional-types) |
+| 受限类型                | `Literal["A", "B"]`, `Enum`   | 具有特定允许值的参数 - 请参阅[受限类型](#constrained-types) |
+| 路径                    | `Path`                        | 文件系统路径 - 请参阅[路径](#paths) |
+| UUID                    | `UUID`                        | 通用唯一标识符 - 请参阅[UUID](#uuids) |
+| Pydantic 模型           | `UserData`                    | 复杂结构化数据 - 请参阅[Pydantic 模型](#pydantic-models) |
 
-For additional type annotations not listed here, see the [Parameter Types](#parameter-types) section below for more detailed information and examples.
-### Parameter Metadata
+有关此处未列出的其他类型注解，请参阅下面的[参数类型](#parameter-types)部分，获取更详细的信息和示例。
+### 参数元数据
 
-You can provide additional metadata about parameters in several ways:
+您可以通过几种方式提供关于参数的额外元数据：
 
-#### Simple String Descriptions
+#### 简单字符串描述
 
 <VersionBadge version="2.11.0" />
 
-For basic parameter descriptions, you can use a convenient shorthand with `Annotated`:
+对于基本参数描述，您可以使用 `Annotated` 的便捷简写：
 
 ```python 
 from typing import Annotated
 
 @mcp.tool
 def process_image(
-    image_url: Annotated[str, "URL of the image to process"],
-    resize: Annotated[bool, "Whether to resize the image"] = False,
-    width: Annotated[int, "Target width in pixels"] = 800,
-    format: Annotated[str, "Output image format"] = "jpeg"
+    image_url: Annotated[str, "要处理的图像的 URL"],
+    resize: Annotated[bool, "是否调整图像大小"] = False,
+    width: Annotated[int, "目标宽度（像素）"] = 800,
+    format: Annotated[str, "输出图像格式"] = "jpeg"
 ) -> dict:
-    """Process an image with optional resizing."""
-    # Implementation...
+    """处理图像并可选择调整大小。"""
+    # 实现...
 ```
 
-This shorthand syntax is equivalent to using `Field(description=...)` but more concise for simple descriptions.
+此简写语法等同于使用 `Field(description=...)`，但对于简单描述更简洁。
 
 <Tip>
-This shorthand syntax is only applied to `Annotated` types with a single string description. 
+此简写语法仅适用于带有单个字符串描述的 `Annotated` 类型。
 </Tip>
 
-#### Advanced Metadata with Field
+#### 使用 Field 的高级元数据
 
-For validation constraints and advanced metadata, use Pydantic's `Field` class with `Annotated`:
+对于验证约束和高级元数据，使用 Pydantic 的 `Field` 类与 `Annotated`：
 
 ```python
 from typing import Annotated
@@ -247,66 +247,66 @@ from pydantic import Field
 
 @mcp.tool
 def process_image(
-    image_url: Annotated[str, Field(description="URL of the image to process")],
-    resize: Annotated[bool, Field(description="Whether to resize the image")] = False,
-    width: Annotated[int, Field(description="Target width in pixels", ge=1, le=2000)] = 800,
+    image_url: Annotated[str, Field(description="要处理的图像的 URL")],
+    resize: Annotated[bool, Field(description="是否调整图像大小")] = False,
+    width: Annotated[int, Field(description="目标宽度（像素）", ge=1, le=2000)] = 800,
     format: Annotated[
         Literal["jpeg", "png", "webp"], 
-        Field(description="Output image format")
+        Field(description="输出图像格式")
     ] = "jpeg"
 ) -> dict:
-    """Process an image with optional resizing."""
-    # Implementation...
+    """处理图像并可选择调整大小。"""
+    # 实现...
 ```
 
 
-You can also use the Field as a default value, though the Annotated approach is preferred:
+您也可以将 Field 用作默认值，尽管首选 Annotated 方法：
 
 ```python
 @mcp.tool
 def search_database(
-    query: str = Field(description="Search query string"),
-    limit: int = Field(10, description="Maximum number of results", ge=1, le=100)
+    query: str = Field(description="搜索查询字符串"),
+    limit: int = Field(10, description="最大结果数量", ge=1, le=100)
 ) -> list:
-    """Search the database with the provided query."""
-    # Implementation...
+    """使用提供的查询搜索数据库。"""
+    # 实现...
 ```
 
-Field provides several validation and documentation features:
-- `description`: Human-readable explanation of the parameter (shown to LLMs)
-- `ge`/`gt`/`le`/`lt`: Greater/less than (or equal) constraints
-- `min_length`/`max_length`: String or collection length constraints
-- `pattern`: Regex pattern for string validation
-- `default`: Default value if parameter is omitted
+Field 提供几个验证和文档功能：
+- `description`：参数的人类可读解释（显示给 LLM）
+- `ge`/`gt`/`le`/`lt`：大于/小于（或等于）约束
+- `min_length`/`max_length`：字符串或集合长度约束
+- `pattern`：字符串验证的正则表达式模式
+- `default`：如果省略参数的默认值
 
 
 
-### Optional Arguments
+### 可选参数
 
-FastMCP follows Python's standard function parameter conventions. Parameters without default values are required, while those with default values are optional.
+FastMCP 遵循 Python 的标准函数参数约定。没有默认值的参数是必需的，而有默认值的参数是可选的。
 
 ```python
 @mcp.tool
 def search_products(
-    query: str,                   # Required - no default value
-    max_results: int = 10,        # Optional - has default value
-    sort_by: str = "relevance",   # Optional - has default value
-    category: str | None = None   # Optional - can be None
+    query: str,                   # 必需 - 无默认值
+    max_results: int = 10,        # 可选 - 有默认值
+    sort_by: str = "relevance",   # 可选 - 有默认值
+    category: str | None = None   # 可选 - 可以为 None
 ) -> list[dict]:
-    """Search the product catalog."""
-    # Implementation...
+    """搜索产品目录。"""
+    # 实现...
 ```
 
-In this example, the LLM must provide a `query` parameter, while `max_results`, `sort_by`, and `category` will use their default values if not explicitly provided.
+在此示例中，LLM 必须提供 `query` 参数，而 `max_results`、`sort_by` 和 `category` 如果未明确提供将使用其默认值。
 
 
-### Excluding Arguments
+### 排除参数
 
 <VersionBadge version="2.6.0" /> 
 
-You can exclude certain arguments from the tool schema shown to the LLM. This is useful for arguments that are injected at runtime (such as `state`, `user_id`, or credentials) and should not be exposed to the LLM or client. Only arguments with default values can be excluded; attempting to exclude a required argument will raise an error.
+您可以从显示给 LLM 的工具架构中排除某些参数。这对于在运行时注入的参数（如 `state`、`user_id` 或凭据）很有用，这些参数不应暴露给 LLM 或客户端。只有具有默认值的参数才能被排除；尝试排除必需参数将引发错误。
 
-Example:
+示例：
 
 ```python
 @mcp.tool(
@@ -314,53 +314,53 @@ Example:
     exclude_args=["user_id"]
 )
 def get_user_details(user_id: str = None) -> str:
-    # user_id will be injected by the server, not provided by the LLM
+    # user_id 将由服务器注入，不是由 LLM 提供
     ...
 ```
 
-With this configuration, `user_id` will not appear in the tool's parameter schema, but can still be set by the server or framework at runtime.
+使用此配置，`user_id` 不会出现在工具的参数架构中，但仍可以在运行时由服务器或框架设置。
 
-For more complex tool transformations, see [Transforming Tools](/patterns/tool-transformation).
+有关更复杂的工具转换，请参阅[转换工具](/zh/patterns/tool-transformation)。
 
-### Disabling Tools
+### 禁用工具
 
 <VersionBadge version="2.8.0" />
 
-You can control the visibility and availability of tools by enabling or disabling them. This is useful for feature flagging, maintenance, or dynamically changing the toolset available to a client. Disabled tools will not appear in the list of available tools returned by `list_tools`, and attempting to call a disabled tool will result in an "Unknown tool" error, just as if the tool did not exist.
+您可以通过启用或禁用工具来控制工具的可见性和可用性。这对于功能标记、维护或动态更改客户端可用的工具集很有用。禁用的工具不会出现在 `list_tools` 返回的可用工具列表中，尝试调用禁用的工具将导致"未知工具"错误，就像工具不存在一样。
 
-By default, all tools are enabled. You can disable a tool upon creation using the `enabled` parameter in the decorator:
+默认情况下，所有工具都是启用的。您可以在创建时使用装饰器中的 `enabled` 参数禁用工具：
 
 ```python
 @mcp.tool(enabled=False)
 def maintenance_tool():
-    """This tool is currently under maintenance."""
+    """此工具目前正在维护中。"""
     return "This tool is disabled."
 ```
 
-You can also toggle a tool's state programmatically after it has been created:
+您也可以在创建工具后以编程方式切换工具状态：
 
 ```python
 @mcp.tool
 def dynamic_tool():
     return "I am a dynamic tool."
 
-# Disable and re-enable the tool
+# 禁用和重新启用工具
 dynamic_tool.disable()
 dynamic_tool.enable()
 ```
 
-### Return Values
+### 返回值
 
 
-FastMCP tools can return data in two complementary formats: **traditional content blocks** (like text and images) and **structured outputs** (machine-readable JSON). When you add return type annotations, FastMCP automatically generates **output schemas** to validate the structured data and enables clients to deserialize results back to Python objects.
+FastMCP 工具可以以两种互补格式返回数据：**传统内容块**（如文本和图像）和**结构化输出**（机器可读的 JSON）。当您添加返回类型注解时，FastMCP 自动生成**输出架构**来验证结构化数据，并使客户端能够将结果反序列化为 Python 对象。
 
-Understanding how these three concepts work together:
+了解这三个概念如何协同工作：
 
-- **Return Values**: What your Python function returns (determines both content blocks and structured data)
-- **Structured Outputs**: JSON data sent alongside traditional content for machine processing  
-- **Output Schemas**: JSON Schema declarations that describe and validate the structured output format
+- **返回值**：您的 Python 函数返回的内容（决定内容块和结构化数据）
+- **结构化输出**：与传统内容一起发送的 JSON 数据，用于机器处理
+- **输出架构**：描述和验证结构化输出格式的 JSON Schema 声明
 
-The following sections explain each concept in detail.
+以下部分详细解释每个概念。
 
 #### Content Blocks
 
@@ -672,7 +672,7 @@ mcp.remove_tool("example_tool") # Sends tools/list_changed notification
 
 Notifications are only sent when these operations occur within an active MCP request context (e.g., when called from within a tool or other MCP operation). Operations performed during server initialization do not trigger notifications.
 
-Clients can handle these notifications using a [message handler](/clients/messages) to automatically refresh their tool lists or update their interfaces.
+Clients can handle these notifications using a [message handler](/zh/clients/messages) to automatically refresh their tool lists or update their interfaces.
 
 ## MCP Context
 
@@ -713,7 +713,7 @@ The Context object provides access to:
 - **LLM Sampling**: `ctx.sample(...)`
 - **Request Information**: `ctx.request_id`, `ctx.client_id`
 
-For full documentation on the Context object and all its capabilities, see the [Context documentation](/servers/context).
+For full documentation on the Context object and all its capabilities, see the [Context documentation](/zh/servers/context).
 
 ## Parameter Types
 

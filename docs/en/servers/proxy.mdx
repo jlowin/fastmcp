@@ -65,7 +65,7 @@ This single setup gives you:
 - Session isolation to prevent context mixing
 - Full compatibility with all MCP clients
 
-You can also pass a FastMCP [client transport](/clients/transports) (or parameter that can be inferred to a transport) to `as_proxy()`. This will automatically create a `ProxyClient` instance for you.
+You can also pass a FastMCP [client transport](/en/clients/transports) (or parameter that can be inferred to a transport) to `as_proxy()`. This will automatically create a `ProxyClient` instance for you.
 
 Finally, you can pass a regular FastMCP `Client` instance to `as_proxy()`. This will work for many use cases, but may break if advanced MCP features like sampling or elicitation are invoked by the server. 
 

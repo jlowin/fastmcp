@@ -122,8 +122,8 @@ client = Client("server.py", message_handler=ToolCacheHandler())
 
 While the message handler receives server-initiated requests, for most use cases you should use the dedicated callback parameters instead:
 
-- **Sampling requests**: Use [`sampling_handler`](/clients/sampling)
-- **Progress requests**: Use [`progress_handler`](/clients/progress)  
-- **Log requests**: Use [`log_handler`](/clients/logging)
+- **Sampling requests**: Use [`sampling_handler`](/zh/clients/sampling)
+- **Progress requests**: Use [`progress_handler`](/zh/clients/progress)
+- **Log requests**: Use [`log_handler`](/zh/clients/logging)
 
 The message handler is primarily for monitoring and handling notifications rather than responding to requests.

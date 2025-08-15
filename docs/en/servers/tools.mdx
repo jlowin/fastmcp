@@ -320,7 +320,7 @@ def get_user_details(user_id: str = None) -> str:
 
 With this configuration, `user_id` will not appear in the tool's parameter schema, but can still be set by the server or framework at runtime.
 
-For more complex tool transformations, see [Transforming Tools](/patterns/tool-transformation).
+For more complex tool transformations, see [Transforming Tools](/en/patterns/tool-transformation).
 
 ### Disabling Tools
 
@@ -672,7 +672,7 @@ mcp.remove_tool("example_tool") # Sends tools/list_changed notification
 
 Notifications are only sent when these operations occur within an active MCP request context (e.g., when called from within a tool or other MCP operation). Operations performed during server initialization do not trigger notifications.
 
-Clients can handle these notifications using a [message handler](/clients/messages) to automatically refresh their tool lists or update their interfaces.
+Clients can handle these notifications using a [message handler](/en/clients/messages) to automatically refresh their tool lists or update their interfaces.
 
 ## MCP Context
 
@@ -713,7 +713,7 @@ The Context object provides access to:
 - **LLM Sampling**: `ctx.sample(...)`
 - **Request Information**: `ctx.request_id`, `ctx.client_id`
 
-For full documentation on the Context object and all its capabilities, see the [Context documentation](/servers/context).
+For full documentation on the Context object and all its capabilities, see the [Context documentation](/en/servers/context).
 
 ## Parameter Types
 

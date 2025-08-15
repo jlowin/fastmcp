@@ -1,22 +1,22 @@
-# Community Section
+# 社区版块
 
-This directory contains community-contributed content and showcases for FastMCP.
+本目录包含社区贡献的内容和 FastMCP 的展示项目。
 
-## Structure
+## 结构
 
-- `showcase.mdx` - Main community showcase page featuring high-quality projects and examples
+- `showcase.mdx` - 主要的社区展示页面，展示高质量的项目和示例
 
-## Adding Content
+## 添加内容
 
-To add new community content:
-1. Create a new MDX file in this directory
-2. Update `docs.json` to include it in the navigation
-3. Follow the existing format for consistency
+要添加新的社区内容：
+1. 在此目录中创建一个新的 MDX 文件
+2. 更新 `docs.json` 以将其包含在导航中
+3. 遵循现有格式以保持一致性
 
-## Guidelines
+## 指导原则
 
-Community content should:
-- Demonstrate best practices
-- Provide educational value
-- Include proper documentation
-- Be maintained and up-to-date
+社区内容应该：
+- 展示最佳实践
+- 提供教育价值
+- 包含适当的文档
+- 保持维护和更新
