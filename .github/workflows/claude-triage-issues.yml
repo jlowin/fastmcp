@@ -25,6 +25,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Generate Marvin App token
+        id: marvin-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.MARVIN_APP_ID }}
+          private-key: ${{ secrets.MARVIN_APP_PRIVATE_KEY }}
+
       - name: Create triage prompt
         run: |
           mkdir -p /tmp/claude-prompts
@@ -105,7 +112,7 @@ jobs:
                 "type": "http",
                 "url": "https://api.githubcopilot.com/mcp/",
                 "headers": {
-                  "Authorization": "Bearer ${{ secrets.GITHUB_TOKEN }}"
+                  "Authorization": "Bearer ${{ steps.marvin-token.outputs.token }}"
                 }
               }
             }
@@ -121,4 +128,4 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           mcp_config: /tmp/mcp-config/mcp-servers.json
           claude_env: |
-            GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            GH_TOKEN: ${{ steps.marvin-token.outputs.token }}
