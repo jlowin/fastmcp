@@ -59,9 +59,15 @@ jobs:
 
           CORE CATEGORIES (apply EXACTLY ONE - these are mutually exclusive):
           - bug: Reports of broken functionality OR PRs that fix bugs
-          - enhancement: Improvements to existing features (issues requesting improvements OR PRs implementing minor improvements)
-          - feature: ONLY for major PRs implementing significant new functionality (2-4 per release, never for issues)
+          - enhancement: New functions/endpoints, improvements to existing features, internal tooling, workflow improvements, minor new capabilities
+          - feature: ONLY for major headline functionality worthy of a blog post announcement (2-4 per release, never for issues)
           - documentation: Primary change is to docs, examples, or guides
+
+          FEATURE vs ENHANCEMENT guidance:
+          - feature: Major systems like new auth systems, MCP composition, proxying MCP servers, major CLI commands that transform workflows
+          - enhancement: New functions/endpoints, internal workflows, CI improvements, developer tooling, refactoring, utilities, typical new CLI commands
+          - If unsure between feature/enhancement, choose enhancement
+
           Note: If a PR fixes a bug, label it "bug" not "enhancement"
 
           SPECIAL CATEGORY (can be combined with above):
