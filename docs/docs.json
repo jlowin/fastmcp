@@ -99,8 +99,9 @@
                     "icon": "shield-check",
                     "pages": [
                       "servers/auth/authentication",
-                      "servers/auth/remote-oauth",
                       "servers/auth/token-verification",
+                      "servers/auth/remote-oauth",
+                      "servers/auth/oauth-proxy",
                       "servers/auth/full-oauth-server"
                     ]
                   },
@@ -162,7 +163,8 @@
                 "group": "Integrations",
                 "pages": [
                   "integrations/anthropic",
-                  "integrations/authkit",
+                  "integrations/auth/authkit",
+                  "integrations/auth/github",
                   "integrations/chatgpt",
                   "integrations/claude-code",
                   "integrations/claude-desktop",
