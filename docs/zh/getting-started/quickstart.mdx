@@ -1,0 +1,129 @@
+---
+title: 快速开始
+icon: rocket-launch
+---
+
+欢迎！本指南将帮助您快速设置 FastMCP 并运行您的第一个 MCP 服务器。
+
+如果您还没有安装 FastMCP，请按照[安装说明](/zh/getting-started/installation)进行操作。
+
+## 创建 FastMCP 服务端
+
+FastMCP 服务端是工具、资源和其他 MCP 组件的集合。要创建服务端，首先实例化 `FastMCP` 类。
+
+创建一个名为 `my_server.py` 的新文件，并添加以下代码：
+
+```python my_server.py
+from fastmcp import FastMCP
+
+mcp = FastMCP("My MCP Server")
+```
+
+
+就是这样！您已经创建了一个 FastMCP 服务，尽管是一个非常无聊的服务。让我们添加一个工具来让它更有趣。
+
+
+## 添加工具
+
+要添加一个返回简单问候的工具，编写一个函数并用 `@mcp.tool` 装饰器装饰它以将其注册到服务端：
+
+```python my_server.py {5-7}
+from fastmcp import FastMCP
+
+mcp = FastMCP("My MCP Server")
+
+@mcp.tool
+def greet(name: str) -> str:
+    return f"Hello, {name}!"
+```
+
+
+## 测试服务器
+
+
+要测试服务端，创建一个 FastMCP 客户端并将其指向服务对象。
+
+```python my_server.py {1-2, 10-17}
+import asyncio
+from fastmcp import FastMCP, Client
+
+mcp = FastMCP("My MCP Server")
+
+@mcp.tool
+def greet(name: str) -> str:
+    return f"Hello, {name}!"
+
+client = Client(mcp)
+
+async def call_tool(name: str):
+    async with client:
+        result = await client.call_tool("greet", {"name": name})
+        print(result)
+
+asyncio.run(call_tool("Ford"))
+```
+
+这里有几个要注意的点：
+- 客户端是异步的，所以我们需要使用 `asyncio.run` 来运行客户端。
+- 在使用客户端之前，我们必须进入客户端上下文（`async with client:`）。您可以在同一个上下文中进行多个客户端调用。
+
+## 运行服务端
+
+为了用 Python 运行服务，我们需要在服务器文件的 `__main__` 块中添加一个 `run` 语句。
+
+```python my_server.py {9-10}
+from fastmcp import FastMCP
+
+mcp = FastMCP("My MCP Server")
+
+@mcp.tool
+def greet(name: str) -> str:
+    return f"Hello, {name}!"
+
+if __name__ == "__main__":
+    mcp.run()
+```
+
+这让我们可以使用 `python my_server.py` 运行服务，使用默认的 `stdio` 传输，这是向客户端暴露 MCP 服务器的标准方式。
+
+<Tip>
+为什么我们需要 `if __name__ == "__main__":` 块？
+
+在 FastMCP 生态系统中，这行可能是不必要的。但是，包含它可以确保您的 FastMCP 服务端为所有用户和客户端以一致的方式运行，因此建议作为最佳实践。
+</Tip>
+
+### 与 Python 服务器交互
+
+现在服务器可以用 `python my_server.py` 执行，我们可以像与任何其他 MCP 服务器一样与它交互。
+
+在新文件中，创建一个客户端并将其指向服务文件：
+
+```python my_client.py
+import asyncio
+from fastmcp import Client
+
+client = Client("my_server.py")
+
+async def call_tool(name: str):
+    async with client:
+        result = await client.call_tool("greet", {"name": name})
+        print(result)
+
+asyncio.run(call_tool("Ford"))
+```
+
+
+
+### 使用 FastMCP CLI
+
+要让 FastMCP 为我们运行服务器，我们可以使用 `fastmcp run` 命令。这将启动服务器并保持运行直到停止。默认情况下，它将使用 `stdio` 传输，这是一个用于与服务器交互的简单基于文本的协议。
+
+```bash
+fastmcp run my_server.py:mcp
+```
+
+请注意，FastMCP *不*需要服务文件中的 `__main__` 块，如果存在它会忽略它。相反，它会查找 CLI 命令中提供的服务器对象（这里是 `mcp`）。如果没有提供服务器对象，`fastmcp run` 将自动搜索文件中名为 "mcp"、"app" 或 "server" 的服务。
+
+<Tip>
+我们将客户端指向服务文件，它被识别为 Python MCP 服务，默认情况下用 `python my_server.py` 执行。这会执行服务文件的 `__main__` 块。还有其他运行服务器的方式，在[服务器配置](/zh/servers/server#running-the-server)指南中有描述。
+</Tip>

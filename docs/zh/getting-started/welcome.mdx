@@ -1,0 +1,78 @@
+---
+title: "欢迎使用 FastMCP 2.0！"
+sidebarTitle: "欢迎！"
+description: 构建 MCP 服务器和客户端的快速、Pythonic 方式。
+icon: hand-wave
+---
+
+
+[Model Context Protocol](https://modelcontextprotocol.io/) (MCP) 是一种全新的标准化方式，用于向您的 LLM 提供上下文和工具，而 FastMCP 使构建 MCP 服务器和客户端变得简单直观。使用简洁的 Pythonic 代码创建工具、暴露资源、定义提示等：
+
+```python {1}
+from fastmcp import FastMCP
+
+mcp = FastMCP("Demo 🚀")
+
+@mcp.tool
+def add(a: int, b: int) -> int:
+    """Add two numbers"""
+    return a + b
+
+if __name__ == "__main__":
+    mcp.run()
+```
+
+
+## 超越协议本身
+
+FastMCP 是使用 Model Context Protocol 的标准框架。FastMCP 1.0 于 2024 年被合并到 [官方 MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk) 中。
+
+这是 FastMCP 2.0，**积极维护的版本**，为 MCP 生态系统提供完整的工具包。
+
+FastMCP 2.0 拥有一套全面的功能特性，远超核心 MCP 规范，全部致力于提供**最简单的生产流程**。这些功能包括部署、认证、客户端、服务器代理和组合、从 REST API 生成服务器、动态工具重写、内置测试工具、集成等等。
+
+准备升级或开始使用了吗？请按照[安装说明](/getting-started/installation)，其中包括从官方 MCP SDK 升级的步骤。
+
+
+## 什么是 MCP？
+
+Model Context Protocol 允许您构建服务器，以安全、标准化的方式向 LLM 应用程序暴露数据和功能。它常被描述为"AI 的 USB-C 接口"，提供了连接 LLM 到可用资源的统一方式。将其视为专门为 LLM 交互设计的 API 可能更容易理解。MCP 服务器可以：
+
+- 通过 `Resources` 暴露数据（类似于 GET 端点；用于将信息加载到 LLM 的上下文中）
+- 通过 `Tools` 提供功能（类似于 POST 端点；用于执行代码或产生副作用）
+- 通过 `Prompts` 定义交互模式（用于 LLM 交互的可重用模板）
+- 以及更多功能！
+
+FastMCP 为构建、管理和与这些服务器交互提供了高级的 Pythonic 接口。
+
+## 为什么选择 FastMCP？
+
+MCP 协议功能强大，但实现它涉及大量样板代码 - 服务器设置、协议处理器、内容类型、错误管理。FastMCP 处理所有复杂的协议细节和服务器管理，因此您可以专注于构建出色的工具。它被设计为高级和 Pythonic；在大多数情况下，装饰一个函数就是您所需要的全部。
+
+FastMCP 2.0 已发展成为一个全面的平台，远超基本的协议实现。虽然 1.0 版本提供了服务器构建功能（现在是官方 MCP SDK 的一部分），2.0 版本提供了一个完整的生态系统，包括客户端库、认证系统、部署工具、与主要 AI 平台的集成、测试框架和生产构建的基础设施模式。
+
+FastMCP 的目标是：
+
+🚀 **快速**：高级接口意味着更少的代码和更快的开发
+
+🍀 **简单**：以最少的样板代码构建 MCP 服务器
+
+🐍 **Pythonic**：对 Python 开发者来说感觉更自然
+
+🔍 **完整**：涵盖从开发到生产的所有 MCP 用例的综合平台
+
+FastMCP 由 [Prefect](https://www.prefect.io/) 用 💙 制作。
+
+
+
+## 面向 LLM 友好的文档
+
+此文档也以 [llms.txt 格式](https://llmstxt.org/) 提供，这是 LLM 可以轻松使用的简单 markdown 标准。
+
+有两种方式访问 LLM 友好的文档：
+- [llms.txt](https://gofastmcp.com/llms.txt) 本质上是一个站点地图，列出了文档中的所有页面。
+- [llms-full.txt](https://gofastmcp.com/llms-full.txt) 包含完整的文档。注意这可能超出您的 LLM 的最大上下文。
+
+此外，任何页面都可以通过在 URL 后添加 `.md` 来以 markdown 格式访问。例如，此页面将变成 `https://fastmcp.wiki/zh/getting-started/welcome.md`，您可以在[这里](/zh/getting-started/welcome.md)查看。
+
+最后，您可以通过在键盘上按 "Cmd+C"（或 Windows 上的 "Ctrl+C"）来复制任何页面的 markdown 内容。
