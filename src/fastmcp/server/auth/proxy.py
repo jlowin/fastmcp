@@ -106,25 +106,39 @@ class OAuthProxy(OAuthProvider):
             resource_server_url: Resource server URL (defaults to base_url)
         """
         # Convert string URLs to AnyHttpUrl for parent class
-        base_url_parsed = AnyHttpUrl(base_url) if isinstance(base_url, str) else base_url
+        base_url_parsed = (
+            AnyHttpUrl(base_url) if isinstance(base_url, str) else base_url
+        )
         issuer_url_parsed = (
-            AnyHttpUrl(issuer_url) if isinstance(issuer_url, str) else issuer_url
-        ) if issuer_url else None
+            (AnyHttpUrl(issuer_url) if isinstance(issuer_url, str) else issuer_url)
+            if issuer_url
+            else None
+        )
         service_documentation_url_parsed = (
-            AnyHttpUrl(service_documentation_url) if isinstance(service_documentation_url, str) else service_documentation_url
-        ) if service_documentation_url else None
+            (
+                AnyHttpUrl(service_documentation_url)
+                if isinstance(service_documentation_url, str)
+                else service_documentation_url
+            )
+            if service_documentation_url
+            else None
+        )
         resource_server_url_parsed = (
-            AnyHttpUrl(resource_server_url) if isinstance(resource_server_url, str) else resource_server_url
-        ) if resource_server_url else None
+            (
+                AnyHttpUrl(resource_server_url)
+                if isinstance(resource_server_url, str)
+                else resource_server_url
+            )
+            if resource_server_url
+            else None
+        )
 
         # Always enable DCR since we implement it locally for MCP clients
         client_registration_options = ClientRegistrationOptions(enabled=True)
 
         # Enable revocation only if upstream endpoint provided
         revocation_options = (
-            RevocationOptions(enabled=True)
-            if upstream_revocation_endpoint
-            else None
+            RevocationOptions(enabled=True) if upstream_revocation_endpoint else None
         )
 
         super().__init__(
@@ -143,9 +157,11 @@ class OAuthProxy(OAuthProvider):
         self._upstream_client_id = upstream_client_id
         self._upstream_client_secret = SecretStr(upstream_client_secret)
         self._upstream_revocation_endpoint = upstream_revocation_endpoint
-        
+
         # Store redirect configuration
-        self._redirect_path = redirect_path if redirect_path.startswith("/") else f"/{redirect_path}"
+        self._redirect_path = (
+            redirect_path if redirect_path.startswith("/") else f"/{redirect_path}"
+        )
 
         # Local state for DCR and token bookkeeping
         self._clients: dict[str, OAuthClientInformationFull] = {}
@@ -824,7 +840,9 @@ class OAuthProxy(OAuthProvider):
             )
 
             try:
-                idp_redirect_uri = f"{str(self.base_url).rstrip('/')}{self._redirect_path}"
+                idp_redirect_uri = (
+                    f"{str(self.base_url).rstrip('/')}{self._redirect_path}"
+                )
                 logger.debug(
                     f"Exchanging IdP code for tokens with redirect_uri: {idp_redirect_uri}"
                 )

@@ -200,7 +200,7 @@ The `OAuthProxy` requires a [`TokenVerifier`](/servers/auth/token-verification) 
 - **JWT tokens**: Use `JWTVerifier` with the provider's JWKS endpoint for offline validation
 - **Opaque tokens**: Implement a custom `TokenVerifier` subclass that validates tokens via API calls
 
-FastMCP includes provider-specific implementations like `GitHubProvider` that include appropriate token verifiers for their token formats. For other providers, you'll need to provide a token verifier that matches how that provider's tokens work.
+FastMCP includes provider-specific implementations like `GitHubOAuthProxyProvider` that include appropriate token verifiers for their token formats. For other providers, you'll need to provide a token verifier that matches how that provider's tokens work.
 
 ## Environment Configuration
 

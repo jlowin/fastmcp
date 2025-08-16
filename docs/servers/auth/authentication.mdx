@@ -129,13 +129,13 @@ This example uses WorkOS AuthKit as the external identity provider. The `AuthKit
 
 This class acts as a bridge between MCP's DCR expectations and traditional OAuth providers. It implements DCR locally by always returning your pre-registered credentials, while transparently forwarding OAuth flows to your upstream provider.
 
-For example, the built-in `GitHubProvider` is a `OAuthProxy` that uses GitHub as the external identity provider:
+For example, the built-in `GitHubOAuthProxyProvider` is a `OAuthProxy` that uses GitHub as the external identity provider:
 
 ```python
 from fastmcp import FastMCP
-from fastmcp.server.auth.providers.github import GitHubProvider
+from fastmcp.server.auth.providers.github import GitHubOAuthProxyProvider
 
-auth = GitHubProvider(
+auth = GitHubOAuthProxyProvider(
     client_id="Ov23li...",  # Your GitHub OAuth App ID
     client_secret="abc123...",  # Your GitHub OAuth App Secret
     base_url="https://your-server.com"

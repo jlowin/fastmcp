@@ -1,6 +1,5 @@
 """Comprehensive tests for OAuth Proxy Provider functionality."""
 
-import secrets
 import time
 from unittest.mock import Mock
 from urllib.parse import parse_qs, urlparse
@@ -76,7 +75,10 @@ class TestOAuthProxyComprehensive:
         )
 
         # Verify all parameters are set correctly
-        assert proxy._upstream_authorization_endpoint == "https://auth.example.com/authorize"
+        assert (
+            proxy._upstream_authorization_endpoint
+            == "https://auth.example.com/authorize"
+        )
         assert proxy._upstream_token_endpoint == "https://auth.example.com/token"
         assert proxy._upstream_client_id == "client-123"
         assert proxy._upstream_client_secret.get_secret_value() == "secret-456"
@@ -122,7 +124,7 @@ class TestOAuthProxyComprehensive:
             token_verifier=jwt_verifier,
             base_url="https://server.com",
         )
-        
+
         assert proxy.client_registration_options is not None
         assert proxy.client_registration_options.enabled is True
 
@@ -137,7 +139,7 @@ class TestOAuthProxyComprehensive:
             token_verifier=jwt_verifier,
             base_url="https://server.com",
         )
-        
+
         assert proxy.revocation_options is not None
         assert proxy.revocation_options.enabled is True
         assert proxy._upstream_revocation_endpoint == "https://auth.com/revoke"
@@ -152,7 +154,7 @@ class TestOAuthProxyComprehensive:
             token_verifier=jwt_verifier,
             base_url="https://server.com",
         )
-        
+
         assert proxy.revocation_options is None
         assert proxy._upstream_revocation_endpoint is None
 
@@ -180,7 +182,7 @@ class TestOAuthProxyComprehensive:
         stored_client = oauth_proxy._clients.get("test-client-id")
         assert stored_client is not None
         assert stored_client.client_id == "test-client-id"
-    
+
     @pytest.mark.asyncio
     async def test_register_client_empty_grant_types(self, oauth_proxy):
         """Test client registration adds grant types when empty."""
@@ -217,14 +219,16 @@ class TestOAuthProxyComprehensive:
         """Test getting a temporary client for unregistered client ID."""
         # Get a client that hasn't been registered
         temp_client = await oauth_proxy.get_client("unknown-client-id")
-        
+
         assert temp_client is not None
         assert temp_client.client_id == "unknown-client-id"
         assert temp_client.client_secret is None
         assert temp_client.token_endpoint_auth_method == "none"
         assert len(temp_client.redirect_uris) >= 1
         # Should include the proxy's callback URL
-        assert str(temp_client.redirect_uris[0]) == "https://myserver.com/oauth/callback"
+        assert (
+            str(temp_client.redirect_uris[0]) == "https://myserver.com/oauth/callback"
+        )
 
     @pytest.mark.asyncio
     async def test_authorize_creates_transaction(self, oauth_proxy):
@@ -292,10 +296,10 @@ class TestOAuthProxyComprehensive:
         )
 
         redirect_url = await oauth_proxy.authorize(client, params)
-        
+
         parsed = urlparse(redirect_url)
         query_params = parse_qs(parsed.query)
-        
+
         # Should use required_scopes from token_verifier
         assert query_params["scope"] == ["read write"]
 
@@ -327,10 +331,10 @@ class TestOAuthProxyComprehensive:
         )
 
         redirect_url = await proxy.authorize(client, params)
-        
+
         parsed = urlparse(redirect_url)
         query_params = parse_qs(parsed.query)
-        
+
         # Should add minimal scope for Google
         assert query_params["scope"] == ["openid"]
 
@@ -356,7 +360,7 @@ class TestOAuthProxyComprehensive:
 
         # Load the code
         auth_code = await oauth_proxy.load_authorization_code(client, code)
-        
+
         assert auth_code is not None
         assert auth_code.code == code
         assert auth_code.client_id == "test-client-id"
@@ -405,7 +409,9 @@ class TestOAuthProxyComprehensive:
         assert auth_code is None
 
     @pytest.mark.asyncio
-    async def test_load_access_token_delegates_to_verifier(self, oauth_proxy, jwt_verifier):
+    async def test_load_access_token_delegates_to_verifier(
+        self, oauth_proxy, jwt_verifier
+    ):
         """Test that load_access_token delegates to the token verifier."""
         token = "test-access-token"
         expected_result = AccessToken(
@@ -414,26 +420,27 @@ class TestOAuthProxyComprehensive:
             scopes=["read"],
             expires_at=int(time.time() + 3600),
         )
+
         # Mock the async method properly
-        async def mock_verify():
+        async def mock_verify(token):
             return expected_result
+
         jwt_verifier.verify_token = mock_verify
 
         result = await oauth_proxy.load_access_token(token)
-        
+
         assert result == expected_result
         # Can't assert on the mock function call in this case
 
     def test_get_routes_includes_callback(self, oauth_proxy):
         """Test that get_routes includes the OAuth callback route."""
         routes = oauth_proxy.get_routes()
-        
+
         # Find the callback route
         callback_routes = [
-            r for r in routes 
-            if hasattr(r, 'path') and r.path == "/oauth/callback"
+            r for r in routes if hasattr(r, "path") and r.path == "/oauth/callback"
         ]
-        
+
         assert len(callback_routes) == 1
         callback_route = callback_routes[0]
         assert "GET" in callback_route.methods
@@ -442,15 +449,15 @@ class TestOAuthProxyComprehensive:
     def test_get_routes_preserves_standard_routes(self, oauth_proxy):
         """Test that get_routes preserves standard OAuth routes."""
         routes = oauth_proxy.get_routes()
-        
+
         # Should have standard OAuth routes
-        paths = [r.path for r in routes if hasattr(r, 'path')]
-        
+        paths = [r.path for r in routes if hasattr(r, "path")]
+
         # Standard OAuth endpoints should be present
         assert "/authorize" in paths
         assert "/token" in paths
         assert "/.well-known/oauth-authorization-server" in paths
-        
+
         # Plus our custom callback
         assert "/oauth/callback" in paths
 
@@ -460,7 +467,7 @@ class TestOAuthProxyComprehensive:
         # Store tokens
         access_token = "access-123"
         refresh_token = "refresh-456"
-        
+
         oauth_proxy._access_tokens[access_token] = AccessToken(
             token=access_token,
             client_id="client",
@@ -493,7 +500,7 @@ class TestOAuthProxyComprehensive:
             "expires_in": 3600,
             "token_type": "Bearer",
         }
-        
+
         oauth_proxy._client_codes[code] = {
             "client_id": "test-client",
             "redirect_uri": "http://localhost:54321/callback",

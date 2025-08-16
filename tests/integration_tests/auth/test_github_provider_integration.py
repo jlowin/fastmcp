@@ -19,7 +19,7 @@ import pytest
 
 from fastmcp import FastMCP
 from fastmcp.client import Client
-from fastmcp.server.auth.providers.github import GitHubProvider
+from fastmcp.server.auth.providers.github import GitHubOAuthProxyProvider
 from fastmcp.utilities.tests import HeadlessOAuth, run_server_in_process
 
 FASTMCP_TEST_AUTH_GITHUB_CLIENT_ID = os.getenv("FASTMCP_TEST_AUTH_GITHUB_CLIENT_ID")
@@ -41,7 +41,7 @@ def create_github_server(host: str = "127.0.0.1", port: int = 9100, **kwargs) ->
     assert FASTMCP_TEST_AUTH_GITHUB_CLIENT_SECRET is not None
 
     # Create GitHub OAuth provider
-    auth = GitHubProvider(
+    auth = GitHubOAuthProxyProvider(
         client_id=FASTMCP_TEST_AUTH_GITHUB_CLIENT_ID,
         client_secret=FASTMCP_TEST_AUTH_GITHUB_CLIENT_SECRET,
         base_url=f"http://{host}:{port}",
@@ -72,15 +72,13 @@ def create_github_server_with_mock_callback(
     assert FASTMCP_TEST_AUTH_GITHUB_CLIENT_SECRET is not None
 
     # Create GitHub OAuth provider
-    auth = GitHubProvider(
+    auth = GitHubOAuthProxyProvider(
         client_id=FASTMCP_TEST_AUTH_GITHUB_CLIENT_ID,
         client_secret=FASTMCP_TEST_AUTH_GITHUB_CLIENT_SECRET,
         base_url=f"http://{host}:{port}",
     )
 
     # Mock the authorize method to return a fake code instead of redirecting to GitHub
-    original_authorize = auth.authorize
-
     async def mock_authorize(client, params):
         # Instead of redirecting to GitHub, simulate an immediate callback
         import secrets

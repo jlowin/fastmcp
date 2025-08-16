@@ -57,14 +57,14 @@ Create an OAuth App in your GitHub settings to get the credentials needed for au
 
 ### Step 2: FastMCP Configuration
 
-Create your FastMCP server using the `GitHubProvider`, which handles GitHub's OAuth quirks automatically:
+Create your FastMCP server using the `GitHubOAuthProxyProvider`, which handles GitHub's OAuth quirks automatically:
 
 ```python server.py
 from fastmcp import FastMCP
-from fastmcp.server.auth.providers.github import GitHubProvider
+from fastmcp.server.auth.providers.github import GitHubOAuthProxyProvider
 
-# The GitHubProvider handles GitHub's token format and validation
-auth_provider = GitHubProvider(
+# The GitHubOAuthProxyProvider handles GitHub's token format and validation
+auth_provider = GitHubOAuthProxyProvider(
     client_id="Ov23liAbcDefGhiJkLmN",  # Your GitHub OAuth App Client ID
     client_secret="github_pat_...",     # Your GitHub OAuth App Client Secret
     base_url="http://localhost:8000"    # Must match your OAuth App configuration
@@ -79,7 +79,7 @@ async def get_user_info() -> dict:
     from fastmcp.server.dependencies import get_access_token
     
     token = get_access_token()
-    # The GitHubProvider stores user data in token claims
+    # The GitHubOAuthProxyProvider stores user data in token claims
     return {
         "github_user": token.claims.get("login"),
         "name": token.claims.get("name"),
@@ -166,7 +166,7 @@ async def list_repos() -> list[str]:
 
 ## GitHub OAuth Scopes
 
-GitHub uses OAuth scopes to control what your application can access. The `GitHubProvider` defaults to the `user` scope for basic profile access.
+GitHub uses OAuth scopes to control what your application can access. The `GitHubOAuthProxyProvider` defaults to the `user` scope for basic profile access.
 
 ### Common Scopes
 
@@ -182,7 +182,7 @@ GitHub uses OAuth scopes to control what your application can access. The `GitHu
 Configure required scopes when creating the provider:
 
 ```python
-auth_provider = GitHubProvider(
+auth_provider = GitHubOAuthProxyProvider(
     client_id="...",
     client_secret="...",
     base_url="http://localhost:8000",
@@ -196,14 +196,14 @@ Request only the scopes you need. Users are more likely to authorize apps with m
 
 ## How It Works
 
-The `GitHubProvider` handles several GitHub-specific requirements:
+The `GitHubOAuthProxyProvider` handles several GitHub-specific requirements:
 
 1. **Token Format**: GitHub uses opaque tokens (not JWTs), so the provider validates tokens by calling GitHub's API
 2. **Response Format**: GitHub returns tokens in form-encoded format, which the provider handles transparently
 3. **Token Validation**: Each request triggers an API call to verify the token and get user information
 4. **User Data**: GitHub user information is stored in the token's claims for easy access
 
-This complexity is hidden behind the simple `GitHubProvider` interface, giving you GitHub authentication with minimal configuration.
+This complexity is hidden behind the simple `GitHubOAuthProxyProvider` interface, giving you GitHub authentication with minimal configuration.
 
 ## Production Considerations
 
@@ -224,7 +224,7 @@ import os
 # Dynamically set base URL from environment
 base_url = os.getenv("FASTMCP_BASE_URL", "http://localhost:8000")
 
-auth_provider = GitHubProvider(
+auth_provider = GitHubOAuthProxyProvider(
     client_id=os.getenv("GITHUB_CLIENT_ID"),
     client_secret=os.getenv("GITHUB_CLIENT_SECRET"),
     base_url=base_url
