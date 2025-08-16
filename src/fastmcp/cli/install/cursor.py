@@ -330,7 +330,7 @@ async def cursor_command(
         Path | None,
         cyclopts.Parameter(
             "--workspace",
-            help="Install to workspace .cursor/ directory instead of using deeplink",
+            help="Install to workspace directory (will create .cursor/ inside it) instead of using deeplink",
         ),
     ] = None,
 ) -> None:
