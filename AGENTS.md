@@ -110,6 +110,13 @@ async with Client(transport=StreamableHttpTransport(server_url)) as client:
 - Minor fixes: keep body short and concise
 - No "test plan" sections or testing summaries
 
+### Code Review Guidelines
+
+- Focus on API design and naming clarity
+- Identify confusing patterns (e.g., parameter values that contradict defaults) or non-idiomatic code (mutable defaults, etc.). Contributed code will need to be maintained indefinitely, and by someone other than the author (unless the author is a maintainer).
+- Suggest specific improvements, not generic "add more tests" comments
+- Think about API ergonomics from a user perspective
+
 ### Code Standards
 
 - Python ≥ 3.10 with full type annotations
