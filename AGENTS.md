@@ -201,8 +201,7 @@ uv sync                    # Installs all deps including dev tools
 ### CLI Usage
 
 - **Run server**: `uv run fastmcp run server.py`
-- **Development**: `uv run fastmcp dev server.py` (with Inspector UI)
-- **Help**: `uv run fastmcp --help`
+- **Inspect server**: `uv run fastmcp inspect server.py`
 
 ## Critical Patterns
 
