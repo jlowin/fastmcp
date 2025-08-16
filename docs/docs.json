@@ -109,6 +109,7 @@
                     "icon": "rocket",
                     "pages": [
                       "deployment/running-server",
+                      "deployment/server-configuration",
                       "deployment/testing",
                       "deployment/self-hosted",
                       "deployment/fastmcp-cloud"
