@@ -52,14 +52,38 @@ logger = get_logger(__name__)
 
 
 class ProxyDCRClient(OAuthClientInformationFull):
-    """Client for DCR proxy that accepts any localhost redirect URI."""
+    """Client for DCR proxy that accepts any localhost redirect URI.
+
+    This special client class is critical for the OAuth proxy to work correctly
+    with Dynamic Client Registration (DCR). Here's why it exists:
+
+    Problem:
+    --------
+    When MCP clients use OAuth, they dynamically register with random localhost
+    ports (e.g., http://localhost:55454/callback). The OAuth proxy needs to:
+    1. Accept these dynamic redirect URIs from clients
+    2. Use its own fixed redirect URI with the upstream provider (Google, GitHub, etc.)
+    3. Forward the authorization code back to the client's dynamic URI
+
+    Solution:
+    ---------
+    This class overrides redirect_uri validation to accept ANY localhost URI,
+    while the proxy internally uses its own fixed redirect URI with the upstream
+    provider. This allows the flow to work even when clients reconnect with
+    different ports or when tokens are cached.
+
+    Without this class, clients would get "Redirect URI not registered" errors
+    when trying to authenticate with cached tokens, because the stored client
+    would have fixed redirect URIs that don't match the new dynamic port.
+    """
 
     def validate_redirect_uri(self, redirect_uri: AnyUrl | None) -> AnyUrl:
         """Accept any localhost redirect URI for DCR clients.
 
         Since we're acting as a proxy and clients register dynamically,
         we need to accept their localhost redirect URIs even though they're
-        not pre-registered with us.
+        not pre-registered with us. This is essential for cached token
+        scenarios where the client may reconnect with a different port.
         """
         if redirect_uri is not None:
             # Accept any localhost redirect URI for DCR clients
@@ -81,17 +105,111 @@ HTTP_TIMEOUT_SECONDS: Final[int] = 30
 
 
 class OAuthProxy(OAuthProvider):
-    """OAuth provider that proxies requests to an upstream Authorization Server.
+    """OAuth provider that presents a DCR-compliant interface while proxying to non-DCR IDPs.
 
-    This provider implements a transparent proxy pattern where:
-    - Client registration is handled locally with fixed upstream credentials
-    - Authorization flows redirect to the upstream server
-    - Token exchange is forwarded to the upstream server
-    - Token validation uses upstream JWKS
-    - Minimal local state is maintained for bookkeeping
+    Purpose
+    -------
+    MCP clients expect OAuth providers to support Dynamic Client Registration (DCR),
+    where clients can register themselves dynamically and receive unique credentials.
+    Most enterprise IDPs (Google, GitHub, Azure AD, etc.) don't support DCR and require
+    pre-registered OAuth applications with fixed credentials.
 
-    This approach allows FastMCP to work with enterprise identity providers
-    that don't support Dynamic Client Registration or have restricted policies.
+    This proxy bridges that gap by:
+    - Presenting a full DCR-compliant OAuth interface to MCP clients
+    - Translating DCR registration requests to use pre-configured upstream credentials
+    - Proxying all OAuth flows to the upstream IDP with appropriate translations
+    - Managing the state and security requirements of both protocols
+
+    Architecture Overview
+    --------------------
+    The proxy maintains a single OAuth app registration with the upstream provider
+    while allowing unlimited MCP clients to register and authenticate dynamically.
+    It implements the complete OAuth 2.1 + DCR specification for clients while
+    translating to whatever OAuth variant the upstream provider requires.
+
+    Key Translation Challenges Solved
+    ---------------------------------
+    1. Dynamic Client Registration:
+       - MCP clients expect to register dynamically and get unique credentials
+       - Upstream IDPs require pre-registered apps with fixed credentials
+       - Solution: Accept DCR requests, return shared upstream credentials
+
+    2. Dynamic Redirect URIs:
+       - MCP clients use random localhost ports that change between sessions
+       - Upstream IDPs require fixed, pre-registered redirect URIs
+       - Solution: Use proxy's fixed callback URL with upstream, forward to client's dynamic URI
+
+    3. Authorization Code Mapping:
+       - Upstream returns codes for the proxy's redirect URI
+       - Clients expect codes for their own redirect URIs
+       - Solution: Exchange upstream code server-side, issue new code to client
+
+    4. State Parameter Collision:
+       - Both client and proxy need to maintain state through the flow
+       - Only one state parameter available in OAuth
+       - Solution: Use transaction ID as state with upstream, preserve client's state
+
+    5. Token Management:
+       - Clients may expect different token formats/claims than upstream provides
+       - Need to track tokens for revocation and refresh
+       - Solution: Store token relationships, forward upstream tokens transparently
+
+    OAuth Flow Implementation
+    ------------------------
+    1. Client Registration (DCR):
+       - Accept any client registration request
+       - Store ProxyDCRClient that accepts dynamic redirect URIs
+       - Return shared upstream credentials to all clients
+
+    2. Authorization:
+       - Store transaction mapping client details to proxy flow
+       - Redirect to upstream with proxy's fixed redirect URI
+       - Use transaction ID as state parameter with upstream
+
+    3. Upstream Callback:
+       - Exchange upstream authorization code for tokens (server-side)
+       - Generate new authorization code bound to client's PKCE challenge
+       - Redirect to client's original dynamic redirect URI
+
+    4. Token Exchange:
+       - Validate client's code and PKCE verifier
+       - Return previously obtained upstream tokens
+       - Clean up one-time use authorization code
+
+    5. Token Refresh:
+       - Forward refresh requests to upstream using authlib
+       - Handle token rotation if upstream issues new refresh token
+       - Update local token mappings
+
+    State Management
+    ---------------
+    The proxy maintains minimal but crucial state:
+    - _clients: DCR registrations (all use ProxyDCRClient for flexibility)
+    - _oauth_transactions: Active authorization flows with client context
+    - _client_codes: Authorization codes with PKCE challenges and upstream tokens
+    - _access_tokens, _refresh_tokens: Token storage for revocation
+    - Token relationship mappings for cleanup and rotation
+
+    Security Considerations
+    ----------------------
+    - PKCE enforced end-to-end (client to proxy, proxy to upstream)
+    - Authorization codes are single-use with short expiry
+    - Transaction IDs are cryptographically random
+    - All state is cleaned up after use to prevent replay
+    - Token validation delegates to upstream provider
+
+    Provider Compatibility
+    ---------------------
+    Works with any OAuth 2.0 provider that supports:
+    - Authorization code flow
+    - Fixed redirect URI (configured in provider's app settings)
+    - Standard token endpoint
+
+    Handles provider-specific requirements:
+    - Google: Ensures minimum scope requirements
+    - GitHub: Compatible with OAuth Apps and GitHub Apps
+    - Azure AD: Handles tenant-specific endpoints
+    - Generic: Works with any spec-compliant provider
     """
 
     def __init__(
@@ -217,6 +335,11 @@ class OAuthProxy(OAuthProvider):
 
         For unregistered clients, returns a ProxyDCRClient that accepts
         any localhost redirect URI for DCR clients.
+
+        Even registered clients use ProxyDCRClient to ensure they can
+        authenticate with different dynamic ports on reconnection. This
+        handles the case where a client with cached tokens reconnects
+        on a different port.
         """
         client = self._clients.get(client_id)
 
@@ -247,10 +370,31 @@ class OAuthProxy(OAuthProvider):
 
         This ensures all clients use the same credentials that are registered
         with the upstream server.
+
+        Implementation Detail:
+        We store a ProxyDCRClient (not the original client_info) to ensure
+        the client can reconnect with different dynamic redirect URIs. This is
+        essential for cached token scenarios where the client port changes.
+
+        The flow:
+        1. Client provides its desired redirect URIs (dynamic localhost ports)
+        2. We create a ProxyDCRClient that will accept ANY localhost URI
+        3. We store this flexible client for future authentications
+        4. When client reconnects with a different port, ProxyDCRClient accepts it
         """
         # Always use the upstream credentials
         upstream_id = self._upstream_client_id
         upstream_secret = self._upstream_client_secret.get_secret_value()
+
+        # Create a ProxyDCRClient that accepts any localhost redirect URI
+        proxy_client = ProxyDCRClient(
+            client_id=upstream_id,
+            client_secret=upstream_secret,
+            redirect_uris=client_info.redirect_uris or [AnyUrl("http://localhost")],
+            grant_types=client_info.grant_types
+            or ["authorization_code", "refresh_token"],
+            token_endpoint_auth_method="none",
+        )
 
         # Modify the client_info object in place (framework ignores return values)
         client_info.client_id = upstream_id
@@ -261,13 +405,13 @@ class OAuthProxy(OAuthProvider):
         if not client_info.grant_types:
             client_info.grant_types = ["authorization_code", "refresh_token"]
 
-        # Store the client registration using the upstream ID
-        self._clients[upstream_id] = client_info
+        # Store the ProxyDCRClient using the upstream ID
+        self._clients[upstream_id] = proxy_client
 
         logger.info(
             "Registered client %s with %d redirect URIs",
             upstream_id,
-            len(client_info.redirect_uris),
+            len(proxy_client.redirect_uris),
         )
 
     # -------------------------------------------------------------------------

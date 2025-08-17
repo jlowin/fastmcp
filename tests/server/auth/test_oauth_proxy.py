@@ -225,10 +225,16 @@ class TestOAuthProxyComprehensive:
         assert temp_client.client_secret is None
         assert temp_client.token_endpoint_auth_method == "none"
         assert len(temp_client.redirect_uris) >= 1
-        # Should include the proxy's callback URL
-        assert (
-            str(temp_client.redirect_uris[0]) == "https://myserver.com/oauth/callback"
+        # ProxyDCRClient uses a placeholder URL but accepts any localhost URI
+        assert str(temp_client.redirect_uris[0]) == "http://localhost/"
+
+        # Test that it accepts any localhost redirect URI
+        from pydantic import AnyUrl
+
+        test_uri = temp_client.validate_redirect_uri(
+            AnyUrl("http://localhost:55454/callback")
         )
+        assert str(test_uri) == "http://localhost:55454/callback"
 
     @pytest.mark.asyncio
     async def test_authorize_creates_transaction(self, oauth_proxy):
