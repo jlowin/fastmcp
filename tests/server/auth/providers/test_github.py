@@ -30,7 +30,10 @@ class TestGitHubOAuthProxyProviderSettings:
             settings = GitHubOAuthProxyProviderSettings()
 
             assert settings.client_id == "env_client_id"
-            assert settings.client_secret.get_secret_value() == "env_secret"
+            assert (
+                settings.client_secret
+                and settings.client_secret.get_secret_value() == "env_secret"
+            )
             assert settings.base_url == "https://example.com"
             assert settings.redirect_path == "/custom/callback"
             assert settings.timeout_seconds == 30
@@ -52,7 +55,10 @@ class TestGitHubOAuthProxyProviderSettings:
             )
 
             assert settings.client_id == "explicit_client_id"
-            assert settings.client_secret.get_secret_value() == "explicit_secret"
+            assert (
+                settings.client_secret
+                and settings.client_secret.get_secret_value() == "explicit_secret"
+            )
 
 
 class TestGitHubOAuthProxyProvider:

@@ -7,10 +7,10 @@ Google's OAuth flow, token validation, and user management.
 Example:
     ```python
     from fastmcp import FastMCP
-    from fastmcp.server.auth.providers.google import GoogleProvider
+    from fastmcp.server.auth.providers.google import GoogleOAuthProxyProvider
 
     # Simple Google OAuth protection
-    auth = GoogleProvider(
+    auth = GoogleOAuthProxyProvider(
         client_id="your-google-client-id.apps.googleusercontent.com",
         client_secret="your-google-client-secret"
     )
@@ -70,9 +70,8 @@ class GoogleTokenVerifier(TokenVerifier):
 
                 if response.status_code != 200:
                     logger.debug(
-                        "Google token verification failed: %d - %s",
+                        "Google token verification failed: %d",
                         response.status_code,
-                        response.text[:200],
                     )
                     return None
 
@@ -124,7 +123,7 @@ class GoogleTokenVerifier(TokenVerifier):
                     expires_at = int(time.time() + int(expires_in))
 
                 # Create AccessToken with Google user info
-                return AccessToken(
+                access_token = AccessToken(
                     token=token,
                     client_id=token_info.get(
                         "audience", "unknown"
@@ -144,6 +143,8 @@ class GoogleTokenVerifier(TokenVerifier):
                         "google_token_info": token_info,
                     },
                 )
+                logger.debug("Google token verified successfully")
+                return access_token
 
         except httpx.RequestError as e:
             logger.debug("Failed to verify Google token: %s", e)
@@ -154,7 +155,7 @@ class GoogleTokenVerifier(TokenVerifier):
 
 
 @register_provider("Google")
-class GoogleProvider(OAuthProxy):
+class GoogleOAuthProxyProvider(OAuthProxy):
     """Complete Google OAuth provider for FastMCP.
 
     This provider makes it trivial to add Google OAuth protection to any
@@ -170,9 +171,9 @@ class GoogleProvider(OAuthProxy):
     Example:
         ```python
         from fastmcp import FastMCP
-        from fastmcp.server.auth.providers.google import GoogleProvider
+        from fastmcp.server.auth.providers.google import GoogleOAuthProxyProvider
 
-        auth = GoogleProvider(
+        auth = GoogleOAuthProxyProvider(
             client_id="123456789.apps.googleusercontent.com",
             client_secret="GOCSPX-abc123...",
             base_url="https://my-server.com"  # Optional, defaults to http://localhost:8000
@@ -197,14 +198,15 @@ class GoogleProvider(OAuthProxy):
             client_id: Google OAuth client ID (e.g., "123456789.apps.googleusercontent.com")
             client_secret: Google OAuth client secret (e.g., "GOCSPX-abc123...")
             base_url: Public URL of your FastMCP server (for OAuth callbacks)
-            required_scopes: Required Google scopes (defaults to ["openid", "email"])
+            required_scopes: Required Google scopes (defaults to []). Common scopes include:
+                - "openid" for OpenID Connect
+                - "https://www.googleapis.com/auth/userinfo.email" for email access
+                - "https://www.googleapis.com/auth/userinfo.profile" for profile info
             timeout_seconds: HTTP request timeout for Google API calls
         """
-        # Default to openid and email scopes if None is passed
-        # If empty list is passed explicitly, respect that (no required scopes)
+        # Default to no required scopes - let users specify what they need
         if required_scopes is None:
-            required_scopes = ["openid", "email"]
-        # If empty list passed explicitly, keep it empty (no scope requirements)
+            required_scopes = []
 
         # Create Google token verifier
         token_verifier = GoogleTokenVerifier(
@@ -220,6 +222,7 @@ class GoogleProvider(OAuthProxy):
             upstream_client_secret=client_secret,
             token_verifier=token_verifier,
             base_url=base_url,
+            redirect_path="/oauth/callback",  # Fixed callback path for Google
             issuer_url=base_url,  # We act as the issuer for client registration
         )
 

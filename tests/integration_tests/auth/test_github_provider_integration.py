@@ -6,8 +6,8 @@ This test requires a GitHub OAuth app to be created at https://github.com/settin
 with the following configuration:
 - Redirect URL: http://127.0.0.1:9100/oauth/callback
 - Client ID and Client Secret should be set as environment variables:
-  - FASTMCP_TEST_AUTH_GITHUB_CLIENT_ID
-  - FASTMCP_TEST_AUTH_GITHUB_CLIENT_SECRET
+  - FASTMCP_TEST_AUTH_GITHUB_OAUTH_PROXY_CLIENT_ID
+  - FASTMCP_TEST_AUTH_GITHUB_OAUTH_PROXY_CLIENT_SECRET
 """
 
 import os
@@ -22,28 +22,30 @@ from fastmcp.client import Client
 from fastmcp.server.auth.providers.github import GitHubOAuthProxyProvider
 from fastmcp.utilities.tests import HeadlessOAuth, run_server_in_process
 
-FASTMCP_TEST_AUTH_GITHUB_CLIENT_ID = os.getenv("FASTMCP_TEST_AUTH_GITHUB_CLIENT_ID")
-FASTMCP_TEST_AUTH_GITHUB_CLIENT_SECRET = os.getenv(
-    "FASTMCP_TEST_AUTH_GITHUB_CLIENT_SECRET"
+FASTMCP_TEST_AUTH_GITHUB_OAUTH_PROXY_CLIENT_ID = os.getenv(
+    "FASTMCP_TEST_AUTH_GITHUB_OAUTH_PROXY_CLIENT_ID"
+)
+FASTMCP_TEST_AUTH_GITHUB_OAUTH_PROXY_CLIENT_SECRET = os.getenv(
+    "FASTMCP_TEST_AUTH_GITHUB_OAUTH_PROXY_CLIENT_SECRET"
 )
 
 # Skip tests if no GitHub OAuth credentials are available
 pytestmark = pytest.mark.xfail(
-    not FASTMCP_TEST_AUTH_GITHUB_CLIENT_ID
-    or not FASTMCP_TEST_AUTH_GITHUB_CLIENT_SECRET,
-    reason="FASTMCP_TEST_AUTH_GITHUB_CLIENT_ID and FASTMCP_TEST_AUTH_GITHUB_CLIENT_SECRET environment variables are not set or empty",
+    not FASTMCP_TEST_AUTH_GITHUB_OAUTH_PROXY_CLIENT_ID
+    or not FASTMCP_TEST_AUTH_GITHUB_OAUTH_PROXY_CLIENT_SECRET,
+    reason="FASTMCP_TEST_AUTH_GITHUB_OAUTH_PROXY_CLIENT_ID and FASTMCP_TEST_AUTH_GITHUB_OAUTH_PROXY_CLIENT_SECRET environment variables are not set or empty",
 )
 
 
 def create_github_server(host: str = "127.0.0.1", port: int = 9100, **kwargs) -> None:
     """Create FastMCP server with GitHub OAuth protection."""
-    assert FASTMCP_TEST_AUTH_GITHUB_CLIENT_ID is not None
-    assert FASTMCP_TEST_AUTH_GITHUB_CLIENT_SECRET is not None
+    assert FASTMCP_TEST_AUTH_GITHUB_OAUTH_PROXY_CLIENT_ID is not None
+    assert FASTMCP_TEST_AUTH_GITHUB_OAUTH_PROXY_CLIENT_SECRET is not None
 
     # Create GitHub OAuth provider
     auth = GitHubOAuthProxyProvider(
-        client_id=FASTMCP_TEST_AUTH_GITHUB_CLIENT_ID,
-        client_secret=FASTMCP_TEST_AUTH_GITHUB_CLIENT_SECRET,
+        client_id=FASTMCP_TEST_AUTH_GITHUB_OAUTH_PROXY_CLIENT_ID,
+        client_secret=FASTMCP_TEST_AUTH_GITHUB_OAUTH_PROXY_CLIENT_SECRET,
         base_url=f"http://{host}:{port}",
     )
 
@@ -68,13 +70,13 @@ def create_github_server_with_mock_callback(
     host: str = "127.0.0.1", port: int = 9100, **kwargs
 ) -> None:
     """Create FastMCP server with GitHub OAuth that mocks the callback for testing."""
-    assert FASTMCP_TEST_AUTH_GITHUB_CLIENT_ID is not None
-    assert FASTMCP_TEST_AUTH_GITHUB_CLIENT_SECRET is not None
+    assert FASTMCP_TEST_AUTH_GITHUB_OAUTH_PROXY_CLIENT_ID is not None
+    assert FASTMCP_TEST_AUTH_GITHUB_OAUTH_PROXY_CLIENT_SECRET is not None
 
     # Create GitHub OAuth provider
     auth = GitHubOAuthProxyProvider(
-        client_id=FASTMCP_TEST_AUTH_GITHUB_CLIENT_ID,
-        client_secret=FASTMCP_TEST_AUTH_GITHUB_CLIENT_SECRET,
+        client_id=FASTMCP_TEST_AUTH_GITHUB_OAUTH_PROXY_CLIENT_ID,
+        client_secret=FASTMCP_TEST_AUTH_GITHUB_OAUTH_PROXY_CLIENT_SECRET,
         base_url=f"http://{host}:{port}",
     )
 
@@ -126,11 +128,12 @@ def create_github_server_with_mock_callback(
             # Return a mock AccessToken for our fake tokens
             import time
 
-            from mcp.server.auth.provider import AccessToken
+            from fastmcp.server.auth.auth import AccessToken
 
             return AccessToken(
                 token=token,
-                client_id=FASTMCP_TEST_AUTH_GITHUB_CLIENT_ID,
+                client_id=FASTMCP_TEST_AUTH_GITHUB_OAUTH_PROXY_CLIENT_ID
+                or "test-client",
                 scopes=["user"],
                 expires_at=int(time.time() + 3600),
             )
@@ -197,10 +200,10 @@ def github_client_with_mock(github_server_with_mock: str) -> Client:
 
 async def test_github_oauth_credentials_available():
     """Test that GitHub OAuth credentials are available for testing."""
-    assert FASTMCP_TEST_AUTH_GITHUB_CLIENT_ID is not None
-    assert FASTMCP_TEST_AUTH_GITHUB_CLIENT_SECRET is not None
-    assert len(FASTMCP_TEST_AUTH_GITHUB_CLIENT_ID) > 0
-    assert len(FASTMCP_TEST_AUTH_GITHUB_CLIENT_SECRET) > 0
+    assert FASTMCP_TEST_AUTH_GITHUB_OAUTH_PROXY_CLIENT_ID is not None
+    assert FASTMCP_TEST_AUTH_GITHUB_OAUTH_PROXY_CLIENT_SECRET is not None
+    assert len(FASTMCP_TEST_AUTH_GITHUB_OAUTH_PROXY_CLIENT_ID) > 0
+    assert len(FASTMCP_TEST_AUTH_GITHUB_OAUTH_PROXY_CLIENT_SECRET) > 0
 
 
 async def test_github_oauth_authorization_redirect(github_server: str):
@@ -262,7 +265,10 @@ async def test_github_oauth_authorization_redirect(github_server: str):
         # Check that GitHub gets the right parameters
         github_params = parse_qs(redirect_parsed.query)
         assert "client_id" in github_params
-        assert github_params["client_id"][0] == FASTMCP_TEST_AUTH_GITHUB_CLIENT_ID
+        assert (
+            github_params["client_id"][0]
+            == FASTMCP_TEST_AUTH_GITHUB_OAUTH_PROXY_CLIENT_ID
+        )
         assert "redirect_uri" in github_params
         # The redirect_uri should be our proxy's callback, not the client's
         proxy_callback = github_params["redirect_uri"][0]

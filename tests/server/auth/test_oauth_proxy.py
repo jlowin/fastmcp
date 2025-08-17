@@ -244,7 +244,6 @@ class TestOAuthProxyComprehensive:
             redirect_uri_provided_explicitly=True,
             state="client-state-123",
             code_challenge="challenge-abc",
-            code_challenge_method="S256",
             scopes=["read", "write"],
         )
 
@@ -518,7 +517,7 @@ class TestOAuthProxyComprehensive:
         auth_code = AuthorizationCode(
             code=code,
             client_id="test-client",
-            redirect_uri="http://localhost:54321/callback",
+            redirect_uri=AnyUrl("http://localhost:54321/callback"),
             redirect_uri_provided_explicitly=True,
             scopes=["read", "write"],
             expires_at=time.time() + 300,

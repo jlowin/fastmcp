@@ -37,7 +37,7 @@ from mcp.server.auth.settings import (
     RevocationOptions,
 )
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
-from pydantic import AnyHttpUrl, AnyUrl, SecretStr, ValidationError
+from pydantic import AnyHttpUrl, AnyUrl, SecretStr
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse
 from starlette.routing import Route
@@ -49,6 +49,28 @@ if TYPE_CHECKING:
     pass
 
 logger = get_logger(__name__)
+
+
+class ProxyDCRClient(OAuthClientInformationFull):
+    """Client for DCR proxy that accepts any localhost redirect URI."""
+
+    def validate_redirect_uri(self, redirect_uri: AnyUrl | None) -> AnyUrl:
+        """Accept any localhost redirect URI for DCR clients.
+
+        Since we're acting as a proxy and clients register dynamically,
+        we need to accept their localhost redirect URIs even though they're
+        not pre-registered with us.
+        """
+        if redirect_uri is not None:
+            # Accept any localhost redirect URI for DCR clients
+            uri_str = str(redirect_uri)
+            if uri_str.startswith(("http://localhost", "http://127.0.0.1")):
+                return redirect_uri
+            # Fall back to normal validation for non-localhost URIs
+            return super().validate_redirect_uri(redirect_uri)
+        # If no redirect_uri provided, use default behavior
+        return super().validate_redirect_uri(redirect_uri)
+
 
 # Default token expiration times
 DEFAULT_ACCESS_TOKEN_EXPIRY_SECONDS: Final[int] = 60 * 60  # 1 hour
@@ -193,48 +215,26 @@ class OAuthProxy(OAuthProvider):
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
         """Get client information by ID.
 
-        For unregistered clients, returns a temporary client object to allow
-        the OAuth flow to proceed. The client will be properly registered
-        during the register_client call.
+        For unregistered clients, returns a ProxyDCRClient that accepts
+        any localhost redirect URI for DCR clients.
         """
         client = self._clients.get(client_id)
 
         if client is None:
-            # Create a temporary client to allow OAuth flow validation
-            # We'll use a permissive redirect_uri list since upstream will validate
-            # Use the full callback URL, not just base_url
-            callback_url = f"{str(self.base_url).rstrip('/')}{self._redirect_path}"
-            redirect_uris: list[AnyUrl] = [AnyUrl(callback_url)]  # type: ignore[list-item]
-
-            # Try to extract redirect_uri from current request context
-            try:
-                from fastmcp.server.dependencies import (
-                    get_http_request,  # local import to avoid circular dependency
-                )
-
-                req = get_http_request()
-                maybe_redirect = req.query_params.get("redirect_uri")
-                if maybe_redirect:
-                    try:
-                        redirect_uri = AnyUrl(maybe_redirect)
-                        redirect_uris.insert(0, redirect_uri)
-                    except ValidationError:
-                        logger.warning(
-                            "Invalid redirect_uri in request: %s", maybe_redirect
-                        )
-            except Exception:
-                # No active request context or other error - use defaults
-                pass
-
-            client = OAuthClientInformationFull(
+            # For unregistered DCR clients, create a permissive client
+            # that will accept any localhost redirect URI
+            # We need at least one URI for Pydantic validation, but our custom
+            # validate_redirect_uri will accept any localhost URI
+            client = ProxyDCRClient(
                 client_id=client_id,
                 client_secret=None,
-                redirect_uris=redirect_uris,
+                redirect_uris=[
+                    AnyUrl("http://localhost")
+                ],  # Placeholder - we accept any localhost URI
                 grant_types=["authorization_code", "refresh_token"],
                 token_endpoint_auth_method="none",
             )
-
-            logger.debug("Created temporary client for %s", client_id)
+            logger.debug("Created ProxyDCRClient for unregistered client %s", client_id)
 
         return client
 
@@ -537,7 +537,12 @@ class OAuthProxy(OAuthProvider):
         Delegates to the JWT verifier which handles signature validation,
         expiration checking, and claims validation using the upstream JWKS.
         """
-        return await self._token_validator.verify_token(token)
+        result = await self._token_validator.verify_token(token)
+        if result:
+            logger.debug("Token validated successfully")
+        else:
+            logger.debug("Token validation failed")
+        return result
 
     # -------------------------------------------------------------------------
     # Token Revocation
