@@ -42,6 +42,14 @@ jobs:
           python-version: "3.12"
       - name: Install dependencies
         run: uv sync --dev
+      - name: Check lockfile is up to date
+        run: |
+          if ! uv lock --check; then
+            echo "❌ Lockfile is out of date!"
+            echo "To update the lockfile, run 'uv lock'."
+            exit 1
+          fi
+          echo "✅ Lockfile is up to date"
       - name: Run pre-commit
         uses: pre-commit/action@v3.0.1
         env:

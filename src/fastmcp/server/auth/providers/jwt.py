@@ -15,8 +15,7 @@ from pydantic import AnyHttpUrl, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing_extensions import TypedDict
 
-from fastmcp.server.auth import TokenVerifier
-from fastmcp.server.auth.auth import AccessToken
+from fastmcp.server.auth import AccessToken, TokenVerifier
 from fastmcp.server.auth.registry import register_provider
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.types import NotSet, NotSetT
@@ -108,8 +107,6 @@ class RSAKeyPair:
             additional_claims: Any additional claims to include
             kid: Key ID to include in header
         """
-        import time
-
         # Create header
         header = {"alg": "RS256"}
         if kid:

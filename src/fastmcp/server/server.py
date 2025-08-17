@@ -49,7 +49,7 @@ from fastmcp.prompts import Prompt, PromptManager
 from fastmcp.prompts.prompt import FunctionPrompt
 from fastmcp.resources import Resource, ResourceManager
 from fastmcp.resources.template import ResourceTemplate
-from fastmcp.server.auth.auth import AuthProvider
+from fastmcp.server.auth import AuthProvider
 from fastmcp.server.auth.registry import get_registered_provider
 from fastmcp.server.http import (
     StarletteWithLifespan,
@@ -172,6 +172,7 @@ class FastMCP(Generic[LifespanResultT]):
         )
 
         self._additional_http_routes: list[BaseRoute] = []
+        self._mounted_servers: list[MountedServer] = []
         self._tool_manager = ToolManager(
             duplicate_behavior=on_duplicate_tools,
             mask_error_details=mask_error_details,
@@ -474,6 +475,24 @@ class FastMCP(Generic[LifespanResultT]):
             return fn
 
         return decorator
+
+    def _get_additional_http_routes(self) -> list[BaseRoute]:
+        """Get all additional HTTP routes including from mounted servers.
+
+        Returns a list of all custom HTTP routes from this server and
+        recursively from all mounted servers.
+
+        Returns:
+            List of Starlette BaseRoute objects
+        """
+        routes = list(self._additional_http_routes)
+
+        # Recursively get routes from mounted servers
+        for mounted_server in self._mounted_servers:
+            mounted_routes = mounted_server.server._get_additional_http_routes()
+            routes.extend(mounted_routes)
+
+        return routes
 
     async def _mcp_list_tools(self) -> list[MCPTool]:
         logger.debug("Handler called: list_tools")
@@ -1796,6 +1815,7 @@ class FastMCP(Generic[LifespanResultT]):
             server=server,
             resource_prefix_format=self.resource_prefix_format,
         )
+        self._mounted_servers.append(mounted_server)
         self._tool_manager.mount(mounted_server)
         self._resource_manager.mount(mounted_server)
         self._prompt_manager.mount(mounted_server)
