@@ -475,7 +475,6 @@ class OAuthProxy(OAuthProvider):
             txn_id,
             client.client_id,
         )
-        logger.debug("IdP authorization URL: %s", upstream_url)
 
         return upstream_url
 
@@ -1048,7 +1047,7 @@ class OAuthProxy(OAuthProvider):
                 f"{client_redirect_uri}{separator}{urlencode(callback_params)}"
             )
 
-            logger.info(f"Forwarding to client callback: {client_callback_url}")
+            logger.debug(f"Forwarding to client callback for transaction {txn_id}")
 
             return RedirectResponse(url=client_callback_url, status_code=302)
 

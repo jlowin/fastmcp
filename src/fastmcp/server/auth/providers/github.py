@@ -127,9 +127,9 @@ class GitHubTokenVerifier(TokenVerifier):
                     required_scopes_set = set(self.required_scopes)
                     if not required_scopes_set.issubset(token_scopes_set):
                         logger.debug(
-                            "GitHub token missing required scopes. Has: %s, Required: %s",
-                            token_scopes_set,
-                            required_scopes_set,
+                            "GitHub token missing required scopes. Has %d, needs %d",
+                            len(token_scopes_set),
+                            len(required_scopes_set),
                         )
                         return None
 
