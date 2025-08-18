@@ -14,14 +14,18 @@ SERVER_URL = "http://127.0.0.1:8000/mcp"
 
 
 async def main():
-    async with Client(SERVER_URL, auth="oauth") as client:
-        assert await client.ping()
-        print("✅ Successfully authenticated!")
+    try:
+        async with Client(SERVER_URL, auth="oauth") as client:
+            assert await client.ping()
+            print("✅ Successfully authenticated!")
 
-        tools = await client.list_tools()
-        print(f"🔧 Available tools ({len(tools)}):")
-        for tool in tools:
-            print(f"   - {tool.name}: {tool.description}")
+            tools = await client.list_tools()
+            print(f"🔧 Available tools ({len(tools)}):")
+            for tool in tools:
+                print(f"   - {tool.name}: {tool.description}")
+    except Exception as e:
+        print(f"❌ Authentication failed: {e}")
+        raise
 
 
 if __name__ == "__main__":
