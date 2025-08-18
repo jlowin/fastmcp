@@ -7,10 +7,10 @@ Google's OAuth flow, token validation, and user management.
 Example:
     ```python
     from fastmcp import FastMCP
-    from fastmcp.server.auth.providers.google import GoogleOAuthProxyProvider
+    from fastmcp.server.auth.providers.google import GoogleProvider
 
     # Simple Google OAuth protection
-    auth = GoogleOAuthProxyProvider(
+    auth = GoogleProvider(
         client_id="your-google-client-id.apps.googleusercontent.com",
         client_secret="your-google-client-secret"
     )
@@ -155,7 +155,7 @@ class GoogleTokenVerifier(TokenVerifier):
 
 
 @register_provider("Google")
-class GoogleOAuthProxyProvider(OAuthProxy):
+class GoogleProvider(OAuthProxy):
     """Complete Google OAuth provider for FastMCP.
 
     This provider makes it trivial to add Google OAuth protection to any
@@ -171,9 +171,9 @@ class GoogleOAuthProxyProvider(OAuthProxy):
     Example:
         ```python
         from fastmcp import FastMCP
-        from fastmcp.server.auth.providers.google import GoogleOAuthProxyProvider
+        from fastmcp.server.auth.providers.google import GoogleProvider
 
-        auth = GoogleOAuthProxyProvider(
+        auth = GoogleProvider(
             client_id="123456789.apps.googleusercontent.com",
             client_secret="GOCSPX-abc123...",
             base_url="https://my-server.com"  # Optional, defaults to http://localhost:8000

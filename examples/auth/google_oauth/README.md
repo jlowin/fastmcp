@@ -14,8 +14,8 @@ Demonstrates FastMCP server protection with Google OAuth.
 
 2. Set environment variables:
    ```bash
-   export FASTMCP_TEST_AUTH_GOOGLE_OAUTH_PROXY_CLIENT_ID="your-client-id.apps.googleusercontent.com"
-   export FASTMCP_TEST_AUTH_GOOGLE_OAUTH_PROXY_CLIENT_SECRET="your-client-secret"
+   export FASTMCP_TEST_AUTH_GOOGLE_CLIENT_ID="your-client-id.apps.googleusercontent.com"
+   export FASTMCP_TEST_AUTH_GOOGLE_CLIENT_SECRET="your-client-secret"
    ```
 
 3. Run the server:

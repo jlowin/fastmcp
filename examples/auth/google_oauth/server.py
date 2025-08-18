@@ -3,8 +3,8 @@
 This example demonstrates how to protect a FastMCP server with Google OAuth.
 
 Required environment variables:
-- FASTMCP_TEST_AUTH_GOOGLE_OAUTH_PROXY_CLIENT_ID: Your Google OAuth client ID
-- FASTMCP_TEST_AUTH_GOOGLE_OAUTH_PROXY_CLIENT_SECRET: Your Google OAuth client secret
+- FASTMCP_TEST_AUTH_GOOGLE_CLIENT_ID: Your Google OAuth client ID
+- FASTMCP_TEST_AUTH_GOOGLE_CLIENT_SECRET: Your Google OAuth client secret
 
 To run:
     python server.py
@@ -13,11 +13,11 @@ To run:
 import os
 
 from fastmcp import FastMCP
-from fastmcp.server.auth.providers.google import GoogleOAuthProxyProvider
+from fastmcp.server.auth.providers.google import GoogleProvider
 
-auth = GoogleOAuthProxyProvider(
-    client_id=os.getenv("FASTMCP_TEST_AUTH_GOOGLE_OAUTH_PROXY_CLIENT_ID") or "",
-    client_secret=os.getenv("FASTMCP_TEST_AUTH_GOOGLE_OAUTH_PROXY_CLIENT_SECRET") or "",
+auth = GoogleProvider(
+    client_id=os.getenv("FASTMCP_TEST_AUTH_GOOGLE_CLIENT_ID") or "",
+    client_secret=os.getenv("FASTMCP_TEST_AUTH_GOOGLE_CLIENT_SECRET") or "",
     base_url="http://localhost:8000",
     # redirect_path="/oauth/callback",  # Default path - change if using a different callback URL
     # Optional: specify required scopes

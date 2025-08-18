@@ -235,8 +235,8 @@ Different OAuth providers use different token formats, requiring appropriate ver
 
 | Provider | Token Type | Verification Method | Built-in Support |
 |----------|-----------|--------------------|-----------------|
-| GitHub | Opaque | API validation (`/user` endpoint) | ✅ `GitHubOAuthProxyProvider` |
-| Google | JWT | JWKS signature verification | ✅ `GoogleOAuthProxyProvider` |
+| GitHub | Opaque | API validation (`/user` endpoint) | ✅ `GitHubProvider` |
+| Google | JWT | JWKS signature verification | ✅ `GoogleProvider` |
 | Azure AD | JWT | JWKS signature verification | Configure `JWTVerifier` |
 | Discord | Opaque | API validation | ✅ `DiscordOAuthProxyProvider` |
 | Custom | Varies | Implement `TokenVerifier` | Extend base class |
@@ -246,10 +246,10 @@ Different OAuth providers use different token formats, requiring appropriate ver
 FastMCP includes pre-configured providers that handle token verification automatically:
 
 ```python
-from fastmcp.server.auth.providers.github import GitHubOAuthProxyProvider
+from fastmcp.server.auth.providers.github import GitHubProvider
 
 # GitHub provider with automatic API-based token validation
-auth = GitHubOAuthProxyProvider(
+auth = GitHubProvider(
     client_id="your-github-client-id",
     client_secret="your-github-client-secret",
     base_url="https://your-server.com"

@@ -6,13 +6,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from fastmcp.server.auth.providers.github import (
-    GitHubOAuthProxyProvider,
-    GitHubOAuthProxyProviderSettings,
+    GitHubProvider,
+    GitHubProviderSettings,
     GitHubTokenVerifier,
 )
 
 
-class TestGitHubOAuthProxyProviderSettings:
+class TestGitHubProviderSettings:
     """Test settings for GitHub OAuth provider."""
 
     def test_settings_from_env_vars(self):
@@ -20,14 +20,14 @@ class TestGitHubOAuthProxyProviderSettings:
         with patch.dict(
             os.environ,
             {
-                "FASTMCP_SERVER_AUTH_GITHUB_OAUTH_PROXY_CLIENT_ID": "env_client_id",
-                "FASTMCP_SERVER_AUTH_GITHUB_OAUTH_PROXY_CLIENT_SECRET": "env_secret",
-                "FASTMCP_SERVER_AUTH_GITHUB_OAUTH_PROXY_BASE_URL": "https://example.com",
-                "FASTMCP_SERVER_AUTH_GITHUB_OAUTH_PROXY_REDIRECT_PATH": "/custom/callback",
-                "FASTMCP_SERVER_AUTH_GITHUB_OAUTH_PROXY_TIMEOUT_SECONDS": "30",
+                "FASTMCP_SERVER_AUTH_GITHUB_CLIENT_ID": "env_client_id",
+                "FASTMCP_SERVER_AUTH_GITHUB_CLIENT_SECRET": "env_secret",
+                "FASTMCP_SERVER_AUTH_GITHUB_BASE_URL": "https://example.com",
+                "FASTMCP_SERVER_AUTH_GITHUB_REDIRECT_PATH": "/custom/callback",
+                "FASTMCP_SERVER_AUTH_GITHUB_TIMEOUT_SECONDS": "30",
             },
         ):
-            settings = GitHubOAuthProxyProviderSettings()
+            settings = GitHubProviderSettings()
 
             assert settings.client_id == "env_client_id"
             assert (
@@ -43,11 +43,11 @@ class TestGitHubOAuthProxyProviderSettings:
         with patch.dict(
             os.environ,
             {
-                "FASTMCP_SERVER_AUTH_GITHUB_OAUTH_PROXY_CLIENT_ID": "env_client_id",
-                "FASTMCP_SERVER_AUTH_GITHUB_OAUTH_PROXY_CLIENT_SECRET": "env_secret",
+                "FASTMCP_SERVER_AUTH_GITHUB_CLIENT_ID": "env_client_id",
+                "FASTMCP_SERVER_AUTH_GITHUB_CLIENT_SECRET": "env_secret",
             },
         ):
-            settings = GitHubOAuthProxyProviderSettings.model_validate(
+            settings = GitHubProviderSettings.model_validate(
                 {
                     "client_id": "explicit_client_id",
                     "client_secret": "explicit_secret",
@@ -61,12 +61,12 @@ class TestGitHubOAuthProxyProviderSettings:
             )
 
 
-class TestGitHubOAuthProxyProvider:
-    """Test GitHubOAuthProxyProvider initialization."""
+class TestGitHubProvider:
+    """Test GitHubProvider initialization."""
 
     def test_init_with_explicit_params(self):
         """Test initialization with explicit parameters."""
-        provider = GitHubOAuthProxyProvider(
+        provider = GitHubProvider(
             client_id="test_client",
             client_secret="test_secret",
             base_url="https://example.com",
@@ -88,12 +88,12 @@ class TestGitHubOAuthProxyProvider:
         with patch.dict(
             os.environ,
             {
-                "FASTMCP_SERVER_AUTH_GITHUB_OAUTH_PROXY_CLIENT_ID": "env_client_id",
-                "FASTMCP_SERVER_AUTH_GITHUB_OAUTH_PROXY_CLIENT_SECRET": "env_secret",
-                "FASTMCP_SERVER_AUTH_GITHUB_OAUTH_PROXY_BASE_URL": "https://env-example.com",
+                "FASTMCP_SERVER_AUTH_GITHUB_CLIENT_ID": "env_client_id",
+                "FASTMCP_SERVER_AUTH_GITHUB_CLIENT_SECRET": "env_secret",
+                "FASTMCP_SERVER_AUTH_GITHUB_BASE_URL": "https://env-example.com",
             },
         ):
-            provider = GitHubOAuthProxyProvider()
+            provider = GitHubProvider()
 
             assert provider._upstream_client_id == "env_client_id"
             assert provider._upstream_client_secret.get_secret_value() == "env_secret"
@@ -104,11 +104,11 @@ class TestGitHubOAuthProxyProvider:
         with patch.dict(
             os.environ,
             {
-                "FASTMCP_SERVER_AUTH_GITHUB_OAUTH_PROXY_CLIENT_ID": "env_client_id",
-                "FASTMCP_SERVER_AUTH_GITHUB_OAUTH_PROXY_CLIENT_SECRET": "env_secret",
+                "FASTMCP_SERVER_AUTH_GITHUB_CLIENT_ID": "env_client_id",
+                "FASTMCP_SERVER_AUTH_GITHUB_CLIENT_SECRET": "env_secret",
             },
         ):
-            provider = GitHubOAuthProxyProvider(
+            provider = GitHubProvider(
                 client_id="explicit_client",
                 client_secret="explicit_secret",
             )
@@ -121,16 +121,16 @@ class TestGitHubOAuthProxyProvider:
     def test_init_missing_client_id_raises_error(self):
         """Test that missing client_id raises ValueError."""
         with pytest.raises(ValueError, match="client_id is required"):
-            GitHubOAuthProxyProvider(client_secret="test_secret")
+            GitHubProvider(client_secret="test_secret")
 
     def test_init_missing_client_secret_raises_error(self):
         """Test that missing client_secret raises ValueError."""
         with pytest.raises(ValueError, match="client_secret is required"):
-            GitHubOAuthProxyProvider(client_id="test_client")
+            GitHubProvider(client_id="test_client")
 
     def test_init_defaults(self):
         """Test that default values are applied correctly."""
-        provider = GitHubOAuthProxyProvider(
+        provider = GitHubProvider(
             client_id="test_client",
             client_secret="test_secret",
         )

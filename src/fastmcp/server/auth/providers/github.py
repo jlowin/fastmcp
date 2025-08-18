@@ -7,10 +7,10 @@ GitHub's OAuth flow, token validation, and user management.
 Example:
     ```python
     from fastmcp import FastMCP
-    from fastmcp.server.auth.providers.github import GitHubOAuthProxyProvider
+    from fastmcp.server.auth.providers.github import GitHubProvider
 
     # Simple GitHub OAuth protection
-    auth = GitHubOAuthProxyProvider(
+    auth = GitHubProvider(
         client_id="your-github-client-id",
         client_secret="your-github-client-secret"
     )
@@ -35,11 +35,11 @@ from fastmcp.utilities.types import NotSet, NotSetT
 logger = get_logger(__name__)
 
 
-class GitHubOAuthProxyProviderSettings(BaseSettings):
+class GitHubProviderSettings(BaseSettings):
     """Settings for GitHub OAuth provider."""
 
     model_config = SettingsConfigDict(
-        env_prefix="FASTMCP_SERVER_AUTH_GITHUB_OAUTH_PROXY_",
+        env_prefix="FASTMCP_SERVER_AUTH_GITHUB_",
         env_file=".env",
         extra="ignore",
     )
@@ -158,7 +158,7 @@ class GitHubTokenVerifier(TokenVerifier):
 
 
 @register_provider("GitHub")
-class GitHubOAuthProxyProvider(OAuthProxy):
+class GitHubProvider(OAuthProxy):
     """Complete GitHub OAuth provider for FastMCP.
 
     This provider makes it trivial to add GitHub OAuth protection to any
@@ -174,9 +174,9 @@ class GitHubOAuthProxyProvider(OAuthProxy):
     Example:
         ```python
         from fastmcp import FastMCP
-        from fastmcp.server.auth.providers.github import GitHubOAuthProxyProvider
+        from fastmcp.server.auth.providers.github import GitHubProvider
 
-        auth = GitHubOAuthProxyProvider(
+        auth = GitHubProvider(
             client_id="Ov23li...",
             client_secret="abc123...",
             base_url="https://my-server.com"  # Optional, defaults to http://localhost:8000
@@ -206,7 +206,7 @@ class GitHubOAuthProxyProvider(OAuthProxy):
             required_scopes: Required GitHub scopes (defaults to ["user"])
             timeout_seconds: HTTP request timeout for GitHub API calls
         """
-        settings = GitHubOAuthProxyProviderSettings.model_validate(
+        settings = GitHubProviderSettings.model_validate(
             {
                 k: v
                 for k, v in {
@@ -224,11 +224,11 @@ class GitHubOAuthProxyProvider(OAuthProxy):
         # Validate required settings
         if not settings.client_id:
             raise ValueError(
-                "client_id is required - set via parameter or FASTMCP_SERVER_AUTH_GITHUB_OAUTH_PROXY_CLIENT_ID"
+                "client_id is required - set via parameter or FASTMCP_SERVER_AUTH_GITHUB_CLIENT_ID"
             )
         if not settings.client_secret:
             raise ValueError(
-                "client_secret is required - set via parameter or FASTMCP_SERVER_AUTH_GITHUB_OAUTH_PROXY_CLIENT_SECRET"
+                "client_secret is required - set via parameter or FASTMCP_SERVER_AUTH_GITHUB_CLIENT_SECRET"
             )
 
         # Apply defaults

@@ -11,8 +11,8 @@ Demonstrates FastMCP server protection with GitHub OAuth.
 
 2. Set environment variables:
    ```bash
-   export FASTMCP_TEST_AUTH_GITHUB_OAUTH_PROXY_CLIENT_ID="your-client-id"
-   export FASTMCP_TEST_AUTH_GITHUB_OAUTH_PROXY_CLIENT_SECRET="your-client-secret"
+   export FASTMCP_TEST_AUTH_GITHUB_CLIENT_ID="your-client-id"
+   export FASTMCP_TEST_AUTH_GITHUB_CLIENT_SECRET="your-client-secret"
    ```
 
 3. Run the server:
