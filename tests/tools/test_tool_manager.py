@@ -1004,6 +1004,7 @@ class TestMountedComponentsRaiseOnLoadError:
     async def test_mounted_components_raise_on_load_error_default_false(self):
         """Test that by default, mounted component load errors are warned and not raised."""
         import fastmcp
+        from fastmcp.utilities.tests import temporary_settings
         
         # Ensure default setting is False
         assert fastmcp.settings.mounted_components_raise_on_load_error is False
@@ -1022,25 +1023,18 @@ class TestMountedComponentsRaiseOnLoadError:
 
     async def test_mounted_components_raise_on_load_error_true(self):
         """Test that when enabled, mounted component load errors are raised."""
-        import fastmcp
+        from fastmcp.utilities.tests import temporary_settings
         
-        # Set the setting to True
-        original_setting = fastmcp.settings.mounted_components_raise_on_load_error
-        fastmcp.settings.mounted_components_raise_on_load_error = True
+        parent_mcp = FastMCP("ParentServer")
+        child_mcp = FastMCP("FailingChildServer")
         
-        try:
-            parent_mcp = FastMCP("ParentServer")
-            child_mcp = FastMCP("FailingChildServer")
-            
-            # Create a failing mounted server
-            mounted_server = parent_mcp.mount(child_mcp, prefix="child")
-            # Corrupt the child server to make it fail during tool loading
-            child_mcp._tool_manager._mounted_servers.append("invalid")  # type: ignore
-            
+        # Create a failing mounted server
+        mounted_server = parent_mcp.mount(child_mcp, prefix="child")
+        # Corrupt the child server to make it fail during tool loading
+        child_mcp._tool_manager._mounted_servers.append("invalid")  # type: ignore
+        
+        # Use temporary settings context manager
+        with temporary_settings(mounted_components_raise_on_load_error=True):
             # Should raise the exception
-            with pytest.raises(Exception):
+            with pytest.raises(AttributeError, match=""):
                 await parent_mcp._tool_manager.list_tools()
-        
-        finally:
-            # Restore original setting
-            fastmcp.settings.mounted_components_raise_on_load_error = original_setting

@@ -111,11 +111,11 @@ class ResourceManager:
                     all_resources.update(child_resources)
             except Exception as e:
                 # Skip failed mounts silently, matches existing behavior
-                if settings.mounted_components_raise_on_load_error:
-                    raise e
                 logger.warning(
                     f"Failed to get resources from server: {mounted.server.name!r}, mounted at: {mounted.prefix!r}: {e}"
                 )
+                if settings.mounted_components_raise_on_load_error:
+                    raise e
                 continue
 
         # Finally, add local resources, which always take precedence
@@ -164,11 +164,11 @@ class ResourceManager:
                     all_templates.update(child_dict)
             except Exception as e:
                 # Skip failed mounts silently, matches existing behavior
-                if settings.mounted_components_raise_on_load_error:
-                    raise e
                 logger.warning(
                     f"Failed to get templates from server: {mounted.server.name!r}, mounted at: {mounted.prefix!r}: {e}"
                 )
+                if settings.mounted_components_raise_on_load_error:
+                    raise e
                 continue
 
         # Finally, add local templates, which always take precedence
