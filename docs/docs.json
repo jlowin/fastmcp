@@ -159,6 +159,7 @@
                   "integrations/anthropic",
                   "integrations/authkit",
                   "integrations/github",
+                  "integrations/google",
                   "integrations/chatgpt",
                   "integrations/claude-code",
                   "integrations/claude-desktop",

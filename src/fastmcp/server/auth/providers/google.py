@@ -24,15 +24,34 @@ from __future__ import annotations
 import time
 
 import httpx
-from pydantic import AnyHttpUrl
+from pydantic import AnyHttpUrl, SecretStr
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from fastmcp.server.auth import TokenVerifier
 from fastmcp.server.auth.auth import AccessToken
 from fastmcp.server.auth.proxy import OAuthProxy
 from fastmcp.server.auth.registry import register_provider
 from fastmcp.utilities.logging import get_logger
+from fastmcp.utilities.types import NotSet, NotSetT
 
 logger = get_logger(__name__)
+
+
+class GoogleProviderSettings(BaseSettings):
+    """Settings for Google OAuth provider."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="FASTMCP_SERVER_AUTH_GOOGLE_",
+        env_file=".env",
+        extra="ignore",
+    )
+
+    client_id: str | None = None
+    client_secret: SecretStr | None = None
+    base_url: AnyHttpUrl | str | None = None
+    redirect_path: str | None = None
+    required_scopes: list[str] | None = None
+    timeout_seconds: int | None = None
 
 
 class GoogleTokenVerifier(TokenVerifier):
@@ -186,11 +205,12 @@ class GoogleProvider(OAuthProxy):
     def __init__(
         self,
         *,
-        client_id: str,
-        client_secret: str,
-        base_url: AnyHttpUrl | str = "http://localhost:8000",
-        required_scopes: list[str] | None = None,
-        timeout_seconds: int = 10,
+        client_id: str | NotSetT = NotSet,
+        client_secret: str | NotSetT = NotSet,
+        base_url: AnyHttpUrl | str | NotSetT = NotSet,
+        redirect_path: str | NotSetT = NotSet,
+        required_scopes: list[str] | None | NotSetT = NotSet,
+        timeout_seconds: int | NotSetT = NotSet,
     ):
         """Initialize Google OAuth provider.
 
@@ -198,36 +218,69 @@ class GoogleProvider(OAuthProxy):
             client_id: Google OAuth client ID (e.g., "123456789.apps.googleusercontent.com")
             client_secret: Google OAuth client secret (e.g., "GOCSPX-abc123...")
             base_url: Public URL of your FastMCP server (for OAuth callbacks)
+            redirect_path: Redirect path configured in Google OAuth app (defaults to "/oauth/callback")
             required_scopes: Required Google scopes (defaults to []). Common scopes include:
                 - "openid" for OpenID Connect
                 - "https://www.googleapis.com/auth/userinfo.email" for email access
                 - "https://www.googleapis.com/auth/userinfo.profile" for profile info
             timeout_seconds: HTTP request timeout for Google API calls
         """
-        # Default to no required scopes - let users specify what they need
-        if required_scopes is None:
-            required_scopes = []
+        settings = GoogleProviderSettings.model_validate(
+            {
+                k: v
+                for k, v in {
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "base_url": base_url,
+                    "redirect_path": redirect_path,
+                    "required_scopes": required_scopes,
+                    "timeout_seconds": timeout_seconds,
+                }.items()
+                if v is not NotSet
+            }
+        )
+
+        # Validate required settings
+        if not settings.client_id:
+            raise ValueError(
+                "client_id is required - set via parameter or FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_ID"
+            )
+        if not settings.client_secret:
+            raise ValueError(
+                "client_secret is required - set via parameter or FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_SECRET"
+            )
+
+        # Apply defaults
+        base_url_final = settings.base_url or "http://localhost:8000"
+        redirect_path_final = settings.redirect_path or "/oauth/callback"
+        timeout_seconds_final = settings.timeout_seconds or 10
+        required_scopes_final = settings.required_scopes or []
 
         # Create Google token verifier
         token_verifier = GoogleTokenVerifier(
-            required_scopes=required_scopes,
-            timeout_seconds=timeout_seconds,
+            required_scopes=required_scopes_final,
+            timeout_seconds=timeout_seconds_final,
+        )
+
+        # Extract secret string from SecretStr
+        client_secret_str = (
+            settings.client_secret.get_secret_value() if settings.client_secret else ""
         )
 
         # Initialize OAuth proxy with Google endpoints
         super().__init__(
             upstream_authorization_endpoint="https://accounts.google.com/o/oauth2/v2/auth",
             upstream_token_endpoint="https://oauth2.googleapis.com/token",
-            upstream_client_id=client_id,
-            upstream_client_secret=client_secret,
+            upstream_client_id=settings.client_id,
+            upstream_client_secret=client_secret_str,
             token_verifier=token_verifier,
-            base_url=base_url,
-            redirect_path="/oauth/callback",  # Fixed callback path for Google
-            issuer_url=base_url,  # We act as the issuer for client registration
+            base_url=base_url_final,
+            redirect_path=redirect_path_final,
+            issuer_url=base_url_final,  # We act as the issuer for client registration
         )
 
         logger.info(
             "Initialized Google OAuth provider for client %s with scopes: %s",
-            client_id,
-            required_scopes,
+            settings.client_id,
+            required_scopes_final,
         )
