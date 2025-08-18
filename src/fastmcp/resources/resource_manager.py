@@ -115,7 +115,7 @@ class ResourceManager:
                     f"Failed to get resources from server: {mounted.server.name!r}, mounted at: {mounted.prefix!r}: {e}"
                 )
                 if settings.mounted_components_raise_on_load_error:
-                    raise e
+                    raise
                 continue
 
         # Finally, add local resources, which always take precedence
@@ -168,7 +168,7 @@ class ResourceManager:
                     f"Failed to get templates from server: {mounted.server.name!r}, mounted at: {mounted.prefix!r}: {e}"
                 )
                 if settings.mounted_components_raise_on_load_error:
-                    raise e
+                    raise
                 continue
 
         # Finally, add local templates, which always take precedence

@@ -87,7 +87,7 @@ class ToolManager:
                     f"Failed to get tools from server: {mounted.server.name!r}, mounted at: {mounted.prefix!r}: {e}"
                 )
                 if settings.mounted_components_raise_on_load_error:
-                    raise e
+                    raise
                 continue
 
         # Finally, add local tools, which always take precedence
