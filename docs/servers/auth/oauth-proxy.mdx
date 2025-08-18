@@ -8,25 +8,55 @@ tag: NEW
 
 import { VersionBadge } from "/snippets/version-badge.mdx"
 
-<VersionBadge version="2.11.3" />
+<VersionBadge version="2.12.0" />
 
-OAuth Proxy enables your FastMCP server to authenticate with third-party OAuth providers that don't support Dynamic Client Registration (DCR). This includes major providers like GitHub, Google, Azure, and most enterprise identity systems. The proxy acts as a bridge, implementing DCR locally while forwarding OAuth flows to upstream providers.
+OAuth Proxy enables your FastMCP server to authenticate with OAuth providers that **don't support Dynamic Client Registration (DCR)**. This includes virtually all traditional OAuth providers: GitHub, Google, Azure, Facebook, Discord, and most enterprise identity systems.
+
+While MCP clients expect to dynamically register and obtain credentials, these providers require manual app registration through their developer consoles. OAuth Proxy bridges this gap by presenting a DCR-compliant interface to MCP clients while using your pre-registered credentials with the upstream provider.
 
 <Tip>
-OAuth Proxy is the recommended approach for integrating with existing OAuth providers that have pre-registered applications. It provides seamless authentication without requiring providers to support DCR.
+**When to use OAuth Proxy vs RemoteAuthProvider:**
+- **OAuth Proxy**: For providers WITHOUT Dynamic Client Registration (GitHub, Google, Azure, etc.)
+- **RemoteAuthProvider**: For providers WITH Dynamic Client Registration (WorkOS AuthKit, etc.)
+
+OAuth Proxy makes traditional OAuth providers work seamlessly with MCP's automated authentication flow.
 </Tip>
 
-## The DCR Problem
+## DCR vs Non-DCR Providers
 
-The MCP specification assumes OAuth providers support Dynamic Client Registration - the ability for clients to automatically register themselves and obtain credentials. This works well with modern providers like WorkOS, but fails with traditional OAuth providers that require manual app registration.
+The key distinction in MCP authentication is whether your OAuth provider supports **Dynamic Client Registration (DCR)**:
 
-Most established OAuth providers require you to:
-- Manually register your application through their developer console
-- Obtain a fixed client ID and client secret
-- Configure specific redirect URIs in advance
-- Manage these credentials securely
+- **Providers WITH DCR** (WorkOS, some OIDC providers): Use [`RemoteAuthProvider`](/servers/auth/remote-oauth)
+  - Clients can register themselves automatically
+  - No manual app registration needed
+  - True dynamic authentication flow
 
-This creates a fundamental incompatibility: MCP clients expect to register dynamically, but your OAuth provider only accepts pre-registered credentials. The OAuth Proxy solves this by presenting a DCR-compatible interface to MCP clients while using your fixed credentials with the upstream provider.
+- **Providers WITHOUT DCR** (GitHub, Google, Azure, Discord, etc.): Use `OAuthProxy` (this guide)
+  - Requires manual app registration in provider's console
+  - You obtain fixed client ID and secret
+  - OAuth Proxy bridges the gap for MCP compatibility
+
+OAuth Proxy makes non-DCR providers work seamlessly with MCP by implementing a local DCR interface that always returns your pre-registered credentials.
+
+## Understanding the DCR Gap
+
+**Dynamic Client Registration (DCR)** allows OAuth clients to automatically register themselves with an authorization server and obtain credentials without manual intervention. The MCP specification is designed around this capability, expecting clients to register dynamically.
+
+However, most OAuth providers don't support DCR:
+
+| Provider Type | DCR Support | Registration Method | Examples |
+|--------------|-------------|--------------------|-----------|
+| Modern Auth Platforms | ✅ Yes | Automatic via API | WorkOS AuthKit, Some OIDC providers |
+| Traditional OAuth | ❌ No | Manual via console | GitHub, Google, Azure, Discord, Facebook |
+| Enterprise SSO | ❌ No | IT Administrator | Okta, AD FS, PingIdentity |
+
+Providers without DCR require you to:
+- Manually register applications through their developer console
+- Obtain fixed client IDs and secrets that never change
+- Pre-configure specific redirect URIs
+- Manage credentials through their web interface
+
+This creates a fundamental incompatibility: MCP clients expect to call a registration endpoint and receive credentials, but traditional providers only work with pre-registered apps. OAuth Proxy solves this by accepting any client registration request and returning your fixed upstream credentials.
 
 ## How OAuth Proxy Works
 
@@ -60,24 +90,28 @@ sequenceDiagram
     Proxy-->>Client: 10. Returns stored provider tokens
 ```
 
-### The Callback Forwarding Breakthrough
+### The Callback Forwarding Pattern
 
-The OAuth Proxy solves the fundamental redirect URI problem that has plagued OAuth integrations:
+OAuth Proxy implements an innovative callback forwarding pattern that solves the redirect URI mismatch problem:
 
-**The Problem:**
-- MCP clients use dynamic localhost ports (e.g., `http://localhost:54321/callback`)
-- OAuth providers require pre-registered, fixed redirect URIs
-- Result: "redirect_uri not associated with application" errors
+**The Challenge:**
+- MCP clients listen on random localhost ports (e.g., `http://localhost:54321/callback`)
+- Each client session uses a different port
+- OAuth providers only accept pre-registered, fixed redirect URIs
+- Registering every possible localhost port is impossible
 
 **The Solution:**
-1. **Client Registration**: Client registers with any localhost callback URL
-2. **Transaction Storage**: Proxy stores client's callback URL and PKCE challenge
-3. **Provider Redirect**: Proxy redirects to provider with its own fixed callback (`/oauth/callback`)
-4. **Server-Side Exchange**: Proxy receives provider callback and exchanges code for tokens
-5. **Client Forwarding**: Proxy redirects to client's original callback with a new code
-6. **Token Delivery**: Client exchanges the new code for the provider's tokens
 
-This enables any MCP client to work with any OAuth provider, regardless of redirect URI restrictions.
+The proxy acts as an intermediary callback handler:
+
+1. **Dynamic Registration**: Client provides its localhost callback URL during registration
+2. **Transaction Tracking**: Proxy stores the client's callback URL with a transaction ID
+3. **Fixed Provider Callback**: Proxy uses its own fixed callback URL with the provider
+4. **Server-Side Token Exchange**: Proxy receives the provider's callback and exchanges the authorization code for tokens
+5. **Client Forwarding**: Proxy redirects to the client's original localhost callback with a new authorization code
+6. **Token Delivery**: Client exchanges this new code with the proxy to receive the provider's tokens
+
+This pattern maintains full OAuth 2.1 security (including PKCE) while enabling dynamic client ports to work with fixed provider callbacks. The client never knows it's talking to a proxy - it experiences a standard DCR flow.
 
 ## Basic Implementation
 
@@ -193,14 +227,42 @@ The OAuth Proxy's callback forwarding enables **any MCP client** to authenticate
 
 This breakthrough means that MCP clients no longer need to worry about registering specific callback URLs with OAuth providers. The proxy handles the complexity of bridging dynamic client callbacks with the fixed URLs that providers require. The entire flow maintains OAuth 2.1 and PKCE (RFC-7636) compliance for security.
 
-## Token Verification
+## Token Verification Strategies
 
-The `OAuthProxy` requires a [`TokenVerifier`](/servers/auth/token-verification) instance to validate tokens from your OAuth provider. The token verifier determines how tokens are validated:
+Different OAuth providers use different token formats, requiring appropriate verification strategies:
 
-- **JWT tokens**: Use `JWTVerifier` with the provider's JWKS endpoint for offline validation
-- **Opaque tokens**: Implement a custom `TokenVerifier` subclass that validates tokens via API calls
+### Provider Token Types
 
-FastMCP includes provider-specific implementations like `GitHubOAuthProxyProvider` that include appropriate token verifiers for their token formats. For other providers, you'll need to provide a token verifier that matches how that provider's tokens work.
+| Provider | Token Type | Verification Method | Built-in Support |
+|----------|-----------|--------------------|-----------------|
+| GitHub | Opaque | API validation (`/user` endpoint) | ✅ `GitHubOAuthProxyProvider` |
+| Google | JWT | JWKS signature verification | ✅ `GoogleOAuthProxyProvider` |
+| Azure AD | JWT | JWKS signature verification | Configure `JWTVerifier` |
+| Discord | Opaque | API validation | ✅ `DiscordOAuthProxyProvider` |
+| Custom | Varies | Implement `TokenVerifier` | Extend base class |
+
+### Using Built-in Providers
+
+FastMCP includes pre-configured providers that handle token verification automatically:
+
+```python
+from fastmcp.server.auth.providers.github import GitHubOAuthProxyProvider
+
+# GitHub provider with automatic API-based token validation
+auth = GitHubOAuthProxyProvider(
+    client_id="your-github-client-id",
+    client_secret="your-github-client-secret",
+    base_url="https://your-server.com"
+)
+```
+
+### Custom Token Verification
+
+For providers without built-in support, implement a [`TokenVerifier`](/servers/auth/token-verification):
+
+- **JWT tokens**: Use `JWTVerifier` with the provider's JWKS endpoint
+- **Opaque tokens**: Extend `TokenVerifier` to validate via the provider's API
+- **Hybrid approaches**: Combine multiple verification methods as needed
 
 ## Environment Configuration
 
