@@ -996,3 +996,51 @@ class TestToolErrorHandling:
         # Exception message should contain the tool name but not the internal details
         assert "Error calling tool 'async_buggy_tool'" in str(excinfo.value)
         assert "Internal async error details" not in str(excinfo.value)
+
+
+class TestMountedComponentsRaiseOnLoadError:
+    """Test the mounted_components_raise_on_load_error setting."""
+
+    async def test_mounted_components_raise_on_load_error_default_false(self):
+        """Test that by default, mounted component load errors are warned and not raised."""
+        import fastmcp
+        
+        # Ensure default setting is False
+        assert fastmcp.settings.mounted_components_raise_on_load_error is False
+        
+        parent_mcp = FastMCP("ParentServer")
+        child_mcp = FastMCP("FailingChildServer")
+        
+        # Create a failing mounted server by corrupting it
+        mounted_server = parent_mcp.mount(child_mcp, prefix="child")
+        # Corrupt the child server to make it fail during tool loading
+        child_mcp._tool_manager._mounted_servers.append("invalid")  # type: ignore
+        
+        # Should not raise, just warn
+        tools = await parent_mcp._tool_manager.list_tools()
+        assert isinstance(tools, list)  # Should return empty list, not raise
+
+    async def test_mounted_components_raise_on_load_error_true(self):
+        """Test that when enabled, mounted component load errors are raised."""
+        import fastmcp
+        
+        # Set the setting to True
+        original_setting = fastmcp.settings.mounted_components_raise_on_load_error
+        fastmcp.settings.mounted_components_raise_on_load_error = True
+        
+        try:
+            parent_mcp = FastMCP("ParentServer")
+            child_mcp = FastMCP("FailingChildServer")
+            
+            # Create a failing mounted server
+            mounted_server = parent_mcp.mount(child_mcp, prefix="child")
+            # Corrupt the child server to make it fail during tool loading
+            child_mcp._tool_manager._mounted_servers.append("invalid")  # type: ignore
+            
+            # Should raise the exception
+            with pytest.raises(Exception):
+                await parent_mcp._tool_manager.list_tools()
+        
+        finally:
+            # Restore original setting
+            fastmcp.settings.mounted_components_raise_on_load_error = original_setting

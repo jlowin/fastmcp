@@ -77,6 +77,8 @@ class PromptManager:
                     all_prompts.update(child_dict)
             except Exception as e:
                 # Skip failed mounts silently, matches existing behavior
+                if settings.mounted_components_raise_on_load_error:
+                    raise e
                 logger.warning(
                     f"Failed to get prompts from server: {mounted.server.name!r}, mounted at: {mounted.prefix!r}: {e}"
                 )
