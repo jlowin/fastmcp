@@ -1004,18 +1004,18 @@ class TestMountedComponentsRaiseOnLoadError:
     async def test_mounted_components_raise_on_load_error_default_false(self):
         """Test that by default, mounted component load errors are warned and not raised."""
         import fastmcp
-        
+
         # Ensure default setting is False
         assert fastmcp.settings.mounted_components_raise_on_load_error is False
-        
+
         parent_mcp = FastMCP("ParentServer")
         child_mcp = FastMCP("FailingChildServer")
-        
+
         # Create a failing mounted server by corrupting it
         parent_mcp.mount(child_mcp, prefix="child")
         # Corrupt the child server to make it fail during tool loading
         child_mcp._tool_manager._mounted_servers.append("invalid")  # type: ignore
-        
+
         # Should not raise, just warn
         tools = await parent_mcp._tool_manager.list_tools()
         assert isinstance(tools, list)  # Should return empty list, not raise
@@ -1024,12 +1024,12 @@ class TestMountedComponentsRaiseOnLoadError:
         """Test that when enabled, mounted component load errors are raised."""
         parent_mcp = FastMCP("ParentServer")
         child_mcp = FastMCP("FailingChildServer")
-        
+
         # Create a failing mounted server
         parent_mcp.mount(child_mcp, prefix="child")
         # Corrupt the child server to make it fail during tool loading
         child_mcp._tool_manager._mounted_servers.append("invalid")  # type: ignore
-        
+
         # Use temporary settings context manager
         with temporary_settings(mounted_components_raise_on_load_error=True):
             # Should raise the exception
