@@ -10,17 +10,20 @@ Demonstrates FastMCP server protection with GitHub OAuth.
    - Copy the Client ID and Client Secret
 
 2. Set environment variables:
+
    ```bash
-   export FASTMCP_TEST_AUTH_GITHUB_CLIENT_ID="your-client-id"
-   export FASTMCP_TEST_AUTH_GITHUB_CLIENT_SECRET="your-client-secret"
+   export FASTMCP_SERVER_AUTH_GITHUB_CLIENT_ID="your-client-id"
+   export FASTMCP_SERVER_AUTH_GITHUB_CLIENT_SECRET="your-client-secret"
    ```
 
 3. Run the server:
+
    ```bash
    python server.py
    ```
 
 4. In another terminal, run the client:
+
    ```bash
    python client.py
    ```
