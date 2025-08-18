@@ -103,7 +103,7 @@ def install_cursor_workspace(
     # Create .cursor directory in workspace
     cursor_dir = workspace_path / ".cursor"
     cursor_dir.mkdir(exist_ok=True)
-    
+
     config_file = cursor_dir / "mcp.json"
 
     # Build uv run command
@@ -155,7 +155,9 @@ def install_cursor_workspace(
 
         # Update configuration with the new server
         update_config_file(config_file, name, server_config)
-        print(f"[green]Successfully installed '{name}' to workspace at {workspace_path}[/green]")
+        print(
+            f"[green]Successfully installed '{name}' to workspace at {workspace_path}[/green]"
+        )
         return True
     except Exception as e:
         print(f"[red]Failed to install server to workspace: {e}[/red]")
