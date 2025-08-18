@@ -172,7 +172,8 @@
                   "integrations/openai",
                   "integrations/openapi",
                   "integrations/permit",
-                  "integrations/starlette"
+                  "integrations/starlette",
+                  "integrations/workos-oauth"
                 ]
               },
               {

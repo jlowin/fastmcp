@@ -1,0 +1,306 @@
+---
+title: WorkOS OAuth 🤝 FastMCP
+sidebarTitle: WorkOS OAuth
+description: Secure your FastMCP server with WorkOS SSO using OAuth 2.0
+icon: key
+---
+
+import { VersionBadge } from "/snippets/version-badge.mdx"
+
+<VersionBadge version="2.11.0" />
+
+This guide shows you how to secure your FastMCP server using **WorkOS SSO** with OAuth 2.0 authentication. This integration uses the [**Remote OAuth**](/servers/auth/remote-oauth) pattern, where WorkOS handles user authentication and your FastMCP server validates the tokens.
+
+<Note>
+This WorkOS OAuth provider works with traditional OAuth flows and WorkOS User Management. If you're using AuthKit with Dynamic Client Registration (DCR), see the [AuthKit integration](/integrations/authkit) instead.
+</Note>
+
+## Configuration
+
+### Prerequisites
+
+Before you begin, you will need:
+1. A **[WorkOS Account](https://workos.com/)** and a new **Application**.
+2. **SSO Connection** configured in WorkOS (SAML, OIDC, or OAuth provider like Google/Microsoft).
+3. Your FastMCP server's URL (can be localhost for development, e.g., `http://localhost:8000`).
+
+### Step 1: WorkOS Application Setup
+
+In your WorkOS Dashboard, create and configure your application:
+
+<Steps>
+<Step title="Create WorkOS Application">
+    Go to **Applications** and create a new application. Note your:
+    - **Client ID** (e.g., `client_123`)
+    - **Client Secret** (e.g., `sk_test_456`)  
+    - **API Key** (e.g., `sk_test_789`)
+</Step>
+
+<Step title="Configure SSO Connection">
+    Go to **Connections** and set up your SSO connection:
+    - **SAML**: Configure with your identity provider
+    - **OIDC**: Set up OpenID Connect provider
+    - **OAuth**: Configure Google, Microsoft, GitHub, etc.
+    
+    Note your **Organization ID** (e.g., `org_123`) or **Connection ID** (e.g., `conn_456`).
+</Step>
+
+<Step title="Set Redirect URLs">
+    In your application settings, add redirect URLs for the OAuth flow:
+    - For development: `http://localhost:8000/oauth/callback`
+    - For production: `https://yourdomain.com/oauth/callback`
+</Step>
+</Steps>
+
+### Step 2: FastMCP Configuration
+
+Create your FastMCP server with the `WorkOSProvider`:
+
+```python server.py
+from fastmcp import FastMCP
+from fastmcp.server.auth.providers.workos import WorkOSProvider
+
+# Configure WorkOS OAuth provider
+auth_provider = WorkOSProvider(
+    client_id="client_123",
+    client_secret="sk_test_456", 
+    api_key="sk_test_789",
+    base_url="http://localhost:8000",
+    organization_id="org_123"  # Optional: for SSO
+)
+
+# Create authenticated FastMCP server
+mcp = FastMCP(name="WorkOS OAuth Secured App", auth=auth_provider)
+
+@mcp.tool
+def get_user_profile() -> dict:
+    """Get authenticated user information."""
+    # User claims are available in the token context
+    return {"message": "Hello authenticated user!"}
+
+@mcp.resource("workos://user/info")
+def user_info() -> str:
+    """Get user information from WorkOS token."""
+    return "User authenticated via WorkOS SSO"
+```
+
+## Environment Variables
+
+You can configure the WorkOS OAuth provider using environment variables:
+
+```bash
+# Required credentials
+FASTMCP_SERVER_AUTH=WORKOS
+FASTMCP_SERVER_AUTH_WORKOS_CLIENT_ID=client_123
+FASTMCP_SERVER_AUTH_WORKOS_CLIENT_SECRET=sk_test_456
+FASTMCP_SERVER_AUTH_WORKOS_API_KEY=sk_test_789
+
+# Server configuration
+FASTMCP_SERVER_AUTH_WORKOS_BASE_URL=http://localhost:8000
+
+# Optional: SSO configuration
+FASTMCP_SERVER_AUTH_WORKOS_ORGANIZATION_ID=org_123
+FASTMCP_SERVER_AUTH_WORKOS_CONNECTION_ID=conn_456
+
+# Optional: Required scopes
+FASTMCP_SERVER_AUTH_WORKOS_REQUIRED_SCOPES=["profile", "email"]
+```
+
+When using environment variables, you can create a simpler server:
+
+```python server.py
+from fastmcp import FastMCP
+
+# FastMCP automatically creates WorkOSProvider from environment variables
+mcp = FastMCP(name="WorkOS OAuth Secured App")
+```
+
+## Testing
+
+### Start the Server
+
+Run your server locally:
+
+```bash
+fastmcp run server.py --transport http --port 8000
+```
+
+### Test with Client
+
+Create a test client that automatically handles OAuth authentication:
+
+```python client.py
+from fastmcp import Client
+from fastmcp.client.auth.oauth import OAuth
+from fastmcp.client.transports import StreamableHttpTransport
+import asyncio
+
+async def main():
+    # Configure OAuth authentication
+    oauth_auth = OAuth(
+        mcp_url="http://localhost:8000/mcp",
+        scopes=["profile", "email"],
+        client_name="FastMCP WorkOS Test Client"
+    )
+    
+    # Create authenticated client
+    client = Client(
+        transport=StreamableHttpTransport("http://localhost:8000/mcp"),
+        auth=oauth_auth
+    )
+    
+    async with client:
+        # This will trigger OAuth flow if needed
+        print("✅ Connected successfully!")
+        
+        # Test server functionality
+        result = await client.ping()
+        print(f"Ping result: {result}")
+        
+        # Call protected tools
+        tools = await client.list_tools()
+        print(f"Available tools: {[t.name for t in tools]}")
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+## OAuth Flow
+
+The authentication flow works as follows:
+
+<Steps>
+<Step title="Initial Request">
+    Client attempts to connect to your FastMCP server without authentication.
+</Step>
+
+<Step title="Auth Challenge">
+    Server responds with `401 Unauthorized` and provides OAuth metadata pointing to WorkOS.
+</Step>
+
+<Step title="OAuth Discovery">
+    Client discovers WorkOS OAuth endpoints and initiates authorization flow.
+</Step>
+
+<Step title="User Authentication">
+    Browser opens to WorkOS login page. User authenticates via configured SSO connection.
+</Step>
+
+<Step title="Authorization Code">
+    WorkOS redirects back with authorization code to your callback URL.
+</Step>
+
+<Step title="Token Exchange">
+    Client exchanges authorization code for access token with WorkOS.
+</Step>
+
+<Step title="Authenticated Requests">
+    Client uses access token for all subsequent FastMCP requests.
+</Step>
+
+<Step title="Token Validation">
+    Server validates each request by checking token with WorkOS User Management API.
+</Step>
+</Steps>
+
+## User Information
+
+The WorkOS OAuth provider automatically extracts user information from validated tokens and makes it available in your tools and resources:
+
+```python
+from fastmcp.server.dependencies import get_current_token
+
+@mcp.tool  
+def get_current_user() -> dict:
+    """Get information about the currently authenticated user."""
+    # Token claims include user information from WorkOS
+    token = get_current_token()
+    return {
+        "user_id": token.claims.get("sub"),
+        "email": token.claims.get("email"), 
+        "first_name": token.claims.get("first_name"),
+        "last_name": token.claims.get("last_name"),
+        "organization_id": token.claims.get("organization_id")
+    }
+```
+
+## Security Features
+
+The WorkOS OAuth integration provides:
+
+- **Token Validation**: Every request validates tokens against WorkOS User Management API
+- **Scope Enforcement**: Configure required scopes for API access
+- **User Information**: Access authenticated user details in your tools
+- **Organization Isolation**: Optional organization-based access control
+- **Token Caching**: Client automatically caches and reuses valid tokens
+- **Error Handling**: Graceful handling of token expiration and validation failures
+
+## Example Application
+
+For a complete working example, see:
+
+```bash
+# Clone the repository
+git clone https://github.com/jlowin/fastmcp.git
+cd fastmcp/examples/auth/WORKOS
+
+# Set up environment variables
+cp .env.example .env
+# Edit .env with your WorkOS credentials
+
+# Install dependencies  
+uv sync
+
+# Run the example server
+uv run python server.py
+
+# In another terminal, run the client
+uv run python client.py
+```
+
+## Troubleshooting
+
+### Common Issues
+
+<AccordionGroup>
+<Accordion title="Invalid client error">
+Double-check your `CLIENT_ID` and `CLIENT_SECRET` in environment variables or provider configuration.
+</Accordion>
+
+<Accordion title="Token validation failed">
+Verify your `API_KEY` is correct and has User Management permissions enabled in WorkOS.
+</Accordion>
+
+<Accordion title="Redirect URI mismatch">
+Ensure the redirect URL in your WorkOS application settings matches your server's OAuth callback endpoint.
+</Accordion>
+
+<Accordion title="Browser doesn't open for OAuth">
+Check that your client can bind to localhost and that firewall settings allow the callback server.
+</Accordion>
+</AccordionGroup>
+
+### Debug Mode
+
+Enable detailed logging to troubleshoot issues:
+
+```python
+import logging
+logging.basicConfig(level=logging.DEBUG)
+```
+
+### Clear Token Cache
+
+If you encounter persistent authentication issues, clear the token cache:
+
+```python
+from fastmcp.client.auth.oauth import FileTokenStorage
+FileTokenStorage.clear_all()
+```
+
+## Next Steps
+
+- Explore [WorkOS Directory Sync](https://workos.com/docs/directory-sync) for user provisioning
+- Set up multiple SSO connections for different organizations  
+- Implement role-based access control using WorkOS organization data
+- Configure custom scopes and claims validation for advanced use cases
