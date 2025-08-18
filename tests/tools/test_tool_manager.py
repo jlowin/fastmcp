@@ -13,7 +13,7 @@ from fastmcp.exceptions import NotFoundError, ToolError
 from fastmcp.tools import FunctionTool, ToolManager
 from fastmcp.tools.tool import Tool
 from fastmcp.tools.tool_transform import ArgTransformConfig, ToolTransformConfig
-from fastmcp.utilities.tests import caplog_for_fastmcp
+from fastmcp.utilities.tests import caplog_for_fastmcp, temporary_settings
 from fastmcp.utilities.types import Image
 
 
@@ -1004,7 +1004,6 @@ class TestMountedComponentsRaiseOnLoadError:
     async def test_mounted_components_raise_on_load_error_default_false(self):
         """Test that by default, mounted component load errors are warned and not raised."""
         import fastmcp
-        from fastmcp.utilities.tests import temporary_settings
         
         # Ensure default setting is False
         assert fastmcp.settings.mounted_components_raise_on_load_error is False
@@ -1013,7 +1012,7 @@ class TestMountedComponentsRaiseOnLoadError:
         child_mcp = FastMCP("FailingChildServer")
         
         # Create a failing mounted server by corrupting it
-        mounted_server = parent_mcp.mount(child_mcp, prefix="child")
+        parent_mcp.mount(child_mcp, prefix="child")
         # Corrupt the child server to make it fail during tool loading
         child_mcp._tool_manager._mounted_servers.append("invalid")  # type: ignore
         
@@ -1023,13 +1022,11 @@ class TestMountedComponentsRaiseOnLoadError:
 
     async def test_mounted_components_raise_on_load_error_true(self):
         """Test that when enabled, mounted component load errors are raised."""
-        from fastmcp.utilities.tests import temporary_settings
-        
         parent_mcp = FastMCP("ParentServer")
         child_mcp = FastMCP("FailingChildServer")
         
         # Create a failing mounted server
-        mounted_server = parent_mcp.mount(child_mcp, prefix="child")
+        parent_mcp.mount(child_mcp, prefix="child")
         # Corrupt the child server to make it fail during tool loading
         child_mcp._tool_manager._mounted_servers.append("invalid")  # type: ignore
         
