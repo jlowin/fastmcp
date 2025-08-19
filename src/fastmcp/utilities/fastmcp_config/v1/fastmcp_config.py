@@ -11,7 +11,7 @@ import json
 import os
 import re
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, overload
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -330,7 +330,7 @@ class FastMCPConfig(BaseModel):
     )
 
     # Server entrypoint - supports both string and object format
-    entrypoint: str | EntrypointConfig = Field(
+    entrypoint: EntrypointConfig = Field(
         description="Server entrypoint as a string (file or file:object) or object with file/object/repo",
         examples=[
             "server.py",
@@ -340,20 +340,35 @@ class FastMCPConfig(BaseModel):
     )
 
     # Environment configuration
-    environment: EnvironmentConfig | None = Field(
-        default=None,
+    environment: EnvironmentConfig = Field(
+        default_factory=lambda: EnvironmentConfig(),
         description="Python environment setup configuration",
     )
 
     # Deployment configuration
-    deployment: DeploymentConfig | None = Field(
-        default=None,
+    deployment: DeploymentConfig = Field(
+        default_factory=lambda: DeploymentConfig(),
         description="Server deployment and runtime settings",
     )
 
+    # purely for static type checkers to avoid issues with providng str entrypoint
+    if TYPE_CHECKING:
+
+        @overload
+        def __init__(
+            self, *, entrypoint: str | dict | EntrypointConfig, **data
+        ) -> None: ...
+        @overload
+        def __init__(
+            self, *, environment: dict | EnvironmentConfig, **data
+        ) -> None: ...
+        @overload
+        def __init__(self, *, deployment: dict | DeploymentConfig, **data) -> None: ...
+        def __init__(self, **data) -> None: ...
+
     @field_validator("entrypoint", mode="before")
     @classmethod
-    def validate_entrypoint(cls, v: Any) -> str | EntrypointConfig:
+    def validate_entrypoint(cls, v: str | EntrypointConfig) -> EntrypointConfig:
         """Validate and convert entrypoint to proper format.
 
         Supports:
@@ -367,6 +382,8 @@ class FastMCPConfig(BaseModel):
         if isinstance(v, EntrypointConfig):
             # Already an EntrypointConfig instance, return as-is
             return v
+        elif isinstance(v, dict):
+            return EntrypointConfig(**v)
         elif isinstance(v, str):
             # Parse file.py:object syntax into object format if present
             if ":" in v:
@@ -377,55 +394,43 @@ class FastMCPConfig(BaseModel):
                 if ":" in (v[2:] if has_windows_drive else v):
                     file, obj = v.rsplit(":", 1)
                     return EntrypointConfig(file=file, object=obj)
-            return v
-        elif isinstance(v, dict):
-            return EntrypointConfig(**v)
-        else:
-            raise ValueError(
-                "entrypoint must be a string, dict, or EntrypointConfig instance"
-            )
+            else:
+                return EntrypointConfig(file=v)
+
+        raise ValueError("entrypoint must be a string, EntrypointConfig instance")
 
     @field_validator("environment", mode="before")
     @classmethod
-    def validate_environment(cls, v: Any) -> EnvironmentConfig | None:
+    def validate_environment(cls, v: dict | EnvironmentConfig) -> EnvironmentConfig:
         """Validate and convert environment to EnvironmentConfig.
 
         Accepts:
         - EnvironmentConfig instance
         - dict that can be converted to EnvironmentConfig
-        - None
         """
-        if v is None:
-            return None
-        elif isinstance(v, EnvironmentConfig):
+        if isinstance(v, EnvironmentConfig):
             return v
         elif isinstance(v, dict):
-            return EnvironmentConfig(**v)
+            return EnvironmentConfig(**v)  # type: ignore[arg-type]
         else:
-            raise ValueError(
-                "environment must be a dict, EnvironmentConfig instance, or None"
-            )
+            raise ValueError("environment must be a dict, EnvironmentConfig instance")
 
     @field_validator("deployment", mode="before")
     @classmethod
-    def validate_deployment(cls, v: Any) -> DeploymentConfig | None:
+    def validate_deployment(cls, v: dict | DeploymentConfig) -> DeploymentConfig:
         """Validate and convert deployment to DeploymentConfig.
 
         Accepts:
         - DeploymentConfig instance
         - dict that can be converted to DeploymentConfig
-        - None
+
         """
-        if v is None:
-            return None
-        elif isinstance(v, DeploymentConfig):
+        if isinstance(v, DeploymentConfig):
             return v
         elif isinstance(v, dict):
-            return DeploymentConfig(**v)
+            return DeploymentConfig(**v)  # type: ignore[arg-type]
         else:
-            raise ValueError(
-                "deployment must be a dict, DeploymentConfig instance, or None"
-            )
+            raise ValueError("deployment must be a dict, DeploymentConfig instance")
 
     def get_entrypoint(self, config_path: Path | None = None) -> EntrypointConfig:
         """Get the entrypoint as a structured object with resolved paths.
