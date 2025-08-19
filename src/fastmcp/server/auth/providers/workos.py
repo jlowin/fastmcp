@@ -138,7 +138,7 @@ class WorkOSProvider(OAuthProxy):
 
     Setup Requirements:
     1. Create a WorkOS application in your dashboard
-    2. Configure redirect URI as: http://localhost:8000/oauth/callback
+    2. Configure redirect URI as: http://localhost:8000/auth/callback
     3. Note your Client ID and Client Secret
     4. Set either organization_id OR connection_id for SSO
 
@@ -176,7 +176,7 @@ class WorkOSProvider(OAuthProxy):
             client_id: WorkOS client ID
             client_secret: WorkOS client secret
             base_url: Public URL of your FastMCP server (for OAuth callbacks)
-            redirect_path: Redirect path configured in WorkOS (defaults to "/oauth/callback")
+            redirect_path: Redirect path configured in WorkOS (defaults to "/auth/callback")
             organization_id: Optional WorkOS organization ID for SSO
             connection_id: Optional WorkOS connection ID for SSO
             required_scopes: Required scopes
@@ -218,7 +218,7 @@ class WorkOSProvider(OAuthProxy):
 
         # Apply defaults
         base_url_final = settings.base_url or "http://localhost:8000"
-        redirect_path_final = settings.redirect_path or "/oauth/callback"
+        redirect_path_final = settings.redirect_path or "/auth/callback"
         timeout_seconds_final = settings.timeout_seconds or 10
 
         # Extract secret string from SecretStr

@@ -22,7 +22,7 @@ The WorkOS OAuth provider enables authentication using WorkOS SSO (Single Sign-O
 
 3. **Set Redirect URLs**:
    - In your WorkOS application settings, add redirect URLs for your OAuth flow
-   - For this example: `http://localhost:8000/oauth/callback`
+   - For this example: `http://localhost:8000/auth/callback`
 
 ### 2. Environment Variables
 

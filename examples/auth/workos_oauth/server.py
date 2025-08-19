@@ -25,7 +25,7 @@ auth = WorkOSProvider(
     base_url="http://localhost:8000",
     organization_id=os.getenv("WORKOS_ORGANIZATION_ID"),  # Required for SSO
     # connection_id=os.getenv("WORKOS_CONNECTION_ID"),  # Alternative to organization_id
-    # redirect_path="/oauth/callback",  # Default path - change if using a different callback URL
+    # redirect_path="/auth/callback",  # Default path - change if using a different callback URL
 )
 
 mcp = FastMCP("WorkOS OAuth Example Server", auth=auth)

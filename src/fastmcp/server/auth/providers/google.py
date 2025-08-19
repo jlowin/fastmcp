@@ -218,7 +218,7 @@ class GoogleProvider(OAuthProxy):
             client_id: Google OAuth client ID (e.g., "123456789.apps.googleusercontent.com")
             client_secret: Google OAuth client secret (e.g., "GOCSPX-abc123...")
             base_url: Public URL of your FastMCP server (for OAuth callbacks)
-            redirect_path: Redirect path configured in Google OAuth app (defaults to "/oauth/callback")
+            redirect_path: Redirect path configured in Google OAuth app (defaults to "/auth/callback")
             required_scopes: Required Google scopes (defaults to []). Common scopes include:
                 - "openid" for OpenID Connect
                 - "https://www.googleapis.com/auth/userinfo.email" for email access
@@ -252,7 +252,7 @@ class GoogleProvider(OAuthProxy):
 
         # Apply defaults
         base_url_final = settings.base_url or "http://localhost:8000"
-        redirect_path_final = settings.redirect_path or "/oauth/callback"
+        redirect_path_final = settings.redirect_path or "/auth/callback"
         timeout_seconds_final = settings.timeout_seconds or 10
         required_scopes_final = settings.required_scopes or []
 

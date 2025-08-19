@@ -225,7 +225,7 @@ class OAuthProxy(OAuthProvider):
         token_verifier: TokenVerifier,
         # FastMCP server configuration
         base_url: AnyHttpUrl | str,
-        redirect_path: str = "/oauth/callback",
+        redirect_path: str = "/auth/callback",
         issuer_url: AnyHttpUrl | str | None = None,
         service_documentation_url: AnyHttpUrl | str | None = None,
         resource_server_url: AnyHttpUrl | str | None = None,
@@ -240,7 +240,7 @@ class OAuthProxy(OAuthProvider):
             upstream_revocation_endpoint: Optional upstream revocation endpoint
             token_verifier: Token verifier for validating access tokens
             base_url: Public URL of this FastMCP server
-            redirect_path: Redirect path configured in upstream OAuth app (defaults to "/oauth/callback")
+            redirect_path: Redirect path configured in upstream OAuth app (defaults to "/auth/callback")
             issuer_url: Issuer URL for OAuth metadata (defaults to base_url)
             service_documentation_url: Optional service documentation URL
             resource_server_url: Resource server URL (defaults to base_url)

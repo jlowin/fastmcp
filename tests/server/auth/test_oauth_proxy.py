@@ -35,7 +35,7 @@ class TestOAuthProxyComprehensive:
             upstream_client_secret="test-client-secret",
             token_verifier=jwt_verifier,
             base_url="https://myserver.com",
-            redirect_path="/oauth/callback",
+            redirect_path="/auth/callback",
         )
 
     def test_initialization_with_string_urls(self, jwt_verifier):
@@ -98,9 +98,9 @@ class TestOAuthProxyComprehensive:
             upstream_client_secret="secret",
             token_verifier=jwt_verifier,
             base_url="https://server.com",
-            redirect_path="oauth/callback",
+            redirect_path="auth/callback",
         )
-        assert proxy1._redirect_path == "/oauth/callback"
+        assert proxy1._redirect_path == "/auth/callback"
 
         # With leading slash
         proxy2 = OAuthProxy(
@@ -110,9 +110,9 @@ class TestOAuthProxyComprehensive:
             upstream_client_secret="secret",
             token_verifier=jwt_verifier,
             base_url="https://server.com",
-            redirect_path="/oauth/callback",
+            redirect_path="/auth/callback",
         )
-        assert proxy2._redirect_path == "/oauth/callback"
+        assert proxy2._redirect_path == "/auth/callback"
 
     def test_dcr_always_enabled(self, jwt_verifier):
         """Test that DCR is always enabled for OAuth Proxy."""
@@ -268,7 +268,7 @@ class TestOAuthProxyComprehensive:
         # Verify query parameters
         assert query_params["response_type"] == ["code"]
         assert query_params["client_id"] == ["test-client-id"]
-        assert query_params["redirect_uri"] == ["https://myserver.com/oauth/callback"]
+        assert query_params["redirect_uri"] == ["https://myserver.com/auth/callback"]
         assert "state" in query_params  # This should be the transaction ID
         assert query_params["scope"] == ["read write"]
 
@@ -443,7 +443,7 @@ class TestOAuthProxyComprehensive:
 
         # Find the callback route
         callback_routes = [
-            r for r in routes if hasattr(r, "path") and r.path == "/oauth/callback"
+            r for r in routes if hasattr(r, "path") and r.path == "/auth/callback"
         ]
 
         assert len(callback_routes) == 1
@@ -464,7 +464,7 @@ class TestOAuthProxyComprehensive:
         assert "/.well-known/oauth-authorization-server" in paths
 
         # Plus our custom callback
-        assert "/oauth/callback" in paths
+        assert "/auth/callback" in paths
 
     @pytest.mark.asyncio
     async def test_revoke_token_access_token(self, oauth_proxy):

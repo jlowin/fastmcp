@@ -137,7 +137,7 @@ class TestGitHubProvider:
 
         # Check defaults
         assert str(provider.base_url) == "http://localhost:8000/"
-        assert provider._redirect_path == "/oauth/callback"
+        assert provider._redirect_path == "/auth/callback"
         # The required_scopes should be passed to the token verifier
         assert provider._token_validator.required_scopes == ["user"]
 
