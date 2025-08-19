@@ -3,12 +3,9 @@
 This example demonstrates how to protect a FastMCP server with WorkOS OAuth.
 
 Required environment variables:
-- FASTMCP_SERVER_AUTH_WORKOS_CLIENT_ID: Your WorkOS client ID
-- FASTMCP_SERVER_AUTH_WORKOS_CLIENT_SECRET: Your WorkOS client secret
-
-Optional:
-- FASTMCP_SERVER_AUTH_WORKOS_ORGANIZATION_ID: For SSO with specific org
-- FASTMCP_SERVER_AUTH_WORKOS_CONNECTION_ID: For SSO with specific connection
+- WORKOS_CLIENT_ID: Your WorkOS Connect application client ID
+- WORKOS_CLIENT_SECRET: Your WorkOS Connect application client secret
+- WORKOS_AUTHKIT_DOMAIN: Your AuthKit domain (e.g., "https://your-app.authkit.app")
 
 To run:
     python server.py
@@ -21,10 +18,9 @@ from fastmcp.server.auth.providers.workos import WorkOSProvider
 
 auth = WorkOSProvider(
     client_id=os.getenv("WORKOS_CLIENT_ID") or "",
-    client_secret=os.getenv("WORKOS_API_KEY") or "",
+    client_secret=os.getenv("WORKOS_CLIENT_SECRET") or "",
+    authkit_domain=os.getenv("WORKOS_AUTHKIT_DOMAIN") or "https://your-app.authkit.app",
     base_url="http://localhost:8000",
-    organization_id=os.getenv("WORKOS_ORGANIZATION_ID"),  # Required for SSO
-    # connection_id=os.getenv("WORKOS_CONNECTION_ID"),  # Alternative to organization_id
     # redirect_path="/auth/callback",  # Default path - change if using a different callback URL
 )
 

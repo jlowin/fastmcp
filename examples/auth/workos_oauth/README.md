@@ -4,7 +4,7 @@ This example demonstrates how to use the WorkOS OAuth provider with FastMCP serv
 
 ## Overview
 
-The WorkOS OAuth provider enables authentication using WorkOS SSO (Single Sign-On) connections. Unlike the AuthKit provider which uses DCR (Dynamic Client Registration), this provider works with traditional OAuth flows and WorkOS User Management.
+The WorkOS OAuth provider enables authentication using WorkOS User Management. It provides general OAuth2 authentication similar to GitHub or Google, with optional support for enterprise SSO connections. Unlike the AuthKit provider which uses DCR (Dynamic Client Registration), this provider works with traditional OAuth flows.
 
 ## Setup
 
@@ -13,12 +13,13 @@ The WorkOS OAuth provider enables authentication using WorkOS SSO (Single Sign-O
 1. **Create a WorkOS Application**:
    - Go to [WorkOS Dashboard → Applications](https://dashboard.workos.com/applications)
    - Create a new application or use an existing one
-   - Copy your `Client ID`, `Client Secret`, and `API Key`
+   - Enable **User Management** for OAuth authentication
+   - Copy your `Client ID` and `API Key` (client secret)
 
-2. **Configure SSO Connection** (optional):
+2. **Configure SSO Connection** (optional for enterprise SSO):
    - Go to WorkOS Dashboard → Connections
    - Set up your SSO connection (SAML, OIDC, or OAuth provider like Google/Microsoft)
-   - Note the `Organization ID` or `Connection ID`
+   - Note the `Organization ID` or `Connection ID` if using SSO
 
 3. **Set Redirect URLs**:
    - In your WorkOS application settings, add redirect URLs for your OAuth flow
@@ -31,17 +32,17 @@ Create a `.env` file in this directory:
 ```bash
 # Required WorkOS credentials
 WORKOS_CLIENT_ID=client_123
-WORKOS_API_KEY=sk_test_456  # This is your WorkOS secret key
+WORKOS_API_KEY=sk_test_456  # Your WorkOS API key (client secret)
 
-# Server URL
-WORKOS_BASE_URL=http://localhost:8000
+# Server URL (optional, defaults to http://localhost:8000)
+# WORKOS_BASE_URL=http://localhost:8000
 
-# REQUIRED: Must set either organization_id OR connection_id for SSO
-WORKOS_ORGANIZATION_ID=org_123  # Your WorkOS organization ID
-# WORKOS_CONNECTION_ID=conn_456  # Alternative: specific connection ID
+# Optional: For enterprise SSO connections
+# WORKOS_ORGANIZATION_ID=org_123  # Route to specific organization's SSO
+# WORKOS_CONNECTION_ID=conn_456    # Route to specific SSO connection
 
 # Optional: Required scopes
-FASTMCP_SERVER_AUTH_WORKOS_REQUIRED_SCOPES=["profile", "email"]
+# FASTMCP_SERVER_AUTH_WORKOS_REQUIRED_SCOPES=["profile", "email"]
 ```
 
 ### 3. Install Dependencies
