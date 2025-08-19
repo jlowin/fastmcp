@@ -158,6 +158,7 @@
                 "pages": [
                   "integrations/anthropic",
                   "integrations/authkit",
+                  "integrations/azure",
                   "integrations/github",
                   "integrations/google",
                   "integrations/chatgpt",
