@@ -150,7 +150,9 @@ class TestEnvironmentExecution:
         """Test that no UV is needed without environment config."""
         config = FastMCPConfig(entrypoint="server.py")
 
-        assert config.environment is None
+        # Environment is now always present but may be empty
+        assert config.environment is not None
+        assert not config.environment.needs_uv()
 
     def test_no_uv_needed_with_empty_environment(self):
         """Test that no UV is needed with empty environment config."""

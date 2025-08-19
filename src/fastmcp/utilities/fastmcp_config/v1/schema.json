@@ -332,14 +332,7 @@
       "title": "$Schema"
     },
     "entrypoint": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "$ref": "#/$defs/EntrypointConfig"
-        }
-      ],
+      "$ref": "#/$defs/EntrypointConfig",
       "description": "Server entrypoint as a string (file or file:object) or object with file/object/repo",
       "examples": [
         "server.py",
@@ -348,31 +341,14 @@
           "file": "src/server.py",
           "object": "app"
         }
-      ],
-      "title": "Entrypoint"
+      ]
     },
     "environment": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/EnvironmentConfig"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
+      "$ref": "#/$defs/EnvironmentConfig",
       "description": "Python environment setup configuration"
     },
     "deployment": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/DeploymentConfig"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
+      "$ref": "#/$defs/DeploymentConfig",
       "description": "Server deployment and runtime settings"
     }
   },

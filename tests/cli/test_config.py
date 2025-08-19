@@ -19,11 +19,14 @@ class TestEntrypointConfig:
     """Test EntrypointConfig class."""
 
     def test_string_entrypoint(self):
-        """Test that string entrypoint is stored and can be converted to EntrypointConfig."""
+        """Test that string entrypoint is converted to EntrypointConfig."""
         config = FastMCPConfig(entrypoint="server.py")
-        assert config.entrypoint == "server.py"
+        # With the new validator, this should be converted to EntrypointConfig
+        assert isinstance(config.entrypoint, EntrypointConfig)
+        assert config.entrypoint.file == "server.py"
+        assert config.entrypoint.object is None
 
-        # Convert to EntrypointConfig
+        # get_entrypoint should return the same object
         entrypoint = config.get_entrypoint()
         assert isinstance(entrypoint, EntrypointConfig)
         assert entrypoint.file == "server.py"
@@ -96,7 +99,7 @@ class TestEnvironmentConfig:
         """Test needs_uv() method."""
         # No environment config - doesn't need UV
         config = FastMCPConfig(entrypoint="server.py")
-        assert config.environment is None
+        assert not config.environment.needs_uv()
 
         # Empty environment - doesn't need UV
         config = FastMCPConfig(entrypoint="server.py", environment={})
@@ -326,9 +329,18 @@ class TestFastMCPConfig:
     def test_minimal_config(self):
         """Test creating a config with only required fields."""
         config = FastMCPConfig(entrypoint="server.py")
-        assert config.entrypoint == "server.py"
-        assert config.environment is None
-        assert config.deployment is None
+        assert isinstance(config.entrypoint, EntrypointConfig)
+        assert config.entrypoint.file == "server.py"
+        assert config.entrypoint.object is None
+        # Environment and deployment are now always present but empty
+        assert isinstance(config.environment, EnvironmentConfig)
+        assert isinstance(config.deployment, DeploymentConfig)
+        # Check they have no values set
+        assert not config.environment.needs_uv()
+        assert all(
+            getattr(config.deployment, field, None) is None
+            for field in DeploymentConfig.model_fields
+        )
 
     def test_nested_structure(self):
         """Test the nested configuration structure."""
@@ -344,7 +356,9 @@ class TestFastMCPConfig:
             },
         )
 
-        assert config.entrypoint == "server.py"  # String is stored as-is
+        assert isinstance(config.entrypoint, EntrypointConfig)
+        assert config.entrypoint.file == "server.py"
+        assert config.entrypoint.object is None
         assert isinstance(config.environment, EnvironmentConfig)
         assert isinstance(config.deployment, DeploymentConfig)
 
@@ -474,16 +488,26 @@ class TestFastMCPConfig:
         """Test that all config sections are optional except entrypoint."""
         # Only entrypoint is required
         config = FastMCPConfig(entrypoint="server.py")
-        assert config.entrypoint == "server.py"
-        assert config.environment is None
-        assert config.deployment is None
+        assert isinstance(config.entrypoint, EntrypointConfig)
+        assert config.entrypoint.file == "server.py"
+        # Environment and deployment are now always present but may be empty
+        assert isinstance(config.environment, EnvironmentConfig)
+        assert isinstance(config.deployment, DeploymentConfig)
 
-        # Only environment
+        # Only environment with values
         config = FastMCPConfig(entrypoint="server.py", environment={"python": "3.12"})
         assert config.environment.python == "3.12"
-        assert config.deployment is None
+        assert isinstance(config.deployment, DeploymentConfig)
+        assert all(
+            getattr(config.deployment, field, None) is None
+            for field in DeploymentConfig.model_fields
+        )
 
-        # Only deployment
+        # Only deployment with values
         config = FastMCPConfig(entrypoint="server.py", deployment={"transport": "http"})
-        assert config.environment is None
+        assert isinstance(config.environment, EnvironmentConfig)
+        assert all(
+            getattr(config.environment, field, None) is None
+            for field in EnvironmentConfig.model_fields
+        )
         assert config.deployment.transport == "http"

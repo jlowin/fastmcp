@@ -221,7 +221,11 @@ def run_with_uv(
                 server_spec = entrypoint.file
 
             # Merge environment config with CLI args
-            if config.environment:
+            # Check if environment has any non-None values
+            if config.environment and any(
+                getattr(config.environment, field, None) is not None
+                for field in EnvironmentConfig.model_fields
+            ):
                 merged_env = config.environment.merge_with_cli_args(
                     python=python_version,
                     with_packages=with_packages,
@@ -234,7 +238,11 @@ def run_with_uv(
                 project = merged_env["project"]
 
             # Merge deployment config with CLI args
-            if config.deployment:
+            # Check if deployment has any non-None values
+            if config.deployment and any(
+                getattr(config.deployment, field, None) is not None
+                for field in DeploymentConfig.model_fields
+            ):
                 merged_deploy = config.deployment.merge_with_cli_args(
                     transport=transport,
                     host=host,
@@ -348,7 +356,26 @@ def load_fastmcp_config(
     # Get entrypoint as structured object with resolved paths
     entrypoint = config.get_entrypoint(config_path)
 
-    return entrypoint, config.deployment, config.environment
+    # Return None for empty configs (backward compatibility)
+    deployment = (
+        config.deployment
+        if any(
+            getattr(config.deployment, field, None) is not None
+            for field in DeploymentConfig.model_fields
+        )
+        else None
+    )
+
+    environment = (
+        config.environment
+        if any(
+            getattr(config.environment, field, None) is not None
+            for field in EnvironmentConfig.model_fields
+        )
+        else None
+    )
+
+    return entrypoint, deployment, environment
 
 
 async def import_server_with_args(
