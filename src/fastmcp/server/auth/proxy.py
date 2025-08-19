@@ -455,12 +455,6 @@ class OAuthProxy(OAuthProvider):
 
         # Add scopes - use client scopes or fallback to required scopes
         scopes_to_use = params.scopes or self.required_scopes or []
-        # Google requires at least some scope parameter, so provide a minimal one if none specified
-        if (
-            not scopes_to_use
-            and "google" in self._upstream_authorization_endpoint.lower()
-        ):
-            scopes_to_use = ["openid"]  # Minimal scope for Google
 
         if scopes_to_use:
             query_params["scope"] = " ".join(scopes_to_use)
