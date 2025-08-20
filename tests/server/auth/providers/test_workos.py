@@ -2,6 +2,7 @@
 
 import os
 from unittest.mock import patch
+from urllib.parse import urlparse
 
 import pytest
 
@@ -76,7 +77,10 @@ class TestWorkOSProvider:
             authkit_domain="test.authkit.app",
             base_url="https://myserver.com",
         )
-        assert "https://test.authkit.app" in provider1._upstream_authorization_endpoint
+        parsed = urlparse(provider1._upstream_authorization_endpoint)
+        assert parsed.scheme == "https"
+        assert parsed.netloc == "test.authkit.app"
+        assert parsed.path == "/oauth2/authorize"
 
         # With https:// - should keep it
         provider2 = WorkOSProvider(
@@ -85,7 +89,10 @@ class TestWorkOSProvider:
             authkit_domain="https://test.authkit.app",
             base_url="https://myserver.com",
         )
-        assert "https://test.authkit.app" in provider2._upstream_authorization_endpoint
+        parsed = urlparse(provider2._upstream_authorization_endpoint)
+        assert parsed.scheme == "https"
+        assert parsed.netloc == "test.authkit.app"
+        assert parsed.path == "/oauth2/authorize"
 
         # With http:// - should be preserved
         provider3 = WorkOSProvider(
@@ -94,7 +101,10 @@ class TestWorkOSProvider:
             authkit_domain="http://localhost:8080",
             base_url="https://myserver.com",
         )
-        assert "http://localhost:8080" in provider3._upstream_authorization_endpoint
+        parsed = urlparse(provider3._upstream_authorization_endpoint)
+        assert parsed.scheme == "http"
+        assert parsed.netloc == "localhost:8080"
+        assert parsed.path == "/oauth2/authorize"
 
     def test_init_defaults(self):
         """Test that default values are applied correctly."""

@@ -2,6 +2,7 @@
 
 import os
 from unittest.mock import patch
+from urllib.parse import urlparse
 
 import pytest
 
@@ -25,8 +26,10 @@ class TestAzureProvider:
         assert provider._upstream_client_secret.get_secret_value() == "azure_secret_123"
         assert str(provider.base_url) == "https://myserver.com/"
         # Check tenant is in the endpoints
-        assert "87654321-4321-4321-4321-210987654321" in provider._upstream_authorization_endpoint
-        assert "87654321-4321-4321-4321-210987654321" in provider._upstream_token_endpoint
+        parsed_auth = urlparse(provider._upstream_authorization_endpoint)
+        assert "87654321-4321-4321-4321-210987654321" in parsed_auth.path
+        parsed_token = urlparse(provider._upstream_token_endpoint)
+        assert "87654321-4321-4321-4321-210987654321" in parsed_token.path
 
     def test_init_with_env_vars(self):
         """Test AzureProvider initialization from environment variables."""
@@ -46,8 +49,10 @@ class TestAzureProvider:
             assert provider._upstream_client_secret.get_secret_value() == "env-secret"
             assert str(provider.base_url) == "https://envserver.com/"
             # Check tenant is in the endpoints
-            assert "env-tenant-id" in provider._upstream_authorization_endpoint
-            assert "env-tenant-id" in provider._upstream_token_endpoint
+            parsed_auth = urlparse(provider._upstream_authorization_endpoint)
+            assert "env-tenant-id" in parsed_auth.path
+            parsed_token = urlparse(provider._upstream_token_endpoint)
+            assert "env-tenant-id" in parsed_token.path
 
     def test_init_missing_client_id_raises_error(self):
         """Test that missing client_id raises ValueError."""
@@ -108,7 +113,8 @@ class TestAzureProvider:
             client_secret="test_secret",
             tenant_id="organizations",
         )
-        assert "organizations" in provider1._upstream_authorization_endpoint
+        parsed = urlparse(provider1._upstream_authorization_endpoint)
+        assert "/organizations/" in parsed.path
 
         # Test with "consumers"
         provider2 = AzureProvider(
@@ -116,7 +122,8 @@ class TestAzureProvider:
             client_secret="test_secret",
             tenant_id="consumers",
         )
-        assert "consumers" in provider2._upstream_authorization_endpoint
+        parsed = urlparse(provider2._upstream_authorization_endpoint)
+        assert "/consumers/" in parsed.path
 
     def test_azure_specific_scopes(self):
         """Test handling of Azure-specific scope formats."""
