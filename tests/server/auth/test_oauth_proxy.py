@@ -10,8 +10,8 @@ from mcp.shared.auth import OAuthClientInformationFull
 from pydantic import AnyUrl
 
 from fastmcp.server.auth.auth import AccessToken
+from fastmcp.server.auth.oauth_proxy import OAuthProxy
 from fastmcp.server.auth.providers.jwt import JWTVerifier
-from fastmcp.server.auth.proxy import OAuthProxy
 
 
 class TestOAuthProxyComprehensive:

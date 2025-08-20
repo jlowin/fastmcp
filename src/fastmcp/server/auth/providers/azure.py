@@ -11,7 +11,7 @@ from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from fastmcp.server.auth import AccessToken, TokenVerifier
-from fastmcp.server.auth.proxy import OAuthProxy
+from fastmcp.server.auth.oauth_proxy import OAuthProxy
 from fastmcp.server.auth.registry import register_provider
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.types import NotSet, NotSetT
