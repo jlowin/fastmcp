@@ -159,8 +159,6 @@
                   "integrations/anthropic",
                   "integrations/authkit",
                   "integrations/azure",
-                  "integrations/github",
-                  "integrations/google",
                   "integrations/chatgpt",
                   "integrations/claude-code",
                   "integrations/claude-desktop",
@@ -169,12 +167,13 @@
                   "integrations/fastapi",
                   "deployment/fastmcp-cloud",
                   "integrations/gemini",
+                  "integrations/github",
+                  "integrations/google",
                   "integrations/mcp-json-configuration",
                   "integrations/openai",
                   "integrations/openapi",
                   "integrations/permit",
-                  "integrations/starlette",
-                  "integrations/workos-oauth"
+                  "integrations/starlette"
                 ]
               },
               {

@@ -321,7 +321,7 @@ class OAuthProxy(OAuthProvider):
         # Use the provided token validator
         self._token_validator = token_verifier
 
-        logger.info(
+        logger.debug(
             "Initialized OAuth proxy provider with upstream server %s",
             self._upstream_authorization_endpoint,
         )
@@ -408,7 +408,7 @@ class OAuthProxy(OAuthProvider):
         # Store the ProxyDCRClient using the upstream ID
         self._clients[upstream_id] = proxy_client
 
-        logger.info(
+        logger.debug(
             "Registered client %s with %d redirect URIs",
             upstream_id,
             len(proxy_client.redirect_uris),
@@ -464,12 +464,11 @@ class OAuthProxy(OAuthProvider):
             f"{self._upstream_authorization_endpoint}?{urlencode(query_params)}"
         )
 
-        logger.info(
+        logger.debug(
             "Starting OAuth transaction %s for client %s, redirecting to IdP",
             txn_id,
             client.client_id,
         )
-
         return upstream_url
 
     # -------------------------------------------------------------------------
@@ -574,7 +573,7 @@ class OAuthProxy(OAuthProvider):
             self._access_to_refresh[access_token_value] = refresh_token_value
             self._refresh_to_access[refresh_token_value] = access_token_value
 
-        logger.info(
+        logger.debug(
             "Successfully exchanged client code for stored IdP tokens (client: %s)",
             client.client_id,
         )
@@ -618,7 +617,7 @@ class OAuthProxy(OAuthProvider):
                 scope=" ".join(scopes) if scopes else None,
             )
 
-            logger.info(
+            logger.debug(
                 "Successfully refreshed access token via authlib (client: %s)",
                 client.client_id,
             )
@@ -721,13 +720,13 @@ class OAuthProxy(OAuthProvider):
                             self._upstream_client_secret.get_secret_value(),
                         ),
                     )
-                    logger.info("Successfully revoked token with upstream server")
+                    logger.debug("Successfully revoked token with upstream server")
             except Exception as e:
                 logger.warning("Failed to revoke token with upstream server: %s", e)
         else:
             logger.debug("No upstream revocation endpoint configured")
 
-        logger.info("Token revoked successfully")
+        logger.debug("Token revoked successfully")
 
     # -------------------------------------------------------------------------
     # Custom Route Handling
@@ -780,7 +779,7 @@ class OAuthProxy(OAuthProvider):
                     if "access_token" in token_data:
                         self._store_tokens_from_response(token_data)
 
-                    logger.info(
+                    logger.debug(
                         "Successfully proxied authorization code exchange via authlib"
                     )
 
@@ -805,7 +804,7 @@ class OAuthProxy(OAuthProvider):
                         else None,
                     )
 
-                    logger.info(
+                    logger.debug(
                         "Successfully proxied refresh token exchange via authlib"
                     )
 
@@ -889,7 +888,7 @@ class OAuthProxy(OAuthProvider):
         custom_routes = []
         token_route_found = False
 
-        logger.info(
+        logger.debug(
             f"get_routes called - configuring OAuth routes in {len(routes)} routes"
         )
 
@@ -908,11 +907,6 @@ class OAuthProxy(OAuthProvider):
                 and "POST" in route.methods
             ):
                 token_route_found = True
-                logger.info("✅ KEEPING standard token endpoint for DCR-compliant flow")
-
-        if not token_route_found:
-            logger.warning("⚠️  No /token POST route found!")
-            # This shouldn't happen with standard OAuth provider
 
         # Add OAuth callback endpoint for forwarding to client callbacks
         custom_routes.append(
@@ -923,7 +917,7 @@ class OAuthProxy(OAuthProvider):
             )
         )
 
-        logger.info(
+        logger.debug(
             f"✅ OAuth routes configured: token_endpoint={token_route_found}, total routes={len(custom_routes)} (includes OAuth callback)"
         )
         return custom_routes
@@ -995,7 +989,7 @@ class OAuthProxy(OAuthProvider):
                     redirect_uri=idp_redirect_uri,
                 )
 
-                logger.info(
+                logger.debug(
                     f"Successfully exchanged IdP code for tokens (transaction: {txn_id})"
                 )
 

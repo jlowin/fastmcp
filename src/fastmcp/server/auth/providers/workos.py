@@ -74,7 +74,7 @@ class WorkOSTokenVerifier(TokenVerifier):
         try:
             async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
                 # Use WorkOS AuthKit userinfo endpoint to validate token
-                response = await client.post(
+                response = await client.get(
                     f"{self.authkit_domain}/oauth2/userinfo",
                     headers={
                         "Authorization": f"Bearer {token}",
@@ -203,12 +203,15 @@ class WorkOSProvider(OAuthProxy):
                 "authkit_domain is required - set via parameter or FASTMCP_SERVER_AUTH_WORKOS_AUTHKIT_DOMAIN"
             )
 
-        # Apply defaults
-        authkit_domain_final = settings.authkit_domain.rstrip("/")
+        # Apply defaults and ensure authkit_domain is a full URL
+        authkit_domain_str = settings.authkit_domain
+        if not authkit_domain_str.startswith(("http://", "https://")):
+            authkit_domain_str = f"https://{authkit_domain_str}"
+        authkit_domain_final = authkit_domain_str.rstrip("/")
         base_url_final = settings.base_url or "http://localhost:8000"
         redirect_path_final = settings.redirect_path or "/auth/callback"
         timeout_seconds_final = settings.timeout_seconds or 10
-        scopes_final = settings.required_scopes or ["openid", "profile", "email"]
+        scopes_final = settings.required_scopes or []
 
         # Extract secret string from SecretStr
         client_secret_str = (
