@@ -1,4 +1,4 @@
-"""ATProto client management."""
+"""ATProto client management!"""
 
 from atproto import Client
 
