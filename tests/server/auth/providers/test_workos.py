@@ -129,6 +129,13 @@ class TestWorkOSProvider:
         )
 
         # Check that endpoints use the authkit domain
-        assert provider._upstream_authorization_endpoint == "https://test.authkit.app/oauth2/authorize"
-        assert provider._upstream_token_endpoint == "https://test.authkit.app/oauth2/token"
-        assert provider._upstream_revocation_endpoint is None  # WorkOS doesn't support revocation
+        assert (
+            provider._upstream_authorization_endpoint
+            == "https://test.authkit.app/oauth2/authorize"
+        )
+        assert (
+            provider._upstream_token_endpoint == "https://test.authkit.app/oauth2/token"
+        )
+        assert (
+            provider._upstream_revocation_endpoint is None
+        )  # WorkOS doesn't support revocation

@@ -38,7 +38,9 @@ class TestGoogleProvider:
             provider = GoogleProvider()
 
             assert provider._upstream_client_id == "env123.apps.googleusercontent.com"
-            assert provider._upstream_client_secret.get_secret_value() == "GOCSPX-env456"
+            assert (
+                provider._upstream_client_secret.get_secret_value() == "GOCSPX-env456"
+            )
             assert str(provider.base_url) == "https://envserver.com/"
 
     def test_init_missing_client_id_raises_error(self):
@@ -76,8 +78,13 @@ class TestGoogleProvider:
         )
 
         # Check that endpoints use Google's OAuth2 endpoints
-        assert provider._upstream_authorization_endpoint == "https://accounts.google.com/o/oauth2/v2/auth"
-        assert provider._upstream_token_endpoint == "https://oauth2.googleapis.com/token"
+        assert (
+            provider._upstream_authorization_endpoint
+            == "https://accounts.google.com/o/oauth2/v2/auth"
+        )
+        assert (
+            provider._upstream_token_endpoint == "https://oauth2.googleapis.com/token"
+        )
         # Google provider doesn't currently set a revocation endpoint
         assert provider._upstream_revocation_endpoint is None
 
@@ -93,6 +100,6 @@ class TestGoogleProvider:
                 "https://www.googleapis.com/auth/userinfo.profile",
             ],
         )
-        
+
         # Provider should initialize successfully with these scopes
         assert provider is not None

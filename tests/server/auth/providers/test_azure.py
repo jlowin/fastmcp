@@ -101,9 +101,17 @@ class TestAzureProvider:
         )
 
         # Check that endpoints use the correct Azure OAuth2 v2.0 endpoints with tenant
-        assert provider._upstream_authorization_endpoint == "https://login.microsoftonline.com/my-tenant-id/oauth2/v2.0/authorize"
-        assert provider._upstream_token_endpoint == "https://login.microsoftonline.com/my-tenant-id/oauth2/v2.0/token"
-        assert provider._upstream_revocation_endpoint is None  # Azure doesn't support revocation
+        assert (
+            provider._upstream_authorization_endpoint
+            == "https://login.microsoftonline.com/my-tenant-id/oauth2/v2.0/authorize"
+        )
+        assert (
+            provider._upstream_token_endpoint
+            == "https://login.microsoftonline.com/my-tenant-id/oauth2/v2.0/token"
+        )
+        assert (
+            provider._upstream_revocation_endpoint is None
+        )  # Azure doesn't support revocation
 
     def test_special_tenant_values(self):
         """Test that special tenant values are accepted."""
@@ -140,6 +148,6 @@ class TestAzureProvider:
                 "profile",
             ],
         )
-        
+
         # Provider should initialize successfully with these scopes
         assert provider is not None
