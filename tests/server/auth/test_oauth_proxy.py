@@ -158,7 +158,6 @@ class TestOAuthProxyComprehensive:
         assert proxy.revocation_options is None
         assert proxy._upstream_revocation_endpoint is None
 
-    @pytest.mark.asyncio
     async def test_register_client(self, oauth_proxy):
         """Test client registration always uses upstream credentials."""
         client_info = OAuthClientInformationFull(
@@ -183,7 +182,6 @@ class TestOAuthProxyComprehensive:
         assert stored_client is not None
         assert stored_client.client_id == "test-client-id"
 
-    @pytest.mark.asyncio
     async def test_register_client_empty_grant_types(self, oauth_proxy):
         """Test client registration adds grant types when empty."""
         client_info = OAuthClientInformationFull(
@@ -198,7 +196,6 @@ class TestOAuthProxyComprehensive:
         # Should add both authorization_code and refresh_token
         assert client_info.grant_types == ["authorization_code", "refresh_token"]
 
-    @pytest.mark.asyncio
     async def test_get_client_existing(self, oauth_proxy):
         """Test getting an existing registered client."""
         # Register a client first
@@ -214,7 +211,6 @@ class TestOAuthProxyComprehensive:
         assert retrieved is not None
         assert retrieved.client_id == "test-client-id"
 
-    @pytest.mark.asyncio
     async def test_get_client_temporary(self, oauth_proxy):
         """Test getting a temporary client for unregistered client ID."""
         # Get a client that hasn't been registered
@@ -236,7 +232,6 @@ class TestOAuthProxyComprehensive:
         )
         assert str(test_uri) == "http://localhost:55454/callback"
 
-    @pytest.mark.asyncio
     async def test_authorize_creates_transaction(self, oauth_proxy):
         """Test that authorize creates a transaction and returns upstream URL."""
         client = OAuthClientInformationFull(
@@ -283,7 +278,6 @@ class TestOAuthProxyComprehensive:
         assert transaction["code_challenge_method"] == "S256"
         assert transaction["scopes"] == ["read", "write"]
 
-    @pytest.mark.asyncio
     async def test_authorize_without_scopes(self, oauth_proxy):
         """Test authorize without scopes uses required scopes from verifier."""
         client = OAuthClientInformationFull(
@@ -308,10 +302,9 @@ class TestOAuthProxyComprehensive:
         # Should use required_scopes from token_verifier
         assert query_params["scope"] == ["read write"]
 
-    @pytest.mark.asyncio
-    async def test_authorize_google_minimal_scope(self, jwt_verifier):
-        """Test that Google OAuth gets minimal scope when none specified."""
-        # Create proxy with Google endpoints
+    async def test_authorize_no_scopes(self, jwt_verifier):
+        """Test that proxy doesn't add scopes when none specified."""
+        # Create proxy - using Google endpoints but proxy shouldn't special-case
         proxy = OAuthProxy(
             upstream_authorization_endpoint="https://accounts.google.com/o/oauth2/v2/auth",
             upstream_token_endpoint="https://oauth2.googleapis.com/token",
@@ -332,7 +325,7 @@ class TestOAuthProxyComprehensive:
             redirect_uri_provided_explicitly=True,
             state="state",
             code_challenge="challenge",
-            scopes=[],  # Empty scopes to test Google fallback
+            scopes=[],  # Empty scopes
         )
 
         redirect_url = await proxy.authorize(client, params)
@@ -340,10 +333,9 @@ class TestOAuthProxyComprehensive:
         parsed = urlparse(redirect_url)
         query_params = parse_qs(parsed.query)
 
-        # Should add minimal scope for Google
-        assert query_params["scope"] == ["openid"]
+        # Proxy should NOT add any scopes - providers handle their own defaults
+        assert "scope" not in query_params
 
-    @pytest.mark.asyncio
     async def test_load_authorization_code_valid(self, oauth_proxy):
         """Test loading a valid authorization code."""
         # Store a client code
@@ -373,7 +365,6 @@ class TestOAuthProxyComprehensive:
         assert auth_code.code_challenge == "challenge-123"
         assert auth_code.scopes == ["read", "write"]
 
-    @pytest.mark.asyncio
     async def test_load_authorization_code_expired(self, oauth_proxy):
         """Test loading an expired authorization code returns None."""
         code = "expired-code"
@@ -394,7 +385,6 @@ class TestOAuthProxyComprehensive:
         # Code should be cleaned up
         assert code not in oauth_proxy._client_codes
 
-    @pytest.mark.asyncio
     async def test_load_authorization_code_wrong_client(self, oauth_proxy):
         """Test loading authorization code with wrong client ID returns None."""
         code = "test-code"
@@ -413,7 +403,6 @@ class TestOAuthProxyComprehensive:
         auth_code = await oauth_proxy.load_authorization_code(wrong_client, code)
         assert auth_code is None
 
-    @pytest.mark.asyncio
     async def test_load_access_token_delegates_to_verifier(
         self, oauth_proxy, jwt_verifier
     ):
@@ -466,7 +455,6 @@ class TestOAuthProxyComprehensive:
         # Plus our custom callback
         assert "/auth/callback" in paths
 
-    @pytest.mark.asyncio
     async def test_revoke_token_access_token(self, oauth_proxy):
         """Test revoking an access token cleans up local storage."""
         # Store tokens
@@ -492,7 +480,6 @@ class TestOAuthProxyComprehensive:
         assert access_token not in oauth_proxy._access_to_refresh
         assert refresh_token not in oauth_proxy._refresh_to_access
 
-    @pytest.mark.asyncio
     async def test_exchange_authorization_code_stores_tokens(self, oauth_proxy):
         """Test that exchange_authorization_code stores tokens locally."""
         from mcp.server.auth.provider import AuthorizationCode

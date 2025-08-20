@@ -120,13 +120,17 @@ class TestGitHubProvider:
 
     def test_init_missing_client_id_raises_error(self):
         """Test that missing client_id raises ValueError."""
-        with pytest.raises(ValueError, match="client_id is required"):
-            GitHubProvider(client_secret="test_secret")
+        # Clear environment variables to test proper error handling
+        with patch.dict(os.environ, {}, clear=True):
+            with pytest.raises(ValueError, match="client_id is required"):
+                GitHubProvider(client_secret="test_secret")
 
     def test_init_missing_client_secret_raises_error(self):
         """Test that missing client_secret raises ValueError."""
-        with pytest.raises(ValueError, match="client_secret is required"):
-            GitHubProvider(client_id="test_client")
+        # Clear environment variables to test proper error handling
+        with patch.dict(os.environ, {}, clear=True):
+            with pytest.raises(ValueError, match="client_secret is required"):
+                GitHubProvider(client_id="test_client")
 
     def test_init_defaults(self):
         """Test that default values are applied correctly."""
