@@ -156,24 +156,54 @@
               {
                 "group": "Integrations",
                 "pages": [
-                  "integrations/anthropic",
-                  "integrations/authkit",
-                  "integrations/azure",
-                  "integrations/chatgpt",
-                  "integrations/claude-code",
-                  "integrations/claude-desktop",
-                  "integrations/cursor",
-                  "integrations/eunomia-authorization",
-                  "integrations/fastapi",
-                  "deployment/fastmcp-cloud",
-                  "integrations/gemini",
-                  "integrations/github",
-                  "integrations/google",
-                  "integrations/mcp-json-configuration",
-                  "integrations/openai",
-                  "integrations/openapi",
-                  "integrations/permit",
-                  "integrations/starlette"
+                  {
+                    "group": "Authentication",
+                    "icon": "key",
+                    "pages": [
+                      "integrations/authkit",
+                      "integrations/azure",
+                      "integrations/github",
+                      "integrations/google",
+                      "integrations/workos-oauth"
+                    ]
+                  },
+                  {
+                    "group": "Authorization",
+                    "icon": "shield-check",
+                    "pages": [
+                      "integrations/eunomia-authorization",
+                      "integrations/permit"
+                    ]
+                  },
+                  {
+                    "group": "AI Assistants",
+                    "icon": "robot",
+                    "pages": [
+                      "integrations/chatgpt",
+                      "integrations/claude-code",
+                      "integrations/claude-desktop",
+                      "integrations/cursor",
+                      "integrations/mcp-json-configuration"
+                    ]
+                  },
+                  {
+                    "group": "AI SDKs",
+                    "icon": "code",
+                    "pages": [
+                      "integrations/anthropic",
+                      "integrations/gemini",
+                      "integrations/openai"
+                    ]
+                  },
+                  {
+                    "group": "Web Frameworks",
+                    "icon": "globe",
+                    "pages": [
+                      "integrations/asgi",
+                      "integrations/fastapi",
+                      "integrations/openapi"
+                    ]
+                  }
                 ]
               },
               {

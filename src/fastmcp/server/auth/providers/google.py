@@ -219,8 +219,8 @@ class GoogleProvider(OAuthProxy):
             client_secret: Google OAuth client secret (e.g., "GOCSPX-abc123...")
             base_url: Public URL of your FastMCP server (for OAuth callbacks)
             redirect_path: Redirect path configured in Google OAuth app (defaults to "/auth/callback")
-            required_scopes: Required Google scopes (defaults to []). Common scopes include:
-                - "openid" for OpenID Connect
+            required_scopes: Required Google scopes (defaults to ["openid"]). Common scopes include:
+                - "openid" for OpenID Connect (default)
                 - "https://www.googleapis.com/auth/userinfo.email" for email access
                 - "https://www.googleapis.com/auth/userinfo.profile" for profile info
             timeout_seconds: HTTP request timeout for Google API calls
@@ -254,7 +254,8 @@ class GoogleProvider(OAuthProxy):
         base_url_final = settings.base_url or "http://localhost:8000"
         redirect_path_final = settings.redirect_path or "/auth/callback"
         timeout_seconds_final = settings.timeout_seconds or 10
-        required_scopes_final = settings.required_scopes or []
+        # Google requires at least one scope - openid is the minimal OIDC scope
+        required_scopes_final = settings.required_scopes or ["openid"]
 
         # Create Google token verifier
         token_verifier = GoogleTokenVerifier(

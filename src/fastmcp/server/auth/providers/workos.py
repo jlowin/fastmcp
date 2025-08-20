@@ -170,7 +170,7 @@ class WorkOSProvider(OAuthProxy):
             authkit_domain: Your WorkOS AuthKit domain (e.g., "https://your-app.authkit.app")
             base_url: Public URL of your FastMCP server (for OAuth callbacks)
             redirect_path: Redirect path configured in WorkOS (defaults to "/auth/callback")
-            required_scopes: Required scopes (defaults to ["openid", "profile", "email"])
+            required_scopes: Required OAuth scopes (no default)
             timeout_seconds: HTTP request timeout for WorkOS API calls
         """
         settings = WorkOSProviderSettings.model_validate(
