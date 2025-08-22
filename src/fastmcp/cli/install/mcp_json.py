@@ -135,7 +135,6 @@ async def mcp_json_command(
         cyclopts.Parameter(
             "--with",
             help="Additional packages to install",
-            negative=False,
         ),
     ] = [],
     env_vars: Annotated[
@@ -143,7 +142,6 @@ async def mcp_json_command(
         cyclopts.Parameter(
             "--env",
             help="Environment variables in KEY=VALUE format",
-            negative=False,
         ),
     ] = [],
     env_file: Annotated[
@@ -158,7 +156,6 @@ async def mcp_json_command(
         cyclopts.Parameter(
             "--copy",
             help="Copy configuration to clipboard instead of printing to stdout",
-            negative=False,
         ),
     ] = False,
     python: Annotated[

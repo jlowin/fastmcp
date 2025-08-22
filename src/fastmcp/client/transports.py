@@ -182,7 +182,7 @@ class SSETransport(ClientTransport):
         self.httpx_client_factory = httpx_client_factory
 
         if isinstance(sse_read_timeout, int | float):
-            sse_read_timeout = datetime.timedelta(seconds=sse_read_timeout)
+            sse_read_timeout = datetime.timedelta(seconds=float(sse_read_timeout))
         self.sse_read_timeout = sse_read_timeout
 
     def _set_auth(self, auth: httpx.Auth | Literal["oauth"] | str | None):
@@ -252,7 +252,7 @@ class StreamableHttpTransport(ClientTransport):
         self.httpx_client_factory = httpx_client_factory
 
         if isinstance(sse_read_timeout, int | float):
-            sse_read_timeout = datetime.timedelta(seconds=sse_read_timeout)
+            sse_read_timeout = datetime.timedelta(seconds=float(sse_read_timeout))
         self.sse_read_timeout = sse_read_timeout
 
     def _set_auth(self, auth: httpx.Auth | Literal["oauth"] | str | None):
@@ -1024,28 +1024,36 @@ def infer_transport(
 
     # the transport is a FastMCP server (2.x or 1.0)
     elif isinstance(transport, FastMCP | FastMCP1Server):
+        # Type checker needs help understanding that transport is now FastMCP | FastMCP1Server
+        assert isinstance(transport, FastMCP | FastMCP1Server)
         inferred_transport = FastMCPTransport(mcp=transport)
 
     # the transport is a path to a script
     elif isinstance(transport, Path | str) and Path(transport).exists():
+        # Type checker needs help understanding that transport is Path | str
+        script_path: str | Path = transport
         if str(transport).endswith(".py"):
-            inferred_transport = PythonStdioTransport(script_path=transport)
+            inferred_transport = PythonStdioTransport(script_path=script_path)
         elif str(transport).endswith(".js"):
-            inferred_transport = NodeStdioTransport(script_path=transport)
+            inferred_transport = NodeStdioTransport(script_path=script_path)
         else:
             raise ValueError(f"Unsupported script type: {transport}")
 
     # the transport is an http(s) URL
     elif isinstance(transport, AnyUrl | str) and str(transport).startswith("http"):
-        inferred_transport_type = infer_transport_type_from_url(transport)
+        # Type checker needs help understanding that transport is AnyUrl | str
+        url_transport: str | AnyUrl = transport
+        inferred_transport_type = infer_transport_type_from_url(url_transport)
         if inferred_transport_type == "sse":
-            inferred_transport = SSETransport(url=transport)
+            inferred_transport = SSETransport(url=url_transport)
         else:
-            inferred_transport = StreamableHttpTransport(url=transport)
+            inferred_transport = StreamableHttpTransport(url=url_transport)
 
     # if the transport is a config dict or MCPConfig
     elif isinstance(transport, dict | MCPConfig):
-        inferred_transport = MCPConfigTransport(config=transport)
+        # Type checker needs help understanding that transport is dict | MCPConfig
+        config_transport: dict | MCPConfig = transport
+        inferred_transport = MCPConfigTransport(config=config_transport)
 
     # the transport is an unknown type
     else:

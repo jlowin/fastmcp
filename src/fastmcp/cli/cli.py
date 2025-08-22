@@ -107,7 +107,6 @@ def version(
         cyclopts.Parameter(
             "--copy",
             help="Copy version information to clipboard",
-            negative=False,
         ),
     ] = False,
 ):
@@ -153,7 +152,6 @@ async def dev(
         cyclopts.Parameter(
             "--with",
             help="Additional packages to install",
-            negative=False,
         ),
     ] = [],
     inspector_version: Annotated[
@@ -385,7 +383,6 @@ async def run(
         cyclopts.Parameter(
             "--no-banner",
             help="Don't show the server banner",
-            negative=False,
         ),
     ] = False,
     python: Annotated[
@@ -400,7 +397,6 @@ async def run(
         cyclopts.Parameter(
             "--with",
             help="Additional packages to install (can be used multiple times)",
-            negative=False,
         ),
     ] = [],
     project: Annotated[
@@ -586,7 +582,6 @@ async def inspect(
         cyclopts.Parameter(
             "--with",
             help="Additional packages to install (can be used multiple times)",
-            negative=False,
         ),
     ] = [],
     project: Annotated[
