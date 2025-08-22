@@ -75,10 +75,10 @@ sequenceDiagram
     Note over Client, Proxy: Authorization with Callback Forwarding
     Client->>Proxy: 3. GET /authorize<br/>redirect_uri=localhost:54321/callback
     Note over Proxy: Store transaction with client callback
-    Proxy->>Provider: 4. Redirect to provider<br/>redirect_uri=server:8000/oauth/callback
+    Proxy->>Provider: 4. Redirect to provider<br/>redirect_uri=server:8000/auth/callback
     
     Note over Provider, Proxy: Provider Callback
-    Provider->>Proxy: 5. GET /oauth/callback<br/>with authorization code
+    Provider->>Proxy: 5. GET /auth/callback<br/>with authorization code
     Proxy->>Provider: 6. Exchange code for tokens
     Provider-->>Proxy: 7. Access & refresh tokens
     
@@ -142,7 +142,7 @@ The `OAuthProxy` class provides the complete proxy implementation:
   Public URL of your FastMCP server (e.g., `https://your-server.com`)
 </ParamField>
 
-<ParamField body="redirect_path" type="str" default="/oauth/callback">
+<ParamField body="redirect_path" type="str" default="/auth/callback">
   Path for OAuth callbacks. Must match the redirect URI configured in your OAuth application
 </ParamField>
 
@@ -161,11 +161,20 @@ The `OAuthProxy` class provides the complete proxy implementation:
 <ParamField body="resource_server_url" type="AnyHttpUrl | str | None">
   Resource server URL (defaults to base_url)
 </ParamField>
+
+<ParamField body="allowed_client_redirect_uris" type="list[str] | None">
+  List of allowed redirect URI patterns for MCP clients. Patterns support wildcards (e.g., `"http://localhost:*"`, `"https://*.example.com/*"`). 
+  - `None` (default): Only localhost redirect URIs allowed (`http://localhost:*`, `http://127.0.0.1:*`)
+  - Empty list `[]`: All redirect URIs allowed (not recommended for production)
+  - Custom list: Only matching patterns allowed
+  
+  These patterns apply to MCP client loopback redirects, NOT the upstream OAuth app redirect URI.
+</ParamField>
 </Card>
 
 ```python
 from fastmcp import FastMCP
-from fastmcp.server.auth.proxy import OAuthProxy
+from fastmcp.server.auth import OAuthProxy
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 
 # Configure token validation for your provider
@@ -191,8 +200,8 @@ auth = OAuthProxy(
     # Your FastMCP server URL (string automatically converted to AnyHttpUrl)
     base_url="https://your-server.com",
     
-    # Optional: customize callback path (defaults to "/oauth/callback")
-    redirect_path="/oauth/callback"
+    # Optional: customize callback path (defaults to "/auth/callback")
+    redirect_path="/auth/callback"
 )
 
 mcp = FastMCP(name="My Server", auth=auth)
@@ -203,13 +212,13 @@ mcp = FastMCP(name="My Server", auth=auth)
 When registering your application with your OAuth provider, configure the redirect/callback URL as:
 
 ```
-https://your-server.com/oauth/callback
+https://your-server.com/auth/callback
 ```
 
 For local development with providers that support it (like GitHub):
 
 ```
-http://localhost:8000/oauth/callback
+http://localhost:8000/auth/callback
 ```
 
 The proxy automatically:
@@ -218,6 +227,32 @@ The proxy automatically:
 - Exchanges authorization codes server-side for enhanced security
 - Validates tokens using your provider's public keys or API
 - Maintains PKCE security throughout the flow
+
+## Client Redirect URI Security
+
+<Warning>
+By default, OAuth Proxy only accepts localhost redirect URIs from MCP clients for security. You can customize this with the `allowed_client_redirect_uris` parameter:
+
+```python
+# Default: localhost only (secure)
+auth = OAuthProxy(...) 
+
+# Custom patterns with wildcards
+auth = OAuthProxy(
+    ...,
+    allowed_client_redirect_uris=[
+        "http://localhost:*",
+        "https://app.example.com/auth/*"
+    ]
+)
+
+# Allow all (NOT recommended for production)
+auth = OAuthProxy(
+    ...,
+    allowed_client_redirect_uris=[]
+)
+```
+</Warning>
 
 ## Client Compatibility
 

@@ -4,7 +4,7 @@ Tests the complete GitHub OAuth flow using HeadlessOAuth to bypass browser inter
 
 This test requires a GitHub OAuth app to be created at https://github.com/settings/developers
 with the following configuration:
-- Redirect URL: http://127.0.0.1:9100/oauth/callback
+- Redirect URL: http://127.0.0.1:9100/auth/callback
 - Client ID and Client Secret should be set as environment variables:
   - FASTMCP_TEST_AUTH_GITHUB_CLIENT_ID
   - FASTMCP_TEST_AUTH_GITHUB_CLIENT_SECRET
@@ -116,7 +116,7 @@ def create_github_server_with_mock_callback(
         separator = "&" if "?" in str(params.redirect_uri) else "?"
         return f"{params.redirect_uri}{separator}{urlencode(callback_params)}"
 
-    auth.authorize = mock_authorize
+    auth.authorize = mock_authorize  # type: ignore[assignment]
 
     # Mock the token verifier to accept our fake tokens
     original_verify_token = auth._token_validator.verify_token
@@ -137,7 +137,7 @@ def create_github_server_with_mock_callback(
         # Fall back to original verification for other tokens
         return await original_verify_token(token)
 
-    auth._token_validator.verify_token = mock_verify_token
+    auth._token_validator.verify_token = mock_verify_token  # type: ignore[assignment]
 
     # Create FastMCP server with mocked GitHub authentication
     server = FastMCP("GitHub OAuth Integration Test Server (Mock)", auth=auth)
@@ -267,7 +267,7 @@ async def test_github_oauth_authorization_redirect(github_server: str):
         # The redirect_uri should be our proxy's callback, not the client's
         proxy_callback = github_params["redirect_uri"][0]
         assert proxy_callback.startswith(base_url)
-        assert proxy_callback.endswith("/oauth/callback")
+        assert proxy_callback.endswith("/auth/callback")
 
 
 async def test_github_oauth_server_metadata(github_server: str):
