@@ -62,6 +62,7 @@ dev = [
     "pytest-timeout>=2.4.0",
     "pytest-xdist>=3.6.1",
     "ruff",
+    "pytest-rerunfailures>=15.1",
 ]
 
 [project.scripts]

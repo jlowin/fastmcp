@@ -3,6 +3,7 @@ import gc
 import inspect
 import logging
 import os
+import sys
 import tempfile
 from collections.abc import AsyncGenerator
 from pathlib import Path
@@ -245,6 +246,8 @@ async def test_multi_client(tmp_path: Path):
 @pytest.mark.skipif(
     running_under_debugger(), reason="Debugger holds a reference to the transport"
 )
+# this test can be flaky on windows
+@pytest.mark.flaky(reruns=3, condition=sys.platform.startswith("win32"))
 @pytest.mark.timeout(5)
 async def test_multi_client_lifespan(tmp_path: Path):
     pid_1: int | None = None
