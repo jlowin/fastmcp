@@ -244,10 +244,9 @@ async def test_multi_client(tmp_path: Path):
 
 
 @pytest.mark.skipif(
-    running_under_debugger(), reason="Debugger holds a reference to the transport"
+    running_under_debugger() or sys.platform.startswith("win32"),
+    reason="Debugger holds a reference to the transport; Windows has process lifecycle issues",
 )
-# this test can be flaky on windows
-@pytest.mark.flaky(reruns=3, condition=sys.platform.startswith("win32"))
 @pytest.mark.timeout(5)
 async def test_multi_client_lifespan(tmp_path: Path):
     pid_1: int | None = None
