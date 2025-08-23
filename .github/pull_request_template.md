@@ -1,15 +1,15 @@
-# Pull Request
-
 ## Description
-Please provide a clear and concise description of the changes made in this pull request.
+<!-- Please provide a clear and concise description of the changes made in this pull request. -->
 
-## Related Issue
-**Required**: This PR must be linked to an open issue.
-- Closes #(issue number)
-- Related to #(issue number)
+## Contribution Checklist
+
+- [ ] My change is related to issue: #(issue number)
+- [ ] I understand my PR will be closed without review if:
+  - I have not created an issue first
+  - I make a PR for an issue that is assigned to someone else
 
 ## Type of Change
-Please check the relevant option(s):
+<!-- Please check all of the matching change types: -->
 
 - [ ] Bug fix (non-breaking change which fixes an issue)
 - [ ] New feature (non-breaking change which adds functionality)
@@ -20,45 +20,29 @@ Please check the relevant option(s):
 - [ ] Other (please describe):
 
 ## Testing
-Please check all that apply:
+<!-- Please check the ways you have tested the changes: -->
 
-- [ ] I have added tests that prove my fix is effective or that my feature works
-- [ ] All new and existing tests pass (`uv run pytest`)
-- [ ] I have performed manual testing of the changes
-- [ ] I have tested the changes in different environments/configurations
+I have tested my changes in the following ways:
+
+- [ ] Performed manual testing of the changes
+- [ ] Added tests that prove my fix is effective or that my feature works
+- [ ] Tested my changes on Python 3.10
 
 ## Code Quality
-Please check all that apply:
+<!-- Please check the ways you have ensured the code quality: -->
 
-- [ ] My code follows the project's coding standards
-- [ ] I have run the linting checks (`uv run pre-commit run --all-files`)
-- [ ] I have run type checking (`uv run ty check`) 
-- [ ] I have performed a self-review of my own code
-- [ ] I have commented my code, particularly in hard-to-understand areas
+I have ensured the code quality by:
+
+- [ ] Following the project's coding standards
+- [ ] Commenting code if it uses unusual patterns or is otherwise hard to understand
 
 ## Documentation
-Please check all that apply:
+<!-- Please check all of the matching documentation changes: -->
 
-- [ ] I have updated relevant documentation
-- [ ] I have added docstrings to new functions/classes
-- [ ] I have updated the changelog (if applicable)
-- [ ] I have added examples for new features (if applicable)
+I have updated the documentation in the following ways:
 
-## Dependencies
-Please check if applicable:
-
-- [ ] I have updated `pyproject.toml` with any new dependencies
-- [ ] I have run `uv sync` to ensure dependencies are properly installed
-- [ ] All dependencies are compatible with Python ≥3.10
-
-## Additional Notes
-Any additional information, context, or screenshots that would be helpful for reviewers.
+- [ ] Updated relevant user documentation
+- [ ] Added docstrings to new functions/classes (if applicable)
+- [ ] Added/updated examples for the features (if applicable)
 
 ---
-
-**Reminder**: Before submitting this PR, ensure you have run the required development workflow:
-```bash
-uv sync                              # Install dependencies
-uv run pre-commit run --all-files    # Ruff + Prettier + ty
-uv run pytest                        # Run full test suite
-```
