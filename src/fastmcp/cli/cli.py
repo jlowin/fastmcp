@@ -107,7 +107,7 @@ def version(
         cyclopts.Parameter(
             "--copy",
             help="Copy version information to clipboard",
-            negative=False,
+            negative="",
         ),
     ] = False,
 ):
@@ -153,7 +153,7 @@ async def dev(
         cyclopts.Parameter(
             "--with",
             help="Additional packages to install",
-            negative=False,
+            negative="",
         ),
     ] = [],
     inspector_version: Annotated[
@@ -385,7 +385,7 @@ async def run(
         cyclopts.Parameter(
             "--no-banner",
             help="Don't show the server banner",
-            negative=False,
+            negative="",
         ),
     ] = False,
     python: Annotated[
@@ -400,7 +400,7 @@ async def run(
         cyclopts.Parameter(
             "--with",
             help="Additional packages to install (can be used multiple times)",
-            negative=False,
+            negative="",
         ),
     ] = [],
     project: Annotated[
@@ -586,7 +586,7 @@ async def inspect(
         cyclopts.Parameter(
             "--with",
             help="Additional packages to install (can be used multiple times)",
-            negative=False,
+            negative="",
         ),
     ] = [],
     project: Annotated[
@@ -763,43 +763,6 @@ async def inspect(
         )
         console.print(f"[bold red]✗[/bold red] Failed to inspect server: {e}")
         sys.exit(1)
-
-
-@app.command
-def generate_schema(
-    *,
-    output: Annotated[
-        Path | None,
-        cyclopts.Parameter(
-            name=["--output", "-o"],
-            help="Output file path for the JSON schema",
-        ),
-    ] = None,
-) -> None:
-    """Generate JSON schema for fastmcp.json configuration files.
-
-    This generates a JSON schema that can be used by IDEs and validators
-    to provide auto-completion and validation for fastmcp.json files.
-
-    Examples:
-        fastmcp generate-schema
-        fastmcp generate-schema -o schema.json
-    """
-    import json
-
-    from fastmcp.utilities.fastmcp_config import (
-        generate_schema as gen_schema,
-    )
-
-    schema = gen_schema()
-    schema_json = json.dumps(schema, indent=2)
-
-    if output:
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(schema_json)
-        logger.info(f"Schema written to {output}")
-    else:
-        console.print(schema_json)
 
 
 # Add install subcommands using proper Cyclopts pattern
