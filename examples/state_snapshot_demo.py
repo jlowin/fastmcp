@@ -8,6 +8,7 @@ from fastmcp.server.context import Context
 
 mcp = FastMCP("State Snapshot Demo")
 
+
 @mcp.tool
 def setup_user_data(username: str, theme: str, language: str, ctx: Context) -> str:
     """Set up some user preferences in the context state."""
@@ -15,13 +16,15 @@ def setup_user_data(username: str, theme: str, language: str, ctx: Context) -> s
     ctx.set_state("theme", theme)
     ctx.set_state("language", language)
     ctx.set_state("session_start", "2024-01-15T10:30:00Z")
-    
+
     return f"User data set up for {username} (theme: {theme}, language: {language})"
+
 
 @mcp.tool
 def create_state_snapshot(snapshot_name: str, ctx: Context) -> str:
     """Create a named snapshot of the current context state."""
     return ctx.create_snapshot(snapshot_name)
+
 
 @mcp.tool
 def show_current_state(ctx: Context) -> dict:
@@ -34,16 +37,19 @@ def show_current_state(ctx: Context) -> dict:
             current_state[key] = value
     return current_state
 
+
 @mcp.tool
 def modify_state(key: str, value: str, ctx: Context) -> str:
     """Modify a state value."""
     ctx.set_state(key, value)
     return f"Set {key} = {value}"
 
+
 @mcp.tool
 def list_all_snapshots(ctx: Context) -> list[str]:
     """List all available snapshots."""
     return ctx.list_snapshots()
+
 
 @mcp.tool
 def restore_from_snapshot(snapshot_name: str, ctx: Context) -> str:
@@ -53,6 +59,7 @@ def restore_from_snapshot(snapshot_name: str, ctx: Context) -> str:
     except KeyError as e:
         return f"Error: {e}"
 
+
 @mcp.tool
 def delete_state_snapshot(snapshot_name: str, ctx: Context) -> str:
     """Delete a named snapshot."""
@@ -60,6 +67,7 @@ def delete_state_snapshot(snapshot_name: str, ctx: Context) -> str:
         return ctx.delete_snapshot(snapshot_name)
     except KeyError as e:
         return f"Error: {e}"
+
 
 @mcp.tool
 def get_snapshot_data(snapshot_name: str, ctx: Context) -> dict:
@@ -69,6 +77,7 @@ def get_snapshot_data(snapshot_name: str, ctx: Context) -> dict:
     except KeyError as e:
         return {"error": str(e)}
 
+
 @mcp.tool
 def compare_snapshots(snapshot1_name: str, snapshot2_name: str, ctx: Context) -> dict:
     """Compare two snapshots and show the differences."""
@@ -76,6 +85,7 @@ def compare_snapshots(snapshot1_name: str, snapshot2_name: str, ctx: Context) ->
         return ctx.get_snapshot_diff(snapshot1_name, snapshot2_name)
     except KeyError as e:
         return {"error": str(e)}
+
 
 # Example usage flow:
 """

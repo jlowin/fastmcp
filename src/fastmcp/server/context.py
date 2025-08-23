@@ -592,11 +592,11 @@ class Context:
 
     def create_snapshot(self, name: str) -> str:
         """Create a named snapshot of the current context state.
-        
+
         Args:
-            name: The name for this snapshot. If a snapshot with this name already 
+            name: The name for this snapshot. If a snapshot with this name already
                   exists, it will be overwritten.
-                  
+
         Returns:
             A confirmation message about the snapshot creation.
         """
@@ -605,7 +605,7 @@ class Context:
 
     def list_snapshots(self) -> list[str]:
         """List all available snapshot names for this session.
-        
+
         Returns:
             A list of snapshot names.
         """
@@ -613,64 +613,72 @@ class Context:
 
     def restore_snapshot(self, name: str) -> str:
         """Restore the context state from a named snapshot.
-        
+
         Args:
             name: The name of the snapshot to restore.
-            
+
         Returns:
             A confirmation message about the snapshot restoration.
-            
+
         Raises:
             KeyError: If the snapshot name doesn't exist.
         """
         if name not in self._snapshots:
-            raise KeyError(f"Snapshot '{name}' not found. Available snapshots: {list(self._snapshots.keys())}")
-        
+            raise KeyError(
+                f"Snapshot '{name}' not found. Available snapshots: {list(self._snapshots.keys())}"
+            )
+
         self._state = copy.deepcopy(self._snapshots[name])
         return f"State restored from snapshot '{name}' with {len(self._state)} items"
 
     def delete_snapshot(self, name: str) -> str:
         """Delete a named snapshot.
-        
+
         Args:
             name: The name of the snapshot to delete.
-            
+
         Returns:
             A confirmation message about the snapshot deletion.
-            
+
         Raises:
             KeyError: If the snapshot name doesn't exist.
         """
         if name not in self._snapshots:
-            raise KeyError(f"Snapshot '{name}' not found. Available snapshots: {list(self._snapshots.keys())}")
-        
+            raise KeyError(
+                f"Snapshot '{name}' not found. Available snapshots: {list(self._snapshots.keys())}"
+            )
+
         del self._snapshots[name]
         return f"Snapshot '{name}' deleted"
 
     def get_snapshot(self, name: str) -> dict[str, Any]:
         """Get the data from a named snapshot.
-        
+
         Args:
             name: The name of the snapshot to retrieve.
-            
+
         Returns:
             A deep copy of the snapshot data.
-            
+
         Raises:
             KeyError: If the snapshot name doesn't exist.
         """
         if name not in self._snapshots:
-            raise KeyError(f"Snapshot '{name}' not found. Available snapshots: {list(self._snapshots.keys())}")
-        
+            raise KeyError(
+                f"Snapshot '{name}' not found. Available snapshots: {list(self._snapshots.keys())}"
+            )
+
         return copy.deepcopy(self._snapshots[name])
 
-    def get_snapshot_diff(self, snapshot1_name: str, snapshot2_name: str) -> dict[str, Any]:
+    def get_snapshot_diff(
+        self, snapshot1_name: str, snapshot2_name: str
+    ) -> dict[str, Any]:
         """Compare two snapshots and return the differences.
-        
+
         Args:
             snapshot1_name: The name of the first snapshot (baseline).
             snapshot2_name: The name of the second snapshot (comparison).
-            
+
         Returns:
             A dictionary containing the differences:
             {
@@ -681,28 +689,32 @@ class Context:
                 },
                 "unchanged": {...}   # Keys with same values (optional, for completeness)
             }
-            
+
         Raises:
             KeyError: If either snapshot name doesn't exist.
         """
         if snapshot1_name not in self._snapshots:
-            raise KeyError(f"Snapshot '{snapshot1_name}' not found. Available snapshots: {list(self._snapshots.keys())}")
+            raise KeyError(
+                f"Snapshot '{snapshot1_name}' not found. Available snapshots: {list(self._snapshots.keys())}"
+            )
         if snapshot2_name not in self._snapshots:
-            raise KeyError(f"Snapshot '{snapshot2_name}' not found. Available snapshots: {list(self._snapshots.keys())}")
-        
+            raise KeyError(
+                f"Snapshot '{snapshot2_name}' not found. Available snapshots: {list(self._snapshots.keys())}"
+            )
+
         snap1 = self._snapshots[snapshot1_name]
         snap2 = self._snapshots[snapshot2_name]
-        
+
         # Get all unique keys from both snapshots
         all_keys = set(snap1.keys()) | set(snap2.keys())
-        
+
         diff = {
-            "added": {},      # In snap2 but not in snap1
-            "removed": {},    # In snap1 but not in snap2
-            "modified": {},   # Different values
-            "unchanged": {}   # Same values
+            "added": {},  # In snap2 but not in snap1
+            "removed": {},  # In snap1 but not in snap2
+            "modified": {},  # Different values
+            "unchanged": {},  # Same values
         }
-        
+
         for key in all_keys:
             if key in snap1 and key in snap2:
                 # Key exists in both snapshots
@@ -716,7 +728,7 @@ class Context:
             else:
                 # Key only in snapshot1 (removed)
                 diff["removed"][key] = snap1[key]
-        
+
         return diff
 
     def _queue_tool_list_changed(self) -> None:

@@ -191,11 +191,11 @@ class TestContextSnapshots:
             # Set up some state
             context.set_state("user", "alice")
             context.set_state("theme", "dark")
-            
+
             # Create snapshot
             result = context.create_snapshot("test_snapshot")
             assert result == "State snapshot 'test_snapshot' created with 2 items"
-            
+
             # Verify snapshot exists in list
             snapshots = context.list_snapshots()
             assert "test_snapshot" in snapshots
@@ -209,17 +209,17 @@ class TestContextSnapshots:
             # Create initial snapshot
             context.set_state("count", 1)
             context.create_snapshot("counter")
-            
+
             # Modify state and overwrite snapshot
             context.set_state("count", 2)
             result = context.create_snapshot("counter")
             assert result == "State snapshot 'counter' created with 1 items"
-            
+
             # Verify only one snapshot exists
             snapshots = context.list_snapshots()
             assert len(snapshots) == 1
             assert "counter" in snapshots
-            
+
             # Verify snapshot has new value
             snapshot_data = context.get_snapshot("counter")
             assert snapshot_data["count"] == 2
@@ -243,7 +243,7 @@ class TestContextSnapshots:
             context.create_snapshot("snap1")
             context.create_snapshot("snap2")
             context.create_snapshot("snap3")
-            
+
             snapshots = context.list_snapshots()
             assert len(snapshots) == 3
             assert set(snapshots) == {"snap1", "snap2", "snap3"}
@@ -258,16 +258,16 @@ class TestContextSnapshots:
             context.set_state("user", "bob")
             context.set_state("settings", {"theme": "light", "lang": "en"})
             context.create_snapshot("user_setup")
-            
+
             # Get snapshot data
             snapshot_data = context.get_snapshot("user_setup")
             expected = {"user": "bob", "settings": {"theme": "light", "lang": "en"}}
             assert snapshot_data == expected
-            
+
             # Verify it's a deep copy (modifying returned data doesn't affect snapshot)
             snapshot_data["user"] = "charlie"
             snapshot_data["settings"]["theme"] = "dark"
-            
+
             # Original snapshot should be unchanged
             original_data = context.get_snapshot("user_setup")
             assert original_data["user"] == "bob"
@@ -292,16 +292,16 @@ class TestContextSnapshots:
             context.set_state("config", "original")
             context.set_state("count", 1)
             context.create_snapshot("backup")
-            
+
             # Modify state
             context.set_state("config", "modified")
             context.set_state("count", 10)
             context.set_state("new_key", "added")
-            
+
             # Restore from snapshot
             result = context.restore_snapshot("backup")
             assert result == "State restored from snapshot 'backup' with 2 items"
-            
+
             # Verify state was restored
             assert context.get_state("config") == "original"
             assert context.get_state("count") == 1
@@ -326,15 +326,15 @@ class TestContextSnapshots:
             context.set_state("data", "test")
             context.create_snapshot("snap1")
             context.create_snapshot("snap2")
-            
+
             # Verify both exist
             snapshots = context.list_snapshots()
             assert len(snapshots) == 2
-            
+
             # Delete one
             result = context.delete_snapshot("snap1")
             assert result == "Snapshot 'snap1' deleted"
-            
+
             # Verify only one remains
             snapshots = context.list_snapshots()
             assert snapshots == ["snap2"]
@@ -359,22 +359,22 @@ class TestContextSnapshots:
             context.set_state("to_modify", "old_value")
             context.set_state("to_remove", "will_be_removed")
             context.create_snapshot("before")
-            
+
             # Modify state
             context.set_state("to_modify", "new_value")  # Modified
-            context.set_state("to_add", "added_value")    # Added
-            del context._state["to_remove"]               # Removed
+            context.set_state("to_add", "added_value")  # Added
+            del context._state["to_remove"]  # Removed
             # unchanged remains the same
             context.create_snapshot("after")
-            
+
             # Test diff
             diff = context.get_snapshot_diff("before", "after")
-            
+
             expected = {
                 "added": {"to_add": "added_value"},
                 "removed": {"to_remove": "will_be_removed"},
                 "modified": {"to_modify": {"old": "old_value", "new": "new_value"}},
-                "unchanged": {"unchanged": "same"}
+                "unchanged": {"unchanged": "same"},
             }
             assert diff == expected
 
@@ -388,14 +388,14 @@ class TestContextSnapshots:
             context.set_state("key2", {"nested": "data"})
             context.create_snapshot("snap1")
             context.create_snapshot("snap2")  # Same state
-            
+
             diff = context.get_snapshot_diff("snap1", "snap2")
-            
+
             expected = {
                 "added": {},
                 "removed": {},
                 "modified": {},
-                "unchanged": {"key1": "value1", "key2": {"nested": "data"}}
+                "unchanged": {"key1": "value1", "key2": {"nested": "data"}},
             }
             assert diff == expected
 
@@ -408,15 +408,10 @@ class TestContextSnapshots:
             # Create empty snapshots
             context.create_snapshot("empty1")
             context.create_snapshot("empty2")
-            
+
             diff = context.get_snapshot_diff("empty1", "empty2")
-            
-            expected = {
-                "added": {},
-                "removed": {},
-                "modified": {},
-                "unchanged": {}
-            }
+
+            expected = {"added": {}, "removed": {}, "modified": {}, "unchanged": {}}
             assert diff == expected
 
     @pytest.mark.asyncio
@@ -426,11 +421,11 @@ class TestContextSnapshots:
 
         async with Context(fastmcp=mock_fastmcp) as context:
             context.create_snapshot("exists")
-            
+
             # Test first snapshot missing
             with pytest.raises(KeyError, match="Snapshot 'missing1' not found"):
                 context.get_snapshot_diff("missing1", "exists")
-                
+
             # Test second snapshot missing
             with pytest.raises(KeyError, match="Snapshot 'missing2' not found"):
                 context.get_snapshot_diff("exists", "missing2")
@@ -444,34 +439,36 @@ class TestContextSnapshots:
             # Create snapshots in parent context
             context1.set_state("parent_data", "value1")
             context1.create_snapshot("parent_snapshot")
-            
+
             async with Context(fastmcp=mock_fastmcp) as context2:
                 # Child should inherit parent snapshots
                 snapshots = context2.list_snapshots()
                 assert "parent_snapshot" in snapshots
-                
+
                 # Child should be able to access parent snapshot
                 snapshot_data = context2.get_snapshot("parent_snapshot")
                 assert snapshot_data["parent_data"] == "value1"
-                
+
                 # Child can create its own snapshots
                 context2.set_state("child_data", "value2")
                 context2.create_snapshot("child_snapshot")
-                
+
                 # Child should see both snapshots
                 child_snapshots = context2.list_snapshots()
                 assert len(child_snapshots) == 2
                 assert set(child_snapshots) == {"parent_snapshot", "child_snapshot"}
-                
+
                 # Modify parent snapshot in child (should not affect parent)
                 context2.set_state("modified", "in_child")
                 context2.create_snapshot("parent_snapshot")  # Overwrite
-                
+
             # Parent should still have original snapshot
             parent_snapshots = context1.list_snapshots()
             assert "parent_snapshot" in parent_snapshots
-            assert "child_snapshot" not in parent_snapshots  # Child snapshots don't bubble up
-            
+            assert (
+                "child_snapshot" not in parent_snapshots
+            )  # Child snapshots don't bubble up
+
             # Parent snapshot should be unchanged
             parent_snapshot_data = context1.get_snapshot("parent_snapshot")
             assert "modified" not in parent_snapshot_data
@@ -487,22 +484,22 @@ class TestContextSnapshots:
             complex_data = {
                 "users": [
                     {"id": 1, "name": "Alice", "settings": {"theme": "dark"}},
-                    {"id": 2, "name": "Bob", "settings": {"theme": "light"}}
+                    {"id": 2, "name": "Bob", "settings": {"theme": "light"}},
                 ],
                 "config": {
                     "database": {"host": "localhost", "port": 5432},
-                    "features": {"feature_a": True, "feature_b": False}
-                }
+                    "features": {"feature_a": True, "feature_b": False},
+                },
             }
             context.set_state("app_data", complex_data)
             context.create_snapshot("complex")
-            
+
             # Modify the state
             context.get_state("app_data")["users"][0]["name"] = "Alice Updated"
-            
+
             # Restore snapshot
             context.restore_snapshot("complex")
-            
+
             # Verify original data is restored (not the modified version)
             restored_data = context.get_state("app_data")
             assert restored_data["users"][0]["name"] == "Alice"  # Original value
