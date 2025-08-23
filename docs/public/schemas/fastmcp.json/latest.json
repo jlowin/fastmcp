@@ -6,11 +6,7 @@
         "transport": {
           "anyOf": [
             {
-              "enum": [
-                "stdio",
-                "http",
-                "sse"
-              ],
+              "enum": ["stdio", "http", "sse"],
               "type": "string"
             },
             {
@@ -32,11 +28,7 @@
           ],
           "default": null,
           "description": "Host to bind to when using HTTP transport",
-          "examples": [
-            "127.0.0.1",
-            "0.0.0.0",
-            "localhost"
-          ],
+          "examples": ["127.0.0.1", "0.0.0.0", "localhost"],
           "title": "Host"
         },
         "port": {
@@ -50,11 +42,7 @@
           ],
           "default": null,
           "description": "Port to bind to when using HTTP transport",
-          "examples": [
-            8000,
-            3000,
-            5000
-          ],
+          "examples": [8000, 3000, 5000],
           "title": "Port"
         },
         "path": {
@@ -68,23 +56,13 @@
           ],
           "default": null,
           "description": "URL path for the server endpoint",
-          "examples": [
-            "/mcp/",
-            "/api/mcp/",
-            "/sse/"
-          ],
+          "examples": ["/mcp/", "/api/mcp/", "/sse/"],
           "title": "Path"
         },
         "log_level": {
           "anyOf": [
             {
-              "enum": [
-                "DEBUG",
-                "INFO",
-                "WARNING",
-                "ERROR",
-                "CRITICAL"
-              ],
+              "enum": ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
               "type": "string"
             },
             {
@@ -106,11 +84,7 @@
           ],
           "default": null,
           "description": "Working directory for the server process",
-          "examples": [
-            ".",
-            "./src",
-            "/app"
-          ],
+          "examples": [".", "./src", "/app"],
           "title": "Cwd"
         },
         "env": {
@@ -149,13 +123,7 @@
           ],
           "default": null,
           "description": "Arguments to pass to the server (after --)",
-          "examples": [
-            [
-              "--config",
-              "config.json",
-              "--debug"
-            ]
-          ],
+          "examples": [["--config", "config.json", "--debug"]],
           "title": "Args"
         }
       },
@@ -167,11 +135,7 @@
       "properties": {
         "file": {
           "description": "Path to Python file containing the server",
-          "examples": [
-            "server.py",
-            "src/server.py",
-            "app/main.py"
-          ],
+          "examples": ["server.py", "src/server.py", "app/main.py"],
           "title": "File",
           "type": "string"
         },
@@ -186,11 +150,7 @@
           ],
           "default": null,
           "description": "Name of the server object in the file (defaults to searching for mcp/server/app)",
-          "examples": [
-            "app",
-            "mcp",
-            "server"
-          ],
+          "examples": ["app", "mcp", "server"],
           "title": "Object"
         },
         "repo": {
@@ -204,15 +164,11 @@
           ],
           "default": null,
           "description": "Git repository URL",
-          "examples": [
-            "https://github.com/user/repo"
-          ],
+          "examples": ["https://github.com/user/repo"],
           "title": "Repo"
         }
       },
-      "required": [
-        "file"
-      ],
+      "required": ["file"],
       "title": "EntrypointConfig",
       "type": "object"
     },
@@ -230,11 +186,7 @@
           ],
           "default": null,
           "description": "Python version constraint",
-          "examples": [
-            "3.10",
-            "3.11",
-            "3.12"
-          ],
+          "examples": ["3.10", "3.11", "3.12"],
           "title": "Python"
         },
         "dependencies": {
@@ -251,13 +203,7 @@
           ],
           "default": null,
           "description": "Python packages to install with PEP 508 specifiers",
-          "examples": [
-            [
-              "fastmcp>=2.0,<3",
-              "httpx",
-              "pandas>=2.0"
-            ]
-          ],
+          "examples": [["fastmcp>=2.0,<3", "httpx", "pandas>=2.0"]],
           "title": "Dependencies"
         },
         "requirements": {
@@ -271,10 +217,7 @@
           ],
           "default": null,
           "description": "Path to requirements.txt file",
-          "examples": [
-            "requirements.txt",
-            "../requirements/prod.txt"
-          ],
+          "examples": ["requirements.txt", "../requirements/prod.txt"],
           "title": "Requirements"
         },
         "project": {
@@ -288,10 +231,7 @@
           ],
           "default": null,
           "description": "Path to project directory containing pyproject.toml",
-          "examples": [
-            ".",
-            "../my-project"
-          ],
+          "examples": [".", "../my-project"],
           "title": "Project"
         },
         "editable": {
@@ -305,10 +245,7 @@
           ],
           "default": null,
           "description": "Directory to install in editable mode",
-          "examples": [
-            ".",
-            "../my-package"
-          ],
+          "examples": [".", "../my-package"],
           "title": "Editable"
         }
       },
@@ -327,7 +264,7 @@
           "type": "null"
         }
       ],
-      "default": "https://gofastmcp.com/schemas/fastmcp_config/v1.json",
+      "default": "https://gofastmcp.com/public/schemas/fastmcp.json/v1.json",
       "description": "JSON schema for IDE support and validation",
       "title": "$Schema"
     },
@@ -352,10 +289,8 @@
       "description": "Server deployment and runtime settings"
     }
   },
-  "required": [
-    "entrypoint"
-  ],
+  "required": ["entrypoint"],
   "title": "FastMCP Configuration",
   "type": "object",
-  "$id": "https://gofastmcp.com/schemas/fastmcp_config/v1.json"
+  "$id": "https://gofastmcp.com/public/schemas/fastmcp.json/v1.json"
 }
