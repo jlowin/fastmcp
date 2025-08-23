@@ -310,6 +310,10 @@ async def test_multi_client_lifespan(tmp_path: Path):
             await asyncio.sleep(0.01)
 
 
+@pytest.mark.skipif(
+    sys.platform.startswith("win32"),
+    reason="Windows has process lifecycle issues",
+)
 async def test_multi_client_force_close(tmp_path: Path):
     server_script = inspect.cleandoc("""
         from fastmcp import FastMCP
