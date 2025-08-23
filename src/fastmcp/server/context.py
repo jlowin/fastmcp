@@ -124,6 +124,7 @@ class Context:
         self._tokens: list[Token] = []
         self._notification_queue: set[str] = set()  # Dedupe notifications
         self._state: dict[str, Any] = {}
+        self._snapshots: dict[str, dict[str, Any]] = {}  # Named state snapshots
 
     @property
     def fastmcp(self) -> FastMCP:
@@ -139,6 +140,8 @@ class Context:
         if parent_context is not None:
             # Inherit state from parent context
             self._state = copy.deepcopy(parent_context._state)
+            # Inherit snapshots from parent context
+            self._snapshots = copy.deepcopy(parent_context._snapshots)
 
         # Always set this context and save the token
         token = _current_context.set(self)
@@ -586,6 +589,135 @@ class Context:
     def get_state(self, key: str) -> Any:
         """Get a value from the context state. Returns None if the key is not found."""
         return self._state.get(key)
+
+    def create_snapshot(self, name: str) -> str:
+        """Create a named snapshot of the current context state.
+        
+        Args:
+            name: The name for this snapshot. If a snapshot with this name already 
+                  exists, it will be overwritten.
+                  
+        Returns:
+            A confirmation message about the snapshot creation.
+        """
+        self._snapshots[name] = copy.deepcopy(self._state)
+        return f"State snapshot '{name}' created with {len(self._state)} items"
+
+    def list_snapshots(self) -> list[str]:
+        """List all available snapshot names for this session.
+        
+        Returns:
+            A list of snapshot names.
+        """
+        return list(self._snapshots.keys())
+
+    def restore_snapshot(self, name: str) -> str:
+        """Restore the context state from a named snapshot.
+        
+        Args:
+            name: The name of the snapshot to restore.
+            
+        Returns:
+            A confirmation message about the snapshot restoration.
+            
+        Raises:
+            KeyError: If the snapshot name doesn't exist.
+        """
+        if name not in self._snapshots:
+            raise KeyError(f"Snapshot '{name}' not found. Available snapshots: {list(self._snapshots.keys())}")
+        
+        self._state = copy.deepcopy(self._snapshots[name])
+        return f"State restored from snapshot '{name}' with {len(self._state)} items"
+
+    def delete_snapshot(self, name: str) -> str:
+        """Delete a named snapshot.
+        
+        Args:
+            name: The name of the snapshot to delete.
+            
+        Returns:
+            A confirmation message about the snapshot deletion.
+            
+        Raises:
+            KeyError: If the snapshot name doesn't exist.
+        """
+        if name not in self._snapshots:
+            raise KeyError(f"Snapshot '{name}' not found. Available snapshots: {list(self._snapshots.keys())}")
+        
+        del self._snapshots[name]
+        return f"Snapshot '{name}' deleted"
+
+    def get_snapshot(self, name: str) -> dict[str, Any]:
+        """Get the data from a named snapshot.
+        
+        Args:
+            name: The name of the snapshot to retrieve.
+            
+        Returns:
+            A deep copy of the snapshot data.
+            
+        Raises:
+            KeyError: If the snapshot name doesn't exist.
+        """
+        if name not in self._snapshots:
+            raise KeyError(f"Snapshot '{name}' not found. Available snapshots: {list(self._snapshots.keys())}")
+        
+        return copy.deepcopy(self._snapshots[name])
+
+    def get_snapshot_diff(self, snapshot1_name: str, snapshot2_name: str) -> dict[str, Any]:
+        """Compare two snapshots and return the differences.
+        
+        Args:
+            snapshot1_name: The name of the first snapshot (baseline).
+            snapshot2_name: The name of the second snapshot (comparison).
+            
+        Returns:
+            A dictionary containing the differences:
+            {
+                "added": {...},      # Keys in snapshot2 but not in snapshot1
+                "removed": {...},    # Keys in snapshot1 but not in snapshot2
+                "modified": {        # Keys with different values
+                    "key": {"old": value1, "new": value2}
+                },
+                "unchanged": {...}   # Keys with same values (optional, for completeness)
+            }
+            
+        Raises:
+            KeyError: If either snapshot name doesn't exist.
+        """
+        if snapshot1_name not in self._snapshots:
+            raise KeyError(f"Snapshot '{snapshot1_name}' not found. Available snapshots: {list(self._snapshots.keys())}")
+        if snapshot2_name not in self._snapshots:
+            raise KeyError(f"Snapshot '{snapshot2_name}' not found. Available snapshots: {list(self._snapshots.keys())}")
+        
+        snap1 = self._snapshots[snapshot1_name]
+        snap2 = self._snapshots[snapshot2_name]
+        
+        # Get all unique keys from both snapshots
+        all_keys = set(snap1.keys()) | set(snap2.keys())
+        
+        diff = {
+            "added": {},      # In snap2 but not in snap1
+            "removed": {},    # In snap1 but not in snap2
+            "modified": {},   # Different values
+            "unchanged": {}   # Same values
+        }
+        
+        for key in all_keys:
+            if key in snap1 and key in snap2:
+                # Key exists in both snapshots
+                if snap1[key] == snap2[key]:
+                    diff["unchanged"][key] = snap1[key]
+                else:
+                    diff["modified"][key] = {"old": snap1[key], "new": snap2[key]}
+            elif key in snap2:
+                # Key only in snapshot2 (added)
+                diff["added"][key] = snap2[key]
+            else:
+                # Key only in snapshot1 (removed)
+                diff["removed"][key] = snap1[key]
+        
+        return diff
 
     def _queue_tool_list_changed(self) -> None:
         """Queue a tool list changed notification."""
