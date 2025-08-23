@@ -256,7 +256,7 @@ async def cursor_command(
         cyclopts.Parameter(
             "--with",
             help="Additional packages to install",
-            negative=False,
+            negative="",
         ),
     ] = [],
     env_vars: Annotated[
@@ -264,7 +264,7 @@ async def cursor_command(
         cyclopts.Parameter(
             "--env",
             help="Environment variables in KEY=VALUE format",
-            negative=False,
+            negative="",
         ),
     ] = [],
     env_file: Annotated[
