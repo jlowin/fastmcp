@@ -95,9 +95,9 @@ class TestRunWithUv:
             "--with",
             "fastmcp",
             "--with",
-            "pandas",
+            "numpy",  # sorted alphabetically
             "--with",
-            "numpy",
+            "pandas",  # sorted alphabetically
             "fastmcp",
             "run",
             "server.py",
@@ -122,7 +122,7 @@ class TestRunWithUv:
             "--with",
             "fastmcp",
             "--with-requirements",
-            "requirements.txt",
+            str(req_path.expanduser().resolve()),  # resolved to absolute path
             "fastmcp",
             "run",
             "server.py",
@@ -202,7 +202,7 @@ class TestRunWithUv:
             "--with",
             "pandas",
             "--with-requirements",
-            "reqs.txt",
+            str(Path("reqs.txt").expanduser().resolve()),  # resolved to absolute path
             "fastmcp",
             "run",
             "server.py",
