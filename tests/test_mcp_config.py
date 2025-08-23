@@ -243,7 +243,6 @@ async def test_multi_client(tmp_path: Path):
         assert result_2.data == 3
 
 
-@pytest.mark.client_process
 @pytest.mark.skipif(
     running_under_debugger() or sys.platform.startswith("win32"),
     reason="Debugger holds a reference to the transport; Windows has process lifecycle issues",
@@ -302,12 +301,12 @@ async def test_multi_client_lifespan(tmp_path: Path):
     with pytest.raises(psutil.NoSuchProcess):
         while True:
             psutil.Process(pid_1)
-            await asyncio.sleep(0.01)
+            await asyncio.sleep(0.1)
 
     with pytest.raises(psutil.NoSuchProcess):
         while True:
             psutil.Process(pid_2)
-            await asyncio.sleep(0.01)
+            await asyncio.sleep(0.1)
 
 
 @pytest.mark.skipif(
