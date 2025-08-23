@@ -97,7 +97,7 @@ class TestSessionId:
         mock_headers = {"mcp-session-id": "test-session-123"}
 
         token = request_ctx.set(
-            RequestContext(
+            RequestContext(  # type: ignore[arg-type]
                 request_id=0,
                 meta=None,
                 session=MagicMock(wraps={}),
@@ -118,7 +118,7 @@ class TestSessionId:
         from mcp.shared.context import RequestContext
 
         token = request_ctx.set(
-            RequestContext(
+            RequestContext(  # type: ignore[arg-type]
                 request_id=0,
                 meta=None,
                 session=MagicMock(wraps={}),

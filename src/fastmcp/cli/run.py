@@ -86,10 +86,8 @@ async def import_server(file: Path, server_or_factory: str | None = None) -> Any
         logger.error("Could not load module", extra={"file": str(file)})
         sys.exit(1)
 
-    assert spec is not None  # Already checked above
-    assert spec.loader is not None  # Already checked above
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
+    spec.loader.exec_module(module)  # type: ignore[union-attr]
 
     # If no object specified, try common server names
     if not server_or_factory:
@@ -131,11 +129,7 @@ async def import_server(file: Path, server_or_factory: str | None = None) -> Any
         )
         sys.exit(1)
 
-    assert obj is not None  # Already checked above
-    assert (
-        server_or_factory is not None
-    )  # If we reach here, server_or_factory must be set
-    return await _resolve_server_or_factory(obj, file, server_or_factory)
+    return await _resolve_server_or_factory(obj, file, server_or_factory)  # type: ignore[arg-type]
 
 
 async def _resolve_server_or_factory(obj: Any, file: Path, name: str) -> Any:

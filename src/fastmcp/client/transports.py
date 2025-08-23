@@ -1024,36 +1024,36 @@ def infer_transport(
 
     # the transport is a FastMCP server (2.x or 1.0)
     elif isinstance(transport, FastMCP | FastMCP1Server):
-        # Type checker needs help understanding that transport is now FastMCP | FastMCP1Server
-        assert isinstance(transport, FastMCP | FastMCP1Server)
-        inferred_transport = FastMCPTransport(mcp=transport)
+        inferred_transport = FastMCPTransport(
+            mcp=cast(FastMCP[Any] | FastMCP1Server, transport)
+        )
 
     # the transport is a path to a script
     elif isinstance(transport, Path | str) and Path(transport).exists():
-        # Type checker needs help understanding that transport is Path | str
-        script_path: str | Path = transport
         if str(transport).endswith(".py"):
-            inferred_transport = PythonStdioTransport(script_path=script_path)
+            inferred_transport = PythonStdioTransport(script_path=cast(Path, transport))
         elif str(transport).endswith(".js"):
-            inferred_transport = NodeStdioTransport(script_path=script_path)
+            inferred_transport = NodeStdioTransport(script_path=cast(Path, transport))
         else:
             raise ValueError(f"Unsupported script type: {transport}")
 
     # the transport is an http(s) URL
     elif isinstance(transport, AnyUrl | str) and str(transport).startswith("http"):
-        # Type checker needs help understanding that transport is AnyUrl | str
-        url_transport: str | AnyUrl = transport
-        inferred_transport_type = infer_transport_type_from_url(url_transport)
+        inferred_transport_type = infer_transport_type_from_url(
+            cast(AnyUrl | str, transport)
+        )
         if inferred_transport_type == "sse":
-            inferred_transport = SSETransport(url=url_transport)
+            inferred_transport = SSETransport(url=cast(AnyUrl | str, transport))
         else:
-            inferred_transport = StreamableHttpTransport(url=url_transport)
+            inferred_transport = StreamableHttpTransport(
+                url=cast(AnyUrl | str, transport)
+            )
 
     # if the transport is a config dict or MCPConfig
     elif isinstance(transport, dict | MCPConfig):
-        # Type checker needs help understanding that transport is dict | MCPConfig
-        config_transport: dict | MCPConfig = transport
-        inferred_transport = MCPConfigTransport(config=config_transport)
+        inferred_transport = MCPConfigTransport(
+            config=cast(dict | MCPConfig, transport)
+        )
 
     # the transport is an unknown type
     else:
