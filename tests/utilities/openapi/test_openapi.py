@@ -4,6 +4,7 @@ from typing import Any
 
 import pytest
 from fastapi import Body, FastAPI, Path, Query
+from inline_snapshot import snapshot
 from pydantic import BaseModel, Field
 
 from fastmcp.utilities.openapi import (
@@ -1031,27 +1032,56 @@ def test_openapi_30_reference_resolution(openapi_30_with_references):
     assert route.request_body.required is True
     assert "application/json" in route.request_body.content_schema
 
-    # Check schema structure
+    # Check schema structure with snapshots
     json_schema = route.request_body.content_schema["application/json"]
-    assert json_schema["type"] == "object"
-    assert "properties" in json_schema
-    assert set(json_schema["required"]) == {"name", "price"}
-
-    # Check primary fields are properly resolved
-    props = json_schema["properties"]
-    assert "id" in props
-    assert "name" in props
-    assert "price" in props
-    assert "category" in props
-
-    # The category might be a reference or resolved object
-    category = props["category"]
-    # Either it's directly resolved with properties
-    # or it still has a $ref field
-    assert "properties" in category or "$ref" in category
+    assert json_schema == snapshot(
+        {
+            "required": ["name", "price"],
+            "type": "object",
+            "properties": {
+                "id": {"type": "string", "format": "uuid"},
+                "name": {"type": "string"},
+                "price": {"type": "number"},
+                "category": {"$ref": "#/$defs/Category"},
+            },
+        }
+    )
 
     combined_schema = _combine_schemas(route)
-    assert "#/$defs/" in combined_schema["properties"]["category"]["$ref"]
+    assert combined_schema == snapshot(
+        {
+            "type": "object",
+            "properties": {
+                "id": {"type": "string", "format": "uuid"},
+                "name": {"type": "string"},
+                "price": {"type": "number"},
+                "category": {"$ref": "#/$defs/Category"},
+            },
+            "required": ["name", "price"],
+            "$defs": {
+                "Category": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "integer"},
+                        "name": {"type": "string"},
+                    },
+                }
+            },
+        }
+    )
+
+    # # Original complex assertions commented out for reference:
+    # assert json_schema["type"] == "object"
+    # assert "properties" in json_schema
+    # assert set(json_schema["required"]) == {"name", "price"}
+    # props = json_schema["properties"]
+    # assert "id" in props
+    # assert "name" in props
+    # assert "price" in props
+    # assert "category" in props
+    # category = props["category"]
+    # assert "properties" in category or "$ref" in category
+    # assert "#/$defs/" in combined_schema["properties"]["category"]["$ref"]
 
 
 def test_openapi_31_reference_resolution(openapi_31_with_references):

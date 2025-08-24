@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import Annotated, Any
 
 import pytest
+from inline_snapshot import snapshot
 from mcp.types import (
     AudioContent,
     EmbeddedResource,
@@ -35,14 +36,22 @@ class TestToolFromFunction:
         assert tool.parameters["properties"]["a"]["type"] == "integer"
         assert tool.parameters["properties"]["b"]["type"] == "integer"
         # With primitive wrapping, int return type becomes object with result property
-        expected_schema = {
-            "type": "object",
-            "properties": {"result": {"type": "integer", "title": "Result"}},
-            "required": ["result"],
-            "title": "_WrappedResult",
-            "x-fastmcp-wrap-result": True,
-        }
-        assert tool.output_schema == expected_schema
+        assert tool.output_schema == snapshot(
+            {
+                "properties": {"result": {"title": "Result", "type": "integer"}},
+                "required": ["result"],
+                "title": "_WrappedResult",
+                "type": "object",
+                "x-fastmcp-wrap-result": True,
+            }
+        )
+        # expected_schema = {
+        #     "type": "object",
+        #     "properties": {"result": {"type": "integer", "title": "Result"}},
+        #     "required": ["result"],
+        #     "title": "_WrappedResult",
+        #     "x-fastmcp-wrap-result": True,
+        # }
 
     def test_meta_parameter(self):
         """Test that meta parameter is properly handled."""
@@ -322,6 +331,7 @@ class TestToolFromFunctionOutputSchema:
                 "x-fastmcp-wrap-result": True,
             }
             assert tool.output_schema == expected_schema
+            # # Note: Parameterized test - keeping original assertion for multiple parameter values
         else:
             # Object types remain unwrapped
             assert tool.output_schema == base_schema
@@ -339,8 +349,8 @@ class TestToolFromFunctionOutputSchema:
             return 1
 
         tool = Tool.from_function(func)
-        base_schema = TypeAdapter(annotation).json_schema()
 
+        base_schema = TypeAdapter(annotation).json_schema()
         expected_schema = {
             "type": "object",
             "properties": {"result": {**base_schema, "title": "Result"}},
@@ -349,6 +359,8 @@ class TestToolFromFunctionOutputSchema:
             "x-fastmcp-wrap-result": True,
         }
         assert tool.output_schema == expected_schema
+        # # Note: Parameterized tests are challenging with snapshots since each parameter
+        # # would need a separate snapshot. Keeping original assertion for now.
 
     async def test_none_return_annotation(self):
         def func() -> None:
