@@ -1,52 +1,43 @@
 ## Description
 <!-- Please provide a clear and concise description of the changes made in this pull request. -->
 
-## Contribution Checklist
+**Type of Change**
+<!-- You must create an issue in the repository before making a Pull Request. Pull Requests without an issue will be closed without review. -->
 
 - [ ] My change is related to issue: #(issue number)
-- [ ] I understand my PR will be closed without review if:
-  - I have not created an issue first
-  - I make a PR for an issue that is assigned to someone else
+- - [ ] Bug fix (non-breaking change which fixes an issue)
+- - [ ] New feature (non-breaking change which adds functionality)
+- - [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
+- - [ ] Other (please describe):
 
-## Type of Change
-<!-- Please check all of the matching change types: -->
+**Development and Testing**
+<!-- You must test your changes before submitting a Pull Request. -->
 
-- [ ] Bug fix (non-breaking change which fixes an issue)
-- [ ] New feature (non-breaking change which adds functionality)
-- [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
-- [ ] Documentation update
-- [ ] Other (please describe):
+- [ ] I have followed the development workflow:
+- - [ ] `uv sync` - Dependencies installed
+- - [ ] `uv run pre-commit run --all-files` - Linting/formatting passed  
+- - [ ] `uv run pytest` - All tests passed
 
-## Testing
-<!-- Please check the ways you have tested the changes: -->
+**Testing**
 
-I have tested my changes in the following ways:
+- [ ] I have tested my changes:
+- - [ ] I have performed manual testing of the changes
+- - [ ] I have added tests that prove my fix is effective or that my feature works
+- - [ ] I have tested my changes on Python 3.10
 
-- [ ] Performed manual testing of the changes
-- [ ] Added tests that prove my fix is effective or that my feature works
-- [ ] Tested my changes on Python 3.10
+**Review**
+<!-- You must review your own changes before requesting a review from a Maintainer. -->
 
-## Code Quality
-<!-- Please check the ways you have ensured the code quality: -->
+- [ ] I have self-reviewed my changes
+- - [ ] I have followed the project's coding standards
+- - [ ] I have commented code if it uses unusual patterns or is otherwise hard to understand
 
-I have ensured the code quality by:
+**Documentation**
+<!-- You must update the documentation for your changes. -->
 
-- [ ] Following the project's coding standards
-- [ ] Commenting code if it uses unusual patterns or is otherwise hard to understand
+- [ ] I have performed all required documentation updates:
+- - [ ] Updated relevant user documentation
+- - [ ] Added docstrings to new functions/classes (if applicable)
+- - [ ] Added/updated examples for the features (if applicable)
 
-## Documentation
-<!-- Please check all of the matching documentation changes: -->
-
-I have updated the documentation in the following ways:
-
-- [ ] Updated relevant user documentation
-- [ ] Added docstrings to new functions/classes (if applicable)
-- [ ] Added/updated examples for the features (if applicable)
-
-## Required Development Workflow
-<!-- Please check all of the matching development workflow steps you followed: -->
-
-- [ ] `uv sync` - Dependencies installed
-- [ ] `uv run pre-commit run --all-files` - Linting/formatting passed  
-- [ ] `uv run pytest` - All tests passed
 ---
