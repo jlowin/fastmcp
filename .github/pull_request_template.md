@@ -15,8 +15,6 @@
 - [ ] New feature (non-breaking change which adds functionality)
 - [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
 - [ ] Documentation update
-- [ ] Refactoring (no functional changes)
-- [ ] Performance improvement
 - [ ] Other (please describe):
 
 ## Testing
@@ -45,4 +43,10 @@ I have updated the documentation in the following ways:
 - [ ] Added docstrings to new functions/classes (if applicable)
 - [ ] Added/updated examples for the features (if applicable)
 
+## Required Development Workflow
+<!-- Please check all of the matching development workflow steps you followed: -->
+
+- [ ] `uv sync` - Dependencies installed
+- [ ] `uv run pre-commit run --all-files` - Linting/formatting passed  
+- [ ] `uv run pytest` - All tests passed
 ---
