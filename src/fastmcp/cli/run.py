@@ -271,19 +271,19 @@ def run_with_uv(
     env_config = Environment(
         python=python_version,
         dependencies=with_packages if with_packages else None,
-        requirements=str(with_requirements) if with_requirements else None,
-        project=str(project) if project else None,
+        requirements=str(with_requirements.resolve()) if with_requirements else None,
+        project=str(project.resolve()) if project else None,
         editable=editable,
     )
-    # IMPORTANT: We add --skip-env-setup to prevent infinite recursion.
+    # IMPORTANT: We add --skip-env to prevent infinite recursion.
     # When this function executes `uv run ... fastmcp run server.py`, the inner
     # `fastmcp run` command will be executed inside the uv environment we're creating.
-    # Without --skip-env-setup, that inner command would detect it needs uv (due to the same
+    # Without --skip-env, that inner command would detect it needs uv (due to the same
     # CLI args) and try to spawn ANOTHER uv subprocess, creating infinite recursion.
-    # The --skip-env-setup flag tells the inner fastmcp: "skip environment setup, we're already
+    # The --skip-env flag tells the inner fastmcp: "skip environment setup, we're already
     # inside the uv environment that was just created for us."
     cmd = ["uv"] + env_config.build_uv_args(
-        ["fastmcp", "run", server_spec, "--skip-env-setup"]
+        ["fastmcp", "run", server_spec, "--skip-env"]
     )
 
     # Add transport options

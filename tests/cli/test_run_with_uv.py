@@ -34,7 +34,7 @@ class TestRunWithUv:
             "fastmcp",
             "run",
             "server.py",
-            "--skip-env-setup",
+            "--skip-env",
         ]
         assert cmd == expected
 
@@ -59,7 +59,7 @@ class TestRunWithUv:
             "fastmcp",
             "run",
             "server.py",
-            "--skip-env-setup",
+            "--skip-env",
         ]
         assert cmd == expected
 
@@ -67,7 +67,8 @@ class TestRunWithUv:
     def test_run_with_uv_project(self, mock_run):
         """Test run_with_uv with project directory."""
         mock_run.return_value = Mock(returncode=0)
-        project_path = Path("/my/project")
+        # Use an absolute path that works on all platforms
+        project_path = Path.cwd() / "my" / "project"
 
         with pytest.raises(SystemExit) as exc_info:
             run_with_uv("server.py", project=project_path)
@@ -86,7 +87,7 @@ class TestRunWithUv:
             "fastmcp",
             "run",
             "server.py",
-            "--skip-env-setup",
+            "--skip-env",
         ]
 
     @patch("subprocess.run")
@@ -112,7 +113,7 @@ class TestRunWithUv:
             "fastmcp",
             "run",
             "server.py",
-            "--skip-env-setup",
+            "--skip-env",
         ]
         assert cmd == expected
 
@@ -134,11 +135,11 @@ class TestRunWithUv:
             "--with",
             "fastmcp",
             "--with-requirements",
-            str(req_path),  # not auto-resolved anymore
+            str(req_path.resolve()),  # auto-resolved to absolute path
             "fastmcp",
             "run",
             "server.py",
-            "--skip-env-setup",
+            "--skip-env",
         ]
         assert cmd == expected
 
@@ -169,7 +170,7 @@ class TestRunWithUv:
             "fastmcp",
             "run",
             "server.py",
-            "--skip-env-setup",
+            "--skip-env",
             "--transport",
             "http",
             "--host",
@@ -189,11 +190,14 @@ class TestRunWithUv:
         """Test run_with_uv with all options combined."""
         mock_run.return_value = Mock(returncode=0)
 
+        # Use an absolute path that works on all platforms
+        project_path = Path.cwd() / "workspace"
+
         with pytest.raises(SystemExit) as exc_info:
             run_with_uv(
                 "server.py",
                 python_version="3.10",
-                project=Path("/workspace"),
+                project=project_path,
                 with_packages=["pandas"],
                 with_requirements=Path("reqs.txt"),
                 transport="http",
@@ -211,13 +215,14 @@ class TestRunWithUv:
         assert Path(cmd[5]).is_absolute()
         assert cmd[6:10] == ["--with", "fastmcp", "--with", "pandas"]
         assert cmd[10] == "--with-requirements"
-        # Check requirements path (not auto-resolved anymore)
-        assert cmd[11] == "reqs.txt"
+        # Check requirements path is now auto-resolved to absolute
+        assert Path(cmd[11]).is_absolute()
+        assert Path(cmd[11]).name == "reqs.txt"
         assert cmd[12:] == [
             "fastmcp",
             "run",
             "server.py",
-            "--skip-env-setup",
+            "--skip-env",
             "--transport",
             "http",
             "--port",

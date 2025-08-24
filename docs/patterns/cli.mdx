@@ -46,7 +46,7 @@ By default, this command runs the server directly in your current Python environ
 | Path | `--path` | Path to bind to when using http transport (default: `/mcp/` or `/sse/` for SSE) |
 | Log Level | `--log-level`, `-l` | Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL) |
 | No Banner | `--no-banner` | Disable the startup banner display |
-| No Environment | `--skip-env-setup` | Skip environment setup with uv (use when already in a uv environment) |
+| No Environment | `--skip-env` | Skip environment setup with uv (use when already in a uv environment) |
 | Python Version | `--python` | Python version to use (e.g., 3.10, 3.11) |
 | Additional Packages | `--with` | Additional packages to install (can be used multiple times) |
 | Project Directory | `--project` | Run the command within the given project directory |
@@ -180,11 +180,11 @@ The configuration file handles dependencies, environment variables, and transpor
 fastmcp run fastmcp.json --port 8080
 
 # Skip environment setup when already in a uv environment
-fastmcp run fastmcp.json --skip-env-setup
+fastmcp run fastmcp.json --skip-env
 ```
 
 <Note>
-The `--skip-env-setup` flag is useful when:
+The `--skip-env` flag is useful when:
 - You're already in an activated virtual environment
 - You're inside a Docker container with pre-installed dependencies  
 - You're in a uv-managed environment (prevents infinite recursion)

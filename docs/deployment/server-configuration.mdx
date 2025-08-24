@@ -303,18 +303,18 @@ fastmcp run  # No arguments needed!
 fastmcp run prod.fastmcp.json
 
 # Skip environment setup when already in a uv environment
-fastmcp run fastmcp.json --skip-env-setup
+fastmcp run fastmcp.json --skip-env
 ```
 
 ### Environment Setup Control
 
-By default, FastMCP uses `uv` to create an isolated environment based on your configuration. The `--skip-env-setup` flag allows you to skip this automatic environment setup:
+By default, FastMCP uses `uv` to create an isolated environment based on your configuration. The `--skip-env` flag allows you to skip this automatic environment setup:
 
 ```bash
-fastmcp run fastmcp.json --skip-env-setup
+fastmcp run fastmcp.json --skip-env
 ```
 
-**When to use `--skip-env-setup`:**
+**When to use `--skip-env`:**
 - You're already in an activated virtual environment with all dependencies installed
 - You're inside a Docker container with pre-installed dependencies
 - You're in a uv-managed environment and want to prevent infinite recursion

@@ -118,9 +118,9 @@ def install_cursor_workspace(
     env_config = Environment(
         python=python_version,
         dependencies=deduplicated_packages,
-        requirements=str(with_requirements) if with_requirements else None,
-        project=str(project) if project else None,
-        editable=str(with_editable) if with_editable else None,
+        requirements=str(with_requirements.resolve()) if with_requirements else None,
+        project=str(project.resolve()) if project else None,
+        editable=str(with_editable.resolve()) if with_editable else None,
     )
     args = env_config.build_uv_args()
 
@@ -198,9 +198,9 @@ def install_cursor(
     env_config = Environment(
         python=python_version,
         dependencies=deduplicated_packages,
-        requirements=str(with_requirements) if with_requirements else None,
-        project=str(project) if project else None,
-        editable=str(with_editable) if with_editable else None,
+        requirements=str(with_requirements.resolve()) if with_requirements else None,
+        project=str(project.resolve()) if project else None,
+        editable=str(with_editable.resolve()) if with_editable else None,
     )
     args = env_config.build_uv_args()
 

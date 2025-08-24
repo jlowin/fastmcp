@@ -391,10 +391,10 @@ async def run(
             help="Requirements file to install dependencies from",
         ),
     ] = None,
-    skip_env_setup: Annotated[
+    skip_env: Annotated[
         bool,
         cyclopts.Parameter(
-            "--skip-env-setup",
+            "--skip-env",
             help="Skip environment setup with uv (use when already in a uv environment)",
             negative="",
         ),
@@ -520,11 +520,11 @@ async def run(
     )
 
     # Check if we need to use uv run (either from CLI args or config)
-    # Skip if --skip-env-setup flag is set (we're already in a uv environment)
-    needs_uv = not skip_env_setup and (
+    # Skip if --skip-env flag is set (we're already in a uv environment)
+    needs_uv = not skip_env and (
         python or with_packages or with_requirements or project or editable
     )
-    if not skip_env_setup and not needs_uv and config and config.environment:
+    if not skip_env and not needs_uv and config and config.environment:
         # Check if config's environment needs uv
         needs_uv = config.environment.needs_uv()
 
