@@ -225,7 +225,7 @@ def run_with_uv(
                     # Try to parse as FastMCPConfig
                     try:
                         adapter = get_cached_typeadapter(FastMCPConfig)
-                        config = adapter.validate_python(data)
+                        config: FastMCPConfig = adapter.validate_python(data)
 
                         # Apply deployment settings
                         if config.deployment:
@@ -275,6 +275,13 @@ def run_with_uv(
         project=str(project) if project else None,
         editable=editable,
     )
+    # IMPORTANT: We add --no-env to prevent infinite recursion.
+    # When this function executes `uv run ... fastmcp run server.py`, the inner
+    # `fastmcp run` command will be executed inside the uv environment we're creating.
+    # Without --no-env, that inner command would detect it needs uv (due to the same
+    # CLI args) and try to spawn ANOTHER uv subprocess, creating infinite recursion.
+    # The --no-env flag tells the inner fastmcp: "skip environment setup, we're already
+    # inside the uv environment that was just created for us."
     cmd = ["uv"] + env_config.build_uv_args(["fastmcp", "run", server_spec, "--no-env"])
 
     # Add transport options

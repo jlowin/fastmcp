@@ -26,7 +26,16 @@ class TestRunWithUv:
         mock_run.assert_called_once()
         cmd = mock_run.call_args[0][0]
 
-        expected = ["uv", "run", "--with", "fastmcp", "fastmcp", "run", "server.py"]
+        expected = [
+            "uv",
+            "run",
+            "--with",
+            "fastmcp",
+            "fastmcp",
+            "run",
+            "server.py",
+            "--no-env",
+        ]
         assert cmd == expected
 
     @patch("subprocess.run")
@@ -50,6 +59,7 @@ class TestRunWithUv:
             "fastmcp",
             "run",
             "server.py",
+            "--no-env",
         ]
         assert cmd == expected
 
@@ -70,7 +80,14 @@ class TestRunWithUv:
         # Check that the project path is absolute
         assert Path(cmd[3]).is_absolute()
         # Check the rest of the command
-        assert cmd[4:] == ["--with", "fastmcp", "fastmcp", "run", "server.py"]
+        assert cmd[4:] == [
+            "--with",
+            "fastmcp",
+            "fastmcp",
+            "run",
+            "server.py",
+            "--no-env",
+        ]
 
     @patch("subprocess.run")
     def test_run_with_uv_with_packages(self, mock_run):
@@ -95,6 +112,7 @@ class TestRunWithUv:
             "fastmcp",
             "run",
             "server.py",
+            "--no-env",
         ]
         assert cmd == expected
 
@@ -120,6 +138,7 @@ class TestRunWithUv:
             "fastmcp",
             "run",
             "server.py",
+            "--no-env",
         ]
         assert cmd == expected
 
@@ -150,6 +169,7 @@ class TestRunWithUv:
             "fastmcp",
             "run",
             "server.py",
+            "--no-env",
             "--transport",
             "http",
             "--host",
@@ -197,6 +217,7 @@ class TestRunWithUv:
             "fastmcp",
             "run",
             "server.py",
+            "--no-env",
             "--transport",
             "http",
             "--port",
