@@ -84,7 +84,6 @@ class ErrorHandlingMiddleware(Middleware):
             return error
 
         # Map common exceptions to appropriate MCP error codes
-        # Use isinstance to catch subclasses (e.g., pydantic_core.ValidationError -> ValueError)
         if isinstance(error, ValueError | TypeError):
             return McpError(
                 ErrorData(code=-32602, message=f"Invalid params: {str(error)}")
