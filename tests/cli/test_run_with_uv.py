@@ -89,9 +89,9 @@ class TestRunWithUv:
             "--with",
             "fastmcp",
             "--with",
-            "numpy",  # sorted alphabetically
+            "pandas",  # original order preserved
             "--with",
-            "pandas",  # sorted alphabetically
+            "numpy",  # original order preserved
             "fastmcp",
             "run",
             "server.py",
@@ -116,7 +116,7 @@ class TestRunWithUv:
             "--with",
             "fastmcp",
             "--with-requirements",
-            str(req_path.expanduser().resolve()),  # resolved to absolute path
+            str(req_path),  # not auto-resolved anymore
             "fastmcp",
             "run",
             "server.py",
@@ -191,8 +191,8 @@ class TestRunWithUv:
         assert Path(cmd[5]).is_absolute()
         assert cmd[6:10] == ["--with", "fastmcp", "--with", "pandas"]
         assert cmd[10] == "--with-requirements"
-        # Check requirements path is absolute
-        assert Path(cmd[11]).is_absolute()
+        # Check requirements path (not auto-resolved anymore)
+        assert cmd[11] == "reqs.txt"
         assert cmd[12:] == [
             "fastmcp",
             "run",

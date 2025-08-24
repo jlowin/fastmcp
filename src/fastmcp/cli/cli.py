@@ -19,7 +19,6 @@ import fastmcp
 from fastmcp.cli import run as run_module
 from fastmcp.cli.install import install_app
 from fastmcp.server.server import FastMCP
-from fastmcp.utilities.cli import build_uv_command
 from fastmcp.utilities.inspect import FastMCPInfo, inspect_fastmcp
 from fastmcp.utilities.logging import get_logger
 
@@ -56,10 +55,6 @@ def _parse_env_var(env_var: str) -> tuple[str, str]:
         sys.exit(1)
     key, value = env_var.split("=", 1)
     return key.strip(), value.strip()
-
-
-# The _build_uv_command function has been moved to cli/utils.py
-# and is now imported as build_uv_command
 
 
 @app.command
@@ -198,18 +193,27 @@ async def dev(
 
         # Merge environment settings with CLI args (CLI takes precedence)
         if config.environment:
-            merged_env = config.environment.merge_with_cli_args(
-                python=python,
-                with_packages=with_packages,
-                with_requirements=with_requirements,
-                project=project,
-                with_editable=with_editable,
+            python = python or config.environment.python
+            project = project or (
+                Path(config.environment.project) if config.environment.project else None
             )
-            python = merged_env["python"]
-            with_packages = merged_env["with_packages"]
-            with_requirements = merged_env["with_requirements"]
-            project = merged_env["project"]
-            with_editable = merged_env["with_editable"]
+            with_requirements = with_requirements or (
+                Path(config.environment.requirements)
+                if config.environment.requirements
+                else None
+            )
+            with_editable = with_editable or (
+                Path(config.environment.editable)
+                if config.environment.editable
+                else None
+            )
+
+            # Merge packages from both sources
+            if config.environment.dependencies:
+                packages = list(config.environment.dependencies)
+                if with_packages:
+                    packages.extend(with_packages)
+                with_packages = packages
 
         # Get server port from deployment config if not specified
         if config.deployment and config.deployment.port:
@@ -265,14 +269,17 @@ async def dev(
         if inspector_version:
             inspector_cmd += f"@{inspector_version}"
 
-        uv_cmd = build_uv_command(
-            server_spec,
-            with_editable=with_editable,
-            with_packages=with_packages,
-            python_version=python,
-            with_requirements=with_requirements,
-            project=project,
+        # Create Environment object from CLI args
+        from fastmcp.utilities.fastmcp_config import Environment
+
+        env_config = Environment(
+            python=python,
+            dependencies=with_packages if with_packages else None,
+            requirements=str(with_requirements) if with_requirements else None,
+            project=str(project) if project else None,
+            editable=str(with_editable) if with_editable else None,
         )
+        uv_cmd = ["uv"] + env_config.build_uv_args(["fastmcp", "run", server_spec])
 
         # Add --no-banner flag for dev command
         uv_cmd.append("--no-banner")
@@ -433,33 +440,37 @@ async def run(
 
             # Merge deployment config with CLI values (CLI takes precedence)
             if config.deployment:
-                merged_deploy = config.deployment.merge_with_cli_args(
-                    transport=transport,
-                    host=host,
-                    port=port,
-                    path=path,
-                    log_level=log_level,
-                    server_args=list(server_args) if server_args else None,
+                transport = transport or config.deployment.transport
+                host = host or config.deployment.host
+                port = port or config.deployment.port
+                path = path or config.deployment.path
+                log_level = log_level or config.deployment.log_level
+                server_args = (
+                    tuple(server_args)
+                    if server_args
+                    else tuple(config.deployment.args or ())
                 )
-                transport = merged_deploy["transport"]
-                host = merged_deploy["host"]
-                port = merged_deploy["port"]
-                path = merged_deploy["path"]
-                log_level = merged_deploy["log_level"]
-                server_args = merged_deploy["server_args"] or ()
 
             # Merge environment config with CLI values (CLI takes precedence)
             if config.environment:
-                merged_env = config.environment.merge_with_cli_args(
-                    python=python,
-                    with_packages=with_packages,
-                    with_requirements=with_requirements,
-                    project=project,
+                python = python or config.environment.python
+                project = project or (
+                    Path(config.environment.project)
+                    if config.environment.project
+                    else None
                 )
-                python = merged_env["python"]
-                with_packages = merged_env["with_packages"]
-                with_requirements = merged_env["with_requirements"]
-                project = merged_env["project"]
+                with_requirements = with_requirements or (
+                    Path(config.environment.requirements)
+                    if config.environment.requirements
+                    else None
+                )
+
+                # Merge packages from both sources
+                if config.environment.dependencies:
+                    packages = list(config.environment.dependencies)
+                    if with_packages:
+                        packages.extend(with_packages)
+                    with_packages = packages
     logger.debug(
         "Running server or client",
         extra={
@@ -627,16 +638,24 @@ async def inspect(
 
             # Merge environment settings from config with CLI (CLI takes precedence)
             if config.environment:
-                merged_env = config.environment.merge_with_cli_args(
-                    python=python,
-                    with_packages=with_packages,
-                    with_requirements=with_requirements,
-                    project=project,
+                python = python or config.environment.python
+                project = project or (
+                    Path(config.environment.project)
+                    if config.environment.project
+                    else None
                 )
-                python = merged_env["python"]
-                with_packages = merged_env["with_packages"]
-                with_requirements = merged_env["with_requirements"]
-                project = merged_env["project"]
+                with_requirements = with_requirements or (
+                    Path(config.environment.requirements)
+                    if config.environment.requirements
+                    else None
+                )
+
+                # Merge packages from both sources
+                if config.environment.dependencies:
+                    packages = list(config.environment.dependencies)
+                    if with_packages:
+                        packages.extend(with_packages)
+                    with_packages = packages
 
     # Check if we need to use uv run
     needs_uv = python or with_packages or with_requirements or project
@@ -656,12 +675,12 @@ async def inspect(
             ]
             config.environment.run_with_uv(inspect_command)
         else:
-            # Build an EnvironmentConfig from CLI args for consistency
+            # Build an Environment from CLI args for consistency
             from fastmcp.utilities.fastmcp_config import (
-                EnvironmentConfig,
+                Environment,
             )
 
-            env_config = EnvironmentConfig(
+            env_config = Environment(
                 python=python,
                 dependencies=with_packages,
                 requirements=str(with_requirements) if with_requirements else None,

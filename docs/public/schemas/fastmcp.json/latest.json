@@ -1,6 +1,6 @@
 {
   "$defs": {
-    "DeploymentConfig": {
+    "Deployment": {
       "description": "Configuration for server deployment and runtime settings.",
       "properties": {
         "transport": {
@@ -127,7 +127,7 @@
           "title": "Args"
         }
       },
-      "title": "DeploymentConfig",
+      "title": "Deployment",
       "type": "object"
     },
     "EntrypointConfig": {
@@ -172,7 +172,7 @@
       "title": "EntrypointConfig",
       "type": "object"
     },
-    "EnvironmentConfig": {
+    "Environment": {
       "description": "Configuration for Python environment setup.",
       "properties": {
         "python": {
@@ -249,7 +249,7 @@
           "title": "Editable"
         }
       },
-      "title": "EnvironmentConfig",
+      "title": "Environment",
       "type": "object"
     }
   },
@@ -281,11 +281,11 @@
       ]
     },
     "environment": {
-      "$ref": "#/$defs/EnvironmentConfig",
+      "$ref": "#/$defs/Environment",
       "description": "Python environment setup configuration"
     },
     "deployment": {
-      "$ref": "#/$defs/DeploymentConfig",
+      "$ref": "#/$defs/Deployment",
       "description": "Server deployment and runtime settings"
     }
   },

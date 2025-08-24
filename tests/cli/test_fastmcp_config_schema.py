@@ -51,13 +51,13 @@ def test_schema_has_required_fields():
     """Test that the schema specifies the required fields correctly."""
     generated_schema = generate_schema()
 
-    # Check that entrypoint is required
+    # Check that source is required
     assert "required" in generated_schema
-    assert "entrypoint" in generated_schema["required"]
+    assert "source" in generated_schema["required"]
 
-    # Check that entrypoint is in properties
+    # Check that source is in properties
     assert "properties" in generated_schema
-    assert "entrypoint" in generated_schema["properties"]
+    assert "source" in generated_schema["properties"]
 
 
 def test_schema_nested_structure():
