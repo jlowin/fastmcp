@@ -15,6 +15,7 @@ from fastmcp.client.client import Client
 from fastmcp.client.transports import FastMCPTransport
 from fastmcp.mcp_config import MCPConfig, StdioMCPServer
 from fastmcp.server.server import FastMCP
+from fastmcp.utilities.fastmcp_config.v1.source import FileSystemSource
 
 
 class TestUrlDetection:
@@ -258,3 +259,123 @@ mcp = fastmcp.FastMCP("TestServer")
         with pytest.raises(SystemExit) as exc_info:
             await import_server(test_file, "nonexistent")
         assert exc_info.value.code == 1
+
+
+class TestSkipSource:
+    """Test the --skip-source functionality."""
+
+    async def test_run_command_calls_prepare_by_default(self, tmp_path):
+        """Test that run_command calls source.prepare() by default."""
+        from unittest.mock import AsyncMock, patch
+
+        from fastmcp.cli.run import run_command
+
+        # Create a test server file
+        test_file = tmp_path / "server.py"
+        test_file.write_text("""
+import fastmcp
+mcp = fastmcp.FastMCP("TestServer")
+""")
+
+        # Create a test config file
+        config_file = tmp_path / "fastmcp.json"
+        config_data = {"source": {"path": str(test_file), "entrypoint": "mcp"}}
+        config_file.write_text(json.dumps(config_data))
+
+        # Mock the prepare method and server run
+        with (
+            patch.object(
+                FileSystemSource, "prepare", new_callable=AsyncMock
+            ) as prepare_mock,
+            patch("fastmcp.server.server.FastMCP.run_async", new_callable=AsyncMock),
+        ):
+            # Run the command
+            await run_command(str(config_file))
+
+            # Verify prepare was called
+            prepare_mock.assert_called_once()
+
+    async def test_run_command_skips_prepare_with_flag(self, tmp_path):
+        """Test that run_command skips source.prepare() when skip_source=True."""
+        from unittest.mock import AsyncMock, patch
+
+        from fastmcp.cli.run import run_command
+
+        # Create a test server file
+        test_file = tmp_path / "server.py"
+        test_file.write_text("""
+import fastmcp
+mcp = fastmcp.FastMCP("TestServer")
+""")
+
+        # Create a test config file
+        config_file = tmp_path / "fastmcp.json"
+        config_data = {"source": {"path": str(test_file), "entrypoint": "mcp"}}
+        config_file.write_text(json.dumps(config_data))
+
+        # Mock the prepare method and server run
+        with (
+            patch.object(
+                FileSystemSource, "prepare", new_callable=AsyncMock
+            ) as prepare_mock,
+            patch("fastmcp.server.server.FastMCP.run_async", new_callable=AsyncMock),
+        ):
+            # Run the command with skip_source=True
+            await run_command(str(config_file), skip_source=True)
+
+            # Verify prepare was NOT called
+            prepare_mock.assert_not_called()
+
+    async def test_filesystem_source_prepare_by_default(self, tmp_path):
+        """Test that FileSystemSource is prepared when using direct file spec."""
+        from unittest.mock import AsyncMock, patch
+
+        from fastmcp.cli.run import run_command
+        from fastmcp.utilities.fastmcp_config.v1.source import FileSystemSource
+
+        # Create a test server file
+        test_file = tmp_path / "server.py"
+        test_file.write_text("""
+import fastmcp
+mcp = fastmcp.FastMCP("TestServer")
+""")
+
+        # Mock the prepare method and server run
+        with (
+            patch.object(
+                FileSystemSource, "prepare", new_callable=AsyncMock
+            ) as prepare_mock,
+            patch("fastmcp.server.server.FastMCP.run_async", new_callable=AsyncMock),
+        ):
+            # Run with direct file specification
+            await run_command(str(test_file))
+
+            # Verify prepare was called
+            prepare_mock.assert_called_once_with(None)
+
+    async def test_filesystem_source_skip_prepare_with_flag(self, tmp_path):
+        """Test that FileSystemSource.prepare() is skipped with skip_source flag."""
+        from unittest.mock import AsyncMock, patch
+
+        from fastmcp.cli.run import run_command
+        from fastmcp.utilities.fastmcp_config.v1.source import FileSystemSource
+
+        # Create a test server file
+        test_file = tmp_path / "server.py"
+        test_file.write_text("""
+import fastmcp
+mcp = fastmcp.FastMCP("TestServer")
+""")
+
+        # Mock the prepare method and server run
+        with (
+            patch.object(
+                FileSystemSource, "prepare", new_callable=AsyncMock
+            ) as prepare_mock,
+            patch("fastmcp.server.server.FastMCP.run_async", new_callable=AsyncMock),
+        ):
+            # Run with direct file specification and skip_source=True
+            await run_command(str(test_file), skip_source=True)
+
+            # Verify prepare was NOT called
+            prepare_mock.assert_not_called()

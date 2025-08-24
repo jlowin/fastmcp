@@ -399,6 +399,14 @@ async def run(
             negative="",
         ),
     ] = False,
+    skip_source: Annotated[
+        bool,
+        cyclopts.Parameter(
+            "--skip-source",
+            help="Skip source preparation step (use when source is already prepared)",
+            negative="",
+        ),
+    ] = False,
 ) -> None:
     """Run an MCP server or connect to a remote one.
 
@@ -566,6 +574,7 @@ async def run(
                 log_level=log_level,
                 server_args=list(server_args),
                 show_banner=not no_banner,
+                skip_source=skip_source,
             )
         except Exception as e:
             logger.error(

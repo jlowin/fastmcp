@@ -328,6 +328,47 @@ class TestRunCommand:
                 ]
             )
 
+    def test_run_command_parsing_skip_env_flag(self):
+        """Test run command parsing with --skip-env flag."""
+        command, bound, _ = app.parse_args(
+            [
+                "run",
+                "server.py",
+                "--skip-env",
+            ]
+        )
+        assert command is not None
+        assert bound.arguments["server_spec"] == "server.py"
+        assert bound.arguments["skip_env"] is True
+
+    def test_run_command_parsing_skip_source_flag(self):
+        """Test run command parsing with --skip-source flag."""
+        command, bound, _ = app.parse_args(
+            [
+                "run",
+                "server.py",
+                "--skip-source",
+            ]
+        )
+        assert command is not None
+        assert bound.arguments["server_spec"] == "server.py"
+        assert bound.arguments["skip_source"] is True
+
+    def test_run_command_parsing_both_skip_flags(self):
+        """Test run command parsing with both --skip-env and --skip-source flags."""
+        command, bound, _ = app.parse_args(
+            [
+                "run",
+                "server.py",
+                "--skip-env",
+                "--skip-source",
+            ]
+        )
+        assert command is not None
+        assert bound.arguments["server_spec"] == "server.py"
+        assert bound.arguments["skip_env"] is True
+        assert bound.arguments["skip_source"] is True
+
 
 class TestWindowsSpecific:
     """Test Windows-specific functionality."""

@@ -10,68 +10,18 @@ from __future__ import annotations
 import json
 import os
 import re
-from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, overload
 
 from pydantic import BaseModel, Field, field_validator
 
+from fastmcp.utilities.fastmcp_config.v1.source import FileSystemSource
 from fastmcp.utilities.logging import get_logger
 
 logger = get_logger("cli.config")
 
 # JSON Schema for IDE support
 FASTMCP_JSON_SCHEMA = "https://gofastmcp.com/public/schemas/fastmcp.json/v1.json"
-
-
-class BaseSource(BaseModel, ABC):
-    """Abstract base class for all source types."""
-
-    type: str = Field(description="Source type identifier")
-
-    async def prepare(self, config_path: Path | None = None) -> Path | None:
-        """Prepare the source (download, clone, install, etc).
-
-        Returns:
-            Path to prepared source directory, or None if no preparation needed.
-            This path may contain a nested fastmcp.json for configuration chaining.
-        """
-        # Default implementation for sources that don't need preparation
-        return None
-
-    @abstractmethod
-    async def load_server(
-        self, config_path: Path | None = None, server_args: list[str] | None = None
-    ) -> Any:
-        """Load and return the FastMCP server instance.
-
-        Must be called after prepare() if the source requires preparation.
-        """
-        ...
-
-
-class FileSystemSource(BaseSource):
-    """Source for local Python files."""
-
-    type: Literal["filesystem"] = Field(default="filesystem", description="Source type")
-    path: str = Field(description="Path to Python file containing the server")
-    entrypoint: str | None = Field(
-        default=None,
-        description="Name of server instance or factory function (a no-arg function that returns a FastMCP server)",
-    )
-
-    async def load_server(
-        self, config_path: Path | None = None, server_args: list[str] | None = None
-    ) -> Any:
-        """Load server from filesystem."""
-        from fastmcp.cli.run import import_server_with_args
-
-        # Resolve relative paths if config_path provided
-        file_path = Path(self.path)
-        if not file_path.is_absolute() and config_path:
-            file_path = (config_path.parent / file_path).resolve()
-
-        return await import_server_with_args(file_path, self.entrypoint, server_args)
 
 
 # Type alias for source union (will expand with GitSource, etc in future)

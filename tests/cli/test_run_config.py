@@ -11,8 +11,8 @@ from fastmcp.utilities.fastmcp_config import (
     Deployment,
     Environment,
     FastMCPConfig,
-    FileSystemSource,
 )
+from fastmcp.utilities.fastmcp_config.v1.source import FileSystemSource
 
 
 @pytest.fixture

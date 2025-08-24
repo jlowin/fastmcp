@@ -17,8 +17,8 @@ from fastmcp.server.server import FastMCP
 from fastmcp.utilities.fastmcp_config import (
     Environment,
     FastMCPConfig,
-    FileSystemSource,
 )
+from fastmcp.utilities.fastmcp_config.v1.source import FileSystemSource
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.types import get_cached_typeadapter
 
@@ -395,6 +395,7 @@ async def run_command(
     server_args: list[str] | None = None,
     show_banner: bool = True,
     use_direct_import: bool = False,
+    skip_source: bool = False,
 ) -> None:
     """Run a MCP server or connect to a remote one.
 
@@ -408,6 +409,7 @@ async def run_command(
         server_args: Additional arguments to pass to the server
         show_banner: Whether to show the server banner
         use_direct_import: Whether to use direct import instead of subprocess
+        skip_source: Whether to skip source preparation step
     """
     if is_url(server_spec):
         # Handle URL case
@@ -441,6 +443,10 @@ async def run_command(
                     server_args if server_args is not None else config.deployment.args
                 )
 
+            # Prepare the source if needed (e.g., clone git repo, download from cloud)
+            if not skip_source:
+                await config.source.prepare(config_path)
+
             # Load the server using the source
             server = await config.source.load_server(config_path, server_args)
             logger.debug(f'Found server "{server.name}" from config {config_path}')
@@ -461,6 +467,11 @@ async def run_command(
 
         # Create a temporary config with just the source
         config = FastMCPConfig(source=source)
+
+        # Prepare the source if needed (e.g., clone git repo, download from cloud)
+        if not skip_source:
+            await config.source.prepare(None)
+
         server = await config.source.load_server(None, server_args)
         logger.debug(f'Found server "{server.name}" in {source.path}')
 
