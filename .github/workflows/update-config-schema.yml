@@ -1,4 +1,4 @@
-name: Update Config Schema
+name: Update FastMCPConfig Schema
 
 # This workflow runs on merges to main to automatically update the config schema
 # by creating a PR when changes are needed.
