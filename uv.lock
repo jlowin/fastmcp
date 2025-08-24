@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.10"
 resolution-markers = [
     "python_full_version >= '3.11'",
@@ -560,7 +560,7 @@ dev = [
     { name = "copychat" },
     { name = "dirty-equals" },
     { name = "fastapi" },
-    { name = "inline-snapshot" },
+    { name = "inline-snapshot", extra = ["dirty-equals"] },
     { name = "ipython", version = "8.37.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "ipython", version = "9.4.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "pdbpp" },
@@ -604,7 +604,7 @@ dev = [
     { name = "copychat", specifier = ">=0.5.2" },
     { name = "dirty-equals", specifier = ">=0.9.0" },
     { name = "fastapi", specifier = ">=0.115.12" },
-    { name = "inline-snapshot", specifier = ">=0.15.0" },
+    { name = "inline-snapshot", extras = ["dirty-equals"], specifier = ">=0.27.2" },
     { name = "ipython", specifier = ">=8.12.3" },
     { name = "pdbpp", specifier = ">=0.10.3" },
     { name = "pre-commit" },
@@ -744,6 +744,11 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/b9/93/3caece250cdf267fcb39e6a82ada0e7e8e8fb37207331309dbf6865d7497/inline_snapshot-0.27.2.tar.gz", hash = "sha256:5ecc7ccfdcbf8d9273d3fa9fb55b829720680ef51bb1db12795fd1b0f4a3783c", size = 347133, upload-time = "2025-08-11T07:49:55.134Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/8f/7f/9e41fd793827af8cbe812fff625d62b3b47603d62145b718307ef4e381eb/inline_snapshot-0.27.2-py3-none-any.whl", hash = "sha256:7c11f78ad560669bccd38d6d3aa3ef33d6a8618d53bd959019dca3a452272b7e", size = 68004, upload-time = "2025-08-11T07:49:53.904Z" },
+]
+
+[package.optional-dependencies]
+dirty-equals = [
+    { name = "dirty-equals" },
 ]
 
 [[package]]

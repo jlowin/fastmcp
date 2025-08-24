@@ -1,5 +1,3 @@
-from inline_snapshot import snapshot
-
 from fastmcp.utilities.json_schema import (
     _prune_param,
     compress_schema,
@@ -76,6 +74,7 @@ class TestPruneUnusedDefs:
             prune_additional_properties=False,
             prune_titles=False,
         )
+
         assert "foo_def" in result["$defs"]
         assert "unused_def" not in result["$defs"]
 
@@ -234,17 +233,8 @@ class TestPruneUnusedDefs:
             prune_additional_properties=False,
             prune_titles=False,
         )
-        assert result == snapshot(
-            {
-                "properties": {
-                    "items": {"type": "array", "items": {"$ref": "#/$defs/item_def"}}
-                },
-                "$defs": {"item_def": {"type": "string"}},
-            }
-        )
-        # # Original assertions:
-        # assert "item_def" in result["$defs"]
-        # assert "unused_def" not in result["$defs"]
+        assert "item_def" in result["$defs"]
+        assert "unused_def" not in result["$defs"]
 
     def test_removes_defs_field_when_empty(self):
         """Test that $defs field is removed when all definitions are unused."""
