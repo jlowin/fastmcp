@@ -84,21 +84,20 @@ class ErrorHandlingMiddleware(Middleware):
             return error
 
         # Map common exceptions to appropriate MCP error codes
-        error_type = type(error)
-
-        if error_type in (ValueError, TypeError):
+        # Use isinstance to catch subclasses (e.g., pydantic_core.ValidationError -> ValueError)
+        if isinstance(error, ValueError | TypeError):
             return McpError(
                 ErrorData(code=-32602, message=f"Invalid params: {str(error)}")
             )
-        elif error_type in (FileNotFoundError, KeyError):
+        elif isinstance(error, FileNotFoundError | KeyError):
             return McpError(
                 ErrorData(code=-32001, message=f"Resource not found: {str(error)}")
             )
-        elif error_type is PermissionError:
+        elif isinstance(error, PermissionError):
             return McpError(
                 ErrorData(code=-32000, message=f"Permission denied: {str(error)}")
             )
-        elif error_type in (TimeoutError, asyncio.TimeoutError):
+        elif isinstance(error, TimeoutError | asyncio.TimeoutError):
             return McpError(
                 ErrorData(code=-32000, message=f"Request timeout: {str(error)}")
             )

@@ -164,6 +164,34 @@ class TestErrorHandlingMiddleware:
         assert result.error.code == -32000
         assert "Request timeout: test error" in result.error.message
 
+    def test_transform_error_pydantic_validation_error(self):
+        """Test transforming pydantic ValidationError."""
+        middleware = ErrorHandlingMiddleware()
+
+        # Create a pydantic ValidationError to test the isinstance fix
+        try:
+            from pydantic import BaseModel, ValidationError
+
+            class TestModel(BaseModel):
+                required_field: str
+
+            # Trigger ValidationError by providing invalid data
+            try:
+                TestModel()  # missing required field
+            except ValidationError as validation_error:
+                result = middleware._transform_error(validation_error)
+
+                assert isinstance(result, McpError)
+                # Should be mapped to Invalid params (-32602) not Internal error (-32603)
+                assert result.error.code == -32602
+                assert "Invalid params:" in result.error.message
+            else:
+                pytest.fail("ValidationError was not raised")
+
+        except ImportError:
+            # If pydantic is not available, skip this test
+            pytest.skip("pydantic not available")
+
     def test_transform_error_generic(self):
         """Test transforming generic error."""
         middleware = ErrorHandlingMiddleware()
@@ -599,3 +627,51 @@ class TestRetryMiddlewareIntegration:
 
         # Should have error logs from error handling middleware
         assert "Error in tools/call:" in log_text
+
+
+class TestPydanticValidationErrorHandling:
+    """Tests for handling Pydantic validation errors specifically."""
+
+    def test_pydantic_validation_error_integration(self):
+        """Test integration with actual Pydantic model validation as described in the issue."""
+        from pydantic import BaseModel, model_validator
+
+        from fastmcp import FastMCP
+
+        try:
+            # Create the exact scenario from the issue
+            class Payload(BaseModel):
+                @model_validator(mode="before")
+                def parse(cls, v):
+                    if not isinstance(v, dict):
+                        raise ValueError("invalid")
+                    return v
+
+            mcp = FastMCP("demo")
+
+            @mcp.tool()
+            async def demo(payload: Payload) -> str:
+                return "ok"
+
+            # Add error handling middleware
+            error_middleware = ErrorHandlingMiddleware(transform_errors=True)
+            mcp.add_middleware(error_middleware)
+
+            # Test that the ValidationError is properly handled
+            from fastmcp.client import Client
+
+            async def run_test():
+                async with Client(mcp) as client:
+                    # This should trigger a pydantic ValidationError which should be mapped to -32602
+                    with pytest.raises(Exception) as exc_info:
+                        await client.call_tool("demo", {"payload": "not_a_dict"})
+
+                    # The error should be present and should have been processed by middleware
+                    assert exc_info.value is not None
+
+            import asyncio
+
+            asyncio.run(run_test())
+
+        except ImportError:
+            pytest.skip("Pydantic not available for integration test")
