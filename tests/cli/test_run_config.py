@@ -60,7 +60,7 @@ def test_load_fastmcp_config(sample_config, monkeypatch):
 
         # Check source - path is not resolved yet, only during load_server
         assert config.source.path == "server.py"
-        assert config.source.object is None
+        assert config.source.entrypoint is None
 
         # Check environment config
         assert config.environment.python == "3.11"
@@ -79,10 +79,10 @@ def test_load_fastmcp_config(sample_config, monkeypatch):
         os.environ.update(original_env)
 
 
-def test_load_config_with_object_source(tmp_path):
-    """Test loading config with object-format source."""
+def test_load_config_with_entrypoint_source(tmp_path):
+    """Test loading config with entrypoint-format source."""
     config_data = {
-        "source": {"path": "src/server.py", "object": "app"},
+        "source": {"path": "src/server.py", "entrypoint": "app"},
         "deployment": {"transport": "http", "port": 8000},
     }
 
@@ -99,7 +99,7 @@ def test_load_config_with_object_source(tmp_path):
 
     # Check source - path is not resolved yet, only during load_server
     assert config.source.path == "src/server.py"
-    assert config.source.object == "app"
+    assert config.source.entrypoint == "app"
 
     # Check deployment
     assert config.deployment.transport == "http"
@@ -226,7 +226,7 @@ def test_config_subset_independence(tmp_path):
     # Each subset should be independently usable
     # Path is not resolved yet, only during load_server
     assert config.source.path == "server.py"
-    assert config.source.object is None
+    assert config.source.entrypoint is None
 
     assert config.environment.python == "3.12"
     assert config.environment.dependencies == ["pandas"]

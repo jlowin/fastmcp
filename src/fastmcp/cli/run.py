@@ -102,7 +102,7 @@ async def import_server(file: Path, server_or_factory: str | None = None) -> Any
         logger.error(
             f"No server object found in {file}. Please either:\n"
             "1. Use a standard variable name (mcp, server, or app)\n"
-            "2. Specify the object name in fastmcp.json or use `file.py:object` syntax as your path.",
+            "2. Specify the entrypoint name in fastmcp.json or use `file.py:object` syntax as your path.",
             extra={"file": str(file)},
         )
         sys.exit(1)

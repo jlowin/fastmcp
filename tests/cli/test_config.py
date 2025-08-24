@@ -24,26 +24,26 @@ class TestFileSystemSource:
         # Dict is converted to FileSystemSource
         assert isinstance(config.source, FileSystemSource)
         assert config.source.path == "server.py"
-        assert config.source.object is None
+        assert config.source.entrypoint is None
         assert config.source.type == "filesystem"
 
-    def test_dict_source_with_object(self):
-        """Test dict source with object field."""
-        config = FastMCPConfig(source={"path": "server.py", "object": "app"})
-        # Dict with object is converted to FileSystemSource
+    def test_dict_source_with_entrypoint(self):
+        """Test dict source with entrypoint field."""
+        config = FastMCPConfig(source={"path": "server.py", "entrypoint": "app"})
+        # Dict with entrypoint is converted to FileSystemSource
         assert isinstance(config.source, FileSystemSource)
         assert config.source.path == "server.py"
-        assert config.source.object == "app"
+        assert config.source.entrypoint == "app"
         assert config.source.type == "filesystem"
 
-    def test_filesystem_source_object(self):
-        """Test FileSystemSource object format."""
+    def test_filesystem_source_entrypoint(self):
+        """Test FileSystemSource entrypoint format."""
         config = FastMCPConfig(
-            source=FileSystemSource(path="src/server.py", object="mcp")
+            source=FileSystemSource(path="src/server.py", entrypoint="mcp")
         )
         assert isinstance(config.source, FileSystemSource)
         assert config.source.path == "src/server.py"
-        assert config.source.object == "mcp"
+        assert config.source.entrypoint == "mcp"
         assert config.source.type == "filesystem"
 
 
@@ -258,7 +258,7 @@ class TestFastMCPConfig:
         config = FastMCPConfig(source={"path": "server.py"})
         assert isinstance(config.source, FileSystemSource)
         assert config.source.path == "server.py"
-        assert config.source.object is None
+        assert config.source.entrypoint is None
         # Environment and deployment are now always present but empty
         assert isinstance(config.environment, Environment)
         assert isinstance(config.deployment, Deployment)
@@ -285,7 +285,7 @@ class TestFastMCPConfig:
 
         assert isinstance(config.source, FileSystemSource)
         assert config.source.path == "server.py"
-        assert config.source.object is None
+        assert config.source.entrypoint is None
         assert isinstance(config.environment, Environment)
         assert isinstance(config.deployment, Deployment)
 
@@ -293,7 +293,7 @@ class TestFastMCPConfig:
         """Test loading config from JSON file with nested structure."""
         config_data = {
             "$schema": "https://gofastmcp.com/public/schemas/fastmcp.json/v1.json",
-            "source": {"path": "src/server.py", "object": "app"},
+            "source": {"path": "src/server.py", "entrypoint": "app"},
             "environment": {"python": "3.12", "dependencies": ["requests"]},
             "deployment": {"transport": "http", "port": 8000},
         }
@@ -303,10 +303,10 @@ class TestFastMCPConfig:
 
         config = FastMCPConfig.from_file(config_file)
 
-        # When loaded from JSON with object format, it becomes EntrypointConfig
+        # When loaded from JSON with entrypoint format, it becomes EntrypointConfig
         assert isinstance(config.source, FileSystemSource)
         assert config.source.path == "src/server.py"
-        assert config.source.object == "app"
+        assert config.source.entrypoint == "app"
         assert config.environment.python == "3.12"
         assert config.environment.dependencies == ["requests"]
         assert config.deployment.transport == "http"
@@ -315,7 +315,7 @@ class TestFastMCPConfig:
     def test_from_file_with_string_entrypoint(self, tmp_path):
         """Test loading config with dict source format."""
         config_data = {
-            "source": {"path": "server.py", "object": "mcp"},
+            "source": {"path": "server.py", "entrypoint": "mcp"},
             "environment": {"dependencies": ["fastmcp"]},
         }
 
@@ -326,12 +326,12 @@ class TestFastMCPConfig:
         # String entrypoint with : should be converted to EntrypointConfig
         assert isinstance(config.source, FileSystemSource)
         assert config.source.path == "server.py"
-        assert config.source.object == "mcp"
+        assert config.source.entrypoint == "mcp"
 
-    def test_string_entrypoint_with_object_and_environment(self, tmp_path):
-        """Test that file.py:object syntax works with environment config."""
+    def test_string_entrypoint_with_entrypoint_and_environment(self, tmp_path):
+        """Test that file.py:entrypoint syntax works with environment config."""
         config_data = {
-            "source": {"path": "src/server.py", "object": "app"},
+            "source": {"path": "src/server.py", "entrypoint": "app"},
             "environment": {"python": "3.12", "dependencies": ["fastmcp", "requests"]},
             "deployment": {"transport": "http", "port": 8000},
         }
@@ -344,7 +344,7 @@ class TestFastMCPConfig:
         # Should be parsed into EntrypointConfig
         assert isinstance(config.source, FileSystemSource)
         assert config.source.path == "src/server.py"
-        assert config.source.object == "app"
+        assert config.source.entrypoint == "app"
 
         # Environment config should still work
         assert config.environment.python == "3.12"

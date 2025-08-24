@@ -55,8 +55,9 @@ class FileSystemSource(BaseSource):
 
     type: Literal["filesystem"] = Field(default="filesystem", description="Source type")
     path: str = Field(description="Path to Python file containing the server")
-    object: str | None = Field(
-        default=None, description="Name of server object in file"
+    entrypoint: str | None = Field(
+        default=None,
+        description="Name of server instance or factory function (a no-arg function that returns a FastMCP server)",
     )
 
     async def load_server(
@@ -70,7 +71,7 @@ class FileSystemSource(BaseSource):
         if not file_path.is_absolute() and config_path:
             file_path = (config_path.parent / file_path).resolve()
 
-        return await import_server_with_args(file_path, self.object, server_args)
+        return await import_server_with_args(file_path, self.entrypoint, server_args)
 
 
 # Type alias for source union (will expand with GitSource, etc in future)
@@ -308,12 +309,12 @@ class FastMCPConfig(BaseModel):
     )
 
     # Server source - defines where and how to load the server
-    source: BaseSource = Field(
+    source: SourceType = Field(
         description="Source configuration for the server",
         examples=[
             {"path": "server.py"},
-            {"path": "server.py", "object": "app"},
-            {"type": "filesystem", "path": "src/server.py", "object": "mcp"},
+            {"path": "server.py", "entrypoint": "app"},
+            {"type": "filesystem", "path": "src/server.py", "entrypoint": "mcp"},
         ],
     )
 
@@ -346,7 +347,7 @@ class FastMCPConfig(BaseModel):
         """Validate and convert source to proper format.
 
         Supports:
-        - Dict format: {"path": "server.py", "object": "app"}
+        - Dict format: {"path": "server.py", "entrypoint": "app"}
         - FileSystemSource instance (passed through)
 
         No string parsing happens here - that's only at CLI boundaries.
@@ -586,14 +587,19 @@ class FastMCPConfig(BaseModel):
         await server.run_async(**run_args)
 
 
-def generate_schema() -> dict[str, Any]:
+def generate_schema(output_path: Path | str | None = None) -> dict[str, Any] | None:
     """Generate JSON schema for fastmcp.json files.
 
     This is used to create the schema file that IDEs can use for
     validation and auto-completion.
 
+    Args:
+        output_path: Optional path to write the schema to. If provided,
+                    writes the schema and returns None. If not provided,
+                    returns the schema as a dictionary.
+
     Returns:
-        JSON schema as a dictionary
+        JSON schema as a dictionary if output_path is None, otherwise None
     """
     schema = FastMCPConfig.model_json_schema()
 
@@ -601,5 +607,15 @@ def generate_schema() -> dict[str, Any]:
     schema["$id"] = FASTMCP_JSON_SCHEMA
     schema["title"] = "FastMCP Configuration"
     schema["description"] = "Configuration file for FastMCP servers"
+
+    if output_path:
+        import json
+
+        output = Path(output_path)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        with open(output, "w") as f:
+            json.dump(schema, f, indent=2)
+            f.write("\n")  # Add trailing newline
+        return None
 
     return schema
