@@ -34,7 +34,7 @@ class TestRunWithUv:
             "fastmcp",
             "run",
             "server.py",
-            "--no-env",
+            "--skip-env-setup",
         ]
         assert cmd == expected
 
@@ -59,7 +59,7 @@ class TestRunWithUv:
             "fastmcp",
             "run",
             "server.py",
-            "--no-env",
+            "--skip-env-setup",
         ]
         assert cmd == expected
 
@@ -86,7 +86,7 @@ class TestRunWithUv:
             "fastmcp",
             "run",
             "server.py",
-            "--no-env",
+            "--skip-env-setup",
         ]
 
     @patch("subprocess.run")
@@ -112,7 +112,7 @@ class TestRunWithUv:
             "fastmcp",
             "run",
             "server.py",
-            "--no-env",
+            "--skip-env-setup",
         ]
         assert cmd == expected
 
@@ -138,7 +138,7 @@ class TestRunWithUv:
             "fastmcp",
             "run",
             "server.py",
-            "--no-env",
+            "--skip-env-setup",
         ]
         assert cmd == expected
 
@@ -169,7 +169,7 @@ class TestRunWithUv:
             "fastmcp",
             "run",
             "server.py",
-            "--no-env",
+            "--skip-env-setup",
             "--transport",
             "http",
             "--host",
@@ -217,7 +217,7 @@ class TestRunWithUv:
             "fastmcp",
             "run",
             "server.py",
-            "--no-env",
+            "--skip-env-setup",
             "--transport",
             "http",
             "--port",
