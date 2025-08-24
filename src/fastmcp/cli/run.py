@@ -11,8 +11,8 @@ from pathlib import Path
 from typing import Any, Literal
 
 from mcp.server.fastmcp import FastMCP as FastMCP1x
+from pydantic import ValidationError
 
-from fastmcp.mcp_config import MCPConfig
 from fastmcp.server.server import FastMCP
 from fastmcp.utilities.fastmcp_config import (
     Environment,
@@ -191,6 +191,7 @@ def run_with_uv(
     path: str | None = None,
     log_level: LogLevelType | None = None,
     show_banner: bool = True,
+    editable: str | None = None,
 ) -> None:
     """Run a MCP server using uv run subprocess.
 
@@ -207,46 +208,64 @@ def run_with_uv(
         log_level: Log level
         show_banner: Whether to show the server banner
     """
-    # Check if server_spec is a fastmcp.json file
-    if server_spec.endswith("fastmcp.json") or "fastmcp.json" in Path(server_spec).name:
+    # Check if server_spec is a .json file
+    if server_spec.endswith(".json"):
         config_path = Path(server_spec).resolve()  # Get absolute path
         if config_path.exists():
-            # Load config
-            config = FastMCPConfig.from_file(config_path)
+            # Try to load as JSON and discriminate between FastMCPConfig and MCPConfig
+            try:
+                with open(config_path) as f:
+                    data = json.load(f)
 
-            # Apply deployment settings
-            if config.deployment:
-                config.deployment.apply_runtime_settings(config_path)
+                # Check if it's an MCPConfig first (has canonical mcpServers key)
+                if "mcpServers" in data:
+                    # It's an MCPConfig, we don't process it here - just pass through
+                    pass
+                else:
+                    # Try to parse as FastMCPConfig
+                    try:
+                        adapter = get_cached_typeadapter(FastMCPConfig)
+                        config = adapter.validate_python(data)
 
-            # Merge environment config with CLI args (CLI takes precedence)
-            if config.environment:
-                # Use CLI values if provided, otherwise fall back to config
-                python_version = python_version or config.environment.python
-                project = project or (
-                    Path(config.environment.project)
-                    if config.environment.project
-                    else None
-                )
-                with_requirements = with_requirements or (
-                    Path(config.environment.requirements)
-                    if config.environment.requirements
-                    else None
-                )
+                        # Apply deployment settings
+                        if config.deployment:
+                            config.deployment.apply_runtime_settings(config_path)
 
-                # Merge packages from both sources
-                if config.environment.dependencies:
-                    packages = list(config.environment.dependencies)
-                    if with_packages:
-                        packages.extend(with_packages)
-                    with_packages = packages
+                        # Merge environment config with CLI args (CLI takes precedence)
+                        if config.environment:
+                            # Use CLI values if provided, otherwise fall back to config
+                            python_version = python_version or config.environment.python
+                            project = project or (
+                                Path(config.environment.project)
+                                if config.environment.project
+                                else None
+                            )
+                            with_requirements = with_requirements or (
+                                Path(config.environment.requirements)
+                                if config.environment.requirements
+                                else None
+                            )
+                            editable = editable or config.environment.editable
 
-            # Merge deployment config with CLI args (CLI takes precedence)
-            if config.deployment:
-                transport = transport or config.deployment.transport
-                host = host or config.deployment.host
-                port = port or config.deployment.port
-                path = path or config.deployment.path
-                log_level = log_level or config.deployment.log_level
+                            # Merge packages from both sources
+                            # Only merge if with_packages doesn't already contain them
+                            # (they may have been merged already in CLI)
+                            if config.environment.dependencies and not with_packages:
+                                with_packages = list(config.environment.dependencies)
+
+                        # Merge deployment config with CLI args (CLI takes precedence)
+                        if config.deployment:
+                            transport = transport or config.deployment.transport
+                            host = host or config.deployment.host
+                            port = port or config.deployment.port
+                            path = path or config.deployment.path
+                            log_level = log_level or config.deployment.log_level
+                    except ValidationError:
+                        # Not a valid FastMCPConfig, just pass through
+                        pass
+            except (json.JSONDecodeError, FileNotFoundError):
+                # Not a valid JSON file, just pass through
+                pass
 
     # Build uv command using Environment.build_uv_args()
     env_config = Environment(
@@ -254,8 +273,9 @@ def run_with_uv(
         dependencies=with_packages if with_packages else None,
         requirements=str(with_requirements) if with_requirements else None,
         project=str(project) if project else None,
+        editable=editable,
     )
-    cmd = ["uv"] + env_config.build_uv_args(["fastmcp", "run", server_spec])
+    cmd = ["uv"] + env_config.build_uv_args(["fastmcp", "run", server_spec, "--no-env"])
 
     # Add transport options
     if transport:
@@ -385,16 +405,19 @@ async def run_command(
         server = create_client_server(server_spec)
         logger.debug(f"Created client proxy server for {server_spec}")
     elif server_spec.endswith(".json"):
-        # Use TypeAdapter to discriminate between FastMCPConfig and MCPConfig
+        # Load JSON and check which type of config it is
         config_path = Path(server_spec)
         with open(config_path) as f:
             data = json.load(f)
 
-        # Let Pydantic handle the discrimination
-        adapter = get_cached_typeadapter(FastMCPConfig | MCPConfig)
-        config_obj = adapter.validate_python(data)
-
-        if isinstance(config_obj, FastMCPConfig):
+        # Check if it's an MCPConfig first (has canonical mcpServers key)
+        if "mcpServers" in data:
+            # It's an MCP config
+            server = create_mcp_config_server(config_path)
+        else:
+            # Try to parse as FastMCPConfig
+            adapter = get_cached_typeadapter(FastMCPConfig)
+            adapter.validate_python(data)  # Validate but don't need to store
             # It's a FastMCP config - load it properly with runtime settings
             config = load_fastmcp_config(config_path)
 
@@ -412,9 +435,6 @@ async def run_command(
             # Load the server using the source
             server = await config.source.load_server(config_path, server_args)
             logger.debug(f'Found server "{server.name}" from config {config_path}')
-        else:
-            # It's an MCP config
-            server = create_mcp_config_server(config_path)
     else:
         # Handle file case - parse into FileSystemSource immediately
         if ":" in server_spec:

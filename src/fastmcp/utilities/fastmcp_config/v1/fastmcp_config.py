@@ -132,10 +132,11 @@ class Environment(BaseModel):
         # Add fastmcp as a base dependency
         args.extend(["--with", "fastmcp"])
 
-        # Add additional dependencies
+        # Add additional dependencies (skip fastmcp if already added)
         if self.dependencies:
             for dep in self.dependencies:
-                args.extend(["--with", dep])
+                if dep != "fastmcp":  # Skip fastmcp since we already added it
+                    args.extend(["--with", dep])
 
         # Add requirements file
         if self.requirements:
@@ -183,12 +184,14 @@ class Environment(BaseModel):
         Returns:
             True if any environment settings require uv run
         """
-        return bool(
-            self.python
-            or self.dependencies
-            or self.requirements
-            or self.project
-            or self.editable
+        return any(
+            [
+                self.python is not None,
+                self.dependencies is not None,
+                self.requirements is not None,
+                self.project is not None,
+                self.editable is not None,
+            ]
         )
 
 
