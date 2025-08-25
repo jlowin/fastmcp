@@ -67,11 +67,15 @@ def with_argv(args: list[str] | None):
     This context manager is used at the CLI boundary to inject
     server arguments when needed, without mutating sys.argv deep
     in the source loading logic.
+
+    Args are provided without the script name, so we preserve sys.argv[0]
+    and replace the rest.
     """
-    if args:
+    if args is not None:
         original = sys.argv[:]
         try:
-            sys.argv = args
+            # Preserve the script name (sys.argv[0]) and replace the rest
+            sys.argv = [sys.argv[0]] + args
             yield
         finally:
             sys.argv = original

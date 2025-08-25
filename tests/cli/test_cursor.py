@@ -282,7 +282,7 @@ class TestInstallCursor:
 
     @patch(
         "fastmcp.utilities.fastmcp_config.v1.fastmcp_config.Environment._find_fastmcp_dev_path",
-        return_value=None,
+        return_value=None,  # Mock to disable dev mode so "fastmcp" count is predictable
     )
     def test_install_cursor_deduplicate_packages(self, mock_find_dev):
         """Test that duplicate packages are deduplicated."""
