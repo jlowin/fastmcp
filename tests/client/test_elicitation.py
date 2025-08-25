@@ -530,6 +530,32 @@ class TestValidation:
                 }
             )
 
+    async def test_enum_schema_inlined_correctly(self):
+        """Test that enum schemas are inlined correctly (no $ref references)."""
+        from fastmcp.server.elicitation import (
+            ScalarElicitationType,
+            get_elicitation_schema,
+        )
+
+        class TestEnum(Enum):
+            A = "a"
+            B = "b"
+            C = "c"
+
+        schema = get_elicitation_schema(ScalarElicitationType[TestEnum])
+
+        # Should not have $defs or $ref
+        assert "$defs" not in schema
+        assert "$ref" not in str(schema)
+
+        # Should have inline enum in properties.value
+        assert schema["type"] == "object"
+        assert "value" in schema["properties"]
+        value_schema = schema["properties"]["value"]
+        assert value_schema["type"] == "string"
+        assert value_schema["enum"] == ["a", "b", "c"]
+        assert "title" in value_schema  # Should preserve the title from the enum
+
 
 class TestPatternMatching:
     async def test_pattern_matching_accept(self):

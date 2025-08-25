@@ -47,10 +47,71 @@ def get_elicitation_schema(response_type: type[T]) -> dict[str, Any]:
     """
 
     schema = get_cached_typeadapter(response_type).json_schema()
+
+    # Resolve $ref references inline before compressing to ensure MCP compliance
+    schema = _resolve_refs_inline(schema)
     schema = compress_schema(schema)
 
     # Validate the schema to ensure it follows MCP elicitation requirements
     validate_elicitation_json_schema(schema)
+
+    return schema
+
+
+def _resolve_refs_inline(schema: dict[str, Any]) -> dict[str, Any]:
+    """Resolve $ref references inline for MCP elicitation schemas.
+
+    The MCP specification doesn't support $ref references in elicitation schemas.
+    All primitive types including enums must be inline.
+
+    Args:
+        schema: The JSON schema with potential $ref references
+
+    Returns:
+        A new schema with $ref references resolved inline
+    """
+    import copy
+
+    # Make a deep copy to avoid modifying the original
+    schema = copy.deepcopy(schema)
+    defs = schema.get("$defs", {})
+
+    def resolve_ref_recursive(obj: dict[str, Any]) -> dict[str, Any]:
+        """Recursively resolve $ref references in a schema object."""
+        if not isinstance(obj, dict):
+            return obj
+
+        # If this object has a $ref, resolve it
+        if "$ref" in obj:
+            ref_path = obj["$ref"]
+            if ref_path.startswith("#/$defs/"):
+                def_name = ref_path[8:]  # Remove "#/$defs/" prefix
+                if def_name in defs:
+                    # Resolve the reference by returning the definition content
+                    resolved_def = defs[def_name]
+                    return resolve_ref_recursive(resolved_def)
+            # If we can't resolve the ref, leave it as-is (shouldn't happen with valid schemas)
+            return obj
+
+        # Recursively resolve refs in nested objects
+        result = {}
+        for key, value in obj.items():
+            if isinstance(value, dict):
+                result[key] = resolve_ref_recursive(value)
+            elif isinstance(value, list):
+                result[key] = [
+                    resolve_ref_recursive(item) if isinstance(item, dict) else item
+                    for item in value
+                ]
+            else:
+                result[key] = value
+        return result
+
+    # Resolve all refs in the schema
+    schema = resolve_ref_recursive(schema)
+
+    # Remove $defs section as all references should now be resolved
+    schema.pop("$defs", None)
 
     return schema
 
