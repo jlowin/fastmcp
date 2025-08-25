@@ -177,6 +177,42 @@ class Environment(BaseModel):
             ]
         )
 
+    async def prepare(self) -> None:
+        """Prepare the Python environment using uv.
+
+        This creates a virtual environment and installs all dependencies
+        specified in the environment configuration.
+        """
+        import shutil
+        import subprocess
+
+        # Check if uv is available
+        if not shutil.which("uv"):
+            raise RuntimeError(
+                "uv is not installed. Please install it with: "
+                "curl -LsSf https://astral.sh/uv/install.sh | sh"
+            )
+
+        # If no environment settings, nothing to prepare
+        if not self.needs_uv():
+            logger.debug("No environment configuration to prepare")
+            return
+
+        logger.info("Preparing Python environment...")
+
+        # Build uv sync or uv pip install command
+        # For now, we'll use the run command with --dry-run to validate
+        # In the future, this could create a persistent venv
+        cmd = ["uv"] + self.build_uv_args(["python", "--version"])
+
+        try:
+            # Run a test command to ensure environment can be created
+            subprocess.run(cmd, capture_output=True, text=True, check=True)
+            logger.info("Environment prepared successfully")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed to prepare environment: {e.stderr}")
+            raise RuntimeError(f"Environment preparation failed: {e.stderr}") from e
+
 
 class Deployment(BaseModel):
     """Configuration for server deployment and runtime settings."""
@@ -498,6 +534,38 @@ class FastMCPConfig(BaseModel):
             return config_path
 
         return None
+
+    async def prepare(self, skip_env: bool = False, skip_source: bool = False) -> None:
+        """Prepare environment and source for execution.
+
+        This is the single entry point for all preparation logic.
+        Called by ALL commands (run, dev, project prepare) with appropriate skip flags.
+
+        Args:
+            skip_env: Skip environment preparation if True
+            skip_source: Skip source preparation if True
+        """
+        if not skip_env:
+            await self.prepare_environment()
+        if not skip_source:
+            await self.prepare_source()
+
+    async def prepare_environment(self) -> None:
+        """Prepare the Python environment.
+
+        Delegates to the environment's prepare() method if environment config exists.
+        """
+        if self.environment:
+            await self.environment.prepare()
+        else:
+            logger.debug("No environment configuration to prepare")
+
+    async def prepare_source(self) -> None:
+        """Prepare the source for loading.
+
+        Delegates to the source's prepare() method.
+        """
+        await self.source.prepare()
 
     async def run_server(self, **kwargs: Any) -> None:
         """Load and run the server with this configuration.

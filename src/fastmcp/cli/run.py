@@ -222,6 +222,7 @@ async def run_command(
     server_args: list[str] | None = None,
     show_banner: bool = True,
     use_direct_import: bool = False,
+    skip_env: bool = False,
     skip_source: bool = False,
 ) -> None:
     """Run a MCP server or connect to a remote one.
@@ -236,6 +237,7 @@ async def run_command(
         server_args: Additional arguments to pass to the server
         show_banner: Whether to show the server banner
         use_direct_import: Whether to use direct import instead of subprocess
+        skip_env: Whether to skip environment preparation step
         skip_source: Whether to skip source preparation step
     """
     # Special case: URLs
@@ -269,9 +271,8 @@ async def run_command(
                     server_args if server_args is not None else config.deployment.args
                 )
 
-            # Prepare the source if needed (e.g., clone git repo, download from cloud)
-            if not skip_source:
-                await config.source.prepare()
+            # Prepare environment and source using unified prepare() method
+            await config.prepare(skip_env=skip_env, skip_source=skip_source)
 
             # Load the server using the source
             from contextlib import nullcontext
@@ -290,9 +291,8 @@ async def run_command(
         source = FileSystemSource(path=server_spec)
         config = FastMCPConfig(source=source)
 
-        # Prepare the source if needed
-        if not skip_source:
-            await config.source.prepare()
+        # Prepare environment and source using unified prepare() method
+        await config.prepare(skip_env=skip_env, skip_source=skip_source)
 
         # Load the server
         from contextlib import nullcontext

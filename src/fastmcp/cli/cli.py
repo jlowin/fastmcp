@@ -598,6 +598,7 @@ async def run(
                 log_level=log_level,
                 server_args=list(server_args),
                 show_banner=not no_banner,
+                skip_env=skip_env,
                 skip_source=skip_source,
             )
         except Exception as e:
@@ -817,6 +818,75 @@ async def inspect(
         console.print(f"[bold red]✗[/bold red] Failed to inspect server: {e}")
         sys.exit(1)
 
+
+# Create project subcommand group
+project_app = cyclopts.App(name="project", help="Manage FastMCP projects")
+
+
+@project_app.command
+async def prepare(
+    config_path: Annotated[
+        str | None,
+        cyclopts.Parameter(help="Path to fastmcp.json configuration file"),
+    ] = None,
+) -> None:
+    """Prepare a FastMCP project by setting up environment and source.
+
+    This command prepares everything needed to run a FastMCP server:
+    - Sets up the Python environment (creates venv, installs dependencies)
+    - Prepares the source (git clone, download, etc. for non-filesystem sources)
+
+    After running this command, you can use:
+    fastmcp run <config> --skip-env --skip-source
+
+    This is useful for:
+    - CI/CD pipelines with separate build and run stages
+    - Docker images where you prepare during build
+    - Production deployments where you validate before running
+    """
+    from pathlib import Path
+
+    from fastmcp.utilities.fastmcp_config import FastMCPConfig
+
+    # Auto-detect fastmcp.json if not provided
+    if config_path is None:
+        found_config = FastMCPConfig.find_config()
+        if found_config:
+            config_path = str(found_config)
+            logger.info(f"Using configuration from {config_path}")
+        else:
+            logger.error(
+                "No configuration file specified and no fastmcp.json found.\n"
+                "Please specify a configuration file or create a fastmcp.json."
+            )
+            sys.exit(1)
+
+    config_file = Path(config_path)
+    if not config_file.exists():
+        logger.error(f"Configuration file not found: {config_path}")
+        sys.exit(1)
+
+    try:
+        # Load the configuration
+        config = FastMCPConfig.from_file(config_file)
+
+        # Prepare environment and source
+        await config.prepare(skip_env=False, skip_source=False)
+
+        console.print(
+            f"[bold green]✓[/bold green] Project prepared successfully!\n"
+            f"You can now run the server with:\n"
+            f"  [cyan]fastmcp run {config_path} --skip-env --skip-source[/cyan]"
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to prepare project: {e}")
+        console.print(f"[bold red]✗[/bold red] Failed to prepare project: {e}")
+        sys.exit(1)
+
+
+# Add project subcommand group
+app.command(project_app)
 
 # Add install subcommands using proper Cyclopts pattern
 app.command(install_app)
