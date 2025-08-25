@@ -180,8 +180,8 @@ class Environment(BaseModel):
     async def prepare(self) -> None:
         """Prepare the Python environment using uv.
 
-        This creates a virtual environment and installs all dependencies
-        specified in the environment configuration.
+        This populates uv's cache with all required dependencies
+        so that subsequent runs with --no-sync can access them quickly.
         """
         import shutil
         import subprocess
@@ -200,15 +200,17 @@ class Environment(BaseModel):
 
         logger.info("Preparing Python environment...")
 
-        # Build uv sync or uv pip install command
-        # For now, we'll use the run command with --dry-run to validate
-        # In the future, this could create a persistent venv
-        cmd = ["uv"] + self.build_uv_args(["python", "--version"])
+        # Build a simple command that will cache the environment with all dependencies
+        # Just run Python and print a message - uv will handle installing everything
+        cmd = ["uv"] + self.build_uv_args(
+            ["python", "-c", "print('Environment cached')"]
+        )
 
         try:
-            # Run a test command to ensure environment can be created
-            subprocess.run(cmd, capture_output=True, text=True, check=True)
+            # Run the command to cache all dependencies
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
             logger.info("Environment prepared successfully")
+            logger.debug(f"Output: {result.stdout}")
         except subprocess.CalledProcessError as e:
             logger.error(f"Failed to prepare environment: {e.stderr}")
             raise RuntimeError(f"Environment preparation failed: {e.stderr}") from e

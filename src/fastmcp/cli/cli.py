@@ -552,16 +552,15 @@ async def run(
     )
 
     # Check if we need to use uv run (either from CLI args or config)
-    # Skip if --skip-env flag is set (we're already in a uv environment)
-    needs_uv = not skip_env and (
-        python or with_packages or with_requirements or project or editable
-    )
-    if not skip_env and not needs_uv and config and config.environment:
+    # When skip_env is set, we still use uv if there are dependencies, but with --no-sync
+    needs_uv = python or with_packages or with_requirements or project or editable
+    if not needs_uv and config and config.environment:
         # Check if config's environment needs uv
         needs_uv = config.environment.needs_uv()
 
     if needs_uv:
         # Use uv run subprocess - always use run_with_uv which handles output correctly
+        # When skip_env is True, we pass no_sync=True to use cached environment without syncing
         try:
             run_module.run_with_uv(
                 server_spec=server_spec,
@@ -576,6 +575,7 @@ async def run(
                 log_level=log_level,
                 show_banner=not no_banner,
                 editable=editable,
+                no_sync=skip_env,  # Use --no-sync when skip_env is True
             )
         except Exception as e:
             logger.error(

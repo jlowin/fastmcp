@@ -125,18 +125,23 @@ class TestEnvironmentPrepare:
     async def test_prepare_with_python(self, mock_which, mock_run):
         """Test that prepare() runs uv with python version."""
         mock_which.return_value = "/usr/bin/uv"
-        mock_run.return_value = MagicMock(returncode=0, stdout="Python 3.10", stderr="")
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="Environment cached", stderr=""
+        )
 
         env = Environment(python="3.10")
 
         await env.prepare()
 
-        # Should run uv with python version check
+        # Should run uv with python version
         mock_run.assert_called_once()
         args = mock_run.call_args[0][0]
         assert args[0] == "uv"
         assert "--python" in args
         assert "3.10" in args
+        # Should run a Python command to cache the environment
+        assert "python" in args
+        assert "-c" in args
 
     @patch("subprocess.run")
     @patch("shutil.which")

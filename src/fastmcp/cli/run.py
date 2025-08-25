@@ -45,6 +45,7 @@ def run_with_uv(
     log_level: LogLevelType | None = None,
     show_banner: bool = True,
     editable: str | None = None,
+    no_sync: bool = False,
 ) -> None:
     """Run a MCP server using uv run subprocess.
 
@@ -60,6 +61,7 @@ def run_with_uv(
         path: Path to bind to when using http transport
         log_level: Log level
         show_banner: Whether to show the server banner
+        no_sync: If True, use --no-sync flag to skip environment syncing
     """
     # Check if server_spec is a .json file
     if server_spec.endswith(".json"):
@@ -128,16 +130,22 @@ def run_with_uv(
         project=str(project.resolve()) if project else None,
         editable=editable,
     )
-    # IMPORTANT: We add --skip-env to prevent infinite recursion.
-    # When this function executes `uv run ... fastmcp run server.py`, the inner
-    # `fastmcp run` command will be executed inside the uv environment we're creating.
-    # Without --skip-env, that inner command would detect it needs uv (due to the same
-    # CLI args) and try to spawn ANOTHER uv subprocess, creating infinite recursion.
-    # The --skip-env flag tells the inner fastmcp: "skip environment setup, we're already
-    # inside the uv environment that was just created for us."
-    cmd = ["uv"] + env_config.build_uv_args(
-        ["fastmcp", "run", server_spec, "--skip-env"]
-    )
+    # Build the uv command
+    uv_args = env_config.build_uv_args(["fastmcp", "run", server_spec])
+
+    # Add --no-sync if requested to skip environment syncing
+    if no_sync:
+        # Insert --no-sync right after 'run' in the args
+        # The args will be like ['run', '--with', 'package', ...]
+        # We want ['run', '--no-sync', '--with', 'package', ...]
+        run_index = uv_args.index("run")
+        uv_args.insert(run_index + 1, "--no-sync")
+
+    # Add --skip-env to the inner fastmcp command to prevent infinite recursion
+    # This tells the inner fastmcp that it's already running inside uv
+    uv_args.append("--skip-env")
+
+    cmd = ["uv"] + uv_args
 
     # Add transport options
     if transport:
