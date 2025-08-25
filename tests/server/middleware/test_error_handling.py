@@ -5,7 +5,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from mcp import McpError
+from pydantic.functional_validators import field_validator
+from pydantic.main import BaseModel
 
+from fastmcp import FastMCP
+from fastmcp.exceptions import ToolError
 from fastmcp.server.middleware.error_handling import (
     ErrorHandlingMiddleware,
     RetryMiddleware,
@@ -155,7 +159,7 @@ class TestErrorHandlingMiddleware:
 
     def test_transform_error_timeout_error(self):
         """Test transforming TimeoutError."""
-        middleware = ErrorHandlingMiddleware()
+        middleware: ErrorHandlingMiddleware = ErrorHandlingMiddleware()
         error = TimeoutError("test error")
 
         result = middleware._transform_error(error)
@@ -163,6 +167,26 @@ class TestErrorHandlingMiddleware:
         assert isinstance(result, McpError)
         assert result.error.code == -32000
         assert "Request timeout: test error" in result.error.message
+
+    def test_transform_error_pydantic_validation_error(self):
+        """Test transforming pydantic ValidationError."""
+        from pydantic import ValidationError
+
+        middleware = ErrorHandlingMiddleware()
+
+        source_error = ValidationError.from_exception_data(
+            title="test_model",
+            line_errors=[],
+        )
+
+        converted_error: Exception = middleware._transform_error(source_error)
+
+        assert isinstance(converted_error, McpError)
+
+        assert converted_error is not None
+        assert converted_error.error.code == -32602
+        assert "Invalid params" in converted_error.error.message
+        assert "validation errors for test_model" in converted_error.error.message
 
     def test_transform_error_generic(self):
         """Test transforming generic error."""
@@ -370,6 +394,18 @@ def error_handling_server():
             raise ConnectionError("Temporary connection error")
         return "Operation succeeded after retries"
 
+    class TestModel(BaseModel):
+        required_field: str
+
+        @field_validator("required_field")
+        def always_fail_validation(cls, v: str) -> str:
+            raise ValueError("required_field is required")
+
+    @mcp.tool
+    def pydantic_validation_error(payload: TestModel) -> str:
+        """An operation that fails with a pydantic validation error."""
+        return "ok"
+
     return mcp
 
 
@@ -512,6 +548,29 @@ class TestErrorHandlingMiddlewareIntegration:
 
             # Error should still exist (may be wrapped by FastMCP)
             assert exc_info.value is not None
+
+    async def test_error_handling_middleware_transform_errors_pydantic_validation_error(
+        self, error_handling_server: FastMCP
+    ):
+        """Test error transformation functionality."""
+        from fastmcp.client import Client
+
+        error_handling_server.add_middleware(
+            ErrorHandlingMiddleware(transform_errors=True)
+        )
+
+        async with Client(error_handling_server) as client:
+            with pytest.raises(ToolError) as exc_info:
+                await client.call_tool(
+                    "pydantic_validation_error", {"payload": {"required_field": "test"}}
+                )
+
+            assert exc_info.value is not None
+            assert (
+                "Internal error: Error calling tool 'pydantic_validation_error'"
+                in str(exc_info.value)
+            )
+            assert "required_field is required" in str(exc_info.value)
 
 
 class TestRetryMiddlewareIntegration:
