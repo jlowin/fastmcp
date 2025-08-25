@@ -357,7 +357,16 @@ class StdioTransport(ClientTransport):
         self, **session_kwargs: Unpack[SessionKwargs]
     ) -> ClientSession | None:
         if self._connect_task is not None:
-            return
+            # Connection already in progress - wait for it to complete
+            await self._ready_event.wait()
+
+            # Check if connect task completed with an exception
+            if self._connect_task.done():
+                exception = self._connect_task.exception()
+                if exception is not None:
+                    raise exception
+
+            return self._session
 
         session_future: asyncio.Future[ClientSession] = asyncio.Future()
 
