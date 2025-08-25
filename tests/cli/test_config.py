@@ -12,7 +12,7 @@ from fastmcp.utilities.fastmcp_config import (
     Environment,
     FastMCPConfig,
 )
-from fastmcp.utilities.fastmcp_config.v1.source import FileSystemSource
+from fastmcp.utilities.fastmcp_config.v1.sources.filesystem import FileSystemSource
 
 
 class TestFileSystemSource:

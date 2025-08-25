@@ -10,10 +10,8 @@ from fastmcp.utilities.fastmcp_config.v1.fastmcp_config import (
     FastMCPConfig,
     generate_schema,
 )
-from fastmcp.utilities.fastmcp_config.v1.sources.base import (
-    BaseSource,
-    FileSystemSource,
-)
+from fastmcp.utilities.fastmcp_config.v1.sources.base import BaseSource
+from fastmcp.utilities.fastmcp_config.v1.sources.filesystem import FileSystemSource
 
 __all__ = [
     "BaseSource",
