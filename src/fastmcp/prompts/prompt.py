@@ -61,7 +61,7 @@ class PromptArgument(FastMCPBaseModel):
     description: str | None = Field(
         default=None, description="Description of what the argument does"
     )
-    required: bool = Field(
+    required: bool | None = Field(
         default=False, description="Whether the argument is required"
     )
 
