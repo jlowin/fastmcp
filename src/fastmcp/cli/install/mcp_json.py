@@ -22,7 +22,7 @@ def install_mcp_json(
     server_object: str | None,
     name: str,
     *,
-    with_editable: Path | None = None,
+    with_editable: list[Path] | None = None,
     with_packages: list[str] | None = None,
     env_vars: dict[str, str] | None = None,
     copy: bool = False,
@@ -36,7 +36,7 @@ def install_mcp_json(
         file: Path to the server file
         server_object: Optional server object name (for :object suffix)
         name: Name for the server in MCP config
-        with_editable: Optional directory to install in editable mode
+        with_editable: Optional list of directories to install in editable mode
         with_packages: Optional list of additional packages to install
         env_vars: Optional dictionary of environment variables
         copy: If True, copy to clipboard instead of printing to stdout
@@ -61,7 +61,7 @@ def install_mcp_json(
             dependencies=deduplicated_packages,
             requirements=str(with_requirements) if with_requirements else None,
             project=str(project) if project else None,
-            editable=[str(with_editable)] if with_editable else None,
+            editable=[str(p) for p in with_editable] if with_editable else None,
         )
         args = env_config.build_uv_args()
 
@@ -116,12 +116,13 @@ async def mcp_json_command(
         ),
     ] = None,
     with_editable: Annotated[
-        Path | None,
+        list[Path],
         cyclopts.Parameter(
             name=["--with-editable", "-e"],
-            help="Directory with pyproject.toml to install in editable mode",
+            help="Directory with pyproject.toml to install in editable mode (can be used multiple times)",
+            negative="",
         ),
-    ] = None,
+    ] = [],
     with_packages: Annotated[
         list[str],
         cyclopts.Parameter(
