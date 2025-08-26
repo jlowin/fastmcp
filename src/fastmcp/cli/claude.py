@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from fastmcp.utilities.fastmcp_config import Environment
 from fastmcp.utilities.logging import get_logger
 
 logger = get_logger(__name__)
@@ -33,7 +34,7 @@ def update_claude_config(
     file_spec: str,
     server_name: str,
     *,
-    with_editable: Path | None = None,
+    with_editable: list[Path] | None = None,
     with_packages: list[str] | None = None,
     env_vars: dict[str, str] | None = None,
 ) -> bool:
@@ -42,7 +43,7 @@ def update_claude_config(
     Args:
         file_spec: Path to the server file, optionally with :object suffix
         server_name: Name for the server in Claude's config
-        with_editable: Optional directory to install in editable mode
+        with_editable: Optional list of directories to install in editable mode
         with_packages: Optional list of additional packages to install
         env_vars: Optional dictionary of environment variables. These are merged with
             any existing variables, with new values taking precedence.
@@ -89,20 +90,20 @@ def update_claude_config(
             else:
                 env_vars = existing_env
 
-        # Build uv run command
-        args = ["run"]
-
-        # Collect all packages in a set to deduplicate
-        packages = {"fastmcp"}
+        # Deduplicate packages and exclude 'fastmcp' since Environment adds it automatically
+        deduplicated_packages = None
         if with_packages:
-            packages.update(pkg for pkg in with_packages if pkg)
+            deduplicated = list(dict.fromkeys(with_packages))
+            deduplicated_packages = [pkg for pkg in deduplicated if pkg != "fastmcp"]
+            if not deduplicated_packages:
+                deduplicated_packages = None
 
-        # Add all packages with --with
-        for pkg in sorted(packages):
-            args.extend(["--with", pkg])
-
-        if with_editable:
-            args.extend(["--with-editable", str(with_editable)])
+        # Build uv run command using Environment.build_uv_args()
+        env_config = Environment(
+            dependencies=deduplicated_packages,
+            editable=[str(p) for p in with_editable] if with_editable else None,
+        )
+        args = env_config.build_uv_args()
 
         # Convert file path to absolute before adding to command
         # Split off any :object suffix first

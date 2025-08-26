@@ -10,6 +10,8 @@ from pathlib import Path
 from types import EllipsisType, UnionType
 from typing import (
     Annotated,
+    Any,
+    Protocol,
     TypeAlias,
     TypeVar,
     Union,
@@ -19,7 +21,7 @@ from typing import (
 )
 
 import mcp.types
-from mcp.types import Annotations
+from mcp.types import Annotations, ContentBlock, ModelPreferences, SamplingMessage
 from pydantic import AnyUrl, BaseModel, ConfigDict, Field, TypeAdapter, UrlConstraints
 
 T = TypeVar("T")
@@ -121,7 +123,7 @@ def issubclass_safe(cls: type, base: type) -> bool:
         return False
 
 
-def is_class_member_of_type(cls: type, base: type) -> bool:
+def is_class_member_of_type(cls: Any, base: type) -> bool:
     """
     Check if cls is a member of base, even if cls is a type variable.
 
@@ -407,3 +409,14 @@ def replace_type(type_, type_map: dict[type, type]):
         return Union[new_args]  # type: ignore # noqa: UP007
     else:
         return origin[new_args]
+
+
+class ContextSamplingFallbackProtocol(Protocol):
+    async def __call__(
+        self,
+        messages: str | list[str | SamplingMessage],
+        system_prompt: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        model_preferences: ModelPreferences | str | list[str] | None = None,
+    ) -> ContentBlock: ...

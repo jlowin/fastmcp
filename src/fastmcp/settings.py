@@ -146,6 +146,7 @@ class Settings(BaseSettings):
 
     test_mode: bool = False
 
+    log_enabled: bool = True
     log_level: LOG_LEVEL = "INFO"
 
     @field_validator("log_level", mode="before")
@@ -314,11 +315,25 @@ class Settings(BaseSettings):
                 Whether to include FastMCP meta in the server's MCP responses.
                 If True, a `_fastmcp` key will be added to the `meta` field of
                 all MCP component responses. This key will contain a dict of
-                various FastMCP-specific metadata, such as tags. 
+                various FastMCP-specific metadata, such as tags.
                 """
             ),
         ),
     ] = True
+
+    mounted_components_raise_on_load_error: Annotated[
+        bool,
+        Field(
+            default=False,
+            description=inspect.cleandoc(
+                """
+                If True, errors encountered when loading mounted components (tools, resources, prompts)
+                will be raised instead of logged as warnings. This is useful for debugging
+                but will interrupt normal operation.
+                """
+            ),
+        ),
+    ] = False
 
 
 def __getattr__(name: str):

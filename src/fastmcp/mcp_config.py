@@ -27,7 +27,7 @@ from __future__ import annotations
 import datetime
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
 from urllib.parse import urlparse
 
 import httpx
@@ -36,7 +36,6 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
-    ValidationInfo,
     model_validator,
 )
 from typing_extensions import Self, override
@@ -47,11 +46,11 @@ from fastmcp.utilities.types import FastMCPBaseModel
 if TYPE_CHECKING:
     from fastmcp.client.transports import (
         ClientTransport,
-        FastMCPTransport,
         SSETransport,
         StdioTransport,
         StreamableHttpTransport,
     )
+    from fastmcp.server.server import FastMCP
 
 
 def infer_transport_type_from_url(
@@ -90,21 +89,38 @@ class _TransformingMCPServerMixin(FastMCPBaseModel):
         description="The tags to exclude in the proxy.",
     )
 
-    def to_transport(self) -> FastMCPTransport:
-        """Get the transport for the server."""
-        from fastmcp.client.transports import FastMCPTransport
-        from fastmcp.server.server import FastMCP
+    def _to_server_and_underlying_transport(
+        self,
+        server_name: str | None = None,
+        client_name: str | None = None,
+    ) -> tuple[FastMCP[Any], ClientTransport]:
+        """Turn the Transforming MCPServer into a FastMCP Server and also return the underlying transport."""
+        from fastmcp import FastMCP
+        from fastmcp.client import Client
+        from fastmcp.client.transports import (
+            ClientTransport,  # pyright: ignore[reportUnusedImport]
+        )
 
         transport: ClientTransport = super().to_transport()  # pyright: ignore[reportUnknownMemberType, reportAttributeAccessIssue, reportUnknownVariableType]
+        transport = cast(ClientTransport, transport)
+
+        client: Client[ClientTransport] = Client(transport=transport, name=client_name)
 
         wrapped_mcp_server = FastMCP.as_proxy(
-            transport,
+            name=server_name,
+            backend=client,
             tool_transformations=self.tools,
             include_tags=self.include_tags,
             exclude_tags=self.exclude_tags,
         )
 
-        return FastMCPTransport(wrapped_mcp_server)
+        return wrapped_mcp_server, transport
+
+    def to_transport(self) -> ClientTransport:
+        """Get the transport for the transforming MCP server."""
+        from fastmcp.client.transports import FastMCPTransport
+
+        return FastMCPTransport(mcp=self._to_server_and_underlying_transport()[0])
 
 
 class StdioMCPServer(BaseModel):
@@ -232,20 +248,24 @@ class MCPConfig(BaseModel):
     For an MCPConfig that is strictly canonical, see the `CanonicalMCPConfig` class.
     """
 
-    mcpServers: dict[str, MCPServerTypes]
+    mcpServers: dict[str, MCPServerTypes] = Field(default_factory=dict)
 
     model_config = ConfigDict(extra="allow")  # Preserve unknown top-level fields
 
     @model_validator(mode="before")
-    def validate_mcp_servers(self, info: ValidationInfo) -> dict[str, Any]:
-        """Validate the MCP servers."""
-        if not isinstance(self, dict):
-            raise ValueError("MCPConfig format requires a dictionary of servers.")
-
-        if "mcpServers" not in self:
-            self = {"mcpServers": self}
-
-        return self
+    @classmethod
+    def wrap_servers_at_root(cls, values: dict[str, Any]) -> dict[str, Any]:
+        """If there's no mcpServers key but there are server configs at root, wrap them."""
+        if "mcpServers" not in values:
+            # Check if any values look like server configs
+            has_servers = any(
+                isinstance(v, dict) and ("command" in v or "url" in v)
+                for v in values.values()
+            )
+            if has_servers:
+                # Move all server-like configs under mcpServers
+                return {"mcpServers": values}
+        return values
 
     def add_server(self, name: str, server: MCPServerTypes) -> None:
         """Add or update a server in the configuration."""
@@ -282,7 +302,7 @@ class CanonicalMCPConfig(MCPConfig):
     The format is designed to be client-agnostic and extensible for future use cases.
     """
 
-    mcpServers: dict[str, CanonicalMCPServerTypes]
+    mcpServers: dict[str, CanonicalMCPServerTypes] = Field(default_factory=dict)
 
     @override
     def add_server(self, name: str, server: CanonicalMCPServerTypes) -> None:

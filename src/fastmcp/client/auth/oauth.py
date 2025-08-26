@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import webbrowser
+from asyncio import Future
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlparse
@@ -18,6 +19,7 @@ from mcp.shared.auth import (
     OAuthToken as OAuthToken,
 )
 from pydantic import AnyHttpUrl, ValidationError
+from uvicorn.server import Server
 
 from fastmcp import settings as fastmcp_global_settings
 from fastmcp.client.oauth_callback import (
@@ -215,8 +217,13 @@ class OAuth(OAuthClientProvider):
         self.redirect_port = callback_port or find_available_port()
         redirect_uri = f"http://localhost:{self.redirect_port}/callback"
 
+        scopes_str: str
         if isinstance(scopes, list):
-            scopes = " ".join(scopes)
+            scopes_str = " ".join(scopes)
+        elif scopes is not None:
+            scopes_str = str(scopes)
+        else:
+            scopes_str = ""
 
         client_metadata = OAuthClientMetadata(
             client_name=client_name,
@@ -224,7 +231,7 @@ class OAuth(OAuthClientProvider):
             grant_types=["authorization_code", "refresh_token"],
             response_types=["code"],
             # token_endpoint_auth_method="client_secret_post",
-            scope=scopes,
+            scope=scopes_str,
             **(additional_client_metadata or {}),
         )
 
@@ -253,10 +260,10 @@ class OAuth(OAuthClientProvider):
     async def callback_handler(self) -> tuple[str, str | None]:
         """Handle OAuth callback and return (auth_code, state)."""
         # Create a future to capture the OAuth response
-        response_future = asyncio.get_running_loop().create_future()
+        response_future: Future[Any] = asyncio.get_running_loop().create_future()
 
         # Create server with the future
-        server = create_oauth_callback_server(
+        server: Server = create_oauth_callback_server(
             port=self.redirect_port,
             server_url=self.server_base_url,
             response_future=response_future,
@@ -280,3 +287,5 @@ class OAuth(OAuthClientProvider):
                 server.should_exit = True
                 await asyncio.sleep(0.1)  # Allow server to shutdown gracefully
                 tg.cancel_scope.cancel()
+
+        raise RuntimeError("OAuth callback handler could not be started")

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import inspect
+import json
 import re
+import secrets
 import warnings
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import (
@@ -69,6 +71,7 @@ from fastmcp.utilities.types import NotSet, NotSetT
 
 if TYPE_CHECKING:
     from fastmcp.client import Client
+    from fastmcp.client.sampling import ServerSamplingHandler
     from fastmcp.client.transports import ClientTransport, ClientTransportT
     from fastmcp.experimental.server.openapi import FastMCPOpenAPI as FastMCPOpenAPINew
     from fastmcp.experimental.server.openapi.routing import (
@@ -166,6 +169,8 @@ class FastMCP(Generic[LifespanResultT]):
         streamable_http_path: str | None = None,
         json_response: bool | None = None,
         stateless_http: bool | None = None,
+        sampling_handler: ServerSamplingHandler[LifespanResultT] | None = None,
+        sampling_handler_behavior: Literal["always", "fallback"] | None = None,
     ):
         self.resource_prefix_format: Literal["protocol", "path"] = (
             resource_prefix_format or fastmcp.settings.resource_prefix_format
@@ -193,8 +198,9 @@ class FastMCP(Generic[LifespanResultT]):
             lifespan = default_lifespan
         else:
             self._has_lifespan = True
+        # Generate random ID if no name provided
         self._mcp_server = LowLevelServer[LifespanResultT](
-            name=name or "FastMCP",
+            name=name or self.generate_name(),
             version=version,
             instructions=instructions,
             lifespan=_lifespan_wrapper(self, lifespan),
@@ -222,7 +228,27 @@ class FastMCP(Generic[LifespanResultT]):
 
         # Set up MCP protocol handlers
         self._setup_handlers()
-        self.dependencies = dependencies or fastmcp.settings.server_dependencies
+
+        # Handle dependencies with deprecation warning
+        # TODO: Remove dependencies parameter (deprecated in v2.11.4)
+        if dependencies is not None:
+            import warnings
+
+            warnings.warn(
+                "The 'dependencies' parameter is deprecated as of FastMCP 2.11.4 and will be removed in a future version. "
+                "Please specify dependencies in a fastmcp.json configuration file instead:\n"
+                '{\n  "entrypoint": "your_server.py",\n  "environment": {\n    "dependencies": '
+                f"{json.dumps(dependencies)}\n  }}\n}}\n"
+                "See https://gofastmcp.com/docs/deployment/server-configuration for more information.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        self.dependencies = (
+            dependencies or fastmcp.settings.server_dependencies
+        )  # TODO: Remove (deprecated in v2.11.4)
+
+        self.sampling_handler = sampling_handler
+        self.sampling_handler_behavior = sampling_handler_behavior or "fallback"
 
         self.include_fastmcp_meta = (
             include_fastmcp_meta
@@ -445,7 +471,7 @@ class FastMCP(Generic[LifespanResultT]):
         Request and returns a Response.
 
         Args:
-            path: URL path for the route (e.g., "/oauth/callback")
+            path: URL path for the route (e.g., "/auth/callback")
             methods: List of HTTP methods to support (e.g., ["GET", "POST"])
             name: Optional name for the route (to reference this route with
                 Starlette's reverse URL lookup feature)
@@ -495,7 +521,7 @@ class FastMCP(Generic[LifespanResultT]):
         return routes
 
     async def _mcp_list_tools(self) -> list[MCPTool]:
-        logger.debug("Handler called: list_tools")
+        logger.debug(f"[{self.name}] Handler called: list_tools")
 
         async with fastmcp.server.context.Context(fastmcp=self):
             tools = await self._list_tools()
@@ -539,7 +565,7 @@ class FastMCP(Generic[LifespanResultT]):
             return await self._apply_middleware(mw_context, _handler)
 
     async def _mcp_list_resources(self) -> list[MCPResource]:
-        logger.debug("Handler called: list_resources")
+        logger.debug(f"[{self.name}] Handler called: list_resources")
 
         async with fastmcp.server.context.Context(fastmcp=self):
             resources = await self._list_resources()
@@ -584,7 +610,7 @@ class FastMCP(Generic[LifespanResultT]):
             return await self._apply_middleware(mw_context, _handler)
 
     async def _mcp_list_resource_templates(self) -> list[MCPResourceTemplate]:
-        logger.debug("Handler called: list_resource_templates")
+        logger.debug(f"[{self.name}] Handler called: list_resource_templates")
 
         async with fastmcp.server.context.Context(fastmcp=self):
             templates = await self._list_resource_templates()
@@ -629,7 +655,7 @@ class FastMCP(Generic[LifespanResultT]):
             return await self._apply_middleware(mw_context, _handler)
 
     async def _mcp_list_prompts(self) -> list[MCPPrompt]:
-        logger.debug("Handler called: list_prompts")
+        logger.debug(f"[{self.name}] Handler called: list_prompts")
 
         async with fastmcp.server.context.Context(fastmcp=self):
             prompts = await self._list_prompts()
@@ -688,7 +714,9 @@ class FastMCP(Generic[LifespanResultT]):
         Returns:
             List of MCP Content objects containing the tool results
         """
-        logger.debug("Handler called: call_tool %s with %s", key, arguments)
+        logger.debug(
+            f"[{self.name}] Handler called: call_tool %s with %s", key, arguments
+        )
 
         async with fastmcp.server.context.Context(fastmcp=self):
             try:
@@ -730,7 +758,7 @@ class FastMCP(Generic[LifespanResultT]):
 
         Delegates to _read_resource, which should be overridden by FastMCP subclasses.
         """
-        logger.debug("Handler called: read_resource %s", uri)
+        logger.debug(f"[{self.name}] Handler called: read_resource %s", uri)
 
         async with fastmcp.server.context.Context(fastmcp=self):
             try:
@@ -785,7 +813,9 @@ class FastMCP(Generic[LifespanResultT]):
 
         Delegates to _get_prompt, which should be overridden by FastMCP subclasses.
         """
-        logger.debug("Handler called: get_prompt %s with %s", name, arguments)
+        logger.debug(
+            f"[{self.name}] Handler called: get_prompt %s with %s", name, arguments
+        )
 
         async with fastmcp.server.context.Context(fastmcp=self):
             try:
@@ -1003,7 +1033,7 @@ class FastMCP(Generic[LifespanResultT]):
                 description=description,
                 tags=tags,
                 output_schema=output_schema,
-                annotations=annotations,
+                annotations=cast(ToolAnnotations | None, annotations),
                 exclude_args=exclude_args,
                 meta=meta,
                 serializer=self._tool_serializer,
@@ -1233,7 +1263,7 @@ class FastMCP(Generic[LifespanResultT]):
                     mime_type=mime_type,
                     tags=tags,
                     enabled=enabled,
-                    annotations=annotations,
+                    annotations=cast(Annotations | None, annotations),
                     meta=meta,
                 )
                 self.add_template(template)
@@ -1248,7 +1278,7 @@ class FastMCP(Generic[LifespanResultT]):
                     mime_type=mime_type,
                     tags=tags,
                     enabled=enabled,
-                    annotations=annotations,
+                    annotations=cast(Annotations | None, annotations),
                     meta=meta,
                 )
                 self.add_resource(resource)
@@ -1942,9 +1972,11 @@ class FastMCP(Generic[LifespanResultT]):
             self._prompt_manager.add_prompt(prompt)
 
         if prefix:
-            logger.debug(f"Imported server {server.name} with prefix '{prefix}'")
+            logger.debug(
+                f"[{self.name}] Imported server {server.name} with prefix '{prefix}'"
+            )
         else:
-            logger.debug(f"Imported server {server.name}")
+            logger.debug(f"[{self.name}] Imported server {server.name}")
 
     @classmethod
     def from_openapi(
@@ -2170,6 +2202,15 @@ class FastMCP(Generic[LifespanResultT]):
                 return False
 
         return True
+
+    @classmethod
+    def generate_name(cls, name: str | None = None) -> str:
+        class_name = cls.__name__
+
+        if name is None:
+            return f"{class_name}-{secrets.token_hex(2)}"
+        else:
+            return f"{class_name}-{name}-{secrets.token_hex(2)}"
 
 
 @dataclass

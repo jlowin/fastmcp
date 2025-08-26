@@ -1,7 +1,7 @@
 ---
 title: Claude Desktop 🤝 FastMCP
 sidebarTitle: Claude Desktop
-description: Call FastMCP servers from Claude Desktop
+description: Connect FastMCP servers to Claude Desktop
 icon: message-smile
 ---
 
@@ -98,16 +98,21 @@ fastmcp install claude-desktop server.py --with-requirements requirements.txt
 fastmcp install claude-desktop server.py --with-editable ./my-local-package
 ```
 
-Alternatively, you can specify dependencies directly in your server code:
+Alternatively, you can use a `fastmcp.json` configuration file (recommended):
 
-```python server.py
-from fastmcp import FastMCP
-
-mcp = FastMCP(
-    name="Dice Roller",
-    dependencies=["pandas", "requests"]
-)
+```json fastmcp.json
+{
+  "$schema": "https://gofastmcp.com/public/schemas/fastmcp.json/v1.json",
+  "source": {
+    "path": "server.py",
+    "entrypoint": "mcp"
+  },
+  "environment": {
+    "dependencies": ["pandas", "requests"]
+  }
+}
 ```
+
 
 #### Python Version and Project Directory
 
