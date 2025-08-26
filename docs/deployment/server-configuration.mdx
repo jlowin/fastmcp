@@ -316,6 +316,20 @@ fastmcp run fastmcp.json --skip-source
 fastmcp run fastmcp.json --skip-env --skip-source
 ```
 
+### Pre-building Environments
+
+You can use `fastmcp project prepare` to create a persistent uv project with all dependencies pre-installed:
+
+```bash
+# Create a persistent environment
+fastmcp project prepare fastmcp.json --output-dir ./env
+
+# Use the pre-built environment to run the server
+fastmcp run fastmcp.json --project ./env
+```
+
+This pattern separates environment setup (slow) from server execution (fast), useful for deployment scenarios.
+
 ### Using an Existing Environment
 
 By default, FastMCP creates an isolated environment with `uv` based on your configuration. When you already have a suitable Python environment, use the `--skip-env` flag to skip environment creation:
