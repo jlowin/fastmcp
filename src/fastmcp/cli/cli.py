@@ -229,9 +229,11 @@ async def dev(
                 if config.environment.requirements
                 else None
             )
+            # Note: config.environment.editable is a list, but CLI only supports single path
+            # Take the first editable path if available
             with_editable = with_editable or (
-                Path(config.environment.editable)
-                if config.environment.editable
+                Path(config.environment.editable[0])
+                if config.environment.editable and config.environment.editable[0]
                 else None
             )
 
@@ -303,7 +305,7 @@ async def dev(
             dependencies=with_packages if with_packages else None,
             requirements=str(with_requirements) if with_requirements else None,
             project=str(project) if project else None,
-            editable=str(with_editable) if with_editable else None,
+            editable=[str(with_editable)] if with_editable else None,
         )
         uv_cmd = ["uv"] + env_config.build_uv_args(["fastmcp", "run", server_spec])
 
@@ -415,19 +417,19 @@ async def run(
             help="Requirements file to install dependencies from",
         ),
     ] = None,
-    skip_env: Annotated[
-        bool,
-        cyclopts.Parameter(
-            "--skip-env",
-            help="Skip environment setup with uv (use when already in a uv environment)",
-            negative="",
-        ),
-    ] = False,
     skip_source: Annotated[
         bool,
         cyclopts.Parameter(
             "--skip-source",
             help="Skip source preparation step (use when source is already prepared)",
+            negative="",
+        ),
+    ] = False,
+    skip_env: Annotated[
+        bool,
+        cyclopts.Parameter(
+            "--skip-env",
+            help="Skip environment configuration (for internal use when already in a uv environment)",
             negative="",
         ),
     ] = False,
@@ -509,7 +511,8 @@ async def run(
                             )
 
                         # Merge environment config with CLI values (CLI takes precedence)
-                        if config.environment:
+                        # BUT: Skip this if --skip-env is set
+                        if config.environment and not skip_env:
                             python = python or config.environment.python
                             project = project or (
                                 Path(config.environment.project)
@@ -552,15 +555,14 @@ async def run(
     )
 
     # Check if we need to use uv run (either from CLI args or config)
-    # When skip_env is set, we still use uv if there are dependencies, but with --no-sync
+    # When --skip-env is set, we ignore config.environment entirely
     needs_uv = python or with_packages or with_requirements or project or editable
-    if not needs_uv and config and config.environment:
-        # Check if config's environment needs uv
+    if not needs_uv and config and config.environment and not skip_env:
+        # Check if config's environment needs uv (but only if not skipping env)
         needs_uv = config.environment.needs_uv()
 
     if needs_uv:
         # Use uv run subprocess - always use run_with_uv which handles output correctly
-        # When skip_env is True, we pass no_sync=True to use cached environment without syncing
         try:
             run_module.run_with_uv(
                 server_spec=server_spec,
@@ -575,7 +577,6 @@ async def run(
                 log_level=log_level,
                 show_banner=not no_banner,
                 editable=editable,
-                no_sync=skip_env,  # Use --no-sync when skip_env is True
             )
         except Exception as e:
             logger.error(
@@ -598,7 +599,6 @@ async def run(
                 log_level=log_level,
                 server_args=list(server_args),
                 show_banner=not no_banner,
-                skip_env=skip_env,
                 skip_source=skip_source,
             )
         except Exception as e:
@@ -829,24 +829,45 @@ async def prepare(
         str | None,
         cyclopts.Parameter(help="Path to fastmcp.json configuration file"),
     ] = None,
+    output_dir: Annotated[
+        str | None,
+        cyclopts.Parameter(help="Directory to create the persistent environment in"),
+    ] = None,
+    skip_source: Annotated[
+        bool,
+        cyclopts.Parameter(help="Skip source preparation (e.g., git clone)"),
+    ] = False,
 ) -> None:
-    """Prepare a FastMCP project by setting up environment and source.
+    """Prepare a FastMCP project by creating a persistent uv environment.
 
-    This command prepares everything needed to run a FastMCP server:
-    - Sets up the Python environment (creates venv, installs dependencies)
-    - Prepares the source (git clone, download, etc. for non-filesystem sources)
+    This command creates a persistent uv project with all dependencies installed:
+    - Creates a pyproject.toml with dependencies from the config
+    - Installs all Python packages into a .venv
+    - Prepares the source (git clone, download, etc.) unless --skip-source
 
     After running this command, you can use:
-    fastmcp run <config> --skip-env --skip-source
+    fastmcp run <config> --project <output-dir>
 
     This is useful for:
     - CI/CD pipelines with separate build and run stages
     - Docker images where you prepare during build
-    - Production deployments where you validate before running
+    - Production deployments where you want fast startup times
+
+    Example:
+        fastmcp project prepare myserver.json --output-dir ./prepared-env
+        fastmcp run myserver.json --project ./prepared-env
     """
     from pathlib import Path
 
     from fastmcp.utilities.fastmcp_config import FastMCPConfig
+
+    # Require output-dir
+    if output_dir is None:
+        logger.error(
+            "The --output-dir parameter is required.\n"
+            "Please specify where to create the persistent environment."
+        )
+        sys.exit(1)
 
     # Auto-detect fastmcp.json if not provided
     if config_path is None:
@@ -866,17 +887,22 @@ async def prepare(
         logger.error(f"Configuration file not found: {config_path}")
         sys.exit(1)
 
+    output_path = Path(output_dir)
+
     try:
         # Load the configuration
         config = FastMCPConfig.from_file(config_file)
 
         # Prepare environment and source
-        await config.prepare(skip_env=False, skip_source=False)
+        await config.prepare(
+            skip_source=skip_source,
+            output_dir=output_path,
+        )
 
         console.print(
-            f"[bold green]✓[/bold green] Project prepared successfully!\n"
+            f"[bold green]✓[/bold green] Project prepared successfully in {output_path}!\n"
             f"You can now run the server with:\n"
-            f"  [cyan]fastmcp run {config_path} --skip-env --skip-source[/cyan]"
+            f"  [cyan]fastmcp run {config_path} --project {output_dir}[/cyan]"
         )
 
     except Exception as e:

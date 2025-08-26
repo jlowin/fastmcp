@@ -44,8 +44,7 @@ def run_with_uv(
     path: str | None = None,
     log_level: LogLevelType | None = None,
     show_banner: bool = True,
-    editable: str | None = None,
-    no_sync: bool = False,
+    editable: str | list[str] | None = None,
 ) -> None:
     """Run a MCP server using uv run subprocess.
 
@@ -61,7 +60,6 @@ def run_with_uv(
         path: Path to bind to when using http transport
         log_level: Log level
         show_banner: Whether to show the server banner
-        no_sync: If True, use --no-sync flag to skip environment syncing
     """
     # Check if server_spec is a .json file
     if server_spec.endswith(".json"):
@@ -100,7 +98,10 @@ def run_with_uv(
                                 if config.environment.requirements
                                 else None
                             )
-                            editable = editable or config.environment.editable
+                            # Note: config editable is a list but CLI currently only supports single path
+                            # Just pass through for now - Environment will handle the list
+                            if not editable and config.environment.editable:
+                                editable = config.environment.editable
 
                             # Merge packages from both sources
                             # Only merge if with_packages doesn't already contain them
@@ -128,38 +129,33 @@ def run_with_uv(
         dependencies=with_packages if with_packages else None,
         requirements=str(with_requirements.resolve()) if with_requirements else None,
         project=str(project.resolve()) if project else None,
-        editable=editable,
+        editable=editable
+        if isinstance(editable, list)
+        else ([editable] if editable else None),
     )
     # Build the uv command
-    uv_args = env_config.build_uv_args(["fastmcp", "run", server_spec])
+    # Build the inner fastmcp command with --skip-env to prevent infinite recursion
+    inner_cmd = ["fastmcp", "run", "--skip-env", server_spec]
 
-    # Add --no-sync if requested to skip environment syncing
-    if no_sync:
-        # Insert --no-sync right after 'run' in the args
-        # The args will be like ['run', '--with', 'package', ...]
-        # We want ['run', '--no-sync', '--with', 'package', ...]
-        run_index = uv_args.index("run")
-        uv_args.insert(run_index + 1, "--no-sync")
-
-    # Add --skip-env to the inner fastmcp command to prevent infinite recursion
-    # This tells the inner fastmcp that it's already running inside uv
-    uv_args.append("--skip-env")
-
-    cmd = ["uv"] + uv_args
-
-    # Add transport options
+    # Add transport options to the inner command
     if transport:
-        cmd.extend(["--transport", transport])
-    if host:
-        cmd.extend(["--host", host])
-    if port:
-        cmd.extend(["--port", str(port)])
-    if path:
-        cmd.extend(["--path", path])
+        inner_cmd.extend(["--transport", transport])
+    # Only add HTTP-specific options for non-stdio transports
+    if transport != "stdio":
+        if host:
+            inner_cmd.extend(["--host", host])
+        if port:
+            inner_cmd.extend(["--port", str(port)])
+        if path:
+            inner_cmd.extend(["--path", path])
     if log_level:
-        cmd.extend(["--log-level", log_level])
+        inner_cmd.extend(["--log-level", log_level])
     if not show_banner:
-        cmd.append("--no-banner")
+        inner_cmd.append("--no-banner")
+
+    # Build the full uv command
+    uv_args = env_config.build_uv_args(inner_cmd)
+    cmd = ["uv"] + uv_args
 
     # Run the command
     logger.debug(f"Running command: {' '.join(cmd)}")
@@ -230,7 +226,6 @@ async def run_command(
     server_args: list[str] | None = None,
     show_banner: bool = True,
     use_direct_import: bool = False,
-    skip_env: bool = False,
     skip_source: bool = False,
 ) -> None:
     """Run a MCP server or connect to a remote one.
@@ -245,7 +240,6 @@ async def run_command(
         server_args: Additional arguments to pass to the server
         show_banner: Whether to show the server banner
         use_direct_import: Whether to use direct import instead of subprocess
-        skip_env: Whether to skip environment preparation step
         skip_source: Whether to skip source preparation step
     """
     # Special case: URLs
@@ -279,8 +273,8 @@ async def run_command(
                     server_args if server_args is not None else config.deployment.args
                 )
 
-            # Prepare environment and source using unified prepare() method
-            await config.prepare(skip_env=skip_env, skip_source=skip_source)
+            # Prepare source only (environment is handled by uv run)
+            await config.prepare_source() if not skip_source else None
 
             # Load the server using the source
             from contextlib import nullcontext
@@ -299,8 +293,8 @@ async def run_command(
         source = FileSystemSource(path=server_spec)
         config = FastMCPConfig(source=source)
 
-        # Prepare environment and source using unified prepare() method
-        await config.prepare(skip_env=skip_env, skip_source=skip_source)
+        # Prepare source only (environment is handled by uv run)
+        await config.prepare_source() if not skip_source else None
 
         # Load the server
         from contextlib import nullcontext
