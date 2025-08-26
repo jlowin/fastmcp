@@ -21,6 +21,8 @@ import fastmcp
 from fastmcp.cli import run as run_module
 from fastmcp.cli.install import install_app
 from fastmcp.server.server import FastMCP
+from fastmcp.utilities.fastmcp_config import Environment, FastMCPConfig
+from fastmcp.utilities.fastmcp_config.v1.sources.filesystem import FileSystemSource
 from fastmcp.utilities.inspect import (
     InspectFormat,
     format_info,
@@ -302,8 +304,6 @@ async def dev(
             inspector_cmd += f"@{inspector_version}"
 
         # Create Environment object from CLI args
-        from fastmcp.utilities.fastmcp_config import Environment
-
         env_config = Environment(
             python=python,
             dependencies=with_packages if with_packages else None,
@@ -665,6 +665,14 @@ async def inspect(
             help="Requirements file to install dependencies from",
         ),
     ] = None,
+    skip_env: Annotated[
+        bool,
+        cyclopts.Parameter(
+            "--skip-env",
+            help="Skip environment configuration (for internal use when already in a uv environment)",
+            negative="",
+        ),
+    ] = False,
 ) -> None:
     """Inspect an MCP server and display information or generate a JSON report.
 
@@ -690,11 +698,6 @@ async def inspect(
     """
     # Convert None to empty lists for list parameters
     with_packages = with_packages or []
-    from pathlib import Path
-
-    from fastmcp.utilities.fastmcp_config import FastMCPConfig
-    from fastmcp.utilities.fastmcp_config.v1.sources.filesystem import FileSystemSource
-
     config = None
     config_path = None
 
@@ -764,14 +767,15 @@ async def inspect(
         source = FileSystemSource(path=server_spec)
         config = FastMCPConfig(source=source)
 
-    # Check if we need to use uv run
-    needs_uv = python or with_packages or with_requirements or project
-    if not needs_uv and config and config.environment:
-        needs_uv = config.environment.needs_uv()
+    # Check if we need to use uv run (skip if --skip-env is set)
+    needs_uv = False
+    if not skip_env:
+        needs_uv = python or with_packages or with_requirements or project
+        if not needs_uv and config and config.environment:
+            needs_uv = config.environment.needs_uv()
 
     if needs_uv:
         # Build and run uv command
-        from fastmcp.utilities.fastmcp_config import Environment
 
         # Create or update environment config
         env_config = Environment(
@@ -785,9 +789,14 @@ async def inspect(
             "fastmcp",
             "inspect",
             server_spec,
-            "--output",
-            str(output),
+            "--skip-env",  # Prevent infinite loop when calling through uv
         ]
+
+        # Add format and output flags if specified
+        if format:
+            inspect_command.extend(["--format", format.value])
+        if output:
+            inspect_command.extend(["--output", str(output)])
         env_config.run_with_uv(inspect_command)
         return  # run_with_uv exits the process
 
