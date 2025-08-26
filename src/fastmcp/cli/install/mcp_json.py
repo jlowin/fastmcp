@@ -116,29 +116,29 @@ async def mcp_json_command(
         ),
     ] = None,
     with_editable: Annotated[
-        list[Path],
+        list[Path] | None,
         cyclopts.Parameter(
-            name=["--with-editable", "-e"],
+            "--with-editable",
             help="Directory with pyproject.toml to install in editable mode (can be used multiple times)",
             negative="",
         ),
-    ] = [],
+    ] = None,
     with_packages: Annotated[
-        list[str],
+        list[str] | None,
         cyclopts.Parameter(
             "--with",
-            help="Additional packages to install",
+            help="Additional packages to install (can be used multiple times)",
             negative="",
         ),
-    ] = [],
+    ] = None,
     env_vars: Annotated[
-        list[str],
+        list[str] | None,
         cyclopts.Parameter(
             "--env",
-            help="Environment variables in KEY=VALUE format",
+            help="Environment variables in KEY=VALUE format (can be used multiple times)",
             negative="",
         ),
-    ] = [],
+    ] = None,
     env_file: Annotated[
         Path | None,
         cyclopts.Parameter(
@@ -181,6 +181,10 @@ async def mcp_json_command(
     Args:
         server_spec: Python file to install, optionally with :object suffix
     """
+    # Convert None to empty lists for list parameters
+    with_editable = with_editable or []
+    with_packages = with_packages or []
+    env_vars = env_vars or []
     file, server_object, name, packages, env_dict = await process_common_args(
         server_spec, server_name, with_packages, env_vars, env_file
     )
