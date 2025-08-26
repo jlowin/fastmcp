@@ -6,8 +6,10 @@ import mcp.types
 import pytest
 
 from fastmcp import Client, FastMCP
+from fastmcp.exceptions import ToolError
 from fastmcp.server.context import Context
-from fastmcp.server.middleware import Middleware, MiddlewareContext
+from fastmcp.server.middleware import CallNext, Middleware, MiddlewareContext
+from fastmcp.tools.tool import ToolResult
 
 
 @dataclass
@@ -121,7 +123,7 @@ def recording_middleware():
 def mcp_server(recording_middleware):
     mcp = FastMCP()
 
-    @mcp.tool
+    @mcp.tool(tags={"add-tool"})
     def add(a: int, b: int) -> int:
         return a + b
 
@@ -410,6 +412,38 @@ class TestMiddlewareHooks:
 
         assert len(prompts) == 1
         assert prompts[0].name == "public_prompt"
+
+    async def test_call_tool_middleware(self):
+        server = FastMCP()
+
+        @server.tool
+        def add(a: int, b: int) -> int:
+            return a + b
+
+        class CallToolMiddleware(Middleware):
+            async def on_call_tool(
+                self,
+                context: MiddlewareContext[mcp.types.CallToolRequestParams],
+                call_next: CallNext[mcp.types.CallToolRequestParams, ToolResult],
+            ):
+                # modify argument
+                if context.message.name == "add":
+                    context.message.arguments["a"] += 100  # type: ignore
+
+                result = await call_next(context)
+
+                # modify result
+                if context.message.name == "add":
+                    result.structured_content["result"] += 5  # type: ignore
+
+                return result
+
+        server.add_middleware(CallToolMiddleware())
+
+        async with Client(server) as client:
+            result = await client.call_tool("add", {"a": 1, "b": 2})
+
+        assert result.structured_content["result"] == 108  # type: ignore
 
 
 class TestNestedMiddlewareHooks:
@@ -728,3 +762,133 @@ class TestProxyServer:
         assert recording_middleware.assert_called(hook="on_request", at_least=2)
         assert recording_middleware.assert_called(hook="on_call_tool", at_least=1)
         assert recording_middleware.assert_called(hook="on_list_tools", at_least=1)
+
+    async def test_proxied_tags_are_visible_to_middleware(
+        self, mcp_server: FastMCP, recording_middleware: RecordingMiddleware
+    ):
+        """Tests that tags on remote FastMCP servers are visible to middleware
+        via proxy. See https://github.com/jlowin/fastmcp/issues/1300"""
+        proxy_server = FastMCP.as_proxy(mcp_server, name="Proxy Server")
+
+        TAGS = []
+
+        class TagMiddleware(Middleware):
+            async def on_list_tools(self, context: MiddlewareContext, call_next):
+                nonlocal TAGS
+                result = await call_next(context)
+                for tool in result:
+                    TAGS.append(tool.tags)
+                return result
+
+        proxy_server.add_middleware(TagMiddleware())
+
+        async with Client(proxy_server) as client:
+            await client.list_tools()
+
+        assert TAGS == [{"add-tool"}, set(), set(), set()]
+
+
+class TestToolCallDenial:
+    """Test denying tool calls in middleware using ToolError."""
+
+    async def test_deny_tool_call_with_tool_error(self):
+        """Test that middleware can deny tool calls by raising ToolError."""
+
+        class AuthMiddleware(Middleware):
+            async def on_call_tool(
+                self,
+                context: MiddlewareContext[mcp.types.CallToolRequestParams],
+                call_next: CallNext[mcp.types.CallToolRequestParams, ToolResult],
+            ) -> ToolResult:
+                tool_name = context.message.name
+                if tool_name.lower() == "restricted_tool":
+                    raise ToolError("Access denied: tool is disabled")
+                return await call_next(context)
+
+        server = FastMCP("TestServer")
+
+        @server.tool
+        def allowed_tool(x: int) -> int:
+            """This tool is allowed."""
+            return x * 2
+
+        @server.tool
+        def restricted_tool(x: int) -> int:
+            """This tool should be denied by middleware."""
+            return x * 3
+
+        server.add_middleware(AuthMiddleware())
+
+        async with Client(server) as client:
+            # Allowed tool should work normally
+            result = await client.call_tool("allowed_tool", {"x": 5})
+            assert result.structured_content is not None
+            assert result.structured_content["result"] == 10
+
+            # Restricted tool should raise ToolError
+            with pytest.raises(ToolError) as exc_info:
+                await client.call_tool("restricted_tool", {"x": 5})
+
+            # Verify the error message is preserved
+            assert "Access denied: tool is disabled" in str(exc_info.value)
+
+    async def test_middleware_can_selectively_deny_tools(self):
+        """Test that middleware can deny specific tools while allowing others."""
+
+        denied_tools = set()
+
+        class SelectiveAuthMiddleware(Middleware):
+            async def on_call_tool(
+                self,
+                context: MiddlewareContext[mcp.types.CallToolRequestParams],
+                call_next: CallNext[mcp.types.CallToolRequestParams, ToolResult],
+            ) -> ToolResult:
+                tool_name = context.message.name
+
+                # Deny tools that start with "admin_"
+                if tool_name.startswith("admin_"):
+                    denied_tools.add(tool_name)
+                    raise ToolError(
+                        f"Access denied: {tool_name} requires admin privileges"
+                    )
+
+                return await call_next(context)
+
+        server = FastMCP("TestServer")
+
+        @server.tool
+        def public_tool(x: int) -> int:
+            """Public tool available to all."""
+            return x + 1
+
+        @server.tool
+        def admin_delete(item_id: str) -> str:
+            """Admin tool that should be denied."""
+            return f"Deleted {item_id}"
+
+        @server.tool
+        def admin_config(setting: str, value: str) -> str:
+            """Another admin tool that should be denied."""
+            return f"Set {setting} to {value}"
+
+        server.add_middleware(SelectiveAuthMiddleware())
+
+        async with Client(server) as client:
+            # Public tool should work
+            result = await client.call_tool("public_tool", {"x": 10})
+            assert result.structured_content is not None
+            assert result.structured_content["result"] == 11
+
+            # Admin tools should be denied
+            with pytest.raises(ToolError) as exc_info:
+                await client.call_tool("admin_delete", {"item_id": "test123"})
+            assert "requires admin privileges" in str(exc_info.value)
+
+            with pytest.raises(ToolError) as exc_info:
+                await client.call_tool(
+                    "admin_config", {"setting": "debug", "value": "true"}
+                )
+            assert "requires admin privileges" in str(exc_info.value)
+
+        # Verify both admin tools were denied
+        assert denied_tools == {"admin_delete", "admin_config"}

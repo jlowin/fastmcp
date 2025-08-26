@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import datetime
+import secrets
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -30,7 +31,11 @@ from fastmcp.client.roots import (
     RootsList,
     create_roots_callback,
 )
-from fastmcp.client.sampling import SamplingHandler, create_sampling_callback
+from fastmcp.client.sampling import (
+    ClientSamplingHandler,
+    SamplingHandler,
+    create_sampling_callback,
+)
 from fastmcp.exceptions import ToolError
 from fastmcp.mcp_config import MCPConfig
 from fastmcp.server import FastMCP
@@ -60,6 +65,7 @@ __all__ = [
     "RootsList",
     "LogHandler",
     "MessageHandler",
+    "ClientSamplingHandler",
     "SamplingHandler",
     "ElicitationHandler",
     "ProgressHandler",
@@ -207,8 +213,9 @@ class Client(Generic[ClientTransportT]):
             | dict[str, Any]
             | str
         ),
+        name: str | None = None,
         roots: RootsList | RootsHandler | None = None,
-        sampling_handler: SamplingHandler | None = None,
+        sampling_handler: ClientSamplingHandler | None = None,
         elicitation_handler: ElicitationHandler | None = None,
         log_handler: LogHandler | None = None,
         message_handler: MessageHandlerT | MessageHandler | None = None,
@@ -218,6 +225,8 @@ class Client(Generic[ClientTransportT]):
         client_info: mcp.types.Implementation | None = None,
         auth: httpx.Auth | Literal["oauth"] | str | None = None,
     ) -> None:
+        self.name = name or self.generate_name()
+
         self.transport = cast(ClientTransportT, infer_transport(transport))
         if auth is not None:
             self.transport._set_auth(auth)
@@ -231,7 +240,7 @@ class Client(Generic[ClientTransportT]):
         self._progress_handler = progress_handler
 
         if isinstance(timeout, int | float):
-            timeout = datetime.timedelta(seconds=timeout)
+            timeout = datetime.timedelta(seconds=float(timeout))
 
         # handle init handshake timeout
         if init_timeout is None:
@@ -292,7 +301,7 @@ class Client(Generic[ClientTransportT]):
         """Set the roots for the client. This does not automatically call `send_roots_list_changed`."""
         self._session_kwargs["list_roots_callback"] = create_roots_callback(roots)
 
-    def set_sampling_callback(self, sampling_callback: SamplingHandler) -> None:
+    def set_sampling_callback(self, sampling_callback: ClientSamplingHandler) -> None:
         """Set the sampling callback for the client."""
         self._session_kwargs["sampling_callback"] = create_sampling_callback(
             sampling_callback
@@ -333,6 +342,8 @@ class Client(Generic[ClientTransportT]):
 
         # Reset session state to fresh state
         new_client._session_state = ClientSessionState()
+
+        new_client.name += f":{secrets.token_hex(2)}"
 
         return new_client
 
@@ -533,6 +544,8 @@ class Client(Generic[ClientTransportT]):
         Raises:
             RuntimeError: If called while the client is not connected.
         """
+        logger.debug(f"[{self.name}] called list_resources")
+
         result = await self.session.list_resources()
         return result
 
@@ -560,6 +573,8 @@ class Client(Generic[ClientTransportT]):
         Raises:
             RuntimeError: If called while the client is not connected.
         """
+        logger.debug(f"[{self.name}] called list_resource_templates")
+
         result = await self.session.list_resource_templates()
         return result
 
@@ -592,6 +607,8 @@ class Client(Generic[ClientTransportT]):
         Raises:
             RuntimeError: If called while the client is not connected.
         """
+        logger.debug(f"[{self.name}] called read_resource: {uri}")
+
         if isinstance(uri, str):
             uri = AnyUrl(uri)  # Ensure AnyUrl
         result = await self.session.read_resource(uri)
@@ -646,6 +663,8 @@ class Client(Generic[ClientTransportT]):
         Raises:
             RuntimeError: If called while the client is not connected.
         """
+        logger.debug(f"[{self.name}] called list_prompts")
+
         result = await self.session.list_prompts()
         return result
 
@@ -678,6 +697,8 @@ class Client(Generic[ClientTransportT]):
         Raises:
             RuntimeError: If called while the client is not connected.
         """
+        logger.debug(f"[{self.name}] called get_prompt: {name}")
+
         # Serialize arguments for MCP protocol - convert non-string values to JSON
         serialized_arguments: dict[str, str] | None = None
         if arguments:
@@ -735,6 +756,8 @@ class Client(Generic[ClientTransportT]):
         Raises:
             RuntimeError: If called while the client is not connected.
         """
+        logger.debug(f"[{self.name}] called complete: {ref}")
+
         result = await self.session.complete(ref=ref, argument=argument)
         return result
 
@@ -770,6 +793,8 @@ class Client(Generic[ClientTransportT]):
         Raises:
             RuntimeError: If called while the client is not connected.
         """
+        logger.debug(f"[{self.name}] called list_tools")
+
         result = await self.session.list_tools()
         return result
 
@@ -812,9 +837,10 @@ class Client(Generic[ClientTransportT]):
         Raises:
             RuntimeError: If called while the client is not connected.
         """
+        logger.debug(f"[{self.name}] called call_tool: {name}")
 
         if isinstance(timeout, int | float):
-            timeout = datetime.timedelta(seconds=timeout)
+            timeout = datetime.timedelta(seconds=float(timeout))
         result = await self.session.call_tool(
             name=name,
             arguments=arguments,
@@ -884,7 +910,7 @@ class Client(Generic[ClientTransportT]):
                     else:
                         data = result.structuredContent
             except Exception as e:
-                logger.error(f"Error parsing structured content: {e}")
+                logger.error(f"[{self.name}] Error parsing structured content: {e}")
 
         return CallToolResult(
             content=result.content,
@@ -892,6 +918,14 @@ class Client(Generic[ClientTransportT]):
             data=data,
             is_error=result.isError,
         )
+
+    @classmethod
+    def generate_name(cls, name: str | None = None) -> str:
+        class_name = cls.__name__
+        if name is None:
+            return f"{class_name}-{secrets.token_hex(2)}"
+        else:
+            return f"{class_name}-{name}-{secrets.token_hex(2)}"
 
 
 @dataclass

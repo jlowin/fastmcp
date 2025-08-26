@@ -55,6 +55,25 @@ class ExtendedSettingsConfigDict(SettingsConfigDict, total=False):
     env_prefixes: list[str] | None
 
 
+class ExperimentalSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="FASTMCP_EXPERIMENTAL_",
+        extra="ignore",
+    )
+
+    enable_new_openapi_parser: Annotated[
+        bool,
+        Field(
+            description=inspect.cleandoc(
+                """
+                Whether to use the new OpenAPI parser. This parser was introduced
+                for testing in 2.11 and will become the default soon.
+                """
+            ),
+        ),
+    ] = False
+
+
 class Settings(BaseSettings):
     """FastMCP settings."""
 
@@ -64,7 +83,34 @@ class Settings(BaseSettings):
         extra="ignore",
         env_nested_delimiter="__",
         nested_model_default_partial_update=True,
+        validate_assignment=True,
     )
+
+    def get_setting(self, attr: str) -> Any:
+        """
+        Get a setting. If the setting contains one or more `__`, it will be
+        treated as a nested setting.
+        """
+        settings = self
+        while "__" in attr:
+            parent_attr, attr = attr.split("__", 1)
+            if not hasattr(settings, parent_attr):
+                raise AttributeError(f"Setting {parent_attr} does not exist.")
+            settings = getattr(settings, parent_attr)
+        return getattr(settings, attr)
+
+    def set_setting(self, attr: str, value: Any) -> None:
+        """
+        Set a setting. If the setting contains one or more `__`, it will be
+        treated as a nested setting.
+        """
+        settings = self
+        while "__" in attr:
+            parent_attr, attr = attr.split("__", 1)
+            if not hasattr(settings, parent_attr):
+                raise AttributeError(f"Setting {parent_attr} does not exist.")
+            settings = getattr(settings, parent_attr)
+        setattr(settings, attr, value)
 
     @classmethod
     def settings_customise_sources(
@@ -100,6 +146,7 @@ class Settings(BaseSettings):
 
     test_mode: bool = False
 
+    log_enabled: bool = True
     log_level: LOG_LEVEL = "INFO"
 
     @field_validator("log_level", mode="before")
@@ -108,6 +155,8 @@ class Settings(BaseSettings):
         if isinstance(v, str):
             return v.upper()
         return v
+
+    experimental: ExperimentalSettings = ExperimentalSettings()
 
     enable_rich_tracebacks: Annotated[
         bool,
@@ -174,9 +223,9 @@ class Settings(BaseSettings):
     # HTTP settings
     host: str = "127.0.0.1"
     port: int = 8000
-    sse_path: str = "/sse/"
+    sse_path: str = "/sse"
     message_path: str = "/messages/"
-    streamable_http_path: str = "/mcp/"
+    streamable_http_path: str = "/mcp"
     debug: bool = False
 
     # error handling
@@ -196,13 +245,10 @@ class Settings(BaseSettings):
         ),
     ] = False
 
-    server_dependencies: Annotated[
-        list[str],
-        Field(
-            default_factory=list,
-            description="List of dependencies to install in the server environment",
-        ),
-    ] = []
+    server_dependencies: list[str] = Field(
+        default_factory=list,
+        description="List of dependencies to install in the server environment",
+    )
 
     # StreamableHTTP settings
     json_response: bool = False
@@ -211,19 +257,23 @@ class Settings(BaseSettings):
     )
 
     # Auth settings
-    default_auth_provider: Annotated[
-        Literal["bearer_env"] | None,
+    server_auth: Annotated[
+        str | None,
         Field(
             description=inspect.cleandoc(
                 """
-                Configure the authentication provider. This setting is intended only to
-                be used for remote confirugation of providers that fully support
-                environment variable configuration.
+                Configure the authentication provider for the server. Auth
+                providers are registered with a specific key, and providing that
+                key here will cause the server to automatically configure the
+                provider from the environment.
 
                 If None, no automatic configuration will take place.
 
                 This setting is *always* overriden by any auth provider passed to the
                 FastMCP constructor.
+
+                Note that most auth providers require additional configuration
+                that must be provided via env vars.
                 """
             ),
         ),
@@ -256,6 +306,35 @@ class Settings(BaseSettings):
         ),
     ] = None
 
+    include_fastmcp_meta: Annotated[
+        bool,
+        Field(
+            default=True,
+            description=inspect.cleandoc(
+                """
+                Whether to include FastMCP meta in the server's MCP responses.
+                If True, a `_fastmcp` key will be added to the `meta` field of
+                all MCP component responses. This key will contain a dict of
+                various FastMCP-specific metadata, such as tags.
+                """
+            ),
+        ),
+    ] = True
+
+    mounted_components_raise_on_load_error: Annotated[
+        bool,
+        Field(
+            default=False,
+            description=inspect.cleandoc(
+                """
+                If True, errors encountered when loading mounted components (tools, resources, prompts)
+                will be raised instead of logged as warnings. This is useful for debugging
+                but will interrupt normal operation.
+                """
+            ),
+        ),
+    ] = False
+
 
 def __getattr__(name: str):
     """
@@ -268,7 +347,7 @@ def __getattr__(name: str):
         # Deprecated in 2.10.2
         if settings.deprecation_warnings:
             warnings.warn(
-                "`from fastmcp.settings import settings` is deprecated. use `fasmtpc.settings` instead.",
+                "`from fastmcp.settings import settings` is deprecated. use `fastmcp.settings` instead.",
                 DeprecationWarning,
                 stacklevel=2,
             )

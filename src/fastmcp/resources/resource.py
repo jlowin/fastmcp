@@ -8,6 +8,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Annotated, Any
 
 import pydantic_core
+from mcp.types import Annotations
 from mcp.types import Resource as MCPResource
 from pydantic import (
     AnyUrl,
@@ -43,6 +44,10 @@ class Resource(FastMCPComponent, abc.ABC):
         description="MIME type of the resource content",
         pattern=r"^[a-zA-Z0-9]+/[a-zA-Z0-9\-+.]+$",
     )
+    annotations: Annotated[
+        Annotations | None,
+        Field(description="Optional annotations about the resource's behavior"),
+    ] = None
 
     def enable(self) -> None:
         super().enable()
@@ -70,6 +75,8 @@ class Resource(FastMCPComponent, abc.ABC):
         mime_type: str | None = None,
         tags: set[str] | None = None,
         enabled: bool | None = None,
+        annotations: Annotations | None = None,
+        meta: dict[str, Any] | None = None,
     ) -> FunctionResource:
         return FunctionResource.from_function(
             fn=fn,
@@ -80,6 +87,8 @@ class Resource(FastMCPComponent, abc.ABC):
             mime_type=mime_type,
             tags=tags,
             enabled=enabled,
+            annotations=annotations,
+            meta=meta,
         )
 
     @field_validator("mime_type", mode="before")
@@ -106,7 +115,12 @@ class Resource(FastMCPComponent, abc.ABC):
         """Read the resource content."""
         pass
 
-    def to_mcp_resource(self, **overrides: Any) -> MCPResource:
+    def to_mcp_resource(
+        self,
+        *,
+        include_fastmcp_meta: bool | None = None,
+        **overrides: Any,
+    ) -> MCPResource:
         """Convert the resource to an MCPResource."""
         kwargs = {
             "uri": self.uri,
@@ -114,6 +128,8 @@ class Resource(FastMCPComponent, abc.ABC):
             "description": self.description,
             "mimeType": self.mime_type,
             "title": self.title,
+            "annotations": self.annotations,
+            "_meta": self.get_meta(include_fastmcp_meta=include_fastmcp_meta),
         }
         return MCPResource(**kwargs | overrides)
 
@@ -157,6 +173,8 @@ class FunctionResource(Resource):
         mime_type: str | None = None,
         tags: set[str] | None = None,
         enabled: bool | None = None,
+        annotations: Annotations | None = None,
+        meta: dict[str, Any] | None = None,
     ) -> FunctionResource:
         """Create a FunctionResource from a function."""
         if isinstance(uri, str):
@@ -170,6 +188,8 @@ class FunctionResource(Resource):
             mime_type=mime_type or "text/plain",
             tags=tags or set(),
             enabled=enabled if enabled is not None else True,
+            annotations=annotations,
+            meta=meta,
         )
 
     async def read(self) -> str | bytes:

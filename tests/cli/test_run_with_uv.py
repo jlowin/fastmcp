@@ -26,7 +26,14 @@ class TestRunWithUv:
         mock_run.assert_called_once()
         cmd = mock_run.call_args[0][0]
 
-        expected = ["uv", "run", "--with", "fastmcp", "fastmcp", "run", "server.py"]
+        expected = [
+            "uv",
+            "run",
+            "fastmcp",
+            "run",
+            "--skip-env",
+            "server.py",
+        ]
         assert cmd == expected
 
     @patch("subprocess.run")
@@ -45,10 +52,9 @@ class TestRunWithUv:
             "run",
             "--python",
             "3.11",
-            "--with",
-            "fastmcp",
             "fastmcp",
             "run",
+            "--skip-env",
             "server.py",
         ]
         assert cmd == expected
@@ -57,7 +63,8 @@ class TestRunWithUv:
     def test_run_with_uv_project(self, mock_run):
         """Test run_with_uv with project directory."""
         mock_run.return_value = Mock(returncode=0)
-        project_path = Path("/my/project")
+        # Use an absolute path that works on all platforms
+        project_path = Path.cwd() / "my" / "project"
 
         with pytest.raises(SystemExit) as exc_info:
             run_with_uv("server.py", project=project_path)
@@ -65,18 +72,17 @@ class TestRunWithUv:
         assert exc_info.value.code == 0
 
         cmd = mock_run.call_args[0][0]
-        expected = [
-            "uv",
-            "run",
-            "--project",
-            str(Path("/my/project")),
-            "--with",
+        # Check the basic structure
+        assert cmd[:3] == ["uv", "run", "--project"]
+        # Check that the project path is absolute
+        assert Path(cmd[3]).is_absolute()
+        # Check the rest of the command
+        assert cmd[4:] == [
             "fastmcp",
-            "fastmcp",
             "run",
+            "--skip-env",
             "server.py",
         ]
-        assert cmd == expected
 
     @patch("subprocess.run")
     def test_run_with_uv_with_packages(self, mock_run):
@@ -93,13 +99,12 @@ class TestRunWithUv:
             "uv",
             "run",
             "--with",
-            "fastmcp",
+            "pandas",  # original order preserved
             "--with",
-            "pandas",
-            "--with",
-            "numpy",
+            "numpy",  # original order preserved
             "fastmcp",
             "run",
+            "--skip-env",
             "server.py",
         ]
         assert cmd == expected
@@ -119,12 +124,11 @@ class TestRunWithUv:
         expected = [
             "uv",
             "run",
-            "--with",
-            "fastmcp",
             "--with-requirements",
-            "requirements.txt",
+            str(req_path.resolve()),  # auto-resolved to absolute path
             "fastmcp",
             "run",
+            "--skip-env",
             "server.py",
         ]
         assert cmd == expected
@@ -151,10 +155,9 @@ class TestRunWithUv:
         expected = [
             "uv",
             "run",
-            "--with",
-            "fastmcp",
             "fastmcp",
             "run",
+            "--skip-env",
             "server.py",
             "--transport",
             "http",
@@ -175,11 +178,14 @@ class TestRunWithUv:
         """Test run_with_uv with all options combined."""
         mock_run.return_value = Mock(returncode=0)
 
+        # Use an absolute path that works on all platforms
+        project_path = Path.cwd() / "workspace"
+
         with pytest.raises(SystemExit) as exc_info:
             run_with_uv(
                 "server.py",
                 python_version="3.10",
-                project=Path("/workspace"),
+                project=project_path,
                 with_packages=["pandas"],
                 with_requirements=Path("reqs.txt"),
                 transport="http",
@@ -190,21 +196,31 @@ class TestRunWithUv:
         assert exc_info.value.code == 0
 
         cmd = mock_run.call_args[0][0]
-        expected = [
-            "uv",
-            "run",
-            "--python",
-            "3.10",
-            "--project",
-            str(Path("/workspace")),
-            "--with",
+
+        # When project is specified, Python version is not included
+        # Build expected command step by step
+        expected_start = ["uv", "run", "--project"]
+
+        # Check start and that project path is absolute
+        assert cmd[:3] == expected_start
+        assert Path(cmd[3]).is_absolute()
+
+        # Find the index where packages and requirements start
+        next_idx = 4
+        assert cmd[next_idx : next_idx + 2] == ["--with", "pandas"]
+        next_idx += 2
+        assert cmd[next_idx : next_idx + 1] == ["--with-requirements"]
+        next_idx += 1
+        # Check requirements path is absolute
+        assert Path(cmd[next_idx]).is_absolute()
+        assert Path(cmd[next_idx]).name == "reqs.txt"
+        next_idx += 1
+
+        # Rest should be the fastmcp command with options
+        assert cmd[next_idx:] == [
             "fastmcp",
-            "--with",
-            "pandas",
-            "--with-requirements",
-            "reqs.txt",
-            "fastmcp",
             "run",
+            "--skip-env",
             "server.py",
             "--transport",
             "http",
@@ -212,7 +228,6 @@ class TestRunWithUv:
             "9000",
             "--no-banner",
         ]
-        assert cmd == expected
 
     @patch("subprocess.run")
     def test_run_with_uv_error_handling(self, mock_run):

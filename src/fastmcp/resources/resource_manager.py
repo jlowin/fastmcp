@@ -101,8 +101,11 @@ class ResourceManager:
                         prefixed_uri = add_resource_prefix(
                             uri, mounted.prefix, mounted.resource_prefix_format
                         )
-                        # Create a copy of the resource with the prefixed key
-                        prefixed_resource = resource.with_key(prefixed_uri)
+                        # Create a copy of the resource with the prefixed key and name
+                        prefixed_resource = resource.model_copy(
+                            update={"name": f"{mounted.prefix}_{resource.name}"},
+                            key=prefixed_uri,
+                        )
                         all_resources[prefixed_uri] = prefixed_resource
                 else:
                     all_resources.update(child_resources)
@@ -111,6 +114,8 @@ class ResourceManager:
                 logger.warning(
                     f"Failed to get resources from server: {mounted.server.name!r}, mounted at: {mounted.prefix!r}: {e}"
                 )
+                if settings.mounted_components_raise_on_load_error:
+                    raise
                 continue
 
         # Finally, add local resources, which always take precedence
@@ -149,8 +154,11 @@ class ResourceManager:
                         prefixed_uri_template = add_resource_prefix(
                             uri_template, mounted.prefix, mounted.resource_prefix_format
                         )
-                        # Create a copy of the template with the prefixed key
-                        prefixed_template = template.with_key(prefixed_uri_template)
+                        # Create a copy of the template with the prefixed key and name
+                        prefixed_template = template.model_copy(
+                            update={"name": f"{mounted.prefix}_{template.name}"},
+                            key=prefixed_uri_template,
+                        )
                         all_templates[prefixed_uri_template] = prefixed_template
                 else:
                     all_templates.update(child_dict)
@@ -159,6 +167,8 @@ class ResourceManager:
                 logger.warning(
                     f"Failed to get templates from server: {mounted.server.name!r}, mounted at: {mounted.prefix!r}: {e}"
                 )
+                if settings.mounted_components_raise_on_load_error:
+                    raise
                 continue
 
         # Finally, add local templates, which always take precedence
@@ -273,7 +283,7 @@ class ResourceManager:
         Args:
             resource: A Resource instance to add. The resource's .key attribute
                 will be used as the storage key. To overwrite it, call
-                Resource.with_key() before calling this method.
+                Resource.model_copy(key=new_key) before calling this method.
         """
         existing = self._resources.get(resource.key)
         if existing:
@@ -322,7 +332,7 @@ class ResourceManager:
         Args:
             template: A ResourceTemplate instance to add. The template's .key attribute
                 will be used as the storage key. To overwrite it, call
-                ResourceTemplate.with_key() before calling this method.
+                ResourceTemplate.model_copy(key=new_key) before calling this method.
 
         Returns:
             The added template. If a template with the same URI already exists,

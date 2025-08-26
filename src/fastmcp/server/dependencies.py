@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, ParamSpec, TypeVar
 
-from mcp.server.auth.middleware.auth_context import get_access_token
-from mcp.server.auth.provider import AccessToken
+from mcp.server.auth.middleware.auth_context import (
+    get_access_token as _sdk_get_access_token,
+)
 from starlette.requests import Request
+
+from fastmcp.server.auth import AccessToken
 
 if TYPE_CHECKING:
     from fastmcp.server.context import Context
@@ -37,9 +40,14 @@ def get_context() -> Context:
 
 
 def get_http_request() -> Request:
-    from fastmcp.server.http import _current_http_request
+    from mcp.server.lowlevel.server import request_ctx
 
-    request = _current_http_request.get()
+    request = None
+    try:
+        request = request_ctx.get().request
+    except LookupError:
+        pass
+
     if request is None:
         raise RuntimeError("No active HTTP request found.")
     return request
@@ -72,6 +80,8 @@ def get_http_headers(include_all: bool = False) -> dict[str, str]:
             "proxy-authenticate",
             "proxy-authorization",
             "proxy-connection",
+            # MCP-related headers
+            "mcp-session-id",
         }
         # (just in case)
         if not all(h.lower() == h for h in exclude_headers):
@@ -87,3 +97,30 @@ def get_http_headers(include_all: bool = False) -> dict[str, str]:
         return headers
     except RuntimeError:
         return {}
+
+
+# --- Access Token ---
+
+
+def get_access_token() -> AccessToken | None:
+    """
+    Get the FastMCP access token from the current context.
+
+    Returns:
+        The access token if an authenticated user is available, None otherwise.
+    """
+    #
+    obj = _sdk_get_access_token()
+    if obj is None or isinstance(obj, AccessToken):
+        return obj
+
+    # If the object is not a FastMCP AccessToken, convert it to one if the fields are compatible
+    # This is a workaround for the case where the SDK returns a different type
+    # If it fails, it will raise a TypeError
+    try:
+        return AccessToken(**obj.model_dump())
+    except Exception as e:
+        raise TypeError(
+            f"Expected fastmcp.server.auth.auth.AccessToken, got {type(obj).__name__}. "
+            "Ensure the SDK is using the correct AccessToken type."
+        ) from e

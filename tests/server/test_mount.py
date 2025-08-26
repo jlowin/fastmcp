@@ -8,6 +8,8 @@ from fastmcp import FastMCP
 from fastmcp.client import Client
 from fastmcp.client.transports import FastMCPTransport, SSETransport
 from fastmcp.server.proxy import FastMCPProxy
+from fastmcp.tools.tool import Tool
+from fastmcp.tools.tool_transform import TransformedTool
 from fastmcp.utilities.tests import caplog_for_fastmcp
 
 
@@ -18,22 +20,29 @@ class TestBasicMount:
         """Test mounting a simple server and accessing its tool."""
         # Create main app and sub-app
         main_app = FastMCP("MainApp")
-        sub_app = FastMCP("SubApp")
 
         # Add a tool to the sub-app
-        @sub_app.tool
-        def sub_tool() -> str:
+        def tool() -> str:
             return "This is from the sub app"
+
+        sub_tool = Tool.from_function(tool)
+
+        transformed_tool = TransformedTool.from_tool(
+            name="transformed_tool", tool=sub_tool
+        )
+
+        sub_app = FastMCP("SubApp", tools=[transformed_tool, sub_tool])
 
         # Mount the sub-app to the main app
         main_app.mount(sub_app, "sub")
 
         # Get tools from main app, should include sub_app's tools
         tools = await main_app.get_tools()
-        assert "sub_sub_tool" in tools
+        assert "sub_tool" in tools
+        assert "sub_transformed_tool" in tools
 
         async with Client(main_app) as client:
-            result = await client.call_tool("sub_sub_tool", {})
+            result = await client.call_tool("sub_tool", {})
             assert result.data == "This is from the sub app"
 
     async def test_mount_with_custom_separator(self):
@@ -281,18 +290,21 @@ class TestMultipleServerMount:
 
         # Use an unreachable port
         unreachable_client = Client(
-            transport=SSETransport("http://127.0.0.1:9999/sse/")
+            transport=SSETransport("http://127.0.0.1:9999/sse/"),
+            name="unreachable_client",
         )
 
         # Create a proxy server that will fail to connect
-        unreachable_proxy = FastMCP.as_proxy(unreachable_client)
+        unreachable_proxy = FastMCP.as_proxy(
+            unreachable_client, name="unreachable_proxy"
+        )
 
         # Mount the unreachable proxy
         main_app.mount(unreachable_proxy, "unreachable")
 
         # All object types should work from working server despite unreachable proxy
         with caplog_for_fastmcp(caplog):
-            async with Client(main_app) as client:
+            async with Client(main_app, name="main_app_client") as client:
                 # Test tools
                 tools = await client.list_tools()
                 tool_names = [tool.name for tool in tools]
@@ -317,17 +329,17 @@ class TestMultipleServerMount:
             record.message for record in caplog.records if record.levelname == "WARNING"
         ]
         assert any(
-            "Failed to get tools from server: 'FastMCP', mounted at: 'unreachable'"
+            "Failed to get tools from server: 'unreachable_proxy', mounted at: 'unreachable'"
             in msg
             for msg in warning_messages
         )
         assert any(
-            "Failed to get resources from server: 'FastMCP', mounted at: 'unreachable'"
+            "Failed to get resources from server: 'unreachable_proxy', mounted at: 'unreachable'"
             in msg
             for msg in warning_messages
         )
         assert any(
-            "Failed to get prompts from server: 'FastMCP', mounted at: 'unreachable'"
+            "Failed to get prompts from server: 'unreachable_proxy', mounted at: 'unreachable'"
             in msg
             for msg in warning_messages
         )
@@ -628,23 +640,8 @@ class TestDynamicChanges:
         sub_app._tool_manager._tools.pop("temp_tool")
 
         # The tool should no longer be accessible
-        # Refresh the cache by clearing it
-        main_app._cache.cache.clear()
         tools = await main_app.get_tools()
         assert "sub_temp_tool" not in tools
-
-    async def test_cache_expiration(self):
-        main_app = FastMCP("MainApp", cache_expiration_seconds=2)
-        sub_app = FastMCP("SubApp")
-        tools = await main_app.get_tools()
-        assert len(tools) == 0
-
-        @sub_app.tool
-        def sub_tool():
-            return "sub_tool"
-
-        tools = await main_app.get_tools()
-        assert len(tools) == 0
 
 
 class TestResourcesAndTemplates:
@@ -973,3 +970,177 @@ class TestAsProxyKwarg:
         # in the present implementation the sub server will be invoked 3 times
         # to call its tool
         assert lifespan_check.count("start") >= 2
+
+
+class TestResourceNamePrefixing:
+    """Test that resource and resource template names get prefixed when mounted."""
+
+    async def test_resource_name_prefixing(self):
+        """Test that resource names are prefixed when mounted."""
+
+        # Create a sub-app with a resource
+        sub_app = FastMCP("SubApp")
+
+        @sub_app.resource("resource://my_resource")
+        def my_resource() -> str:
+            return "Resource content"
+
+        # Create main app and mount sub-app with prefix
+        main_app = FastMCP("MainApp")
+        main_app.mount(sub_app, "prefix")
+
+        # Get resources from main app
+        resources = await main_app.get_resources()
+
+        # Should have prefixed key (using path format: resource://prefix/resource_name)
+        assert "resource://prefix/my_resource" in resources
+
+        # The resource name should also be prefixed
+        resource = resources["resource://prefix/my_resource"]
+        assert resource.name == "prefix_my_resource"
+
+    async def test_resource_template_name_prefixing(self):
+        """Test that resource template names are prefixed when mounted."""
+
+        # Create a sub-app with a resource template
+        sub_app = FastMCP("SubApp")
+
+        @sub_app.resource("resource://user/{user_id}")
+        def user_template(user_id: str) -> str:
+            return f"User {user_id} data"
+
+        # Create main app and mount sub-app with prefix
+        main_app = FastMCP("MainApp")
+        main_app.mount(sub_app, "prefix")
+
+        # Get resource templates from main app
+        templates = await main_app.get_resource_templates()
+
+        # Should have prefixed key (using path format: resource://prefix/template_uri)
+        assert "resource://prefix/user/{user_id}" in templates
+
+        # The template name should also be prefixed
+        template = templates["resource://prefix/user/{user_id}"]
+        assert template.name == "prefix_user_template"
+
+
+class TestCustomRouteForwarding:
+    """Test that custom HTTP routes from mounted servers are forwarded."""
+
+    async def test_get_additional_http_routes_empty(self):
+        """Test _get_additional_http_routes returns empty list for server with no routes."""
+        server = FastMCP("TestServer")
+        routes = server._get_additional_http_routes()
+        assert routes == []
+
+    async def test_get_additional_http_routes_with_custom_route(self):
+        """Test _get_additional_http_routes returns server's own routes."""
+        server = FastMCP("TestServer")
+
+        @server.custom_route("/test", methods=["GET"])
+        async def test_route(request):
+            from starlette.responses import JSONResponse
+
+            return JSONResponse({"message": "test"})
+
+        routes = server._get_additional_http_routes()
+        assert len(routes) == 1
+        assert routes[0].path == "/test"  # type: ignore[attr-defined]
+
+    async def test_get_additional_http_routes_with_mounted_server(self):
+        """Test _get_additional_http_routes includes routes from mounted servers."""
+        main_server = FastMCP("MainServer")
+        sub_server = FastMCP("SubServer")
+
+        @sub_server.custom_route("/sub-route", methods=["GET"])
+        async def sub_route(request):
+            from starlette.responses import JSONResponse
+
+            return JSONResponse({"message": "from sub"})
+
+        # Mount the sub server
+        main_server.mount(sub_server, "sub")
+
+        routes = main_server._get_additional_http_routes()
+        assert len(routes) == 1
+        assert routes[0].path == "/sub-route"  # type: ignore[attr-defined]
+
+    async def test_get_additional_http_routes_recursive(self):
+        """Test _get_additional_http_routes works recursively with nested mounts."""
+        main_server = FastMCP("MainServer")
+        sub_server = FastMCP("SubServer")
+        nested_server = FastMCP("NestedServer")
+
+        @main_server.custom_route("/main-route", methods=["GET"])
+        async def main_route(request):
+            from starlette.responses import JSONResponse
+
+            return JSONResponse({"message": "from main"})
+
+        @sub_server.custom_route("/sub-route", methods=["GET"])
+        async def sub_route(request):
+            from starlette.responses import JSONResponse
+
+            return JSONResponse({"message": "from sub"})
+
+        @nested_server.custom_route("/nested-route", methods=["GET"])
+        async def nested_route(request):
+            from starlette.responses import JSONResponse
+
+            return JSONResponse({"message": "from nested"})
+
+        # Create nested mounting: main -> sub -> nested
+        sub_server.mount(nested_server, "nested")
+        main_server.mount(sub_server, "sub")
+
+        routes = main_server._get_additional_http_routes()
+
+        # Should include all routes
+        assert len(routes) == 3
+        route_paths = [route.path for route in routes]  # type: ignore[attr-defined]
+        assert "/main-route" in route_paths
+        assert "/sub-route" in route_paths
+        assert "/nested-route" in route_paths
+
+    async def test_mounted_servers_tracking(self):
+        """Test that _mounted_servers list tracks mounted servers correctly."""
+        main_server = FastMCP("MainServer")
+        sub_server1 = FastMCP("SubServer1")
+        sub_server2 = FastMCP("SubServer2")
+
+        # Initially no mounted servers
+        assert len(main_server._mounted_servers) == 0
+
+        # Mount first server
+        main_server.mount(sub_server1, "sub1")
+        assert len(main_server._mounted_servers) == 1
+        assert main_server._mounted_servers[0].server == sub_server1
+        assert main_server._mounted_servers[0].prefix == "sub1"
+
+        # Mount second server
+        main_server.mount(sub_server2, "sub2")
+        assert len(main_server._mounted_servers) == 2
+        assert main_server._mounted_servers[1].server == sub_server2
+        assert main_server._mounted_servers[1].prefix == "sub2"
+
+    async def test_multiple_routes_same_server(self):
+        """Test that multiple custom routes from same server are all included."""
+        server = FastMCP("TestServer")
+
+        @server.custom_route("/route1", methods=["GET"])
+        async def route1(request):
+            from starlette.responses import JSONResponse
+
+            return JSONResponse({"message": "route1"})
+
+        @server.custom_route("/route2", methods=["POST"])
+        async def route2(request):
+            from starlette.responses import JSONResponse
+
+            return JSONResponse({"message": "route2"})
+
+        routes = server._get_additional_http_routes()
+        assert len(routes) == 2
+        route_paths = [route.path for route in routes]  # type: ignore[attr-defined]
+        assert "/route1" in route_paths
+        assert "/route2" in route_paths

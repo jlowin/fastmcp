@@ -40,20 +40,43 @@ The `FastMCP` constructor accepts several arguments:
   Description of how to interact with this server. These instructions help clients understand the server's purpose and available functionality
 </ParamField>
 
-<ParamField body="lifespan" type="AsyncContextManager | None">
-  An async context manager function for server startup and shutdown logic
+<ParamField body="auth" type="OAuthProvider | TokenVerifier | None">
+  Authentication provider for securing HTTP-based transports. See [Authentication](/servers/auth/authentication) for configuration options
 </ParamField>
 
-<ParamField body="tags" type="set[str] | None">
-  A set of strings to tag the server itself
+<ParamField body="lifespan" type="AsyncContextManager | None">
+  An async context manager function for server startup and shutdown logic
 </ParamField>
 
 <ParamField body="tools" type="list[Tool | Callable] | None">
   A list of tools (or functions to convert to tools) to add to the server. In some cases, providing tools programmatically may be more convenient than using the `@mcp.tool` decorator
 </ParamField>
 
-<ParamField body="**settings" type="Any">
-  Keyword arguments corresponding to additional `ServerSettings` configuration
+
+<ParamField body="include_tags" type="set[str] | None">
+  Only expose components with at least one matching tag
+</ParamField>
+
+<ParamField body="exclude_tags" type="set[str] | None">
+  Hide components with any matching tag
+</ParamField>
+
+<ParamField body="on_duplicate_tools" type='Literal["error", "warn", "replace"]' default="error">
+  How to handle duplicate tool registrations
+</ParamField>
+
+<ParamField body="on_duplicate_resources" type='Literal["error", "warn", "replace"]' default="warn">
+  How to handle duplicate resource registrations
+</ParamField>
+
+<ParamField body="on_duplicate_prompts" type='Literal["error", "warn", "replace"]' default="replace">
+  How to handle duplicate prompt registrations
+</ParamField>
+
+<ParamField body="include_fastmcp_meta" type="bool" default="True">
+  <VersionBadge version="2.11.0" />
+  
+  Whether to include FastMCP metadata in component responses. When `True`, component tags and other FastMCP-specific metadata are included in the `_fastmcp` namespace within each component's `meta` field. When `False`, this metadata is omitted, resulting in cleaner integration with external systems. Can be overridden globally via `FASTMCP_INCLUDE_FASTMCP_META` environment variable
 </ParamField>
 </Card>
 ## Components
@@ -176,19 +199,44 @@ if __name__ == "__main__":
     # This runs the server, defaulting to STDIO transport
     mcp.run()
     
-    # To use a different transport, e.g., Streamable HTTP:
+    # To use a different transport, e.g., HTTP:
     # mcp.run(transport="http", host="127.0.0.1", port=9000)
 ```
 
 FastMCP supports several transport options: 
 - STDIO (default, for local tools)
-- Streamable HTTP (recommended for web services)
+- HTTP (recommended for web services, uses Streamable HTTP protocol)
 - SSE (legacy web transport, deprecated)
 
 The server can also be run using the FastMCP CLI.
 
 For detailed information on each transport, how to configure them (host, port, paths), and when to use which, please refer to the [**Running Your FastMCP Server**](/deployment/running-server) guide.
 
+## Custom Routes
+
+When running your server with HTTP transport, you can add custom web routes alongside your MCP endpoint using the `@custom_route` decorator. This is useful for simple endpoints like health checks that need to be served alongside your MCP server:
+
+```python
+from fastmcp import FastMCP
+from starlette.requests import Request
+from starlette.responses import PlainTextResponse
+
+mcp = FastMCP("MyServer")
+
+@mcp.custom_route("/health", methods=["GET"])
+async def health_check(request: Request) -> PlainTextResponse:
+    return PlainTextResponse("OK")
+
+if __name__ == "__main__":
+    mcp.run(transport="http")  # Health check at http://localhost:8000/health
+```
+
+Custom routes are served alongside your MCP endpoint and are useful for:
+- Health check endpoints for monitoring
+- Simple status or info endpoints
+- Basic webhooks or callbacks
+
+For more complex web applications, consider [mounting your MCP server into a FastAPI or Starlette app](/deployment/self-hosted#integration-with-web-frameworks).
 
 ## Composing Servers
 
@@ -268,42 +316,14 @@ from fastmcp import FastMCP
 # Configure server-specific settings
 mcp = FastMCP(
     name="ConfiguredServer",
-    dependencies=["requests", "pandas>=2.0.0"],  # Optional server dependencies
     include_tags={"public", "api"},              # Only expose these tagged components
     exclude_tags={"internal", "deprecated"},     # Hide these tagged components
     on_duplicate_tools="error",                  # Handle duplicate registrations
     on_duplicate_resources="warn",
     on_duplicate_prompts="replace",
+    include_fastmcp_meta=False,                  # Disable FastMCP metadata for cleaner integration
 )
 ```
-
-### Constructor Parameters
-
-<Card icon="code" title="AdditionalFastMCP Constructor Parameters">
-<ParamField body="dependencies" type="list[str] | None">
-  Optional server dependencies list with package specifications
-</ParamField>
-
-<ParamField body="include_tags" type="set[str] | None">
-  Only expose components with at least one matching tag
-</ParamField>
-
-<ParamField body="exclude_tags" type="set[str] | None">
-  Hide components with any matching tag
-</ParamField>
-
-<ParamField body="on_duplicate_tools" type='Literal["error", "warn", "replace"]' default="error">
-  How to handle duplicate tool registrations
-</ParamField>
-
-<ParamField body="on_duplicate_resources" type='Literal["error", "warn", "replace"]' default="warn">
-  How to handle duplicate resource registrations
-</ParamField>
-
-<ParamField body="on_duplicate_prompts" type='Literal["error", "warn", "replace"]' default="replace">
-  How to handle duplicate prompt registrations
-</ParamField>
-</Card>
 
 ### Global Settings
 
@@ -316,12 +336,14 @@ import fastmcp
 print(fastmcp.settings.log_level)        # Default: "INFO"
 print(fastmcp.settings.mask_error_details)  # Default: False
 print(fastmcp.settings.resource_prefix_format)  # Default: "path"
+print(fastmcp.settings.include_fastmcp_meta)   # Default: True
 ```
 
 Common global settings include:
 - **`log_level`**: Logging level ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"), set with `FASTMCP_LOG_LEVEL`
 - **`mask_error_details`**: Whether to hide detailed error information from clients, set with `FASTMCP_MASK_ERROR_DETAILS`
 - **`resource_prefix_format`**: How to format resource prefixes ("path" or "protocol"), set with `FASTMCP_RESOURCE_PREFIX_FORMAT`
+- **`include_fastmcp_meta`**: Whether to include FastMCP metadata in component responses (default: True), set with `FASTMCP_INCLUDE_FASTMCP_META`
 
 ### Transport-Specific Configuration
 
@@ -353,6 +375,7 @@ Global FastMCP settings can be configured via environment variables (prefixed wi
 export FASTMCP_LOG_LEVEL=DEBUG
 export FASTMCP_MASK_ERROR_DETAILS=True
 export FASTMCP_RESOURCE_PREFIX_FORMAT=protocol
+export FASTMCP_INCLUDE_FASTMCP_META=False
 ```
 
 ### Custom Tool Serialization

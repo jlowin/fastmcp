@@ -3,7 +3,6 @@ title: Claude Code 🤝 FastMCP
 sidebarTitle: Claude Code
 description: Install and use FastMCP servers in Claude Code
 icon: message-smile
-tag: NEW
 ---
 
 import { VersionBadge } from "/snippets/version-badge.mdx"
@@ -82,16 +81,21 @@ fastmcp install claude-code server.py --with-requirements requirements.txt
 fastmcp install claude-code server.py --with-editable ./my-local-package
 ```
 
-Alternatively, you can specify dependencies directly in your server code:
+Alternatively, you can use a `fastmcp.json` configuration file (recommended):
 
-```python server.py
-from fastmcp import FastMCP
-
-mcp = FastMCP(
-    name="Dice Roller",
-    dependencies=["pandas", "requests"]
-)
+```json fastmcp.json
+{
+  "$schema": "https://gofastmcp.com/public/schemas/fastmcp.json/v1.json",
+  "source": {
+    "path": "server.py",
+    "entrypoint": "mcp"
+  },
+  "environment": {
+    "dependencies": ["pandas", "requests"]
+  }
+}
 ```
+
 
 #### Python Version and Project Configuration
 
@@ -114,7 +118,7 @@ fastmcp install claude-code server.py --project /path/to/my-project
 If your server needs environment variables (like API keys), you must include them:
 
 ```bash
-fastmcp install claude-code server.py --name "Weather Server" \
+fastmcp install claude-code server.py --server-name "Weather Server" \
   --env API_KEY=your-api-key \
   --env DEBUG=true
 ```
@@ -122,7 +126,7 @@ fastmcp install claude-code server.py --name "Weather Server" \
 Or load them from a `.env` file:
 
 ```bash
-fastmcp install claude-code server.py --name "Weather Server" --env-file .env
+fastmcp install claude-code server.py --server-name "Weather Server" --env-file .env
 ```
 
 <Warning>

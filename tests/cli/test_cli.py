@@ -4,7 +4,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from fastmcp.cli.cli import _build_uv_command, _parse_env_var, app
+from fastmcp.cli.cli import _parse_env_var, app
 
 
 class TestMainCLI:
@@ -33,150 +33,6 @@ class TestMainCLI:
         with pytest.raises(SystemExit) as exc_info:
             _parse_env_var("INVALID_FORMAT")
         assert exc_info.value.code == 1
-
-    def test_build_uv_command_basic(self):
-        """Test building basic uv command."""
-        cmd = _build_uv_command("server.py")
-        expected = ["uv", "run", "--with", "fastmcp", "fastmcp", "run", "server.py"]
-        assert cmd == expected
-
-    def test_build_uv_command_with_editable(self):
-        """Test building uv command with editable package."""
-        editable_path = Path("/path/to/package")
-        cmd = _build_uv_command("server.py", with_editable=editable_path)
-        expected = [
-            "uv",
-            "run",
-            "--with",
-            "fastmcp",
-            "--with-editable",
-            str(editable_path),
-            "fastmcp",
-            "run",
-            "server.py",
-        ]
-        assert cmd == expected
-
-    def test_build_uv_command_with_packages(self):
-        """Test building uv command with additional packages."""
-        cmd = _build_uv_command("server.py", with_packages=["pkg1", "pkg2"])
-        expected = [
-            "uv",
-            "run",
-            "--with",
-            "fastmcp",
-            "--with",
-            "pkg1",
-            "--with",
-            "pkg2",
-            "fastmcp",
-            "run",
-            "server.py",
-        ]
-        assert cmd == expected
-
-    def test_build_uv_command_no_banner(self):
-        """Test building uv command with no banner flag."""
-        cmd = _build_uv_command("server.py", no_banner=True)
-        expected = [
-            "uv",
-            "run",
-            "--with",
-            "fastmcp",
-            "fastmcp",
-            "run",
-            "server.py",
-            "--no-banner",
-        ]
-        assert cmd == expected
-
-    def test_build_uv_command_with_python_version(self):
-        """Test building uv command with Python version."""
-        cmd = _build_uv_command("server.py", python_version="3.11")
-        expected = [
-            "uv",
-            "run",
-            "--python",
-            "3.11",
-            "--with",
-            "fastmcp",
-            "fastmcp",
-            "run",
-            "server.py",
-        ]
-        assert cmd == expected
-
-    def test_build_uv_command_with_project(self):
-        """Test building uv command with project directory."""
-        project_path = Path("/path/to/project")
-        cmd = _build_uv_command("server.py", project=project_path)
-        expected = [
-            "uv",
-            "run",
-            "--project",
-            str(project_path),
-            "--with",
-            "fastmcp",
-            "fastmcp",
-            "run",
-            "server.py",
-        ]
-        assert cmd == expected
-
-    def test_build_uv_command_with_requirements(self):
-        """Test building uv command with requirements file."""
-        req_path = Path("requirements.txt")
-        cmd = _build_uv_command("server.py", with_requirements=req_path)
-        expected = [
-            "uv",
-            "run",
-            "--with",
-            "fastmcp",
-            "--with-requirements",
-            "requirements.txt",
-            "fastmcp",
-            "run",
-            "server.py",
-        ]
-        assert cmd == expected
-
-    def test_build_uv_command_with_all_options(self):
-        """Test building uv command with all options."""
-        project_path = Path("/my/project")
-        editable_path = Path("/local/pkg")
-        requirements_path = Path("reqs.txt")
-        cmd = _build_uv_command(
-            "server.py",
-            python_version="3.10",
-            project=project_path,
-            with_packages=["pandas", "numpy"],
-            with_requirements=requirements_path,
-            with_editable=editable_path,
-            no_banner=True,
-        )
-        expected = [
-            "uv",
-            "run",
-            "--python",
-            "3.10",
-            "--project",
-            str(project_path),
-            "--with",
-            "fastmcp",
-            "--with-editable",
-            str(editable_path),
-            "--with",
-            "pandas",
-            "--with",
-            "numpy",
-            "--with-requirements",
-            str(requirements_path),
-            "fastmcp",
-            "run",
-            "server.py",
-            "--no-banner",
-        ]
-        assert cmd == expected
 
 
 class TestVersionCommand:
@@ -399,6 +255,122 @@ class TestRunCommand:
         assert command is not None
         assert bound.arguments["transport"] == "streamable-http"
 
+    def test_run_command_parsing_with_server_args(self):
+        """Test run command parsing with server arguments after --."""
+        command, bound, _ = app.parse_args(
+            [
+                "run",
+                "server.py",
+                "--",
+                "--config",
+                "test.json",
+                "--debug",
+            ]
+        )
+
+        assert command is not None
+        assert bound.arguments["server_spec"] == "server.py"
+        # Server args after -- are captured as positional arguments in bound.args
+        assert bound.args == ("server.py", "--config", "test.json", "--debug")
+
+    def test_run_command_parsing_with_mixed_args(self):
+        """Test run command parsing with both FastMCP options and server args."""
+        command, bound, _ = app.parse_args(
+            [
+                "run",
+                "server.py",
+                "--transport",
+                "http",
+                "--port",
+                "8080",
+                "--",
+                "--server-port",
+                "9090",
+                "--debug",
+            ]
+        )
+
+        assert command is not None
+        assert bound.arguments["server_spec"] == "server.py"
+        assert bound.arguments["transport"] == "http"
+        assert bound.arguments["port"] == 8080
+        # Server args after -- are captured separately from FastMCP options
+        assert bound.args == ("server.py", "--server-port", "9090", "--debug")
+
+    def test_run_command_parsing_with_positional_server_args(self):
+        """Test run command parsing with positional server arguments."""
+        command, bound, _ = app.parse_args(
+            [
+                "run",
+                "server.py",
+                "--",
+                "arg1",
+                "arg2",
+                "--flag",
+            ]
+        )
+
+        assert command is not None
+        assert bound.arguments["server_spec"] == "server.py"
+        # Positional args and flags after -- are all captured
+        assert bound.args == ("server.py", "arg1", "arg2", "--flag")
+
+    def test_run_command_parsing_server_args_require_delimiter(self):
+        """Test that server args without -- delimiter are rejected."""
+        # Should fail because --config is not a recognized FastMCP option
+        with pytest.raises(SystemExit):
+            app.parse_args(
+                [
+                    "run",
+                    "server.py",
+                    "--config",
+                    "test.json",
+                ]
+            )
+
+    def test_run_command_parsing_project_flag(self):
+        """Test run command parsing with --project flag."""
+        command, bound, _ = app.parse_args(
+            [
+                "run",
+                "server.py",
+                "--project",
+                "./test-env",
+            ]
+        )
+        assert command is not None
+        assert bound.arguments["server_spec"] == "server.py"
+        assert bound.arguments["project"] == Path("./test-env")
+
+    def test_run_command_parsing_skip_source_flag(self):
+        """Test run command parsing with --skip-source flag."""
+        command, bound, _ = app.parse_args(
+            [
+                "run",
+                "server.py",
+                "--skip-source",
+            ]
+        )
+        assert command is not None
+        assert bound.arguments["server_spec"] == "server.py"
+        assert bound.arguments["skip_source"] is True
+
+    def test_run_command_parsing_project_and_skip_source(self):
+        """Test run command parsing with --project and --skip-source flags."""
+        command, bound, _ = app.parse_args(
+            [
+                "run",
+                "server.py",
+                "--project",
+                "./test-env",
+                "--skip-source",
+            ]
+        )
+        assert command is not None
+        assert bound.arguments["server_spec"] == "server.py"
+        assert bound.arguments["project"] == Path("./test-env")
+        assert bound.arguments["skip_source"] is True
+
 
 class TestWindowsSpecific:
     """Test Windows-specific functionality."""
@@ -484,22 +456,27 @@ class TestWindowsSpecific:
 
     def test_windows_path_parsing_with_colon(self, tmp_path):
         """Test parsing Windows paths with drive letters and colons."""
-        from fastmcp.cli.run import parse_file_path
+        from pathlib import Path
+
+        from fastmcp.utilities.fastmcp_config.v1.sources.filesystem import (
+            FileSystemSource,
+        )
 
         # Create a real test file to test the logic
         test_file = tmp_path / "server.py"
         test_file.write_text("# test server")
 
         # Test normal file parsing (works on all platforms)
-        file_path, obj = parse_file_path(str(test_file))
-        assert obj is None
+        source = FileSystemSource(path=str(test_file))
+        assert source.entrypoint is None
+        assert Path(source.path).resolve() == test_file.resolve()
 
         # Test file:object parsing
-        file_path, obj = parse_file_path(f"{test_file}:myapp")
-        assert obj == "myapp"
+        source = FileSystemSource(path=f"{test_file}:myapp")
+        assert source.entrypoint == "myapp"
 
         # Test that the file portion resolves correctly when object is specified
-        assert file_path == test_file.resolve()
+        assert Path(source.path).resolve() == test_file.resolve()
 
 
 class TestInspectCommand:

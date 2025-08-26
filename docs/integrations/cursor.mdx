@@ -47,6 +47,21 @@ The easiest way to install a FastMCP server in Cursor is using the `fastmcp inst
 fastmcp install cursor server.py
 ```
 
+#### Workspace Installation
+<VersionBadge version="2.12.0" />
+
+By default, FastMCP installs servers globally for Cursor. You can also install servers to project-specific workspaces using the `--workspace` flag:
+
+```bash
+# Install to current directory's .cursor/ folder
+fastmcp install cursor server.py --workspace .
+
+# Install to specific workspace
+fastmcp install cursor server.py --workspace /path/to/project
+```
+
+This creates a `.cursor/mcp.json` configuration file in the specified workspace directory, allowing different projects to have their own MCP server configurations.
+
 The install command supports the same `file.py:object` notation as the `run` command. If no object is specified, it will automatically look for a FastMCP server object named `mcp`, `server`, or `app` in your file:
 
 ```bash
@@ -84,16 +99,21 @@ fastmcp install cursor server.py --with-requirements requirements.txt
 fastmcp install cursor server.py --with-editable ./my-local-package
 ```
 
-Alternatively, you can specify dependencies directly in your server code:
+Alternatively, you can use a `fastmcp.json` configuration file (recommended):
 
-```python server.py
-from fastmcp import FastMCP
-
-mcp = FastMCP(
-    name="Dice Roller",
-    dependencies=["pandas", "requests"]
-)
+```json fastmcp.json
+{
+  "$schema": "https://gofastmcp.com/public/schemas/fastmcp.json/v1.json",
+  "source": {
+    "path": "server.py",
+    "entrypoint": "mcp"
+  },
+  "environment": {
+    "dependencies": ["pandas", "requests"]
+  }
+}
 ```
+
 
 #### Python Version and Project Configuration
 
@@ -120,7 +140,7 @@ Cursor runs servers in a completely isolated environment with no access to your 
 If your server needs environment variables (like API keys), you must include them:
 
 ```bash
-fastmcp install cursor server.py --name "Weather Server" \
+fastmcp install cursor server.py --server-name "Weather Server" \
   --env API_KEY=your-api-key \
   --env DEBUG=true
 ```
@@ -128,7 +148,7 @@ fastmcp install cursor server.py --name "Weather Server" \
 Or load them from a `.env` file:
 
 ```bash
-fastmcp install cursor server.py --name "Weather Server" --env-file .env
+fastmcp install cursor server.py --server-name "Weather Server" --env-file .env
 ```
 
 <Warning>
@@ -145,10 +165,10 @@ You can generate MCP JSON configuration for manual use:
 
 ```bash
 # Generate configuration and output to stdout
-fastmcp install mcp-json server.py --name "Dice Roller" --with pandas
+fastmcp install mcp-json server.py --server-name "Dice Roller" --with pandas
 
 # Copy configuration to clipboard for easy pasting
-fastmcp install mcp-json server.py --name "Dice Roller" --copy
+fastmcp install mcp-json server.py --server-name "Dice Roller" --copy
 ```
 
 This generates the standard `mcpServers` configuration format that can be used with any MCP-compatible client.

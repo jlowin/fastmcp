@@ -1,0 +1,4 @@
+{
+  "$schema": "https://gofastmcp.com/public/schemas/fastmcp.json/v1.json",
+  "entrypoint": "mount_example.py"
+}

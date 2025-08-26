@@ -75,7 +75,9 @@ class ToolManager:
                 child_dict = {t.key: t for t in child_results}
                 if mounted.prefix:
                     for tool in child_dict.values():
-                        prefixed_tool = tool.with_key(f"{mounted.prefix}_{tool.key}")
+                        prefixed_tool = tool.model_copy(
+                            key=f"{mounted.prefix}_{tool.key}"
+                        )
                         all_tools[prefixed_tool.key] = prefixed_tool
                 else:
                     all_tools.update(child_dict)
@@ -84,6 +86,8 @@ class ToolManager:
                 logger.warning(
                     f"Failed to get tools from server: {mounted.server.name!r}, mounted at: {mounted.prefix!r}: {e}"
                 )
+                if settings.mounted_components_raise_on_load_error:
+                    raise
                 continue
 
         # Finally, add local tools, which always take precedence
