@@ -1032,3 +1032,242 @@ class TestAuth:
         assert isinstance(client.transport, SSETransport)
         assert isinstance(client.transport.auth, BearerAuth)
         assert client.transport.auth.token.get_secret_value() == "test_token"
+
+
+class TestSSEFallback:
+    """Tests for the SSE fallback functionality when StreamableHttpTransport receives 405 errors."""
+
+    async def test_sse_fallback_on_405_error(self, fastmcp_server):
+        """Test that client falls back to SSE transport when receiving 405 error from StreamableHttp."""
+        from contextlib import asynccontextmanager
+        from unittest.mock import Mock, patch
+
+        import httpx
+
+        # Create a client with StreamableHttpTransport
+        from fastmcp.client.transports import StreamableHttpTransport
+
+        # Mock the StreamableHttpTransport to raise 405 error
+        sse_connect_called = False
+
+        @asynccontextmanager
+        async def mock_streamable_connect(*args, **kwargs):
+            response = Mock()
+            response.status_code = 405
+            raise httpx.HTTPStatusError(
+                "405 Method Not Allowed", request=Mock(), response=response
+            )
+            yield  # This won't be reached due to the exception
+
+        @asynccontextmanager
+        async def mock_sse_connect(*args, **kwargs):
+            nonlocal sse_connect_called
+            sse_connect_called = True
+            # Use the in-memory FastMCP transport for successful connection
+            transport = FastMCPTransport(fastmcp_server)
+            async with transport.connect_session(**kwargs) as session:
+                yield session
+
+        with (
+            patch.object(
+                StreamableHttpTransport, "connect_session", mock_streamable_connect
+            ),
+            patch.object(SSETransport, "connect_session", mock_sse_connect),
+        ):
+            client = Client("http://localhost:8888/mcp")
+            assert isinstance(client.transport, StreamableHttpTransport)
+
+            # The client should fallback to SSE and succeed
+            async with client:
+                tools = await client.list_tools()
+                assert len(tools) >= 1  # We have tools from fastmcp_server
+                assert sse_connect_called  # Verify SSE fallback was used
+
+    async def test_sse_fallback_preserves_auth_and_headers(self):
+        """Test that SSE fallback preserves auth and headers from original transport."""
+        from contextlib import asynccontextmanager
+        from unittest.mock import Mock, patch
+
+        import httpx
+
+        from fastmcp.client.auth.bearer import BearerAuth
+
+        # Create client with auth and headers
+        transport = StreamableHttpTransport(
+            "http://localhost:8888/mcp",
+            headers={"Custom-Header": "test-value"},
+            auth="test-token",
+        )
+        client = Client(transport)
+
+        fallback_transport = None
+
+        @asynccontextmanager
+        async def mock_streamable_connect(*args, **kwargs):
+            response = Mock()
+            response.status_code = 405
+            raise httpx.HTTPStatusError(
+                "405 Method Not Allowed", request=Mock(), response=response
+            )
+            yield  # This won't be reached due to the exception
+
+        @asynccontextmanager
+        async def mock_sse_connect(self, *args, **kwargs):
+            nonlocal fallback_transport
+            fallback_transport = self
+            # Just return without yielding to avoid actual connection
+            if False:
+                yield
+
+        with (
+            patch.object(
+                StreamableHttpTransport, "connect_session", mock_streamable_connect
+            ),
+            patch.object(SSETransport, "connect_session", mock_sse_connect),
+        ):
+            try:
+                async with client:
+                    pass
+            except Exception:
+                pass  # We expect this to fail since we're not yielding from mock_sse_connect
+
+            # Verify fallback transport has correct configuration
+            assert fallback_transport is not None
+            assert fallback_transport.url == "http://localhost:8888/mcp"
+            assert fallback_transport.headers == {"Custom-Header": "test-value"}
+            assert isinstance(fallback_transport.auth, BearerAuth)
+            assert fallback_transport.auth.token.get_secret_value() == "test-token"
+
+    async def test_non_405_http_errors_not_fallback(self):
+        """Test that non-405 HTTP errors are re-raised without SSE fallback."""
+        from contextlib import asynccontextmanager
+        from unittest.mock import Mock, patch
+
+        import httpx
+
+        @asynccontextmanager
+        async def mock_streamable_connect(*args, **kwargs):
+            response = Mock()
+            response.status_code = 404
+            raise httpx.HTTPStatusError(
+                "404 Not Found", request=Mock(), response=response
+            )
+            yield  # This won't be reached due to the exception
+
+        with patch.object(
+            StreamableHttpTransport, "connect_session", mock_streamable_connect
+        ):
+            client = Client("http://localhost:8888/mcp")
+
+            # Should re-raise the 404 error without attempting SSE fallback
+            with pytest.raises(httpx.HTTPStatusError, match="404 Not Found"):
+                async with client:
+                    pass
+
+    async def test_sse_transport_not_affected_by_fallback_logic(self, fastmcp_server):
+        """Test that SSE transport works normally and isn't affected by fallback logic."""
+        from contextlib import asynccontextmanager
+        from unittest.mock import patch
+
+        # Create client with SSE transport directly
+        client = Client(transport=SSETransport("http://localhost:8888/sse"))
+
+        # Mock SSE transport to succeed
+        @asynccontextmanager
+        async def mock_sse_connect(*args, **kwargs):
+            transport = FastMCPTransport(fastmcp_server)
+            async with transport.connect_session(**kwargs) as session:
+                yield session
+
+        with patch.object(SSETransport, "connect_session", mock_sse_connect):
+            async with client:
+                tools = await client.list_tools()
+                assert len(tools) >= 1
+
+    async def test_other_transport_types_not_affected(self, fastmcp_server):
+        """Test that other transport types (e.g., FastMCPTransport) work normally."""
+        client = Client(transport=FastMCPTransport(fastmcp_server))
+
+        async with client:
+            tools = await client.list_tools()
+            assert len(tools) >= 1
+
+    async def test_sse_fallback_happens_on_405(self, fastmcp_server):
+        """Test that SSE fallback occurs when 405 error is received."""
+        from contextlib import asynccontextmanager
+        from unittest.mock import Mock, patch
+
+        import httpx
+
+        # Track whether fallback happened
+        fallback_occurred = False
+
+        @asynccontextmanager
+        async def mock_streamable_connect(*args, **kwargs):
+            response = Mock()
+            response.status_code = 405
+            raise httpx.HTTPStatusError(
+                "405 Method Not Allowed", request=Mock(), response=response
+            )
+            yield  # This won't be reached due to the exception
+
+        @asynccontextmanager
+        async def mock_sse_connect(*args, **kwargs):
+            nonlocal fallback_occurred
+            fallback_occurred = True
+            transport = FastMCPTransport(fastmcp_server)
+            async with transport.connect_session(**kwargs) as session:
+                yield session
+
+        with (
+            patch.object(
+                StreamableHttpTransport, "connect_session", mock_streamable_connect
+            ),
+            patch.object(SSETransport, "connect_session", mock_sse_connect),
+        ):
+            client = Client("http://localhost:8888/mcp")
+
+            async with client:
+                await client.list_tools()
+
+            # Verify that fallback occurred
+            assert fallback_occurred
+
+    async def test_sse_fallback_with_successful_tool_call(self, fastmcp_server):
+        """Test that after SSE fallback, tool calls work correctly."""
+        from contextlib import asynccontextmanager
+        from unittest.mock import Mock, patch
+
+        import httpx
+
+        @asynccontextmanager
+        async def mock_streamable_connect(*args, **kwargs):
+            response = Mock()
+            response.status_code = 405
+            raise httpx.HTTPStatusError(
+                "405 Method Not Allowed", request=Mock(), response=response
+            )
+            yield  # This won't be reached due to the exception
+
+        @asynccontextmanager
+        async def mock_sse_connect(*args, **kwargs):
+            transport = FastMCPTransport(fastmcp_server)
+            async with transport.connect_session(**kwargs) as session:
+                yield session
+
+        with (
+            patch.object(
+                StreamableHttpTransport, "connect_session", mock_streamable_connect
+            ),
+            patch.object(SSETransport, "connect_session", mock_sse_connect),
+        ):
+            client = Client("http://localhost:8888/mcp")
+
+            async with client:
+                # Test tool call after fallback
+                result = await client.call_tool("greet", {"name": "World"})
+                assert result.data == "Hello, World!"
+
+                # Test another tool call
+                result = await client.call_tool("add", {"a": 5, "b": 3})
+                assert result.data == 8

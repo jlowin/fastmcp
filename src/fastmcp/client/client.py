@@ -351,7 +351,51 @@ class Client(Generic[ClientTransportT]):
     @asynccontextmanager
     async def _context_manager(self):
         with catch(get_catch_handlers()):
-            async with self.transport.connect_session(
+            transport_to_use = self.transport
+
+            # Check if we should try SSE fallback for 405 errors
+            # This implements the backwards compatibility requirement from the MCP specification
+            if isinstance(self.transport, StreamableHttpTransport):
+                try:
+                    async with transport_to_use.connect_session(
+                        **self._session_kwargs
+                    ) as session:
+                        self._session_state.session = session
+                        # Initialize the session
+                        try:
+                            with anyio.fail_after(self._init_timeout):
+                                self._session_state.initialize_result = (
+                                    await self._session_state.session.initialize()
+                                )
+                            yield
+                            return  # Success, no need to try fallback
+                        except anyio.ClosedResourceError:
+                            raise RuntimeError("Server session was closed unexpectedly")
+                        except TimeoutError:
+                            raise RuntimeError("Failed to initialize server session")
+                        finally:
+                            self._session_state.session = None
+                            self._session_state.initialize_result = None
+                except httpx.HTTPStatusError as e:
+                    # Handle 405 Method Not Allowed - try SSE fallback
+                    if e.response.status_code == 405:
+                        logger.debug(
+                            f"[{self.name}] Received 405 error from StreamableHttpTransport, attempting SSE fallback"
+                        )
+                        # Create SSE transport with same URL and auth settings
+                        transport_to_use = SSETransport(
+                            url=self.transport.url,
+                            headers=self.transport.headers,
+                            auth=self.transport.auth,
+                            sse_read_timeout=self.transport.sse_read_timeout,
+                            httpx_client_factory=self.transport.httpx_client_factory,
+                        )
+                    else:
+                        # Re-raise non-405 HTTP errors
+                        raise
+
+            # Use the (possibly fallback) transport
+            async with transport_to_use.connect_session(
                 **self._session_kwargs
             ) as session:
                 self._session_state.session = session
