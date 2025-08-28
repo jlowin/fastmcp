@@ -269,12 +269,9 @@ async def dev(
             inspector_cmd += f"@{inspector_version}"
 
         # Use the environment from config (already has CLI overrides applied)
-        uv_cmd = ["uv"] + config.environment.build_uv_args(
-            ["fastmcp", "run", server_spec]
+        uv_cmd = config.environment.build_uv_run_command(
+            ["fastmcp", "run", server_spec, "--no-banner"]
         )
-
-        # Add --no-banner flag for dev command
-        uv_cmd.append("--no-banner")
 
         # Set marker to prevent infinite loops when subprocess calls FastMCP
         env = dict(os.environ.items()) | env_vars | {"FASTMCP_UV_SPAWNED": "1"}

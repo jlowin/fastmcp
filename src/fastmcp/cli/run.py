@@ -66,7 +66,7 @@ def run_with_uv(
         editable: Editable package paths
     """
 
-    # Build uv command using Environment.build_uv_args()
+    # Build uv command using Environment.build_uv_run_command()
     env_config = Environment(
         python=python_version,
         dependencies=with_packages if with_packages else None,
@@ -76,7 +76,7 @@ def run_with_uv(
         if isinstance(editable, list)
         else ([editable] if editable else None),
     )
-    # Build the uv command
+
     # Build the inner fastmcp command (environment variable prevents infinite recursion)
     inner_cmd = ["fastmcp", "run", server_spec]
 
@@ -97,8 +97,7 @@ def run_with_uv(
         inner_cmd.append("--no-banner")
 
     # Build the full uv command
-    uv_args = env_config.build_uv_args(inner_cmd)
-    cmd = ["uv"] + uv_args
+    cmd = env_config.build_uv_run_command(inner_cmd)
 
     # Set marker to prevent infinite loops when subprocess calls FastMCP again
     env = os.environ | {"FASTMCP_UV_SPAWNED": "1"}
