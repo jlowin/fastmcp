@@ -119,11 +119,14 @@ class Environment(BaseModel):
         uv_args = self.build_uv_args(command)
         cmd = ["uv"] + uv_args
 
+        # Set marker to prevent infinite loops when subprocess calls FastMCP again
+        env = os.environ | {"FASTMCP_UV_SPAWNED": "1"}
+
         logger.debug(f"Running command: {' '.join(cmd)}")
 
         try:
             # Run without capturing output so it flows through naturally
-            process = subprocess.run(cmd, check=True)
+            process = subprocess.run(cmd, check=True, env=env)
             sys.exit(process.returncode)
         except subprocess.CalledProcessError as e:
             logger.error(f"Command failed: {e}")
