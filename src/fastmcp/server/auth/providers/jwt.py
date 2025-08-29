@@ -442,12 +442,17 @@ class JWTVerifier(TokenVerifier):
             # Check required scopes
             if self.required_scopes:
                 token_scopes = set(scopes)
-                required_scopes = set(self.required_scopes)
-                if not required_scopes.issubset(token_scopes):
+                # TODO: This is a hack to remove `api://<client_id>/` prefix from scopes, since that's not included in the token
+                #  when using Azure AD.
+                required_scopes_for_tokens = set(
+                    s.split("/", 3)[-1] if s.startswith("api://") else s
+                    for s in self.required_scopes
+                )
+                if not required_scopes_for_tokens.issubset(token_scopes):
                     self.logger.debug(
                         "Token missing required scopes. Has: %s, Required: %s",
                         token_scopes,
-                        required_scopes,
+                        required_scopes_for_tokens,
                     )
                     self.logger.info("Bearer token rejected for client %s", client_id)
                     return None

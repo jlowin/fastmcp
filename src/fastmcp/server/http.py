@@ -24,6 +24,7 @@ from starlette.routing import BaseRoute, Mount, Route
 from starlette.types import Lifespan, Receive, Scope, Send
 
 from fastmcp.server.auth import AuthProvider
+from fastmcp.server.auth.providers.azure import AzureProvider
 from fastmcp.utilities.logging import get_logger
 
 if TYPE_CHECKING:
@@ -182,6 +183,13 @@ def create_sse_app(
         # Get auth routes and scopes
         auth_routes = auth.get_routes()
         required_scopes = getattr(auth, "required_scopes", None) or []
+        if isinstance(auth, AzureProvider):
+            # TODO: This is a hack to remove `api://<client_id>/` prefix from scopes, since that's not included in the token
+            #  when using Azure AD.
+            required_scopes = [
+                s.split("/", 3)[-1] if s.startswith("api://") else s
+                for s in required_scopes
+            ]
 
         # Get resource metadata URL for WWW-Authenticate header
         resource_metadata_url = auth.get_resource_metadata_url()
@@ -303,6 +311,13 @@ def create_streamable_http_app(
         # Get auth routes and scopes
         auth_routes = auth.get_routes()
         required_scopes = getattr(auth, "required_scopes", None) or []
+        if isinstance(auth, AzureProvider):
+            # TODO: This is a hack to remove `api://<client_id>/` prefix from scopes, since that's not included in the token
+            #  when using Azure AD.
+            required_scopes = [
+                s.split("/", 3)[-1] if s.startswith("api://") else s
+                for s in required_scopes
+            ]
 
         # Get resource metadata URL for WWW-Authenticate header
         resource_metadata_url = auth.get_resource_metadata_url()
