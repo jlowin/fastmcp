@@ -13,6 +13,7 @@ from starlette.routing import Mount
 from fastmcp import Context
 from fastmcp.client import Client
 from fastmcp.client.transports import StreamableHttpTransport
+from fastmcp.exceptions import ToolError
 from fastmcp.server.dependencies import get_http_request
 from fastmcp.server.server import FastMCP
 from fastmcp.utilities.tests import run_server_in_process
@@ -191,14 +192,21 @@ async def test_elicitation_tool(streamable_http_server: str, request):
 
     stateless_http = request.node.callspec.params.get("streamable_http_server", False)
     if stateless_http:
-        pytest.xfail("Elicitation is not supported in stateless HTTP mode")
-
-    async with Client(
-        transport=StreamableHttpTransport(streamable_http_server),
-        elicitation_handler=elicitation_handler,
-    ) as client:
-        result = await client.call_tool("elicit")
-        assert result.data == "You said your name was: Alice!"
+        with pytest.raises(
+            ToolError, match="Elicitation is not supported in stateless HTTP mode"
+        ):
+            async with Client(
+                transport=StreamableHttpTransport(streamable_http_server),
+                elicitation_handler=elicitation_handler,
+            ) as client:
+                await client.call_tool("elicit")
+    else:
+        async with Client(
+            transport=StreamableHttpTransport(streamable_http_server),
+            elicitation_handler=elicitation_handler,
+        ) as client:
+            result = await client.call_tool("elicit")
+            assert result.data == "You said your name was: Alice!"
 
 
 async def test_nested_streamable_http_server_resolves_correctly():

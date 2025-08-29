@@ -373,6 +373,13 @@ class Context:
         or the request will error.
         """
 
+        # Guard against unsupported transport capabilities
+        if getattr(self.fastmcp, "is_stateless_http", False):
+            raise RuntimeError(
+                "Sampling is not supported in stateless HTTP mode. "
+                "Run the server with stateful HTTP (default) or a bidirectional transport (stdio/SSE)."
+            )
+
         if max_tokens is None:
             max_tokens = 512
 
@@ -505,6 +512,11 @@ class Context:
                 type or dataclass or BaseModel. If it is a primitive type, an
                 object schema with a single "value" field will be generated.
         """
+        if getattr(self.fastmcp, "is_stateless_http", False):
+            raise RuntimeError(
+                "Elicitation is not supported in stateless HTTP mode. "
+                "Run the server with stateful HTTP (default) or a bidirectional transport (stdio/SSE)."
+            )
         if response_type is None:
             schema = {"type": "object", "properties": {}}
         else:

@@ -256,6 +256,10 @@ class FastMCP(Generic[LifespanResultT]):
             else fastmcp.settings.include_fastmcp_meta
         )
 
+        # Track current stateless HTTP setting for runtime capability checks
+        # Updated when apps are created/run
+        self._current_stateless_http: bool = False
+
         # handle deprecated settings
         self._handle_deprecated_settings(
             log_level=log_level,
@@ -1491,6 +1495,8 @@ class FastMCP(Generic[LifespanResultT]):
             )
 
         async with stdio_server() as (read_stream, write_stream):
+            # stdio is always stateful
+            self._current_stateless_http = False
             logger.info(f"Starting MCP server {self.name!r} with transport 'stdio'")
             await self._mcp_server.run(
                 read_stream,
@@ -1624,6 +1630,9 @@ class FastMCP(Generic[LifespanResultT]):
                 DeprecationWarning,
                 stacklevel=2,
             )
+        # SSE is always stateful
+        self._current_stateless_http = False
+
         return create_sse_app(
             server=self,
             message_path=message_path or self._deprecated_settings.message_path,
@@ -1674,6 +1683,15 @@ class FastMCP(Generic[LifespanResultT]):
         """
 
         if transport in ("streamable-http", "http"):
+            effective_stateless_http = (
+                stateless_http
+                if stateless_http is not None
+                else self._deprecated_settings.stateless_http
+            )
+
+            # Record current stateless HTTP flag for runtime capability checks
+            self._current_stateless_http = bool(effective_stateless_http)
+
             return create_streamable_http_app(
                 server=self,
                 streamable_http_path=path
@@ -1685,15 +1703,13 @@ class FastMCP(Generic[LifespanResultT]):
                     if json_response is not None
                     else self._deprecated_settings.json_response
                 ),
-                stateless_http=(
-                    stateless_http
-                    if stateless_http is not None
-                    else self._deprecated_settings.stateless_http
-                ),
+                stateless_http=effective_stateless_http,
                 debug=self._deprecated_settings.debug,
                 middleware=middleware,
             )
         elif transport == "sse":
+            # SSE is always stateful
+            self._current_stateless_http = False
             return create_sse_app(
                 server=self,
                 message_path=self._deprecated_settings.message_path,
@@ -1702,6 +1718,11 @@ class FastMCP(Generic[LifespanResultT]):
                 debug=self._deprecated_settings.debug,
                 middleware=middleware,
             )
+
+    @property
+    def is_stateless_http(self) -> bool:
+        """Return True if the server is currently configured to use stateless StreamableHTTP."""
+        return self._current_stateless_http
 
     async def run_streamable_http_async(
         self,
