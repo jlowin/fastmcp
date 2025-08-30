@@ -79,6 +79,13 @@ There are two ways to access the LLM-friendly documentation:
   - [Context](#context)
   - [MCP Clients](#mcp-clients)
 - [Advanced Features](#advanced-features)
+  - [Client Features](#client-features)
+    - [Roots](#roots)
+    - [Sampling](#sampling)
+    - [Elicitation](#elicitation)
+  - [Server Utilities](#server-utilities)
+    - [Completion](#completion)
+    - [HTTP Utilities](#http-utilities)
   - [Proxy Servers](#proxy-servers)
   - [Composing MCP Servers](#composing-mcp-servers)
   - [OpenAPI \& FastAPI Generation](#openapi--fastapi-generation)
@@ -291,6 +298,75 @@ Learn more in the [**Client Documentation**](https://gofastmcp.com/clients/clien
 ## Advanced Features
 
 FastMCP introduces powerful ways to structure and deploy your MCP applications.
+
+### Client Features
+
+#### Roots
+Provide local context and resource boundaries to MCP servers:
+
+```python
+from fastmcp import Client
+
+# Static roots
+client = Client("my_server.py", roots=["/path/to/root1", "/path/to/root2"])
+
+# Dynamic roots with callback
+async def roots_callback(context):
+    return ["/dynamic/path1", "/dynamic/path2"]
+
+client = Client("my_server.py", roots=roots_callback)
+```
+
+#### Sampling
+Enable servers to request LLM completions through the client:
+
+```python
+from fastmcp import Client
+from fastmcp.client.sampling import SamplingMessage, SamplingParams
+
+async def sampling_handler(messages, params, context):
+    # Integrate with your LLM service
+    return "Generated response from LLM"
+
+client = Client("my_server.py", sampling_handler=sampling_handler)
+```
+
+#### Elicitation
+Handle server-initiated user input requests with structured schemas:
+
+```python
+from fastmcp import Client
+
+async def elicitation_handler(message, response_type, params, context):
+    user_input = input(f"{message}: ")
+    return response_type(value=user_input)
+
+client = Client("my_server.py", elicitation_handler=elicitation_handler)
+```
+
+### Server Utilities
+
+#### Completion
+Built-in completion support for resources and prompts:
+
+```python
+# Client-side completion requests
+result = await client.complete_mcp(
+    ref=mcp.types.ResourceReference(uri="file://config.json"),
+    argument={"prefix": "api_"}
+)
+```
+
+#### HTTP Utilities
+HTTP utilities for server deployment and client connections:
+
+```python
+from fastmcp.utilities.http import find_available_port
+
+# Find available port for server
+port = find_available_port()
+mcp.run(transport="http", port=port)
+```
 
 ### Proxy Servers
 
