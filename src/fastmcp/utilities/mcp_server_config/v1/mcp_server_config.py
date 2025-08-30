@@ -27,8 +27,11 @@ FASTMCP_JSON_SCHEMA = "https://gofastmcp.com/public/schemas/fastmcp.json/v1.json
 
 # Type alias for source union (will expand with GitSource, etc in future)
 SourceType: TypeAlias = FileSystemSource
+
 # Type alias for environment union (will expand with other environments in future)
-EnvironmentType: TypeAlias = UVEnvironment
+EnvironmentType: TypeAlias = (
+    UVEnvironment  # Will be Union[UVEnvironment, NodeEnvironment, ...] in future
+)
 
 
 class Deployment(BaseModel):
@@ -201,19 +204,14 @@ class MCPServerConfig(BaseModel):
 
     @field_validator("environment", mode="before")
     @classmethod
-    def validate_environment(cls, v: dict | UVEnvironment) -> UVEnvironment:
-        """Validate and convert environment to Environment.
+    def validate_environment(cls, v: dict | Any) -> dict | Any:
+        """Ensure environment has a type field for discrimination.
 
-        Accepts:
-        - Environment instance
-        - dict that can be converted to Environment
+        For backward compatibility, if no type is specified, default to "uv".
         """
-        if isinstance(v, UVEnvironment):
-            return v
-        elif isinstance(v, dict):
-            return UVEnvironment(**v)  # type: ignore[arg-type]
-        else:
-            raise ValueError("environment must be a dict, Environment instance")
+        if isinstance(v, dict) and "type" not in v:
+            v["type"] = "uv"
+        return v
 
     @field_validator("deployment", mode="before")
     @classmethod
