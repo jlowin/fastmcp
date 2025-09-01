@@ -390,3 +390,97 @@ class TestRemoteAuthProviderIntegration:
                 data["resource_documentation"]
                 == "https://doc.my-server.com/resource-docs"
             )
+
+    async def test_www_authenticate_header_points_to_base_url(self):
+        """Test that WWW-Authenticate header always points to base URL's .well-known.
+
+        This test verifies the fix for issue #1685 where the WWW-Authenticate header
+        was incorrectly including the MCP path in the .well-known URL.
+        """
+        token_verifier = SimpleTokenVerifier()
+        auth_provider = RemoteAuthProvider(
+            token_verifier=token_verifier,
+            authorization_servers=[AnyHttpUrl("https://accounts.google.com")],
+            base_url="https://my-server.com",
+        )
+
+        mcp = FastMCP("test-server", auth=auth_provider)
+        # Mount MCP at a non-root path
+        mcp_http_app = mcp.http_app(path="/api/v1/mcp")
+
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=mcp_http_app),
+            base_url="https://my-server.com",
+        ) as client:
+            # Make unauthorized request to MCP endpoint
+            response = await client.get("/api/v1/mcp")
+            assert response.status_code == 401
+
+            www_auth = response.headers.get("www-authenticate", "")
+            assert "resource_metadata=" in www_auth
+
+            # Extract the metadata URL from the header
+            import re
+
+            match = re.search(r'resource_metadata="([^"]+)"', www_auth)
+            assert match is not None
+            metadata_url = match.group(1)
+
+            # Should point to base URL, not include /api/v1/mcp
+            assert (
+                metadata_url
+                == "https://my-server.com/.well-known/oauth-protected-resource"
+            )
+
+    async def test_automatic_resource_url_capture(self):
+        """Test that resource URL is automatically captured from MCP path.
+
+        This test verifies PR #1682 functionality where the resource URL
+        should be automatically set based on the MCP endpoint path.
+        """
+        token_verifier = SimpleTokenVerifier()
+        auth_provider = RemoteAuthProvider(
+            token_verifier=token_verifier,
+            authorization_servers=[AnyHttpUrl("https://accounts.google.com")],
+            base_url="https://my-server.com",
+            # Note: NOT specifying resource_server_url
+        )
+
+        mcp = FastMCP("test-server", auth=auth_provider)
+        # Mount MCP at a specific path
+        mcp_http_app = mcp.http_app(path="/mcp")
+
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=mcp_http_app),
+            base_url="https://my-server.com",
+        ) as client:
+            # Get the .well-known metadata
+            response = await client.get("/.well-known/oauth-protected-resource")
+            assert response.status_code == 200
+
+            data = response.json()
+            # The resource URL should be automatically set to the MCP path
+            assert data.get("resource") == "https://my-server.com/mcp"
+
+    async def test_automatic_resource_url_with_nested_path(self):
+        """Test automatic resource URL capture with deeply nested MCP path."""
+        token_verifier = SimpleTokenVerifier()
+        auth_provider = RemoteAuthProvider(
+            token_verifier=token_verifier,
+            authorization_servers=[AnyHttpUrl("https://accounts.google.com")],
+            base_url="https://my-server.com",
+        )
+
+        mcp = FastMCP("test-server", auth=auth_provider)
+        mcp_http_app = mcp.http_app(path="/api/v2/services/mcp")
+
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=mcp_http_app),
+            base_url="https://my-server.com",
+        ) as client:
+            response = await client.get("/.well-known/oauth-protected-resource")
+            assert response.status_code == 200
+
+            data = response.json()
+            # Should automatically capture the nested path
+            assert data.get("resource") == "https://my-server.com/api/v2/services/mcp"
