@@ -569,10 +569,9 @@ class TestCallTools:
                 },
             )
 
-        # Now list items are separate content blocks
-        assert len(result.content) == 2
-        assert result.content[0].text == "rex"  # type: ignore[attr-defined]
-        assert result.content[1].text == "gertrude"  # type: ignore[attr-defined]
+        # Adjacent non-MCP list items are combined into single content block
+        assert len(result.content) == 1
+        assert result.content[0].text == "rexgertrude"  # type: ignore[attr-defined]
         assert result.structured_content == {"result": ["rex", "gertrude"]}
 
     async def test_call_tool_with_custom_serializer(self):
@@ -614,15 +613,11 @@ class TestCallTools:
             ]
 
         result = await manager.call_tool("get_data", {})
-        # Now each list item gets processed individually with the custom serializer
-        assert len(result.content) == 2
+        # Adjacent non-MCP list items get combined with custom serializer applied to each
+        assert len(result.content) == 1
         assert (
             result.content[0].text  # type: ignore[attr-defined]
-            == '{"key": "value", "number": 123}'  # Each item goes through json.dumps(data)
-        )
-        assert (
-            result.content[1].text  # type: ignore[attr-defined]
-            == '{"key": "value2", "number": 456}'  # Each item goes through json.dumps(data)
+            == '{"key": "value", "number": 123}{"key": "value2", "number": 456}'  # Adjacent items combined after individual serialization
         )
         assert result.structured_content == {
             "result": [

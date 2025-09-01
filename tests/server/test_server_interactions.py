@@ -185,10 +185,9 @@ class TestTools:
     async def test_tool_returns_list(self, tool_server: FastMCP):
         async with Client(tool_server) as client:
             result = await client.call_tool("list_tool", {})
-            # Now list items are separate content blocks
-            assert len(result.content) == 2
-            assert result.content[0].text == "x"  # type: ignore[attr-defined]
-            assert result.content[1].text == "2"  # type: ignore[attr-defined]
+            # Adjacent non-MCP list items are combined into single content block
+            assert len(result.content) == 1
+            assert result.content[0].text == "x2"  # type: ignore[attr-defined]
             assert result.data == ["x", 2]
 
     async def test_file_text_tool(self, tool_server: FastMCP):
