@@ -9,8 +9,8 @@ from typing import Annotated
 import cyclopts
 from rich import print
 
-from fastmcp.utilities.fastmcp_config import Environment
 from fastmcp.utilities.logging import get_logger
+from fastmcp.utilities.mcp_server_config.v1.environments.uv import UVEnvironment
 
 from .shared import process_common_args
 
@@ -100,7 +100,8 @@ def install_gemini_cli(
     if not gemini_cmd:
         print(
             "[red]Gemini CLI not found.[/red]\n"
-            "[blue]Please ensure Gemini CLI is installed. Try running 'gemini --version' to verify.[/blue]"
+            "[blue]Please ensure Gemini CLI is installed. Try running 'gemini --version' to verify.[/blue]\n"
+            "[blue]You can install it using 'npm install -g @google/gemini-cli'.[/blue]\n"
         )
         return False
 
@@ -112,15 +113,14 @@ def install_gemini_cli(
         if not deduplicated_packages:
             deduplicated_packages = None
 
-    # Build uv run command using Environment.build_uv_args()
-    env_config = Environment(
+    # Build uv run command using Environment.build_uv_run_command()
+    env_config = UVEnvironment(
         python=python_version,
         dependencies=deduplicated_packages,
         requirements=str(with_requirements) if with_requirements else None,
         project=str(project) if project else None,
         editable=[str(p) for p in with_editable] if with_editable else None,
     )
-    args = env_config.build_uv_args()
 
     # Build server spec from parsed components
     if server_object:
@@ -128,8 +128,8 @@ def install_gemini_cli(
     else:
         server_spec = str(file.resolve())
 
-    # Add fastmcp run command
-    args.extend(["fastmcp", "run", server_spec])
+    # Build the full command
+    full_command = env_config.build_command(["fastmcp", "run", server_spec])
 
     # Build gemini mcp add command
     cmd_parts = [gemini_cmd, "mcp", "add"]
@@ -138,10 +138,10 @@ def install_gemini_cli(
     if env_vars:
         for key, value in env_vars.items():
             cmd_parts.extend(["-e", f"{key}={value}"])
-
+    
     # Add server name and command
-    cmd_parts.extend([name, "uv"])
-    cmd_parts.extend(["--"] + args)
+    cmd_parts.extend([name, full_command[0], "--"])
+    cmd_parts.extend(full_command[1:])
 
     try:
         # Run the gemini mcp add command
