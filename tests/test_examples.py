@@ -24,8 +24,11 @@ async def test_complex_inputs():
         result = await client.call_tool_mcp(
             "name_shrimp", {"tank": tank, "extra_names": ["charlie"]}
         )
-        assert len(result.content) == 1
-        assert result.content[0].text == '["bob","alice","charlie"]'  # type: ignore[attr-defined]
+        # Now each list item is returned as separate content
+        assert len(result.content) == 3
+        assert result.content[0].text == "bob"  # type: ignore[attr-defined]
+        assert result.content[1].text == "alice"  # type: ignore[attr-defined]
+        assert result.content[2].text == "charlie"  # type: ignore[attr-defined]
 
 
 async def test_desktop(monkeypatch):

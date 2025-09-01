@@ -569,7 +569,10 @@ class TestCallTools:
                 },
             )
 
-        assert result.content[0].text == '["rex","gertrude"]'  # type: ignore[attr-defined]
+        # Now list items are separate content blocks
+        assert len(result.content) == 2
+        assert result.content[0].text == "rex"  # type: ignore[attr-defined]
+        assert result.content[1].text == "gertrude"  # type: ignore[attr-defined]
         assert result.structured_content == {"result": ["rex", "gertrude"]}
 
     async def test_call_tool_with_custom_serializer(self):
@@ -611,9 +614,15 @@ class TestCallTools:
             ]
 
         result = await manager.call_tool("get_data", {})
+        # Now each list item gets processed individually with the custom serializer
+        assert len(result.content) == 2
         assert (
             result.content[0].text  # type: ignore[attr-defined]
-            == 'CUSTOM:[{"key": "value", "number": 123}, {"key": "value2", "number": 456}]'  # type: ignore[attr-defined]
+            == '{"key": "value", "number": 123}'  # Each item goes through json.dumps(data)
+        )
+        assert (
+            result.content[1].text  # type: ignore[attr-defined]
+            == '{"key": "value2", "number": 456}'  # Each item goes through json.dumps(data)
         )
         assert result.structured_content == {
             "result": [

@@ -502,26 +502,18 @@ def _convert_to_content(
         # if the result is a list, then it could either be a list of MCP types,
         # or a "regular" list that the tool is returning, or a mix of both.
         #
-        # so we extract all the MCP types / images and convert them as individual content elements,
-        # and aggregate the rest as a single content element
+        # process each item individually to preserve order
 
-        mcp_types = []
-        other_content = []
+        content_items = []
 
         for item in result:
             if isinstance(item, ContentBlock | Image | Audio | File):
-                mcp_types.append(_convert_to_content(item)[0])
+                content_items.extend(_convert_to_content(item))
             else:
-                other_content.append(item)
+                # Convert each non-MCP item individually to preserve order
+                content_items.extend(_convert_to_content(item, serializer=serializer))
 
-        if other_content:
-            other_content = _convert_to_content(
-                other_content,
-                serializer=serializer,
-                _process_as_single_item=True,
-            )
-
-        return other_content + mcp_types
+        return content_items
 
     if not isinstance(result, str):
         if serializer is None:
