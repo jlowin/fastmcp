@@ -126,7 +126,7 @@ class TestWorkOSProvider:
         )
 
         # Check defaults
-        assert str(provider.base_url) == "http://localhost:8000/"
+        assert provider.base_url is None
         assert provider._redirect_path == "/auth/callback"
         # WorkOS provider has no default scopes but we can't easily verify without accessing internals
 
