@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Annotated, Any, TypedDict, TypeVar
+from typing import Annotated, Any, TypedDict
 
 from pydantic import BeforeValidator, Field, PrivateAttr
-from typing_extensions import Self
+from typing_extensions import Self, TypeVar
 
 import fastmcp
 from fastmcp.utilities.types import FastMCPBaseModel
 
-T = TypeVar("T")
+T = TypeVar("T", default=Any)
 
 
 class FastMCPMeta(TypedDict, total=False):
@@ -91,13 +91,34 @@ class FastMCPComponent(FastMCPBaseModel):
 
         return meta or None
 
-    def with_key(self, key: str) -> Self:
-        return self.model_copy(update={"_key": key})
+    def model_copy(
+        self,
+        *,
+        update: dict[str, Any] | None = None,
+        deep: bool = False,
+        key: str | None = None,
+    ) -> Self:
+        """
+        Create a copy of the component.
+
+        Args:
+            update: A dictionary of fields to update.
+            deep: Whether to deep copy the component.
+            key: The key to use for the copy.
+        """
+        # `model_copy` has an `update` parameter but it doesn't work for certain private attributes
+        # https://github.com/pydantic/pydantic/issues/12116
+        # So we manually set the private attribute here instead, such as _key
+        copy = super().model_copy(update=update, deep=deep)
+        if key is not None:
+            copy._key = key
+        return copy
 
     def __eq__(self, other: object) -> bool:
         if type(self) is not type(other):
             return False
-        assert isinstance(other, type(self))
+        if not isinstance(other, type(self)):
+            return False
         return self.model_dump() == other.model_dump()
 
     def __repr__(self) -> str:

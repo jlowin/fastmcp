@@ -7,7 +7,7 @@ dependencies = [
     "python-dotenv>=1.1.0",
     "exceptiongroup>=1.2.2",
     "httpx>=0.28.1",
-    "mcp>=1.10.0",
+    "mcp>=1.12.4,<2.0.0",
     "openapi-pydantic>=0.5.1",
     "rich>=13.9.4",
     "cyclopts>=3.0.0",
@@ -16,6 +16,7 @@ dependencies = [
     "pyperclip>=1.9.0",
     "openapi-core>=0.19.5",
 ]
+
 requires-python = ">=3.10"
 readme = "README.md"
 license = "Apache-2.0"
@@ -39,17 +40,23 @@ classifiers = [
     "Typing :: Typed",
 ]
 
+[project.optional-dependencies]
+websockets = ["websockets>=15.0.1"]
+openai = ["openai>=1.102.0"]
+
 [dependency-groups]
 dev = [
-    "copychat>=0.5.2",
     "dirty-equals>=0.9.0",
+    "fastmcp[openai]",
+    # add optional dependencies for fastmcp dev
     "fastapi>=0.115.12",
+    "inline-snapshot[dirty-equals]>=0.27.2",
     "ipython>=8.12.3",
     "pdbpp>=0.10.3",
     "pre-commit",
+    "psutil",
     "pyinstrument>=5.0.2",
     "pyperclip>=1.9.0",
-    "pyright>=1.1.389",
     "pytest>=8.3.3",
     "pytest-asyncio>=0.23.5",
     "pytest-cov>=6.1.1",
@@ -60,6 +67,7 @@ dev = [
     "pytest-timeout>=2.4.0",
     "pytest-xdist>=3.6.1",
     "ruff",
+    "ty>=0.0.1a19",
 ]
 
 [project.scripts]
@@ -69,10 +77,6 @@ fastmcp = "fastmcp.cli:app"
 Homepage = "https://gofastmcp.com"
 Repository = "https://github.com/jlowin/fastmcp"
 Documentation = "https://gofastmcp.com"
-
-[project.optional-dependencies]
-websockets = ["websockets>=15.0.1"]
-
 
 [build-system]
 requires = ["hatchling", "uv-dynamic-versioning>=0.7.0"]
@@ -101,6 +105,7 @@ env = [
     "FASTMCP_TEST_MODE=1",
     'D:FASTMCP_LOG_LEVEL=DEBUG',
     'D:FASTMCP_ENABLE_RICH_TRACEBACKS=0',
+
 ]
 markers = [
     "integration: marks tests as integration tests (deselect with '-m \"not integration\"')",
@@ -113,18 +118,22 @@ python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 
-[tool.pyright]
+[tool.ty.src]
 include = ["src", "tests"]
 exclude = ["**/node_modules", "**/__pycache__", ".venv", ".git", "dist"]
-pythonVersion = "3.10"
-pythonPlatform = "Darwin"
-typeCheckingMode = "basic"
-reportMissingImports = true
-reportMissingTypeStubs = false
-useLibraryCodeForTypes = true
-venvPath = "."
-venv = ".venv"
-strict = ["src/fastmcp/server/server.py"]
+
+[tool.ty.environment]
+python-version = "3.10"
+
+[tool.ty.rules]
+# Rules with too many errors to fix right now (40+ each)
+no-matching-overload = "ignore" # 126 errors  
+unknown-argument = "ignore"     # 61 errors
+unresolved-attribute = "ignore" # 60 errors
+
+# Rules with moderate errors that need more investigation
+call-non-callable = "ignore" # 7 errors
+missing-argument = "ignore"  # 23 errors
 
 [tool.ruff.lint]
 extend-select = ["I", "UP"]

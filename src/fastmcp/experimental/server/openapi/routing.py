@@ -110,10 +110,8 @@ def _determine_route_type(
                         # Tags don't match, continue to next mapping
                         continue
 
-                # We know mcp_type is not None here due to post_init validation
-                assert route_map.mcp_type is not None
                 logger.debug(
-                    f"Route {route.method} {route.path} matched mapping to {route_map.mcp_type.name}"
+                    f"Route {route.method} {route.path} mapped to {route_map.mcp_type.name}"
                 )
                 return route_map
 

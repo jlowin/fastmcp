@@ -5,7 +5,7 @@ import warnings
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, ImportString, field_validator
 from pydantic.fields import FieldInfo
 from pydantic_settings import (
     BaseSettings,
@@ -146,6 +146,7 @@ class Settings(BaseSettings):
 
     test_mode: bool = False
 
+    log_enabled: bool = True
     log_level: LOG_LEVEL = "INFO"
 
     @field_validator("log_level", mode="before")
@@ -222,9 +223,9 @@ class Settings(BaseSettings):
     # HTTP settings
     host: str = "127.0.0.1"
     port: int = 8000
-    sse_path: str = "/sse/"
+    sse_path: str = "/sse"
     message_path: str = "/messages/"
-    streamable_http_path: str = "/mcp/"
+    streamable_http_path: str = "/mcp"
     debug: bool = False
 
     # error handling
@@ -244,13 +245,10 @@ class Settings(BaseSettings):
         ),
     ] = False
 
-    server_dependencies: Annotated[
-        list[str],
-        Field(
-            default_factory=list,
-            description="List of dependencies to install in the server environment",
-        ),
-    ] = []
+    server_dependencies: list[str] = Field(
+        default_factory=list,
+        description="List of dependencies to install in the server environment",
+    )
 
     # StreamableHTTP settings
     json_response: bool = False
@@ -259,19 +257,31 @@ class Settings(BaseSettings):
     )
 
     # Auth settings
-    default_auth_provider: Annotated[
-        Literal["jwt-env"] | None,
+    server_auth: Annotated[
+        ImportString | None,
         Field(
             description=inspect.cleandoc(
                 """
-                Configure the authentication provider. This setting is intended only to
-                be used for remote confirugation of providers that fully support
-                environment variable configuration.
+                Configure the authentication provider for the server by specifying
+                the full module path to an AuthProvider class (e.g., 
+                'fastmcp.server.auth.providers.google.GoogleProvider').
+
+                The specified class will be imported and instantiated automatically.
+                Any class that inherits from AuthProvider can be used, including
+                custom implementations.
 
                 If None, no automatic configuration will take place.
 
                 This setting is *always* overriden by any auth provider passed to the
                 FastMCP constructor.
+
+                Note that most auth providers require additional configuration
+                that must be provided via env vars.
+
+                Examples:
+                  - fastmcp.server.auth.providers.google.GoogleProvider
+                  - fastmcp.server.auth.providers.jwt.JWTVerifier
+                  - mycompany.auth.CustomAuthProvider
                 """
             ),
         ),
@@ -313,11 +323,25 @@ class Settings(BaseSettings):
                 Whether to include FastMCP meta in the server's MCP responses.
                 If True, a `_fastmcp` key will be added to the `meta` field of
                 all MCP component responses. This key will contain a dict of
-                various FastMCP-specific metadata, such as tags. 
+                various FastMCP-specific metadata, such as tags.
                 """
             ),
         ),
     ] = True
+
+    mounted_components_raise_on_load_error: Annotated[
+        bool,
+        Field(
+            default=False,
+            description=inspect.cleandoc(
+                """
+                If True, errors encountered when loading mounted components (tools, resources, prompts)
+                will be raised instead of logged as warnings. This is useful for debugging
+                but will interrupt normal operation.
+                """
+            ),
+        ),
+    ] = False
 
 
 def __getattr__(name: str):

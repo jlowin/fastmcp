@@ -176,7 +176,6 @@ class TestDeprecatedServerInitKwargs:
             server = FastMCP(
                 name="TestServer",
                 instructions="Test instructions",
-                cache_expiration_seconds=60.0,
                 on_duplicate_tools="warn",
                 on_duplicate_resources="error",
                 on_duplicate_prompts="replace",
@@ -232,6 +231,7 @@ class TestDeprecatedServerInitKwargs:
                 "json_response": True,
                 "stateless_http": True,
             }
+            mock_settings.server_auth = None  # Add server_auth attribute
 
             server = FastMCP("TestServer")
 
@@ -261,6 +261,7 @@ class TestDeprecatedServerInitKwargs:
                 "json_response": True,
                 "stateless_http": True,
             }
+            mock_settings.server_auth = None  # Add server_auth attribute
 
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")  # Ignore warnings for this test

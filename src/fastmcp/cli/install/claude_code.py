@@ -10,6 +10,7 @@ import cyclopts
 from rich import print
 
 from fastmcp.utilities.logging import get_logger
+from fastmcp.utilities.mcp_server_config.v1.environments.uv import UVEnvironment
 
 from .shared import process_common_args
 
@@ -74,7 +75,7 @@ def install_claude_code(
     server_object: str | None,
     name: str,
     *,
-    with_editable: Path | None = None,
+    with_editable: list[Path] | None = None,
     with_packages: list[str] | None = None,
     env_vars: dict[str, str] | None = None,
     python_version: str | None = None,
@@ -87,7 +88,7 @@ def install_claude_code(
         file: Path to the server file
         server_object: Optional server object name (for :object suffix)
         name: Name for the server in Claude Code
-        with_editable: Optional directory to install in editable mode
+        with_editable: Optional list of directories to install in editable mode
         with_packages: Optional list of additional packages to install
         env_vars: Optional dictionary of environment variables
         python_version: Optional Python version to use
@@ -106,31 +107,22 @@ def install_claude_code(
         )
         return False
 
-    # Build uv run command
-    args = ["run"]
-
-    # Add Python version if specified
-    if python_version:
-        args.extend(["--python", python_version])
-
-    # Add project if specified
-    if project:
-        args.extend(["--project", str(project)])
-
-    # Collect all packages in a set to deduplicate
-    packages = {"fastmcp"}
+    # Deduplicate packages and exclude 'fastmcp' since Environment adds it automatically
+    deduplicated_packages = None
     if with_packages:
-        packages.update(pkg for pkg in with_packages if pkg)
+        deduplicated = list(dict.fromkeys(with_packages))
+        deduplicated_packages = [pkg for pkg in deduplicated if pkg != "fastmcp"]
+        if not deduplicated_packages:
+            deduplicated_packages = None
 
-    # Add all packages with --with
-    for pkg in sorted(packages):
-        args.extend(["--with", pkg])
-
-    if with_editable:
-        args.extend(["--with-editable", str(with_editable)])
-
-    if with_requirements:
-        args.extend(["--with-requirements", str(with_requirements)])
+    # Build uv run command using Environment.build_uv_run_command()
+    env_config = UVEnvironment(
+        python=python_version,
+        dependencies=deduplicated_packages,
+        requirements=str(with_requirements) if with_requirements else None,
+        project=str(project) if project else None,
+        editable=[str(p) for p in with_editable] if with_editable else None,
+    )
 
     # Build server spec from parsed components
     if server_object:
@@ -138,8 +130,8 @@ def install_claude_code(
     else:
         server_spec = str(file.resolve())
 
-    # Add fastmcp run command
-    args.extend(["fastmcp", "run", server_spec])
+    # Build the full command
+    full_command = env_config.build_command(["fastmcp", "run", server_spec])
 
     # Build claude mcp add command
     cmd_parts = [claude_cmd, "mcp", "add"]
@@ -151,7 +143,7 @@ def install_claude_code(
 
     # Add server name and command
     cmd_parts.extend([name, "--"])
-    cmd_parts.extend(["uv"] + args)
+    cmd_parts.extend(full_command)
 
     try:
         # Run the claude mcp add command
@@ -167,39 +159,40 @@ def install_claude_code(
         return False
 
 
-def claude_code_command(
+async def claude_code_command(
     server_spec: str,
     *,
     server_name: Annotated[
         str | None,
         cyclopts.Parameter(
-            name=["--server-name", "-n"],
+            name=["--name", "-n"],
             help="Custom name for the server in Claude Code",
         ),
     ] = None,
     with_editable: Annotated[
-        Path | None,
+        list[Path] | None,
         cyclopts.Parameter(
-            name=["--with-editable", "-e"],
-            help="Directory with pyproject.toml to install in editable mode",
+            "--with-editable",
+            help="Directory with pyproject.toml to install in editable mode (can be used multiple times)",
+            negative="",
         ),
     ] = None,
     with_packages: Annotated[
-        list[str],
+        list[str] | None,
         cyclopts.Parameter(
             "--with",
-            help="Additional packages to install",
-            negative=False,
+            help="Additional packages to install (can be used multiple times)",
+            negative="",
         ),
-    ] = [],
+    ] = None,
     env_vars: Annotated[
-        list[str],
+        list[str] | None,
         cyclopts.Parameter(
             "--env",
-            help="Environment variables in KEY=VALUE format",
-            negative=False,
+            help="Environment variables in KEY=VALUE format (can be used multiple times)",
+            negative="",
         ),
-    ] = [],
+    ] = None,
     env_file: Annotated[
         Path | None,
         cyclopts.Parameter(
@@ -234,7 +227,11 @@ def claude_code_command(
     Args:
         server_spec: Python file to install, optionally with :object suffix
     """
-    file, server_object, name, packages, env_dict = process_common_args(
+    # Convert None to empty lists for list parameters
+    with_editable = with_editable or []
+    with_packages = with_packages or []
+    env_vars = env_vars or []
+    file, server_object, name, packages, env_dict = await process_common_args(
         server_spec, server_name, with_packages, env_vars, env_file
     )
 

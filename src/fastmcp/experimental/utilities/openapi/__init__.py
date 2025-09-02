@@ -20,6 +20,7 @@ from .formatters import (
     format_deep_object_parameter,
     format_description_with_responses,
     format_json_for_description,
+    format_simple_description,
     generate_example_from_schema,
 )
 
@@ -28,7 +29,6 @@ from .schemas import (
     _combine_schemas,
     extract_output_schema_from_responses,
     clean_schema_for_display,
-    _replace_ref_with_defs,
     _make_optional_parameter_nullable,
 )
 
@@ -55,12 +55,12 @@ __all__ = [
     "format_deep_object_parameter",
     "format_description_with_responses",
     "format_json_for_description",
+    "format_simple_description",
     "generate_example_from_schema",
     # Schemas
     "_combine_schemas",
     "extract_output_schema_from_responses",
     "clean_schema_for_display",
-    "_replace_ref_with_defs",
     "_make_optional_parameter_nullable",
     # JSON Schema Converter
     "convert_openapi_schema_to_json_schema",

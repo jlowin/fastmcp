@@ -11,7 +11,7 @@ from jsonschema_path import SchemaPath
 from fastmcp.experimental.utilities.openapi import (
     HTTPRoute,
     extract_output_schema_from_responses,
-    format_description_with_responses,
+    format_simple_description,
     parse_openapi_to_http_routes,
 )
 from fastmcp.experimental.utilities.openapi.director import RequestDirector
@@ -151,9 +151,6 @@ class FastMCPOpenAPI(FastMCP):
         try:
             self._spec = SchemaPath.from_dict(openapi_spec)  # type: ignore[arg-type]
             self._director = RequestDirector(self._spec)
-            logger.debug(
-                "Initialized OpenAPI RequestDirector for stateless request building"
-            )
         except Exception as e:
             logger.error(f"Failed to initialize RequestDirector: {e}")
             raise ValueError(f"Invalid OpenAPI specification: {e}") from e
@@ -166,8 +163,6 @@ class FastMCPOpenAPI(FastMCP):
             # Determine route type based on mappings or default rules
             route_map = _determine_route_type(route, route_maps)
 
-            # TODO: remove this once RouteType is removed and mcp_type is typed as MCPType without | None
-            assert route_map.mcp_type is not None
             route_type = route_map.mcp_type
 
             # Call route_map_fn if provided
@@ -270,7 +265,9 @@ class FastMCPOpenAPI(FastMCP):
 
         # Extract output schema from OpenAPI responses
         output_schema = extract_output_schema_from_responses(
-            route.responses, route.schema_definitions, route.openapi_version
+            route.responses,
+            route.response_schemas,
+            route.openapi_version,
         )
 
         # Get a unique tool name
@@ -282,10 +279,9 @@ class FastMCPOpenAPI(FastMCP):
             or f"Executes {route.method} {route.path}"
         )
 
-        # Format enhanced description with parameters and request body
-        enhanced_description = format_description_with_responses(
+        # Use simplified description formatter for tools
+        enhanced_description = format_simple_description(
             base_description=base_description,
-            responses=route.responses,
             parameters=route.parameters,
             request_body=route.request_body,
         )
@@ -318,9 +314,6 @@ class FastMCPOpenAPI(FastMCP):
 
         # Register the tool by directly assigning to the tools dictionary
         self._tool_manager._tools[final_tool_name] = tool
-        logger.debug(
-            f"Registered TOOL: {final_tool_name} ({route.method} {route.path}) with tags: {route.tags}"
-        )
 
     def _create_openapi_resource(
         self,
@@ -337,10 +330,9 @@ class FastMCPOpenAPI(FastMCP):
             route.description or route.summary or f"Represents {route.path}"
         )
 
-        # Format enhanced description with parameters and request body
-        enhanced_description = format_description_with_responses(
+        # Use simplified description for resources
+        enhanced_description = format_simple_description(
             base_description=base_description,
-            responses=route.responses,
             parameters=route.parameters,
             request_body=route.request_body,
         )
@@ -372,9 +364,6 @@ class FastMCPOpenAPI(FastMCP):
 
         # Register the resource by directly assigning to the resources dictionary
         self._resource_manager._resources[final_resource_uri] = resource
-        logger.debug(
-            f"Registered RESOURCE: {final_resource_uri} ({route.method} {route.path}) with tags: {route.tags}"
-        )
 
     def _create_openapi_template(
         self,
@@ -397,10 +386,9 @@ class FastMCPOpenAPI(FastMCP):
             route.description or route.summary or f"Template for {route.path}"
         )
 
-        # Format enhanced description with parameters and request body
-        enhanced_description = format_description_with_responses(
+        # Use simplified description for resource templates
+        enhanced_description = format_simple_description(
             base_description=base_description,
-            responses=route.responses,
             parameters=route.parameters,
             request_body=route.request_body,
         )
@@ -455,9 +443,6 @@ class FastMCPOpenAPI(FastMCP):
 
         # Register the template by directly assigning to the templates dictionary
         self._resource_manager._templates[final_template_uri] = template
-        logger.debug(
-            f"Registered TEMPLATE: {final_template_uri} ({route.method} {route.path}) with tags: {route.tags}"
-        )
 
 
 # Export public symbols

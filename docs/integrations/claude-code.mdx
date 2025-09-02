@@ -3,7 +3,6 @@ title: Claude Code 🤝 FastMCP
 sidebarTitle: Claude Code
 description: Install and use FastMCP servers in Claude Code
 icon: message-smile
-tag: NEW
 ---
 
 import { VersionBadge } from "/snippets/version-badge.mdx"
@@ -82,16 +81,21 @@ fastmcp install claude-code server.py --with-requirements requirements.txt
 fastmcp install claude-code server.py --with-editable ./my-local-package
 ```
 
-Alternatively, you can specify dependencies directly in your server code:
+Alternatively, you can use a `fastmcp.json` configuration file (recommended):
 
-```python server.py
-from fastmcp import FastMCP
-
-mcp = FastMCP(
-    name="Dice Roller",
-    dependencies=["pandas", "requests"]
-)
+```json fastmcp.json
+{
+  "$schema": "https://gofastmcp.com/public/schemas/fastmcp.json/v1.json",
+  "source": {
+    "path": "server.py",
+    "entrypoint": "mcp"
+  },
+  "environment": {
+    "dependencies": ["pandas", "requests"]
+  }
+}
 ```
+
 
 #### Python Version and Project Configuration
 

@@ -1,9 +1,9 @@
 import pytest
 from mcp.server.auth.middleware.bearer_auth import RequireAuthMiddleware
-from starlette.routing import Mount
+from starlette.routing import Route
 
 from fastmcp.server import FastMCP
-from fastmcp.server.auth.verifiers import JWTVerifier, RSAKeyPair
+from fastmcp.server.auth.providers.jwt import JWTVerifier, RSAKeyPair
 from fastmcp.server.http import create_streamable_http_app
 
 
@@ -21,7 +21,7 @@ class TestStreamableHTTPAppResourceMetadataURL:
             public_key=rsa_key_pair.public_key,
             issuer="https://issuer",
             audience="https://audience",
-            resource_server_url="https://resource.example.com",
+            base_url="https://resource.example.com",
         )
         return provider
 
@@ -36,11 +36,11 @@ class TestStreamableHTTPAppResourceMetadataURL:
             auth=bearer_auth_provider,
         )
 
-        mount = next(r for r in app.routes if isinstance(r, Mount) and r.path == "/mcp")
+        route = next(r for r in app.routes if isinstance(r, Route) and r.path == "/mcp")
 
-        assert isinstance(mount.app, RequireAuthMiddleware)
+        assert isinstance(route.endpoint, RequireAuthMiddleware)
         assert (
-            str(mount.app.resource_metadata_url)
+            str(route.endpoint.resource_metadata_url)
             == "https://resource.example.com/.well-known/oauth-protected-resource"
         )
 
@@ -49,7 +49,7 @@ class TestStreamableHTTPAppResourceMetadataURL:
             public_key=rsa_key_pair.public_key,
             issuer="https://issuer",
             audience="https://audience",
-            resource_server_url="https://resource.example.com/",
+            base_url="https://resource.example.com/",
         )
         server = FastMCP(name="TestServer")
         app = create_streamable_http_app(
@@ -57,11 +57,11 @@ class TestStreamableHTTPAppResourceMetadataURL:
             streamable_http_path="/mcp",
             auth=provider,
         )
-        mount = next(r for r in app.routes if isinstance(r, Mount) and r.path == "/mcp")
-        assert isinstance(mount.app, RequireAuthMiddleware)
+        route = next(r for r in app.routes if isinstance(r, Route) and r.path == "/mcp")
+        assert isinstance(route.endpoint, RequireAuthMiddleware)
         # Should not have double slash
         assert (
-            str(mount.app.resource_metadata_url)
+            str(route.endpoint.resource_metadata_url)
             == "https://resource.example.com/.well-known/oauth-protected-resource"
         )
 
@@ -74,5 +74,5 @@ class TestStreamableHTTPAppResourceMetadataURL:
             streamable_http_path="/mcp",
             auth=None,
         )
-        mount = next(r for r in app.routes if isinstance(r, Mount) and r.path == "/mcp")
-        assert not isinstance(mount.app, RequireAuthMiddleware)
+        route = next(r for r in app.routes if isinstance(r, Route) and r.path == "/mcp")
+        assert not isinstance(route.endpoint, RequireAuthMiddleware)

@@ -239,11 +239,14 @@ class TestInstallCursor:
         """Test cursor installation with editable package."""
         mock_open_deeplink.return_value = True
 
+        # Use an absolute path that works on all platforms
+        editable_path = Path.cwd() / "local" / "package"
+
         result = install_cursor(
             file=Path("/path/to/server.py"),
             server_object="custom_app",
             name="test-server",
-            with_editable=Path("/local/package"),
+            with_editable=[editable_path],
         )
 
         assert result is True
@@ -255,9 +258,10 @@ class TestInstallCursor:
         config_data = json.loads(decoded)
 
         assert "--with-editable" in config_data["args"]
-        # Check for the editable path in a platform-agnostic way
-        editable_path_str = str(Path("/local/package"))
-        assert editable_path_str in config_data["args"]
+        # Check that the path was resolved (should be absolute)
+        editable_idx = config_data["args"].index("--with-editable") + 1
+        resolved_path = config_data["args"][editable_idx]
+        assert Path(resolved_path).is_absolute()
         assert "server.py:custom_app" in " ".join(config_data["args"])
 
     @patch("fastmcp.cli.install.cursor.open_deeplink")
@@ -297,8 +301,8 @@ class TestInstallCursor:
             args_str = " ".join(config_data["args"])
             assert args_str.count("numpy") == 1
             assert args_str.count("pandas") == 1
-            # fastmcp appears twice: once as --with fastmcp and once as the command
-            assert args_str.count("fastmcp") == 2
+            # fastmcp appears once in the command only (no longer automatically added as --with)
+            assert args_str.count("fastmcp") == 1
 
 
 class TestCursorCommand:
@@ -306,7 +310,7 @@ class TestCursorCommand:
 
     @patch("fastmcp.cli.install.cursor.install_cursor")
     @patch("fastmcp.cli.install.cursor.process_common_args")
-    def test_cursor_command_basic(self, mock_process_args, mock_install):
+    async def test_cursor_command_basic(self, mock_process_args, mock_install):
         """Test basic cursor command execution."""
         mock_process_args.return_value = (
             Path("server.py"),
@@ -318,24 +322,25 @@ class TestCursorCommand:
         mock_install.return_value = True
 
         with patch("sys.exit") as mock_exit:
-            cursor_command("server.py")
+            await cursor_command("server.py")
 
         mock_install.assert_called_once_with(
             file=Path("server.py"),
             server_object=None,
             name="test-server",
-            with_editable=None,
+            with_editable=[],
             with_packages=[],
             env_vars={},
             python_version=None,
             with_requirements=None,
             project=None,
+            workspace=None,
         )
         mock_exit.assert_not_called()
 
     @patch("fastmcp.cli.install.cursor.install_cursor")
     @patch("fastmcp.cli.install.cursor.process_common_args")
-    def test_cursor_command_failure(self, mock_process_args, mock_install):
+    async def test_cursor_command_failure(self, mock_process_args, mock_install):
         """Test cursor command when installation fails."""
         mock_process_args.return_value = (
             Path("server.py"),
@@ -347,6 +352,6 @@ class TestCursorCommand:
         mock_install.return_value = False
 
         with pytest.raises(SystemExit) as exc_info:
-            cursor_command("server.py")
+            await cursor_command("server.py")
 
         assert exc_info.value.code == 1

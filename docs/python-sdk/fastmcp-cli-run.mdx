@@ -10,7 +10,7 @@ FastMCP run command implementation with enhanced type hints.
 
 ## Functions
 
-### `is_url` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/cli/run.py#L21" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+### `is_url` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/cli/run.py#L28" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 ```python
 is_url(path: str) -> bool
@@ -20,50 +20,21 @@ is_url(path: str) -> bool
 Check if a string is a URL.
 
 
-### `parse_file_path` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/cli/run.py#L27" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+### `run_with_uv` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/cli/run.py#L34" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 ```python
-parse_file_path(server_spec: str) -> tuple[Path, str | None]
-```
-
-
-Parse a file path that may include a server object specification.
-
-**Args:**
-- `server_spec`: Path to file, optionally with \:object suffix
-
-**Returns:**
-- Tuple of (file_path, server_object)
-
-
-### `import_server` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/cli/run.py#L58" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
-
-```python
-import_server(file: Path, server_object: str | None = None) -> Any
-```
-
-
-Import a MCP server from a file.
-
-**Args:**
-- `file`: Path to the file
-- `server_object`: Optional object name in format "module\:object" or just "object"
-
-**Returns:**
-- The server object
-
-
-### `run_with_uv` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/cli/run.py#L128" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
-
-```python
-run_with_uv(server_spec: str, python_version: str | None = None, with_packages: list[str] | None = None, with_requirements: Path | None = None, project: Path | None = None, transport: TransportType | None = None, host: str | None = None, port: int | None = None, path: str | None = None, log_level: LogLevelType | None = None, show_banner: bool = True) -> None
+run_with_uv(server_spec: str, python_version: str | None = None, with_packages: list[str] | None = None, with_requirements: Path | None = None, project: Path | None = None, transport: TransportType | None = None, host: str | None = None, port: int | None = None, path: str | None = None, log_level: LogLevelType | None = None, show_banner: bool = True, editable: str | list[str] | None = None) -> None
 ```
 
 
 Run a MCP server using uv run subprocess.
 
+This function is called when we need to set up a Python environment with specific
+dependencies before running the server. The config parsing and merging should already
+be done by the caller.
+
 **Args:**
-- `server_spec`: Python file, object specification (file\:obj), or URL
+- `server_spec`: Python file, object specification (file\:obj), config file, or URL
 - `python_version`: Python version to use (e.g. "3.10")
 - `with_packages`: Additional packages to install
 - `with_requirements`: Requirements file to use
@@ -74,9 +45,10 @@ Run a MCP server using uv run subprocess.
 - `path`: Path to bind to when using http transport
 - `log_level`: Log level
 - `show_banner`: Whether to show the server banner
+- `editable`: Editable package paths
 
 
-### `create_client_server` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/cli/run.py#L206" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+### `create_client_server` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/cli/run.py#L115" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 ```python
 create_client_server(url: str) -> Any
@@ -92,7 +64,7 @@ Create a FastMCP server from a client URL.
 - A FastMCP server instance
 
 
-### `create_mcp_config_server` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/cli/run.py#L226" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+### `create_mcp_config_server` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/cli/run.py#L135" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 ```python
 create_mcp_config_server(mcp_config_path: Path) -> FastMCP[None]
@@ -102,35 +74,33 @@ create_mcp_config_server(mcp_config_path: Path) -> FastMCP[None]
 Create a FastMCP server from a MCPConfig.
 
 
-### `import_server_with_args` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/cli/run.py#L237" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+### `load_mcp_server_config` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/cli/run.py#L146" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 ```python
-import_server_with_args(file: Path, server_object: str | None = None, server_args: list[str] | None = None) -> Any
+load_mcp_server_config(config_path: Path) -> MCPServerConfig
 ```
 
 
-Import a server with optional command line arguments.
+Load a FastMCP configuration from a fastmcp.json file.
 
 **Args:**
-- `file`: Path to the server file
-- `server_object`: Optional server object name
-- `server_args`: Optional command line arguments to inject
+- `config_path`: Path to fastmcp.json file
 
 **Returns:**
-- The imported server object
+- MCPServerConfig object
 
 
-### `run_command` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/cli/run.py#L261" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+### `run_command` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/cli/run.py#L163" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 ```python
-run_command(server_spec: str, transport: TransportType | None = None, host: str | None = None, port: int | None = None, path: str | None = None, log_level: LogLevelType | None = None, server_args: list[str] | None = None, show_banner: bool = True, use_direct_import: bool = False) -> None
+run_command(server_spec: str, transport: TransportType | None = None, host: str | None = None, port: int | None = None, path: str | None = None, log_level: LogLevelType | None = None, server_args: list[str] | None = None, show_banner: bool = True, use_direct_import: bool = False, skip_source: bool = False) -> None
 ```
 
 
 Run a MCP server or connect to a remote one.
 
 **Args:**
-- `server_spec`: Python file, object specification (file\:obj), MCPConfig file, or URL
+- `server_spec`: Python file, object specification (file\:obj), config file, or URL
 - `transport`: Transport protocol to use
 - `host`: Host to bind to when using http transport
 - `port`: Port to bind to when using http transport
@@ -139,4 +109,11 @@ Run a MCP server or connect to a remote one.
 - `server_args`: Additional arguments to pass to the server
 - `show_banner`: Whether to show the server banner
 - `use_direct_import`: Whether to use direct import instead of subprocess
+- `skip_source`: Whether to skip source preparation step
 
+
+### `run_v1_server` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/cli/run.py#L284" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+run_v1_server(server: FastMCP1x, host: str | None = None, port: int | None = None, transport: TransportType | None = None) -> None
+```

@@ -1,6 +1,6 @@
 ---
 title: MCP JSON Configuration 🤝 FastMCP
-sidebarTitle: MCP JSON
+sidebarTitle: MCP.json
 description: Generate standard MCP configuration files for any compatible client
 icon: brackets-curly
 tag: NEW
@@ -174,16 +174,26 @@ fastmcp install mcp-json server.py --with-editable ./my-package
 fastmcp install mcp-json server.py --with-requirements requirements.txt
 ```
 
-You can also specify dependencies directly in your server code:
+You can also use a `fastmcp.json` configuration file (recommended):
 
-```python server.py
-from fastmcp import FastMCP
-
-mcp = FastMCP(
-    name="Data Analysis Server",
-    dependencies=["pandas", "matplotlib", "seaborn"]
-)
+```json fastmcp.json
+{
+  "$schema": "https://gofastmcp.com/public/schemas/fastmcp.json/v1.json",
+  "source": {
+    "path": "server.py",
+    "entrypoint": "mcp"
+  },
+  "environment": {
+    "dependencies": ["pandas", "matplotlib", "seaborn"]
+  }
+}
 ```
+
+Then simply install with:
+```bash
+fastmcp install mcp-json fastmcp.json
+```
+
 
 ### Environment Variables
 

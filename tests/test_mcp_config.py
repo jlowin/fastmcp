@@ -1,9 +1,15 @@
+import asyncio
+import gc
 import inspect
+import logging
+import os
+import sys
 import tempfile
 from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import Any
 
+import psutil
 import pytest
 
 from fastmcp.client.auth.bearer import BearerAuth
@@ -26,6 +32,19 @@ from fastmcp.mcp_config import (
     TransformingStdioMCPServer,
 )
 from fastmcp.tools.tool import Tool as FastMCPTool
+
+
+def running_under_debugger():
+    return os.environ.get("DEBUGPY_RUNNING") == "true"
+
+
+def gc_collect_harder():
+    gc.collect()
+    gc.collect()
+    gc.collect()
+    gc.collect()
+    gc.collect()
+    gc.collect()
 
 
 def test_parse_single_stdio_config():
@@ -224,6 +243,172 @@ async def test_multi_client(tmp_path: Path):
         assert result_2.data == 3
 
 
+async def test_multi_client_parallel_calls(tmp_path: Path):
+    server_script = inspect.cleandoc("""
+        from fastmcp import FastMCP
+
+        mcp = FastMCP()
+
+        @mcp.tool
+        def add(a: int, b: int) -> int:
+            return a + b
+
+        if __name__ == '__main__':
+            mcp.run()
+        """)
+
+    script_path = tmp_path / "test.py"
+    script_path.write_text(server_script)
+
+    config = {
+        "mcpServers": {
+            "test_1": {
+                "command": "python",
+                "args": [str(script_path)],
+            },
+            "test_2": {
+                "command": "python",
+                "args": [str(script_path)],
+            },
+        }
+    }
+
+    client = Client(config)
+
+    async with client:
+        _ = await client.list_tools()
+
+        tasks = [client.list_tools() for _ in range(40)]
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        exceptions = [result for result in results if isinstance(result, Exception)]
+        assert len(exceptions) == 0
+        assert len(results) == 40
+        assert all(len(result) == 2 for result in results)
+
+
+@pytest.mark.skipif(
+    running_under_debugger() or sys.platform.startswith("win32"),
+    reason="Debugger holds a reference to the transport; Windows has process lifecycle issues",
+)
+@pytest.mark.timeout(5)
+async def test_multi_client_lifespan(tmp_path: Path):
+    pid_1: int | None = None
+    pid_2: int | None = None
+
+    async def test_server():
+        server_script = inspect.cleandoc("""
+            from fastmcp import FastMCP
+            import os
+
+            mcp = FastMCP()
+
+            @mcp.tool
+            def pid() -> int:
+                return os.getpid()
+
+            if __name__ == '__main__':
+                mcp.run()
+            """)
+
+        script_path = tmp_path / "test.py"
+        script_path.write_text(server_script)
+
+        config = {
+            "mcpServers": {
+                "test_1": {
+                    "command": "python",
+                    "args": [str(script_path)],
+                },
+                "test_2": {
+                    "command": "python",
+                    "args": [str(script_path)],
+                },
+            }
+        }
+        transport = MCPConfigTransport(config)
+        client = Client(transport)
+
+        async with client:
+            nonlocal pid_1
+            pid_1 = (await client.call_tool("test_1_pid")).data
+
+            nonlocal pid_2
+            pid_2 = (await client.call_tool("test_2_pid")).data
+
+    await test_server()
+
+    gc_collect_harder()
+
+    # This test will fail while debugging because the debugger holds a reference to the underlying transport
+
+    with pytest.raises(psutil.NoSuchProcess):
+        while True:
+            psutil.Process(pid_1)
+            await asyncio.sleep(0.1)
+
+    with pytest.raises(psutil.NoSuchProcess):
+        while True:
+            psutil.Process(pid_2)
+            await asyncio.sleep(0.1)
+
+
+@pytest.mark.skipif(
+    sys.platform.startswith("win32"),
+    reason="Windows has process lifecycle issues",
+)
+async def test_multi_client_force_close(tmp_path: Path):
+    server_script = inspect.cleandoc("""
+        from fastmcp import FastMCP
+        import os
+
+        mcp = FastMCP()
+
+        @mcp.tool
+        def pid() -> int:
+            return os.getpid()
+
+        if __name__ == '__main__':
+            mcp.run()
+        """)
+
+    script_path = tmp_path / "test.py"
+    script_path.write_text(server_script)
+
+    config = {
+        "mcpServers": {
+            "test_1": {
+                "command": "python",
+                "args": [str(script_path)],
+            },
+            "test_2": {
+                "command": "python",
+                "args": [str(script_path)],
+            },
+        }
+    }
+    transport = MCPConfigTransport(config)
+    client = Client(transport)
+
+    async with client:
+        pid_1 = (await client.call_tool("test_1_pid")).data
+        pid_2 = (await client.call_tool("test_2_pid")).data
+
+    await client.close()
+
+    gc_collect_harder()
+
+    with pytest.raises(psutil.NoSuchProcess):
+        process = psutil.Process(pid_1)
+
+        assert not process
+
+    with pytest.raises(psutil.NoSuchProcess):
+        process = psutil.Process(pid_2)
+
+        assert not process
+
+
 async def test_remote_config_default_no_auth():
     config = {
         "mcpServers": {
@@ -281,10 +466,12 @@ async def test_remote_config_with_oauth_literal():
     assert isinstance(client.transport.transport.auth, OAuthClientProvider)
 
 
-async def test_multi_client_with_logging(tmp_path: Path):
+async def test_multi_client_with_logging(tmp_path: Path, caplog):
     """
     Tests that logging is properly forwarded to the ultimate client.
     """
+    caplog.set_level(logging.INFO, logger=__name__)
+
     server_script = inspect.cleandoc("""
         from fastmcp import FastMCP, Context
 
@@ -317,14 +504,31 @@ async def test_multi_client_with_logging(tmp_path: Path):
 
     MESSAGES = []
 
+    logger = logging.getLogger(__name__)
+    # Backwards-compatible way to get the log level mapping
+    if hasattr(logging, "getLevelNamesMapping"):
+        # For Python 3.11+
+        LOGGING_LEVEL_MAP = logging.getLevelNamesMapping()  # pyright: ignore [reportAttributeAccessIssue]
+    else:
+        # For older Python versions
+        LOGGING_LEVEL_MAP = logging._nameToLevel
+
     async def log_handler(message: LogMessage):
         MESSAGES.append(message)
+
+        level = LOGGING_LEVEL_MAP[message.level.upper()]
+        msg = message.data.get("msg")
+        extra = message.data.get("extra")
+        logger.log(level, msg, extra=extra)
 
     async with Client(config, log_handler=log_handler) as client:
         result = await client.call_tool("test_server_log_test", {"message": "test 42"})
         assert result.data == 42
         assert len(MESSAGES) == 1
-        assert MESSAGES[0].data == "test 42"
+        assert MESSAGES[0].data["msg"] == "test 42"
+
+        assert len(caplog.records) == 1
+        assert caplog.records[0].msg == "test 42"
 
 
 async def test_multi_client_with_transforms(tmp_path: Path):
