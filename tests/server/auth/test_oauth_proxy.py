@@ -49,14 +49,12 @@ class TestOAuthProxyComprehensive:
             base_url="https://api.example.com",  # String instead of AnyHttpUrl
             issuer_url="https://issuer.example.com",  # String
             service_documentation_url="https://docs.example.com",  # String
-            resource_server_url="https://resources.example.com",  # String
         )
 
         # Should work fine and convert internally to AnyHttpUrl
         assert str(proxy.base_url) == "https://api.example.com/"
         assert str(proxy.issuer_url) == "https://issuer.example.com/"
         assert str(proxy.service_documentation_url) == "https://docs.example.com/"
-        assert str(proxy.resource_server_url) == "https://resources.example.com/"
 
     def test_initialization_with_all_parameters(self, jwt_verifier):
         """Test OAuthProxy initialization with all optional parameters."""
