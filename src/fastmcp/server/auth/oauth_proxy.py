@@ -265,7 +265,7 @@ class OAuthProxy(OAuthProvider):
                 If empty list, all redirect URIs are allowed (not recommended for production).
                 These are for MCP clients performing loopback redirects, NOT for the upstream OAuth app.
             valid_scopes: List of all the possible valid scopes for a client.
-                These are advertised to clients through the `/.well-known` endpoints.
+                These are advertised to clients through the `/.well-known` endpoints. Defaults to `reuqired_scopes` if not provided.
         """
         # Always enable DCR since we implement it locally for MCP clients
         client_registration_options = ClientRegistrationOptions(
