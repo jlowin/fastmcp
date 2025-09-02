@@ -48,6 +48,15 @@ When modifying MCP functionality, changes typically need to be applied across al
 - **Resource Templates** (`src/resources/` + `ResourceManager`)
 - **Prompts** (`src/prompts/` + `PromptManager`)
 
+## Writing Style
+
+- Be brief and to the point. Do not regurgitate information that can easily be gleaned from the code, except to guide the reader to where the code is located.
+- **NEVER** use "This isn't..." or "not just..." constructions. State what something IS directly. Avoid defensive writing patterns like:
+  - "This isn't X, it's Y" or "Not just X, but Y" → Just say "This is Y"
+  - "Not just about X" → State the actual purpose
+  - "We're not doing X, we're doing Y" → Just explain what you're doing
+  - Any variation of explaining what something isn't before what it is
+
 ## Testing Best Practices
 
 ### Testing Standards
@@ -203,6 +212,7 @@ If something needs work, your review should help it get there through specific, 
 ### Review Checklist
 
 Before approving, verify:
+
 - [ ] All required development workflow steps completed (uv sync, pre-commit, pytest)
 - [ ] Changes align with repository patterns and conventions
 - [ ] API changes are documented and backwards-compatible where possible

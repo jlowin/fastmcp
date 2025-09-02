@@ -106,7 +106,6 @@
                     "pages": [
                       "deployment/running-server",
                       "deployment/server-configuration",
-                      "deployment/testing",
                       "deployment/self-hosted",
                       "deployment/fastmcp-cloud"
                     ]
@@ -212,6 +211,14 @@
                 ]
               },
               {
+                "group": "Development",
+                "pages": [
+                  "development/contributing",
+                  "development/tests",
+                  "development/releases"
+                ]
+              },
+              {
                 "group": "Tutorials",
                 "pages": [
                   "tutorials/mcp",
@@ -225,6 +232,11 @@
           {
             "anchor": "What's New",
             "pages": ["updates", "changelog"]
+          },
+          {
+            "anchor": "Community",
+            "icon": "users",
+            "pages": ["community/showcase"]
           }
         ],
         "tab": "Documentation"
