@@ -1,3 +1,5 @@
+import re
+
 import httpx
 import pytest
 from pydantic import AnyHttpUrl
@@ -420,8 +422,6 @@ class TestRemoteAuthProviderIntegration:
             assert "resource_metadata=" in www_auth
 
             # Extract the metadata URL from the header
-            import re
-
             match = re.search(r'resource_metadata="([^"]+)"', www_auth)
             assert match is not None
             metadata_url = match.group(1)

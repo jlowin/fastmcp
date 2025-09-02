@@ -6,13 +6,10 @@ using the OAuth Proxy pattern for non-DCR OAuth flows.
 
 from __future__ import annotations
 
-import warnings
-
 import httpx
 from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-import fastmcp
 from fastmcp.server.auth import AccessToken, TokenVerifier
 from fastmcp.server.auth.oauth_proxy import OAuthProxy
 from fastmcp.server.auth.registry import register_provider
@@ -165,7 +162,6 @@ class AzureProvider(OAuthProxy):
         required_scopes: list[str] | None | NotSetT = NotSet,
         timeout_seconds: int | NotSetT = NotSet,
         allowed_client_redirect_uris: list[str] | NotSetT = NotSet,
-        resource_server_url: str | NotSetT = NotSet,  # Deprecated
     ):
         """Initialize Azure OAuth provider.
 
@@ -179,19 +175,7 @@ class AzureProvider(OAuthProxy):
             timeout_seconds: HTTP request timeout for Azure API calls
             allowed_client_redirect_uris: List of allowed redirect URI patterns for MCP clients.
                 If None (default), all URIs are allowed. If empty list, no URIs are allowed.
-            resource_server_url: Deprecated. Use base_url instead.
         """
-        # Handle deprecated resource_server_url parameter
-        if resource_server_url is not NotSet:
-            # Deprecated in v2.12.1
-            if fastmcp.settings.deprecation_warnings:
-                warnings.warn(
-                    "The 'resource_server_url' parameter is deprecated and will be removed in a future version. "
-                    "Please use 'base_url' instead. The resource URL is now determined automatically based on "
-                    "the MCP endpoint path.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
         settings = AzureProviderSettings.model_validate(
             {
                 k: v
