@@ -350,7 +350,9 @@ class TestOAuthProxyComprehensive:
 
         # Verify PKCE parameters are forwarded to upstream
         assert "code_challenge" in query_params
-        assert query_params["code_challenge"] == ["dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"]
+        assert query_params["code_challenge"] == [
+            "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+        ]
         assert "code_challenge_method" in query_params
         assert query_params["code_challenge_method"] == ["S256"]
 
@@ -358,7 +360,10 @@ class TestOAuthProxyComprehensive:
         txn_id = query_params["state"][0]
         transaction = oauth_proxy._oauth_transactions.get(txn_id)
         assert transaction is not None
-        assert transaction["code_challenge"] == "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+        assert (
+            transaction["code_challenge"]
+            == "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+        )
         assert transaction["code_challenge_method"] == "S256"
 
     async def test_authorize_forwards_pkce_without_method(self, oauth_proxy):
@@ -388,7 +393,9 @@ class TestOAuthProxyComprehensive:
 
         # Verify PKCE parameters are forwarded with default method
         assert "code_challenge" in query_params
-        assert query_params["code_challenge"] == ["dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"]
+        assert query_params["code_challenge"] == [
+            "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+        ]
         assert "code_challenge_method" in query_params
         assert query_params["code_challenge_method"] == ["S256"]  # Default method
 
