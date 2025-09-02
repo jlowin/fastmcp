@@ -72,6 +72,7 @@ class TestOAuthProxyComprehensive:
             issuer_url="https://issuer.example.com",
             service_documentation_url="https://docs.example.com",
             resource_server_url="https://resources.example.com",
+            valid_scopes=["read", "write"],
         )
 
         # Verify all parameters are set correctly
@@ -87,6 +88,10 @@ class TestOAuthProxyComprehensive:
         assert str(proxy.issuer_url) == "https://issuer.example.com/"
         assert str(proxy.service_documentation_url) == "https://docs.example.com/"
         assert str(proxy.resource_server_url) == "https://resources.example.com/"
+        assert (
+            proxy.client_registration_options is not None
+            and proxy.client_registration_options.valid_scopes == ["read", "write"]
+        )
 
     def test_redirect_path_normalization(self, jwt_verifier):
         """Test that redirect_path is normalized to start with /."""
