@@ -144,7 +144,7 @@ gemini mcp add dice-roller uv -- run --with fastmcp fastmcp run server.py
 # Add with environment variables
 gemini mcp add weather-server -e API_KEY=secret -e DEBUG=true uv -- run --with fastmcp fastmcp run server.py
 
-# Add with specific scope (local, user, or project)
+# Add with specific scope (user, or project)
 gemini mcp add my-server --scope user uv -- run --with fastmcp fastmcp run server.py
 ```
 
@@ -168,7 +168,7 @@ Try asking Gemini something like:
 
 Gemini will automatically detect your `roll_dice` tool and use it to fulfill your request.
 
-Gemini CLI can now access all the tools, resources, and prompts you've defined in your FastMCP server. 
+Gemini CLI can now access all the tools and prompts you've defined in your FastMCP server. 
 
 If your server provides prompts, you can use them as slash commands with `/prompt_name`.
 
