@@ -69,7 +69,6 @@ class TestOAuthProxyComprehensive:
             redirect_path="/auth/callback",
             issuer_url="https://issuer.example.com",
             service_documentation_url="https://docs.example.com",
-            resource_server_url="https://resources.example.com",
             valid_scopes=["read", "write"],
         )
 
@@ -85,7 +84,6 @@ class TestOAuthProxyComprehensive:
         assert proxy._redirect_path == "/auth/callback"
         assert str(proxy.issuer_url) == "https://issuer.example.com/"
         assert str(proxy.service_documentation_url) == "https://docs.example.com/"
-        assert str(proxy.resource_server_url) == "https://resources.example.com/"
         assert (
             proxy.client_registration_options is not None
             and proxy.client_registration_options.valid_scopes == ["read", "write"]
