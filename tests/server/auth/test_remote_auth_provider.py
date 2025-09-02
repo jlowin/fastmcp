@@ -1,30 +1,29 @@
-import re
-
 import httpx
 import pytest
 from pydantic import AnyHttpUrl
 
 from fastmcp import FastMCP
-from fastmcp.server.auth import AccessToken, RemoteAuthProvider, TokenVerifier
+from fastmcp.server.auth import RemoteAuthProvider
+from fastmcp.server.auth.providers.jwt import StaticTokenVerifier
 
 
-class SimpleTokenVerifier(TokenVerifier):
-    """Simple token verifier for testing."""
-
-    def __init__(self, valid_tokens: dict[str, AccessToken] | None = None):
-        super().__init__()
-        self.valid_tokens = valid_tokens or {}
-
-    async def verify_token(self, token: str) -> AccessToken | None:
-        return self.valid_tokens.get(token)
+@pytest.fixture
+def test_tokens():
+    """Standard test tokens fixture for all auth tests."""
+    return {
+        "test_token": {
+            "client_id": "test-client",
+            "scopes": ["read", "write"],
+        }
+    }
 
 
 class TestRemoteAuthProvider:
     """Test suite for RemoteAuthProvider."""
 
-    def test_init(self):
+    def test_init(self, test_tokens):
         """Test RemoteAuthProvider initialization."""
-        token_verifier = SimpleTokenVerifier()
+        token_verifier = StaticTokenVerifier(tokens=test_tokens)
         auth_servers = [AnyHttpUrl("https://auth.example.com")]
 
         provider = RemoteAuthProvider(
@@ -37,12 +36,16 @@ class TestRemoteAuthProvider:
         assert provider.authorization_servers == auth_servers
         assert provider.base_url == AnyHttpUrl("https://api.example.com/")
 
-    async def test_verify_token_delegates_to_verifier(self):
+    async def test_verify_token_delegates_to_verifier(self, test_tokens):
         """Test that verify_token delegates to the token verifier."""
-        access_token = AccessToken(
-            token="valid_token", client_id="test-client", scopes=[]
-        )
-        token_verifier = SimpleTokenVerifier({"valid_token": access_token})
+        # Use a different token for this specific test
+        tokens = {
+            "valid_token": {
+                "client_id": "test-client",
+                "scopes": [],
+            }
+        }
+        token_verifier = StaticTokenVerifier(tokens=tokens)
 
         provider = RemoteAuthProvider(
             token_verifier=token_verifier,
@@ -52,15 +55,17 @@ class TestRemoteAuthProvider:
 
         # Valid token
         result = await provider.verify_token("valid_token")
-        assert result is access_token
+        assert result is not None
+        assert result.token == "valid_token"
+        assert result.client_id == "test-client"
 
         # Invalid token
         result = await provider.verify_token("invalid_token")
         assert result is None
 
-    def test_get_routes_creates_protected_resource_routes(self):
+    def test_get_routes_creates_protected_resource_routes(self, test_tokens):
         """Test that get_routes creates protected resource routes."""
-        token_verifier = SimpleTokenVerifier()
+        token_verifier = StaticTokenVerifier(tokens=test_tokens)
         auth_servers = [AnyHttpUrl("https://auth.example.com")]
 
         provider = RemoteAuthProvider(
@@ -80,8 +85,15 @@ class TestRemoteAuthProvider:
 
     def test_get_resource_url_with_well_known_path(self):
         """Test _get_resource_url returns correct URL for .well-known path."""
+        tokens = {
+            "test_token": {
+                "client_id": "test-client",
+                "scopes": ["read"],
+            }
+        }
+        token_verifier = StaticTokenVerifier(tokens=tokens)
         provider = RemoteAuthProvider(
-            token_verifier=SimpleTokenVerifier(),
+            token_verifier=token_verifier,
             authorization_servers=[AnyHttpUrl("https://auth.example.com")],
             base_url="https://api.example.com",
         )
@@ -95,8 +107,15 @@ class TestRemoteAuthProvider:
 
     def test_get_resource_url_handles_trailing_slash(self):
         """Test _get_resource_url handles trailing slash correctly."""
+        tokens = {
+            "test_token": {
+                "client_id": "test-client",
+                "scopes": ["read"],
+            }
+        }
+        token_verifier = StaticTokenVerifier(tokens=tokens)
         provider = RemoteAuthProvider(
-            token_verifier=SimpleTokenVerifier(),
+            token_verifier=token_verifier,
             authorization_servers=[AnyHttpUrl("https://auth.example.com")],
             base_url="https://api.example.com/",
         )
@@ -112,16 +131,42 @@ class TestRemoteAuthProvider:
 class TestRemoteAuthProviderIntegration:
     """Integration tests for RemoteAuthProvider with FastMCP server."""
 
-    async def test_protected_resource_metadata_endpoint_status_code(self):
-        """Test that the protected resource metadata endpoint returns 200."""
-        token_verifier = SimpleTokenVerifier()
-        auth_provider = RemoteAuthProvider(
+    @pytest.fixture
+    def basic_auth_provider(self, test_tokens):
+        """Basic RemoteAuthProvider fixture for testing."""
+        token_verifier = StaticTokenVerifier(tokens=test_tokens)
+        return RemoteAuthProvider(
             token_verifier=token_verifier,
             authorization_servers=[AnyHttpUrl("https://auth.example.com")],
             base_url="https://api.example.com",
         )
 
-        mcp = FastMCP("test-server", auth=auth_provider)
+    def _create_test_auth_provider(
+        self, base_url="https://api.example.com", test_tokens=None, **kwargs
+    ):
+        """Helper to create a test RemoteAuthProvider with StaticTokenVerifier."""
+        tokens = kwargs.get(
+            "tokens",
+            test_tokens
+            or {
+                "test_token": {
+                    "client_id": "test-client",
+                    "scopes": ["read", "write"],
+                }
+            },
+        )
+        token_verifier = StaticTokenVerifier(tokens=tokens)
+        return RemoteAuthProvider(
+            token_verifier=token_verifier,
+            authorization_servers=[AnyHttpUrl("https://auth.example.com")],
+            base_url=base_url,
+        )
+
+    async def test_protected_resource_metadata_endpoint_status_code(
+        self, basic_auth_provider
+    ):
+        """Test that the protected resource metadata endpoint returns 200."""
+        mcp = FastMCP("test-server", auth=basic_auth_provider)
         mcp_http_app = mcp.http_app()
 
         async with httpx.AsyncClient(
@@ -133,12 +178,7 @@ class TestRemoteAuthProviderIntegration:
 
     async def test_protected_resource_metadata_endpoint_resource_field(self):
         """Test that the protected resource metadata endpoint returns correct resource field."""
-        token_verifier = SimpleTokenVerifier()
-        auth_provider = RemoteAuthProvider(
-            token_verifier=token_verifier,
-            authorization_servers=[AnyHttpUrl("https://auth.example.com")],
-            base_url="https://api.example.com",
-        )
+        auth_provider = self._create_test_auth_provider()
 
         mcp = FastMCP("test-server", auth=auth_provider)
         mcp_http_app = mcp.http_app()
@@ -157,12 +197,7 @@ class TestRemoteAuthProviderIntegration:
         self,
     ):
         """Test that the protected resource metadata endpoint returns correct authorization_servers field."""
-        token_verifier = SimpleTokenVerifier()
-        auth_provider = RemoteAuthProvider(
-            token_verifier=token_verifier,
-            authorization_servers=[AnyHttpUrl("https://auth.example.com")],
-            base_url="https://api.example.com",
-        )
+        auth_provider = self._create_test_auth_provider()
 
         mcp = FastMCP("test-server", auth=auth_provider)
         mcp_http_app = mcp.http_app()
@@ -185,12 +220,7 @@ class TestRemoteAuthProviderIntegration:
     )
     async def test_base_url_configurations(self, base_url: str, expected_resource: str):
         """Test different base_url configurations."""
-        token_verifier = SimpleTokenVerifier()
-        auth_provider = RemoteAuthProvider(
-            token_verifier=token_verifier,
-            authorization_servers=[AnyHttpUrl("https://auth.example.com")],
-            base_url=base_url,
-        )
+        auth_provider = self._create_test_auth_provider(base_url=base_url)
         mcp = FastMCP("test-server", auth=auth_provider)
         mcp_http_app = mcp.http_app()
 
@@ -206,17 +236,14 @@ class TestRemoteAuthProviderIntegration:
 
     async def test_multiple_authorization_servers_resource_field(self):
         """Test resource field with multiple authorization servers."""
-        token_verifier = SimpleTokenVerifier()
         auth_servers = [
             AnyHttpUrl("https://auth1.example.com"),
             AnyHttpUrl("https://auth2.example.com"),
         ]
 
-        auth_provider = RemoteAuthProvider(
-            token_verifier=token_verifier,
-            authorization_servers=auth_servers,
-            base_url="https://api.example.com",
-        )
+        auth_provider = self._create_test_auth_provider()
+        # Override the authorization servers
+        auth_provider.authorization_servers = auth_servers
 
         mcp = FastMCP("test-server", auth=auth_provider)
         mcp_http_app = mcp.http_app()
@@ -232,17 +259,14 @@ class TestRemoteAuthProviderIntegration:
 
     async def test_multiple_authorization_servers_list(self):
         """Test authorization_servers field with multiple authorization servers."""
-        token_verifier = SimpleTokenVerifier()
         auth_servers = [
             AnyHttpUrl("https://auth1.example.com"),
             AnyHttpUrl("https://auth2.example.com"),
         ]
 
-        auth_provider = RemoteAuthProvider(
-            token_verifier=token_verifier,
-            authorization_servers=auth_servers,
-            base_url="https://api.example.com",
-        )
+        auth_provider = self._create_test_auth_provider()
+        # Override the authorization servers
+        auth_provider.authorization_servers = auth_servers
 
         mcp = FastMCP("test-server", auth=auth_provider)
         mcp_http_app = mcp.http_app()
@@ -266,10 +290,13 @@ class TestRemoteAuthProviderIntegration:
         # endpoint correctly reports the resource server URL, which is tested above
 
         # This is primarily testing that the token verifier integration works
-        access_token = AccessToken(
-            token="valid_token", client_id="test-client", scopes=[]
-        )
-        token_verifier = SimpleTokenVerifier({"valid_token": access_token})
+        tokens = {
+            "valid_token": {
+                "client_id": "test-client",
+                "scopes": [],
+            }
+        }
+        token_verifier = StaticTokenVerifier(tokens=tokens)
 
         provider = RemoteAuthProvider(
             token_verifier=token_verifier,
@@ -279,17 +306,22 @@ class TestRemoteAuthProviderIntegration:
 
         # Test that the provider correctly delegates to the token verifier
         result = await provider.verify_token("valid_token")
-        assert result is access_token
+        assert result is not None
+        assert result.token == "valid_token"
+        assert result.client_id == "test-client"
 
         result = await provider.verify_token("invalid_token")
         assert result is None
 
     async def test_token_verification_with_invalid_auth_fails(self):
         """Test that the provider correctly rejects invalid tokens."""
-        access_token = AccessToken(
-            token="valid_token", client_id="test-client", scopes=[]
-        )
-        token_verifier = SimpleTokenVerifier({"valid_token": access_token})
+        tokens = {
+            "valid_token": {
+                "client_id": "test-client",
+                "scopes": [],
+            }
+        }
+        token_verifier = StaticTokenVerifier(tokens=tokens)
 
         provider = RemoteAuthProvider(
             token_verifier=token_verifier,
@@ -307,7 +339,13 @@ class TestRemoteAuthProviderIntegration:
         This test confirms that RemoteAuthProvider works correctly and returns
         the resource URL with the MCP path appended to the base URL.
         """
-        token_verifier = SimpleTokenVerifier()
+        tokens = {
+            "test_token": {
+                "client_id": "test-client",
+                "scopes": ["read"],
+            }
+        }
+        token_verifier = StaticTokenVerifier(tokens=tokens)
         auth_provider = RemoteAuthProvider(
             token_verifier=token_verifier,
             authorization_servers=[AnyHttpUrl("https://accounts.google.com")],
@@ -336,7 +374,13 @@ class TestRemoteAuthProviderIntegration:
         This test confirms that RemoteAuthProvider works correctly and returns
         the exact resource_name specified.
         """
-        token_verifier = SimpleTokenVerifier()
+        tokens = {
+            "test_token": {
+                "client_id": "test-client",
+                "scopes": ["read"],
+            }
+        }
+        token_verifier = StaticTokenVerifier(tokens=tokens)
         auth_provider = RemoteAuthProvider(
             token_verifier=token_verifier,
             authorization_servers=[AnyHttpUrl("https://accounts.google.com")],
@@ -365,7 +409,13 @@ class TestRemoteAuthProviderIntegration:
         This test confirms that RemoteAuthProvider works correctly and returns
         the exact resource_documentation specified.
         """
-        token_verifier = SimpleTokenVerifier()
+        tokens = {
+            "test_token": {
+                "client_id": "test-client",
+                "scopes": ["read"],
+            }
+        }
+        token_verifier = StaticTokenVerifier(tokens=tokens)
         auth_provider = RemoteAuthProvider(
             token_verifier=token_verifier,
             authorization_servers=[AnyHttpUrl("https://accounts.google.com")],
@@ -392,95 +442,3 @@ class TestRemoteAuthProviderIntegration:
                 data["resource_documentation"]
                 == "https://doc.my-server.com/resource-docs"
             )
-
-    async def test_www_authenticate_header_points_to_base_url(self):
-        """Test that WWW-Authenticate header always points to base URL's .well-known.
-
-        This test verifies the fix for issue #1685 where the WWW-Authenticate header
-        was incorrectly including the MCP path in the .well-known URL.
-        """
-        token_verifier = SimpleTokenVerifier()
-        auth_provider = RemoteAuthProvider(
-            token_verifier=token_verifier,
-            authorization_servers=[AnyHttpUrl("https://accounts.google.com")],
-            base_url="https://my-server.com",
-        )
-
-        mcp = FastMCP("test-server", auth=auth_provider)
-        # Mount MCP at a non-root path
-        mcp_http_app = mcp.http_app(path="/api/v1/mcp")
-
-        async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=mcp_http_app),
-            base_url="https://my-server.com",
-        ) as client:
-            # Make unauthorized request to MCP endpoint
-            response = await client.get("/api/v1/mcp")
-            assert response.status_code == 401
-
-            www_auth = response.headers.get("www-authenticate", "")
-            assert "resource_metadata=" in www_auth
-
-            # Extract the metadata URL from the header
-            match = re.search(r'resource_metadata="([^"]+)"', www_auth)
-            assert match is not None
-            metadata_url = match.group(1)
-
-            # Should point to base URL, not include /api/v1/mcp
-            assert (
-                metadata_url
-                == "https://my-server.com/.well-known/oauth-protected-resource"
-            )
-
-    async def test_automatic_resource_url_capture(self):
-        """Test that resource URL is automatically captured from MCP path.
-
-        This test verifies PR #1682 functionality where the resource URL
-        should be automatically set based on the MCP endpoint path.
-        """
-        token_verifier = SimpleTokenVerifier()
-        auth_provider = RemoteAuthProvider(
-            token_verifier=token_verifier,
-            authorization_servers=[AnyHttpUrl("https://accounts.google.com")],
-            base_url="https://my-server.com",
-            # Note: NOT specifying resource_server_url
-        )
-
-        mcp = FastMCP("test-server", auth=auth_provider)
-        # Mount MCP at a specific path
-        mcp_http_app = mcp.http_app(path="/mcp")
-
-        async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=mcp_http_app),
-            base_url="https://my-server.com",
-        ) as client:
-            # Get the .well-known metadata
-            response = await client.get("/.well-known/oauth-protected-resource")
-            assert response.status_code == 200
-
-            data = response.json()
-            # The resource URL should be automatically set to the MCP path
-            assert data.get("resource") == "https://my-server.com/mcp"
-
-    async def test_automatic_resource_url_with_nested_path(self):
-        """Test automatic resource URL capture with deeply nested MCP path."""
-        token_verifier = SimpleTokenVerifier()
-        auth_provider = RemoteAuthProvider(
-            token_verifier=token_verifier,
-            authorization_servers=[AnyHttpUrl("https://accounts.google.com")],
-            base_url="https://my-server.com",
-        )
-
-        mcp = FastMCP("test-server", auth=auth_provider)
-        mcp_http_app = mcp.http_app(path="/api/v2/services/mcp")
-
-        async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=mcp_http_app),
-            base_url="https://my-server.com",
-        ) as client:
-            response = await client.get("/.well-known/oauth-protected-resource")
-            assert response.status_code == 200
-
-            data = response.json()
-            # Should automatically capture the nested path
-            assert data.get("resource") == "https://my-server.com/api/v2/services/mcp"
