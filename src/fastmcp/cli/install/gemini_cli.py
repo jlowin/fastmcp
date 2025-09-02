@@ -23,18 +23,16 @@ def find_gemini_command() -> str | None:
     gemini_in_path = shutil.which("gemini")
     if gemini_in_path:
         try:
-            result = subprocess.run(
+            # If 'gemini --version' fails, it's not the correct path
+            subprocess.run(
                 [gemini_in_path, "--version"],
                 check=True,
                 capture_output=True,
-                text=True,
             )
-            # Check if the output contains "gemini" (case-insensitive)
-            if "gemini" in result.stdout.lower():
-                return gemini_in_path
+            return gemini_in_path
         except (subprocess.CalledProcessError, FileNotFoundError):
             pass
-    
+
     # Check common installation locations (aliases don't work with subprocess)
     potential_paths = [
         # Default Gemini CLI installation location (after migration)
@@ -49,15 +47,14 @@ def find_gemini_command() -> str | None:
 
     for path in potential_paths:
         if path.exists():
+            # If 'gemini --version' fails, it's not the correct path
             try:
-                result = subprocess.run(
+                subprocess.run(
                     [str(path), "--version"],
                     check=True,
                     capture_output=True,
-                    text=True,
                 )
-                if "Gemini CLI" in result.stdout:
-                    return str(path)
+                return str(path)
             except (subprocess.CalledProcessError, FileNotFoundError):
                 continue
 
