@@ -9,9 +9,6 @@ To run:
 import asyncio
 
 from fastmcp.client import Client
-from fastmcp.client.auth.oauth import FileTokenStorage
-
-FileTokenStorage.clear_all()
 
 SERVER_URL = "http://127.0.0.1:8000/mcp"
 
