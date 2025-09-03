@@ -232,11 +232,6 @@
           {
             "anchor": "What's New",
             "pages": ["updates", "changelog"]
-          },
-          {
-            "anchor": "Community",
-            "icon": "users",
-            "pages": ["community/showcase"]
           }
         ],
         "tab": "Documentation"
