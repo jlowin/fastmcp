@@ -79,6 +79,7 @@ def _replace_ref_with_defs(
 
     Examples:
     - {"type": "object", "properties": {"$ref": "#/components/schemas/..."}}
+    - {"type": "object", "additionalProperties": {"$ref": "#/components/schemas/..."}, "properties": {...}}
     - {"$ref": "#/components/schemas/..."}
     - {"items": {"$ref": "#/components/schemas/..."}}
     - {"anyOf": [{"$ref": "#/components/schemas/..."}]}
@@ -117,6 +118,17 @@ def _replace_ref_with_defs(
     for section in ["anyOf", "allOf", "oneOf"]:
         for i, item in enumerate(schema.get(section, [])):
             schema[section][i] = _replace_ref_with_defs(item)
+    if additionalProperties := schema.get("additionalProperties"):
+        if not isinstance(additionalProperties, bool):
+            if "$ref" in additionalProperties:
+                schema["additionalProperties"] = _replace_ref_with_defs(
+                    additionalProperties
+                )
+            else:
+                schema["additionalProperties"] = {
+                    add_prop_name: _replace_ref_with_defs(add_prop_schema)
+                    for add_prop_name, add_prop_schema in additionalProperties.items()
+                }
     if info.get("description", description) and not schema.get("description"):
         schema["description"] = description
     return schema
