@@ -6,7 +6,7 @@ icon: share
 tag: NEW
 ---
 
-import { VersionBadge } from "/snippets/version-badge.mdx"
+import { VersionBadge } from "/snippets/version-badge.mdx";
 
 <VersionBadge version="2.12.0" />
 
@@ -20,6 +20,7 @@ While MCP clients expect to dynamically register and obtain credentials, these p
 - **RemoteAuthProvider**: For providers WITH Dynamic Client Registration (WorkOS AuthKit, etc.)
 
 OAuth Proxy makes traditional OAuth providers work seamlessly with MCP's automated authentication flow.
+
 </Tip>
 
 ## DCR vs Non-DCR Providers
@@ -44,13 +45,14 @@ OAuth Proxy makes non-DCR providers work seamlessly with MCP by implementing a l
 
 However, most OAuth providers don't support DCR:
 
-| Provider Type | DCR Support | Registration Method | Examples |
-|--------------|-------------|--------------------|-----------|
-| Modern Auth Platforms | ✅ Yes | Automatic via API | WorkOS AuthKit, Some OIDC providers |
-| Traditional OAuth | ❌ No | Manual via console | GitHub, Google, Azure, Discord, Facebook |
-| Enterprise SSO | ❌ No | IT Administrator | Okta, AD FS, PingIdentity |
+| Provider Type         | DCR Support | Registration Method | Examples                                 |
+| --------------------- | ----------- | ------------------- | ---------------------------------------- |
+| Modern Auth Platforms | ✅ Yes      | Automatic via API   | WorkOS AuthKit, Some OIDC providers      |
+| Traditional OAuth     | ❌ No       | Manual via console  | GitHub, Google, Azure, Discord, Facebook |
+| Enterprise SSO        | ❌ No       | IT Administrator    | Okta, AD FS, PingIdentity                |
 
 Providers without DCR require you to:
+
 - Manually register applications through their developer console
 - Obtain fixed client IDs and secrets that never change
 - Pre-configure specific redirect URIs
@@ -72,21 +74,21 @@ sequenceDiagram
     Client->>Proxy: 1. POST /register<br/>redirect_uri: localhost:54321/callback
     Proxy-->>Client: 2. Returns fixed upstream credentials
 
-    Note over Client, Proxy: Authorization with Callback Forwarding
-    Client->>Proxy: 3. GET /authorize<br/>redirect_uri=localhost:54321/callback
-    Note over Proxy: Store transaction with client callback
-    Proxy->>Provider: 4. Redirect to provider<br/>redirect_uri=server:8000/auth/callback
-    
+    Note over Client, Proxy: Authorization with PKCE & Callback Forwarding
+    Client->>Proxy: 3. GET /authorize<br/>redirect_uri=localhost:54321/callback<br/>code_challenge=CLIENT_CHALLENGE
+    Note over Proxy: Store transaction with client PKCE<br/>Generate proxy PKCE pair
+    Proxy->>Provider: 4. Redirect to provider<br/>redirect_uri=server:8000/auth/callback<br/>code_challenge=PROXY_CHALLENGE
+
     Note over Provider, Proxy: Provider Callback
     Provider->>Proxy: 5. GET /auth/callback<br/>with authorization code
-    Proxy->>Provider: 6. Exchange code for tokens
+    Proxy->>Provider: 6. Exchange code for tokens<br/>code_verifier=PROXY_VERIFIER
     Provider-->>Proxy: 7. Access & refresh tokens
-    
+
     Note over Proxy, Client: Client Callback Forwarding
     Proxy->>Client: 8. Redirect to localhost:54321/callback<br/>with new authorization code
-    
+
     Note over Client, Proxy: Token Exchange
-    Client->>Proxy: 9. POST /token with code
+    Client->>Proxy: 9. POST /token with code<br/>code_verifier=CLIENT_VERIFIER
     Proxy-->>Client: 10. Returns stored provider tokens
 ```
 
@@ -95,6 +97,7 @@ sequenceDiagram
 OAuth Proxy implements an innovative callback forwarding pattern that solves the redirect URI mismatch problem:
 
 **The Challenge:**
+
 - MCP clients listen on random localhost ports (e.g., `http://localhost:54321/callback`)
 - Each client session uses a different port
 - OAuth providers only accept pre-registered, fixed redirect URIs
@@ -113,6 +116,20 @@ The proxy acts as an intermediary callback handler:
 
 This pattern maintains full OAuth 2.1 security (including PKCE) while enabling dynamic client ports to work with fixed provider callbacks. The client never knows it's talking to a proxy - it experiences a standard DCR flow.
 
+### PKCE Forwarding
+
+OAuth Proxy automatically handles PKCE (Proof Key for Code Exchange) when working with providers that support or require it. The proxy generates its own PKCE parameters to send upstream while separately validating the client's PKCE, ensuring end-to-end security at both layers.
+
+This is enabled by default via the `forward_pkce` parameter and works seamlessly with providers like Google, Azure AD, and GitHub. Only disable it for legacy providers that don't support PKCE:
+
+```python
+# Disable PKCE forwarding only if upstream doesn't support it
+auth = OAuthProxy(
+    ...,
+    forward_pkce=False  # Default is True
+)
+```
+
 ## Basic Implementation
 
 The `OAuthProxy` class provides the complete proxy implementation:
@@ -123,7 +140,8 @@ The `OAuthProxy` class provides the complete proxy implementation:
 </ParamField>
 
 <ParamField body="upstream_token_endpoint" type="str" required>
-  URL of your OAuth provider's token endpoint (e.g., `https://github.com/login/oauth/access_token`)
+  URL of your OAuth provider's token endpoint (e.g.,
+  `https://github.com/login/oauth/access_token`)
 </ParamField>
 
 <ParamField body="upstream_client_id" type="str" required>
@@ -135,7 +153,8 @@ The `OAuthProxy` class provides the complete proxy implementation:
 </ParamField>
 
 <ParamField body="token_verifier" type="TokenVerifier" required>
-  A [`TokenVerifier`](/servers/auth/token-verification) instance to validate the provider's tokens
+  A [`TokenVerifier`](/servers/auth/token-verification) instance to validate the
+  provider's tokens
 </ParamField>
 
 <ParamField body="base_url" type="AnyHttpUrl | str" required>
@@ -143,7 +162,8 @@ The `OAuthProxy` class provides the complete proxy implementation:
 </ParamField>
 
 <ParamField body="redirect_path" type="str" default="/auth/callback">
-  Path for OAuth callbacks. Must match the redirect URI configured in your OAuth application
+  Path for OAuth callbacks. Must match the redirect URI configured in your OAuth
+  application
 </ParamField>
 
 <ParamField body="upstream_revocation_endpoint" type="str | None">
@@ -158,7 +178,15 @@ The `OAuthProxy` class provides the complete proxy implementation:
   Optional URL to your service documentation
 </ParamField>
 
-
+<ParamField body="forward_pkce" type="bool" default="true">
+  Whether to forward PKCE (Proof Key for Code Exchange) to the upstream OAuth
+  provider. When enabled and the client uses PKCE, the proxy generates its own
+  PKCE parameters to send upstream while separately validating the client's
+  PKCE. This ensures end-to-end PKCE security at both layers (client-to-proxy
+  and proxy-to-upstream). - `true` (default): Forward PKCE for providers that
+  support it (Google, Azure, GitHub, etc.) - `false`: Disable only if upstream
+  provider doesn't support PKCE
+</ParamField>
 
 <ParamField body="allowed_client_redirect_uris" type="list[str] | None">
   List of allowed redirect URI patterns for MCP clients. Patterns support wildcards (e.g., `"http://localhost:*"`, `"https://*.example.com/*"`). 
@@ -214,17 +242,17 @@ auth = OAuthProxy(
     # Upstream provider endpoints
     upstream_authorization_endpoint="https://your-provider.com/oauth/authorize",
     upstream_token_endpoint="https://your-provider.com/oauth/token",
-    
+
     # Your registered app credentials
     upstream_client_id="your-registered-client-id",
     upstream_client_secret="your-registered-client-secret",
-    
+
     # Token validation
     token_verifier=token_verifier,
-    
+
     # Your FastMCP server URL (string automatically converted to AnyHttpUrl)
     base_url="https://your-server.com",
-    
+
     # Optional: customize callback path (defaults to "/auth/callback")
     redirect_path="/auth/callback",
 
@@ -248,6 +276,7 @@ http://localhost:8000/auth/callback
 ```
 
 The proxy automatically:
+
 - Implements DCR by returning your fixed credentials to any client that registers
 - Handles callback forwarding between dynamic client callbacks and your fixed provider callback
 - Exchanges authorization codes server-side for enhanced security
@@ -263,7 +292,7 @@ If you know which clients will connect, you can restrict redirect URIs using the
 
 ```python
 # Default: allow all (for DCR compatibility)
-auth = OAuthProxy(...) 
+auth = OAuthProxy(...)
 
 # Restrict to localhost only
 auth = OAuthProxy(
@@ -294,12 +323,16 @@ auth = OAuthProxy(
 ```
 
 **Tip:** Check your server logs for debug messages that say "Client registered with redirect_uri" messages to see what redirect URIs your clients are using.
+
 </Note>
 
 ## Client Compatibility
 
 <Tip>
-The OAuth Proxy's callback forwarding enables **any MCP client** to authenticate with **any OAuth provider**, regardless of redirect URI restrictions. Clients can use dynamic localhost ports while providers see their expected fixed callbacks.
+  The OAuth Proxy's callback forwarding enables **any MCP client** to
+  authenticate with **any OAuth provider**, regardless of redirect URI
+  restrictions. Clients can use dynamic localhost ports while providers see
+  their expected fixed callbacks.
 </Tip>
 
 This breakthrough means that MCP clients no longer need to worry about registering specific callback URLs with OAuth providers. The proxy handles the complexity of bridging dynamic client callbacks with the fixed URLs that providers require. The entire flow maintains OAuth 2.1 and PKCE (RFC-7636) compliance for security.
@@ -310,13 +343,13 @@ Different OAuth providers use different token formats, requiring appropriate ver
 
 ### Provider Token Types
 
-| Provider | Token Type | Verification Method | Built-in Support |
-|----------|-----------|--------------------|-----------------|
-| GitHub | Opaque | API validation (`/user` endpoint) | ✅ `GitHubProvider` |
-| Google | JWT | JWKS signature verification | ✅ `GoogleProvider` |
-| Azure AD | JWT | JWKS signature verification | Configure `JWTVerifier` |
-| Discord | Opaque | API validation | ✅ `DiscordOAuthProxyProvider` |
-| Custom | Varies | Implement `TokenVerifier` | Extend base class |
+| Provider | Token Type | Verification Method               | Built-in Support               |
+| -------- | ---------- | --------------------------------- | ------------------------------ |
+| GitHub   | Opaque     | API validation (`/user` endpoint) | ✅ `GitHubProvider`            |
+| Google   | JWT        | JWKS signature verification       | ✅ `GoogleProvider`            |
+| Azure AD | JWT        | JWKS signature verification       | Configure `JWTVerifier`        |
+| Discord  | Opaque     | API validation                    | ✅ `DiscordOAuthProxyProvider` |
+| Custom   | Varies     | Implement `TokenVerifier`         | Extend base class              |
 
 ### Using Built-in Providers
 
