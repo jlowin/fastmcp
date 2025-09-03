@@ -102,6 +102,7 @@ def test_schema_transport_enum():
                             assert "stdio" in valid_transports
                             assert "http" in valid_transports
                             assert "sse" in valid_transports
+                            assert "streamable-http" in valid_transports
                             break
     elif "properties" in deploy_schema:
         transport_schema = deploy_schema["properties"].get("transport", {})
@@ -112,6 +113,7 @@ def test_schema_transport_enum():
                     assert "stdio" in valid_transports
                     assert "http" in valid_transports
                     assert "sse" in valid_transports
+                    assert "streamable-http" in valid_transports
                     break
 
 
@@ -155,16 +157,16 @@ def test_schema_log_level_enum():
 
 
 @pytest.mark.parametrize(
-    "input_transport,expected_transport",
+    "transport",
     [
-        ("streamable-http", "http"),  # streamable-http converts to http
-        ("http", "http"),  # http remains http
-        ("stdio", "stdio"),  # stdio unchanged
-        ("sse", "sse"),  # sse unchanged
-        (None, None),  # None remains None
+        "streamable-http",
+        "http",
+        "stdio",
+        "sse",
+        None,
     ],
 )
-def test_transport_validator(input_transport, expected_transport):
-    """Test that transport values are validated correctly."""
-    deployment = Deployment(transport=input_transport)
-    assert deployment.transport == expected_transport
+def test_transport_values_accepted(transport):
+    """Test that all valid transport values are accepted."""
+    deployment = Deployment(transport=transport)
+    assert deployment.transport == transport
