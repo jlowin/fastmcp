@@ -130,6 +130,21 @@ class Deployment(BaseModel):
         # Match ${VAR_NAME} pattern and replace with environment variable values
         return re.sub(r"\$\{([^}]+)\}", replace_var, value)
 
+    @field_validator("transport", mode="before")
+    @classmethod
+    def validate_transport(
+        cls, v: Literal["stdio", "http", "sse", "streamable-http"] | None
+    ) -> Literal["stdio", "http", "sse"] | None:
+        """
+        The MCP Server Config advertises "http" as a valid transport, but for
+        compatibility with e.g. the FastMCP CLI and MCP SDK, we want to ensure
+        that is accepts "streamable-http" as well. This validator intercepts
+        "streamable-http" and converts it to "http".
+        """
+        if v == "streamable-http":
+            v = "http"
+        return v
+
 
 class MCPServerConfig(BaseModel):
     """Configuration for a FastMCP server.
