@@ -180,7 +180,7 @@ class FileTokenStorage(TokenStorage):
         for file_type in file_types:
             path = self._get_file_path(file_type)
             path.unlink(missing_ok=True)
-        logger.info(f"Cleared OAuth cache for {self.get_base_url(self.server_url)}")
+        logger.debug(f"Cleared OAuth cache for {self.get_base_url(self.server_url)}")
 
     @classmethod
     def clear_all(cls, cache_dir: Path | None = None) -> None:
