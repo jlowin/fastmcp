@@ -209,6 +209,36 @@ assert result.status == "success", f"Expected successful operation, got {result.
 
 Try not to have too many assertions in a single test unless you truly need to check various aspects of the same behavior. In general, assertions of different behaviors should be in separate tests.
 
+#### Inline Snapshots
+
+FastMCP uses `inline-snapshot` for testing complex data structures. On first run with empty `snapshot()`, pytest will auto-populate the expected value. To update snapshots after intentional changes, run `pytest --inline-snapshot=fix`. This is particularly useful for testing JSON schemas and API responses.
+
+```python
+from inline_snapshot import snapshot
+
+async def test_tool_schema_generation():
+    """Test that tool schemas are generated correctly."""
+    mcp = FastMCP("test-server")
+    
+    @mcp.tool
+    def calculate_tax(amount: float, rate: float = 0.1) -> dict:
+        """Calculate tax on an amount."""
+        return {"amount": amount, "tax": amount * rate, "total": amount * (1 + rate)}
+    
+    tools = mcp.list_tools()
+    schema = tools[0].inputSchema
+    
+    # First run: snapshot() is empty, gets auto-populated
+    # Subsequent runs: compares against stored snapshot
+    assert schema == snapshot({
+        "type": "object", 
+        "properties": {
+            "amount": {"type": "number"}, 
+            "rate": {"type": "number", "default": 0.1}
+        }, 
+        "required": ["amount"]
+    })
+```
 
 ### In-Memory Testing
 
