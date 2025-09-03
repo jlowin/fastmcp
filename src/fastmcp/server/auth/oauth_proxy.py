@@ -270,9 +270,7 @@ class OAuthProxy(OAuthProvider):
         # Always enable DCR since we implement it locally for MCP clients
         client_registration_options = ClientRegistrationOptions(
             enabled=True,
-            valid_scopes=valid_scopes is not None
-            and valid_scopes
-            or token_verifier.required_scopes,
+            valid_scopes=valid_scopes or token_verifier.required_scopes,
         )
 
         # Enable revocation only if upstream endpoint provided
