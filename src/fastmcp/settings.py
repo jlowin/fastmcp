@@ -344,6 +344,9 @@ class Settings(BaseSettings):
     ] = False
 
 
+_instance = None
+
+
 def __getattr__(name: str):
     """
     Used to deprecate the module-level Image class; can be removed once it is no longer imported to root.
@@ -360,5 +363,9 @@ def __getattr__(name: str):
                 stacklevel=2,
             )
         return settings
+
+    # Proxy to injected instance (debugger fix)
+    if _instance is not None and hasattr(_instance, name):
+        return getattr(_instance, name)
 
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")

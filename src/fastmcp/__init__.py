@@ -3,9 +3,13 @@
 import warnings
 from importlib.metadata import version as _version
 from fastmcp.settings import Settings
+import fastmcp.settings as settings_module
 from fastmcp.utilities.logging import configure_logging as _configure_logging
 
 settings = Settings()
+
+settings_module._instance = settings
+
 if settings.log_enabled:
     _configure_logging(
         level=settings.log_level,
