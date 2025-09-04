@@ -485,6 +485,15 @@ class OAuthProxy(OAuthProvider):
                 txn_id,
             )
 
+        # Add audience if provided by token verifier
+        audience = getattr(self._token_validator, "audience", None)
+        if audience:
+            query_params["audience"] = audience
+            logger.debug(
+                "Forwarding token verifier audience to upstream for transaction %s",
+                txn_id,
+            )
+
         # Build the upstream authorization URL
         separator = "&" if "?" in self._upstream_authorization_endpoint else "?"
         upstream_url = f"{self._upstream_authorization_endpoint}{separator}{urlencode(query_params)}"
@@ -870,26 +879,33 @@ class OAuthProxy(OAuthProvider):
                     f"Exchanging IdP code for tokens with redirect_uri: {idp_redirect_uri}"
                 )
 
+                fetch_kwargs = {
+                    "redirect_uri": idp_redirect_uri,
+                }
+
                 # Include proxy's code_verifier if we forwarded PKCE
                 proxy_code_verifier = transaction.get("proxy_code_verifier")
                 if proxy_code_verifier:
+                    fetch_kwargs["code_verifier"] = proxy_code_verifier
                     logger.debug(
                         "Including proxy code_verifier in token exchange for transaction %s",
                         txn_id,
                     )
-                    idp_tokens: dict[str, Any] = await oauth_client.fetch_token(  # type: ignore[misc]
-                        url=self._upstream_token_endpoint,
-                        code=idp_code,
-                        redirect_uri=idp_redirect_uri,
-                        code_verifier=proxy_code_verifier,
-                    )
-                else:
-                    idp_tokens: dict[str, Any] = await oauth_client.fetch_token(  # type: ignore[misc]
-                        url=self._upstream_token_endpoint,
-                        code=idp_code,
-                        redirect_uri=idp_redirect_uri,
+
+                # Add audience if provided by token verifier
+                audience = getattr(self._token_validator, "audience", None)
+                if audience:
+                    fetch_kwargs["audience"] = audience
+                    logger.debug(
+                        "Including token verifier audience in token exchange for transaction %s",
+                        txn_id,
                     )
 
+                idp_tokens: dict[str, Any] = await oauth_client.fetch_token(  # type: ignore[misc]
+                    url=self._upstream_token_endpoint,
+                    code=idp_code,
+                    **fetch_kwargs,
+                )
                 logger.debug(
                     f"Successfully exchanged IdP code for tokens (transaction: {txn_id}, PKCE: {bool(proxy_code_verifier)})"
                 )
