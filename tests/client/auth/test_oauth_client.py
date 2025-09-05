@@ -126,3 +126,55 @@ async def test_oauth_server_metadata_discovery(streamable_http_server: str):
         # The endpoints should be properly formed URLs
         assert metadata["authorization_endpoint"].startswith(server_base_url)
         assert metadata["token_endpoint"].startswith(server_base_url)
+
+
+@pytest.fixture(scope="module")
+def sse_oauth_server() -> Generator[str, None, None]:
+    """Fixture for SSE transport with OAuth authentication."""
+    with run_server_in_process(run_server, transport="sse") as url:
+        yield f"{url}/sse"
+
+
+async def test_oauth_cached_token_with_sse(sse_oauth_server: str):
+    """Test that OAuth properly adds cached tokens to SSE requests.
+
+    This reproduces a bug where cached OAuth tokens are not properly added
+    as Authorization headers to requests on subsequent connections.
+    """
+    import tempfile
+    from pathlib import Path
+
+    from fastmcp.client.transports import SSETransport
+
+    # Use a temporary directory for token cache
+    with tempfile.TemporaryDirectory() as tmpdir:
+        cache_dir = Path(tmpdir)
+
+        # First client connection - performs full OAuth flow and caches tokens
+        auth1 = HeadlessOAuth(
+            mcp_url=sse_oauth_server, token_storage_cache_dir=cache_dir
+        )
+        client1 = Client(transport=SSETransport(sse_oauth_server), auth=auth1)
+
+        async with client1:
+            # Verify we can successfully call a tool
+            result = await client1.call_tool("add", {"a": 5, "b": 3})
+            assert result.data == 8
+
+            # The OAuth provider should have cached tokens
+            assert auth1.context.current_tokens is not None
+            assert auth1.context.current_tokens.access_token is not None
+
+        # Second client connection - should use cached tokens
+        # This is where the bug occurs: the cached token is loaded but not
+        # properly added to SSE requests, causing authentication to fail
+        auth2 = HeadlessOAuth(
+            mcp_url=sse_oauth_server, token_storage_cache_dir=cache_dir
+        )
+        client2 = Client(transport=SSETransport(sse_oauth_server), auth=auth2)
+
+        # Second connection should work with cached tokens
+        async with client2:
+            # Verify we can still call tools with cached tokens
+            result = await client2.call_tool("add", {"a": 10, "b": 20})
+            assert result.data == 30
