@@ -167,7 +167,7 @@ async def test_oauth_cached_token_with_sse(sse_oauth_server: str):
 
         # Second client connection - should use cached tokens
         # This is where the bug occurs: the cached token is loaded but not
-        # properly added to SSE requests, causing authentication to fail
+        # properly added to requests, causing authentication to fail
         auth2 = HeadlessOAuth(
             mcp_url=sse_oauth_server, token_storage_cache_dir=cache_dir
         )
