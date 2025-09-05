@@ -368,33 +368,34 @@ class OAuth(OAuthClientProvider):
         If the OAuth flow fails due to invalid/stale client credentials,
         clears the cache and retries once with fresh registration.
         """
-        # Use the lock to ensure thread safety
+        # Acquire lock to ensure thread-safe access to context
         async with self.context.lock:
             # Initialize if needed
             if not self._initialized:
                 await self._initialize()
 
-            # If we have valid cached tokens, add them to the request before yielding
+            # Try using cached tokens if they exist and are valid
             if self.context.is_token_valid():
                 request.headers["Authorization"] = (
                     f"Bearer {self.context.current_tokens.access_token}"
                 )
-                # Yield the request with auth header already added
+                # Send request with cached token
                 response = yield request
 
-                # If we got a 401, the token might be invalid, proceed with full flow
+                # Check if cached token was accepted
                 if response.status_code == 401:
-                    # Token was invalid, clear it and continue with full OAuth flow
+                    # Cached token was rejected - clear it and fall through to full OAuth flow
                     self.context.clear_tokens()
-                    # Fall through to the retry logic below
                 else:
-                    # Success with cached token
+                    # Cached token worked - we're done
                     return
 
-        # If we get here, either we had no valid tokens or got a 401
-        # Proceed with the standard auth flow (which handles refresh and full OAuth)
+        # At this point either:
+        # 1. We had no valid cached tokens, or
+        # 2. Our cached token was rejected with a 401
+        # Proceed with standard OAuth flow (handles token refresh and full OAuth)
         try:
-            # First attempt with potentially cached credentials
+            # Attempt with potentially cached credentials
             gen = super().async_auth_flow(request)
             response = None
             while True:
@@ -409,16 +410,16 @@ class OAuth(OAuthClientProvider):
                 "OAuth client not found on server, clearing cache and retrying..."
             )
 
-            # Clear cached state and retry once
+            # Reset initialization flag to force reload
             self._initialized = False
 
-            # Try to clear storage if it supports it
+            # Clear cached credentials if storage supports it
             if hasattr(self.context.storage, "clear"):
                 try:
                     self.context.storage.clear()
                 except Exception as e:
                     logger.warning(f"Failed to clear OAuth storage cache: {e}")
-                    # Can't retry without clearing cache, re-raise original error
+                    # Cannot retry without clearing stale credentials
                     raise ClientNotFoundError(
                         "OAuth client not found and cache could not be cleared"
                     ) from e
@@ -426,9 +427,10 @@ class OAuth(OAuthClientProvider):
                 logger.warning(
                     "Storage does not support clear() - cannot retry with fresh credentials"
                 )
-                # Can't retry without clearing cache, re-raise original error
+                # Cannot retry without clearing stale credentials
                 raise
 
+            # Retry OAuth flow with fresh client registration
             gen = super().async_auth_flow(request)
             response = None
             while True:
