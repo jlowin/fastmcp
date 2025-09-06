@@ -292,6 +292,16 @@ def jwt_verifier():
 
 
 @pytest.fixture
+def jwt_verifier_with_audience():
+    """Create a mock JWT verifier for testing."""
+    verifier = Mock(spec=JWTVerifier)
+    verifier.required_scopes = ["read", "write"]
+    verifier.verify_token = Mock(return_value=None)
+    verifier.audience = "test-audience"
+    return verifier
+
+
+@pytest.fixture
 def oauth_proxy(jwt_verifier):
     """Create a standard OAuthProxy instance for testing."""
     return OAuthProxy(
@@ -544,6 +554,77 @@ class TestOAuthProxyPKCE:
         transaction = proxy_without_pkce._oauth_transactions[txn_id]
         assert transaction["code_challenge"] == "client_challenge"
         assert "proxy_code_verifier" not in transaction
+
+
+class TestOAuthProxyAudience:
+    """Tests for OAuth proxy with audience."""
+
+    @pytest.fixture
+    def proxy_with_audience(self, jwt_verifier_with_audience):
+        return OAuthProxy(
+            upstream_authorization_endpoint="https://oauth.example.com/authorize",
+            upstream_token_endpoint="https://oauth.example.com/token",
+            upstream_client_id="upstream-client",
+            upstream_client_secret="upstream-secret",
+            token_verifier=jwt_verifier_with_audience,
+            base_url="https://proxy.example.com",
+        )
+
+    @pytest.fixture
+    def proxy_without_audience(self, jwt_verifier):
+        return OAuthProxy(
+            upstream_authorization_endpoint="https://oauth.example.com/authorize",
+            upstream_token_endpoint="https://oauth.example.com/token",
+            upstream_client_id="upstream-client",
+            upstream_client_secret="upstream-secret",
+            token_verifier=jwt_verifier,
+            base_url="https://proxy.example.com",
+        )
+
+    async def test_audience_provided(self, proxy_with_audience):
+        """Test that proxy includes audience during authorize."""
+        client = OAuthClientInformationFull(
+            client_id="test-client",
+            client_secret="test-secret",
+            redirect_uris=[AnyUrl("http://localhost:12345/callback")],
+        )
+
+        params = AuthorizationParams(
+            redirect_uri=AnyUrl("http://localhost:12345/callback"),
+            redirect_uri_provided_explicitly=True,
+            state="client-state",
+            code_challenge="client_challenge",
+            scopes=["read"],
+        )
+
+        redirect_url = await proxy_with_audience.authorize(client, params)
+        query_params = parse_qs(urlparse(redirect_url).query)
+
+        # Proxy should forward audience
+        assert "audience" in query_params
+        assert query_params["audience"][0] == "test-audience"
+
+    async def test_audience_not_provided(self, proxy_without_audience):
+        """Test that PKCE is not forwarded when disabled."""
+        client = OAuthClientInformationFull(
+            client_id="test-client",
+            client_secret="test-secret",
+            redirect_uris=[AnyUrl("http://localhost:12345/callback")],
+        )
+
+        params = AuthorizationParams(
+            redirect_uri=AnyUrl("http://localhost:12345/callback"),
+            redirect_uri_provided_explicitly=True,
+            state="client-state",
+            code_challenge="client_challenge",
+            scopes=["read"],
+        )
+
+        redirect_url = await proxy_without_audience.authorize(client, params)
+        query_params = parse_qs(urlparse(redirect_url).query)
+
+        # No audience forwarded to upstream
+        assert "audience" not in query_params
 
 
 class TestOAuthProxyTokenEndpointAuth:
