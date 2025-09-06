@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock, call
 import pytest
 import uvicorn
 from mcp import McpError
-from mcp.server.elicitation import AcceptedElicitation
 from starlette.applications import Starlette
 from starlette.routing import Mount
 
