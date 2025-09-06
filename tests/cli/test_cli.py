@@ -32,6 +32,7 @@ class TestMainCLI:
         """Test parsing invalid environment variables exits."""
         with pytest.raises(SystemExit) as exc_info:
             _parse_env_var("INVALID_FORMAT")
+        assert isinstance(exc_info.value, SystemExit)
         assert exc_info.value.code == 1
 
 

@@ -34,10 +34,8 @@ def fastmcp_server():
         """Elicit a response from the user."""
         result = await ctx.elicit("What is your name?", response_type=str)
 
-        assert isinstance(result, AcceptedElicitation)
-
         if result.action == "accept":
-            return f"You said your name was: {result.data}!"
+            return f"You said your name was: {result.data}!"  # ty: ignore[possibly-unbound-attribute]
         else:
             return "No name provided"
 

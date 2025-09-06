@@ -505,7 +505,7 @@ class Client(Generic[ClientTransportT]):
     ) -> None:
         """Send a cancellation notification for an in-progress request."""
         notification = mcp.types.ClientNotification(
-            mcp.types.CancelledNotification(
+            root=mcp.types.CancelledNotification(
                 method="notifications/cancelled",
                 params=mcp.types.CancelledNotificationParams(
                     requestId=request_id,
