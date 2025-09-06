@@ -90,7 +90,6 @@ def update_claude_config(
             else:
                 env_vars = existing_env
 
-        # Build uv run command using Environment.build_uv_run_command()
         env_config = UVEnvironment(
             dependencies=(with_packages or []) + ["fastmcp"],
             editable=[str(p) for p in with_editable] if with_editable else None,
