@@ -185,9 +185,7 @@ class TestTools:
     async def test_tool_returns_list(self, tool_server: FastMCP):
         async with Client(tool_server) as client:
             result = await client.call_tool("list_tool", {})
-            # Adjacent non-MCP list items are combined into single content block
-            assert len(result.content) == 1
-            assert result.content[0].text == "x2"  # type: ignore[attr-defined]
+            assert result.content[0].text == '["x",2]'  # type: ignore[attr-defined]
             assert result.data == ["x", 2]
 
     async def test_file_text_tool(self, tool_server: FastMCP):
@@ -428,7 +426,7 @@ class TestToolReturnTypes:
         self, tool_server: FastMCP, tmp_path: Path
     ):
         """Test that lists containing Image objects and other types are handled
-        correctly. Items now preserve their original order."""
+        correctly. Note that the non-MCP content will be grouped together."""
         # Create a test image
         image_path = tmp_path / "test.png"
         image_path.write_bytes(b"test image data")
@@ -437,30 +435,26 @@ class TestToolReturnTypes:
             result = await client.call_tool(
                 "mixed_list_fn", {"image_path": str(image_path)}
             )
-            assert len(result.content) == 4  # Now each item is separate
-            # Check text message (first item)
+            assert len(result.content) == 3
+            # Check text conversion
             content1 = result.content[0]
             assert isinstance(content1, TextContent)
-            assert content1.text == "text message"
-            # Check image conversion (second item)
+            assert json.loads(content1.text) == ["text message", {"key": "value"}]
+            # Check image conversion
             content2 = result.content[1]
             assert isinstance(content2, ImageContent)
             assert content2.mimeType == "image/png"
             assert base64.b64decode(content2.data) == b"test image data"
-            # Check dict content (third item)
+            # Check direct TextContent
             content3 = result.content[2]
             assert isinstance(content3, TextContent)
-            assert json.loads(content3.text) == {"key": "value"}
-            # Check direct TextContent (fourth item)
-            content4 = result.content[3]
-            assert isinstance(content4, TextContent)
-            assert content4.text == "direct content"
+            assert content3.text == "direct content"
 
     async def test_tool_mixed_list_with_audio(
         self, tool_server: FastMCP, tmp_path: Path
     ):
         """Test that lists containing Audio objects and other types are handled
-        correctly. Items now preserve their original order."""
+        correctly. Note that the non-MCP content will be grouped together."""
         # Create a test audio file
         audio_path = tmp_path / "test.wav"
         audio_path.write_bytes(b"test audio data")
@@ -469,30 +463,26 @@ class TestToolReturnTypes:
             result = await client.call_tool(
                 "mixed_audio_list_fn", {"audio_path": str(audio_path)}
             )
-            assert len(result.content) == 4  # Now each item is separate
-            # Check text message (first item)
+            assert len(result.content) == 3
+            # Check text conversion
             content1 = result.content[0]
             assert isinstance(content1, TextContent)
-            assert content1.text == "text message"
-            # Check audio conversion (second item)
+            assert json.loads(content1.text) == ["text message", {"key": "value"}]
+            # Check audio conversion
             content2 = result.content[1]
             assert isinstance(content2, AudioContent)
             assert content2.mimeType == "audio/wav"
             assert base64.b64decode(content2.data) == b"test audio data"
-            # Check dict content (third item)
+            # Check direct TextContent
             content3 = result.content[2]
             assert isinstance(content3, TextContent)
-            assert json.loads(content3.text) == {"key": "value"}
-            # Check direct TextContent (fourth item)
-            content4 = result.content[3]
-            assert isinstance(content4, TextContent)
-            assert content4.text == "direct content"
+            assert content3.text == "direct content"
 
     async def test_tool_mixed_list_with_file(
         self, tool_server: FastMCP, tmp_path: Path
     ):
         """Test that lists containing File objects and other types are handled
-        correctly. Items now preserve their original order."""
+        correctly. Note that the non-MCP content will be grouped together."""
         # Create a test file
         file_path = tmp_path / "test.bin"
         file_path.write_bytes(b"test file data")
@@ -501,12 +491,12 @@ class TestToolReturnTypes:
             result = await client.call_tool(
                 "mixed_file_list_fn", {"file_path": str(file_path)}
             )
-            assert len(result.content) == 4  # Now each item is separate
-            # Check text message (first item)
+            assert len(result.content) == 3
+            # Check text conversion
             content1 = result.content[0]
             assert isinstance(content1, TextContent)
-            assert content1.text == "text message"
-            # Check file conversion (second item)
+            assert json.loads(content1.text) == ["text message", {"key": "value"}]
+            # Check file conversion
             content2 = result.content[1]
             assert isinstance(content2, EmbeddedResource)
             assert content2.type == "resource"
@@ -515,14 +505,10 @@ class TestToolReturnTypes:
             assert hasattr(resource, "blob")
             blob_data = getattr(resource, "blob")
             assert base64.b64decode(blob_data) == b"test file data"
-            # Check dict content (third item)
+            # Check direct TextContent
             content3 = result.content[2]
             assert isinstance(content3, TextContent)
-            assert json.loads(content3.text) == {"key": "value"}
-            # Check direct TextContent (fourth item)
-            content4 = result.content[3]
-            assert isinstance(content4, TextContent)
-            assert content4.text == "direct content"
+            assert content3.text == "direct content"
 
 
 class TestToolParameters:
