@@ -73,7 +73,7 @@ class UVEnvironment(Environment):
         # Always add dependencies, requirements, and editable packages
         # These work with --project to add additional packages on top of the project env
         if self.dependencies:
-            for dep in self.dependencies:
+            for dep in sorted(set(self.dependencies)):
                 args.extend(["--with", dep])
 
         # Add requirements file
