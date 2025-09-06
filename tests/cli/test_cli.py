@@ -47,14 +47,14 @@ class TestVersionCommand:
     def test_version_command_parsing(self):
         """Test that the version command parses arguments correctly."""
         command, bound, _ = app.parse_args(["version"])
-        assert command.__name__ == "version"
+        assert command.__name__ == "version"  # type: ignore[attr-defined]
         # Default arguments aren't included in bound.arguments
         assert bound.arguments == {}
 
     def test_version_command_with_copy_flag(self):
         """Test that the version command parses --copy flag correctly."""
         command, bound, _ = app.parse_args(["version", "--copy"])
-        assert command.__name__ == "version"
+        assert command.__name__ == "version"  # type: ignore[attr-defined]
         assert bound.arguments == {"copy": True}
 
     @patch("fastmcp.cli.cli.pyperclip.copy")

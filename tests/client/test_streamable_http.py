@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, call
 import pytest
 import uvicorn
 from mcp import McpError
+from mcp.server.elicitation import AcceptedElicitation
 from starlette.applications import Starlette
 from starlette.routing import Mount
 
@@ -32,6 +33,9 @@ def fastmcp_server():
     async def elicit(ctx: Context) -> str:
         """Elicit a response from the user."""
         result = await ctx.elicit("What is your name?", response_type=str)
+
+        assert isinstance(result, AcceptedElicitation)
+
         if result.action == "accept":
             return f"You said your name was: {result.data}!"
         else:
