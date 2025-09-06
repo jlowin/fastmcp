@@ -28,7 +28,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from fastmcp.server.auth import TokenVerifier
 from fastmcp.server.auth.auth import AccessToken
 from fastmcp.server.auth.oauth_proxy import OAuthProxy
-from fastmcp.server.auth.registry import register_provider
 from fastmcp.utilities.auth import parse_scopes
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.types import NotSet, NotSetT
@@ -51,7 +50,6 @@ class GitHubProviderSettings(BaseSettings):
     redirect_path: str | None = None
     required_scopes: list[str] | None = None
     timeout_seconds: int | None = None
-    resource_server_url: AnyHttpUrl | str | None = None
     allowed_client_redirect_uris: list[str] | None = None
 
     @field_validator("required_scopes", mode="before")
@@ -165,7 +163,6 @@ class GitHubTokenVerifier(TokenVerifier):
             return None
 
 
-@register_provider("GitHub")
 class GitHubProvider(OAuthProxy):
     """Complete GitHub OAuth provider for FastMCP.
 
@@ -187,7 +184,7 @@ class GitHubProvider(OAuthProxy):
         auth = GitHubProvider(
             client_id="Ov23li...",
             client_secret="abc123...",
-            base_url="https://my-server.com"  # Optional, defaults to http://localhost:8000
+            base_url="https://my-server.com"
         )
 
         mcp = FastMCP("My App", auth=auth)
@@ -203,7 +200,6 @@ class GitHubProvider(OAuthProxy):
         redirect_path: str | NotSetT = NotSet,
         required_scopes: list[str] | NotSetT = NotSet,
         timeout_seconds: int | NotSetT = NotSet,
-        resource_server_url: AnyHttpUrl | str | NotSetT = NotSet,
         allowed_client_redirect_uris: list[str] | NotSetT = NotSet,
     ):
         """Initialize GitHub OAuth provider.
@@ -215,11 +211,10 @@ class GitHubProvider(OAuthProxy):
             redirect_path: Redirect path configured in GitHub OAuth app (defaults to "/auth/callback")
             required_scopes: Required GitHub scopes (defaults to ["user"])
             timeout_seconds: HTTP request timeout for GitHub API calls
-            resource_server_url: Path of the FastMCP server (defaults to base_url). If your MCP endpoint is at
-                a different path like {base_url}/mcp, specify it here for RFC 8707 compliance.
             allowed_client_redirect_uris: List of allowed redirect URI patterns for MCP clients.
                 If None (default), all URIs are allowed. If empty list, no URIs are allowed.
         """
+
         settings = GitHubProviderSettings.model_validate(
             {
                 k: v
@@ -230,7 +225,6 @@ class GitHubProvider(OAuthProxy):
                     "redirect_path": redirect_path,
                     "required_scopes": required_scopes,
                     "timeout_seconds": timeout_seconds,
-                    "resource_server_url": resource_server_url,
                     "allowed_client_redirect_uris": allowed_client_redirect_uris,
                 }.items()
                 if v is not NotSet
@@ -248,11 +242,10 @@ class GitHubProvider(OAuthProxy):
             )
 
         # Apply defaults
-        base_url_final = settings.base_url or "http://localhost:8000"
+
         redirect_path_final = settings.redirect_path or "/auth/callback"
         timeout_seconds_final = settings.timeout_seconds or 10
         required_scopes_final = settings.required_scopes or ["user"]
-        resource_server_url_final = settings.resource_server_url or base_url_final
         allowed_client_redirect_uris_final = settings.allowed_client_redirect_uris
 
         # Create GitHub token verifier
@@ -273,11 +266,10 @@ class GitHubProvider(OAuthProxy):
             upstream_client_id=settings.client_id,
             upstream_client_secret=client_secret_str,
             token_verifier=token_verifier,
-            base_url=base_url_final,
+            base_url=settings.base_url,
             redirect_path=redirect_path_final,
-            issuer_url=base_url_final,  # We act as the issuer for client registration
+            issuer_url=settings.base_url,  # We act as the issuer for client registration
             allowed_client_redirect_uris=allowed_client_redirect_uris_final,
-            resource_server_url=resource_server_url_final,
         )
 
         logger.info(

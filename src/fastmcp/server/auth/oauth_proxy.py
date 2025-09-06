@@ -18,12 +18,15 @@ production use with enterprise identity providers.
 
 from __future__ import annotations
 
+import hashlib
 import secrets
 import time
+from base64 import urlsafe_b64encode
 from typing import TYPE_CHECKING, Any, Final
 from urllib.parse import urlencode
 
 import httpx
+from authlib.common.security import generate_token
 from authlib.integrations.httpx_client import AsyncOAuth2Client
 from mcp.server.auth.provider import (
     AccessToken,
@@ -39,7 +42,7 @@ from mcp.server.auth.settings import (
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 from pydantic import AnyHttpUrl, AnyUrl, SecretStr
 from starlette.requests import Request
-from starlette.responses import JSONResponse, RedirectResponse
+from starlette.responses import RedirectResponse
 from starlette.routing import Route
 
 from fastmcp.server.auth.auth import OAuthProvider, TokenVerifier
@@ -172,7 +175,6 @@ class OAuthProxy(OAuthProvider):
     1. Client Registration (DCR):
        - Accept any client registration request
        - Store ProxyDCRClient that accepts dynamic redirect URIs
-       - Return shared upstream credentials to all clients
 
     2. Authorization:
        - Store transaction mapping client details to proxy flow
@@ -241,9 +243,13 @@ class OAuthProxy(OAuthProvider):
         redirect_path: str = "/auth/callback",
         issuer_url: AnyHttpUrl | str | None = None,
         service_documentation_url: AnyHttpUrl | str | None = None,
-        resource_server_url: AnyHttpUrl | str | None = None,
         # Client redirect URI validation
         allowed_client_redirect_uris: list[str] | None = None,
+        valid_scopes: list[str] | None = None,
+        # PKCE configuration
+        forward_pkce: bool = True,
+        # Token endpoint authentication
+        token_endpoint_auth_method: str | None = None,
     ):
         """Initialize the OAuth proxy provider.
 
@@ -259,15 +265,25 @@ class OAuthProxy(OAuthProvider):
             redirect_path: Redirect path configured in upstream OAuth app (defaults to "/auth/callback")
             issuer_url: Issuer URL for OAuth metadata (defaults to base_url)
             service_documentation_url: Optional service documentation URL
-            resource_server_url: Path of the FastMCP server.
             allowed_client_redirect_uris: List of allowed redirect URI patterns for MCP clients.
                 Patterns support wildcards (e.g., "http://localhost:*", "https://*.example.com/*").
                 If None (default), only localhost redirect URIs are allowed.
                 If empty list, all redirect URIs are allowed (not recommended for production).
                 These are for MCP clients performing loopback redirects, NOT for the upstream OAuth app.
+            valid_scopes: List of all the possible valid scopes for a client.
+                These are advertised to clients through the `/.well-known` endpoints. Defaults to `required_scopes` if not provided.
+            forward_pkce: Whether to forward PKCE to upstream server (default True).
+                Enable for providers that support/require PKCE (Google, Azure, etc.).
+                Disable only if upstream provider doesn't support PKCE.
+            token_endpoint_auth_method: Token endpoint authentication method for upstream server.
+                Common values: "client_secret_basic", "client_secret_post", "none".
+                If None, authlib will use its default (typically "client_secret_basic").
         """
         # Always enable DCR since we implement it locally for MCP clients
-        client_registration_options = ClientRegistrationOptions(enabled=True)
+        client_registration_options = ClientRegistrationOptions(
+            enabled=True,
+            valid_scopes=valid_scopes or token_verifier.required_scopes,
+        )
 
         # Enable revocation only if upstream endpoint provided
         revocation_options = (
@@ -281,7 +297,6 @@ class OAuthProxy(OAuthProvider):
             client_registration_options=client_registration_options,
             revocation_options=revocation_options,
             required_scopes=token_verifier.required_scopes,
-            resource_server_url=resource_server_url,
         )
 
         # Store upstream configuration
@@ -297,6 +312,12 @@ class OAuthProxy(OAuthProvider):
             redirect_path if redirect_path.startswith("/") else f"/{redirect_path}"
         )
         self._allowed_client_redirect_uris = allowed_client_redirect_uris
+
+        # PKCE configuration
+        self._forward_pkce = forward_pkce
+
+        # Token endpoint authentication
+        self._token_endpoint_auth_method = token_endpoint_auth_method
 
         # Local state for DCR and token bookkeeping
         self._clients: dict[str, OAuthClientInformationFull] = {}
@@ -322,71 +343,51 @@ class OAuthProxy(OAuthProvider):
         )
 
     # -------------------------------------------------------------------------
+    # PKCE Helper Methods
+    # -------------------------------------------------------------------------
+
+    def _generate_pkce_pair(self) -> tuple[str, str]:
+        """Generate PKCE code verifier and challenge pair.
+
+        Returns:
+            Tuple of (code_verifier, code_challenge) using S256 method
+        """
+        # Generate code verifier: 43-128 characters from unreserved set
+        code_verifier = generate_token(48)
+
+        # Generate code challenge using S256 (SHA256 + base64url)
+        challenge_bytes = hashlib.sha256(code_verifier.encode()).digest()
+        code_challenge = urlsafe_b64encode(challenge_bytes).decode().rstrip("=")
+
+        return code_verifier, code_challenge
+
+    # -------------------------------------------------------------------------
     # Client Registration (Local Implementation)
     # -------------------------------------------------------------------------
 
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
-        """Get client information by ID.
+        """Get client information by ID. This is generally the random ID
+        provided to the DCR client during registration, not the upstream client ID.
 
-        For unregistered clients, returns a ProxyDCRClient that accepts
-        any localhost redirect URI for DCR clients.
-
-        Even registered clients use ProxyDCRClient to ensure they can
-        authenticate with different dynamic ports on reconnection. This
-        handles the case where a client with cached tokens reconnects
-        on a different port.
+        For unregistered clients, returns None (which will raise an error in the SDK).
         """
         client = self._clients.get(client_id)
-
-        if client is None:
-            # For unregistered DCR clients, create a permissive client
-            # that will accept any localhost redirect URI
-            # We need at least one URI for Pydantic validation, but our custom
-            # validate_redirect_uri will accept any localhost URI
-            client = ProxyDCRClient(
-                client_id=client_id,
-                client_secret=None,
-                redirect_uris=[
-                    AnyUrl("http://localhost")
-                ],  # Placeholder, validation uses allowed_patterns
-                grant_types=["authorization_code", "refresh_token"],
-                scope=self._default_scope_str,
-                token_endpoint_auth_method="none",
-                allowed_redirect_uri_patterns=self._allowed_client_redirect_uris,
-            )
-            logger.debug("Created ProxyDCRClient for unregistered client %s", client_id)
 
         return client
 
     async def register_client(self, client_info: OAuthClientInformationFull) -> None:
-        """Register a client locally using fixed upstream credentials.
+        """Register a client locally
 
-        This implementation always uses the upstream client_id and client_secret
-        regardless of what the client requests. It modifies the client_info object
-        in place since the MCP framework ignores return values.
-
-        This ensures all clients use the same credentials that are registered
-        with the upstream server.
-
-        Implementation Detail:
-        We store a ProxyDCRClient (not the original client_info) to ensure
-        the client can reconnect with different dynamic redirect URIs. This is
-        essential for cached token scenarios where the client port changes.
-
-        The flow:
-        1. Client provides its desired redirect URIs (dynamic localhost ports)
-        2. We create a ProxyDCRClient that will accept ANY localhost URI
-        3. We store this flexible client for future authentications
-        4. When client reconnects with a different port, ProxyDCRClient accepts it
+        When a client registers, we create a ProxyDCRClient that is more
+        forgiving about validating redirect URIs, since the DCR client's
+        redirect URI will likely be localhost or unknown to the proxied IDP. The
+        proxied IDP only knows about this server's fixed redirect URI.
         """
-        # Always use the upstream credentials
-        upstream_id = self._upstream_client_id
-        upstream_secret = self._upstream_client_secret.get_secret_value()
 
         # Create a ProxyDCRClient with configured redirect URI validation
         proxy_client = ProxyDCRClient(
-            client_id=upstream_id,
-            client_secret=upstream_secret,
+            client_id=client_info.client_id,
+            client_secret=client_info.client_secret,
             redirect_uris=client_info.redirect_uris or [AnyUrl("http://localhost")],
             grant_types=client_info.grant_types
             or ["authorization_code", "refresh_token"],
@@ -395,8 +396,8 @@ class OAuthProxy(OAuthProvider):
             allowed_redirect_uri_patterns=self._allowed_client_redirect_uris,
         )
 
-        # Store the ProxyDCRClient using the upstream ID
-        self._clients[upstream_id] = proxy_client
+        # Store the ProxyDCRClient
+        self._clients[client_info.client_id] = proxy_client
 
         # Log redirect URIs to help users discover what patterns they might need
         if client_info.redirect_uris:
@@ -409,7 +410,7 @@ class OAuthProxy(OAuthProvider):
 
         logger.debug(
             "Registered client %s with %d redirect URIs",
-            upstream_id,
+            client_info.client_id,
             len(proxy_client.redirect_uris),
         )
 
@@ -426,14 +427,25 @@ class OAuthProxy(OAuthProvider):
 
         This implements the DCR-compliant proxy pattern:
         1. Store transaction with client details and PKCE challenge
-        2. Use transaction ID as state for IdP
-        3. Redirect to IdP with our fixed callback URL
+        2. Generate proxy's own PKCE parameters if forwarding is enabled
+        3. Use transaction ID as state for IdP
+        4. Redirect to IdP with our fixed callback URL and proxy's PKCE
         """
         # Generate transaction ID for this authorization request
         txn_id = secrets.token_urlsafe(32)
 
+        # Generate proxy's own PKCE parameters if forwarding is enabled
+        proxy_code_verifier = None
+        proxy_code_challenge = None
+        if self._forward_pkce and params.code_challenge:
+            proxy_code_verifier, proxy_code_challenge = self._generate_pkce_pair()
+            logger.debug(
+                "Generated proxy PKCE for transaction %s (forwarding client PKCE to upstream)",
+                txn_id,
+            )
+
         # Store transaction data for IdP callback processing
-        self._oauth_transactions[txn_id] = {
+        transaction_data = {
             "client_id": client.client_id,
             "client_redirect_uri": str(params.redirect_uri),
             "client_state": params.state,
@@ -442,6 +454,12 @@ class OAuthProxy(OAuthProvider):
             "scopes": params.scopes or [],
             "created_at": time.time(),
         }
+
+        # Store proxy's PKCE verifier if we're forwarding
+        if proxy_code_verifier:
+            transaction_data["proxy_code_verifier"] = proxy_code_verifier
+
+        self._oauth_transactions[txn_id] = transaction_data
 
         # Build query parameters for upstream IdP authorization request
         # Use our fixed IdP callback and transaction ID as state
@@ -458,14 +476,24 @@ class OAuthProxy(OAuthProvider):
         if scopes_to_use:
             query_params["scope"] = " ".join(scopes_to_use)
 
+        # Forward proxy's PKCE challenge to upstream if enabled
+        if proxy_code_challenge:
+            query_params["code_challenge"] = proxy_code_challenge
+            query_params["code_challenge_method"] = "S256"
+            logger.debug(
+                "Forwarding proxy PKCE challenge to upstream for transaction %s",
+                txn_id,
+            )
+
         # Build the upstream authorization URL
         separator = "&" if "?" in self._upstream_authorization_endpoint else "?"
         upstream_url = f"{self._upstream_authorization_endpoint}{separator}{urlencode(query_params)}"
 
         logger.debug(
-            "Starting OAuth transaction %s for client %s, redirecting to IdP",
+            "Starting OAuth transaction %s for client %s, redirecting to IdP (PKCE forwarding: %s)",
             txn_id,
             client.client_id,
+            "enabled" if proxy_code_challenge else "disabled",
         )
         return upstream_url
 
@@ -602,6 +630,7 @@ class OAuthProxy(OAuthProvider):
         oauth_client = AsyncOAuth2Client(
             client_id=self._upstream_client_id,
             client_secret=self._upstream_client_secret.get_secret_value(),
+            token_endpoint_auth_method=self._token_endpoint_auth_method,
             timeout=HTTP_TIMEOUT_SECONDS,
         )
 
@@ -726,163 +755,22 @@ class OAuthProxy(OAuthProvider):
 
         logger.debug("Token revoked successfully")
 
-    # -------------------------------------------------------------------------
-    # Custom Route Handling
-    # -------------------------------------------------------------------------
-
-    async def _handle_proxy_token_request(self, request: Request) -> JSONResponse:
-        """Custom token endpoint using authlib for upstream requests.
-
-        This handler uses authlib's OAuth2Client to forward token requests to the
-        upstream OAuth server, automatically handling response format differences.
-        """
-        try:
-            # Parse the incoming request form data
-            form_data = await request.form()
-
-            # Log the incoming request (with sensitive data redacted)
-            redacted_form = {
-                k: (
-                    str(v)[:8] + "..."
-                    if k in {"code", "code_verifier", "client_secret", "refresh_token"}
-                    and v
-                    else str(v)
-                )
-                for k, v in form_data.items()
-            }
-            logger.debug("Proxy token request form data: %s", redacted_form)
-
-            # Create authlib OAuth2 client
-            oauth_client = AsyncOAuth2Client(
-                client_id=self._upstream_client_id,
-                client_secret=self._upstream_client_secret.get_secret_value(),
-                timeout=HTTP_TIMEOUT_SECONDS,
-            )
-
-            grant_type = str(form_data.get("grant_type", ""))
-
-            if grant_type == "authorization_code":
-                # Authorization code grant
-                try:
-                    token_data: dict[str, Any] = await oauth_client.fetch_token(  # type: ignore[misc]
-                        url=self._upstream_token_endpoint,
-                        code=str(form_data.get("code", "")),
-                        redirect_uri=str(form_data.get("redirect_uri", "")),
-                        code_verifier=str(form_data.get("code_verifier"))
-                        if "code_verifier" in form_data
-                        else None,
-                    )
-
-                    # Store tokens locally for tracking
-                    if "access_token" in token_data:
-                        self._store_tokens_from_response(token_data)
-
-                    logger.debug(
-                        "Successfully proxied authorization code exchange via authlib"
-                    )
-
-                except Exception as e:
-                    logger.error("Authlib authorization code exchange failed: %s", e)
-                    return JSONResponse(
-                        content={
-                            "error": "invalid_grant",
-                            "error_description": f"Authorization code exchange failed: {e}",
-                        },
-                        status_code=400,
-                    )
-
-            elif grant_type == "refresh_token":
-                # Refresh token grant
-                try:
-                    token_data: dict[str, Any] = await oauth_client.refresh_token(  # type: ignore[misc]
-                        url=self._upstream_token_endpoint,
-                        refresh_token=str(form_data.get("refresh_token", "")),
-                        scope=str(form_data.get("scope"))
-                        if "scope" in form_data
-                        else None,
-                    )
-
-                    logger.debug(
-                        "Successfully proxied refresh token exchange via authlib"
-                    )
-
-                except Exception as e:
-                    logger.error("Authlib refresh token exchange failed: %s", e)
-                    return JSONResponse(
-                        content={
-                            "error": "invalid_grant",
-                            "error_description": f"Refresh token exchange failed: {e}",
-                        },
-                        status_code=400,
-                    )
-            else:
-                # Unsupported grant type
-                logger.error("Unsupported grant type: %s", grant_type)
-                return JSONResponse(
-                    content={
-                        "error": "unsupported_grant_type",
-                        "error_description": f"Grant type '{grant_type}' not supported by proxy",
-                    },
-                    status_code=400,
-                )
-
-            return JSONResponse(content=token_data)
-
-        except Exception as e:
-            logger.error("Error in proxy token handler: %s", e, exc_info=True)
-            return JSONResponse(
-                content={
-                    "error": "server_error",
-                    "error_description": "Internal server error",
-                },
-                status_code=500,
-            )
-
-    def _store_tokens_from_response(self, token_data: dict[str, Any]) -> None:
-        """Store tokens from upstream response for local tracking."""
-        try:
-            access_token_value = token_data.get("access_token")
-            refresh_token_value = token_data.get("refresh_token")
-            expires_in = int(
-                token_data.get("expires_in", DEFAULT_ACCESS_TOKEN_EXPIRY_SECONDS)
-            )
-            expires_at = int(time.time() + expires_in)
-
-            if access_token_value:
-                access_token = AccessToken(
-                    token=access_token_value,
-                    client_id=self._upstream_client_id,
-                    scopes=[],  # Will be determined by token validation
-                    expires_at=expires_at,
-                )
-                self._access_tokens[access_token_value] = access_token
-
-                if refresh_token_value:
-                    refresh_token = RefreshToken(
-                        token=refresh_token_value,
-                        client_id=self._upstream_client_id,
-                        scopes=[],
-                        expires_at=None,
-                    )
-                    self._refresh_tokens[refresh_token_value] = refresh_token
-
-                    # Maintain token relationships
-                    self._access_to_refresh[access_token_value] = refresh_token_value
-                    self._refresh_to_access[refresh_token_value] = access_token_value
-
-                logger.debug("Stored tokens from upstream response for tracking")
-
-        except Exception as e:
-            logger.warning("Failed to store tokens from upstream response: %s", e)
-
-    def get_routes(self) -> list[Route]:
+    def get_routes(
+        self,
+        mcp_path: str | None = None,
+        mcp_endpoint: Any | None = None,
+    ) -> list[Route]:
         """Get OAuth routes with custom proxy token handler.
 
         This method creates standard OAuth routes and replaces the token endpoint
         with our proxy handler that forwards requests to the upstream OAuth server.
+
+        Args:
+            mcp_path: The path where the MCP endpoint is mounted (e.g., "/mcp")
+            mcp_endpoint: The MCP endpoint handler to protect with auth
         """
         # Get standard OAuth routes from parent class
-        routes = super().get_routes()
+        routes = super().get_routes(mcp_path, mcp_endpoint)
         custom_routes = []
         token_route_found = False
 
@@ -970,6 +858,7 @@ class OAuthProxy(OAuthProvider):
             oauth_client = AsyncOAuth2Client(
                 client_id=self._upstream_client_id,
                 client_secret=self._upstream_client_secret.get_secret_value(),
+                token_endpoint_auth_method=self._token_endpoint_auth_method,
                 timeout=HTTP_TIMEOUT_SECONDS,
             )
 
@@ -981,14 +870,28 @@ class OAuthProxy(OAuthProvider):
                     f"Exchanging IdP code for tokens with redirect_uri: {idp_redirect_uri}"
                 )
 
-                idp_tokens: dict[str, Any] = await oauth_client.fetch_token(  # type: ignore[misc]
-                    url=self._upstream_token_endpoint,
-                    code=idp_code,
-                    redirect_uri=idp_redirect_uri,
-                )
+                # Include proxy's code_verifier if we forwarded PKCE
+                proxy_code_verifier = transaction.get("proxy_code_verifier")
+                if proxy_code_verifier:
+                    logger.debug(
+                        "Including proxy code_verifier in token exchange for transaction %s",
+                        txn_id,
+                    )
+                    idp_tokens: dict[str, Any] = await oauth_client.fetch_token(  # type: ignore[misc]
+                        url=self._upstream_token_endpoint,
+                        code=idp_code,
+                        redirect_uri=idp_redirect_uri,
+                        code_verifier=proxy_code_verifier,
+                    )
+                else:
+                    idp_tokens: dict[str, Any] = await oauth_client.fetch_token(  # type: ignore[misc]
+                        url=self._upstream_token_endpoint,
+                        code=idp_code,
+                        redirect_uri=idp_redirect_uri,
+                    )
 
                 logger.debug(
-                    f"Successfully exchanged IdP code for tokens (transaction: {txn_id})"
+                    f"Successfully exchanged IdP code for tokens (transaction: {txn_id}, PKCE: {bool(proxy_code_verifier)})"
                 )
 
             except Exception as e:
