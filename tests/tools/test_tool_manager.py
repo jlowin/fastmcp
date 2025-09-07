@@ -5,7 +5,8 @@ from typing import Annotated, Any
 
 import pydantic_core
 import pytest
-from mcp.types import ImageContent
+from inline_snapshot import snapshot
+from mcp.types import ImageContent, TextContent
 from pydantic import BaseModel
 
 from fastmcp import Context, FastMCP
@@ -15,6 +16,7 @@ from fastmcp.tools.tool import Tool
 from fastmcp.tools.tool_transform import ArgTransformConfig, ToolTransformConfig
 from fastmcp.utilities.tests import caplog_for_fastmcp, temporary_settings
 from fastmcp.utilities.types import Image
+from tests.conftest import get_fn_name
 
 
 class TestAddTools:
@@ -236,7 +238,7 @@ class TestAddTools:
         tool = await manager.get_tool("test_tool")
         assert tool is not None
         assert isinstance(tool, FunctionTool)
-        assert tool.fn.__name__ == "replacement_fn"
+        assert get_fn_name(tool.fn) == "replacement_fn"
 
     async def test_ignore_duplicate_tools(self):
         """Test ignoring duplicate tools."""
@@ -257,10 +259,10 @@ class TestAddTools:
         tool = await manager.get_tool("test_tool")
         assert tool is not None
         assert isinstance(tool, FunctionTool)
-        assert tool.fn.__name__ == "original_fn"
+        assert get_fn_name(tool.fn) == "original_fn"
         # Result should be the original tool
         assert isinstance(result, FunctionTool)
-        assert result.fn.__name__ == "replacement_fn"
+        assert get_fn_name(result.fn) == "replacement_fn"
 
 
 class TestListTools:
@@ -571,8 +573,10 @@ class TestCallTools:
 
         # Adjacent non-MCP list items are combined into single content block
         assert len(result.content) == 1
-        assert result.content[0].text == "rexgertrude"  # type: ignore[attr-defined]
-        assert result.structured_content == {"result": ["rex", "gertrude"]}
+        assert result.content == snapshot(
+            [TextContent(type="text", text='["rex","gertrude"]')]
+        )
+        assert result.structured_content == snapshot({"result": ["rex", "gertrude"]})
 
     async def test_call_tool_with_custom_serializer(self):
         """Test that a custom serializer provided to FastMCP is used by tools."""
@@ -615,16 +619,22 @@ class TestCallTools:
         result = await manager.call_tool("get_data", {})
         # Adjacent non-MCP list items get combined with custom serializer applied to each
         assert len(result.content) == 1
-        assert (
-            result.content[0].text  # type: ignore[attr-defined]
-            == '{"key": "value", "number": 123}{"key": "value2", "number": 456}'  # Adjacent items combined after individual serialization
-        )
-        assert result.structured_content == {
-            "result": [
-                {"key": "value", "number": 123},
-                {"key": "value2", "number": 456},
+        assert result.content == snapshot(
+            [
+                TextContent(
+                    type="text",
+                    text='CUSTOM:[{"key": "value", "number": 123}, {"key": "value2", "number": 456}]',
+                )
             ]
-        }
+        )
+        assert result.structured_content == snapshot(
+            {
+                "result": [
+                    {"key": "value", "number": 123},
+                    {"key": "value2", "number": 456},
+                ]
+            }
+        )
 
     async def test_custom_serializer_fallback_on_error(self):
         """Test that a broken custom serializer gracefully falls back."""
@@ -824,7 +834,7 @@ class TestCustomToolNames:
         assert await manager.get_tool("custom_name") is not None
         assert tool.name == "custom_name"
         assert isinstance(tool, FunctionTool)
-        assert tool.fn.__name__ == "original_fn"
+        assert get_fn_name(tool.fn) == "original_fn"
         # The tool should not be accessible via its original function name
         with pytest.raises(NotFoundError, match="Tool 'original_fn' not found"):
             await manager.get_tool("original_fn")
@@ -901,7 +911,7 @@ class TestCustomToolNames:
 
         # But the function is different
         assert isinstance(stored_tool, FunctionTool)
-        assert stored_tool.fn.__name__ == "replacement_fn"
+        assert get_fn_name(stored_tool.fn) == "replacement_fn"
 
 
 class TestToolErrorHandling:
