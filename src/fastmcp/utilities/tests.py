@@ -141,7 +141,7 @@ def run_server_in_process(
 def caplog_for_fastmcp(caplog):
     """Context manager to capture logs from FastMCP loggers even when propagation is disabled."""
     caplog.clear()
-    logger = logging.getLogger("FastMCP")
+    logger = logging.getLogger("fastmcp")
     logger.addHandler(caplog.handler)
     try:
         yield
