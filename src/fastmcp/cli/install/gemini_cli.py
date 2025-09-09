@@ -1,4 +1,4 @@
-"""Claude Code integration for FastMCP install using Cyclopts."""
+"""Gemini CLI integration for FastMCP install using Cyclopts."""
 
 import shutil
 import subprocess
@@ -17,60 +17,56 @@ from .shared import process_common_args
 logger = get_logger(__name__)
 
 
-def find_claude_command() -> str | None:
-    """Find the Claude Code CLI command.
-
-    Checks common installation locations since 'claude' is often a shell alias
-    that doesn't work with subprocess calls.
-    """
+def find_gemini_command() -> str | None:
+    """Find the Gemini CLI command."""
     # First try shutil.which() in case it's a real executable in PATH
-    claude_in_path = shutil.which("claude")
-    if claude_in_path:
+    gemini_in_path = shutil.which("gemini")
+    if gemini_in_path:
         try:
-            result = subprocess.run(
-                [claude_in_path, "--version"],
+            # If 'gemini --version' fails, it's not the correct path
+            subprocess.run(
+                [gemini_in_path, "--version"],
                 check=True,
                 capture_output=True,
-                text=True,
             )
-            if "Claude Code" in result.stdout:
-                return claude_in_path
+            return gemini_in_path
         except (subprocess.CalledProcessError, FileNotFoundError):
             pass
 
     # Check common installation locations (aliases don't work with subprocess)
     potential_paths = [
-        # Default Claude Code installation location (after migration)
-        Path.home() / ".claude" / "local" / "claude",
+        # Default Gemini CLI installation location (after migration)
+        Path.home() / ".gemini" / "local" / "gemini",
         # npm global installation on macOS/Linux (default)
-        Path("/usr/local/bin/claude"),
+        Path("/usr/local/bin/gemini"),
         # npm global installation with custom prefix
-        Path.home() / ".npm-global" / "bin" / "claude",
+        Path.home() / ".npm-global" / "bin" / "gemini",
+        # Homebrew installation on macOS
+        Path("/opt/homebrew/bin/gemini"),
     ]
 
     for path in potential_paths:
         if path.exists():
+            # If 'gemini --version' fails, it's not the correct path
             try:
-                result = subprocess.run(
+                subprocess.run(
                     [str(path), "--version"],
                     check=True,
                     capture_output=True,
-                    text=True,
                 )
-                if "Claude Code" in result.stdout:
-                    return str(path)
+                return str(path)
             except (subprocess.CalledProcessError, FileNotFoundError):
                 continue
 
     return None
 
 
-def check_claude_code_available() -> bool:
-    """Check if Claude Code CLI is available."""
-    return find_claude_command() is not None
+def check_gemini_cli_available() -> bool:
+    """Check if Gemini CLI is available."""
+    return find_gemini_command() is not None
 
 
-def install_claude_code(
+def install_gemini_cli(
     file: Path,
     server_object: str | None,
     name: str,
@@ -82,12 +78,12 @@ def install_claude_code(
     with_requirements: Path | None = None,
     project: Path | None = None,
 ) -> bool:
-    """Install FastMCP server in Claude Code.
+    """Install FastMCP server in Gemini CLI.
 
     Args:
         file: Path to the server file
         server_object: Optional server object name (for :object suffix)
-        name: Name for the server in Claude Code
+        name: Name for the server in Gemini CLI
         with_editable: Optional list of directories to install in editable mode
         with_packages: Optional list of additional packages to install
         env_vars: Optional dictionary of environment variables
@@ -98,15 +94,17 @@ def install_claude_code(
     Returns:
         True if installation was successful, False otherwise
     """
-    # Check if Claude Code CLI is available
-    claude_cmd = find_claude_command()
-    if not claude_cmd:
+    # Check if Gemini CLI is available
+    gemini_cmd = find_gemini_command()
+    if not gemini_cmd:
         print(
-            "[red]Claude Code CLI not found.[/red]\n"
-            "[blue]Please ensure Claude Code is installed. Try running 'claude --version' to verify.[/blue]"
+            "[red]Gemini CLI not found.[/red]\n"
+            "[blue]Please ensure Gemini CLI is installed. Try running 'gemini --version' to verify.[/blue]\n"
+            "[blue]You can install it using 'npm install -g @google/gemini-cli'.[/blue]\n"
         )
         return False
 
+    # Build uv run command using Environment.build_uv_run_command()
     env_config = UVEnvironment(
         python=python_version,
         dependencies=(with_packages or []) + ["fastmcp"],
@@ -124,8 +122,8 @@ def install_claude_code(
     # Build the full command
     full_command = env_config.build_command(["fastmcp", "run", server_spec])
 
-    # Build claude mcp add command
-    cmd_parts = [claude_cmd, "mcp", "add"]
+    # Build gemini mcp add command
+    cmd_parts = [gemini_cmd, "mcp", "add"]
 
     # Add environment variables if specified (before the name and command)
     if env_vars:
@@ -133,31 +131,31 @@ def install_claude_code(
             cmd_parts.extend(["-e", f"{key}={value}"])
 
     # Add server name and command
-    cmd_parts.extend([name, "--"])
-    cmd_parts.extend(full_command)
+    cmd_parts.extend([name, full_command[0], "--"])
+    cmd_parts.extend(full_command[1:])
 
     try:
-        # Run the claude mcp add command
+        # Run the gemini mcp add command
         subprocess.run(cmd_parts, check=True, capture_output=True, text=True)
         return True
     except subprocess.CalledProcessError as e:
         print(
-            f"[red]Failed to install '[bold]{name}[/bold]' in Claude Code: {e.stderr.strip() if e.stderr else str(e)}[/red]"
+            f"[red]Failed to install '[bold]{name}[/bold]' in Gemini CLI: {e.stderr.strip() if e.stderr else str(e)}[/red]"
         )
         return False
     except Exception as e:
-        print(f"[red]Failed to install '[bold]{name}[/bold]' in Claude Code: {e}[/red]")
+        print(f"[red]Failed to install '[bold]{name}[/bold]' in Gemini CLI: {e}[/red]")
         return False
 
 
-async def claude_code_command(
+async def gemini_cli_command(
     server_spec: str,
     *,
     server_name: Annotated[
         str | None,
         cyclopts.Parameter(
             name=["--name", "-n"],
-            help="Custom name for the server in Claude Code",
+            help="Custom name for the server in Gemini CLI",
         ),
     ] = None,
     with_editable: Annotated[
@@ -213,7 +211,7 @@ async def claude_code_command(
         ),
     ] = None,
 ) -> None:
-    """Install an MCP server in Claude Code.
+    """Install an MCP server in Gemini CLI.
 
     Args:
         server_spec: Python file to install, optionally with :object suffix
@@ -226,7 +224,7 @@ async def claude_code_command(
         server_spec, server_name, with_packages, env_vars, env_file
     )
 
-    success = install_claude_code(
+    success = install_gemini_cli(
         file=file,
         server_object=server_object,
         name=name,
@@ -239,6 +237,6 @@ async def claude_code_command(
     )
 
     if success:
-        print(f"[green]Successfully installed '{name}' in Claude Code[/green]")
+        print(f"[green]Successfully installed '{name}' in Gemini CLI")
     else:
         sys.exit(1)

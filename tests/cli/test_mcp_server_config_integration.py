@@ -103,9 +103,12 @@ class TestConfigWithClient:
         spec = importlib.util.spec_from_file_location("test_server", str(source_path))
         if spec is None or spec.loader is None:
             raise RuntimeError(f"Could not load module from {source_path}")
+
         module = importlib.util.module_from_spec(spec)
         sys.modules["test_server"] = module
         spec.loader.exec_module(module)
+
+        assert hasattr(module, "mcp")
 
         server = module.mcp
 
@@ -138,7 +141,7 @@ class TestEnvironmentExecution:
         )
 
         assert config.environment is not None
-        assert config.environment.needs_uv()
+        assert config.environment._must_run_with_uv()
 
     def test_needs_uv_with_python_version(self):
         """Test that environment with Python version needs UV."""
@@ -148,7 +151,7 @@ class TestEnvironmentExecution:
         )
 
         assert config.environment is not None
-        assert config.environment.needs_uv()
+        assert config.environment._must_run_with_uv()
 
     def test_no_uv_needed_without_environment(self):
         """Test that no UV is needed without environment config."""
@@ -156,7 +159,7 @@ class TestEnvironmentExecution:
 
         # Environment is now always present but may be empty
         assert config.environment is not None
-        assert not config.environment.needs_uv()
+        assert not config.environment._must_run_with_uv()
 
     def test_no_uv_needed_with_empty_environment(self):
         """Test that no UV is needed with empty environment config."""
@@ -166,7 +169,7 @@ class TestEnvironmentExecution:
         )
 
         assert config.environment is not None
-        assert not config.environment.needs_uv()
+        assert not config.environment._must_run_with_uv()
 
 
 class TestPathResolution:
