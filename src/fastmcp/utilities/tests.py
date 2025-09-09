@@ -144,7 +144,7 @@ def caplog_for_fastmcp(caplog):
     logger = logging.getLogger("fastmcp")
     logger.addHandler(caplog.handler)
     try:
-        yield
+        yield caplog
     finally:
         logger.removeHandler(caplog.handler)
 
