@@ -345,7 +345,7 @@ class FastMCP(Generic[LifespanResultT]):
             transport: Transport protocol to use ("stdio", "sse", or "streamable-http")
         """
         if transport is None:
-            transport = "stdio"
+            transport = self._deprecated_settings.transport
         if transport not in {"stdio", "http", "sse", "streamable-http"}:
             raise ValueError(f"Unknown transport: {transport}")
 
