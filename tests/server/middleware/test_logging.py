@@ -350,9 +350,9 @@ INFO     fastmcp.requests:logging.py:117 Completed message: event=request_succes
         logging_middleware = StructuredLoggingMiddleware(
             include_payloads=True, methods=["tools/call"]
         )
-        logging_middleware._get_timestamp_from_context = (
+        logging_middleware._get_timestamp_from_context = (  # ty: ignore[invalid-assignment]
             lambda _: FIXED_DATE.isoformat()
-        )  # ty: ignore[invalid-assignment]
+        )
 
         logging_server.add_middleware(logging_middleware)
 
