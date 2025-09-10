@@ -2,6 +2,7 @@
 
 import datetime
 import logging
+import re
 from typing import Any, Literal, TypeVar
 from unittest.mock import AsyncMock, MagicMock
 
@@ -21,6 +22,17 @@ from fastmcp.server.middleware.middleware import MiddlewareContext
 FIXED_DATE = datetime.datetime(2023, 1, 1, tzinfo=datetime.timezone.utc)
 
 T = TypeVar("T")
+
+
+def remove_line_numbers(logs: str) -> str:
+    """Remove line numbers from log messages."""
+    trimmed_logs = ""
+    lines = logs.split("\n")
+    for line in lines:
+        # Match only the first `:\d+ `
+        line = re.sub(pattern=r":\d+ ", repl=":LINE_NUMBER ", string=line, count=1)
+        trimmed_logs += line + "\n"
+    return trimmed_logs
 
 
 def new_mock_context(
@@ -71,8 +83,8 @@ class TestStructuredLoggingMiddleware:
         assert middleware.log_level == logging.INFO
         assert middleware.include_payloads is False
         assert middleware.max_payload_length == 1000
-        assert middleware.include_response_length is False
-        assert middleware.estimate_response_tokens is False
+        assert middleware.include_payload_length is False
+        assert middleware.estimate_payload_tokens is False
         assert middleware.structured_logging is False
 
     def test_init_custom(self):
@@ -82,21 +94,21 @@ class TestStructuredLoggingMiddleware:
             logger=logger,
             log_level=logging.DEBUG,
             include_payloads=True,
-            include_response_length=False,
-            estimate_response_tokens=True,
+            include_payload_length=False,
+            estimate_payload_tokens=True,
         )
         assert middleware.logger is logger
         assert middleware.log_level == logging.DEBUG
         assert middleware.include_payloads is True
-        assert middleware.include_response_length is False
-        assert middleware.estimate_response_tokens is True
+        assert middleware.include_payload_length is False
+        assert middleware.estimate_payload_tokens is True
 
     class TestHelperMethods:
-        def test_create_message(self, mock_context: MiddlewareContext[Any]):
+        def test_create_before_message(self, mock_context: MiddlewareContext[Any]):
             """Test message formatting without payloads."""
             middleware = StructuredLoggingMiddleware()
 
-            message = middleware._create_message(mock_context, "test_event")
+            message = middleware._create_before_message(mock_context, "test_event")
 
             assert message == snapshot(
                 {
@@ -114,7 +126,7 @@ class TestStructuredLoggingMiddleware:
             """Test message formatting with payloads."""
             middleware = StructuredLoggingMiddleware(include_payloads=True)
 
-            message = middleware._create_message(mock_context, "test_event")
+            message = middleware._create_before_message(mock_context, "test_event")
 
             assert message == snapshot(
                 {
@@ -130,8 +142,8 @@ class TestStructuredLoggingMiddleware:
 
         def test_calculate_response_size(self, mock_context: MiddlewareContext[Any]):
             """Test response size calculation."""
-            middleware = StructuredLoggingMiddleware(include_response_length=True)
-            message = middleware._create_message(mock_context, "test_event")
+            middleware = StructuredLoggingMiddleware(include_payload_length=True)
+            message = middleware._create_before_message(mock_context, "test_event")
 
             assert message == snapshot(
                 {
@@ -140,7 +152,7 @@ class TestStructuredLoggingMiddleware:
                     "source": "client",
                     "type": "request",
                     "method": "test_method",
-                    "response_length": 98,
+                    "payload_length": 98,
                 }
             )
 
@@ -149,9 +161,9 @@ class TestStructuredLoggingMiddleware:
         ):
             """Test response size calculation with token estimation."""
             middleware = StructuredLoggingMiddleware(
-                include_response_length=True, estimate_response_tokens=True
+                include_payload_length=True, estimate_payload_tokens=True
             )
-            message = middleware._create_message(mock_context, "test_event")
+            message = middleware._create_before_message(mock_context, "test_event")
 
             assert message == snapshot(
                 {
@@ -160,8 +172,8 @@ class TestStructuredLoggingMiddleware:
                     "source": "client",
                     "type": "request",
                     "method": "test_method",
-                    "response_tokens": 24,
-                    "response_length": 98,
+                    "payload_tokens": 24,
+                    "payload_length": 98,
                 }
             )
 
@@ -179,9 +191,10 @@ class TestStructuredLoggingMiddleware:
 
         assert result == "test_result"
         assert mock_call_next.called
-        assert caplog.text == snapshot("""\
-INFO     fastmcp.structured:logging.py:107 Processing message: {"event": "request_start", "timestamp": "2023-01-01T00:00:00+00:00", "method": "test_method", "type": "request", "source": "client"}
-INFO     fastmcp.structured:logging.py:117 Completed message: {"event": "request_success", "timestamp": "2023-01-01T00:00:00+00:00", "method": "test_method", "type": "request", "source": "client"}
+        assert remove_line_numbers(caplog.text) == snapshot("""\
+INFO     fastmcp.structured:logging.py:LINE_NUMBER Processing message: {"event": "request_start", "timestamp": "2023-01-01T00:00:00+00:00", "method": "test_method", "type": "request", "source": "client"}
+INFO     fastmcp.structured:logging.py:LINE_NUMBER Completed message: {"event": "request_success", "timestamp": "2023-01-01T00:00:00+00:00", "method": "test_method", "type": "request", "source": "client"}
+
 """)
 
     async def test_on_message_failure(
@@ -208,24 +221,26 @@ class TestLoggingMiddleware:
         assert middleware.logger.name == "fastmcp.requests"
         assert middleware.log_level == logging.INFO
         assert middleware.include_payloads is False
-        assert middleware.include_response_length is False
-        assert middleware.estimate_response_tokens is False
+        assert middleware.include_payload_length is False
+        assert middleware.estimate_payload_tokens is False
 
     def test_format_message(self, mock_context: MiddlewareContext[Any]):
         """Test message formatting."""
         middleware = LoggingMiddleware()
-        message = middleware._create_message(mock_context, "test_event")
+        message = middleware._create_before_message(mock_context, "test_event")
         formatted = middleware._format_message(message)
 
         assert formatted == snapshot(
             "event=test_event timestamp=2023-01-01T00:00:00+00:00 method=test_method type=request source=client"
         )
 
-    def test_create_message_long_payload(self, mock_context: MiddlewareContext[Any]):
+    def test_create_before_message_long_payload(
+        self, mock_context: MiddlewareContext[Any]
+    ):
         """Test message formatting with long payload truncation."""
         middleware = LoggingMiddleware(include_payloads=True, max_payload_length=10)
 
-        message = middleware._create_message(mock_context, "test_event")
+        message = middleware._create_before_message(mock_context, "test_event")
 
         formatted = middleware._format_message(message)
 
@@ -292,14 +307,15 @@ class TestLoggingMiddlewareIntegration:
                 )
 
         # Should have processing and completion logs for both operations
-        assert caplog.text == snapshot("""\
-INFO     mcp.server.lowlevel.server:server.py:624 Processing request of type CallToolRequest
-INFO     fastmcp.requests:logging.py:107 Processing message: event=request_start timestamp=2023-01-01T00:00:00+00:00 method=tools/call type=request source=client
-INFO     fastmcp.requests:logging.py:117 Completed message: event=request_success timestamp=2023-01-01T00:00:00+00:00 method=tools/call type=request source=client
-INFO     mcp.server.lowlevel.server:server.py:624 Processing request of type ListToolsRequest
-INFO     mcp.server.lowlevel.server:server.py:624 Processing request of type CallToolRequest
-INFO     fastmcp.requests:logging.py:107 Processing message: event=request_start timestamp=2023-01-01T00:00:00+00:00 method=tools/call type=request source=client
-INFO     fastmcp.requests:logging.py:117 Completed message: event=request_success timestamp=2023-01-01T00:00:00+00:00 method=tools/call type=request source=client
+        assert remove_line_numbers(caplog.text) == snapshot("""\
+INFO     mcp.server.lowlevel.server:server.py:LINE_NUMBER Processing request of type CallToolRequest
+INFO     fastmcp.requests:logging.py:LINE_NUMBER Processing message: event=request_start timestamp=2023-01-01T00:00:00+00:00 method=tools/call type=request source=client
+INFO     fastmcp.requests:logging.py:LINE_NUMBER Completed message: event=request_success timestamp=2023-01-01T00:00:00+00:00 method=tools/call type=request source=client
+INFO     mcp.server.lowlevel.server:server.py:LINE_NUMBER Processing request of type ListToolsRequest
+INFO     mcp.server.lowlevel.server:server.py:LINE_NUMBER Processing request of type CallToolRequest
+INFO     fastmcp.requests:logging.py:LINE_NUMBER Processing message: event=request_start timestamp=2023-01-01T00:00:00+00:00 method=tools/call type=request source=client
+INFO     fastmcp.requests:logging.py:LINE_NUMBER Completed message: event=request_success timestamp=2023-01-01T00:00:00+00:00 method=tools/call type=request source=client
+
 """)
 
     async def test_logging_middleware_logs_failures(
@@ -326,11 +342,14 @@ INFO     fastmcp.requests:logging.py:117 Completed message: event=request_succes
         self, logging_server: FastMCP, caplog: pytest.LogCaptureFixture
     ):
         """Test logging middleware when configured to include payloads."""
-        logging_server.add_middleware(
-            LoggingMiddleware(
-                include_payloads=True, max_payload_length=500, methods=["tools/call"]
-            )
+
+        middleware = LoggingMiddleware(
+            include_payloads=True, max_payload_length=500, methods=["tools/call"]
         )
+        middleware._get_timestamp_from_context = (  # ty: ignore[invalid-assignment]
+            lambda _: FIXED_DATE.isoformat()
+        )
+        logging_server.add_middleware(middleware)
 
         with caplog.at_level(logging.INFO):
             async with Client(logging_server) as client:
@@ -338,9 +357,13 @@ INFO     fastmcp.requests:logging.py:117 Completed message: event=request_succes
 
         log_text = caplog.text
 
-        # Should include payload information
-        assert "Processing message:" in log_text
-        assert "payload=" in log_text
+        assert remove_line_numbers(log_text) == snapshot("""\
+INFO     mcp.server.lowlevel.server:server.py:LINE_NUMBER Processing request of type CallToolRequest
+INFO     fastmcp.requests:logging.py:LINE_NUMBER Processing message: event=request_start timestamp=2023-01-01T00:00:00+00:00 method=tools/call type=request source=client payload={"_meta":null,"name":"simple_operation","arguments":{"data":"payload_test"}} payload_type=CallToolRequestParams
+INFO     fastmcp.requests:logging.py:LINE_NUMBER Completed message: event=request_success timestamp=2023-01-01T00:00:00+00:00 method=tools/call type=request source=client
+INFO     mcp.server.lowlevel.server:server.py:LINE_NUMBER Processing request of type ListToolsRequest
+
+""")
 
     async def test_structured_logging_middleware_produces_json(
         self, logging_server: FastMCP, caplog: pytest.LogCaptureFixture
@@ -371,11 +394,12 @@ INFO     fastmcp.requests:logging.py:117 Completed message: event=request_succes
 
         assert len(log_lines) >= 2  # Should have start and success entries
 
-        assert caplog.text == snapshot("""\
-INFO     mcp.server.lowlevel.server:server.py:624 Processing request of type CallToolRequest
-INFO     fastmcp.structured:logging.py:107 Processing message: {"event": "request_start", "timestamp": "2023-01-01T00:00:00+00:00", "method": "tools/call", "type": "request", "source": "client", "payload": "{\\"_meta\\":null,\\"name\\":\\"simple_operation\\",\\"arguments\\":{\\"data\\":\\"json_test\\"}}", "payload_type": "CallToolRequestParams"}
-INFO     fastmcp.structured:logging.py:117 Completed message: {"event": "request_success", "timestamp": "2023-01-01T00:00:00+00:00", "method": "tools/call", "type": "request", "source": "client", "payload": "{\\"_meta\\":null,\\"name\\":\\"simple_operation\\",\\"arguments\\":{\\"data\\":\\"json_test\\"}}", "payload_type": "CallToolRequestParams"}
-INFO     mcp.server.lowlevel.server:server.py:624 Processing request of type ListToolsRequest
+        assert remove_line_numbers(caplog.text) == snapshot("""\
+INFO     mcp.server.lowlevel.server:server.py:LINE_NUMBER Processing request of type CallToolRequest
+INFO     fastmcp.structured:logging.py:LINE_NUMBER Processing message: {"event": "request_start", "timestamp": "2023-01-01T00:00:00+00:00", "method": "tools/call", "type": "request", "source": "client", "payload": "{\\"_meta\\":null,\\"name\\":\\"simple_operation\\",\\"arguments\\":{\\"data\\":\\"json_test\\"}}", "payload_type": "CallToolRequestParams"}
+INFO     fastmcp.structured:logging.py:LINE_NUMBER Completed message: {"event": "request_success", "timestamp": "2023-01-01T00:00:00+00:00", "method": "tools/call", "type": "request", "source": "client"}
+INFO     mcp.server.lowlevel.server:server.py:LINE_NUMBER Processing request of type ListToolsRequest
+
 """)
 
     async def test_structured_logging_middleware_handles_errors(
@@ -397,10 +421,11 @@ INFO     mcp.server.lowlevel.server:server.py:624 Processing request of type Lis
                         "operation_with_error", {"should_fail": True}
                     )
 
-        assert caplog.text == snapshot("""\
-INFO     mcp.server.lowlevel.server:server.py:624 Processing request of type CallToolRequest
-INFO     fastmcp.structured:logging.py:107 Processing message: {"event": "request_start", "timestamp": "2023-01-01T00:00:00+00:00", "method": "tools/call", "type": "request", "source": "client"}
-ERROR    fastmcp.structured:logging.py:121 Failed message: tools/call - Error calling tool 'operation_with_error': Operation failed intentionally
+        assert remove_line_numbers(caplog.text) == snapshot("""\
+INFO     mcp.server.lowlevel.server:server.py:LINE_NUMBER Processing request of type CallToolRequest
+INFO     fastmcp.structured:logging.py:LINE_NUMBER Processing message: {"event": "request_start", "timestamp": "2023-01-01T00:00:00+00:00", "method": "tools/call", "type": "request", "source": "client"}
+ERROR    fastmcp.structured:logging.py:LINE_NUMBER Failed message: tools/call - Error calling tool 'operation_with_error': Operation failed intentionally
+
 """)
 
     async def test_logging_middleware_with_different_operations(

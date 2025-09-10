@@ -22,8 +22,8 @@ class BaseLoggingMiddleware(Middleware):
     logger: Logger
     log_level: int
     include_payloads: bool
-    include_response_length: bool
-    estimate_response_tokens: bool
+    include_payload_length: bool
+    estimate_payload_tokens: bool
     max_payload_length: int | None
     methods: list[str] | None
     structured_logging: bool
@@ -56,8 +56,44 @@ class BaseLoggingMiddleware(Middleware):
         """Get a timestamp from the context."""
         return context.timestamp.isoformat()
 
-    def _create_message(
+    def _create_before_message(
         self, context: MiddlewareContext[Any], event: str
+    ) -> dict[str, str | int]:
+        message = self._create_base_message(context, event)
+
+        if (
+            self.include_payloads
+            or self.include_payload_length
+            or self.estimate_payload_tokens
+        ):
+            payload = self._serialize_payload(context)
+
+            if self.max_payload_length and len(payload) > self.max_payload_length:
+                payload = payload[: self.max_payload_length] + "..."
+
+            if self.include_payloads:
+                message["payload"] = payload
+                message["payload_type"] = type(context.message).__name__
+
+            if self.include_payload_length or self.estimate_payload_tokens:
+                payload_length = len(payload)
+                payload_tokens = payload_length // 4
+                if self.estimate_payload_tokens:
+                    message["payload_tokens"] = payload_tokens
+                if self.include_payload_length:
+                    message["payload_length"] = payload_length
+
+        return message
+
+    def _create_after_message(
+        self, context: MiddlewareContext[Any], event: str
+    ) -> dict[str, str | int]:
+        return self._create_base_message(context, event)
+
+    def _create_base_message(
+        self,
+        context: MiddlewareContext[Any],
+        event: str,
     ) -> dict[str, str | int]:
         """Format a message for logging."""
 
@@ -69,28 +105,6 @@ class BaseLoggingMiddleware(Middleware):
             "source": context.source,
         }
 
-        if (
-            self.include_payloads
-            or self.include_response_length
-            or self.estimate_response_tokens
-        ):
-            payload = self._serialize_payload(context)
-
-            if self.max_payload_length and len(payload) > self.max_payload_length:
-                payload = payload[: self.max_payload_length] + "..."
-
-            if self.include_payloads:
-                parts["payload"] = payload
-                parts["payload_type"] = type(context.message).__name__
-
-            if self.include_response_length or self.estimate_response_tokens:
-                response_length = len(payload)
-                response_tokens = response_length // 4
-                if self.estimate_response_tokens:
-                    parts["response_tokens"] = response_tokens
-                if self.include_response_length:
-                    parts["response_length"] = response_length
-
         return parts
 
     async def on_message(
@@ -98,7 +112,9 @@ class BaseLoggingMiddleware(Middleware):
     ) -> Any:
         """Log all messages."""
 
-        request_start_log_message = self._create_message(context, "request_start")
+        request_start_log_message = self._create_before_message(
+            context, "request_start"
+        )
 
         if self.methods and context.method not in self.methods:
             return await call_next(context)
@@ -109,7 +125,7 @@ class BaseLoggingMiddleware(Middleware):
         try:
             result = await call_next(context)
 
-            request_success_log_message = self._create_message(
+            request_success_log_message = self._create_after_message(
                 context, "request_success"
             )
 
@@ -149,8 +165,8 @@ class LoggingMiddleware(BaseLoggingMiddleware):
         logger: logging.Logger | None = None,
         log_level: int = logging.INFO,
         include_payloads: bool = False,
-        include_response_length: bool = False,
-        estimate_response_tokens: bool = False,
+        include_payload_length: bool = False,
+        estimate_payload_tokens: bool = False,
         max_payload_length: int = 1000,
         methods: list[str] | None = None,
         payload_serializer: Callable[[Any], str] | None = None,
@@ -161,8 +177,8 @@ class LoggingMiddleware(BaseLoggingMiddleware):
             logger: Logger instance to use. If None, creates a logger named 'fastmcp.requests'
             log_level: Log level for messages (default: INFO)
             include_payloads: Whether to include message payloads in logs
-            include_response_length: Whether to include response size in logs
-            estimate_response_tokens: Whether to estimate response tokens
+            include_payload_length: Whether to include response size in logs
+            estimate_payload_tokens: Whether to estimate response tokens
             max_payload_length: Maximum length of payload to log (prevents huge logs)
             methods: List of methods to log. If None, logs all methods.
             payload_serializer: Callable that converts objects to a JSON string for the
@@ -171,8 +187,8 @@ class LoggingMiddleware(BaseLoggingMiddleware):
         self.logger: Logger = logger or logging.getLogger("fastmcp.requests")
         self.log_level = log_level
         self.include_payloads: bool = include_payloads
-        self.include_response_length: bool = include_response_length
-        self.estimate_response_tokens: bool = estimate_response_tokens
+        self.include_payload_length: bool = include_payload_length
+        self.estimate_payload_tokens: bool = estimate_payload_tokens
         self.max_payload_length: int = max_payload_length
         self.methods: list[str] | None = methods
         self.payload_serializer: Callable[[Any], str] | None = payload_serializer
@@ -201,10 +217,10 @@ class StructuredLoggingMiddleware(BaseLoggingMiddleware):
         logger: logging.Logger | None = None,
         log_level: int = logging.INFO,
         include_payloads: bool = False,
+        include_payload_length: bool = False,
+        estimate_payload_tokens: bool = False,
         methods: list[str] | None = None,
         payload_serializer: Callable[[Any], str] | None = None,
-        include_response_length: bool = False,
-        estimate_response_tokens: bool = False,
     ):
         """Initialize structured logging middleware.
 
@@ -212,18 +228,18 @@ class StructuredLoggingMiddleware(BaseLoggingMiddleware):
             logger: Logger instance to use. If None, creates a logger named 'fastmcp.structured'
             log_level: Log level for messages (default: INFO)
             include_payloads: Whether to include message payloads in logs
+            include_payload_length: Whether to include payload size in logs
+            estimate_payload_tokens: Whether to estimate token count using length // 4
             methods: List of methods to log. If None, logs all methods.
             payload_serializer: Callable that converts objects to a JSON string for the
                 payload. If not provided, uses FastMCP's default tool serializer.
-            include_response_length: Whether to include response size in logs (default: True)
-            estimate_response_tokens: Whether to estimate token count using length // 4 (default: False)
         """
         self.logger: Logger = logger or logging.getLogger("fastmcp.structured")
         self.log_level: int = log_level
         self.include_payloads: bool = include_payloads
+        self.include_payload_length: bool = include_payload_length
+        self.estimate_payload_tokens: bool = estimate_payload_tokens
         self.methods: list[str] | None = methods
         self.payload_serializer: Callable[[Any], str] | None = payload_serializer
-        self.include_response_length: bool = include_response_length
-        self.estimate_response_tokens: bool = estimate_response_tokens
         self.max_payload_length: int | None = None
         self.structured_logging: bool = True
