@@ -962,3 +962,259 @@ class TestParameterForwarding:
         assert query_params["audience"][0] == "https://api.example.com"
         assert query_params["prompt"][0] == "consent"
         assert query_params["max_age"][0] == "3600"
+
+
+class TestOAuthProxyFileBasedClientStorage:
+    """Tests for OAuth proxy file-based client storage functionality."""
+
+    @pytest.fixture
+    def temp_cache_dir(self, tmp_path):
+        """Create a temporary directory for client cache."""
+        cache_dir = tmp_path / "oauth-proxy-cache"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        return cache_dir
+
+    @pytest.fixture
+    def oauth_proxy_with_file_storage(self, jwt_verifier, temp_cache_dir):
+        """Create OAuth proxy with file-based storage in temp directory."""
+        return OAuthProxy(
+            upstream_authorization_endpoint="https://github.com/login/oauth/authorize",
+            upstream_token_endpoint="https://github.com/login/oauth/access_token",
+            upstream_client_id="test-client-id",
+            upstream_client_secret="test-client-secret",
+            token_verifier=jwt_verifier,
+            base_url="https://myserver.com",
+            redirect_path="/auth/callback",
+            client_cache_dir=temp_cache_dir,
+        )
+
+    def test_get_safe_client_id_key(self, oauth_proxy_with_file_storage):
+        """Test client ID is converted to filesystem-safe key."""
+        proxy = oauth_proxy_with_file_storage
+        
+        # Test various special characters
+        assert proxy._get_safe_client_id_key("client.id") == "client_id"
+        assert proxy._get_safe_client_id_key("client/id") == "client_id"
+        assert proxy._get_safe_client_id_key("client\\id") == "client_id"
+        assert proxy._get_safe_client_id_key("client:id") == "client_id"
+        assert proxy._get_safe_client_id_key("client id") == "client_id"
+        assert proxy._get_safe_client_id_key("client.id/test:with\\spaces") == "client_id_test_with_spaces"
+
+    def test_get_client_file_path(self, oauth_proxy_with_file_storage, temp_cache_dir):
+        """Test client file path generation."""
+        proxy = oauth_proxy_with_file_storage
+        
+        path = proxy._get_client_file_path("test-client")
+        expected = temp_cache_dir / "test-client_client_info.json"
+        assert path == expected
+        
+        # Test with special characters
+        path = proxy._get_client_file_path("client.id")
+        expected = temp_cache_dir / "client_id_client_info.json"
+        assert path == expected
+
+    async def test_save_and_load_client_file(self, oauth_proxy_with_file_storage):
+        """Test saving and loading client data to/from file."""
+        proxy = oauth_proxy_with_file_storage
+        
+        # Create a ProxyDCRClient with test data
+        from fastmcp.server.auth.oauth_proxy import ProxyDCRClient
+        
+        client = ProxyDCRClient(
+            client_id="test-client",
+            client_secret="test-secret",
+            redirect_uris=[AnyUrl("http://localhost:8080/callback")],
+            grant_types=["authorization_code", "refresh_token"],
+            scope="read write",
+            token_endpoint_auth_method="none",
+            allowed_redirect_uri_patterns=["http://localhost:*"],
+        )
+        
+        # Save client to file
+        await proxy._save_client_to_file(client)
+        
+        # Verify file exists
+        file_path = proxy._get_client_file_path("test-client")
+        assert file_path.exists()
+        
+        # Load client from file
+        loaded_client = await proxy._load_client_from_file("test-client")
+        
+        # Verify loaded client matches original
+        assert loaded_client is not None
+        assert loaded_client.client_id == "test-client"
+        assert loaded_client.client_secret == "test-secret" 
+        assert len(loaded_client.redirect_uris) == 1
+        assert str(loaded_client.redirect_uris[0]) == "http://localhost:8080/callback"
+        assert loaded_client.grant_types == ["authorization_code", "refresh_token"]
+        assert loaded_client.scope == "read write"
+
+    async def test_load_nonexistent_client_file(self, oauth_proxy_with_file_storage):
+        """Test loading client that doesn't exist returns None."""
+        proxy = oauth_proxy_with_file_storage
+        
+        client = await proxy._load_client_from_file("nonexistent-client")
+        assert client is None
+
+    async def test_load_corrupted_client_file(self, oauth_proxy_with_file_storage):
+        """Test loading corrupted JSON file returns None."""
+        proxy = oauth_proxy_with_file_storage
+        
+        # Create a corrupted JSON file
+        file_path = proxy._get_client_file_path("corrupted-client")
+        file_path.write_text("invalid json content")
+        
+        client = await proxy._load_client_from_file("corrupted-client")
+        assert client is None
+
+    async def test_register_client_persists_to_file(self, oauth_proxy_with_file_storage, temp_cache_dir):
+        """Test that client registration saves to file storage."""
+        proxy = oauth_proxy_with_file_storage
+        
+        client_info = OAuthClientInformationFull(
+            client_id="persistent-client",
+            client_secret="persistent-secret",
+            redirect_uris=[AnyUrl("http://localhost:9000/callback")],
+        )
+        
+        # Register client
+        await proxy.register_client(client_info)
+        
+        # Verify file was created
+        file_path = proxy._get_client_file_path("persistent-client")
+        assert file_path.exists()
+        
+        # Verify in-memory storage
+        assert "persistent-client" in proxy._clients
+        
+        # Verify file contents
+        import json
+        file_data = json.loads(file_path.read_text())
+        assert file_data["client_id"] == "persistent-client"
+        assert file_data["client_secret"] == "persistent-secret"
+
+    async def test_get_client_loads_from_file_first(self, oauth_proxy_with_file_storage):
+        """Test that get_client loads from file storage first."""
+        proxy = oauth_proxy_with_file_storage
+        
+        # Create a ProxyDCRClient and save it to file directly (bypassing register)
+        from fastmcp.server.auth.oauth_proxy import ProxyDCRClient
+        
+        client = ProxyDCRClient(
+            client_id="file-stored-client",
+            client_secret="file-stored-secret",
+            redirect_uris=[AnyUrl("http://localhost:7000/callback")],
+            grant_types=["authorization_code", "refresh_token"],
+            scope="read write",
+            token_endpoint_auth_method="none",
+            allowed_redirect_uri_patterns=["http://localhost:*"],
+        )
+        await proxy._save_client_to_file(client)
+        
+        # Ensure client is NOT in memory
+        assert "file-stored-client" not in proxy._clients
+        
+        # Get client should load from file and cache in memory
+        loaded_client = await proxy.get_client("file-stored-client")
+        
+        # Verify client was loaded correctly
+        assert loaded_client is not None
+        assert loaded_client.client_id == "file-stored-client"
+        assert loaded_client.client_secret == "file-stored-secret"
+        
+        # Verify client is now cached in memory for performance
+        assert "file-stored-client" in proxy._clients
+
+    async def test_get_client_fallback_to_memory(self, oauth_proxy_with_file_storage):
+        """Test that get_client falls back to memory if file doesn't exist."""
+        proxy = oauth_proxy_with_file_storage
+        
+        # Create client only in memory (not in file)
+        from fastmcp.server.auth.oauth_proxy import ProxyDCRClient
+        
+        client = ProxyDCRClient(
+            client_id="memory-only-client",
+            client_secret="memory-only-secret",
+            redirect_uris=[AnyUrl("http://localhost:6000/callback")],
+            grant_types=["authorization_code", "refresh_token"],
+            scope="read write",
+            token_endpoint_auth_method="none",
+            allowed_redirect_uri_patterns=["http://localhost:*"],
+        )
+        proxy._clients["memory-only-client"] = client
+        
+        # Get client should find it in memory
+        loaded_client = await proxy.get_client("memory-only-client")
+        
+        assert loaded_client is not None
+        assert loaded_client.client_id == "memory-only-client"
+
+    async def test_file_storage_handles_complex_redirect_uris(self, oauth_proxy_with_file_storage):
+        """Test file storage correctly handles complex URL objects."""
+        proxy = oauth_proxy_with_file_storage
+        
+        client_info = OAuthClientInformationFull(
+            client_id="complex-client",
+            client_secret="complex-secret",
+            redirect_uris=[
+                AnyUrl("http://localhost:3000/callback"),
+                AnyUrl("https://app.example.com/auth/callback"),
+                AnyUrl("custom://app/callback"),
+            ],
+        )
+        
+        # Register client with complex redirect URIs
+        await proxy.register_client(client_info)
+        
+        # Retrieve client from file storage
+        # Clear memory first to force file load
+        proxy._clients.clear()
+        
+        loaded_client = await proxy.get_client("complex-client")
+        
+        # Verify all redirect URIs are preserved
+        assert loaded_client is not None
+        assert len(loaded_client.redirect_uris) == 3
+        redirect_uri_strs = [str(uri) for uri in loaded_client.redirect_uris]
+        assert "http://localhost:3000/callback" in redirect_uri_strs
+        assert "https://app.example.com/auth/callback" in redirect_uri_strs
+        assert "custom://app/callback" in redirect_uri_strs
+
+    def test_cache_directory_creation(self, jwt_verifier, tmp_path):
+        """Test that cache directory is created automatically."""
+        cache_dir = tmp_path / "new-oauth-cache"
+        
+        # Directory should not exist initially
+        assert not cache_dir.exists()
+        
+        # Create proxy with non-existent cache directory
+        OAuthProxy(
+            upstream_authorization_endpoint="https://auth.example.com/authorize",
+            upstream_token_endpoint="https://auth.example.com/token",
+            upstream_client_id="test-client",
+            upstream_client_secret="test-secret",
+            token_verifier=jwt_verifier,
+            base_url="https://api.example.com",
+            client_cache_dir=cache_dir,
+        )
+        
+        # Directory should be created during initialization
+        assert cache_dir.exists()
+        assert cache_dir.is_dir()
+
+    def test_default_cache_directory_usage(self, jwt_verifier):
+        """Test that default cache directory is used when not specified."""
+        proxy = OAuthProxy(
+            upstream_authorization_endpoint="https://auth.example.com/authorize",
+            upstream_token_endpoint="https://auth.example.com/token",
+            upstream_client_id="test-client",
+            upstream_client_secret="test-secret",
+            token_verifier=jwt_verifier,
+            base_url="https://api.example.com",
+            # No client_cache_dir specified
+        )
+        
+        # Should use default cache directory
+        from fastmcp.server.auth.oauth_proxy import default_oauth_proxy_cache_dir
+        expected_dir = default_oauth_proxy_cache_dir()
+        assert proxy._client_cache_dir == expected_dir
