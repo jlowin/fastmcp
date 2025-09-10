@@ -43,6 +43,8 @@ class LoggingMiddleware(Middleware):
         max_payload_length: int = 1000,
         methods: list[str] | None = None,
         payload_serializer: Callable[[Any], str] | None = None,
+        log_response_size: bool = True,
+        estimate_tokens: bool = False,
     ):
         """Initialize logging middleware.
 
@@ -52,6 +54,8 @@ class LoggingMiddleware(Middleware):
             include_payloads: Whether to include message payloads in logs
             max_payload_length: Maximum length of payload to log (prevents huge logs)
             methods: List of methods to log. If None, logs all methods.
+            log_response_size: Whether to include response size in logs (default: True)
+            estimate_tokens: Whether to estimate token count using length // 4 (default: False)
         """
         self.logger: Logger = logger or logging.getLogger("fastmcp.requests")
         self.log_level: int = log_level
@@ -59,6 +63,8 @@ class LoggingMiddleware(Middleware):
         self.max_payload_length: int = max_payload_length
         self.methods: list[str] | None = methods
         self.payload_serializer: Callable[[Any], str] | None = payload_serializer
+        self.log_response_size: bool = log_response_size
+        self.estimate_tokens: bool = estimate_tokens
 
     def _format_message(self, context: MiddlewareContext[Any]) -> str:
         """Format a message for logging."""
@@ -88,6 +94,28 @@ class LoggingMiddleware(Middleware):
             parts.append(f"payload={payload}")
         return " ".join(parts)
 
+    def _calculate_response_size(self, result: Any) -> dict[str, Any]:
+        """Calculate response size and optionally estimate tokens."""
+        size_info = {}
+
+        if self.log_response_size:
+            try:
+                # Serialize the result to get its size
+                serialized = default_serializer(result) if result is not None else ""
+                response_size = len(serialized)
+                size_info["response_size"] = response_size
+
+                if self.estimate_tokens:
+                    estimated_tokens = response_size // 4
+                    size_info["estimated_tokens"] = estimated_tokens
+            except Exception as e:
+                self.logger.warning(f"Failed to calculate response size: {e}")
+                size_info["response_size"] = "unknown"
+                if self.estimate_tokens:
+                    size_info["estimated_tokens"] = "unknown"
+
+        return size_info
+
     async def on_message(
         self, context: MiddlewareContext[Any], call_next: CallNext[Any, Any]
     ) -> Any:
@@ -100,9 +128,27 @@ class LoggingMiddleware(Middleware):
 
         try:
             result = await call_next(context)
-            self.logger.log(
-                self.log_level, f"Completed message: {context.method or 'unknown'}"
+
+            # Create completion message with optional size info
+            completion_parts = [f"Completed message: {context.method or 'unknown'}"]
+            size_info = self._calculate_response_size(result)
+
+            if size_info:
+                size_parts = []
+                if "response_size" in size_info:
+                    size_parts.append(f"size={size_info['response_size']}")
+                if "estimated_tokens" in size_info:
+                    size_parts.append(f"tokens~{size_info['estimated_tokens']}")
+                if size_parts:
+                    completion_parts.append(" ".join(size_parts))
+
+            completion_message = (
+                " - ".join(completion_parts)
+                if len(completion_parts) > 1
+                else completion_parts[0]
             )
+            self.logger.log(self.log_level, completion_message)
+
             return result
         except Exception as e:
             self.logger.log(
@@ -134,6 +180,8 @@ class StructuredLoggingMiddleware(Middleware):
         include_payloads: bool = False,
         methods: list[str] | None = None,
         payload_serializer: Callable[[Any], str] | None = None,
+        log_response_size: bool = True,
+        estimate_tokens: bool = False,
     ):
         """Initialize structured logging middleware.
 
@@ -142,14 +190,18 @@ class StructuredLoggingMiddleware(Middleware):
             log_level: Log level for messages (default: INFO)
             include_payloads: Whether to include message payloads in logs
             methods: List of methods to log. If None, logs all methods.
-            serializer: Callable that converts objects to a JSON string for the
+            payload_serializer: Callable that converts objects to a JSON string for the
                 payload. If not provided, uses FastMCP's default tool serializer.
+            log_response_size: Whether to include response size in logs (default: True)
+            estimate_tokens: Whether to estimate token count using length // 4 (default: False)
         """
         self.logger: Logger = logger or logging.getLogger("fastmcp.structured")
         self.log_level: int = log_level
         self.include_payloads: bool = include_payloads
         self.methods: list[str] | None = methods
         self.payload_serializer: Callable[[Any], str] | None = payload_serializer
+        self.log_response_size: bool = log_response_size
+        self.estimate_tokens: bool = estimate_tokens
 
     def _create_log_entry(
         self, context: MiddlewareContext[Any], event: str, **extra_fields: Any
@@ -182,6 +234,28 @@ class StructuredLoggingMiddleware(Middleware):
 
         return entry
 
+    def _calculate_response_size_structured(self, result: Any) -> dict[str, Any]:
+        """Calculate response size and optionally estimate tokens for structured logging."""
+        size_info = {}
+
+        if self.log_response_size:
+            try:
+                # Serialize the result to get its size
+                serialized = default_serializer(result) if result is not None else ""
+                response_size = len(serialized)
+                size_info["response_size"] = response_size
+
+                if self.estimate_tokens:
+                    estimated_tokens = response_size // 4
+                    size_info["estimated_tokens"] = estimated_tokens
+            except Exception as e:
+                self.logger.warning(f"Failed to calculate response size: {e}")
+                size_info["response_size"] = "unknown"
+                if self.estimate_tokens:
+                    size_info["estimated_tokens"] = "unknown"
+
+        return size_info
+
     async def on_message(
         self, context: MiddlewareContext[Any], call_next: CallNext[Any, Any]
     ) -> Any:
@@ -195,10 +269,13 @@ class StructuredLoggingMiddleware(Middleware):
         try:
             result = await call_next(context)
 
+            # Create success entry with response size info
+            extra_fields = {"result_type": type(result).__name__ if result else None}
+            size_info = self._calculate_response_size_structured(result)
+            extra_fields.update(size_info)
+
             success_entry = self._create_log_entry(
-                context,
-                "request_success",
-                result_type=type(result).__name__ if result else None,
+                context, "request_success", **extra_fields
             )
             self.logger.log(self.log_level, json.dumps(success_entry))
 

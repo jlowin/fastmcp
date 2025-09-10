@@ -72,6 +72,8 @@ class TestLoggingMiddleware:
         assert middleware.log_level == logging.INFO
         assert middleware.include_payloads is False
         assert middleware.max_payload_length == 1000
+        assert middleware.log_response_size is True
+        assert middleware.estimate_tokens is False
 
     def test_init_custom(self):
         """Test custom initialization."""
@@ -81,11 +83,15 @@ class TestLoggingMiddleware:
             log_level=logging.DEBUG,
             include_payloads=True,
             max_payload_length=500,
+            log_response_size=False,
+            estimate_tokens=True,
         )
         assert middleware.logger is logger
         assert middleware.log_level == logging.DEBUG
         assert middleware.include_payloads is True
         assert middleware.max_payload_length == 500
+        assert middleware.log_response_size is False
+        assert middleware.estimate_tokens is True
 
     def test_format_message_without_payloads(
         self, mock_context: MiddlewareContext[Any]
@@ -115,6 +121,37 @@ class TestLoggingMiddleware:
 
         assert "payload=" in formatted
         assert "..." in formatted
+
+    def test_calculate_response_size(self):
+        """Test response size calculation."""
+        middleware = LoggingMiddleware()
+        result = {"key": "value", "number": 42}
+        size_info = middleware._calculate_response_size(result)
+
+        assert "response_size" in size_info
+        assert size_info["response_size"] == 27  # Length of serialized JSON
+        assert "estimated_tokens" not in size_info
+
+    def test_calculate_response_size_with_token_estimation(self):
+        """Test response size calculation with token estimation."""
+        middleware = LoggingMiddleware(estimate_tokens=True)
+        result = "This is a test string that is 40 chars!"  # 40 chars
+        size_info = middleware._calculate_response_size(result)
+
+        assert "response_size" in size_info
+        assert "estimated_tokens" in size_info
+        # Should be length of serialized result // 4
+        serialized_length = len('"This is a test string that is 40 chars!"')
+        assert size_info["response_size"] == serialized_length
+        assert size_info["estimated_tokens"] == serialized_length // 4
+
+    def test_calculate_response_size_disabled(self):
+        """Test response size calculation when disabled."""
+        middleware = LoggingMiddleware(log_response_size=False)
+        result = {"key": "value"}
+        size_info = middleware._calculate_response_size(result)
+
+        assert size_info == {}
 
     async def test_on_message_success(
         self,
@@ -157,6 +194,8 @@ class TestStructuredLoggingMiddleware:
         assert middleware.logger.name == "fastmcp.structured"
         assert middleware.log_level == logging.INFO
         assert middleware.include_payloads is False
+        assert middleware.log_response_size is True
+        assert middleware.estimate_tokens is False
 
     def test_create_log_entry_basic(self, mock_context: MiddlewareContext[Any]):
         """Test creating basic log entry."""
@@ -200,6 +239,29 @@ class TestStructuredLoggingMiddleware:
 
         assert entry["extra_field"] == "extra_value"
 
+    def test_calculate_response_size_structured(self):
+        """Test structured response size calculation."""
+        middleware = StructuredLoggingMiddleware()
+        result = {"status": "success", "data": [1, 2, 3]}
+        size_info = middleware._calculate_response_size_structured(result)
+
+        assert "response_size" in size_info
+        assert size_info["response_size"] == 35  # Length of serialized JSON
+        assert "estimated_tokens" not in size_info
+
+    def test_calculate_response_size_structured_with_tokens(self):
+        """Test structured response size calculation with token estimation."""
+        middleware = StructuredLoggingMiddleware(estimate_tokens=True)
+        result = "A simple test response"
+        size_info = middleware._calculate_response_size_structured(result)
+
+        assert "response_size" in size_info
+        assert "estimated_tokens" in size_info
+        # Should be length of serialized result // 4
+        serialized_length = len('"A simple test response"')
+        assert size_info["response_size"] == serialized_length
+        assert size_info["estimated_tokens"] == serialized_length // 4
+
     async def test_on_message_success(
         self,
         mock_context: MiddlewareContext[Any],
@@ -237,6 +299,7 @@ class TestStructuredLoggingMiddleware:
                 "type": "request",
                 "method": "test_method",
                 "result_type": "str",
+                "response_size": 13,
             }
         )
 
@@ -314,6 +377,7 @@ class TestStructuredLoggingMiddleware:
                 "type": "request",
                 "method": "test_method",
                 "result_type": "str",
+                "response_size": 13,
                 "payload": '{"method":"resources/read","params":{"_meta":null,"uri":"test://example/1"}}',
             }
         )
