@@ -73,7 +73,7 @@ def mock_call_next() -> AsyncMock:
 
 
 class TestStructuredLoggingMiddleware:
-    """Test logging middleware functionality."""
+    """Test structured logging middleware functionality."""
 
     def test_init_default(self):
         """Test default initialization."""

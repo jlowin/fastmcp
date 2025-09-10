@@ -39,7 +39,7 @@ class BaseLoggingMiddleware(Middleware):
                 payload = self.payload_serializer(context.message)
             except Exception as e:
                 self.logger.warning(
-                    f"Failed {e} to serialize payload: {context.type} {context.method} {context.source}."
+                    f"Failed to serialize payload due to {e}: {context.type} {context.method} {context.source}."
                 )
                 payload = default_serializer(context.message)
 
@@ -68,13 +68,6 @@ class BaseLoggingMiddleware(Middleware):
         ):
             payload = self._serialize_payload(context)
 
-            if self.max_payload_length and len(payload) > self.max_payload_length:
-                payload = payload[: self.max_payload_length] + "..."
-
-            if self.include_payloads:
-                message["payload"] = payload
-                message["payload_type"] = type(context.message).__name__
-
             if self.include_payload_length or self.estimate_payload_tokens:
                 payload_length = len(payload)
                 payload_tokens = payload_length // 4
@@ -82,6 +75,13 @@ class BaseLoggingMiddleware(Middleware):
                     message["payload_tokens"] = payload_tokens
                 if self.include_payload_length:
                     message["payload_length"] = payload_length
+
+            if self.max_payload_length and len(payload) > self.max_payload_length:
+                payload = payload[: self.max_payload_length] + "..."
+
+            if self.include_payloads:
+                message["payload"] = payload
+                message["payload_type"] = type(context.message).__name__
 
         return message
 
@@ -112,12 +112,12 @@ class BaseLoggingMiddleware(Middleware):
     ) -> Any:
         """Log all messages."""
 
+        if self.methods and context.method not in self.methods:
+            return await call_next(context)
+
         request_start_log_message = self._create_before_message(
             context, "request_start"
         )
-
-        if self.methods and context.method not in self.methods:
-            return await call_next(context)
 
         formatted_message = self._format_message(request_start_log_message)
         self.logger.log(self.log_level, f"Processing message: {formatted_message}")
