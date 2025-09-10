@@ -19,9 +19,11 @@ production use with enterprise identity providers.
 from __future__ import annotations
 
 import hashlib
+import json
 import secrets
 import time
 from base64 import urlsafe_b64encode
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
 from urllib.parse import urlencode
 
@@ -40,11 +42,12 @@ from mcp.server.auth.settings import (
     RevocationOptions,
 )
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
-from pydantic import AnyHttpUrl, AnyUrl, SecretStr
+from pydantic import AnyHttpUrl, AnyUrl, SecretStr, ValidationError
 from starlette.requests import Request
 from starlette.responses import RedirectResponse
 from starlette.routing import Route
 
+from fastmcp import settings as fastmcp_global_settings
 from fastmcp.server.auth.auth import OAuthProvider, TokenVerifier
 from fastmcp.server.auth.redirect_validation import validate_redirect_uri
 from fastmcp.utilities.logging import get_logger
@@ -53,6 +56,11 @@ if TYPE_CHECKING:
     pass
 
 logger = get_logger(__name__)
+
+
+def default_oauth_proxy_cache_dir() -> Path:
+    """Default cache directory for OAuth proxy client storage."""
+    return fastmcp_global_settings.home / "oauth-proxy-cache"
 
 
 class ProxyDCRClient(OAuthClientInformationFull):
@@ -254,6 +262,8 @@ class OAuthProxy(OAuthProvider):
         extra_authorize_params: dict[str, str] | None = None,
         # Extra parameters to forward to token endpoint
         extra_token_params: dict[str, str] | None = None,
+        # File-based client storage
+        client_cache_dir: Path | None = None,
     ):
         """Initialize the OAuth proxy provider.
 
@@ -287,6 +297,8 @@ class OAuthProxy(OAuthProvider):
                 Example: {"audience": "https://api.example.com"}
             extra_token_params: Additional parameters to forward to the upstream token endpoint.
                 Useful for provider-specific parameters during token exchange.
+            client_cache_dir: Directory for storing client registration data.
+                Defaults to ~/.fastmcp/oauth-proxy-cache if not specified.
         """
         # Always enable DCR since we implement it locally for MCP clients
         client_registration_options = ClientRegistrationOptions(
@@ -332,7 +344,11 @@ class OAuthProxy(OAuthProvider):
         self._extra_authorize_params = extra_authorize_params or {}
         self._extra_token_params = extra_token_params or {}
 
-        # Local state for DCR and token bookkeeping
+        # File-based client storage
+        self._client_cache_dir = client_cache_dir or default_oauth_proxy_cache_dir()
+        self._client_cache_dir.mkdir(exist_ok=True, parents=True)
+
+        # Local state for DCR and token bookkeeping (keeping in-memory for performance)
         self._clients: dict[str, OAuthClientInformationFull] = {}
         self._access_tokens: dict[str, AccessToken] = {}
         self._refresh_tokens: dict[str, RefreshToken] = {}
@@ -375,6 +391,58 @@ class OAuthProxy(OAuthProvider):
         return code_verifier, code_challenge
 
     # -------------------------------------------------------------------------
+    # File-based Client Storage Helper Methods
+    # -------------------------------------------------------------------------
+
+    def _get_safe_client_id_key(self, client_id: str) -> str:
+        """Generate a safe filesystem key from client ID."""
+        return (
+            client_id.replace(".", "_")
+            .replace("/", "_")
+            .replace("\\", "_")
+            .replace(":", "_")
+            .replace(" ", "_")
+        )
+
+    def _get_client_file_path(self, client_id: str) -> Path:
+        """Get the file path for storing client information."""
+        key = self._get_safe_client_id_key(client_id)
+        return self._client_cache_dir / f"{key}_client_info.json"
+
+    async def _load_client_from_file(
+        self, client_id: str
+    ) -> OAuthClientInformationFull | None:
+        """Load client information from file storage."""
+        path = self._get_client_file_path(client_id)
+        try:
+            # Parse JSON data and reconstruct ProxyDCRClient
+            client_data_json = path.read_text()
+            client_data = json.loads(client_data_json)
+
+            # Create ProxyDCRClient with validation patterns, using **client_data to unpack fields
+            client = ProxyDCRClient(
+                allowed_redirect_uri_patterns=self._allowed_client_redirect_uris,
+                **client_data,
+            )
+
+            logger.debug(f"Loaded client {client_id} from file storage")
+            return client
+
+        except (FileNotFoundError, json.JSONDecodeError, ValidationError) as e:
+            logger.debug(f"Could not load client {client_id} from file: {e}")
+            return None
+
+    async def _save_client_to_file(self, client: OAuthClientInformationFull) -> None:
+        """Save client information to file storage."""
+        path = self._get_client_file_path(client.client_id)
+
+        # Convert to dict for JSON serialization, handling URL objects
+        client_data = client.model_dump(mode="json")
+
+        path.write_text(json.dumps(client_data, indent=2))
+        logger.debug(f"Saved client {client.client_id} to file storage")
+
+    # -------------------------------------------------------------------------
     # Client Registration (Local Implementation)
     # -------------------------------------------------------------------------
 
@@ -383,9 +451,17 @@ class OAuthProxy(OAuthProvider):
         provided to the DCR client during registration, not the upstream client ID.
 
         For unregistered clients, returns None (which will raise an error in the SDK).
+        First tries to load from file storage, then fallback to in-memory storage.
         """
-        client = self._clients.get(client_id)
+        # First try to load from file storage
+        client = await self._load_client_from_file(client_id)
+        if client:
+            # Cache in memory for performance
+            self._clients[client_id] = client
+            return client
 
+        # Fallback to in-memory storage
+        client = self._clients.get(client_id)
         return client
 
     async def register_client(self, client_info: OAuthClientInformationFull) -> None:
@@ -395,6 +471,8 @@ class OAuthProxy(OAuthProvider):
         forgiving about validating redirect URIs, since the DCR client's
         redirect URI will likely be localhost or unknown to the proxied IDP. The
         proxied IDP only knows about this server's fixed redirect URI.
+
+        Client data is persisted to file storage for durability.
         """
 
         # Create a ProxyDCRClient with configured redirect URI validation
@@ -409,7 +487,10 @@ class OAuthProxy(OAuthProvider):
             allowed_redirect_uri_patterns=self._allowed_client_redirect_uris,
         )
 
-        # Store the ProxyDCRClient
+        # Save to file storage for persistence
+        await self._save_client_to_file(proxy_client)
+
+        # Store in memory for performance
         self._clients[client_info.client_id] = proxy_client
 
         # Log redirect URIs to help users discover what patterns they might need
@@ -422,7 +503,7 @@ class OAuthProxy(OAuthProvider):
                 )
 
         logger.debug(
-            "Registered client %s with %d redirect URIs",
+            "Registered client %s with %d redirect URIs (saved to file storage)",
             client_info.client_id,
             len(proxy_client.redirect_uris),
         )
