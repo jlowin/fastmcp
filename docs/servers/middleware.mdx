@@ -484,6 +484,35 @@ mcp.add_middleware(StructuredLoggingMiddleware(include_payloads=True))
 
 The built-in versions include payload logging, structured JSON output, custom logger support, payload size limits, and operation-specific hooks for granular control.
 
+### Schema Dereference Middleware
+
+Some MCP clients have limited support for JSON Schema `$ref` references in tool and resource template schemas. This can lead to null parameters or validation failures when a client cannot resolve references during tool invocation.
+
+<Info>
+The schema dereference middleware flattens internal `$ref` references (those pointing to `#/$defs/...`) in listing responses, so clients receive inline schemas that are easier to consume.
+</Info>
+
+```python
+from fastmcp import FastMCP
+from fastmcp.server.middleware.schema_dereference import SchemaDereferenceMiddleware
+
+mcp = FastMCP("MyServer")
+mcp.add_middleware(SchemaDereferenceMiddleware())
+```
+
+What it does
+- Inlines internal `$ref` to `#/$defs/...` for:
+  - on_list_tools: `Tool.parameters`
+  - on_list_resource_templates: `ResourceTemplate.parameters`
+- Handles common schema shapes:
+  - Properties, arrays (`items`), maps (`additionalProperties`)
+  - Composition keywords (`allOf`, `oneOf`, `anyOf`)
+  - Transitive and reused definitions
+
+<Tip>
+Enable this middleware when serving tools or templates to clients that cannot resolve JSON Schema `$ref` internally. It is safe to use with clients that fully support `$ref` as well.
+</Tip>
+
 ### Rate Limiting Middleware
 
 Rate limiting is essential for protecting your server from abuse, ensuring fair resource usage, and maintaining performance under load. FastMCP includes sophisticated rate limiting middleware at `fastmcp.server.middleware.rate_limiting`. 
