@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator, Callable, Generator
 from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Union
 
 from mcp.server.auth.middleware.bearer_auth import RequireAuthMiddleware
 from mcp.server.lowlevel.server import LifespanResultT
@@ -79,6 +79,13 @@ def set_http_request(request: Request) -> Generator[Request, None, None]:
         _current_http_request.reset(token)
 
 
+def get_current_http_request() -> Union[Request, None]:
+    try:
+        return _current_http_request.get()
+    except LookupError:
+        return None
+
+
 class RequestContextMiddleware:
     """
     Middleware that stores each request in a ContextVar
@@ -113,7 +120,7 @@ def create_base_app(
         A Starlette application
     """
     # Always add RequestContextMiddleware as the outermost middleware
-    middleware.append(Middleware(RequestContextMiddleware))
+    middleware.insert(0, Middleware(RequestContextMiddleware))
 
     return StarletteWithLifespan(
         routes=routes,
