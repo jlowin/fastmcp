@@ -19,6 +19,7 @@ from fastmcp.server.middleware.logging import (
 )
 from fastmcp.server.middleware.middleware import CallNext, MiddlewareContext
 from fastmcp.server.server import FastMCP
+from fastmcp.utilities.tests import caplog_for_fastmcp
 
 FIXED_DATE = datetime.datetime(2023, 1, 1, tzinfo=datetime.timezone.utc)
 
@@ -125,7 +126,7 @@ class TestLoggingMiddleware:
         middleware = LoggingMiddleware()
         mock_call_next = AsyncMock(return_value="test_result")
 
-        with caplog.at_level(logging.INFO):
+        with caplog_for_fastmcp(caplog):
             result = await middleware.on_message(mock_context, mock_call_next)
 
         assert result == "test_result"
@@ -140,7 +141,7 @@ class TestLoggingMiddleware:
         middleware = LoggingMiddleware()
         mock_call_next = AsyncMock(side_effect=ValueError("test error"))
 
-        with caplog.at_level(logging.INFO):
+        with caplog_for_fastmcp(caplog):
             with pytest.raises(ValueError):
                 await middleware.on_message(mock_context, mock_call_next)
 
@@ -209,7 +210,7 @@ class TestStructuredLoggingMiddleware:
         """Test structured logging of successful messages."""
         middleware = StructuredLoggingMiddleware()
 
-        with caplog.at_level(logging.INFO):
+        with caplog_for_fastmcp(caplog):
             result = await middleware.on_message(mock_context, mock_call_next)
 
         assert result == "test_result"
@@ -247,7 +248,7 @@ class TestStructuredLoggingMiddleware:
         middleware = StructuredLoggingMiddleware()
         mock_call_next = AsyncMock(side_effect=ValueError("test error"))
 
-        with caplog.at_level(logging.INFO):
+        with caplog_for_fastmcp(caplog):
             with pytest.raises(ValueError):
                 await middleware.on_message(mock_context, mock_call_next)
 
@@ -288,7 +289,7 @@ class TestStructuredLoggingMiddleware:
 
         middleware = StructuredLoggingMiddleware(include_payloads=True)
 
-        with caplog.at_level(logging.INFO):
+        with caplog_for_fastmcp(caplog):
             result = await middleware.on_message(mock_context, mock_call_next)
 
         assert result == "test_result"
@@ -335,7 +336,7 @@ class TestStructuredLoggingMiddleware:
 
         middleware = StructuredLoggingMiddleware(include_payloads=True)
 
-        with caplog.at_level(logging.INFO):
+        with caplog_for_fastmcp(caplog):
             result = await middleware.on_message(mock_context, mock_call_next)
 
         assert result == "test_result"
@@ -374,7 +375,7 @@ class TestStructuredLoggingMiddleware:
 
         middleware = StructuredLoggingMiddleware(include_payloads=True)
 
-        with caplog.at_level(logging.INFO):
+        with caplog_for_fastmcp(caplog):
             result = await middleware.on_message(mock_context, mock_call_next)
 
         assert result == "test_result"
@@ -415,7 +416,7 @@ class TestStructuredLoggingMiddleware:
             include_payloads=True, payload_serializer=custom_serializer
         )
 
-        with caplog.at_level(logging.INFO):
+        with caplog_for_fastmcp(caplog):
             result = await middleware.on_message(mock_context, mock_call_next)
 
         assert result == "test_result"
@@ -482,12 +483,13 @@ class TestLoggingMiddlewareIntegration:
 
         logging_server.add_middleware(LoggingMiddleware(methods=["tools/call"]))
 
-        with caplog.at_level(logging.INFO):
-            async with Client(logging_server) as client:
-                await client.call_tool("simple_operation", {"data": "test_data"})
-                await client.call_tool(
-                    "complex_operation", {"items": ["a", "b", "c"], "mode": "batch"}
-                )
+        with caplog_for_fastmcp(caplog):
+            with caplog.at_level(logging.INFO):
+                async with Client(logging_server) as client:
+                    await client.call_tool("simple_operation", {"data": "test_data"})
+                    await client.call_tool(
+                        "complex_operation", {"items": ["a", "b", "c"], "mode": "batch"}
+                    )
 
         log_text = caplog.text
 
@@ -509,7 +511,7 @@ class TestLoggingMiddlewareIntegration:
 
         logging_server.add_middleware(LoggingMiddleware(methods=["tools/call"]))
 
-        with caplog.at_level(logging.INFO):
+        with caplog_for_fastmcp(caplog):
             async with Client(logging_server) as client:
                 # This should fail and be logged
                 with pytest.raises(Exception):
@@ -535,7 +537,7 @@ class TestLoggingMiddlewareIntegration:
             )
         )
 
-        with caplog.at_level(logging.INFO):
+        with caplog_for_fastmcp(caplog):
             async with Client(logging_server) as client:
                 await client.call_tool("simple_operation", {"data": "payload_test"})
 
@@ -557,7 +559,7 @@ class TestLoggingMiddlewareIntegration:
             StructuredLoggingMiddleware(include_payloads=True, methods=["tools/call"])
         )
 
-        with caplog.at_level(logging.INFO):
+        with caplog_for_fastmcp(caplog):
             async with Client(logging_server) as client:
                 await client.call_tool("simple_operation", {"data": "json_test"})
 
@@ -591,7 +593,7 @@ class TestLoggingMiddlewareIntegration:
             StructuredLoggingMiddleware(methods=["tools/call"])
         )
 
-        with caplog.at_level(logging.INFO):
+        with caplog_for_fastmcp(caplog):
             async with Client(logging_server) as client:
                 with pytest.raises(Exception):
                     await client.call_tool(
@@ -637,7 +639,7 @@ class TestLoggingMiddlewareIntegration:
             )
         )
 
-        with caplog.at_level(logging.INFO):
+        with caplog_for_fastmcp(caplog):
             async with Client(logging_server) as client:
                 # Test different operation types
                 await client.call_tool("simple_operation", {"data": "test"})
