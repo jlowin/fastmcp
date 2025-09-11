@@ -1574,15 +1574,12 @@ class TestInputSchema:
         assert transformed_tool.parameters == snapshot(
             {
                 "type": "object",
-                "properties": {
-                    "used_param": {"$ref": "#/$defs/UsedType", "title": "Used Param"}
-                },
+                "properties": {"used_param": {"$ref": "#/$defs/UsedType"}},
                 "required": ["used_param"],
                 "$defs": {
                     "UsedType": {
-                        "properties": {"value": {"title": "Value", "type": "string"}},
+                        "properties": {"value": {"type": "string"}},
                         "required": ["value"],
-                        "title": "UsedType",
                         "type": "object",
                     }
                 },
@@ -1615,18 +1612,12 @@ class TestInputSchema:
         assert transformed.parameters == snapshot(
             {
                 "type": "object",
-                "properties": {
-                    "renamed_input": {
-                        "$ref": "#/$defs/InputType",
-                        "title": "Input Data",
-                    }
-                },
+                "properties": {"renamed_input": {"$ref": "#/$defs/InputType"}},
                 "required": ["renamed_input"],
                 "$defs": {
                     "InputType": {
-                        "properties": {"data": {"title": "Data", "type": "string"}},
+                        "properties": {"data": {"type": "string"}},
                         "required": ["data"],
-                        "title": "InputType",
                         "type": "object",
                     }
                 },
@@ -1659,21 +1650,19 @@ class TestInputSchema:
             {
                 "type": "object",
                 "properties": {
-                    "param_a": {"$ref": "#/$defs/TypeA", "title": "Param A"},
-                    "param_b": {"$ref": "#/$defs/TypeB", "title": "Param B"},
+                    "param_a": {"$ref": "#/$defs/TypeA"},
+                    "param_b": {"$ref": "#/$defs/TypeB"},
                 },
                 "required": IsList("param_b", "param_a", check_order=False),
                 "$defs": {
                     "TypeA": {
-                        "properties": {"a": {"title": "A", "type": "string"}},
+                        "properties": {"a": {"type": "string"}},
                         "required": ["a"],
-                        "title": "TypeA",
                         "type": "object",
                     },
                     "TypeB": {
-                        "properties": {"b": {"title": "B", "type": "integer"}},
+                        "properties": {"b": {"type": "integer"}},
                         "required": ["b"],
-                        "title": "TypeB",
                         "type": "object",
                     },
                 },
@@ -1693,15 +1682,12 @@ class TestInputSchema:
         assert transform2.parameters == snapshot(
             {
                 "type": "object",
-                "properties": {
-                    "param_a": {"$ref": "#/$defs/TypeA", "title": "Param A"}
-                },
+                "properties": {"param_a": {"$ref": "#/$defs/TypeA"}},
                 "required": ["param_a"],
                 "$defs": {
                     "TypeA": {
-                        "properties": {"a": {"title": "A", "type": "string"}},
+                        "properties": {"a": {"type": "string"}},
                         "required": ["a"],
-                        "title": "TypeA",
                         "type": "object",
                     }
                 },
