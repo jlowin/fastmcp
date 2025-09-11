@@ -22,6 +22,7 @@ logger = get_logger(__name__)
 LOG_LEVEL = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
 DuplicateBehavior = Literal["warn", "error", "replace", "ignore"]
+Transport = Literal["stdio", "http", "sse", "streamable-http"]
 
 
 class ExtendedEnvSettingsSource(EnvSettingsSource):
@@ -219,6 +220,14 @@ class Settings(BaseSettings):
             description="The timeout for the client's initialization handshake, in seconds. Set to None or 0 to disable.",
         ),
     ] = None
+
+    transport: Annotated[
+        Transport,
+        Field(
+            default="stdio",
+            description="The transport protocol to use for the server. Defaults to 'stdio'.",
+        ),
+    ] = "stdio"
 
     # HTTP settings
     host: str = "127.0.0.1"
