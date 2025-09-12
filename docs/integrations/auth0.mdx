@@ -8,7 +8,7 @@ tag: NEW
 
 import { VersionBadge } from "/snippets/version-badge.mdx"
 
-<VersionBadge version="2.13.0" />
+<VersionBadge version="2.12.4" />
 
 This guide shows you how to secure your FastMCP server using **Auth0 OAuth**. While Auth0 does have support for Dynamic Client Registration, it is not enabled by default so this integration uses the [**OIDC Proxy**](/servers/auth/oidc-proxy) pattern to bridge Auth0's dynamic OIDC configuration with MCP's authentication requirements.
 
@@ -155,8 +155,6 @@ The client caches tokens locally, so you won't need to re-authenticate for subse
 
 ## Environment Variables
 
-<VersionBadge version="2.13.0" />
-
 For production deployments, use environment variables instead of hardcoding credentials.
 
 ### Provider Selection
@@ -175,15 +173,15 @@ These environment variables provide default values for the Auth0 provider, wheth
 
 <Card>
 <ParamField path="FASTMCP_SERVER_AUTH_AUTH0_CONFIG_URL" required>
-Your Auth0 Application Client ID (e.g., `Ov23liAbcDefGhiJkLmN`)
+Your Auth0 Application Configuration URL (e.g., `https://.../.well-known/openid-configuration`)
 </ParamField>
 
 <ParamField path="FASTMCP_SERVER_AUTH_AUTH0_CLIENT_ID" required>
-Your Auth0 Application Client ID (e.g., `Ov23liAbcDefGhiJkLmN`)
+Your Auth0 Application Client ID (e.g., `tv2ObNgaZAWWhhycr7Bz1LU2mxlnsmsB`)
 </ParamField>
 
 <ParamField path="FASTMCP_SERVER_AUTH_AUTH0_CLIENT_SECRET" required>
-Your Auth0 Application Client Secret
+Your Auth0 Application Client Secret (e.g., `vPYqbjemq...`)
 </ParamField>
 
 <ParamField path="FASTMCP_SERVER_AUTH_AUTH0_AUDIENCE" required>

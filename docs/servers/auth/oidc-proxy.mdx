@@ -8,7 +8,7 @@ tag: NEW
 
 import { VersionBadge } from "/snippets/version-badge.mdx";
 
-<VersionBadge version="2.13.0" />
+<VersionBadge version="2.12.4" />
 
 OIDC Proxy enables FastMCP servers to authenticate with OIDC providers that **don't support Dynamic Client Registration (DCR)** out of the box. This includes OAuth providers like: Auth0, Google, Azure, etc. For providers that do support DCR (like WorkOS AuthKit), use [`RemoteAuthProvider`](/servers/auth/remote-oauth) instead.
 
@@ -39,7 +39,7 @@ Here's how to implement OIDC Proxy with any provider:
 
 ```python
 from fastmcp import FastMCP
-from fastmcp.server.auth import OIDCProxy
+from fastmcp.server.auth.oidc_proxy import OIDCProxy
 
 # Create the OIDC proxy
 auth = OIDCProxy(

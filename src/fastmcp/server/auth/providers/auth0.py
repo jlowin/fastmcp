@@ -160,7 +160,7 @@ class Auth0Provider(OIDCProxy):
         }
 
         if settings.redirect_path:
-            init_kwargs["redirect_path"] = redirect_path
+            init_kwargs["redirect_path"] = settings.redirect_path
 
         super().__init__(**init_kwargs)
 
