@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import AnyUrl
 
-from fastmcp import settings
+import fastmcp
 from fastmcp.exceptions import NotFoundError, ResourceError
 from fastmcp.resources.resource import Resource
 from fastmcp.resources.template import (
@@ -44,7 +44,9 @@ class ResourceManager:
         self._resources: dict[str, Resource] = {}
         self._templates: dict[str, ResourceTemplate] = {}
         self._mounted_servers: list[MountedServer] = []
-        self.mask_error_details = mask_error_details or settings.mask_error_details
+        self.mask_error_details = (
+            mask_error_details or fastmcp.settings.mask_error_details
+        )
 
         # Default to "warn" if None is provided
         if duplicate_behavior is None:
@@ -114,7 +116,7 @@ class ResourceManager:
                 logger.warning(
                     f"Failed to get resources from server: {mounted.server.name!r}, mounted at: {mounted.prefix!r}: {e}"
                 )
-                if settings.mounted_components_raise_on_load_error:
+                if fastmcp.settings.mounted_components_raise_on_load_error:
                     raise
                 continue
 
@@ -167,7 +169,7 @@ class ResourceManager:
                 logger.warning(
                     f"Failed to get templates from server: {mounted.server.name!r}, mounted at: {mounted.prefix!r}: {e}"
                 )
-                if settings.mounted_components_raise_on_load_error:
+                if fastmcp.settings.mounted_components_raise_on_load_error:
                     raise
                 continue
 
@@ -261,7 +263,7 @@ class ResourceManager:
             returns the existing resource.
         """
         # deprecated in 2.7.0
-        if settings.deprecation_warnings:
+        if fastmcp.settings.deprecation_warnings:
             warnings.warn(
                 "add_resource_from_fn is deprecated. Use Resource.from_function() and call add_resource() instead.",
                 DeprecationWarning,
@@ -310,7 +312,7 @@ class ResourceManager:
     ) -> ResourceTemplate:
         """Create a template from a function."""
         # deprecated in 2.7.0
-        if settings.deprecation_warnings:
+        if fastmcp.settings.deprecation_warnings:
             warnings.warn(
                 "add_template_from_fn is deprecated. Use ResourceTemplate.from_function() and call add_template() instead.",
                 DeprecationWarning,

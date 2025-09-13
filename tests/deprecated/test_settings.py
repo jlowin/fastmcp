@@ -1,15 +1,59 @@
 import os
 import warnings
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from textwrap import dedent
 from unittest.mock import patch
 
 import pytest
 
 from fastmcp import FastMCP
+from fastmcp.client import Client
+from fastmcp.client.transports import PythonStdioTransport
 from fastmcp.settings import Settings
 from fastmcp.utilities.tests import caplog_for_fastmcp
 
 # reset deprecation warnings for this module
 pytestmark = pytest.mark.filterwarnings("default::DeprecationWarning")
+
+
+class TestSettingsImport:
+    """Test settings import."""
+
+    async def test_settings_from_environment_issue_1749(self):
+        """Test that when auth is enabled, the server starts."""
+
+        script = dedent("""
+        import os
+
+        os.environ["FASTMCP_SERVER_AUTH"] = "fastmcp.server.auth.providers.azure.AzureProvider"
+
+        os.environ["FASTMCP_SERVER_AUTH_AZURE_TENANT_ID"] = "A_Valid_Value"
+        os.environ["FASTMCP_SERVER_AUTH_AZURE_CLIENT_ID"] = "A_Valid_Value"
+        os.environ["FASTMCP_SERVER_AUTH_AZURE_CLIENT_SECRET"] = "A_Valid_Value"
+        os.environ["FASTMCP_SERVER_AUTH_AZURE_REDIRECT_PATH"] = "/auth/callback"
+        os.environ["FASTMCP_SERVER_AUTH_AZURE_BASE_URL"] = "http://localhost:8000"
+        os.environ["FASTMCP_SERVER_AUTH_AZURE_REQUIRED_SCOPES"] = "User.Read,email,profile"
+
+        import fastmcp
+        
+        mcp = fastmcp.FastMCP("TestServer")
+
+        mcp.run()
+        """)
+
+        with TemporaryDirectory() as temp_dir:
+            server_file = Path(temp_dir) / "server.py"
+            server_file.write_text(script)
+
+            transport: PythonStdioTransport = PythonStdioTransport(
+                script_path=server_file
+            )
+
+            async with Client[PythonStdioTransport](transport=transport) as client:
+                tools = await client.list_tools()
+
+                assert tools == []
 
 
 class TestDeprecatedServerInitKwargs:

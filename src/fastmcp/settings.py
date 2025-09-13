@@ -86,31 +86,38 @@ class Settings(BaseSettings):
         validate_assignment=True,
     )
 
+    def _find_setting_level(self, attr: str) -> Any:
+        """
+        Get the parent of a setting. If the setting contains one or more `__`, it will be
+        treated as a nested setting.
+        """
+        current_settings_level = self
+
+        while "__" in attr:
+            parent_attr, attr = attr.split("__", 1)
+            if not hasattr(current_settings_level, parent_attr):
+                raise AttributeError(f"Setting {parent_attr} does not exist.")
+
+            # Go one level deeper into the nested settings
+            current_settings_level = getattr(current_settings_level, parent_attr)
+
+        return current_settings_level
+
     def get_setting(self, attr: str) -> Any:
         """
         Get a setting. If the setting contains one or more `__`, it will be
         treated as a nested setting.
         """
-        settings = self
-        while "__" in attr:
-            parent_attr, attr = attr.split("__", 1)
-            if not hasattr(settings, parent_attr):
-                raise AttributeError(f"Setting {parent_attr} does not exist.")
-            settings = getattr(settings, parent_attr)
-        return getattr(settings, attr)
+        settings_level = self._find_setting_level(attr)
+        return getattr(settings_level, attr)
 
     def set_setting(self, attr: str, value: Any) -> None:
         """
         Set a setting. If the setting contains one or more `__`, it will be
         treated as a nested setting.
         """
-        settings = self
-        while "__" in attr:
-            parent_attr, attr = attr.split("__", 1)
-            if not hasattr(settings, parent_attr):
-                raise AttributeError(f"Setting {parent_attr} does not exist.")
-            settings = getattr(settings, parent_attr)
-        setattr(settings, attr, value)
+        settings_level = self._find_setting_level(attr)
+        setattr(settings_level, attr, value)
 
     @classmethod
     def settings_customise_sources(

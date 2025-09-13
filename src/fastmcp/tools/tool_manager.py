@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from mcp.types import ToolAnnotations
 
-from fastmcp import settings
+import fastmcp
 from fastmcp.exceptions import NotFoundError, ToolError
 from fastmcp.settings import DuplicateBehavior
 from fastmcp.tools.tool import Tool, ToolResult
@@ -33,7 +33,9 @@ class ToolManager:
     ):
         self._tools: dict[str, Tool] = {}
         self._mounted_servers: list[MountedServer] = []
-        self.mask_error_details = mask_error_details or settings.mask_error_details
+        self.mask_error_details = (
+            mask_error_details or fastmcp.settings.mask_error_details
+        )
         self.transformations = transformations or {}
 
         # Default to "warn" if None is provided
@@ -86,7 +88,7 @@ class ToolManager:
                 logger.warning(
                     f"Failed to get tools from server: {mounted.server.name!r}, mounted at: {mounted.prefix!r}: {e}"
                 )
-                if settings.mounted_components_raise_on_load_error:
+                if fastmcp.settings.mounted_components_raise_on_load_error:
                     raise
                 continue
 
@@ -146,7 +148,7 @@ class ToolManager:
     ) -> Tool:
         """Add a tool to the server."""
         # deprecated in 2.7.0
-        if settings.deprecation_warnings:
+        if fastmcp.settings.deprecation_warnings:
             warnings.warn(
                 "ToolManager.add_tool_from_fn() is deprecated. Use Tool.from_function() and call add_tool() instead.",
                 DeprecationWarning,

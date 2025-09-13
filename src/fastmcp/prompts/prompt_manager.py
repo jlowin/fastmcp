@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from mcp import GetPromptResult
 
-from fastmcp import settings
+import fastmcp
 from fastmcp.exceptions import NotFoundError, PromptError
 from fastmcp.prompts.prompt import FunctionPrompt, Prompt, PromptResult
 from fastmcp.settings import DuplicateBehavior
@@ -28,7 +28,9 @@ class PromptManager:
     ):
         self._prompts: dict[str, Prompt] = {}
         self._mounted_servers: list[MountedServer] = []
-        self.mask_error_details = mask_error_details or settings.mask_error_details
+        self.mask_error_details = (
+            mask_error_details or fastmcp.settings.mask_error_details
+        )
 
         # Default to "warn" if None is provided
         if duplicate_behavior is None:
@@ -80,7 +82,7 @@ class PromptManager:
                 logger.warning(
                     f"Failed to get prompts from server: {mounted.server.name!r}, mounted at: {mounted.prefix!r}: {e}"
                 )
-                if settings.mounted_components_raise_on_load_error:
+                if fastmcp.settings.mounted_components_raise_on_load_error:
                     raise
                 continue
 
@@ -122,7 +124,7 @@ class PromptManager:
     ) -> FunctionPrompt:
         """Create a prompt from a function."""
         # deprecated in 2.7.0
-        if settings.deprecation_warnings:
+        if fastmcp.settings.deprecation_warnings:
             warnings.warn(
                 "PromptManager.add_prompt_from_fn() is deprecated. Use Prompt.from_function() and call add_prompt() instead.",
                 DeprecationWarning,
