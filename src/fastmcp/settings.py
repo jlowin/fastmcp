@@ -367,8 +367,8 @@ class Settings(BaseSettings):
 
         # https://github.com/jlowin/fastmcp/issues/1749
         # Pydantic imports the module in an ImportString during model validation, but we don't want the server
-        # auth module imported during settings creation as it imports dependencies we aren't ready for yet. 
-        # To fix this while limiting breaking changes, we delay the import by creating a temporary model 
+        # auth module imported during settings creation as it imports dependencies we aren't ready for yet.
+        # To fix this while limiting breaking changes, we delay the import by creating a temporary model
         # with ImportString only when the class is actually needed
 
         class ServerAuthModule(BaseModel):
