@@ -79,13 +79,6 @@ def set_http_request(request: Request) -> Generator[Request, None, None]:
         _current_http_request.reset(token)
 
 
-def get_current_http_request() -> Union[Request, None]:
-    try:
-        return _current_http_request.get()
-    except LookupError:
-        return None
-
-
 class RequestContextMiddleware:
     """
     Middleware that stores each request in a ContextVar
