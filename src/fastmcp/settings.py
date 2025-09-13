@@ -3,9 +3,9 @@ from __future__ import annotations as _annotations
 import inspect
 import warnings
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
-from pydantic import Field, ImportString, field_validator
+from pydantic import BaseModel, Field, ImportString, field_validator
 from pydantic.fields import FieldInfo
 from pydantic_settings import (
     BaseSettings,
@@ -22,6 +22,9 @@ logger = get_logger(__name__)
 LOG_LEVEL = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
 DuplicateBehavior = Literal["warn", "error", "replace", "ignore"]
+
+if TYPE_CHECKING:
+    from fastmcp.server.auth.auth import AuthProvider
 
 
 class ExtendedEnvSettingsSource(EnvSettingsSource):
@@ -258,7 +261,7 @@ class Settings(BaseSettings):
 
     # Auth settings
     server_auth: Annotated[
-        ImportString | None,
+        str | None,
         Field(
             description=inspect.cleandoc(
                 """
@@ -266,9 +269,9 @@ class Settings(BaseSettings):
                 the full module path to an AuthProvider class (e.g., 
                 'fastmcp.server.auth.providers.google.GoogleProvider').
 
-                The specified class will be imported and instantiated automatically.
-                Any class that inherits from AuthProvider can be used, including
-                custom implementations.
+                The specified class will be imported and instantiated automatically
+                during FastMCP server creation. Any class that inherits from AuthProvider
+                can be used, including custom implementations.
 
                 If None, no automatic configuration will take place.
 
@@ -356,6 +359,22 @@ class Settings(BaseSettings):
             ),
         ),
     ] = True
+
+    @property
+    def server_auth_class(self) -> AuthProvider | None:
+        if not self.server_auth:
+            return None
+
+        # https://github.com/jlowin/fastmcp/issues/1749
+        # Pydantic imports the module in an an ImportString on model validation, but we don't want the 
+        # server auth module to be imported during settings creation as it will import a lot of things 
+        # that we aren't ready to import yet, so to fix this while limiting the impact of a breaking change,
+        # we instantiate a model with the ImportString and get the class from it
+
+        class ServerAuthModule(BaseModel):
+            auth_module: ImportString
+
+        return ServerAuthModule(auth_module=self.server_auth).auth_module
 
 
 def __getattr__(name: str):
