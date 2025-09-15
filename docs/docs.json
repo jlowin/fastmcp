@@ -425,7 +425,7 @@
   },
   "theme": "mint",
   "thumbnails": {
-    "appearance": "light",
+    "appearance": "dark",
     "background": "/assets/brand/thumbnail-background.png"
   }
 }
