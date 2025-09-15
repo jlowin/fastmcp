@@ -426,6 +426,6 @@
   "theme": "mint",
   "thumbnails": {
     "appearance": "light",
-    "background": "/assets/brand/card-background.png"
+    "background": "/assets/brand/thumbnail-background.png"
   }
 }
