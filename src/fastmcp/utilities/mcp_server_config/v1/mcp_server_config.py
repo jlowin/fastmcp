@@ -95,6 +95,21 @@ class Deployment(BaseModel):
         import os
         from pathlib import Path
 
+        # Apply log level to global settings
+        if self.log_level:
+            import fastmcp
+            from fastmcp.utilities.logging import configure_logging
+
+            # Update the global settings
+            fastmcp.settings.log_level = self.log_level
+
+            # Reconfigure logging with the new level
+            if fastmcp.settings.log_enabled:
+                configure_logging(
+                    level=self.log_level,
+                    enable_rich_tracebacks=fastmcp.settings.enable_rich_tracebacks,
+                )
+
         # Set environment variables with interpolation support
         if self.env:
             for key, value in self.env.items():
