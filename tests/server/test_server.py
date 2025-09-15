@@ -1587,6 +1587,8 @@ class TestSettingsFromEnvironment:
     async def test_settings_from_environment_issue_1749(self):
         """Test that when auth is enabled, the server starts."""
         from fastmcp.client.transports import PythonStdioTransport
+        from fastmcp.server.auth.providers.azure import AzureProvider
+        from fastmcp.settings import Settings
 
         script = dedent("""
         import os
@@ -1619,3 +1621,11 @@ class TestSettingsFromEnvironment:
                 tools = await client.list_tools()
 
                 assert tools == []
+
+        settings = Settings(
+            server_auth="fastmcp.server.auth.providers.azure.AzureProvider"
+        )
+
+        auth_class = settings.server_auth_class
+
+        assert auth_class is AzureProvider

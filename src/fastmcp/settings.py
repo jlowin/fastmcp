@@ -5,7 +5,7 @@ import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, ImportString, field_validator
+from pydantic import Field, ImportString, field_validator
 from pydantic.fields import FieldInfo
 from pydantic_settings import (
     BaseSettings,
@@ -362,19 +362,22 @@ class Settings(BaseSettings):
 
     @property
     def server_auth_class(self) -> AuthProvider | None:
+        from fastmcp.utilities.types import get_cached_typeadapter
+
         if not self.server_auth:
             return None
 
         # https://github.com/jlowin/fastmcp/issues/1749
         # Pydantic imports the module in an ImportString during model validation, but we don't want the server
         # auth module imported during settings creation as it imports dependencies we aren't ready for yet.
-        # To fix this while limiting breaking changes, we delay the import by creating a temporary model
-        # with ImportString only when the class is actually needed
+        # To fix this while limiting breaking changes, we delay the import by only creating the ImportString
+        # when the class is actually needed
 
-        class ServerAuthModule(BaseModel):
-            auth_module: ImportString
+        type_adapter = get_cached_typeadapter(ImportString)
 
-        return ServerAuthModule(auth_module=self.server_auth).auth_module
+        auth_class = type_adapter.validate_python(self.server_auth)
+
+        return auth_class
 
 
 def __getattr__(name: str):
