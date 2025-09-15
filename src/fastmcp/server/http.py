@@ -113,7 +113,7 @@ def create_base_app(
         A Starlette application
     """
     # Always add RequestContextMiddleware as the outermost middleware
-    middleware.append(Middleware(RequestContextMiddleware))
+    middleware.insert(0, Middleware(RequestContextMiddleware))
 
     return StarletteWithLifespan(
         routes=routes,
