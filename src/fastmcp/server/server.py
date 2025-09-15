@@ -337,12 +337,16 @@ class FastMCP(Generic[LifespanResultT]):
         self,
         transport: Transport | None = None,
         show_banner: bool = True,
+        log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+        | None = None,
         **transport_kwargs: Any,
     ) -> None:
         """Run the FastMCP server asynchronously.
 
         Args:
             transport: Transport protocol to use ("stdio", "sse", or "streamable-http")
+            show_banner: Whether to show the server banner
+            log_level: Log level for the server ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
         """
         if transport is None:
             transport = "stdio"
@@ -352,12 +356,14 @@ class FastMCP(Generic[LifespanResultT]):
         if transport == "stdio":
             await self.run_stdio_async(
                 show_banner=show_banner,
+                log_level=log_level,
                 **transport_kwargs,
             )
         elif transport in {"http", "sse", "streamable-http"}:
             await self.run_http_async(
                 transport=transport,
                 show_banner=show_banner,
+                log_level=log_level,
                 **transport_kwargs,
             )
         else:
@@ -1481,8 +1487,24 @@ class FastMCP(Generic[LifespanResultT]):
             meta=meta,
         )
 
-    async def run_stdio_async(self, show_banner: bool = True) -> None:
-        """Run the server using stdio transport."""
+    async def run_stdio_async(
+        self,
+        show_banner: bool = True,
+        log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+        | None = None,
+    ) -> None:
+        """Run the server using stdio transport.
+
+        Args:
+            show_banner: Whether to show the server banner
+            log_level: Log level for the server ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+        """
+
+        # Configure logging if log_level is provided
+        if log_level:
+            from fastmcp.utilities.logging import configure_logging
+
+            configure_logging(level=log_level)
 
         # Display server banner
         if show_banner:

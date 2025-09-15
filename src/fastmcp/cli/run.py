@@ -99,6 +99,7 @@ async def run_command(
         log_level: Log level
         server_args: Additional arguments to pass to the server
         show_banner: Whether to show the server banner
+        log_level: Log level for the server ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
         use_direct_import: Whether to use direct import instead of subprocess
         skip_source: Whether to skip source preparation step
     """
@@ -184,8 +185,8 @@ async def run_command(
         kwargs["port"] = port
     if path:
         kwargs["path"] = path
-    # Note: log_level is not currently supported by run_async
-    # TODO: Add log_level support to server.run_async
+    if log_level:
+        kwargs["log_level"] = log_level
 
     if not show_banner:
         kwargs["show_banner"] = False
