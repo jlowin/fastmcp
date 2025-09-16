@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import logging
 import re
 import secrets
 import warnings
@@ -1485,8 +1486,45 @@ class FastMCP(Generic[LifespanResultT]):
             meta=meta,
         )
 
-    async def run_stdio_async(self, show_banner: bool = True) -> None:
-        """Run the server using stdio transport."""
+    async def run_stdio_async(
+        self, show_banner: bool = True, log_level: str | None = None
+    ) -> None:
+        """Run the server using stdio transport.
+
+        Args:
+            show_banner: Whether to display the server banner
+            log_level: Log level for the server
+        """
+        import contextlib
+
+        from fastmcp.utilities.logging import configure_logging
+
+        # Create a context manager for log level configuration
+        @contextlib.contextmanager
+        def log_level_context(level: str | None):
+            if level:
+                from typing import Literal, cast
+
+                # Get the FastMCP logger
+                fastmcp_logger = logging.getLogger("FastMCP")
+                old_level = fastmcp_logger.level
+                old_handlers = fastmcp_logger.handlers[:]
+
+                # Configure with new level
+                # Cast to proper type for type checker
+                log_level_literal = cast(
+                    Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+                    level.upper(),
+                )
+                configure_logging(level=log_level_literal)
+                try:
+                    yield
+                finally:
+                    # Restore old configuration
+                    fastmcp_logger.setLevel(old_level)
+                    fastmcp_logger.handlers[:] = old_handlers
+            else:
+                yield
 
         # Display server banner
         if show_banner:
@@ -1495,15 +1533,16 @@ class FastMCP(Generic[LifespanResultT]):
                 transport="stdio",
             )
 
-        async with stdio_server() as (read_stream, write_stream):
-            logger.info(f"Starting MCP server {self.name!r} with transport 'stdio'")
-            await self._mcp_server.run(
-                read_stream,
-                write_stream,
-                self._mcp_server.create_initialization_options(
-                    NotificationOptions(tools_changed=True)
-                ),
-            )
+        with log_level_context(log_level):
+            async with stdio_server() as (read_stream, write_stream):
+                logger.info(f"Starting MCP server {self.name!r} with transport 'stdio'")
+                await self._mcp_server.run(
+                    read_stream,
+                    write_stream,
+                    self._mcp_server.create_initialization_options(
+                        NotificationOptions(tools_changed=True)
+                    ),
+                )
 
     async def run_http_async(
         self,
@@ -1529,6 +1568,36 @@ class FastMCP(Generic[LifespanResultT]):
             middleware: A list of middleware to apply to the app
             stateless_http: Whether to use stateless HTTP (defaults to settings.stateless_http)
         """
+        import contextlib
+
+        from fastmcp.utilities.logging import configure_logging
+
+        # Create a context manager for log level configuration
+        @contextlib.contextmanager
+        def log_level_context(level: str | None):
+            if level:
+                from typing import Literal, cast
+
+                # Get the FastMCP logger
+                fastmcp_logger = logging.getLogger("FastMCP")
+                old_level = fastmcp_logger.level
+                old_handlers = fastmcp_logger.handlers[:]
+
+                # Configure with new level
+                # Cast to proper type for type checker
+                log_level_literal = cast(
+                    Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+                    level.upper(),
+                )
+                configure_logging(level=log_level_literal)
+                try:
+                    yield
+                finally:
+                    # Restore old configuration
+                    fastmcp_logger.setLevel(old_level)
+                    fastmcp_logger.handlers[:] = old_handlers
+            else:
+                yield
 
         host = host or self._deprecated_settings.host
         port = port or self._deprecated_settings.port
@@ -1570,14 +1639,15 @@ class FastMCP(Generic[LifespanResultT]):
         if "log_config" not in config_kwargs and "log_level" not in config_kwargs:
             config_kwargs["log_level"] = default_log_level_to_use
 
-        config = uvicorn.Config(app, host=host, port=port, **config_kwargs)
-        server = uvicorn.Server(config)
-        path = app.state.path.lstrip("/")  # type: ignore
-        logger.info(
-            f"Starting MCP server {self.name!r} with transport {transport!r} on http://{host}:{port}/{path}"
-        )
+        with log_level_context(log_level):
+            config = uvicorn.Config(app, host=host, port=port, **config_kwargs)
+            server = uvicorn.Server(config)
+            path = app.state.path.lstrip("/")  # type: ignore
+            logger.info(
+                f"Starting MCP server {self.name!r} with transport {transport!r} on http://{host}:{port}/{path}"
+            )
 
-        await server.serve()
+            await server.serve()
 
     async def run_sse_async(
         self,
