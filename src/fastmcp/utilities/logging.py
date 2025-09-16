@@ -33,6 +33,11 @@ def configure_logging(
         level: the log level to use
         rich_kwargs: the parameters to use for creating RichHandler
     """
+    # Check if logging is disabled in settings
+    import fastmcp
+
+    if not fastmcp.settings.log_enabled:
+        return
 
     if logger is None:
         logger = logging.getLogger("FastMCP")

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import inspect
 import json
-import logging
 import re
 import secrets
 import warnings
@@ -1505,10 +1504,10 @@ class FastMCP(Generic[LifespanResultT]):
             if level:
                 from typing import Literal, cast
 
-                # Get the FastMCP logger
-                fastmcp_logger = logging.getLogger("FastMCP")
-                old_level = fastmcp_logger.level
-                old_handlers = fastmcp_logger.handlers[:]
+                import fastmcp
+
+                # Get the original log level from settings
+                original_level = fastmcp.settings.log_level
 
                 # Configure with new level
                 # Cast to proper type for type checker
@@ -1520,9 +1519,9 @@ class FastMCP(Generic[LifespanResultT]):
                 try:
                     yield
                 finally:
-                    # Restore old configuration
-                    fastmcp_logger.setLevel(old_level)
-                    fastmcp_logger.handlers[:] = old_handlers
+                    # Restore original configuration using configure_logging
+                    # This will respect the log_enabled setting
+                    configure_logging(level=original_level)
             else:
                 yield
 
@@ -1578,10 +1577,10 @@ class FastMCP(Generic[LifespanResultT]):
             if level:
                 from typing import Literal, cast
 
-                # Get the FastMCP logger
-                fastmcp_logger = logging.getLogger("FastMCP")
-                old_level = fastmcp_logger.level
-                old_handlers = fastmcp_logger.handlers[:]
+                import fastmcp
+
+                # Get the original log level from settings
+                original_level = fastmcp.settings.log_level
 
                 # Configure with new level
                 # Cast to proper type for type checker
@@ -1593,9 +1592,9 @@ class FastMCP(Generic[LifespanResultT]):
                 try:
                     yield
                 finally:
-                    # Restore old configuration
-                    fastmcp_logger.setLevel(old_level)
-                    fastmcp_logger.handlers[:] = old_handlers
+                    # Restore original configuration using configure_logging
+                    # This will respect the log_enabled setting
+                    configure_logging(level=original_level)
             else:
                 yield
 
