@@ -8,11 +8,7 @@ import re
 import secrets
 import warnings
 from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import (
-    AbstractAsyncContextManager,
-    AsyncExitStack,
-    asynccontextmanager,
-)
+from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
@@ -1494,36 +1490,7 @@ class FastMCP(Generic[LifespanResultT]):
             show_banner: Whether to display the server banner
             log_level: Log level for the server
         """
-        import contextlib
-
-        from fastmcp.utilities.logging import configure_logging
-
-        # Create a context manager for log level configuration
-        @contextlib.contextmanager
-        def log_level_context(level: str | None):
-            if level:
-                from typing import Literal, cast
-
-                import fastmcp
-
-                # Get the original log level from settings
-                original_level = fastmcp.settings.log_level
-
-                # Configure with new level
-                # Cast to proper type for type checker
-                log_level_literal = cast(
-                    Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
-                    level.upper(),
-                )
-                configure_logging(level=log_level_literal)
-                try:
-                    yield
-                finally:
-                    # Restore original configuration using configure_logging
-                    # This will respect the log_enabled setting
-                    configure_logging(level=original_level)
-            else:
-                yield
+        from fastmcp.utilities.logging import temporary_log_level
 
         # Display server banner
         if show_banner:
@@ -1532,7 +1499,7 @@ class FastMCP(Generic[LifespanResultT]):
                 transport="stdio",
             )
 
-        with log_level_context(log_level):
+        with temporary_log_level(log_level):
             async with stdio_server() as (read_stream, write_stream):
                 logger.info(f"Starting MCP server {self.name!r} with transport 'stdio'")
                 await self._mcp_server.run(
@@ -1567,36 +1534,7 @@ class FastMCP(Generic[LifespanResultT]):
             middleware: A list of middleware to apply to the app
             stateless_http: Whether to use stateless HTTP (defaults to settings.stateless_http)
         """
-        import contextlib
-
-        from fastmcp.utilities.logging import configure_logging
-
-        # Create a context manager for log level configuration
-        @contextlib.contextmanager
-        def log_level_context(level: str | None):
-            if level:
-                from typing import Literal, cast
-
-                import fastmcp
-
-                # Get the original log level from settings
-                original_level = fastmcp.settings.log_level
-
-                # Configure with new level
-                # Cast to proper type for type checker
-                log_level_literal = cast(
-                    Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
-                    level.upper(),
-                )
-                configure_logging(level=log_level_literal)
-                try:
-                    yield
-                finally:
-                    # Restore original configuration using configure_logging
-                    # This will respect the log_enabled setting
-                    configure_logging(level=original_level)
-            else:
-                yield
+        from fastmcp.utilities.logging import temporary_log_level
 
         host = host or self._deprecated_settings.host
         port = port or self._deprecated_settings.port
@@ -1638,7 +1576,7 @@ class FastMCP(Generic[LifespanResultT]):
         if "log_config" not in config_kwargs and "log_level" not in config_kwargs:
             config_kwargs["log_level"] = default_log_level_to_use
 
-        with log_level_context(log_level):
+        with temporary_log_level(log_level):
             config = uvicorn.Config(app, host=host, port=port, **config_kwargs)
             server = uvicorn.Server(config)
             path = app.state.path.lstrip("/")  # type: ignore
