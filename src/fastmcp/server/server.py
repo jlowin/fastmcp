@@ -61,7 +61,7 @@ from fastmcp.tools.tool import FunctionTool, Tool, ToolResult
 from fastmcp.tools.tool_transform import ToolTransformConfig
 from fastmcp.utilities.cli import log_server_banner
 from fastmcp.utilities.components import FastMCPComponent
-from fastmcp.utilities.logging import get_logger
+from fastmcp.utilities.logging import get_logger, temporary_log_level
 from fastmcp.utilities.types import NotSet, NotSetT
 
 if TYPE_CHECKING:
@@ -1490,8 +1490,6 @@ class FastMCP(Generic[LifespanResultT]):
             show_banner: Whether to display the server banner
             log_level: Log level for the server
         """
-        from fastmcp.utilities.logging import temporary_log_level
-
         # Display server banner
         if show_banner:
             log_server_banner(
@@ -1534,8 +1532,6 @@ class FastMCP(Generic[LifespanResultT]):
             middleware: A list of middleware to apply to the app
             stateless_http: Whether to use stateless HTTP (defaults to settings.stateless_http)
         """
-        from fastmcp.utilities.logging import temporary_log_level
-
         host = host or self._deprecated_settings.host
         port = port or self._deprecated_settings.port
         default_log_level_to_use = (
@@ -2133,10 +2129,8 @@ class FastMCP(Generic[LifespanResultT]):
             # - Connected clients: reuse existing session for all requests
             # - Disconnected clients: create fresh sessions per request for isolation
             if client.is_connected():
-                from fastmcp.utilities.logging import get_logger
-
-                logger = get_logger(__name__)
-                logger.info(
+                _proxy_logger = get_logger(__name__)
+                _proxy_logger.info(
                     "Proxy detected connected client - reusing existing session for all requests. "
                     "This may cause context mixing in concurrent scenarios."
                 )
