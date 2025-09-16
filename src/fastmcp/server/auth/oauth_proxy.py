@@ -389,6 +389,23 @@ class OAuthProxy(OAuthProvider):
         """
         client = self._clients.get(client_id)
 
+        if client is None:
+            # For unregistered DCR clients, create a permissive client
+            # that will accept any localhost redirect URI
+            # We need at least one URI for Pydantic validation, but our custom
+            # validate_redirect_uri will accept any localhost URI
+            client = ProxyDCRClient(
+                client_id=client_id,
+                client_secret=None,
+                redirect_uris=[
+                    AnyUrl("http://localhost")
+                ],  # Placeholder, validation uses allowed_patterns
+                grant_types=["authorization_code", "refresh_token"],
+                scope=self._default_scope_str,
+                token_endpoint_auth_method="none",
+                allowed_redirect_uri_patterns=self._allowed_client_redirect_uris,
+            )
+            logger.debug("Created ProxyDCRClient for unregistered client %s", client_id)
         return client
 
     async def register_client(self, client_info: OAuthClientInformationFull) -> None:
