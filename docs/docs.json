@@ -82,6 +82,7 @@
                   "servers/context",
                   "servers/proxy",
                   "servers/composition",
+                  "servers/mixed-composition",
                   "servers/elicitation",
                   "servers/logging",
                   "servers/progress",

@@ -1,0 +1,361 @@
+---
+title: Mixed Server Composition
+sidebarTitle: Mixed Composition
+description: Create parent servers that combine remote (stdio/sse), native tools, and mounted in-memory servers into a unified interface.
+icon: puzzle-piece
+---
+import { VersionBadge } from '/snippets/version-badge.mdx'
+
+<VersionBadge version="2.0.0" />
+
+Mixed server composition allows you to create parent servers that aggregate functionality from multiple sources: remote servers via stdio/sse, native tools defined directly on the parent server, and mounted in-memory FastMCP servers. This pattern creates a unified interface while preserving the modular architecture of your components.
+
+## Why Mixed Composition?
+
+- **Unified Interface**: Clients see a single server with all capabilities regardless of their source
+- **Flexible Architecture**: Combine legacy stdio servers, remote sse servers, local tools, and in-memory modules
+- **Performance Optimization**: Keep critical tools local while delegating specialized functionality to external servers
+- **Gradual Migration**: Incrementally move from stdio/sse servers to in-memory servers without breaking client connections
+
+## Basic Mixed Server Example
+
+Here's a comprehensive example showing all three types of server composition:
+
+```python
+import asyncio
+from pathlib import Path
+
+from fastmcp import FastMCP
+from fastmcp.client import Client
+
+
+# 1. In-memory server for weather functionality
+weather_server = FastMCP("WeatherService")
+
+@weather_server.tool
+def get_weather(city: str) -> dict:
+    """Get current weather for a city."""
+    return {
+        "city": city,
+        "temperature": 72,
+        "condition": "Sunny",
+        "humidity": 45
+    }
+
+@weather_server.resource("weather://current")
+def current_conditions() -> dict:
+    """Current weather conditions."""
+    return {"global_temp": 68, "trending": "warmer"}
+
+
+# 2. Another in-memory server for database operations
+database_server = FastMCP("DatabaseService") 
+
+@database_server.tool
+def query_users(limit: int = 10) -> list[dict]:
+    """Query user database."""
+    return [
+        {"id": i, "name": f"User{i}", "active": True} 
+        for i in range(1, limit + 1)
+    ]
+
+@database_server.tool
+def create_user(name: str, email: str) -> dict:
+    """Create a new user."""
+    return {"id": 999, "name": name, "email": email, "created": True}
+
+
+# 3. Main parent server with native tools
+parent_server = FastMCP("UnifiedService")
+
+@parent_server.tool
+def get_system_status() -> dict:
+    """Check the overall system status."""
+    return {
+        "status": "operational",
+        "uptime": "99.9%",
+        "active_services": ["weather", "database", "file_ops"]
+    }
+
+@parent_server.resource("system://health")
+def system_health() -> dict:
+    """System health metrics."""
+    return {"cpu": "12%", "memory": "34%", "disk": "67%"}
+
+
+async def setup_mixed_server():
+    """Set up the mixed composition server."""
+    
+    # Mount in-memory servers with prefixes
+    parent_server.mount(weather_server, prefix="weather")
+    parent_server.mount(database_server, prefix="db")
+    
+    # Add remote stdio server proxy
+    stdio_proxy = FastMCP.as_proxy(
+        Client("path/to/stdio_server.py"),
+        name="StdioFileOps"
+    )
+    parent_server.mount(stdio_proxy, prefix="files")
+    
+    # Add remote SSE server proxy  
+    sse_proxy = FastMCP.as_proxy(
+        Client("https://api.example.com/mcp"),
+        name="RemoteAPIService"
+    )
+    parent_server.mount(sse_proxy, prefix="api")
+    
+    return parent_server
+
+
+async def demonstrate_mixed_server():
+    """Demonstrate the capabilities of the mixed server."""
+    server = await setup_mixed_server()
+    
+    # Use the server directly (in-memory client)
+    async with Client(server) as client:
+        # List all available tools from all sources
+        tools = await client.list_tools()
+        print(f"Total tools available: {len(tools)}")
+        
+        # Native tool
+        status = await client.call_tool("get_system_status")
+        print(f"System status: {status.data}")
+        
+        # Mounted in-memory server tool
+        weather = await client.call_tool("weather_get_weather", {"city": "San Francisco"})
+        print(f"Weather: {weather.data}")
+        
+        # Another mounted in-memory server tool
+        users = await client.call_tool("db_query_users", {"limit": 3})
+        print(f"Users: {users.data}")
+        
+        # Remote stdio server tool (if available)
+        try:
+            file_list = await client.call_tool("files_list_directory", {"path": "."})
+            print(f"Files: {file_list.data}")
+        except Exception as e:
+            print(f"Stdio server not available: {e}")
+        
+        # Remote SSE server tool (if available)
+        try:
+            api_data = await client.call_tool("api_get_data", {"endpoint": "/users"})
+            print(f"API data: {api_data.data}")
+        except Exception as e:
+            print(f"SSE server not available: {e}")
+
+
+if __name__ == "__main__":
+    asyncio.run(demonstrate_mixed_server())
+    
+    # Uncomment to run as HTTP server
+    # server = asyncio.run(setup_mixed_server())
+    # server.run()
+```
+
+## Advanced Configuration Example
+
+For more complex scenarios with authentication and middleware:
+
+```python
+import asyncio
+from fastmcp import FastMCP
+from fastmcp.client import Client
+from fastmcp.server.auth.providers import BearerTokenProvider
+
+
+# Business logic server with authentication
+secure_server = FastMCP("SecureBusinessLogic")
+secure_server.add_auth_provider(
+    BearerTokenProvider(tokens={"secret123": "admin"})
+)
+
+@secure_server.tool
+def process_payment(amount: float, currency: str = "USD") -> dict:
+    """Process a payment transaction."""
+    return {
+        "transaction_id": "tx_123456",
+        "amount": amount,
+        "currency": currency,
+        "status": "processed"
+    }
+
+
+# Analytics server
+analytics_server = FastMCP("AnalyticsService")
+
+@analytics_server.tool
+def get_metrics(timeframe: str = "1h") -> dict:
+    """Get system metrics for specified timeframe."""
+    return {
+        "requests": 1250,
+        "errors": 3,
+        "avg_response_time": "45ms",
+        "timeframe": timeframe
+    }
+
+
+# Gateway server combining all services
+gateway_server = FastMCP("APIGateway")
+
+@gateway_server.tool
+def health_check() -> dict:
+    """Gateway health check."""
+    return {"status": "healthy", "services": "all operational"}
+
+async def setup_enterprise_server():
+    """Set up enterprise-grade mixed server."""
+    
+    # Mount secure in-memory server
+    gateway_server.mount(secure_server, prefix="payments")
+    gateway_server.mount(analytics_server, prefix="analytics")
+    
+    # Add legacy stdio servers
+    legacy_crm = FastMCP.as_proxy(
+        Client("legacy_crm_server.py"),
+        name="LegacyCRM"
+    )
+    gateway_server.mount(legacy_crm, prefix="crm")
+    
+    # Add modern microservice via SSE
+    user_service = FastMCP.as_proxy(
+        Client("https://users.company.com/mcp"),
+        name="UserMicroservice"
+    )
+    gateway_server.mount(user_service, prefix="users")
+    
+    # Add notification service via WebSocket
+    notification_proxy = FastMCP.as_proxy(
+        Client("ws://notifications.company.com/mcp"),
+        name="NotificationService"
+    )
+    gateway_server.mount(notification_proxy, prefix="notify")
+    
+    return gateway_server
+
+
+if __name__ == "__main__":
+    server = asyncio.run(setup_enterprise_server())
+    server.run(host="0.0.0.0", port=8000)
+```
+
+## Configuration-Based Mixed Servers
+
+You can also use configuration files to define mixed server compositions:
+
+```json
+{
+  "mcpServers": {
+    "main": {
+      "command": "python",
+      "args": ["main_server.py"],
+      "env": {}
+    },
+    "weather": {
+      "command": "python", 
+      "args": ["weather_server.py"],
+      "env": {}
+    },
+    "database": {
+      "url": "https://db.api.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer token123"
+      }
+    }
+  }
+}
+```
+
+Then load and compose them:
+
+```python
+from fastmcp import FastMCP
+from fastmcp.client import Client
+from fastmcp.mcp_config import MCPConfig
+
+async def setup_from_config():
+    """Set up mixed server from configuration."""
+    # Load configuration
+    config = MCPConfig.from_file("servers.json")
+    
+    # Create main server
+    main_server = FastMCP("ConfiguredGateway")
+    
+    # Add native functionality
+    @main_server.tool
+    def orchestrate() -> str:
+        """Orchestrate across all services."""
+        return "Orchestrating requests across all configured services"
+    
+    # Mount configured servers
+    for name, server_config in config.mcpServers.items():
+        if name == "main":
+            continue  # Skip self
+            
+        proxy = FastMCP.as_proxy(
+            Client(server_config),
+            name=f"Proxy_{name}"
+        )
+        main_server.mount(proxy, prefix=name)
+    
+    return main_server
+```
+
+## Best Practices
+
+### Performance Considerations
+
+- **Local First**: Keep frequently used tools as native or in-memory mounted servers
+- **Proxy Caching**: Consider caching strategies for remote server responses  
+- **Error Handling**: Implement fallbacks when remote servers are unavailable
+- **Timeout Management**: Set appropriate timeouts for remote server calls
+
+### Architecture Guidelines
+
+- **Clear Naming**: Use descriptive prefixes that indicate the source/purpose
+- **Separation of Concerns**: Group related functionality into dedicated servers
+- **Monitoring**: Include health check tools that verify all mounted servers
+- **Documentation**: Maintain clear documentation of what each prefix provides
+
+### Security Considerations
+
+- **Authentication**: Secure remote connections with appropriate auth mechanisms
+- **Authorization**: Implement proper access controls for sensitive operations
+- **Network Security**: Use TLS/SSL for remote connections
+- **Input Validation**: Validate inputs before forwarding to remote servers
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Remote Server Unavailable**: Implement fallback mechanisms and clear error messages
+2. **Naming Conflicts**: Use distinct prefixes to avoid tool/resource name collisions  
+3. **Performance Issues**: Monitor latency and consider moving slow operations to background tasks
+4. **Authentication Failures**: Verify credentials and token validity for remote servers
+
+### Debugging Tips
+
+```python
+async def debug_mixed_server(server: FastMCP):
+    """Debug helper for mixed servers."""
+    tools = await server.get_tools()
+    resources = await server.get_resources()
+    
+    print("=== Server Analysis ===")
+    print(f"Total tools: {len(tools)}")
+    print(f"Total resources: {len(resources)}")
+    
+    # Group by prefix
+    tool_prefixes = {}
+    for name, tool in tools.items():
+        prefix = name.split('_')[0] if '_' in name else 'native'
+        tool_prefixes.setdefault(prefix, []).append(name)
+    
+    for prefix, tool_names in tool_prefixes.items():
+        print(f"  {prefix}: {len(tool_names)} tools")
+        for tool_name in tool_names[:3]:  # Show first 3
+            print(f"    - {tool_name}")
+        if len(tool_names) > 3:
+            print(f"    ... and {len(tool_names) - 3} more")
+```
+
+Mixed server composition provides powerful flexibility for building scalable, maintainable MCP applications that can integrate with existing systems while providing room for future growth and modernization.
