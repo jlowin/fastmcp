@@ -208,8 +208,8 @@ class FastMCP(Generic[LifespanResultT]):
         # if auth is `NotSet`, try to create a provider from the environment
         if auth is NotSet:
             if fastmcp.settings.server_auth is not None:
-                # ImportString returns the class itself
-                auth = fastmcp.settings.server_auth()
+                # server_auth_class returns the class itself
+                auth = fastmcp.settings.server_auth_class()
             else:
                 auth = None
         self.auth = cast(AuthProvider | None, auth)
@@ -328,6 +328,10 @@ class FastMCP(Generic[LifespanResultT]):
     @property
     def instructions(self) -> str | None:
         return self._mcp_server.instructions
+
+    @instructions.setter
+    def instructions(self, value: str | None) -> None:
+        self._mcp_server.instructions = value
 
     @property
     def version(self) -> str | None:
