@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-from importlib.metadata import version
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -204,10 +204,17 @@ def log_server_banner(
         "FastMCP version:",
         Text(fastmcp.__version__, style="dim white", no_wrap=True),
     )
+    # Get MCP version with fallback for subprocess environments
+    try:
+        mcp_version = version("mcp")
+    except PackageNotFoundError:
+        # Fallback when package metadata isn't available (e.g., in subprocess tests)
+        mcp_version = "unknown"
+
     info_table.add_row(
         "🤝",
         "MCP SDK version:",
-        Text(version("mcp"), style="dim white", no_wrap=True),
+        Text(mcp_version, style="dim white", no_wrap=True),
     )
 
     # Add documentation link
