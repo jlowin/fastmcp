@@ -1590,6 +1590,7 @@ class TestOpenAPIExperimentalFeatureFlag:
 
 
 class TestSettingsFromEnvironment:
+    @pytest.mark.client_process
     async def test_settings_from_environment_issue_1749(self):
         """Test that when auth is enabled, the server starts."""
         from fastmcp.client.transports import PythonStdioTransport

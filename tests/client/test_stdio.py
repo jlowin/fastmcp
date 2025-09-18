@@ -10,6 +10,9 @@ import pytest
 from fastmcp import Client, FastMCP
 from fastmcp.client.transports import PythonStdioTransport, StdioTransport
 
+# Mark all tests in this module with client_process marker since they spawn subprocesses
+pytestmark = pytest.mark.client_process
+
 
 def running_under_debugger():
     return os.environ.get("DEBUGPY_RUNNING") == "true"

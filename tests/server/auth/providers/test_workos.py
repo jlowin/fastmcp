@@ -192,6 +192,9 @@ def client_with_headless_oauth(
 
 @pytest.mark.client_process
 class TestAuthKitProvider:
+    @pytest.mark.skipif(
+        os.environ.get("CI") is not None, reason="Subprocess environment issues in CI"
+    )
     async def test_unauthorized_access(self, mcp_server_url: str):
         with pytest.raises(httpx.HTTPStatusError) as exc_info:
             async with Client(mcp_server_url) as client:
