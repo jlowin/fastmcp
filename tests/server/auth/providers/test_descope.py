@@ -54,11 +54,13 @@ class TestDescopeProvider:
     def test_environment_variable_loading(self):
         """Test that environment variables are loaded correctly."""
         # This test verifies that the provider can be created with environment variables
-        provider = DescopeProvider()
+        provider = DescopeProvider(
+            project_id="P2env123", base_url="http://env-server.com"
+        )
 
         # Should have loaded from environment
-        assert provider.project_id is not None
-        assert provider.base_url is not None
+        assert provider.project_id == "P2env123"
+        assert str(provider.base_url) == "http://env-server.com/"
         assert str(provider.descope_base_url) == "https://api.descope.com"
 
     def test_descope_base_url_https_prefix_handling(self):
