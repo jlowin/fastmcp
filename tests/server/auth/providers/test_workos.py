@@ -190,6 +190,7 @@ def client_with_headless_oauth(
     yield client
 
 
+@pytest.mark.client_process
 class TestAuthKitProvider:
     async def test_unauthorized_access(self, mcp_server_url: str):
         with pytest.raises(httpx.HTTPStatusError) as exc_info:

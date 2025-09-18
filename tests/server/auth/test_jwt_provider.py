@@ -967,6 +967,7 @@ class TestBearerToken:
         assert access_token.client_id == "test-user"
 
 
+@pytest.mark.client_process
 class TestFastMCPBearerAuth:
     def test_bearer_auth(self):
         mcp = FastMCP(

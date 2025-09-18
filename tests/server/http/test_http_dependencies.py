@@ -9,6 +9,9 @@ from fastmcp.server.dependencies import get_http_request
 from fastmcp.server.server import FastMCP
 from fastmcp.utilities.tests import run_server_in_process
 
+# Mark all tests in this module with client_process marker since they use run_server_in_process
+pytestmark = pytest.mark.client_process
+
 
 def fastmcp_server():
     server = FastMCP()
