@@ -22,7 +22,6 @@ class TestDescopeProvider:
             project_id="P2abc123",
             base_url="https://myserver.com",
             descope_base_url="https://api.descope.com",
-            required_scopes=["openid", "profile"],
         )
 
         assert provider.project_id == "P2abc123"
@@ -44,7 +43,6 @@ class TestDescopeProvider:
                 "FASTMCP_SERVER_AUTH_DESCOPEPROVIDER_PROJECT_ID": "P2env123",
                 "FASTMCP_SERVER_AUTH_DESCOPEPROVIDER_BASE_URL": "https://envserver.com",
                 "FASTMCP_SERVER_AUTH_DESCOPEPROVIDER_DESCOPE_BASE_URL": "https://api.descope.com",
-                "FASTMCP_SERVER_AUTH_DESCOPEPROVIDER_REQUIRED_SCOPES": scopes_env,
             },
         ):
             provider = DescopeProvider()
@@ -52,10 +50,6 @@ class TestDescopeProvider:
             assert provider.project_id == "P2env123"
             assert str(provider.base_url) == "https://envserver.com/"
             assert str(provider.descope_base_url) == "https://api.descope.com"
-            assert provider.token_verifier.required_scopes == [
-                "openid",
-                "email",
-            ]
 
     def test_environment_variable_loading(self):
         """Test that environment variables are loaded correctly."""
@@ -66,7 +60,6 @@ class TestDescopeProvider:
         assert provider.project_id is not None
         assert provider.base_url is not None
         assert str(provider.descope_base_url) == "https://api.descope.com"
-        # required_scopes may be loaded from environment
 
     def test_descope_base_url_https_prefix_handling(self):
         """Test that descope_base_url handles missing https:// prefix."""
@@ -103,8 +96,6 @@ class TestDescopeProvider:
 
         # Check defaults
         assert str(provider.descope_base_url) == "https://api.descope.com"
-        # Note: required_scopes will be loaded from environment if available
-        # This test verifies the provider can be created with minimal args
 
     def test_jwt_verifier_configured_correctly(self):
         """Test that JWT verifier is configured correctly."""

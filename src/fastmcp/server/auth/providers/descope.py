@@ -10,14 +10,13 @@ from __future__ import annotations
 from typing import Any
 
 import httpx
-from pydantic import AnyHttpUrl, field_validator
+from pydantic import AnyHttpUrl
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from fastmcp.server.auth import RemoteAuthProvider, TokenVerifier
 from fastmcp.server.auth.providers.jwt import JWTVerifier
-from fastmcp.utilities.auth import parse_scopes
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.types import NotSet, NotSetT
 
@@ -34,12 +33,6 @@ class DescopeProviderSettings(BaseSettings):
     project_id: str
     base_url: AnyHttpUrl
     descope_base_url: AnyHttpUrl = AnyHttpUrl("https://api.descope.com")
-    required_scopes: list[str] | None = None
-
-    @field_validator("required_scopes", mode="before")
-    @classmethod
-    def _parse_scopes(cls, v):
-        return parse_scopes(v)
 
 
 class DescopeProvider(RemoteAuthProvider):
@@ -87,7 +80,6 @@ class DescopeProvider(RemoteAuthProvider):
         project_id: str | NotSetT = NotSet,
         base_url: AnyHttpUrl | str | NotSetT = NotSet,
         descope_base_url: AnyHttpUrl | str | NotSetT = NotSet,
-        required_scopes: list[str] | None | NotSetT = NotSet,
         token_verifier: TokenVerifier | None = None,
     ):
         """Initialize Descope metadata provider.
@@ -96,7 +88,6 @@ class DescopeProvider(RemoteAuthProvider):
             project_id: Your Descope Project ID (e.g., "P2abc...123")
             base_url: Public URL of this FastMCP server
             descope_base_url: Descope API base URL (defaults to https://api.descope.com)
-            required_scopes: Optional list of scopes to require for all requests
             token_verifier: Optional token verifier. If None, creates JWT verifier for Descope
         """
         settings = DescopeProviderSettings.model_validate(
@@ -106,7 +97,6 @@ class DescopeProvider(RemoteAuthProvider):
                     "project_id": project_id,
                     "base_url": base_url,
                     "descope_base_url": descope_base_url,
-                    "required_scopes": required_scopes,
                 }.items()
                 if v is not NotSet
             }
@@ -123,7 +113,6 @@ class DescopeProvider(RemoteAuthProvider):
                 issuer=f"{self.descope_base_url}/v1/apps/{self.project_id}",
                 algorithm="RS256",
                 audience=self.project_id,
-                required_scopes=settings.required_scopes,
             )
 
         # Initialize RemoteAuthProvider with Descope as the authorization server

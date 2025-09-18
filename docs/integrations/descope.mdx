@@ -71,7 +71,6 @@ auth_provider = DescopeProvider(
     project_id=DESCOPE_PROJECT_ID,        # Your Descope Project ID
     base_url=SERVER_URL,                  # Your server's public URL
     descope_base_url=DESCOPE_BASE_URL,    # Descope API base URL
-    # Optional: Add required_scopes=["your-scope"] to enforce specific permissions
 )
 
 # Create FastMCP server with auth
@@ -133,10 +132,6 @@ Public URL of your FastMCP server (e.g., `https://your-server.com` or `http://lo
 <ParamField path="FASTMCP_SERVER_AUTH_DESCOPEPROVIDER_DESCOPE_BASE_URL" default="https://api.descope.com">
 Descope API base URL for your [region/environment](https://docs.descope.com/management/project-settings/multi-regional)
 </ParamField>
-
-<ParamField path="FASTMCP_SERVER_AUTH_DESCOPEPROVIDER_REQUIRED_SCOPES" default="[]">
-Comma-, space-, or JSON-separated list of required OAuth scopes (e.g., `openid profile email` or `["openid", "profile", "email"]`)
-</ParamField>
 </Card>
 
 Example `.env` file:
@@ -148,7 +143,6 @@ FASTMCP_SERVER_AUTH=fastmcp.server.auth.providers.descope.DescopeProvider
 FASTMCP_SERVER_AUTH_DESCOPEPROVIDER_PROJECT_ID=P2abc...123
 FASTMCP_SERVER_AUTH_DESCOPEPROVIDER_BASE_URL=https://your-server.com
 FASTMCP_SERVER_AUTH_DESCOPEPROVIDER_DESCOPE_BASE_URL=https://api.descope.com
-FASTMCP_SERVER_AUTH_DESCOPEPROVIDER_REQUIRED_SCOPES=openid,profile,email
 ```
 
 With environment variables set, your server code simplifies to:
