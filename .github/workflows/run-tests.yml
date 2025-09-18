@@ -51,15 +51,10 @@ jobs:
         run: uv run pytest -v tests -m "not integration and not client_process"
 
       - name: Run client subprocess tests (except OpenAPI)
-        run: |
-          uv run pytest -v tests/client -m "client_process" \
-            --ignore=tests/client/test_openapi_legacy.py \
-            --ignore=tests/client/test_openapi_experimental.py
+        run: uv run pytest -v tests/client -m "client_process" --ignore=tests/client/test_openapi_legacy.py --ignore=tests/client/test_openapi_experimental.py
 
       - name: Run OpenAPI subprocess tests
-        run: |
-          uv run pytest -v tests/client/test_openapi_legacy.py tests/client/test_openapi_experimental.py \
-            -m "client_process"
+        run: uv run pytest -v tests/client/test_openapi_legacy.py tests/client/test_openapi_experimental.py -m "client_process"
 
       - name: Run server subprocess tests
         run: uv run pytest -v tests/server -m "client_process"
