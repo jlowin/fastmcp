@@ -10,6 +10,7 @@ if settings.log_enabled:
     _configure_logging(
         level=settings.log_level,
         enable_rich_tracebacks=settings.enable_rich_tracebacks,
+        console_width=settings.rich_console_width,
     )
 
 from fastmcp.server.server import FastMCP

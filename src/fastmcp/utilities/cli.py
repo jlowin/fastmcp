@@ -231,5 +231,8 @@ def log_server_banner(
         expand=False,
     )
 
-    console = Console(stderr=True)
+    from fastmcp.settings import Settings
+
+    settings = Settings()
+    console = Console(stderr=True, width=settings.rich_console_width)
     console.print(Group("\n", panel, "\n"))

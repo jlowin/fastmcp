@@ -172,6 +172,19 @@ class Settings(BaseSettings):
         ),
     ] = True
 
+    rich_console_width: Annotated[
+        int | None,
+        Field(
+            description=inspect.cleandoc(
+                """
+                Width for Rich console output including tracebacks. If None, 
+                Rich will auto-detect the terminal width. Set to a larger value
+                (e.g., 120, 140) for wider tracebacks that show more code context.
+                """
+            )
+        ),
+    ] = 120
+
     deprecation_warnings: Annotated[
         bool,
         Field(

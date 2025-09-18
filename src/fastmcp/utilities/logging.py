@@ -23,6 +23,7 @@ def configure_logging(
     level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] | int = "INFO",
     logger: logging.Logger | None = None,
     enable_rich_tracebacks: bool = True,
+    console_width: int | None = None,
     **rich_kwargs: Any,
 ) -> None:
     """
@@ -31,6 +32,7 @@ def configure_logging(
     Args:
         logger: the logger to configure
         level: the log level to use
+        console_width: width for Rich console output
         rich_kwargs: the parameters to use for creating RichHandler
     """
 
@@ -39,7 +41,7 @@ def configure_logging(
 
     # Only configure the FastMCP logger namespace
     handler = RichHandler(
-        console=Console(stderr=True),
+        console=Console(stderr=True, width=console_width),
         rich_tracebacks=enable_rich_tracebacks,
         **rich_kwargs,
     )
