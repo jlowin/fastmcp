@@ -11,9 +11,6 @@ from fastmcp.server.auth.providers.in_memory import InMemoryOAuthProvider
 from fastmcp.server.server import FastMCP
 from fastmcp.utilities.tests import HeadlessOAuth, run_server_in_process
 
-# Mark all tests in this module with client_process marker since they use run_server_in_process
-pytestmark = pytest.mark.client_process
-
 
 def fastmcp_server(issuer_url: str):
     """Create a FastMCP server with OAuth authentication."""

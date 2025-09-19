@@ -10,9 +10,6 @@ from fastmcp.client.transports import SSETransport, StreamableHttpTransport
 from fastmcp.experimental.server.openapi import MCPType, RouteMap
 from fastmcp.utilities.tests import run_server_in_process
 
-# Mark all tests in this module with client_process marker since they use run_server_in_process
-pytestmark = pytest.mark.client_process
-
 
 def fastmcp_server_for_headers() -> FastMCP:
     fastmcp.settings.experimental.enable_new_openapi_parser = True
