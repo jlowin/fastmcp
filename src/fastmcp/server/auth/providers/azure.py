@@ -98,7 +98,8 @@ class AzureTokenVerifier(TokenVerifier):
                     expires_at=None,
                     claims={
                         "sub": user_data.get("id"),
-                        "email": user_data.get("mail") or user_data.get("userPrincipalName"),
+                        "email": user_data.get("mail")
+                        or user_data.get("userPrincipalName"),
                         "name": user_data.get("displayName"),
                         "given_name": user_data.get("givenName"),
                         "family_name": user_data.get("surname"),
@@ -194,9 +195,13 @@ class AzureProvider(OAuthProxy):
 
         # Validate required settings
         if not settings.client_id:
-            raise ValueError("client_id is required - set via parameter or FASTMCP_SERVER_AUTH_AZURE_CLIENT_ID")
+            raise ValueError(
+                "client_id is required - set via parameter or FASTMCP_SERVER_AUTH_AZURE_CLIENT_ID"
+            )
         if not settings.client_secret:
-            raise ValueError("client_secret is required - set via parameter or FASTMCP_SERVER_AUTH_AZURE_CLIENT_SECRET")
+            raise ValueError(
+                "client_secret is required - set via parameter or FASTMCP_SERVER_AUTH_AZURE_CLIENT_SECRET"
+            )
 
         # Validate tenant_id is provided
         if not settings.tenant_id:
@@ -219,7 +224,9 @@ class AzureProvider(OAuthProxy):
         allowed_client_redirect_uris_final = settings.allowed_client_redirect_uris
 
         # Extract secret string from SecretStr
-        client_secret_str = settings.client_secret.get_secret_value() if settings.client_secret else ""
+        client_secret_str = (
+            settings.client_secret.get_secret_value() if settings.client_secret else ""
+        )
 
         # Create Azure token verifier
         token_verifier = AzureTokenVerifier(
@@ -228,8 +235,12 @@ class AzureProvider(OAuthProxy):
         )
 
         # Build Azure OAuth endpoints with tenant
-        authorization_endpoint = f"https://login.microsoftonline.com/{tenant_id_final}/oauth2/v2.0/authorize"
-        token_endpoint = f"https://login.microsoftonline.com/{tenant_id_final}/oauth2/v2.0/token"
+        authorization_endpoint = (
+            f"https://login.microsoftonline.com/{tenant_id_final}/oauth2/v2.0/authorize"
+        )
+        token_endpoint = (
+            f"https://login.microsoftonline.com/{tenant_id_final}/oauth2/v2.0/token"
+        )
 
         # Initialize OAuth proxy with Azure endpoints
         super().__init__(
@@ -277,7 +288,8 @@ class AzureProvider(OAuthProxy):
 
             if original_resource:
                 logger.debug(
-                    "Filtering out 'resource' parameter '%s' for Azure AD v2.0 (use scopes instead)", original_resource
+                    "Filtering out 'resource' parameter '%s' for Azure AD v2.0 (use scopes instead)",
+                    original_resource,
                 )
 
         # Call parent's authorize method with the filtered parameters
