@@ -1,10 +1,23 @@
 """Logging utilities for FastMCP."""
 
 import logging
+import shutil
 from typing import Any, Literal
 
 from rich.console import Console
 from rich.logging import RichHandler
+
+
+def get_terminal_width() -> int:
+    """Get terminal width using shutil.get_terminal_size() with fallback to 100.
+
+    Returns:
+        Terminal width in characters, defaulting to 100 if detection fails.
+    """
+    try:
+        return shutil.get_terminal_size().columns
+    except (OSError, ValueError):
+        return 100
 
 
 def get_logger(name: str) -> logging.Logger:
@@ -39,7 +52,7 @@ def configure_logging(
 
     # Only configure the FastMCP logger namespace
     handler = RichHandler(
-        console=Console(stderr=True),
+        console=Console(stderr=True, width=get_terminal_width()),
         rich_tracebacks=enable_rich_tracebacks,
         **rich_kwargs,
     )

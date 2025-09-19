@@ -26,12 +26,12 @@ from fastmcp.utilities.inspect import (
     format_info,
     inspect_fastmcp,
 )
-from fastmcp.utilities.logging import get_logger
+from fastmcp.utilities.logging import get_logger, get_terminal_width
 from fastmcp.utilities.mcp_server_config import MCPServerConfig
 from fastmcp.utilities.mcp_server_config.v1.environments.uv import UVEnvironment
 
 logger = get_logger("cli")
-console = Console()
+console = Console(width=get_terminal_width())
 
 app = cyclopts.App(
     name="fastmcp",
