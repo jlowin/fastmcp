@@ -148,9 +148,9 @@ async def get_user_info() -> dict:
     token = get_access_token()
     # The AWSCognitoProvider extracts user data from JWT claims
     return {
-        "sub": token.claims.get("sub"),
-        "username": token.claims.get("username"),
+        "user_id": token.claims.get("sub"),
         "email": token.claims.get("email"),
+        "email_verified": token.claims.get("email_verified"),
         "name": token.claims.get("name"),
         "cognito_groups": token.claims.get("cognito_groups", [])
     }
@@ -183,9 +183,16 @@ async def main():
         print("✓ Authenticated with AWS Cognito!")
 
         # Test the protected tool
-        result = await client.call_tool("get_user_info")
-        print(f"AWS Cognito user: {result['username']}")
-        print(f"Email: {result['email']}")
+        result = await client.call_tool("get_user_profile")
+            if hasattr(result, 'data') and result.data:
+                user_data = result.data
+                print(f"AWS Cognito user ID (sub): {user_data.get('user_id', 'N/A')}")
+                print(f"Email: {user_data.get('email', 'N/A')}")
+                print(f"Email verified: {user_data.get('email_verified', 'N/A')}")
+                print(f"Name: {user_data.get('name', 'N/A')}")
+                print(f"Cognito groups: {user_data.get('cognito_groups', [])}")
+        else:
+            print(result)
 
 if __name__ == "__main__":
     asyncio.run(main())

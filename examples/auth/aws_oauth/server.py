@@ -33,6 +33,7 @@ auth = AWSCognitoProvider(
     client_id=os.getenv("FASTMCP_SERVER_AUTH_AWS_COGNITO_CLIENT_ID") or "",
     client_secret=os.getenv("FASTMCP_SERVER_AUTH_AWS_COGNITO_CLIENT_SECRET") or "",
     base_url="http://localhost:8000",
+    # redirect_path="/custom/callback"
 )
 
 mcp = FastMCP("AWS Cognito OAuth Example Server", auth=auth)
@@ -42,6 +43,21 @@ mcp = FastMCP("AWS Cognito OAuth Example Server", auth=auth)
 def echo(message: str) -> str:
     """Echo the provided message."""
     return message
+
+
+@mcp.tool
+async def get_user_profile() -> dict:
+    """Get the authenticated user's profile from AWS Cognito."""
+    from fastmcp.server.dependencies import get_access_token
+
+    token = get_access_token()
+    return {
+        "user_id": token.claims.get("sub"),
+        "email": token.claims.get("email"),
+        "email_verified": token.claims.get("email_verified"),
+        "name": token.claims.get("name"),
+        "cognito_groups": token.claims.get("cognito_groups", []),
+    }
 
 
 if __name__ == "__main__":
