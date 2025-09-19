@@ -90,6 +90,7 @@ def _single_pass_optimize(
         current_def_name: str | None = None,
         skip_defs_section: bool = False,
         depth: int = 0,
+        parent_key: str | None = None,
     ) -> None:
         """Traverse schema tree, collecting $ref info and applying cleanups."""
         if depth > 50:  # Prevent infinite recursion
@@ -109,8 +110,26 @@ def _single_pass_optimize(
                         root_refs.add(referenced_def)
 
             # Apply cleanups
-            if prune_titles and "title" in node:
-                node.pop("title")
+            # Only remove "title" if it's a schema metadata field, not a property name
+            # Schema metadata titles appear alongside "type", "properties", etc.
+            # We should NOT remove title if the parent key is "properties"
+            if prune_titles and "title" in node and parent_key != "properties":
+                # Additional check: only remove if this looks like a schema node
+                # (has type, properties, $ref, or other schema keywords)
+                if any(
+                    k in node
+                    for k in [
+                        "type",
+                        "properties",
+                        "$ref",
+                        "items",
+                        "allOf",
+                        "oneOf",
+                        "anyOf",
+                        "required",
+                    ]
+                ):
+                    node.pop("title")
 
             if (
                 prune_additional_properties
@@ -126,13 +145,19 @@ def _single_pass_optimize(
                 # Handle schema composition keywords with special traversal
                 if key in ["allOf", "oneOf", "anyOf"] and isinstance(value, list):
                     for item in value:
-                        traverse_and_clean(item, current_def_name, depth=depth + 1)
+                        traverse_and_clean(
+                            item, current_def_name, depth=depth + 1, parent_key=key
+                        )
                 else:
-                    traverse_and_clean(value, current_def_name, depth=depth + 1)
+                    traverse_and_clean(
+                        value, current_def_name, depth=depth + 1, parent_key=key
+                    )
 
         elif isinstance(node, list):
             for item in node:
-                traverse_and_clean(item, current_def_name, depth=depth + 1)
+                traverse_and_clean(
+                    item, current_def_name, depth=depth + 1, parent_key=parent_key
+                )
 
     # Phase 2: Traverse main schema (excluding $defs section)
     traverse_and_clean(schema, skip_defs_section=True)
