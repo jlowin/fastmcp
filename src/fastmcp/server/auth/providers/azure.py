@@ -7,6 +7,8 @@ using the OAuth Proxy pattern for non-DCR OAuth flows.
 from __future__ import annotations
 
 import httpx
+from mcp.server.auth.provider import AuthorizationParams
+from mcp.shared.auth import OAuthClientInformationFull
 from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -258,3 +260,37 @@ class AzureProvider(OAuthProxy):
             settings.client_id,
             tenant_id_final,
         )
+
+    async def authorize(
+        self,
+        client: OAuthClientInformationFull,
+        params: AuthorizationParams,
+    ) -> str:
+        """Start OAuth transaction and redirect to Azure AD.
+
+        Override parent's authorize method to filter out the 'resource' parameter
+        which is not supported by Azure AD v2.0 endpoints. The v2.0 endpoints use
+        scopes to determine the resource/audience instead of a separate parameter.
+
+        Args:
+            client: OAuth client information
+            params: Authorization parameters from the client
+
+        Returns:
+            Authorization URL to redirect the user to Azure AD
+        """
+        # Clear the resource parameter that Azure AD v2.0 doesn't support
+        # This parameter comes from RFC 8707 (OAuth 2.0 Resource Indicators)
+        # but Azure AD v2.0 uses scopes instead to determine the audience
+        if hasattr(params, "resource"):
+            original_resource = params.resource
+            params.resource = None
+
+            if original_resource:
+                logger.debug(
+                    "Filtering out 'resource' parameter '%s' for Azure AD v2.0 (use scopes instead)",
+                    original_resource,
+                )
+
+        # Call parent's authorize method with the filtered parameters
+        return await super().authorize(client, params)
