@@ -160,6 +160,7 @@
                   "integrations/authkit",
                   "integrations/aws-cognito",
                   "integrations/azure",
+                  "integrations/descope",
                   "integrations/github",
                   "integrations/google",
                   "integrations/workos"
