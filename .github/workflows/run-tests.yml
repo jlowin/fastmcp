@@ -48,10 +48,10 @@ jobs:
         run: uv sync --frozen
 
       - name: Run tests (excluding integration and client_process)
-        run: uv run pytest -v tests -m "not integration and not client_process"
+        run: uv run pytest -v tests -m "not integration and not client_process" --timeout=5
 
       - name: Run client process tests separately
-        run: uv run pytest -v tests -m "client_process" -x
+        run: uv run pytest -v tests -m "client_process" -x --timeout=5
 
   run_integration_tests:
     name: "Run integration tests"
