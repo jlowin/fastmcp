@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 import pytest
 
 from fastmcp.server.auth.providers.azure import AzureProvider
-
+from fastmcp.server.auth.oauth_proxy import OAuthProxy
 
 class TestAzureProvider:
     """Test Azure OAuth provider functionality."""
@@ -160,17 +160,18 @@ class TestAzureProvider:
 
     async def test_authorize_filters_resource_parameter(self):
         """Test that authorize method filters out the 'resource' parameter for Azure AD v2.0."""
+        from unittest.mock import AsyncMock, patch
         from mcp.server.auth.provider import AuthorizationParams
         from mcp.shared.auth import OAuthClientInformationFull
         from pydantic import AnyUrl
-
+        
         provider = AzureProvider(
             client_id="test_client",
             client_secret="test_secret",
             tenant_id="test-tenant",
             base_url="https://myserver.com",
         )
-
+        
         # Create a mock client
         client = OAuthClientInformationFull(
             client_id="test_client_123",
@@ -179,64 +180,64 @@ class TestAzureProvider:
             grant_types=["authorization_code"],
             scope="openid profile",
         )
-
+        
         # Create authorization params with resource parameter (which Azure v2.0 doesn't support)
         params = AuthorizationParams(
             redirect_uri=AnyUrl("http://localhost:12345/callback"),
             redirect_uri_provided_explicitly=True,
             state="test_state_123",
             code_challenge="test_challenge",
+            code_challenge_method="S256",
             scopes=["openid", "profile"],
             resource="https://graph.microsoft.com",  # This should be filtered out
         )
-
-        # Mock the parent's authorize method to capture the params it receives
-        original_authorize = provider.__class__.__bases__[0].authorize
-        called_params = None
-
-        async def mock_authorize(self, client, params):
-            nonlocal called_params
-            called_params = params
-            # Return a dummy URL
-            return "https://login.microsoftonline.com/test-tenant/oauth2/v2.0/authorize?test=1"
-
-        # Temporarily replace parent's authorize with our mock
-        provider.__class__.__bases__[0].authorize = mock_authorize
-
-        try:
+        
+        # Mock the parent class's authorize method
+        with patch.object(
+            OAuthProxy, 
+            'authorize',
+            new_callable=AsyncMock,
+            return_value="https://login.microsoftonline.com/test-tenant/oauth2/v2.0/authorize?test=1"
+        ) as mock_authorize:
             # Call the Azure provider's authorize method
-            result = await provider.authorize(client, params)
-
+            await provider.authorize(client, params)
+            
+            # Verify the parent's authorize was called
+            mock_authorize.assert_called_once()
+            
+            # Get the params that were passed to the parent's authorize
+            call_args = mock_authorize.call_args
+            called_client = call_args[0][0]
+            called_params = call_args[0][1]
+            
             # Verify the resource parameter was filtered out
-            assert called_params is not None, "Parent authorize method was not called"
-            assert not hasattr(called_params, "resource") or called_params.resource is None, (
+            assert not hasattr(called_params, 'resource') or called_params.resource is None, \
                 "Resource parameter should have been filtered out"
-            )
-
+            
             # Verify other parameters were preserved
             assert called_params.redirect_uri == params.redirect_uri
+            assert called_params.redirect_uri_provided_explicitly == params.redirect_uri_provided_explicitly
             assert called_params.state == params.state
             assert called_params.code_challenge == params.code_challenge
             assert called_params.scopes == params.scopes
+            
+            # Verify the client was passed through unchanged
+            assert called_client == client
 
-        finally:
-            # Restore original authorize method
-            provider.__class__.__bases__[0].authorize = original_authorize
-
-    @pytest.mark.asyncio
     async def test_authorize_without_resource_parameter(self):
         """Test that authorize works normally when no resource parameter is present."""
+        from unittest.mock import AsyncMock, patch
         from mcp.server.auth.provider import AuthorizationParams
         from mcp.shared.auth import OAuthClientInformationFull
         from pydantic import AnyUrl
-
+        
         provider = AzureProvider(
             client_id="test_client",
             client_secret="test_secret",
             tenant_id="test-tenant",
             base_url="https://myserver.com",
         )
-
+        
         # Create a mock client
         client = OAuthClientInformationFull(
             client_id="test_client_123",
@@ -245,34 +246,28 @@ class TestAzureProvider:
             grant_types=["authorization_code"],
             scope="openid profile",
         )
-
+        
         # Create authorization params WITHOUT resource parameter
         params = AuthorizationParams(
             redirect_uri=AnyUrl("http://localhost:12345/callback"),
             redirect_uri_provided_explicitly=True,
             state="test_state_123",
             code_challenge="test_challenge",
+            code_challenge_method="S256",
             scopes=["openid", "profile"],
             # No resource parameter
         )
-
-        # Mock the parent's authorize method
-        original_authorize = provider.__class__.__bases__[0].authorize
-        called = False
-
-        async def mock_authorize(self, client, params):
-            nonlocal called
-            called = True
-            return "https://login.microsoftonline.com/test-tenant/oauth2/v2.0/authorize?test=1"
-
-        provider.__class__.__bases__[0].authorize = mock_authorize
-
-        try:
+        
+        # Mock the parent class's authorize method
+        with patch.object(
+            OAuthProxy,
+            'authorize',
+            new_callable=AsyncMock,
+            return_value="https://login.microsoftonline.com/test-tenant/oauth2/v2.0/authorize?test=1"
+        ) as mock_authorize:
             # Call should work without issues
             result = await provider.authorize(client, params)
-            assert called, "Parent authorize method should have been called"
+            
+            # Verify the parent's authorize was called
+            mock_authorize.assert_called_once()
             assert result is not None
-
-        finally:
-            # Restore original authorize method
-            provider.__class__.__bases__[0].authorize = original_authorize
