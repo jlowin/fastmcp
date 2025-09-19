@@ -119,7 +119,10 @@
               {
                 "group": "Essentials",
                 "icon": "cube",
-                "pages": ["clients/client", "clients/transports"]
+                "pages": [
+                  "clients/client",
+                  "clients/transports"
+                ]
               },
               {
                 "group": "Core Operations",
@@ -145,7 +148,10 @@
               {
                 "group": "Authentication",
                 "icon": "user-shield",
-                "pages": ["clients/auth/oauth", "clients/auth/bearer"]
+                "pages": [
+                  "clients/auth/oauth",
+                  "clients/auth/bearer"
+                ]
               }
             ]
           },
@@ -226,7 +232,10 @@
         "tab": "Documentation"
       },
       {
-        "pages": ["updates", "changelog"],
+        "pages": [
+          "updates",
+          "changelog"
+        ],
         "tab": "What's New"
       },
       {
@@ -310,12 +319,15 @@
                       "python-sdk/fastmcp-server-auth-__init__",
                       "python-sdk/fastmcp-server-auth-auth",
                       "python-sdk/fastmcp-server-auth-oauth_proxy",
+                      "python-sdk/fastmcp-server-auth-oidc_proxy",
                       {
                         "group": "providers",
                         "pages": [
                           "python-sdk/fastmcp-server-auth-providers-__init__",
+                          "python-sdk/fastmcp-server-auth-providers-auth0",
                           "python-sdk/fastmcp-server-auth-providers-azure",
                           "python-sdk/fastmcp-server-auth-providers-bearer",
+                          "python-sdk/fastmcp-server-auth-providers-descope",
                           "python-sdk/fastmcp-server-auth-providers-github",
                           "python-sdk/fastmcp-server-auth-providers-google",
                           "python-sdk/fastmcp-server-auth-providers-in_memory",
