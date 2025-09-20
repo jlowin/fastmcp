@@ -22,6 +22,7 @@ import hashlib
 import secrets
 import time
 from base64 import urlsafe_b64encode
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
 from urllib.parse import urlencode
 
@@ -46,6 +47,7 @@ from starlette.responses import RedirectResponse
 from starlette.routing import Route
 
 from fastmcp.server.auth.auth import OAuthProvider, TokenVerifier
+from fastmcp.server.auth.client_storage import OAuthClientStorage
 from fastmcp.server.auth.redirect_validation import validate_redirect_uri
 from fastmcp.utilities.logging import get_logger
 
@@ -254,6 +256,8 @@ class OAuthProxy(OAuthProvider):
         extra_authorize_params: dict[str, str] | None = None,
         # Extra parameters to forward to token endpoint
         extra_token_params: dict[str, str] | None = None,
+        # Client storage configuration
+        client_cache_dir: Path | None = None,
     ):
         """Initialize the OAuth proxy provider.
 
@@ -287,6 +291,9 @@ class OAuthProxy(OAuthProvider):
                 Example: {"audience": "https://api.example.com"}
             extra_token_params: Additional parameters to forward to the upstream token endpoint.
                 Useful for provider-specific parameters during token exchange.
+            client_cache_dir: Directory for storing client registrations persistently.
+                Defaults to ~/.fastmcp/oauth-proxy-clients/ if not specified.
+                Client registrations will persist across server restarts.
         """
         # Always enable DCR since we implement it locally for MCP clients
         client_registration_options = ClientRegistrationOptions(
@@ -335,7 +342,10 @@ class OAuthProxy(OAuthProvider):
         self._extra_authorize_params = extra_authorize_params or {}
         self._extra_token_params = extra_token_params or {}
 
-        # Local state for DCR and token bookkeeping
+        # Initialize persistent client storage
+        self._client_storage = OAuthClientStorage(cache_dir=client_cache_dir)
+
+        # Local state for DCR and token bookkeeping (in-memory cache)
         self._clients: dict[str, OAuthClientInformationFull] = {}
         self._access_tokens: dict[str, AccessToken] = {}
         self._refresh_tokens: dict[str, RefreshToken] = {}
@@ -386,8 +396,21 @@ class OAuthProxy(OAuthProvider):
         provided to the DCR client during registration, not the upstream client ID.
 
         For unregistered clients, returns None (which will raise an error in the SDK).
+        First checks in-memory cache, then tries persistent storage.
         """
+        # Check in-memory cache first
         client = self._clients.get(client_id)
+        if client:
+            return client
+
+        # Try to load from persistent storage
+        client = await self._client_storage.get_client(
+            client_id, allowed_redirect_uri_patterns=self._allowed_client_redirect_uris
+        )
+        if client:
+            # Cache in memory for performance
+            self._clients[client_id] = client
+            logger.debug(f"Loaded client {client_id} from persistent storage")
 
         return client
 
@@ -412,7 +435,8 @@ class OAuthProxy(OAuthProvider):
             allowed_redirect_uri_patterns=self._allowed_client_redirect_uris,
         )
 
-        # Store the ProxyDCRClient
+        # Store the ProxyDCRClient in both persistent storage and in-memory cache
+        await self._client_storage.save_client(proxy_client, is_proxy_dcr=True)
         self._clients[client_info.client_id] = proxy_client
 
         # Log redirect URIs to help users discover what patterns they might need
