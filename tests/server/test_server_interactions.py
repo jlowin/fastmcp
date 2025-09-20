@@ -936,8 +936,6 @@ class TestToolOutputSchema:
 
             type_schema = TypeAdapter(annotation).json_schema()
             # Remove title fields from the schema for comparison (title pruning is enabled)
-            from fastmcp.utilities.json_schema import compress_schema
-
             type_schema = compress_schema(type_schema, prune_titles=True)
             # this line will fail until MCP adds output schemas!!
             assert tools[0].outputSchema == {
@@ -1099,8 +1097,6 @@ class TestToolOutputSchema:
             # List tools and verify schema shows wrapped array
             tools = await client.list_tools()
             tool = next(t for t in tools if t.name == "complex_tool")
-            from fastmcp.utilities.json_schema import compress_schema
-
             expected_inner_schema = compress_schema(
                 TypeAdapter(list[dict[str, int]]).json_schema(), prune_titles=True
             )
