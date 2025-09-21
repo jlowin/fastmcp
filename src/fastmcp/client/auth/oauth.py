@@ -141,6 +141,7 @@ class FileTokenStorage(TokenStorage):
             )
 
         # Create StoredToken and save using storage
+        # Note: JSONFileStorage will wrap this in {"data": ..., "timestamp": ...}
         stored = StoredToken(token_payload=tokens, expires_at=expires_at)
         await self._storage.set(key, stored.model_dump(mode="json"))
         logger.debug(f"Saved tokens for {self.get_base_url(self.server_url)}")
