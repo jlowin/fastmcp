@@ -30,10 +30,13 @@ class KVStorage(Protocol):
 
 
 class JSONFileStorage:
-    """File-based key-value storage for JSON data.
+    """File-based key-value storage for JSON data with automatic metadata tracking.
 
     Each key-value pair is stored as a separate JSON file on disk.
     Keys are sanitized to be filesystem-safe.
+
+    The storage automatically wraps all data with metadata:
+    - timestamp: Timestamp when the entry was last written
 
     Args:
         cache_dir: Directory for storing JSON files
@@ -77,9 +80,16 @@ class JSONFileStorage:
         """
         path = self._get_file_path(key)
         try:
-            data = json.loads(path.read_text())
+            wrapper = json.loads(path.read_text())
+
+            # Expect wrapped format with metadata
+            if not isinstance(wrapper, dict) or "data" not in wrapper:
+                logger.warning(f"Invalid storage format for key '{key}'")
+                return None
+
             logger.debug(f"Loaded data for key '{key}'")
-            return data
+            return wrapper["data"]
+
         except FileNotFoundError:
             logger.debug(f"No data found for key '{key}'")
             return None
@@ -88,16 +98,25 @@ class JSONFileStorage:
             return None
 
     async def set(self, key: str, value: dict[str, Any]) -> None:
-        """Store a JSON dict.
+        """Store a JSON dict with metadata.
 
         Args:
             key: The key to store under
             value: The dict to store
         """
+        import time
+
         path = self._get_file_path(key)
+        current_time = time.time()
+
+        # Create wrapper with metadata
+        wrapper = {
+            "data": value,
+            "timestamp": current_time,
+        }
 
         # Use pydantic_core for consistent JSON serialization
-        json_data = pydantic_core.to_json(value, fallback=str)
+        json_data = pydantic_core.to_json(wrapper, fallback=str)
         path.write_bytes(json_data)
         logger.debug(f"Saved data for key '{key}'")
 
@@ -111,6 +130,54 @@ class JSONFileStorage:
         if path.exists():
             path.unlink()
             logger.debug(f"Deleted data for key '{key}'")
+
+    async def cleanup_old_entries(
+        self,
+        max_age_seconds: int = 30 * 24 * 60 * 60,  # 30 days default
+    ) -> int:
+        """Remove entries older than the specified age.
+
+        Uses the timestamp field to determine age.
+
+        Args:
+            max_age_seconds: Maximum age in seconds (default 30 days)
+
+        Returns:
+            Number of entries removed
+        """
+        import time
+
+        current_time = time.time()
+        removed_count = 0
+
+        for json_file in self.cache_dir.glob("*.json"):
+            try:
+                # Read the file and check timestamp
+                wrapper = json.loads(json_file.read_text())
+
+                # Check wrapped format
+                if not isinstance(wrapper, dict) or "data" not in wrapper:
+                    continue  # Invalid format, skip
+
+                if "timestamp" not in wrapper:
+                    continue  # No timestamp field, skip
+
+                entry_age = current_time - wrapper["timestamp"]
+                if entry_age > max_age_seconds:
+                    json_file.unlink()
+                    removed_count += 1
+                    logger.debug(
+                        f"Removed old entry '{json_file.stem}' (age: {entry_age:.0f}s)"
+                    )
+
+            except (json.JSONDecodeError, KeyError) as e:
+                logger.debug(f"Error reading {json_file.name}: {e}")
+                continue
+
+        if removed_count > 0:
+            logger.info(f"Cleaned up {removed_count} old entries from storage")
+
+        return removed_count
 
 
 class InMemoryStorage:

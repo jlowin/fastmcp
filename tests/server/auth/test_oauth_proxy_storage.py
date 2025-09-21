@@ -171,5 +171,43 @@ class TestOAuthProxyStorage:
         assert raw_data is not None
         assert "client" in raw_data
         assert "allowed_redirect_uri_patterns" in raw_data
-        assert "registered_at" in raw_data
-        assert isinstance(raw_data["registered_at"], int | float)
+
+    async def test_cleanup_old_clients(self, jwt_verifier, temp_storage):
+        """Test cleanup of old clients using storage's cleanup method."""
+        import json
+        import time
+
+        proxy = self.create_proxy(jwt_verifier, storage=temp_storage)
+
+        # Register some clients
+        client1 = OAuthClientInformationFull(
+            client_id="old-client",
+            client_secret="secret1",
+            redirect_uris=[AnyUrl("http://localhost:8080/callback")],
+        )
+        await proxy.register_client(client1)
+
+        client2 = OAuthClientInformationFull(
+            client_id="recent-client",
+            client_secret="secret2",
+            redirect_uris=[AnyUrl("http://localhost:9090/callback")],
+        )
+        await proxy.register_client(client2)
+
+        # Manually make the first client old by modifying the file directly
+        old_client_path = temp_storage._get_file_path("old-client")
+        wrapper = json.loads(old_client_path.read_text())
+        wrapper["timestamp"] = time.time() - (35 * 24 * 60 * 60)  # 35 days old
+        old_client_path.write_text(json.dumps(wrapper))
+
+        # Run cleanup directly on storage
+        removed_count = await temp_storage.cleanup_old_entries(
+            max_age_seconds=30 * 24 * 60 * 60
+        )
+        assert removed_count == 1
+
+        # Old client should be gone
+        assert await proxy.get_client("old-client") is None
+
+        # Recent client should still exist
+        assert await proxy.get_client("recent-client") is not None

@@ -406,7 +406,7 @@ class OAuthProxy(OAuthProvider):
 
         if client_data := data.get("client", None):
             return ProxyDCRClient(
-                allowed_redirect_uri_patterns=client_data.get(
+                allowed_redirect_uri_patterns=data.get(
                     "allowed_redirect_uri_patterns", self._allowed_client_redirect_uris
                 ),
                 **client_data,
@@ -439,7 +439,6 @@ class OAuthProxy(OAuthProvider):
         storage_data = {
             "client": proxy_client.model_dump(mode="json"),
             "allowed_redirect_uri_patterns": self._allowed_client_redirect_uris,
-            "registered_at": time.time(),
         }
         await self._client_storage.set(client_info.client_id, storage_data)
 
