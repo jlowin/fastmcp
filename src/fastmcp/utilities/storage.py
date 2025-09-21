@@ -1,0 +1,128 @@
+"""Key-value storage utilities for persistent data management."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any, Protocol
+
+import pydantic_core
+
+from fastmcp.utilities.logging import get_logger
+
+logger = get_logger(__name__)
+
+
+class KVStorage(Protocol):
+    """Protocol for key-value storage of JSON data."""
+
+    async def get(self, key: str) -> dict[str, Any] | None:
+        """Get a JSON dict by key."""
+        ...
+
+    async def set(self, key: str, value: dict[str, Any]) -> None:
+        """Store a JSON dict by key."""
+        ...
+
+    async def delete(self, key: str) -> None:
+        """Delete a value by key."""
+        ...
+
+
+class JSONFileStorage:
+    """File-based key-value storage for JSON data.
+
+    Each key-value pair is stored as a separate JSON file on disk.
+    Keys are sanitized to be filesystem-safe.
+
+    Args:
+        cache_dir: Directory for storing JSON files
+    """
+
+    def __init__(self, cache_dir: Path):
+        """Initialize JSON file storage."""
+        self.cache_dir = cache_dir
+        self.cache_dir.mkdir(exist_ok=True, parents=True)
+
+    def _get_safe_key(self, key: str) -> str:
+        """Convert key to filesystem-safe string."""
+        # Replace problematic characters with underscores
+        safe_key = key
+        for char in [".", "/", "\\", ":", "*", "?", '"', "<", ">", "|", " "]:
+            safe_key = safe_key.replace(char, "_")
+        return safe_key
+
+    def _get_file_path(self, key: str) -> Path:
+        """Get the file path for a given key."""
+        safe_key = self._get_safe_key(key)
+        return self.cache_dir / f"{safe_key}.json"
+
+    async def get(self, key: str) -> dict[str, Any] | None:
+        """Get a JSON dict from storage by key.
+
+        Args:
+            key: The key to retrieve
+
+        Returns:
+            The stored dict or None if not found
+        """
+        path = self._get_file_path(key)
+        try:
+            data = json.loads(path.read_text())
+            logger.debug(f"Loaded data for key '{key}'")
+            return data
+        except FileNotFoundError:
+            logger.debug(f"No data found for key '{key}'")
+            return None
+        except json.JSONDecodeError as e:
+            logger.warning(f"Failed to load data for key '{key}': {e}")
+            return None
+
+    async def set(self, key: str, value: dict[str, Any]) -> None:
+        """Store a JSON dict.
+
+        Args:
+            key: The key to store under
+            value: The dict to store
+        """
+        path = self._get_file_path(key)
+
+        # Use pydantic_core for consistent JSON serialization
+        json_data = pydantic_core.to_json(value, fallback=str)
+        path.write_bytes(json_data)
+        logger.debug(f"Saved data for key '{key}'")
+
+    async def delete(self, key: str) -> None:
+        """Delete a value from storage.
+
+        Args:
+            key: The key to delete
+        """
+        path = self._get_file_path(key)
+        if path.exists():
+            path.unlink()
+            logger.debug(f"Deleted data for key '{key}'")
+
+
+class InMemoryStorage:
+    """In-memory key-value storage for JSON data.
+
+    Simple dict-based storage that doesn't persist across restarts.
+    Useful for testing or environments where file storage isn't available.
+    """
+
+    def __init__(self):
+        """Initialize in-memory storage."""
+        self._data: dict[str, dict[str, Any]] = {}
+
+    async def get(self, key: str) -> dict[str, Any] | None:
+        """Get a JSON dict from memory by key."""
+        return self._data.get(key)
+
+    async def set(self, key: str, value: dict[str, Any]) -> None:
+        """Store a JSON dict in memory."""
+        self._data[key] = value
+
+    async def delete(self, key: str) -> None:
+        """Delete a value from memory."""
+        self._data.pop(key, None)
