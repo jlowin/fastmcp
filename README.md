@@ -3,9 +3,9 @@
 <!-- omit in toc -->
 
 <picture>
-  <source width="550" media="(prefers-color-scheme: dark)" srcset="docs/assets/brand/wordmark-watercolor-rainbow.png">
-  <source width="550" media="(prefers-color-scheme: light)" srcset="docs/assets/brand/wordmark-watercolor-rainbow.png">
-  <img width="550" alt="FastMCP Logo" src="docs/assets/brand/wordmark-watercolor-rainbow.png">
+  <source width="550" media="(prefers-color-scheme: dark)" srcset="docs/assets/brand/wordmark-watercolor-waves.png">
+  <source width="550" media="(prefers-color-scheme: light)" srcset="docs/assets/brand/wordmark-watercolor-waves.png">
+  <img width="550" alt="FastMCP Logo" src="docs/assets/brand/wordmark-watercolor-waves.png">
 </picture>
 
 # FastMCP v2 🚀
