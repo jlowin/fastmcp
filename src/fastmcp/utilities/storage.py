@@ -46,10 +46,19 @@ class JSONFileStorage:
 
     def _get_safe_key(self, key: str) -> str:
         """Convert key to filesystem-safe string."""
-        # Replace problematic characters with underscores
         safe_key = key
+
+        # Replace problematic characters with underscores
         for char in [".", "/", "\\", ":", "*", "?", '"', "<", ">", "|", " "]:
             safe_key = safe_key.replace(char, "_")
+
+        # Compress multiple underscores into one
+        while "__" in safe_key:
+            safe_key = safe_key.replace("__", "_")
+
+        # Strip leading and trailing underscores
+        safe_key = safe_key.strip("_")
+
         return safe_key
 
     def _get_file_path(self, key: str) -> Path:
