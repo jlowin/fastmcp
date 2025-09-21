@@ -155,17 +155,17 @@ class TestParameterHandling:
                 assert "X-API-Key" in properties
 
                 # Check that parameter descriptions are included
-                assert (
-                    "description" in properties["query"]
-                ), "Query parameter should have description"
+                assert "description" in properties["query"], (
+                    "Query parameter should have description"
+                )
                 assert properties["query"]["description"] == "Search query"
-                assert (
-                    "description" in properties["limit"]
-                ), "Limit parameter should have description"
+                assert "description" in properties["limit"], (
+                    "Limit parameter should have description"
+                )
                 assert properties["limit"]["description"] == "Maximum number of results"
-                assert (
-                    "description" in properties["tags"]
-                ), "Tags parameter should have description"
+                assert "description" in properties["tags"], (
+                    "Tags parameter should have description"
+                )
                 assert properties["tags"]["description"] == "Filter by tags"
 
                 # Check that required parameters are marked as required
