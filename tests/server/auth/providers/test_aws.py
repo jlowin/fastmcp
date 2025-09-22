@@ -28,7 +28,6 @@ class TestAWSCognitoProviderSettings:
                 "FASTMCP_SERVER_AUTH_AWS_COGNITO_CLIENT_SECRET": "env_secret",
                 "FASTMCP_SERVER_AUTH_AWS_COGNITO_BASE_URL": "https://example.com",
                 "FASTMCP_SERVER_AUTH_AWS_COGNITO_REDIRECT_PATH": "/custom/callback",
-                "FASTMCP_SERVER_AUTH_AWS_COGNITO_TIMEOUT_SECONDS": "30",
             },
         ):
             settings = AWSCognitoProviderSettings()
@@ -43,7 +42,6 @@ class TestAWSCognitoProviderSettings:
             )
             assert settings.base_url == "https://example.com"
             assert settings.redirect_path == "/custom/callback"
-            assert settings.timeout_seconds == 30
 
     def test_settings_explicit_override_env(self):
         """Test that explicit settings override environment variables."""
@@ -85,7 +83,6 @@ class TestAWSCognitoProvider:
             base_url="https://example.com",
             redirect_path="/custom/callback",
             required_scopes=["openid", "email"],
-            timeout_seconds=30,
         )
 
         # Check that the provider was initialized correctly
@@ -241,7 +238,6 @@ class TestAWSCognitoTokenVerifier:
         """Test initialization with custom required scopes."""
         verifier = AWSCognitoTokenVerifier(
             required_scopes=["openid", "email"],
-            timeout_seconds=30,
             user_pool_id="us-east-1_XXXXXXXXX",
             aws_region="us-east-1",
         )
