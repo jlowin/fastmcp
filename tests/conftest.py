@@ -35,7 +35,7 @@ def worker_id(request):
 def free_port():
     """Get a free port for the test to use."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("", 0))
+        s.bind(("127.0.0.1", 0))
         s.listen(1)
         port = s.getsockname()[1]
     return port
@@ -49,7 +49,7 @@ def free_port_factory(worker_id):
     def get_port():
         while True:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.bind(("", 0))
+                s.bind(("127.0.0.1", 0))
                 s.listen(1)
                 port = s.getsockname()[1]
                 if port not in used_ports:
