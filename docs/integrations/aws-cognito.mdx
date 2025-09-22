@@ -125,6 +125,7 @@ Create your FastMCP server using the `AWSCognitoProvider`, which handles AWS Cog
 ```python server.py
 from fastmcp import FastMCP
 from fastmcp.server.auth.providers.aws import AWSCognitoProvider
+from fastmcp.server.dependencies import get_access_token
 
 # The AWSCognitoProvider handles JWT validation and user claims
 auth_provider = AWSCognitoProvider(
@@ -143,8 +144,6 @@ mcp = FastMCP(name="AWS Cognito Secured App", auth=auth_provider)
 @mcp.tool
 async def get_user_profile() -> dict:
     """Returns information about the authenticated AWS Cognito user."""
-    from fastmcp.server.dependencies import get_access_token
-
     token = get_access_token()
     # The AWSCognitoProvider extracts user data from JWT claims
     return {

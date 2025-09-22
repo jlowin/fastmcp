@@ -20,6 +20,7 @@ from dotenv import load_dotenv
 
 from fastmcp import FastMCP
 from fastmcp.server.auth.providers.aws import AWSCognitoProvider
+from fastmcp.server.dependencies import get_access_token
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -48,8 +49,6 @@ def echo(message: str) -> str:
 @mcp.tool
 async def get_user_profile() -> dict:
     """Get the authenticated user's profile from AWS Cognito."""
-    from fastmcp.server.dependencies import get_access_token
-
     token = get_access_token()
     return {
         "user_id": token.claims.get("sub"),
