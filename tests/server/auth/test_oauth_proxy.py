@@ -44,7 +44,7 @@ class MockOAuthProvider:
     - Network calls to external services
     """
 
-    def __init__(self, port: int = 9999):
+    def __init__(self, port: int = 0):
         self.port = port
         self.base_url = f"http://localhost:{port}"
         self.app = None
@@ -229,9 +229,20 @@ class MockOAuthProvider:
 
     async def start(self):
         """Start the mock OAuth server."""
+        import socket
+
         from uvicorn import Config, Server
 
         self.app = self.create_app()
+
+        # If port is 0, find an available port
+        if self.port == 0:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(("", 0))
+                s.listen(1)
+                self.port = s.getsockname()[1]
+
+        self.base_url = f"http://localhost:{self.port}"
         config = Config(self.app, host="localhost", port=self.port, log_level="error")
         self.server = Server(config)
 
@@ -308,7 +319,7 @@ def oauth_proxy(jwt_verifier):
 @pytest.fixture
 async def mock_oauth_provider():
     """Create and start a mock OAuth provider."""
-    provider = MockOAuthProvider(port=9999)
+    provider = MockOAuthProvider()
     await provider.start()
     yield provider
     await provider.stop()
