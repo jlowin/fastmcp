@@ -26,15 +26,12 @@ async def main():
 
             # Test the protected tool
             result = await client.call_tool("get_user_profile")
-            if hasattr(result, "data") and result.data:
-                user_data = result.data
-                print(f"AWS Cognito user ID (sub): {user_data.get('user_id', 'N/A')}")
-                print(f"Email: {user_data.get('email', 'N/A')}")
-                print(f"Email verified: {user_data.get('email_verified', 'N/A')}")
-                print(f"Name: {user_data.get('name', 'N/A')}")
-                print(f"Cognito groups: {user_data.get('cognito_groups', [])}")
-            else:
-                print(result)
+            user_data = result.data
+            print(f"AWS Cognito user ID (sub): {user_data.get('user_id', 'N/A')}")
+            print(f"Email: {user_data.get('email', 'N/A')}")
+            print(f"Email verified: {user_data.get('email_verified', 'N/A')}")
+            print(f"Name: {user_data.get('name', 'N/A')}")
+            print(f"Cognito groups: {user_data.get('cognito_groups', [])}")
 
     except Exception as e:
         print(f"❌ Authentication failed: {e}")
