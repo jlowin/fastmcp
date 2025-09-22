@@ -287,15 +287,16 @@ class AzureProvider(OAuthProxy):
         # Clear the resource parameter that Azure AD v2.0 doesn't support
         # This parameter comes from RFC 8707 (OAuth 2.0 Resource Indicators)
         # but Azure AD v2.0 uses scopes instead to determine the audience
+        params_to_use = params
         if hasattr(params, "resource"):
-            original_resource = params.resource
-            params.resource = None
-
-            if original_resource:
-                logger.debug(
-                    "Filtering out 'resource' parameter '%s' for Azure AD v2.0 (use scopes instead)",
-                    original_resource,
-                )
+            original_resource = getattr(params, "resource", None)
+            if original_resource is not None:
+                params_to_use = params.model_copy(update={"resource": None})
+                if original_resource:
+                    logger.debug(
+                        "Filtering out 'resource' parameter '%s' for Azure AD v2.0 (use scopes instead)",
+                        original_resource,
+                    )
 
         # Call parent's authorize method with the filtered parameters
-        return await super().authorize(client, params)
+        return await super().authorize(client, params_to_use)
