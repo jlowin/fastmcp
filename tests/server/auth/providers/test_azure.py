@@ -2,11 +2,15 @@
 
 import os
 from unittest.mock import patch
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 import pytest
+from mcp.server.auth.provider import AuthorizationParams
+from mcp.shared.auth import OAuthClientInformationFull
+from pydantic import AnyUrl
 
 from fastmcp.server.auth.providers.azure import AzureProvider
+from fastmcp.server.auth.providers.jwt import JWTVerifier
 
 
 class TestAzureProvider:
@@ -162,3 +166,73 @@ class TestAzureProvider:
 
         # Provider should initialize successfully with these scopes
         assert provider is not None
+
+    def test_init_with_custom_audience_requires_api_client_id(self):
+        """Custom audience requires api_client_id to be provided."""
+        with pytest.raises(ValueError, match="api_client_id is required"):
+            AzureProvider(
+                client_id="test_client",
+                client_secret="test_secret",
+                tenant_id="test-tenant",
+                audience="api://my-api",
+            )
+
+    def test_init_with_custom_audience_uses_jwt_verifier(self):
+        """When audience is provided, JWTVerifier is configured with JWKS and issuer."""
+        provider = AzureProvider(
+            client_id="test_client",
+            client_secret="test_secret",
+            tenant_id="my-tenant",
+            audience="api://my-api",
+            api_client_id="00000000-0000-0000-0000-000000000000",
+            required_scopes=[".default"],
+        )
+
+        assert provider._token_validator is not None
+        assert isinstance(provider._token_validator, JWTVerifier)
+        verifier = provider._token_validator
+        assert verifier.jwks_uri is not None
+        assert verifier.jwks_uri.startswith(
+            "https://login.microsoftonline.com/my-tenant/discovery/v2.0/keys"
+        )
+        assert verifier.issuer == "https://login.microsoftonline.com/my-tenant/v2.0"
+        assert verifier.audience == "00000000-0000-0000-0000-000000000000"
+
+    @pytest.mark.asyncio
+    async def test_authorize_filters_resource_and_prefixes_scopes_with_audience(self):
+        """authorize() should drop resource and prefix non-openid scopes with audience."""
+        provider = AzureProvider(
+            client_id="test_client",
+            client_secret="test_secret",
+            tenant_id="common",
+            audience="api://my-api",
+            api_client_id="11111111-1111-1111-1111-111111111111",
+            required_scopes=["read", "write"],
+            base_url="https://srv.example",
+        )
+
+        client = OAuthClientInformationFull(
+            client_id="dummy",
+            client_secret="secret",
+            redirect_uris=[AnyUrl("http://localhost:12345/callback")],
+        )
+
+        params = AuthorizationParams(
+            redirect_uri=AnyUrl("http://localhost:12345/callback"),
+            redirect_uri_provided_explicitly=True,
+            scopes=["read", "profile"],
+            state="abc",
+            code_challenge="xyz",
+            resource="https://should.be.ignored",
+        )
+
+        url = await provider.authorize(client, params)
+
+        parsed = urlparse(url)
+        qs = parse_qs(parsed.query)
+        assert "resource" not in qs
+        scope_value = qs.get("scope", [""])[0]
+        scope_parts = scope_value.split(" ") if scope_value else []
+        assert "openid" in scope_parts
+        assert "api://my-api/read" in scope_parts
+        assert "profile" in scope_parts
