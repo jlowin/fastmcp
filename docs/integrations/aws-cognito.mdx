@@ -141,7 +141,7 @@ mcp = FastMCP(name="AWS Cognito Secured App", auth=auth_provider)
 
 # Add a protected tool to test authentication
 @mcp.tool
-async def get_user_info() -> dict:
+async def get_user_profile() -> dict:
     """Returns information about the authenticated AWS Cognito user."""
     from fastmcp.server.dependencies import get_access_token
 
