@@ -199,7 +199,7 @@ class AzureProvider(OAuthProxy):
                           audience is specified, as Azure AD v2.0 tokens use this as the 'aud' claim.
             base_url: Public URL of your FastMCP server (for OAuth callbacks)
             redirect_path: Redirect path configured in Azure (defaults to "/auth/callback")
-            required_scopes: Required scopes. When audience is specified, use your API's scopes without the audience prefix.
+            required_scopes: Required scopes. When audience is specified, use your API's scopes without the ID URI prefix.
                            Defaults to ["User.Read", "email", "openid", "profile"] for Graph API.
             timeout_seconds: HTTP request timeout for Azure API calls
             allowed_client_redirect_uris: List of allowed redirect URI patterns for MCP clients.
