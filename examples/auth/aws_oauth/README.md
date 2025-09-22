@@ -19,7 +19,6 @@ Demonstrates FastMCP server protection with AWS Cognito OAuth.
    ```bash
    export FASTMCP_SERVER_AUTH_AWS_COGNITO_USER_POOL_ID="your-user-pool-id"
    export FASTMCP_SERVER_AUTH_AWS_COGNITO_AWS_REGION="your-aws-region"
-   export FASTMCP_SERVER_AUTH_AWS_COGNITO_DOMAIN_PREFIX="your-domain-prefix"
    export FASTMCP_SERVER_AUTH_AWS_COGNITO_CLIENT_ID="your-app-client-id"
    export FASTMCP_SERVER_AUTH_AWS_COGNITO_CLIENT_SECRET="your-app-client-secret"
    ```
@@ -29,7 +28,6 @@ Demonstrates FastMCP server protection with AWS Cognito OAuth.
    ```env
    FASTMCP_SERVER_AUTH_AWS_COGNITO_USER_POOL_ID=your-user-pool-id
    FASTMCP_SERVER_AUTH_AWS_COGNITO_AWS_REGION=your-aws-region
-   FASTMCP_SERVER_AUTH_AWS_COGNITO_DOMAIN_PREFIX=your-domain-prefix
    FASTMCP_SERVER_AUTH_AWS_COGNITO_CLIENT_ID=your-app-client-id
    FASTMCP_SERVER_AUTH_AWS_COGNITO_CLIENT_SECRET=your-app-client-secret
    ```

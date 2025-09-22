@@ -13,7 +13,6 @@ Example:
     auth = AWSCognitoProvider(
         user_pool_id="your-user-pool-id",
         aws_region="eu-central-1",
-        domain_prefix="your-domain-prefix",
         client_id="your-cognito-client-id",
         client_secret="your-cognito-client-secret"
     )
@@ -27,8 +26,9 @@ from __future__ import annotations
 from pydantic import AnyHttpUrl, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from fastmcp.server.auth import TokenVerifier
 from fastmcp.server.auth.auth import AccessToken
-from fastmcp.server.auth.oauth_proxy import OAuthProxy
+from fastmcp.server.auth.oidc_proxy import OIDCProxy
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 from fastmcp.utilities.auth import parse_scopes
 from fastmcp.utilities.logging import get_logger
@@ -48,7 +48,6 @@ class AWSCognitoProviderSettings(BaseSettings):
 
     user_pool_id: str | None = None
     aws_region: str | None = None
-    domain_prefix: str | None = None
     client_id: str | None = None
     client_secret: SecretStr | None = None
     base_url: AnyHttpUrl | str | None = None
@@ -63,50 +62,16 @@ class AWSCognitoProviderSettings(BaseSettings):
 
 
 class AWSCognitoTokenVerifier(JWTVerifier):
-    """Token verifier for AWS Cognito JWT tokens.
-
-    Extends JWTVerifier with Cognito-specific configuration and claim extraction.
-    Automatically configures JWKS URI and issuer based on user pool details.
-    """
-
-    def __init__(
-        self,
-        *,
-        required_scopes: list[str] | None = None,
-        user_pool_id: str,
-        aws_region: str = "eu-central-1",
-    ):
-        """Initialize the AWS Cognito token verifier.
-
-        Args:
-            required_scopes: Required OAuth scopes (e.g., ['openid', 'email'])
-            user_pool_id: AWS Cognito User Pool ID
-            aws_region: AWS region where the User Pool is located
-        """
-        # Construct Cognito-specific URLs
-        issuer = f"https://cognito-idp.{aws_region}.amazonaws.com/{user_pool_id}"
-        jwks_uri = f"{issuer}/.well-known/jwks.json"
-
-        # Initialize parent JWTVerifier with Cognito configuration
-        super().__init__(
-            jwks_uri=jwks_uri,
-            issuer=issuer,
-            algorithm="RS256",
-            required_scopes=required_scopes,
-        )
-
-        # Store Cognito-specific info for logging
-        self.user_pool_id = user_pool_id
-        self.aws_region = aws_region
+    """Token verifier that filters claims to Cognito-specific subset."""
 
     async def verify_token(self, token: str) -> AccessToken | None:
-        """Verify AWS Cognito JWT token with Cognito-specific claim extraction."""
-        # Use parent's JWT verification logic
+        """Verify token and filter claims to Cognito-specific subset."""
+        # Use base JWT verification
         access_token = await super().verify_token(token)
         if not access_token:
             return None
 
-        # Extract only the Cognito-specific claims we want to expose
+        # Filter claims to Cognito-specific subset
         cognito_claims = {
             "sub": access_token.claims.get("sub"),
             "username": access_token.claims.get("username"),
@@ -123,17 +88,17 @@ class AWSCognitoTokenVerifier(JWTVerifier):
         )
 
 
-class AWSCognitoProvider(OAuthProxy):
+class AWSCognitoProvider(OIDCProxy):
     """Complete AWS Cognito OAuth provider for FastMCP.
 
     This provider makes it trivial to add AWS Cognito OAuth protection to any
-    FastMCP server. Just provide your Cognito app credentials and
-    a base URL, and you're ready to go.
+    FastMCP server using OIDC Discovery. Just provide your Cognito User Pool details,
+    client credentials, and a base URL, and you're ready to go.
 
     Features:
-    - Transparent OAuth proxy to AWS Cognito
+    - Automatic OIDC Discovery from AWS Cognito User Pool
     - Automatic JWT token validation via Cognito's public keys
-    - User information extraction from JWT claims
+    - Cognito-specific claim filtering (sub, username, cognito:groups)
     - Support for Cognito User Pools
 
     Example:
@@ -144,10 +109,10 @@ class AWSCognitoProvider(OAuthProxy):
         auth = AWSCognitoProvider(
             user_pool_id="eu-central-1_XXXXXXXXX",
             aws_region="eu-central-1",
-            domain_prefix="your-domain-prefix",
             client_id="your-cognito-client-id",
             client_secret="your-cognito-client-secret",
-            base_url="https://my-server.com"
+            base_url="https://my-server.com",
+            redirect_path="/custom/callback",
         )
 
         mcp = FastMCP("My App", auth=auth)
@@ -159,7 +124,6 @@ class AWSCognitoProvider(OAuthProxy):
         *,
         user_pool_id: str | NotSetT = NotSet,
         aws_region: str | NotSetT = NotSet,
-        domain_prefix: str | NotSetT = NotSet,
         client_id: str | NotSetT = NotSet,
         client_secret: str | NotSetT = NotSet,
         base_url: AnyHttpUrl | str | NotSetT = NotSet,
@@ -172,7 +136,6 @@ class AWSCognitoProvider(OAuthProxy):
         Args:
             user_pool_id: Your Cognito User Pool ID (e.g., "eu-central-1_XXXXXXXXX")
             aws_region: AWS region where your User Pool is located (defaults to "eu-central-1")
-            domain_prefix: Your Cognito domain prefix (e.g., "your-domain" - will become "your-domain.auth.{region}.amazoncognito.com")
             client_id: Cognito app client ID
             client_secret: Cognito app client secret
             base_url: Public URL of your FastMCP server (for OAuth callbacks)
@@ -188,7 +151,6 @@ class AWSCognitoProvider(OAuthProxy):
                 for k, v in {
                     "user_pool_id": user_pool_id,
                     "aws_region": aws_region,
-                    "domain_prefix": domain_prefix,
                     "client_id": client_id,
                     "client_secret": client_secret,
                     "base_url": base_url,
@@ -205,10 +167,6 @@ class AWSCognitoProvider(OAuthProxy):
             raise ValueError(
                 "user_pool_id is required - set via parameter or FASTMCP_SERVER_AUTH_AWS_COGNITO_USER_POOL_ID"
             )
-        if not settings.domain_prefix:
-            raise ValueError(
-                "domain_prefix is required - set via parameter or FASTMCP_SERVER_AUTH_AWS_COGNITO_DOMAIN_PREFIX"
-            )
         if not settings.client_id:
             raise ValueError(
                 "client_id is required - set via parameter or FASTMCP_SERVER_AUTH_AWS_COGNITO_CLIENT_ID"
@@ -224,33 +182,27 @@ class AWSCognitoProvider(OAuthProxy):
         aws_region_final = settings.aws_region or "eu-central-1"
         redirect_path_final = settings.redirect_path or "/auth/callback"
 
-        # Construct full cognito domain from prefix and region
-        cognito_domain = (
-            f"{settings.domain_prefix}.auth.{aws_region_final}.amazoncognito.com"
-        )
-
-        # Create Cognito token verifier
-        token_verifier = AWSCognitoTokenVerifier(
-            required_scopes=required_scopes_final,
-            user_pool_id=settings.user_pool_id,
-            aws_region=aws_region_final,
-        )
+        # Construct OIDC discovery URL
+        config_url = f"https://cognito-idp.{aws_region_final}.amazonaws.com/{settings.user_pool_id}/.well-known/openid-configuration"
 
         # Extract secret string from SecretStr
         client_secret_str = (
             settings.client_secret.get_secret_value() if settings.client_secret else ""
         )
 
-        # Initialize OAuth proxy with Cognito endpoints
+        # Store Cognito-specific info for claim filtering
+        self.user_pool_id = settings.user_pool_id
+        self.aws_region = aws_region_final
+
+        # Initialize OIDC proxy with Cognito discovery
         super().__init__(
-            upstream_authorization_endpoint=f"https://{cognito_domain}/oauth2/authorize",
-            upstream_token_endpoint=f"https://{cognito_domain}/oauth2/token",
-            upstream_client_id=settings.client_id,
-            upstream_client_secret=client_secret_str,
-            token_verifier=token_verifier,
+            config_url=config_url,
+            client_id=settings.client_id,
+            client_secret=client_secret_str,
+            algorithm="RS256",
+            required_scopes=required_scopes_final,
             base_url=settings.base_url,
             redirect_path=redirect_path_final,
-            issuer_url=settings.base_url,  # We act as the issuer for client registration
             allowed_client_redirect_uris=allowed_client_redirect_uris_final,
         )
 
@@ -258,4 +210,29 @@ class AWSCognitoProvider(OAuthProxy):
             "Initialized AWS Cognito OAuth provider for client %s with scopes: %s",
             settings.client_id,
             required_scopes_final,
+        )
+
+    def get_token_verifier(
+        self,
+        *,
+        algorithm: str | None = None,
+        audience: str | None = None,
+        required_scopes: list[str] | None = None,
+        timeout_seconds: int | None = None,
+    ) -> TokenVerifier:
+        """Creates a Cognito-specific token verifier with claim filtering.
+
+        Args:
+            algorithm: Optional token verifier algorithm
+            audience: Optional token verifier audience
+            required_scopes: Optional token verifier required_scopes
+            timeout_seconds: HTTP request timeout in seconds
+        """
+        # Create AWSCognitoTokenVerifier directly
+        return AWSCognitoTokenVerifier(
+            issuer=str(self.oidc_config.issuer),
+            audience=audience,
+            algorithm=algorithm,
+            jwks_uri=str(self.oidc_config.jwks_uri),
+            required_scopes=required_scopes,
         )

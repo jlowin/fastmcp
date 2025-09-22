@@ -129,9 +129,8 @@ from fastmcp.server.dependencies import get_access_token
 
 # The AWSCognitoProvider handles JWT validation and user claims
 auth_provider = AWSCognitoProvider(
-    user_pool_id="eu-central-1_XXXXXXXXX",      # Your AWS Cognito user pool ID
-    aws_region="eu-central-1",                  # AWS region (defaults to eu-central-1)
-    domain_prefix="my-app",                  # Your AWS Cognito domain prefix
+    user_pool_id="eu-central-1_XXXXXXXXX",   # Your AWS Cognito user pool ID
+    aws_region="eu-central-1",               # AWS region (defaults to eu-central-1)
     client_id="your-app-client-id",          # Your app client ID
     client_secret="your-app-client-secret",  # Your app client Secret
     base_url="http://localhost:8000",        # Must match your callback URL
@@ -227,10 +226,6 @@ Your AWS Cognito user pool ID (e.g., `eu-central-1_XXXXXXXXX`)
 AWS region where your AWS Cognito user pool is located
 </ParamField>
 
-<ParamField path="FASTMCP_SERVER_AUTH_AWS_COGNITO_DOMAIN_PREFIX" required>
-Your AWS Cognito domain prefix (e.g., `my-app` for `my-app.auth.region.amazoncognito.com`)
-</ParamField>
-
 <ParamField path="FASTMCP_SERVER_AUTH_AWS_COGNITO_CLIENT_ID" required>
 Your AWS Cognito app client ID
 </ParamField>
@@ -260,7 +255,6 @@ FASTMCP_SERVER_AUTH=fastmcp.server.auth.providers.aws.AWSCognitoProvider
 # AWS Cognito credentials
 FASTMCP_SERVER_AUTH_AWS_COGNITO_USER_POOL_ID=eu-central-1_XXXXXXXXX
 FASTMCP_SERVER_AUTH_AWS_COGNITO_AWS_REGION=eu-central-1
-FASTMCP_SERVER_AUTH_AWS_COGNITO_DOMAIN_PREFIX=my-app
 FASTMCP_SERVER_AUTH_AWS_COGNITO_CLIENT_ID=your-app-client-id
 FASTMCP_SERVER_AUTH_AWS_COGNITO_CLIENT_SECRET=your-app-client-secret
 FASTMCP_SERVER_AUTH_AWS_COGNITO_BASE_URL=https://your-server.com
