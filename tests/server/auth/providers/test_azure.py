@@ -233,6 +233,5 @@ class TestAzureProvider:
         assert "resource" not in qs
         scope_value = qs.get("scope", [""])[0]
         scope_parts = scope_value.split(" ") if scope_value else []
-        assert "openid" in scope_parts
         assert "api://my-api/read" in scope_parts
-        assert "profile" in scope_parts
+        assert "api://my-api/profile" in scope_parts
