@@ -8,7 +8,7 @@ tag: NEW
 
 import { VersionBadge } from "/snippets/version-badge.mdx"
 
-<VersionBadge version="2.13.0" />
+<VersionBadge version="2.12.4" />
 
 This guide shows you how to secure your FastMCP server using **AWS Cognito user pools**. Since AWS Cognito doesn't support Dynamic Client Registration, this integration uses the [**OAuth Proxy**](/servers/auth/oauth-proxy) pattern to bridge AWS Cognito's traditional OAuth with MCP's authentication requirements. It also includes robust JWT token validation, ensuring enterprise-grade authentication.
 
@@ -208,8 +208,6 @@ The client caches tokens locally, so you won't need to re-authenticate for subse
 </Info>
 
 ## Environment Variables
-
-<VersionBadge version="2.13.0" />
 
 For production deployments, use environment variables instead of hardcoding credentials.
 
