@@ -242,13 +242,7 @@ class AWSCognitoTokenVerifier(TokenVerifier):
                 claims={
                     "sub": claims.get("sub"),
                     "username": claims.get("username"),
-                    "email": claims.get("email"),
-                    "email_verified": claims.get("email_verified"),
-                    "name": claims.get("name"),
-                    "given_name": claims.get("given_name"),
-                    "family_name": claims.get("family_name"),
-                    "cognito_groups": claims.get("cognito:groups", []),
-                    "cognito_user_data": claims,
+                    "cognito:groups": claims.get("cognito:groups", []),
                 },
             )
 

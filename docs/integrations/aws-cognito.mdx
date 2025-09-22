@@ -142,16 +142,13 @@ mcp = FastMCP(name="AWS Cognito Secured App", auth=auth_provider)
 
 # Add a protected tool to test authentication
 @mcp.tool
-async def get_user_profile() -> dict:
-    """Returns information about the authenticated AWS Cognito user."""
+async def get_access_token_claims() -> dict:
+    """Get the authenticated user's access token claims."""
     token = get_access_token()
-    # The AWSCognitoProvider extracts user data from JWT claims
     return {
-        "user_id": token.claims.get("sub"),
-        "email": token.claims.get("email"),
-        "email_verified": token.claims.get("email_verified"),
-        "name": token.claims.get("name"),
-        "cognito_groups": token.claims.get("cognito_groups", [])
+        "sub": token.claims.get("sub"),
+        "username": token.claims.get("username"),
+        "cognito:groups": token.claims.get("cognito:groups", []),
     }
 ```
 
@@ -182,13 +179,13 @@ async def main():
         print("✓ Authenticated with AWS Cognito!")
 
         # Test the protected tool
-        result = await client.call_tool("get_user_profile")
+        print("Calling protected tool: get_access_token_claims")
+        result = await client.call_tool("get_access_token_claims")
         user_data = result.data
-        print(f"AWS Cognito user ID (sub): {user_data.get('user_id', 'N/A')}")
-        print(f"Email: {user_data.get('email', 'N/A')}")
-        print(f"Email verified: {user_data.get('email_verified', 'N/A')}")
-        print(f"Name: {user_data.get('name', 'N/A')}")
-        print(f"Cognito groups: {user_data.get('cognito_groups', [])}")
+        print("Available access token claims:")
+        print(f"- sub: {user_data.get('sub', 'N/A')}")
+        print(f"- username: {user_data.get('username', 'N/A')}")
+        print(f"- cognito:groups: {user_data.get('cognito:groups', [])}")
 
 if __name__ == "__main__":
     asyncio.run(main())
@@ -284,14 +281,13 @@ from fastmcp.server.dependencies import get_access_token
 mcp = FastMCP(name="AWS Cognito Secured App")
 
 @mcp.tool
-async def get_user_profile() -> dict:
-    """Get the authenticated user's profile from AWS Cognito."""
+async def get_access_token_claims() -> dict:
+    """Get the authenticated user's access token claims."""
     token = get_access_token()
     return {
-        "user_id": token.claims.get("sub"),
-        "email": token.claims.get("email"),
-        "email_verified": token.claims.get("email_verified"),
-        "groups": token.claims.get("cognito_groups", [])
+        "sub": token.claims.get("sub"),
+        "username": token.claims.get("username"),
+        "cognito:groups": token.claims.get("cognito:groups", []),
     }
 ```
 
@@ -317,7 +313,7 @@ from fastmcp.server.dependencies import get_access_token
 async def admin_only_tool() -> str:
     """A tool only available to admin users."""
     token = get_access_token()
-    user_groups = token.claims.get("cognito_groups", [])
+    user_groups = token.claims.get("cognito:groups", [])
 
     if "admin" not in user_groups:
         raise ValueError("This tool requires admin access")

@@ -47,15 +47,13 @@ def echo(message: str) -> str:
 
 
 @mcp.tool
-async def get_user_profile() -> dict:
-    """Get the authenticated user's profile from AWS Cognito."""
+async def get_access_token_claims() -> dict:
+    """Get the authenticated user's access token claims."""
     token = get_access_token()
     return {
-        "user_id": token.claims.get("sub"),
-        "email": token.claims.get("email"),
-        "email_verified": token.claims.get("email_verified"),
-        "name": token.claims.get("name"),
-        "cognito_groups": token.claims.get("cognito_groups", []),
+        "sub": token.claims.get("sub"),
+        "username": token.claims.get("username"),
+        "cognito:groups": token.claims.get("cognito:groups", []),
     }
 
 

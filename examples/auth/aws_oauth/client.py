@@ -25,13 +25,13 @@ async def main():
                 print(f"   - {tool.name}: {tool.description}")
 
             # Test the protected tool
-            result = await client.call_tool("get_user_profile")
+            print("🔒 Calling protected tool: get_access_token_claims")
+            result = await client.call_tool("get_access_token_claims")
             user_data = result.data
-            print(f"AWS Cognito user ID (sub): {user_data.get('user_id', 'N/A')}")
-            print(f"Email: {user_data.get('email', 'N/A')}")
-            print(f"Email verified: {user_data.get('email_verified', 'N/A')}")
-            print(f"Name: {user_data.get('name', 'N/A')}")
-            print(f"Cognito groups: {user_data.get('cognito_groups', [])}")
+            print("📄 Available access token claims:")
+            print(f"   - sub: {user_data.get('sub', 'N/A')}")
+            print(f"   - username: {user_data.get('username', 'N/A')}")
+            print(f"   - cognito:groups: {user_data.get('cognito:groups', [])}")
 
     except Exception as e:
         print(f"❌ Authentication failed: {e}")
