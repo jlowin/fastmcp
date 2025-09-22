@@ -278,6 +278,7 @@ With environment variables set, your server code simplifies to:
 
 ```python server.py
 from fastmcp import FastMCP
+from fastmcp.server.dependencies import get_access_token
 
 # Authentication is automatically configured from environment
 mcp = FastMCP(name="AWS Cognito Secured App")
@@ -285,8 +286,6 @@ mcp = FastMCP(name="AWS Cognito Secured App")
 @mcp.tool
 async def get_user_profile() -> dict:
     """Get the authenticated user's profile from AWS Cognito."""
-    from fastmcp.server.dependencies import get_access_token
-
     token = get_access_token()
     return {
         "user_id": token.claims.get("sub"),
@@ -312,11 +311,11 @@ The AWS Cognito provider includes robust JWT token validation:
 Access rich user information from AWS Cognito JWT tokens:
 
 ```python
+from fastmcp.server.dependencies import get_access_token
+
 @mcp.tool
 async def admin_only_tool() -> str:
     """A tool only available to admin users."""
-    from fastmcp.server.dependencies import get_access_token
-
     token = get_access_token()
     user_groups = token.claims.get("cognito_groups", [])
 
