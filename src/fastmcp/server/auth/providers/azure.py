@@ -164,7 +164,8 @@ class AzureProvider(OAuthProxy):
             client_secret="your-client-secret",
             tenant_id="your-tenant-id",
             audience="api://your-api-id",  # Your API's Application ID URI
-            base_url="http://localhost:8000"
+            api_client_id="your-api-client-id",  # Your API's Client ID
+            required_scopes=["your_api_scope"],
         )
 
         mcp = FastMCP("My App", auth=auth)
@@ -198,8 +199,7 @@ class AzureProvider(OAuthProxy):
                           audience is specified, as Azure AD v2.0 tokens use this as the 'aud' claim.
             base_url: Public URL of your FastMCP server (for OAuth callbacks)
             redirect_path: Redirect path configured in Azure (defaults to "/auth/callback")
-            required_scopes: Required scopes. When audience is specified, you typically use
-                           ["<audience>/.default"] or specific scopes like ["<audience>/read"].
+            required_scopes: Required scopes. When audience is specified, use your API's scopes without the audience prefix.
                            Defaults to ["User.Read", "email", "openid", "profile"] for Graph API.
             timeout_seconds: HTTP request timeout for Azure API calls
             allowed_client_redirect_uris: List of allowed redirect URI patterns for MCP clients.
