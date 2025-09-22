@@ -238,7 +238,7 @@ class MockOAuthProvider:
         # If port is 0, find an available port
         if self.port == 0:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.bind(("", 0))
+                s.bind(("127.0.0.1", 0))
                 s.listen(1)
                 self.port = s.getsockname()[1]
 

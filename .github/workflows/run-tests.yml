@@ -51,7 +51,7 @@ jobs:
         run: uv run pytest --inline-snapshot=disable -v tests -m "not integration and not client_process" -n 4
 
       - name: Run client process tests separately
-        run: uv run pytest --inline-snapshot=disable -v tests -m "client_process" -x -n 4
+        run: uv run pytest --inline-snapshot=disable -v tests -m "client_process" -x
 
   run_integration_tests:
     name: "Run integration tests"
