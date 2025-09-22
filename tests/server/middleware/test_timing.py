@@ -157,13 +157,13 @@ def timing_server():
     def short_task() -> str:
         """A task that takes 0.01 seconds."""
         time.sleep(0.01)
-        return "Done after 0.01s"
+        return "Done after 0.01 seconds"
 
     @mcp.tool
     def medium_task() -> str:
         """A task that takes 0.02 seconds."""
         time.sleep(0.02)
-        return "Done after 0.02s"
+        return "Done after 0.02 seconds"
 
     @mcp.tool
     def failing_task() -> str:
@@ -174,13 +174,13 @@ def timing_server():
     def test_resource() -> str:
         """A resource that takes time to read."""
         time.sleep(0.005)
-        return "Resource content after 0.005s"
+        return "Resource content after 0.005 seconds"
 
     @mcp.prompt
     def test_prompt() -> str:
         """A prompt that takes time to generate."""
         time.sleep(0.008)
-        return "Prompt content after 0.008s"
+        return "Prompt content after 0.008 seconds"
 
     return mcp
 

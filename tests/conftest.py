@@ -43,7 +43,7 @@ def free_port():
 
 @pytest.fixture
 def free_port_factory(worker_id):
-    """Factory to get free ports with optional worker-based offset."""
+    """Factory to get free ports that tracks used ports per test session."""
     used_ports = set()
 
     def get_port():
