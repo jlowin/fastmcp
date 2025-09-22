@@ -101,7 +101,8 @@ class AzureTokenVerifier(TokenVerifier):
                     expires_at=None,
                     claims={
                         "sub": user_data.get("id"),
-                        "email": user_data.get("mail") or user_data.get("userPrincipalName"),
+                        "email": user_data.get("mail")
+                        or user_data.get("userPrincipalName"),
                         "name": user_data.get("displayName"),
                         "given_name": user_data.get("givenName"),
                         "family_name": user_data.get("surname"),
@@ -226,9 +227,13 @@ class AzureProvider(OAuthProxy):
 
         # Validate required settings
         if not settings.client_id:
-            raise ValueError("client_id is required - set via parameter or FASTMCP_SERVER_AUTH_AZURE_CLIENT_ID")
+            raise ValueError(
+                "client_id is required - set via parameter or FASTMCP_SERVER_AUTH_AZURE_CLIENT_ID"
+            )
         if not settings.client_secret:
-            raise ValueError("client_secret is required - set via parameter or FASTMCP_SERVER_AUTH_AZURE_CLIENT_SECRET")
+            raise ValueError(
+                "client_secret is required - set via parameter or FASTMCP_SERVER_AUTH_AZURE_CLIENT_SECRET"
+            )
 
         # Validate tenant_id is provided
         if not settings.tenant_id:
@@ -247,14 +252,21 @@ class AzureProvider(OAuthProxy):
         if settings.audience and not settings.required_scopes:
             raise ValueError("required_scopes is required when audience is specified")
         if settings.audience and not isinstance(settings.required_scopes, list):
-            raise ValueError("required_scopes must be a list when audience is specified")
+            raise ValueError(
+                "required_scopes must be a list when audience is specified"
+            )
         # Validate that scopes does not have audience as prefix when audience is specified
         if (
             settings.audience
             and isinstance(settings.required_scopes, list)
-            and any(scope.startswith(f"{settings.audience}/") for scope in settings.required_scopes)
+            and any(
+                scope.startswith(f"{settings.audience}/")
+                for scope in settings.required_scopes
+            )
         ):
-            raise ValueError("Scopes in required_scopes must not be prefixed with audience. ")
+            raise ValueError(
+                "Scopes in required_scopes must not be prefixed with audience. "
+            )
 
         # Apply defaults
         self.audience = settings.audience
@@ -303,11 +315,17 @@ class AzureProvider(OAuthProxy):
             )
 
         # Extract secret string from SecretStr
-        client_secret_str = settings.client_secret.get_secret_value() if settings.client_secret else ""
+        client_secret_str = (
+            settings.client_secret.get_secret_value() if settings.client_secret else ""
+        )
 
         # Build Azure OAuth endpoints with tenant
-        authorization_endpoint = f"https://login.microsoftonline.com/{tenant_id_final}/oauth2/v2.0/authorize"
-        token_endpoint = f"https://login.microsoftonline.com/{tenant_id_final}/oauth2/v2.0/token"
+        authorization_endpoint = (
+            f"https://login.microsoftonline.com/{tenant_id_final}/oauth2/v2.0/authorize"
+        )
+        token_endpoint = (
+            f"https://login.microsoftonline.com/{tenant_id_final}/oauth2/v2.0/token"
+        )
 
         # Initialize OAuth proxy with Azure endpoints
         super().__init__(
