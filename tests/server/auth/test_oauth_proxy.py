@@ -239,13 +239,13 @@ class MockOAuthProvider:
         asyncio.create_task(self.server.serve())
 
         # Wait for server to be ready
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.05)
 
     async def stop(self):
         """Stop the mock OAuth server."""
         if self.server:
             self.server.should_exit = True
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.01)
 
     def reset(self):
         """Reset all state for next test."""

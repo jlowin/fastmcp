@@ -68,6 +68,7 @@ dev = [
     "pytest-xdist>=3.6.1",
     "ruff",
     "ty>=0.0.1a19",
+    "pytest-benchmark>=5.1.0",
 ]
 
 [project.scripts]
