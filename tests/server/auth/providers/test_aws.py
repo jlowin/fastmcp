@@ -2,10 +2,9 @@
 
 import os
 import time
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
-from authlib.jose.errors import JoseError
 
 from fastmcp.server.auth.providers.aws import (
     AWSCognitoProvider,
@@ -248,7 +247,6 @@ class TestAWSCognitoTokenVerifier:
         )
 
         assert verifier.required_scopes == ["openid", "email"]
-        assert verifier.timeout_seconds == 30
         assert verifier.user_pool_id == "us-east-1_XXXXXXXXX"
         assert verifier.aws_region == "us-east-1"
         assert (
@@ -263,7 +261,6 @@ class TestAWSCognitoTokenVerifier:
         )
 
         assert verifier.required_scopes == []
-        assert verifier.timeout_seconds == 10
         assert verifier.aws_region == "eu-central-1"
 
     @pytest.mark.asyncio
@@ -288,16 +285,10 @@ class TestAWSCognitoTokenVerifier:
             user_pool_id="us-east-1_XXXXXXXXX",
         )
 
-        # Mock httpx.AsyncClient to simulate JWKS fetch failure
-        with patch("httpx.AsyncClient") as mock_client_class:
-            mock_client = MagicMock()
-            mock_client_class.return_value.__aenter__.return_value = mock_client
-
-            # Simulate 404 response from JWKS endpoint
-            mock_response = MagicMock()
-            mock_response.raise_for_status.side_effect = Exception("404 Not Found")
-            mock_client.get.return_value = mock_response
-
+        # Mock the parent JWTVerifier's verify_token to return None (simulating failure)
+        with patch.object(
+            verifier.__class__.__bases__[0], "verify_token", return_value=None
+        ):
             # Use a properly formatted JWT token
             valid_jwt = "eyJhbGciOiJSUzI1NiIsImtpZCI6InRlc3Qta2lkIn0.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiYWRtaW4iOnRydWV9.signature"
 
@@ -334,51 +325,38 @@ class TestAWSCognitoTokenVerifier:
             "cognito:groups": ["admin", "users"],
         }
 
-        # Mock JWKS response
-        mock_jwks = {
-            "keys": [
-                {
-                    "kid": "test-kid",
-                    "kty": "RSA",
-                    "alg": "RS256",
-                    "use": "sig",
-                    "n": "test-modulus",
-                    "e": "AQAB",
-                }
-            ]
-        }
+        valid_jwt = "eyJhbGciOiJSUzI1NiIsImtpZCI6InRlc3Qta2lkIn0.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signature"
 
-        # Mock the verification key
-        mock_public_key = "mock-public-key"
+        # Create a mock AccessToken that the parent JWTVerifier would return
+        from fastmcp.server.auth.auth import AccessToken
 
-        with patch("httpx.AsyncClient") as mock_client_class:
-            mock_client = AsyncMock()
-            mock_client_class.return_value.__aenter__.return_value = mock_client
+        mock_access_token = AccessToken(
+            token=valid_jwt,  # Use the actual token from the test
+            client_id="cognito-client-id",
+            scopes=["openid", "email"],
+            expires_at=future_time,
+            claims=mock_payload,
+        )
 
-            # Mock JWKS fetch
-            mock_response = MagicMock()
-            mock_response.json.return_value = mock_jwks
-            mock_client.get.return_value = mock_response
+        # Mock the parent's verify_token method to return the mock token
+        with patch.object(
+            verifier.__class__.__bases__[0],
+            "verify_token",
+            return_value=mock_access_token,
+        ):
+            result = await verifier.verify_token(valid_jwt)
 
-            # Mock JWT decoding
-            with patch.object(
-                verifier, "_get_verification_key", return_value=mock_public_key
-            ):
-                with patch.object(verifier.jwt, "decode", return_value=mock_payload):
-                    valid_jwt = "eyJhbGciOiJSUzI1NiIsImtpZCI6InRlc3Qta2lkIn0.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signature"
-
-                    result = await verifier.verify_token(valid_jwt)
-
-                    assert result is not None
-                    assert result.token == valid_jwt
-                    assert result.client_id == "cognito-client-id"
-                    assert result.scopes == ["openid", "email"]
-                    assert result.expires_at == future_time
-                    assert result.claims["sub"] == "user-id-123"
-                    assert result.claims["username"] == "testuser"
-                    assert result.claims["email"] == "test@example.com"
-                    assert result.claims["name"] == "Test User"
-                    assert result.claims["cognito_groups"] == ["admin", "users"]
+            assert result is not None
+            assert result.token == valid_jwt
+            assert result.client_id == "cognito-client-id"
+            assert result.scopes == ["openid", "email"]
+            assert result.expires_at == future_time
+            assert result.claims["sub"] == "user-id-123"
+            assert result.claims["username"] == "testuser"
+            assert result.claims["cognito:groups"] == ["admin", "users"]
+            # Email and name should not be in filtered claims
+            assert "email" not in result.claims
+            assert "name" not in result.claims
 
     @pytest.mark.asyncio
     async def test_verify_token_expired(self):
@@ -387,24 +365,14 @@ class TestAWSCognitoTokenVerifier:
             user_pool_id="us-east-1_XXXXXXXXX",
         )
 
-        # Mock expired JWT payload
-        past_time = int(time.time() - 3600)  # Token expired 1 hour ago
-        mock_payload = {
-            "sub": "user-id-123",
-            "exp": past_time,
-            "iss": "https://cognito-idp.eu-central-1.amazonaws.com/us-east-1_XXXXXXXXX",
-        }
-
-        mock_public_key = "mock-public-key"
-
+        # Mock the parent's verify_token to return None (expired token case)
         with patch.object(
-            verifier, "_get_verification_key", return_value=mock_public_key
+            verifier.__class__.__bases__[0], "verify_token", return_value=None
         ):
-            with patch.object(verifier.jwt, "decode", return_value=mock_payload):
-                valid_jwt = "eyJhbGciOiJSUzI1NiIsImtpZCI6InRlc3Qta2lkIn0.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signature"
+            valid_jwt = "eyJhbGciOiJSUzI1NiIsImtpZCI6InRlc3Qta2lkIn0.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signature"
 
-                result = await verifier.verify_token(valid_jwt)
-                assert result is None
+            result = await verifier.verify_token(valid_jwt)
+            assert result is None
 
     @pytest.mark.asyncio
     async def test_verify_token_wrong_issuer(self):
@@ -414,25 +382,14 @@ class TestAWSCognitoTokenVerifier:
             aws_region="us-east-1",
         )
 
-        # Mock JWT payload with wrong issuer
-        current_time = time.time()
-        future_time = int(current_time + 3600)
-        mock_payload = {
-            "sub": "user-id-123",
-            "exp": future_time,
-            "iss": "https://wrong-issuer.com",  # Wrong issuer
-        }
-
-        mock_public_key = "mock-public-key"
-
+        # Mock the parent's verify_token to return None (wrong issuer case)
         with patch.object(
-            verifier, "_get_verification_key", return_value=mock_public_key
+            verifier.__class__.__bases__[0], "verify_token", return_value=None
         ):
-            with patch.object(verifier.jwt, "decode", return_value=mock_payload):
-                valid_jwt = "eyJhbGciOiJSUzI1NiIsImtpZCI6InRlc3Qta2lkIn0.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signature"
+            valid_jwt = "eyJhbGciOiJSUzI1NiIsImtpZCI6InRlc3Qta2lkIn0.signature"
 
-                result = await verifier.verify_token(valid_jwt)
-                assert result is None
+            result = await verifier.verify_token(valid_jwt)
+            assert result is None
 
     @pytest.mark.asyncio
     async def test_verify_token_missing_required_scopes(self):
@@ -443,26 +400,14 @@ class TestAWSCognitoTokenVerifier:
             aws_region="us-east-1",
         )
 
-        # Mock JWT payload without admin scope
-        current_time = time.time()
-        future_time = int(current_time + 3600)
-        mock_payload = {
-            "sub": "user-id-123",
-            "exp": future_time,
-            "iss": "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_XXXXXXXXX",
-            "scope": "openid email",  # Missing admin scope
-        }
-
-        mock_public_key = "mock-public-key"
-
+        # Mock the parent's verify_token to return None (missing required scopes case)
         with patch.object(
-            verifier, "_get_verification_key", return_value=mock_public_key
+            verifier.__class__.__bases__[0], "verify_token", return_value=None
         ):
-            with patch.object(verifier.jwt, "decode", return_value=mock_payload):
-                valid_jwt = "eyJhbGciOiJSUzI1NiIsImtpZCI6InRlc3Qta2lkIn0.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signature"
+            valid_jwt = "eyJhbGciOiJSUzI1NiIsImtpZCI6InRlc3Qta2lkIn0.signature"
 
-                result = await verifier.verify_token(valid_jwt)
-                assert result is None
+            result = await verifier.verify_token(valid_jwt)
+            assert result is None
 
     @pytest.mark.asyncio
     async def test_verify_token_jwt_decode_error(self):
@@ -471,59 +416,13 @@ class TestAWSCognitoTokenVerifier:
             user_pool_id="us-east-1_XXXXXXXXX",
         )
 
-        mock_public_key = "mock-public-key"
-
+        # Mock the parent's verify_token to return None (JWT decode error case)
         with patch.object(
-            verifier, "_get_verification_key", return_value=mock_public_key
+            verifier.__class__.__bases__[0], "verify_token", return_value=None
         ):
-            with patch.object(
-                verifier.jwt, "decode", side_effect=JoseError("Invalid signature")
-            ):
-                valid_jwt = "eyJhbGciOiJSUzI1NiIsImtpZCI6InRlc3Qta2lkIn0.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signature"
+            valid_jwt = "eyJhbGciOiJSUzI1NiIsImtpZCI6InRlc3Qta2lkIn0.signature"
 
-                result = await verifier.verify_token(valid_jwt)
-                assert result is None
+            result = await verifier.verify_token(valid_jwt)
+            assert result is None
 
-    @pytest.mark.asyncio
-    async def test_jwks_caching(self):
-        """Test that JWKS responses are cached properly."""
-        verifier = AWSCognitoTokenVerifier(
-            user_pool_id="us-east-1_XXXXXXXXX",
-        )
-
-        mock_jwks = {
-            "keys": [
-                {
-                    "kid": "test-kid",
-                    "kty": "RSA",
-                    "alg": "RS256",
-                    "use": "sig",
-                    "n": "test-modulus",
-                    "e": "AQAB",
-                }
-            ]
-        }
-
-        with patch("httpx.AsyncClient") as mock_client_class:
-            mock_client = AsyncMock()
-            mock_client_class.return_value.__aenter__.return_value = mock_client
-
-            mock_response = MagicMock()
-            mock_response.json.return_value = mock_jwks
-            mock_client.get.return_value = mock_response
-
-            # Mock JsonWebKey.import_key to return a mock key
-            with patch("fastmcp.server.auth.providers.aws.JsonWebKey") as mock_jwk:
-                mock_key = MagicMock()
-                mock_key.get_public_key.return_value = "mock-public-key"
-                mock_jwk.import_key.return_value = mock_key
-
-                # First call should fetch JWKS
-                result1 = await verifier._get_jwks_key("test-kid")
-                assert result1 == "mock-public-key"
-                assert mock_client.get.call_count == 1
-
-                # Second call should use cache (no additional HTTP request)
-                result2 = await verifier._get_jwks_key("test-kid")
-                assert result2 == "mock-public-key"
-                assert mock_client.get.call_count == 1  # Still only one call
+    # JWKS caching is now handled by the parent JWTVerifier class
