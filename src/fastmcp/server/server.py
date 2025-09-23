@@ -905,10 +905,8 @@ class FastMCP(Generic[LifespanResultT]):
             ref_type = "prompt"
             ref_identifier = ref.name
 
-        handler_key = f"{ref_type}:{ref_identifier}:{argument.name}"
-
-        # First, check for type annotation completion providers (NEW SYSTEM)
-        component_key = ref_identifier  # For tools and prompts, this is the key/name
+        # First, check for type annotation completion providers
+        component_key = ref_identifier
         if component_key in self._completion_providers:
             providers = self._completion_providers[component_key]
             if argument.name in providers:
@@ -1962,7 +1960,7 @@ class FastMCP(Generic[LifespanResultT]):
         self._resource_manager.mount(mounted_server)
         self._prompt_manager.mount(mounted_server)
 
-        # Mount type annotation completion providers (NEW)
+        # Mount type annotation completion providers
         if hasattr(server, "_completion_providers") and server._completion_providers:
             for component_key, providers in server._completion_providers.items():
                 # Apply prefix to component key to match the prefixed component names
@@ -2090,7 +2088,7 @@ class FastMCP(Generic[LifespanResultT]):
                 prompt = prompt.model_copy(key=f"{prefix}_{key}")
             self._prompt_manager.add_prompt(prompt)
 
-        # Import type annotation completion providers (NEW)
+        # Import type annotation completion providers
         if hasattr(server, "_completion_providers") and server._completion_providers:
             for component_key, providers in server._completion_providers.items():
                 # Apply prefix to component key to match the prefixed component names
