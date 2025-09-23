@@ -18,6 +18,7 @@ import fastmcp.server
 
 from fastmcp.client import Client
 from . import client
+from . import completion
 
 __version__ = _version("fastmcp")
 
