@@ -2087,7 +2087,7 @@ class FastMCP(Generic[LifespanResultT]):
             for component_key, providers in server._completion_providers.items():
                 if prefix:
                     # If component_key contains '://' we assume it's a resource URI
-                    if '://' in component_key:
+                    if "://" in component_key:
                         component_key = add_resource_prefix(
                             component_key, prefix, self.resource_prefix_format
                         )
