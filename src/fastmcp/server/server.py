@@ -2085,9 +2085,16 @@ class FastMCP(Generic[LifespanResultT]):
         # Import type annotation completion providers
         if hasattr(server, "_completion_providers") and server._completion_providers:
             for component_key, providers in server._completion_providers.items():
-                # Apply prefix to component key to match the prefixed component names
-                prefixed_key = f"{prefix}_{component_key}" if prefix else component_key
-                self._completion_providers[prefixed_key] = providers
+                if prefix:
+                    # If component_key contains '://' we assume it's a resource URI
+                    if '://' in component_key:
+                        component_key = add_resource_prefix(
+                            component_key, prefix, self.resource_prefix_format
+                        )
+                    else:
+                        component_key = f"{prefix}_{component_key}"
+
+                self._completion_providers[component_key] = providers
 
         if prefix:
             logger.debug(
