@@ -52,6 +52,7 @@ class StaticCompletion(CompletionProvider):
     def __repr__(self) -> str:
         return f"StaticCompletion({self.choices!r})"
 
+
 class FuzzyCompletion(CompletionProvider):
     """Fuzzy matching completion provider."""
 
@@ -67,6 +68,7 @@ class FuzzyCompletion(CompletionProvider):
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}()"
+
 
 class DynamicCompletion(CompletionProvider):
     """Dynamic completion provider using a callable."""

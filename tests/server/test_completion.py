@@ -10,11 +10,12 @@ from pydantic import Field
 
 from fastmcp import FastMCP
 from fastmcp.completion import (
-    StaticCompletion,
-    FuzzyCompletion,
     DynamicCompletion,
+    FuzzyCompletion,
+    StaticCompletion,
     extract_completion_providers,
 )
+
 
 class TestCompletionProviders:
     """Test completion provider implementations."""
@@ -66,6 +67,7 @@ class TestCompletionProviders:
         # Test partial word matching
         result = await provider.complete("sale")
         assert result == ["sales_records"]
+
 
 class TestCompletionExtraction:
     """Test extraction of completion providers from type annotations."""
@@ -139,7 +141,7 @@ class TestFastMCPIntegration:
         async def process_file(
             operation: Annotated[str, StaticCompletion(["read", "write", "delete"])],
         ) -> str:
-            return f"Processing {path} with {operation}"
+            return f"Processing {operation}"
 
         # Verify completion providers were extracted and stored
         prompt_key = process_file.key
@@ -162,7 +164,7 @@ class TestFastMCPIntegration:
             return f"Category: {category}"
 
         # Create completion request
-        ref = PromptReference(type='ref/prompt', name="test_prompt")
+        ref = PromptReference(type="ref/prompt", name="test_prompt")
         argument = CompletionArgument(name="category", value="d")
 
         # Execute completion
@@ -236,8 +238,7 @@ async def test_completion_provider_error_handling():
 
     # Create completion request
     ref = PromptReference(
-        type='ref/prompt',
-        name="test_prompt"
+        type="ref/prompt", name="test_prompt"
     )  # Note: This would be prompt ref in real usage
     argument = CompletionArgument(name="param", value="test")
 
