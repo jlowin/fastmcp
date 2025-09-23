@@ -3,14 +3,7 @@ FastMCP-specific completion providers for Prompts and Resources.
 """
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from fastmcp import FastMCP
-    from fastmcp.prompts import Prompt
-    from fastmcp.resources import Resource, ResourceTemplate
-
 
 class CompletionProvider(ABC):
     """Base class for FastMCP completion providers."""
