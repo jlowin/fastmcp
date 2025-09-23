@@ -1,0 +1,78 @@
+---
+title: Completion
+sidebarTitle: Completion
+description: Provide autocompletion of arguments of prompts and resources.
+icon: message-question
+tag: NEW
+---
+
+import { VersionBadge } from '/snippets/version-badge.mdx'
+
+<VersionBadge version="2.10.0" />
+
+Completion allows MCP servers to offer argument autocompletion suggestions for prompts and resource URIs. This enables rich, IDE-like experiences where users receive contextual suggestions while entering argument values.
+
+<Tip>
+Most of the examples in this document assume you have a FastMCP server instance named `mcp`.
+</Tip>
+
+## What is Completion?
+
+Completion in MCP is designed to support interactive user experiences similar to IDE code completion.
+For example, applications may show completion suggestions in a dropdown or popup menu as users type, with the ability to filter and select from available options.
+However, implementations are free to expose completion through any interface pattern that suits their needs—the protocol itself does not mandate any specific user interaction model.
+
+### Basic Usage
+
+Use annoted parameters to add support for completion.
+
+```python
+from fastmcp import FastMCP
+from fastmcp.completion import StaticCompletion
+
+mcp = FastMCP("Completion Server")
+
+@mcp.prompt
+async def country_info(
+    country_name: Annotated[
+        str,
+        Field(description="Country name"),
+        StaticCompletion(["Belgium", "Ukraine", "France"]),
+    ],
+) -> str:
+    """Get more information about a given country."""
+    return f"Tell me more about {country_name}"
+
+@mcp.resource(
+    name="get_country",
+    uri="country://{id}",
+    description="Fetch details of a country by its ISO3 code.",
+    mime_type="application/json",
+)
+async def get_country(
+    id: Annotated[
+        str,
+        Field(description="Country ISO3 code"),
+        StaticCompletion(["Belgium (bel)", "Ukraine (ukr)", "France (fra)"]),
+    ],
+    ctx: Context
+) -> dict:
+    """
+    Input:
+        id (str): The country to fetch.
+        ctx (Context): The context object for logging and tool state.
+    Output:
+        dict: The detailed country as a dictionary.
+    """
+    await ctx.info(f"Fetching country {id} from API.")
+    try:
+        # Extract id if specified between brackets.
+        # Format is "Country name (id)"
+        if "(" in id and ")" in id:
+            id = id.split("(")[1].split(")")[0].strip()
+
+        return api_get_country(id)
+    except Exception as e:
+        raise ToolError("Unable to load country, try again later.")
+
+```
