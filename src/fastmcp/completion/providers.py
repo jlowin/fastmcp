@@ -3,6 +3,7 @@ FastMCP-specific completion providers for Prompts and Resources.
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 
@@ -50,3 +51,33 @@ class StaticCompletion(CompletionProvider):
 
     def __repr__(self) -> str:
         return f"StaticCompletion({self.choices!r})"
+
+class FuzzyCompletion(CompletionProvider):
+    """Fuzzy matching completion provider."""
+
+    def __init__(self, choices: list[str]):
+        self.choices = choices
+
+    async def complete(
+        self, partial: str, context: dict[str, Any] | None = None
+    ) -> list[str]:
+        if not partial:
+            return []
+        return [c for c in self.choices if partial.lower() in c.lower()]
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}()"
+
+class DynamicCompletion(CompletionProvider):
+    """Dynamic completion provider using a callable."""
+
+    def __init__(self, completion_fn: Callable[[str], Awaitable[list[str]]]):
+        self.completion_fn = completion_fn
+
+    async def complete(
+        self, partial: str, context: dict[str, Any] | None = None
+    ) -> list[str]:
+        return await self.completion_fn(partial)
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}()"
