@@ -32,7 +32,6 @@ from mcp.types import (
     ContentBlock,
     GetPromptResult,
     PromptReference,
-    ResourceReference,
     ResourceTemplateReference,
     ToolAnnotations,
 )
@@ -869,7 +868,7 @@ class FastMCP(Generic[LifespanResultT]):
 
     async def _mcp_completion(
         self,
-        ref: ResourceReference | ResourceTemplateReference | PromptReference,
+        ref: ResourceTemplateReference | PromptReference,
         argument: CompletionArgument,
         context: CompletionContext | None = None,
     ) -> Completion:
@@ -888,21 +887,16 @@ class FastMCP(Generic[LifespanResultT]):
 
     async def _completion(
         self,
-        ref: ResourceReference | ResourceTemplateReference | PromptReference,
+        ref: ResourceTemplateReference | PromptReference,
         argument: CompletionArgument,
         context: CompletionContext | None = None,
     ) -> CompleteResult:
         """Execute completion handlers for the given reference and argument."""
 
         # Determine reference type and construct handler key
-        if isinstance(ref, ResourceReference):
-            ref_type = "resource"
-            ref_identifier = ref.uri
-        elif isinstance(ref, ResourceTemplateReference):
-            ref_type = "resource_template"
+        if isinstance(ref, ResourceTemplateReference):
             ref_identifier = ref.uri
         else:  # PromptReference
-            ref_type = "prompt"
             ref_identifier = ref.name
 
         # First, check for type annotation completion providers
