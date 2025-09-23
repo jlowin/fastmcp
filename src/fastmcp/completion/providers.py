@@ -3,7 +3,8 @@ FastMCP-specific completion providers for Prompts and Resources.
 """
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any
+from typing import Any
+
 
 class CompletionProvider(ABC):
     """Base class for FastMCP completion providers."""
@@ -26,6 +27,7 @@ class CompletionProvider(ABC):
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}()"
+
 
 class StaticCompletion(CompletionProvider):
     """Static completion provider with predefined choices (for simple cases)."""

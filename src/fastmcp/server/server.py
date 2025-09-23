@@ -1119,7 +1119,7 @@ class FastMCP(Generic[LifespanResultT]):
                 enabled=enabled,
             )
             self.add_tool(tool)
-            
+
             return tool
 
         elif isinstance(name_or_fn, str):
