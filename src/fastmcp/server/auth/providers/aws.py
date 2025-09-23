@@ -228,7 +228,6 @@ class AWSCognitoProvider(OIDCProxy):
             required_scopes: Optional token verifier required_scopes
             timeout_seconds: HTTP request timeout in seconds
         """
-        # Create AWSCognitoTokenVerifier directly
         return AWSCognitoTokenVerifier(
             issuer=str(self.oidc_config.issuer),
             audience=audience,
