@@ -7,8 +7,12 @@ from pathlib import Path
 from typing import Any, Protocol
 
 import pydantic_core
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from redis import Redis
+from redis.retry import Retry
 
 from fastmcp.utilities.logging import get_logger
+from fastmcp.utilities.types import NotSet, NotSetT
 
 logger = get_logger(__name__)
 
@@ -202,3 +206,129 @@ class InMemoryStorage:
     async def delete(self, key: str) -> None:
         """Delete a value from memory."""
         self._data.pop(key, None)
+
+
+class RedisStorageSettings(BaseSettings):
+    """Settings for Redis based storage."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="FASTMCP_SERVER_STORAGE_REDIS_",
+        env_file=".env",
+        extra="ignore",
+    )
+
+    host: str | None = None
+    port: int | None = None
+    db: int | None = None
+    protocol: int | None = None
+    ssl: bool | None = None
+    ssl_cert_reqs: str | None = None
+    max_connections: int | None = None
+    health_check_interval: int | None = None
+    expire_in_seconds: int | None = None
+
+
+class RedisStorage:
+    """Redis based key-value storage for serializable JSON data."""
+
+    def __init__(
+        self,
+        *,
+        host: str | NotSetT = NotSet,
+        port: int | NotSetT = NotSet,
+        db: int | NotSetT = NotSet,
+        protocol: int | NotSetT = NotSet,
+        ssl: bool | NotSetT = NotSet,
+        ssl_cert_reqs: str | NotSetT = NotSet,
+        max_connections: int | NotSetT = NotSet,
+        health_check_interval: int | NotSetT = NotSet,
+        expire_in_seconds: int | NotSetT = NotSet,
+        retry: Retry | None = None,
+        retry_on_error: list[type[Exception]] | None = None,
+    ) -> None:
+        """Initialize Redis storage.
+
+        Args:
+            host: The Redis host
+            port: The Redis port (defaults to 6379)
+            db: The Redis db index (defaults to 0)
+            protocol: The Redis protocol version (defaults to 2)
+            ssl: Enable SSL connections (defaults to False)
+            ssl_cert_reqs: The SSL verify mode (defaults to "required")
+            max_connections: The maximum nummber of connections to the Redis server (defaults to None)
+            health_check_interval: The health check interval in seconds (defaults to 0)
+            expire_in_seconds: The cache entry expiration in seconds (defaults to None)
+            retry: The Redis retry object to manage retries (defaults to None)
+            retry_on_error: A list of exception types which should trigger a retry (defaults to None)
+        """
+        settings = RedisStorageSettings.model_validate(
+            {
+                k: v
+                for k, v in {
+                    "host": host,
+                    "port": port,
+                    "db": db,
+                    "protocol": protocol,
+                    "ssl": ssl,
+                    "ssl_cert_reqs": ssl_cert_reqs,
+                    "max_connections": max_connections,
+                    "health_check_interval": health_check_interval,
+                    "expire_in_seconds": expire_in_seconds,
+                }.items()
+                if v is not NotSet
+            }
+        )
+
+        if not settings.host:
+            raise ValueError(
+                "host is required - set via parameter or FASTMCP_SERVER_STORAGE_REDIS_HOST"
+            )
+
+        # Configuration based arguments
+        redis_kwargs = {"host": settings.host}
+
+        def set_kwargs(attrs: list[str]) -> None:
+            for attr in attrs:
+                if (value := getattr(settings, attr, None)) is not None:
+                    redis_kwargs[attr] = value
+
+        set_kwargs(
+            [
+                "port",
+                "db",
+                "protocol",
+                "ssl",
+                "ssl_cert_reqs",
+                "max_connections",
+                "health_check_interval",
+            ]
+        )
+
+        # Code based arguments
+        if retry:
+            redis_kwargs["retry"] = retry
+
+        if retry_on_error:
+            redis_kwargs["retry_on_error"] = retry_on_error
+
+        self.redis = Redis(**redis_kwargs)
+        self.redis.ping()
+
+        # Cache entry settings
+        self.ex = settings.expire_in_seconds
+
+        logger.info(f"Initialized Redis storage on host '{settings.host}")
+
+    async def get(self, key: str) -> dict[str, Any] | None:
+        """Get a JSON dict by key."""
+        redis_value = self.redis.get(key)
+        return json.loads(redis_value)
+
+    async def set(self, key: str, value: dict[str, Any]) -> None:
+        """Store a JSON dict by key."""
+        redis_value = json.dumps(value)
+        self.redis.set(key, redis_value, ex=self.ex)
+
+    async def delete(self, key: str) -> None:
+        """Delete a value by key."""
+        self.redis.delete(key)
