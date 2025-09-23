@@ -1,0 +1,135 @@
+{
+  "realm": "fastmcp",
+  "displayName": "FastMCP Realm",
+  "enabled": true,
+  "registrationAllowed": true,
+  "defaultDefaultClientScopes": [
+    "web-origins",
+    "roles",
+    "profile",
+    "email",
+    "basic"
+  ],
+  "defaultOptionalClientScopes": [
+    "offline_access"
+  ],
+  "users": [
+    {
+      "username": "testuser",
+      "email": "testuser@example.com",
+      "firstName": "Test",
+      "lastName": "User",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "password123",
+          "temporary": false
+        }
+      ]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "fastmcp-client",
+      "name": "FastMCP Client",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "fastmcp-client-secret-12345",
+      "protocol": "openid-connect",
+      "redirectUris": [
+        "http://localhost:8000/auth/callback",
+        "http://localhost:8000/*"
+      ],
+      "webOrigins": [
+        "http://localhost:8000"
+      ],
+      "standardFlowEnabled": true
+    }
+  ],
+  "clientPolicies": {
+    "policies": [
+      {
+        "name": "Allowed Client Scopes",
+        "enabled": true,
+        "conditions": [
+          {
+            "condition": "client-scopes",
+            "configuration": {
+              "allowed-client-scopes": [
+                "openid",
+                "profile",
+                "email",
+                "roles",
+                "offline_access",
+                "web-origins",
+                "basic"
+              ]
+            }
+          }
+        ],
+        "profiles": [],
+        "global": false
+      },
+      {
+        "name": "Trusted Hosts",
+        "description": "",
+        "enabled": true,
+        "conditions": [
+          {
+            "condition": "any-client",
+            "configuration": {
+              "is-negative-logic": false
+            }
+          },
+          {
+            "condition": "client-updater-source-host",
+            "configuration": {
+              "is-negative-logic": false,
+              "trusted-hosts": [
+                "localhost",
+                "172.18.0.1"
+              ]
+            }
+          }
+        ],
+        "profiles": []
+      }
+    ]
+  },
+  "clientScopes": [
+    {
+      "name": "profile",
+      "protocol": "openid-connect"
+    },
+    {
+      "name": "email",
+      "protocol": "openid-connect"
+    },
+    {
+      "name": "roles",
+      "protocol": "openid-connect"
+    },
+    {
+      "name": "offline_access",
+      "protocol": "openid-connect"
+    },
+    {
+      "name": "openid",
+      "protocol": "openid-connect"
+    },
+    {
+      "name": "web-origins",
+      "protocol": "openid-connect"
+    },
+    {
+      "name": "basic",
+      "protocol": "openid-connect"
+    },
+    {
+      "name": "role_list",
+      "protocol": "saml"
+    }
+  ]
+}
