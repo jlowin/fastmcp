@@ -99,6 +99,7 @@ class TestAzureProvider:
             client_id="test_client",
             client_secret="test_secret",
             tenant_id="test-tenant",
+            required_scopes=["User.Read"],
         )
 
         # Check defaults
@@ -113,6 +114,7 @@ class TestAzureProvider:
             client_secret="test_secret",
             tenant_id="my-tenant-id",
             base_url="https://myserver.com",
+            required_scopes=["User.Read"],
         )
 
         # Check that endpoints use the correct Azure OAuth2 v2.0 endpoints with tenant
@@ -135,6 +137,7 @@ class TestAzureProvider:
             client_id="test_client",
             client_secret="test_secret",
             tenant_id="organizations",
+            required_scopes=["User.Read"],
         )
         parsed = urlparse(provider1._upstream_authorization_endpoint)
         assert "/organizations/" in parsed.path
@@ -144,6 +147,7 @@ class TestAzureProvider:
             client_id="test_client",
             client_secret="test_secret",
             tenant_id="consumers",
+            required_scopes=["User.Read"],
         )
         parsed = urlparse(provider2._upstream_authorization_endpoint)
         assert "/consumers/" in parsed.path
@@ -167,15 +171,15 @@ class TestAzureProvider:
         # Provider should initialize successfully with these scopes
         assert provider is not None
 
-    def test_init_with_custom_audience_requires_api_client_id(self):
-        """Custom audience requires api_client_id to be provided."""
-        with pytest.raises(ValueError, match="api_client_id is required"):
-            AzureProvider(
-                client_id="test_client",
-                client_secret="test_secret",
-                tenant_id="test-tenant",
-                audience="api://my-api",
-            )
+    def test_init_does_not_require_api_client_id_anymore(self):
+        """API client ID is no longer required; audience is client_id."""
+        provider = AzureProvider(
+            client_id="test_client",
+            client_secret="test_secret",
+            tenant_id="test-tenant",
+            required_scopes=["User.Read"],
+        )
+        assert provider is not None
 
     def test_init_with_custom_audience_uses_jwt_verifier(self):
         """When audience is provided, JWTVerifier is configured with JWKS and issuer."""
@@ -183,8 +187,7 @@ class TestAzureProvider:
             client_id="test_client",
             client_secret="test_secret",
             tenant_id="my-tenant",
-            audience="api://my-api",
-            api_client_id="00000000-0000-0000-0000-000000000000",
+            identifier_uri="api://my-api",
             required_scopes=[".default"],
         )
 
@@ -196,7 +199,7 @@ class TestAzureProvider:
             "https://login.microsoftonline.com/my-tenant/discovery/v2.0/keys"
         )
         assert verifier.issuer == "https://login.microsoftonline.com/my-tenant/v2.0"
-        assert verifier.audience == "00000000-0000-0000-0000-000000000000"
+        assert verifier.audience == "test_client"
 
     @pytest.mark.asyncio
     async def test_authorize_filters_resource_and_prefixes_scopes_with_audience(self):
@@ -205,8 +208,7 @@ class TestAzureProvider:
             client_id="test_client",
             client_secret="test_secret",
             tenant_id="common",
-            audience="api://my-api",
-            api_client_id="11111111-1111-1111-1111-111111111111",
+            identifier_uri="api://my-api",
             required_scopes=["read", "write"],
             base_url="https://srv.example",
         )
