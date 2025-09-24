@@ -159,7 +159,9 @@ class AzureProvider(OAuthProxy):
 
         # Always validate tokens against the app's API client ID using JWT
         issuer = f"https://login.microsoftonline.com/{tenant_id_final}/v2.0"
-        jwks_uri = f"https://login.microsoftonline.com/{tenant_id_final}/discovery/v2.0/keys"
+        jwks_uri = (
+            f"https://login.microsoftonline.com/{tenant_id_final}/discovery/v2.0/keys"
+        )
 
         token_verifier = JWTVerifier(
             jwks_uri=jwks_uri,
@@ -170,11 +172,17 @@ class AzureProvider(OAuthProxy):
         )
 
         # Extract secret string from SecretStr
-        client_secret_str = settings.client_secret.get_secret_value() if settings.client_secret else ""
+        client_secret_str = (
+            settings.client_secret.get_secret_value() if settings.client_secret else ""
+        )
 
         # Build Azure OAuth endpoints with tenant
-        authorization_endpoint = f"https://login.microsoftonline.com/{tenant_id_final}/oauth2/v2.0/authorize"
-        token_endpoint = f"https://login.microsoftonline.com/{tenant_id_final}/oauth2/v2.0/token"
+        authorization_endpoint = (
+            f"https://login.microsoftonline.com/{tenant_id_final}/oauth2/v2.0/authorize"
+        )
+        token_endpoint = (
+            f"https://login.microsoftonline.com/{tenant_id_final}/oauth2/v2.0/token"
+        )
 
         # Initialize OAuth proxy with Azure endpoints
         super().__init__(
@@ -229,7 +237,11 @@ class AzureProvider(OAuthProxy):
                         original_resource,
                     )
         original_scopes = params_to_use.scopes or self.required_scopes
-        prefixed_scopes = self._add_prefix_to_scopes(original_scopes) if self.identifier_uri else original_scopes
+        prefixed_scopes = (
+            self._add_prefix_to_scopes(original_scopes)
+            if self.identifier_uri
+            else original_scopes
+        )
 
         # Create modified params with prefixed scopes
         modified_params = params_to_use.model_copy(update={"scopes": prefixed_scopes})
