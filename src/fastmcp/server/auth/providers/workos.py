@@ -23,6 +23,7 @@ from fastmcp.server.auth.oauth_proxy import OAuthProxy
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 from fastmcp.utilities.auth import parse_scopes
 from fastmcp.utilities.logging import get_logger
+from fastmcp.utilities.storage import KVStorage
 from fastmcp.utilities.types import NotSet, NotSetT
 
 logger = get_logger(__name__)
@@ -169,6 +170,7 @@ class WorkOSProvider(OAuthProxy):
         required_scopes: list[str] | None | NotSetT = NotSet,
         timeout_seconds: int | NotSetT = NotSet,
         allowed_client_redirect_uris: list[str] | NotSetT = NotSet,
+        client_storage: KVStorage | None = None,
     ):
         """Initialize WorkOS OAuth provider.
 
@@ -182,6 +184,8 @@ class WorkOSProvider(OAuthProxy):
             timeout_seconds: HTTP request timeout for WorkOS API calls
             allowed_client_redirect_uris: List of allowed redirect URI patterns for MCP clients.
                 If None (default), all URIs are allowed. If empty list, no URIs are allowed.
+            client_storage: Storage implementation for OAuth client registrations.
+                Defaults to file-based storage if not specified.
         """
 
         settings = WorkOSProviderSettings.model_validate(
@@ -220,7 +224,6 @@ class WorkOSProvider(OAuthProxy):
         if not authkit_domain_str.startswith(("http://", "https://")):
             authkit_domain_str = f"https://{authkit_domain_str}"
         authkit_domain_final = authkit_domain_str.rstrip("/")
-        redirect_path_final = settings.redirect_path or "/auth/callback"
         timeout_seconds_final = settings.timeout_seconds or 10
         scopes_final = settings.required_scopes or []
         allowed_client_redirect_uris_final = settings.allowed_client_redirect_uris
@@ -245,9 +248,10 @@ class WorkOSProvider(OAuthProxy):
             upstream_client_secret=client_secret_str,
             token_verifier=token_verifier,
             base_url=settings.base_url,
-            redirect_path=redirect_path_final,
+            redirect_path=settings.redirect_path,
             issuer_url=settings.base_url,
             allowed_client_redirect_uris=allowed_client_redirect_uris_final,
+            client_storage=client_storage,
         )
 
         logger.info(

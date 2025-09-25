@@ -5,7 +5,7 @@ import copy
 import inspect
 import warnings
 import weakref
-from collections.abc import Generator, Mapping
+from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
@@ -17,9 +17,10 @@ from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.lowlevel.server import request_ctx
 from mcp.shared.context import RequestContext
 from mcp.types import (
+    AudioContent,
     ClientCapabilities,
-    ContentBlock,
     CreateMessageResult,
+    ImageContent,
     IncludeContext,
     ModelHint,
     ModelPreferences,
@@ -85,18 +86,18 @@ class Context:
 
     ```python
     @server.tool
-    def my_tool(x: int, ctx: Context) -> str:
+    async def my_tool(x: int, ctx: Context) -> str:
         # Log messages to the client
-        ctx.info(f"Processing {x}")
-        ctx.debug("Debug info")
-        ctx.warning("Warning message")
-        ctx.error("Error message")
+        await ctx.info(f"Processing {x}")
+        await ctx.debug("Debug info")
+        await ctx.warning("Warning message")
+        await ctx.error("Error message")
 
         # Report progress
-        ctx.report_progress(50, 100, "Processing")
+        await ctx.report_progress(50, 100, "Processing")
 
         # Access resources
-        data = ctx.read_resource("resource://data")
+        data = await ctx.read_resource("resource://data")
 
         # Get request info
         request_id = ctx.request_id
@@ -359,13 +360,13 @@ class Context:
 
     async def sample(
         self,
-        messages: str | list[str | SamplingMessage],
+        messages: str | Sequence[str | SamplingMessage],
         system_prompt: str | None = None,
         include_context: IncludeContext | None = None,
         temperature: float | None = None,
         max_tokens: int | None = None,
         model_preferences: ModelPreferences | str | list[str] | None = None,
-    ) -> ContentBlock:
+    ) -> TextContent | ImageContent | AudioContent:
         """
         Send a sampling request to the client and await the response.
 
@@ -383,7 +384,7 @@ class Context:
                     content=TextContent(text=messages, type="text"), role="user"
                 )
             ]
-        elif isinstance(messages, list):
+        elif isinstance(messages, Sequence):
             sampling_messages = [
                 SamplingMessage(content=TextContent(text=m, type="text"), role="user")
                 if isinstance(m, str)
@@ -449,7 +450,7 @@ class Context:
         AcceptedElicitation[dict[str, Any]] | DeclinedElicitation | CancelledElicitation
     ): ...
 
-    """When response_type is None, the accepted elicitaiton will contain an
+    """When response_type is None, the accepted elicitation will contain an
     empty dict"""
 
     @overload
@@ -459,7 +460,7 @@ class Context:
         response_type: type[T],
     ) -> AcceptedElicitation[T] | DeclinedElicitation | CancelledElicitation: ...
 
-    """When response_type is not None, the accepted elicitaiton will contain the
+    """When response_type is not None, the accepted elicitation will contain the
     response data"""
 
     @overload
@@ -469,7 +470,7 @@ class Context:
         response_type: list[str],
     ) -> AcceptedElicitation[str] | DeclinedElicitation | CancelledElicitation: ...
 
-    """When response_type is a list of strings, the accepted elicitaiton will
+    """When response_type is a list of strings, the accepted elicitation will
     contain the selected string response"""
 
     async def elicit(
@@ -573,7 +574,7 @@ class Context:
             warnings.warn(
                 "Context.get_http_request() is deprecated and will be removed in a future version. "
                 "Use get_http_request() from fastmcp.server.dependencies instead. "
-                "See https://gofastmcp.com/patterns/http-requests for more details.",
+                "See https://gofastmcp.com/servers/context#http-requests for more details.",
                 DeprecationWarning,
                 stacklevel=2,
             )

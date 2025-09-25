@@ -8,11 +8,7 @@ import re
 import secrets
 import warnings
 from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import (
-    AbstractAsyncContextManager,
-    AsyncExitStack,
-    asynccontextmanager,
-)
+from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
@@ -65,7 +61,7 @@ from fastmcp.tools.tool import FunctionTool, Tool, ToolResult
 from fastmcp.tools.tool_transform import ToolTransformConfig
 from fastmcp.utilities.cli import log_server_banner
 from fastmcp.utilities.components import FastMCPComponent
-from fastmcp.utilities.logging import get_logger
+from fastmcp.utilities.logging import get_logger, temporary_log_level
 from fastmcp.utilities.types import NotSet, NotSetT
 
 if TYPE_CHECKING:
@@ -208,8 +204,8 @@ class FastMCP(Generic[LifespanResultT]):
         # if auth is `NotSet`, try to create a provider from the environment
         if auth is NotSet:
             if fastmcp.settings.server_auth is not None:
-                # ImportString returns the class itself
-                auth = fastmcp.settings.server_auth()
+                # server_auth_class returns the class itself
+                auth = fastmcp.settings.server_auth_class()
             else:
                 auth = None
         self.auth = cast(AuthProvider | None, auth)
@@ -328,6 +324,10 @@ class FastMCP(Generic[LifespanResultT]):
     @property
     def instructions(self) -> str | None:
         return self._mcp_server.instructions
+
+    @instructions.setter
+    def instructions(self, value: str | None) -> None:
+        self._mcp_server.instructions = value
 
     @property
     def version(self) -> str | None:
@@ -1210,8 +1210,8 @@ class FastMCP(Generic[LifespanResultT]):
                 return f"Weather for {city}"
 
             @server.resource("resource://{city}/weather")
-            def get_weather_with_context(city: str, ctx: Context) -> str:
-                ctx.info(f"Fetching weather for {city}")
+            async def get_weather_with_context(city: str, ctx: Context) -> str:
+                await ctx.info(f"Fetching weather for {city}")
                 return f"Weather for {city}"
 
             @server.resource("resource://{city}/weather")
@@ -1386,8 +1386,8 @@ class FastMCP(Generic[LifespanResultT]):
                 ]
 
             @server.prompt()
-            def analyze_with_context(table_name: str, ctx: Context) -> list[Message]:
-                ctx.info(f"Analyzing table {table_name}")
+            async def analyze_with_context(table_name: str, ctx: Context) -> list[Message]:
+                await ctx.info(f"Analyzing table {table_name}")
                 schema = read_table_schema(table_name)
                 return [
                     {
@@ -1397,7 +1397,7 @@ class FastMCP(Generic[LifespanResultT]):
                 ]
 
             @server.prompt("custom_name")
-            def analyze_file(path: str) -> list[Message]:
+            async def analyze_file(path: str) -> list[Message]:
                 content = await read_file(path)
                 return [
                     {
@@ -1481,9 +1481,15 @@ class FastMCP(Generic[LifespanResultT]):
             meta=meta,
         )
 
-    async def run_stdio_async(self, show_banner: bool = True) -> None:
-        """Run the server using stdio transport."""
+    async def run_stdio_async(
+        self, show_banner: bool = True, log_level: str | None = None
+    ) -> None:
+        """Run the server using stdio transport.
 
+        Args:
+            show_banner: Whether to display the server banner
+            log_level: Log level for the server
+        """
         # Display server banner
         if show_banner:
             log_server_banner(
@@ -1491,15 +1497,16 @@ class FastMCP(Generic[LifespanResultT]):
                 transport="stdio",
             )
 
-        async with stdio_server() as (read_stream, write_stream):
-            logger.info(f"Starting MCP server {self.name!r} with transport 'stdio'")
-            await self._mcp_server.run(
-                read_stream,
-                write_stream,
-                self._mcp_server.create_initialization_options(
-                    NotificationOptions(tools_changed=True)
-                ),
-            )
+        with temporary_log_level(log_level):
+            async with stdio_server() as (read_stream, write_stream):
+                logger.info(f"Starting MCP server {self.name!r} with transport 'stdio'")
+                await self._mcp_server.run(
+                    read_stream,
+                    write_stream,
+                    self._mcp_server.create_initialization_options(
+                        NotificationOptions(tools_changed=True)
+                    ),
+                )
 
     async def run_http_async(
         self,
@@ -1525,7 +1532,6 @@ class FastMCP(Generic[LifespanResultT]):
             middleware: A list of middleware to apply to the app
             stateless_http: Whether to use stateless HTTP (defaults to settings.stateless_http)
         """
-
         host = host or self._deprecated_settings.host
         port = port or self._deprecated_settings.port
         default_log_level_to_use = (
@@ -1566,14 +1572,15 @@ class FastMCP(Generic[LifespanResultT]):
         if "log_config" not in config_kwargs and "log_level" not in config_kwargs:
             config_kwargs["log_level"] = default_log_level_to_use
 
-        config = uvicorn.Config(app, host=host, port=port, **config_kwargs)
-        server = uvicorn.Server(config)
-        path = app.state.path.lstrip("/")  # type: ignore
-        logger.info(
-            f"Starting MCP server {self.name!r} with transport {transport!r} on http://{host}:{port}/{path}"
-        )
+        with temporary_log_level(log_level):
+            config = uvicorn.Config(app, host=host, port=port, **config_kwargs)
+            server = uvicorn.Server(config)
+            path = app.state.path.lstrip("/")  # type: ignore
+            logger.info(
+                f"Starting MCP server {self.name!r} with transport {transport!r} on http://{host}:{port}/{path}"
+            )
 
-        await server.serve()
+            await server.serve()
 
     async def run_sse_async(
         self,
@@ -2122,10 +2129,8 @@ class FastMCP(Generic[LifespanResultT]):
             # - Connected clients: reuse existing session for all requests
             # - Disconnected clients: create fresh sessions per request for isolation
             if client.is_connected():
-                from fastmcp.utilities.logging import get_logger
-
-                logger = get_logger(__name__)
-                logger.info(
+                _proxy_logger = get_logger(__name__)
+                _proxy_logger.info(
                     "Proxy detected connected client - reusing existing session for all requests. "
                     "This may cause context mixing in concurrent scenarios."
                 )

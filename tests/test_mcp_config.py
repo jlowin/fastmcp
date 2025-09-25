@@ -345,12 +345,12 @@ async def test_multi_client_lifespan(tmp_path: Path):
     with pytest.raises(psutil.NoSuchProcess):
         while True:
             psutil.Process(pid_1)
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.01)
 
     with pytest.raises(psutil.NoSuchProcess):
         while True:
             psutil.Process(pid_2)
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.01)
 
 
 @pytest.mark.skipif(
@@ -610,7 +610,7 @@ async def test_canonical_multi_client_with_transforms(tmp_path: Path):
             "test_1": {
                 "command": "python",
                 "args": [str(script_path)],
-                "tools": {  # <--- Will be ignored as its not valid for a canonical MCPConfig
+                "tools": {  # <--- Will be ignored as it's not valid for a canonical MCPConfig
                     "add": {
                         "name": "transformed_add",
                         "arguments": {

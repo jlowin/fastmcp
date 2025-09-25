@@ -11,8 +11,11 @@
     },
     "decoration": "windows"
   },
+  "contextual": {
+    "options": ["copy", "view"]
+  },
   "banner": {
-    "content": "Remote MCP that just works:  [FastMCP Cloud is here!](https://fastmcp.link/IhmBxWn) "
+    "content": "Host your server on [FastMCP Cloud](https://fastmcp.cloud) for free!"
   },
   "colors": {
     "dark": "#f72585",
@@ -40,11 +43,18 @@
     "drilldown": false
   },
   "logo": {
-    "dark": "/assets/brand/logo-wordmark-dark.svg",
-    "light": "/assets/brand/logo-wordmark.svg"
+    "dark": "/assets/brand/wordmark-white.png",
+    "light": "/assets/brand/wordmark.png"
   },
   "name": "FastMCP",
   "navbar": {
+    "links": [
+      {
+        "href": "https://fastmcp.cloud",
+        "label": "FastMCP Cloud",
+        "icon": "cloud"
+      }
+    ],
     "primary": {
       "href": "https://github.com/jlowin/fastmcp",
       "type": "github"
@@ -97,6 +107,7 @@
                   "servers/auth/token-verification",
                   "servers/auth/remote-oauth",
                   "servers/auth/oauth-proxy",
+                  "servers/auth/oidc-proxy",
                   "servers/auth/full-oauth-server"
                 ]
               },
@@ -118,10 +129,7 @@
               {
                 "group": "Essentials",
                 "icon": "cube",
-                "pages": [
-                  "clients/client",
-                  "clients/transports"
-                ]
+                "pages": ["clients/client", "clients/transports"]
               },
               {
                 "group": "Core Operations",
@@ -147,10 +155,7 @@
               {
                 "group": "Authentication",
                 "icon": "user-shield",
-                "pages": [
-                  "clients/auth/oauth",
-                  "clients/auth/bearer"
-                ]
+                "pages": ["clients/auth/oauth", "clients/auth/bearer"]
               }
             ]
           },
@@ -161,8 +166,10 @@
                 "group": "Authentication",
                 "icon": "key",
                 "pages": [
+                  "integrations/auth0",
                   "integrations/authkit",
                   "integrations/azure",
+                  "integrations/descope",
                   "integrations/github",
                   "integrations/google",
                   "integrations/workos"
@@ -184,6 +191,7 @@
                   "integrations/claude-code",
                   "integrations/claude-desktop",
                   "integrations/cursor",
+                  "integrations/gemini-cli",
                   "integrations/mcp-json-configuration"
                 ]
               },
@@ -228,10 +236,7 @@
         "tab": "Documentation"
       },
       {
-        "pages": [
-          "updates",
-          "changelog"
-        ],
+        "pages": ["updates", "changelog"],
         "tab": "What's New"
       },
       {
@@ -432,6 +437,6 @@
   "theme": "mint",
   "thumbnails": {
     "appearance": "light",
-    "background": "/assets/brand/card-background.png"
+    "background": "/assets/brand/thumbnail-background.png"
   }
 }

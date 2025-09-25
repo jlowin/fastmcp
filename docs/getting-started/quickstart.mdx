@@ -102,7 +102,7 @@ Once your server is running with HTTP transport, you can connect to it with a Fa
 import asyncio
 from fastmcp import Client
 
-client = Client("http://localhost:8000")
+client = Client("http://localhost:8000/mcp")
 
 async def call_tool(name: str):
     async with client:
@@ -119,11 +119,10 @@ Note that:
 
 ## Deploy to FastMCP Cloud
 
-
 [FastMCP Cloud](https://fastmcp.cloud) is a hosting service run by the FastMCP team at [Prefect](https://www.prefect.io/fastmcp). It is optimized to deploy authenticated FastMCP servers as quickly as possible, giving you a secure URL that you can plug into any LLM client.
 
 <Info>
-Please note that FastMCP Cloud is a commercial service, though it is completely free for most personal servers.
+FastMCP Cloud is **free for personal servers** and offers simple pay-as-you-go pricing for teams.
 </Info>
 
 To deploy your server, you'll need a [GitHub account](https://github.com). Once you have one, you can deploy your server in three steps:
