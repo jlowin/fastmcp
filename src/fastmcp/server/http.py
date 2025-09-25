@@ -183,7 +183,7 @@ def create_sse_app(
                 app=RequireAuthMiddleware(
                     sse.handle_post_message,
                     auth.required_scopes,
-                    auth._get_resource_url(".well-known/oauth-protected-resource"),
+                    auth._get_resource_url("/.well-known/oauth-protected-resource"),
                 ),
             )
         )

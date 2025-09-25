@@ -121,7 +121,7 @@ class TestRemoteAuthProvider:
         )
 
         metadata_url = provider._get_resource_url(
-            ".well-known/oauth-protected-resource"
+            "/.well-known/oauth-protected-resource"
         )
         assert metadata_url == AnyHttpUrl(
             "https://api.example.com/v1/.well-known/oauth-protected-resource"
@@ -238,6 +238,8 @@ class TestRemoteAuthProviderIntegration:
         [
             ("https://api.example.com", "https://api.example.com/mcp"),
             ("https://api.example.com/", "https://api.example.com/mcp"),
+            ("https://api.example.com/v1/", "https://api.example.com/v1/mcp"),
+
         ],
     )
     async def test_base_url_configurations(self, base_url: str, expected_resource: str):

@@ -105,7 +105,7 @@ class AuthProvider(TokenVerifierProtocol):
         # Add protected MCP endpoint if provided
         if mcp_path and mcp_endpoint:
             resource_metadata_url = self._get_resource_url(
-                ".well-known/oauth-protected-resource"
+                "/.well-known/oauth-protected-resource"
             )
 
             routes.append(
@@ -146,8 +146,7 @@ class AuthProvider(TokenVerifierProtocol):
             return None
 
         if path:
-            return AnyHttpUrl(urljoin(str(self.base_url), path))
-
+            return AnyHttpUrl(f"{str(self.base_url).rstrip('/')}/{path.lstrip('/')}")
         return self.base_url
 
 
