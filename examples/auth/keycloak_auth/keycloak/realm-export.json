@@ -44,24 +44,6 @@
       ]
     }
   ],
-  "clients": [
-    {
-      "clientId": "fastmcp-client",
-      "name": "FastMCP Client",
-      "enabled": true,
-      "clientAuthenticatorType": "client-secret",
-      "secret": "fastmcp-client-secret-12345",
-      "protocol": "openid-connect",
-      "redirectUris": [
-        "http://localhost:8000/auth/callback",
-        "http://localhost:8000/*"
-      ],
-      "webOrigins": [
-        "http://localhost:8000"
-      ],
-      "standardFlowEnabled": true
-    }
-  ],
   "clientPolicies": {
     "policies": [
       {
@@ -82,6 +64,30 @@
               ]
             }
           }
+        ]
+      },
+      {
+        "name": "DCR Policy",
+        "enabled": true,
+        "conditions": [
+          {
+            "condition": "client-uris",
+            "configuration": {
+              "uris": [
+                "http://localhost:8000/*"
+              ]
+            }
+          }
+        ]
+      }
+    ],
+    "profiles": [
+      {
+        "name": "dcr-profile",
+        "to-clients-dynamically-registered": true,
+        "policies": [
+          "DCR Policy",
+          "Allowed Client Scopes"
         ]
       }
     ]
