@@ -2,17 +2,31 @@
   "realm": "fastmcp",
   "displayName": "FastMCP Realm",
   "enabled": true,
+  "keycloakVersion": "26.2.5",
   "registrationAllowed": true,
-  "defaultDefaultClientScopes": [
-    "web-origins",
-    "roles",
-    "profile",
-    "email",
-    "basic"
-  ],
-  "defaultOptionalClientScopes": [
-    "offline_access"
-  ],
+  "components": {
+    "org.keycloak.services.clientregistration.policy.ClientRegistrationPolicy": [
+      {
+        "id": "3acdf0c5-75bf-48af-ba61-cd473a326dd6",
+        "name": "Trusted Hosts",
+        "providerId": "trusted-hosts",
+        "subType": "anonymous",
+        "subComponents": {},
+        "config": {
+          "host-sending-registration-request-must-match": [
+            "true"
+          ],
+          "trusted-hosts": [
+            "localhost",
+            "172.18.0.1"
+          ],
+          "client-uris-must-match": [
+            "true"
+          ]
+        }
+      }
+    ]
+  },
   "users": [
     {
       "username": "testuser",
@@ -68,68 +82,8 @@
               ]
             }
           }
-        ],
-        "profiles": [],
-        "global": false
-      },
-      {
-        "name": "Trusted Hosts",
-        "description": "",
-        "enabled": true,
-        "conditions": [
-          {
-            "condition": "any-client",
-            "configuration": {
-              "is-negative-logic": false
-            }
-          },
-          {
-            "condition": "client-updater-source-host",
-            "configuration": {
-              "is-negative-logic": false,
-              "trusted-hosts": [
-                "localhost",
-                "172.18.0.1"
-              ]
-            }
-          }
-        ],
-        "profiles": []
+        ]
       }
     ]
-  },
-  "clientScopes": [
-    {
-      "name": "profile",
-      "protocol": "openid-connect"
-    },
-    {
-      "name": "email",
-      "protocol": "openid-connect"
-    },
-    {
-      "name": "roles",
-      "protocol": "openid-connect"
-    },
-    {
-      "name": "offline_access",
-      "protocol": "openid-connect"
-    },
-    {
-      "name": "openid",
-      "protocol": "openid-connect"
-    },
-    {
-      "name": "web-origins",
-      "protocol": "openid-connect"
-    },
-    {
-      "name": "basic",
-      "protocol": "openid-connect"
-    },
-    {
-      "name": "role_list",
-      "protocol": "saml"
-    }
-  ]
+  }
 }

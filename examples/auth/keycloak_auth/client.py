@@ -27,29 +27,22 @@ async def main():
             # Test the protected tool
             print("🔒 Calling protected tool: get_access_token_claims")
             result = await client.call_tool("get_access_token_claims")
-            user_data = result.data
+            claims = result.data
             print("📄 Available access token claims:")
-            print(f"   - sub: {user_data.get('sub', 'N/A')}")
-            print(
-                f"   - preferred_username: {user_data.get('preferred_username', 'N/A')}"
-            )
-            print(f"   - email: {user_data.get('email', 'N/A')}")
-            print(f"   - realm_access: {user_data.get('realm_access', {})}")
+            print(f"   - sub: {claims.get('sub', 'N/A')}")
+            print(f"   - name: {claims.get('name', 'N/A')}")
+            print(f"   - given_name: {claims.get('given_name', 'N/A')}")
+            print(f"   - family_name: {claims.get('family_name', 'N/A')}")
+            print(f"   - preferred_username: {claims.get('preferred_username', 'N/A')}")
+            print(f"   - scope: {claims.get('scope', [])}")
 
     except Exception as e:
         print(f"❌ Authentication failed: {e}")
-        raise
 
 
 if __name__ == "__main__":
-    import socket
-
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
-        # A dummy IP address to initiate a connection, doesn't need to be reachable.
-        s.connect(("8.8.8.8", 80))
-        ip_address = s.getsockname()[0]
-        print(f"My Python program is using IP: {ip_address}")
-    finally:
-        s.close()
-    asyncio.run(main())
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        # Graceful shutdown, suppress noisy logs resulting from asyncio.run task cancellation propagation
+        pass
