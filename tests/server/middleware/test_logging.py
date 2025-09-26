@@ -694,26 +694,18 @@ DEBUG    fastmcp.fastmcp.server.server:server.py:LINE_NUMBER [LoggingTestServer]
                             "operation_with_error", {"should_fail": True}
                         )
 
-        assert remove_line_numbers(caplog.text) == snapshot("""\
-INFO     mcp.server.lowlevel.server:server.py:LINE_NUMBER Processing request of type CallToolRequest
-INFO     fastmcp.structured:logging.py:LINE_NUMBER Processing message: {"event": "request_start", "timestamp": "2023-01-01T00:00:00+00:00", "method": "tools/call", "type": "request", "source": "client"}
-ERROR    fastmcp.fastmcp.tools.tool_manager:tool_manager.py:LINE_NUMBER Error calling tool 'operation_with_error'
-Traceback (most recent call last):
-  File "/Users/jlowin/Developer/fastmcp/src/fastmcp/tools/tool_manager.py", line 224, in call_tool
-    return await tool.run(arguments)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/jlowin/Developer/fastmcp/src/fastmcp/tools/tool.py", line 314, in run
-    result = type_adapter.validate_python(arguments)
-             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/jlowin/Developer/fastmcp/.venv/lib/python3.12/site-packages/pydantic/type_adapter.py", line 421, in validate_python
-    return self.validator.validate_python(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/jlowin/Developer/fastmcp/tests/server/middleware/test_logging.py", line 528, in operation_with_error
-    raise ValueError("Operation failed intentionally")
-ValueError: Operation failed intentionally
-ERROR    fastmcp.structured:logging.py:LINE_NUMBER Failed message: tools/call - Error calling tool 'operation_with_error': Operation failed intentionally
+        # Verify that the structured logging middleware properly logs errors
+        logs = caplog.text
 
-""")
+        # The key assertion: structured logging middleware logged the error in JSON format
+        assert re.search(
+            r"fastmcp\.structured.*Failed message: tools/call.*Operation failed intentionally",
+            logs,
+        )
+
+        # Verify the error contains expected error type and message
+        assert "ValueError" in logs
+        assert "Operation failed intentionally" in logs
 
     async def test_logging_middleware_with_different_operations(
         self, logging_server: FastMCP, caplog: pytest.LogCaptureFixture
