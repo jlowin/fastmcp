@@ -29,7 +29,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest]
-        python-version: ["3.10"]
+        python-version: ["3.10", "3.14"]
       fail-fast: false
     timeout-minutes: 5
 
@@ -67,6 +67,7 @@ jobs:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
           python-version: "3.10"
+          allow-prereleases: true
 
       - name: Install FastMCP
         # run with frozen to use the current lockfile; static checks will determine if it needs updating
