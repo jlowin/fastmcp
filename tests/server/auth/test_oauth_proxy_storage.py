@@ -92,11 +92,19 @@ class TestOAuthProxyStorage:
         assert client.client_secret == "persistent-secret"
         assert client.scope == "openid profile"
 
-    async def test_nonexistent_client_returns_none(self, jwt_verifier, temp_storage):
-        """Test that requesting non-existent client returns None."""
+    async def test_nonexistent_client_raises_token_error(
+        self, jwt_verifier, temp_storage
+    ):
+        """Test that requesting non-existent client raises TokenError."""
+        from mcp.server.auth.provider import TokenError
+
         proxy = self.create_proxy(jwt_verifier, storage=temp_storage)
-        client = await proxy.get_client("does-not-exist")
-        assert client is None
+
+        with pytest.raises(TokenError) as exc_info:
+            await proxy.get_client("does-not-exist")
+
+        assert exc_info.value.error == "invalid_client"  # type: ignore[attr-defined]
+        assert "not found" in exc_info.value.error_description.lower()  # type: ignore[attr-defined]
 
     async def test_proxy_dcr_client_redirect_validation(
         self, jwt_verifier, temp_storage
@@ -150,10 +158,15 @@ class TestOAuthProxyStorage:
         client2 = await proxy2.get_client("memory-client")
         assert client2 is not None
 
-        # But new storage instance won't have it
+        # But new storage instance won't have it - should raise TokenError
+        from mcp.server.auth.provider import TokenError
+
         proxy3 = self.create_proxy(jwt_verifier, storage=InMemoryStorage())
-        client3 = await proxy3.get_client("memory-client")
-        assert client3 is None
+
+        with pytest.raises(TokenError) as exc_info:
+            await proxy3.get_client("memory-client")
+
+        assert exc_info.value.error == "invalid_client"  # type: ignore[attr-defined]
 
     async def test_storage_data_structure(self, jwt_verifier, temp_storage):
         """Test that storage uses proper structured format."""
@@ -206,8 +219,11 @@ class TestOAuthProxyStorage:
         )
         assert removed_count == 1
 
-        # Old client should be gone
-        assert await proxy.get_client("old-client") is None
+        # Old client should be gone - should raise TokenError
+        from mcp.server.auth.provider import TokenError
+
+        with pytest.raises(TokenError):
+            await proxy.get_client("old-client")
 
         # Recent client should still exist
         assert await proxy.get_client("recent-client") is not None

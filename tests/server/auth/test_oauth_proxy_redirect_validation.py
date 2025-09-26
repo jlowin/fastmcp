@@ -193,6 +193,11 @@ class TestOAuthProxyRedirectValidation:
             allowed_client_redirect_uris=custom_patterns,
         )
 
-        # Get an unregistered client
-        client = await proxy.get_client("unknown-client")
-        assert client is None
+        # Get an unregistered client should raise TokenError
+        from mcp.server.auth.provider import TokenError
+
+        with pytest.raises(TokenError) as exc_info:
+            await proxy.get_client("unknown-client")
+
+        assert exc_info.value.error == "invalid_client"  # type: ignore[attr-defined]
+        assert "not found" in exc_info.value.error_description.lower()  # type: ignore[attr-defined]
