@@ -6,7 +6,6 @@ from urllib.parse import parse_qs, urlparse
 
 import httpx
 import pytest
-from pydantic import AnyHttpUrl
 
 from fastmcp import FastMCP
 from fastmcp.server.auth.oidc_proxy import OIDCConfiguration
@@ -72,11 +71,8 @@ class TestKeycloakProviderSettings:
                 ),
             },
         ):
-            # Linter fix: provide placeholder args (env vars will override)
-            settings = KeycloakProviderSettings(
-                realm_url=AnyHttpUrl("https://placeholder.example.com/realm"),
-                base_url=AnyHttpUrl("https://placeholder.example.com"),
-            )
+            # Let environment variables populate the settings
+            settings = KeycloakProviderSettings.model_validate({})
 
             assert str(settings.realm_url) == TEST_REALM_URL
             assert str(settings.base_url).rstrip("/") == TEST_BASE_URL
@@ -121,11 +117,8 @@ class TestKeycloakProviderSettings:
                 "FASTMCP_SERVER_AUTH_KEYCLOAK_REQUIRED_SCOPES": scopes_env,
             },
         ):
-            # Linter fix: provide placeholder args (env vars will override)
-            settings = KeycloakProviderSettings(
-                realm_url=AnyHttpUrl("https://placeholder.example.com/realm"),
-                base_url=AnyHttpUrl("https://placeholder.example.com"),
-            )
+            # Let environment variables populate the settings
+            settings = KeycloakProviderSettings.model_validate({})
             assert settings.required_scopes == ["openid", "profile"]
 
 
