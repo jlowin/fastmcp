@@ -1,0 +1,283 @@
+---
+title: Keycloak OAuth 🤝 FastMCP
+sidebarTitle: Keycloak
+description: Secure your FastMCP server with Keycloak OAuth
+icon: shield-check
+tag: NEW
+---
+
+import { VersionBadge } from "/snippets/version-badge.mdx"
+
+<VersionBadge version="2.12.4" />
+
+This guide shows you how to secure your FastMCP server using **Keycloak OAuth**. This integration uses the [**Remote OAuth**](/servers/auth/remote-oauth) pattern with Dynamic Client Registration (DCR), where Keycloak handles user login and your FastMCP server validates the tokens.
+
+## Configuration
+
+### Prerequisites
+
+Before you begin, you will need:
+1. A **[Keycloak](https://keycloak.org/)** server instance running (can be localhost for development, e.g., `http://localhost:8080`)
+
+<Tip>
+To spin up Keycloak instantly on your local machine, use Docker:
+
+```bash
+docker run --rm \
+  --name keycloak-fastmcp \
+  -p 8080:8080 \
+  -e KC_BOOTSTRAP_ADMIN_USERNAME=admin \
+  -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin123 \
+  quay.io/keycloak/keycloak:26.3 \
+  start-dev
+```
+
+Then access the admin console at `http://localhost:8080` with username `admin` and password `admin123`.
+</Tip>
+
+<Tip>
+If you prefer using Docker Compose instead, you may want to have a look at the [`docker-compose.yaml`](https://github.com/jlowin/fastmcp/blob/main/examples/auth/keycloak_auth/docker-compose.yml) file included in the Keycloak auth example.
+</Tip>
+
+2. Administrative access to create and configure a Keycloak realm
+3. Your FastMCP server's URL (can be localhost for development, e.g., `http://localhost:8000`)
+
+### Step 1: Configure Keycloak for Dynamic Client Registration (DCR)
+
+<Steps>
+<Step title="Prepare the Realm Configuration">
+    Before importing, you should review and customize the pre-configured realm file:
+
+    1. Download the FastMCP Keycloak realm configuration: [`realm-fastmcp.json`](https://github.com/jlowin/fastmcp/blob/main/examples/auth/keycloak_auth/keycloak/realm-fastmcp.json)
+    2. Open the file in a text editor and customize as needed:
+       - **Realm name and display name**: Change `"realm": "fastmcp"` and `"displayName": "FastMCP Realm"` to match your project
+       - **Trusted hosts configuration**: Look for `"trusted-hosts"` section and update IP addresses if needed
+         - `localhost`: For local development
+         - `172.17.0.1`: Docker network gateway IP address (required when Keycloak is run with Docker and MCP server directly on localhost)
+         - `172.18.0.1`: Docker Compose network gateway IP address (required when Keycloak is run with Docker Compose and MCP server directly on localhost)
+         - For production, replace these with your actual domain names
+    3. **Review the test user**: The file includes a test user (`testuser` with password `password123`). You may want to:
+       - Change the credentials for security
+       - Replace with more meaningful user accounts
+       - Or remove and create users later through the admin interface
+
+    <Warning>
+    **Production Security**: Always review and customize the configuration before importing, especially realm names, trusted hosts, and user credentials.
+    </Warning>
+</Step>
+
+<Step title="Import the Realm Configuration">
+    <Note>
+    The following instructions are based on **Keycloak 26.3**. Menu items, tabs, and interface elements may be slightly different in other Keycloak versions, but the core configuration concepts remain the same.
+    </Note>
+
+    1. In the left-side navigation, click **Manage realms** (if not visible, click the hamburger menu (☰) in the top-left corner to expand the navigation)
+    2. Click **Create realm**
+    3. In the "Create realm" dialog:
+       - Drag your `realm-fastmcp.json` file into the **Resource file** box (or use the "Browse" button to find and select it)
+       - Keycloak will automatically read the realm name (`fastmcp`) from the file
+       - Click the **Create** button
+
+    That's it! This single action will create the `fastmcp` realm and instantly configure everything from the file:
+    - The realm settings (including user registration policies)
+    - The test user with their credentials
+    - All the necessary Client Policies and Client Profiles required to support Dynamic Client Registration (DCR)
+    - Trusted hosts configuration for secure client registration
+
+    <Note>
+    You may see this warning in the Keycloak logs during import:
+    ```
+    Failed to deserialize client policies in the realm fastmcp.Fallback to return empty profiles.
+    Details: Unrecognized field "profiles" (class org.keycloak.representations.idm.ClientPoliciesRepresentation),
+    not marked as ignorable (2 known properties: "policies","globalPolicies"])
+    ```
+    This is due to Keycloak's buggy/strict parser not recognizing valid older JSON formats but doesn't seem to impact functionality and can be safely ignored.
+    </Note>
+</Step>
+
+<Step title="Verify the Configuration">
+    After import, verify your realm is properly configured:
+
+    1. **Check the realm URL**: `http://localhost:8080/realms/fastmcp`
+    2. **Verify DCR policies**: Navigate to **Clients** → **Client registration** to see the imported `"Trusted Hosts"` policy with the trusted hosts you have configured earlier
+    3. **Test user access**: The imported test user can be used for initial testing
+
+    <Note>
+    Your realm is now ready for FastMCP integration with Dynamic Client Registration fully configured!
+    </Note>
+</Step>
+</Steps>
+
+### Step 2: FastMCP Configuration
+
+Create your FastMCP server file and use the KeycloakAuthProvider to handle all the OAuth integration automatically:
+
+```python server.py
+from fastmcp import FastMCP
+from fastmcp.server.auth.providers.keycloak import KeycloakAuthProvider
+from fastmcp.server.dependencies import get_access_token
+
+# The KeycloakAuthProvider automatically discovers Keycloak endpoints
+# and configures JWT token validation
+auth_provider = KeycloakAuthProvider(
+    realm_url="http://localhost:8080/realms/fastmcp",  # Your Keycloak realm URL
+    base_url="http://localhost:8000",                  # Your server's public URL
+    required_scopes=["openid", "profile"],             # Required OAuth scopes
+)
+
+# Create FastMCP server with auth
+mcp = FastMCP(name="My Keycloak Protected Server", auth=auth_provider)
+
+@mcp.tool
+async def get_access_token_claims() -> dict:
+    """Get the authenticated user's access token claims."""
+    token = get_access_token()
+    return {
+        "sub": token.claims.get("sub"),
+        "name": token.claims.get("name"),
+        "preferred_username": token.claims.get("preferred_username"),
+        "scope": token.claims.get("scope")
+    }
+```
+
+## Testing
+
+To test your server, you can use the `fastmcp` CLI to run it locally. Assuming you've saved the above code to `server.py` (after replacing the realm URL and base URL with your actual values!), you can run the following command:
+
+```bash
+fastmcp run server.py --transport http --port 8000
+```
+
+Now, you can use a FastMCP client to test that you can reach your server after authenticating:
+
+```python
+import asyncio
+from fastmcp import Client
+
+async def main():
+    async with Client("http://localhost:8000/mcp/", auth="oauth") as client:
+        # First-time connection will open Keycloak login in your browser
+        print("✓ Authenticated with Keycloak!")
+
+        # Test the protected tool
+        result = await client.call_tool("get_access_token_claims")
+        print(f"User: {result['preferred_username']}")
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+When you run the client for the first time:
+1. Your browser will open to Keycloak's authorization page
+2. After you log in and authorize the app, you'll be redirected back
+3. The client receives the token and can make authenticated requests
+
+<Info>
+The client caches tokens locally, so you won't need to re-authenticate for subsequent runs unless the token expires or you explicitly clear the cache.
+</Info>
+
+### Troubleshooting: "Client not found" Error
+
+<Warning>
+If you restart Keycloak or change the realm configuration, you may end up seeing Keycloak showing a "Client not found" error instead of the login screen when running your client. This happens because FastMCP uses Dynamic Client Registration (DCR) and the client ID that was cached locally no longer exists on the Keycloak server.
+
+**Keycloak error**: "We are sorry... Client not found."
+
+**Solution**: Clear the local OAuth cache to force re-registration with Keycloak:
+
+```python
+from fastmcp.client.auth.oauth import FileTokenStorage
+
+# Clear OAuth cache for your specific MCP server
+storage = FileTokenStorage("http://localhost:8000/mcp/")  # Use your MCP server URL
+storage.clear()
+
+# Or clear all OAuth cache data for all MCP servers
+FileTokenStorage.clear_all()
+```
+
+After clearing the cache, run your client again. It will automatically re-register with Keycloak and obtain new credentials.
+</Warning>
+
+## Environment Variables
+
+For production deployments, use environment variables instead of hardcoding credentials.
+
+### Provider Selection
+
+Setting this environment variable allows the Keycloak provider to be used automatically without explicitly instantiating it in code.
+
+<Card>
+<ParamField path="FASTMCP_SERVER_AUTH" default="Not set">
+Set to `fastmcp.server.auth.providers.keycloak.KeycloakAuthProvider` to use Keycloak authentication.
+</ParamField>
+</Card>
+
+### Keycloak-Specific Configuration
+
+These environment variables provide default values for the Keycloak provider, whether it's instantiated manually or configured via `FASTMCP_SERVER_AUTH`.
+
+<Card>
+<ParamField path="FASTMCP_SERVER_AUTH_KEYCLOAK_REALM_URL" required>
+Your Keycloak realm URL (e.g., `http://localhost:8080/realms/fastmcp` or `https://keycloak.example.com/realms/myrealm`)
+</ParamField>
+
+<ParamField path="FASTMCP_SERVER_AUTH_KEYCLOAK_BASE_URL" required>
+Public URL of your FastMCP server (e.g., `https://your-server.com` or `http://localhost:8000` for development)
+</ParamField>
+
+<ParamField path="FASTMCP_SERVER_AUTH_KEYCLOAK_REQUIRED_SCOPES" default="None">
+Comma-, space-, or JSON-separated list of required OAuth scopes (e.g., `openid profile` or `["openid","profile","email"]`)
+</ParamField>
+</Card>
+
+Example `.env` file:
+```bash
+# Use the Keycloak provider
+FASTMCP_SERVER_AUTH=fastmcp.server.auth.providers.keycloak.KeycloakAuthProvider
+
+# Keycloak configuration
+FASTMCP_SERVER_AUTH_KEYCLOAK_REALM_URL=http://localhost:8080/realms/fastmcp
+FASTMCP_SERVER_AUTH_KEYCLOAK_BASE_URL=https://your-server.com
+FASTMCP_SERVER_AUTH_KEYCLOAK_REQUIRED_SCOPES=openid,profile,email
+```
+
+With environment variables set, your server code simplifies to:
+
+```python server.py
+from fastmcp import FastMCP
+
+# Authentication is automatically configured from environment
+mcp = FastMCP(name="My Keycloak Protected Server")
+
+@mcp.tool
+async def protected_operation() -> str:
+    """Perform a protected operation."""
+    # Your tool implementation here
+    return "Operation completed successfully"
+```
+
+## Advanced Configuration
+
+### Custom Token Verifier
+
+For advanced use cases, you can provide a custom token verifier:
+
+```python
+from fastmcp.server.auth.providers.jwt import JWTVerifier
+from fastmcp.server.auth.providers.keycloak import KeycloakAuthProvider
+
+# Custom JWT verifier with specific audience
+custom_verifier = JWTVerifier(
+    jwks_uri="http://localhost:8080/realms/fastmcp/.well-known/jwks.json",
+    issuer="http://localhost:8080/realms/fastmcp",
+    audience="my-specific-client",
+    required_scopes=["api:read", "api:write"]
+)
+
+auth_provider = KeycloakAuthProvider(
+    realm_url="http://localhost:8080/realms/fastmcp",
+    base_url="http://localhost:8000",
+    token_verifier=custom_verifier
+)
+```

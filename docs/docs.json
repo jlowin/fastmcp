@@ -163,6 +163,7 @@
                   "integrations/descope",
                   "integrations/github",
                   "integrations/google",
+                  "integrations/keycloak",
                   "integrations/workos"
                 ]
               },
