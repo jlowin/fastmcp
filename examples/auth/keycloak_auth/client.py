@@ -8,12 +8,19 @@ To run:
 
 import asyncio
 
-from fastmcp.client import Client
+from fastmcp import Client
 
 SERVER_URL = "http://localhost:8000/mcp"
 
 
 async def main():
+    # Uncomment the following lines to clear any previously stored tokens.
+    # This is useful if you have just restarted Keycloak and end up seeing
+    # Keycloak showing this error: "We are sorry... Client not found."
+    # instead of the login screen
+    # storage = FileTokenStorage("http://localhost:8000/mcp/")
+    # storage.clear()
+
     try:
         async with Client(SERVER_URL, auth="oauth") as client:
             assert await client.ping()
