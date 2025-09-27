@@ -425,10 +425,16 @@ class TestOAuthProxyClientRegistration:
         assert retrieved is not None
         assert retrieved.client_id == "test-client"
 
-    async def test_get_unregistered_client_returns_none(self, oauth_proxy):
-        """Test that unregistered clients return None."""
-        client = await oauth_proxy.get_client("unknown-client")
-        assert client is None
+    async def test_get_unregistered_client_raises_token_error(self, oauth_proxy):
+        """Test that unregistered clients raise TokenError with invalid_client."""
+        from mcp.server.auth.provider import TokenError
+
+        with pytest.raises(TokenError) as exc_info:
+            await oauth_proxy.get_client("unknown-client")
+
+        assert exc_info.value.error == "invalid_client"  # type: ignore[attr-defined]
+        assert "not found" in exc_info.value.error_description.lower()  # type: ignore[attr-defined]
+        assert "unknown-client" in exc_info.value.error_description  # type: ignore[attr-defined]
 
 
 class TestOAuthProxyAuthorization:

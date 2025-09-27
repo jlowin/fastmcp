@@ -62,8 +62,16 @@ class InMemoryOAuthProvider(OAuthProvider):
             str, str
         ] = {}  # refresh_token_str -> access_token_str
 
-    async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
-        return self.clients.get(client_id)
+    async def get_client(self, client_id: str) -> OAuthClientInformationFull:
+        """Get client information by ID.
+
+        Raises:
+            TokenError: If client is not found, raises invalid_client error
+        """
+        client = self.clients.get(client_id)
+        if client is None:
+            raise TokenError("invalid_client", f"Client ID '{client_id}' not found")
+        return client
 
     async def register_client(self, client_info: OAuthClientInformationFull) -> None:
         if client_info.client_id in self.clients:

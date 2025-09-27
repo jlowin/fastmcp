@@ -393,16 +393,20 @@ class OAuthProxy(OAuthProvider):
     # Client Registration (Local Implementation)
     # -------------------------------------------------------------------------
 
-    async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
+    async def get_client(self, client_id: str) -> OAuthClientInformationFull:
         """Get client information by ID. This is generally the random ID
         provided to the DCR client during registration, not the upstream client ID.
 
-        For unregistered clients, returns None (which will raise an error in the SDK).
+        For unregistered clients, raises TokenError with invalid_client error.
+
+        Raises:
+            TokenError: If client is not found, raises invalid_client error
         """
         # Load from storage
         data = await self._client_storage.get(client_id)
         if not data:
-            return None
+            # Client not found - raise OAuth compliant error
+            raise TokenError("invalid_client", f"Client ID '{client_id}' not found")
 
         if client_data := data.get("client", None):
             return ProxyDCRClient(
@@ -412,7 +416,8 @@ class OAuthProxy(OAuthProvider):
                 **client_data,
             )
 
-        return None
+        # No client data in storage - raise OAuth compliant error
+        raise TokenError("invalid_client", f"Client ID '{client_id}' not found")
 
     async def register_client(self, client_info: OAuthClientInformationFull) -> None:
         """Register a client locally
