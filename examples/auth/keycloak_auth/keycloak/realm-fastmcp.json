@@ -2,12 +2,11 @@
   "realm": "fastmcp",
   "displayName": "FastMCP Realm",
   "enabled": true,
-  "keycloakVersion": "26.2.5",
+  "keycloakVersion": "26.3.5",
   "registrationAllowed": true,
   "components": {
     "org.keycloak.services.clientregistration.policy.ClientRegistrationPolicy": [
       {
-        "id": "3acdf0c5-75bf-48af-ba61-cd473a326dd6",
         "name": "Trusted Hosts",
         "providerId": "trusted-hosts",
         "subType": "anonymous",
@@ -18,6 +17,7 @@
           ],
           "trusted-hosts": [
             "localhost",
+            "172.17.0.1",
             "172.18.0.1"
           ],
           "client-uris-must-match": [
@@ -67,7 +67,7 @@
         ]
       },
       {
-        "name": "DCR Policy",
+        "name": "Allowed Client URIs",
         "enabled": true,
         "conditions": [
           {
@@ -83,10 +83,10 @@
     ],
     "profiles": [
       {
-        "name": "dcr-profile",
+        "name": "dynamic-client-registration-profile",
         "to-clients-dynamically-registered": true,
         "policies": [
-          "DCR Policy",
+          "Allowed Client URIs",
           "Allowed Client Scopes"
         ]
       }
