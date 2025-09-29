@@ -39,6 +39,7 @@ class TestToolFromFunction:
                 "tags": set(),
                 "enabled": True,
                 "parameters": {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
                     "properties": {
                         "a": {"type": "integer"},
                         "b": {"type": "integer"},
@@ -89,6 +90,7 @@ class TestToolFromFunction:
                 "tags": set(),
                 "enabled": True,
                 "parameters": {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
                     "properties": {"url": {"type": "string"}},
                     "required": ["url"],
                     "type": "object",
@@ -120,6 +122,7 @@ class TestToolFromFunction:
                 "tags": set(),
                 "enabled": True,
                 "parameters": {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
                     "properties": {
                         "x": {"type": "integer"},
                         "y": {"type": "integer"},
@@ -153,6 +156,7 @@ class TestToolFromFunction:
                 "tags": set(),
                 "enabled": True,
                 "parameters": {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
                     "properties": {
                         "x": {"type": "integer"},
                         "y": {"type": "integer"},
@@ -199,6 +203,7 @@ class TestToolFromFunction:
                             "type": "object",
                         }
                     },
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
                     "properties": {
                         "user": {"$ref": "#/$defs/UserInput"},
                         "flag": {"type": "boolean"},
@@ -265,6 +270,7 @@ class TestToolFromFunction:
                 "tags": set(),
                 "enabled": True,
                 "parameters": {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
                     "properties": {"x": {"title": "X"}},
                     "required": ["x"],
                     "type": "object",
@@ -294,6 +300,7 @@ class TestToolFromFunction:
                 "tags": set(),
                 "enabled": True,
                 "parameters": {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
                     "properties": {
                         "_a": {"type": "integer"},
                         "_b": {"type": "integer"},
@@ -342,6 +349,7 @@ class TestToolFromFunction:
                 "tags": set(),
                 "enabled": True,
                 "parameters": {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
                     "properties": {
                         "x": {"type": "integer"},
                         "y": {"type": "integer"},

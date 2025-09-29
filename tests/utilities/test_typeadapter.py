@@ -271,3 +271,19 @@ def test_class_with_methods():
     type_adapter = get_cached_typeadapter(class_with_methods.do_something_return_none)
     schema = type_adapter.json_schema()
     assert "self" not in schema["properties"]
+
+
+def test_json_schema_no_tag():
+    """
+    Pydantic does not generate a $schema tag (see toward the end of source code of
+    https://docs.pydantic.dev/latest/api/json_schema/#pydantic.json_schema.GenerateJsonSchema.generate).
+
+    This test is to make sure that doesn't catch us off-guard if it changes.
+    """
+
+    def func_with_str(a: str):
+        return a
+
+    type_adapter = get_cached_typeadapter(func_with_str)
+    parameters = type_adapter.json_schema()
+    assert "$schema" not in parameters

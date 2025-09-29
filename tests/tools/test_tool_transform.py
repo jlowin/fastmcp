@@ -1571,6 +1571,7 @@ class TestInputSchema:
 
         assert transformed_tool.parameters == snapshot(
             {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
                 "type": "object",
                 "properties": {"used_param": {"$ref": "#/$defs/UsedType"}},
                 "required": ["used_param"],
@@ -1609,6 +1610,7 @@ class TestInputSchema:
 
         assert transformed.parameters == snapshot(
             {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
                 "type": "object",
                 "properties": {"renamed_input": {"$ref": "#/$defs/InputType"}},
                 "required": ["renamed_input"],
@@ -1646,6 +1648,7 @@ class TestInputSchema:
 
         assert transform1.parameters == snapshot(
             {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
                 "type": "object",
                 "properties": {
                     "param_a": {"$ref": "#/$defs/TypeA"},
@@ -1679,6 +1682,7 @@ class TestInputSchema:
 
         assert transform2.parameters == snapshot(
             {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
                 "type": "object",
                 "properties": {"param_a": {"$ref": "#/$defs/TypeA"}},
                 "required": ["param_a"],

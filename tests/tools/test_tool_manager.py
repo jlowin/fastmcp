@@ -35,6 +35,9 @@ class TestAddTools:
         assert tool is not None
         assert tool.name == "add"
         assert tool.description == "Add two numbers."
+        assert (
+            tool.parameters["$schema"] == "https://json-schema.org/draft/2020-12/schema"
+        )
         assert tool.parameters["properties"]["a"]["type"] == "integer"
         assert tool.parameters["properties"]["b"]["type"] == "integer"
 

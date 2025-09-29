@@ -14,7 +14,13 @@ from pydantic.fields import Field
 from pydantic.functional_validators import BeforeValidator
 
 import fastmcp
-from fastmcp.tools.tool import ParsedFunction, Tool, ToolResult, _convert_to_content
+from fastmcp.tools.tool import (
+    ParsedFunction,
+    Tool,
+    ToolResult,
+    _convert_to_content,
+    json_schema_uri,
+)
 from fastmcp.utilities.components import _convert_set_default_none
 from fastmcp.utilities.json_schema import compress_schema
 from fastmcp.utilities.logging import get_logger
@@ -539,6 +545,7 @@ class TransformedTool(Tool):
                 final_schema = cls._merge_schema_with_precedence(
                     parsed_fn.input_schema, schema
                 )
+        final_schema["$schema"] = json_schema_uri
 
         # Additional validation: check for naming conflicts after transformation
         if transform_args:

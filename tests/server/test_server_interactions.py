@@ -620,9 +620,9 @@ class TestToolParameters:
             # String input should raise validation error (no coercion)
             with pytest.raises(
                 ToolError,
-                match="Input validation error: '42' is not of type 'integer'",
+                match="Input validation error: 'forty-two' is not of type 'integer'",
             ):
-                await client.call_tool("add_one", {"x": "42"})
+                await client.call_tool("add_one", {"x": "forty-two"})
 
     async def test_tool_bool_coercion(self):
         """Test that invalid bool input raises validation error."""

@@ -44,6 +44,8 @@ logger = get_logger(__name__)
 
 T = TypeVar("T", default=Any)
 
+json_schema_uri = "https://json-schema.org/draft/2020-12/schema"
+
 
 @dataclass
 class _WrappedResult(Generic[T]):
@@ -416,6 +418,8 @@ class ParsedFunction:
         input_schema = compress_schema(
             input_schema, prune_params=prune_params, prune_titles=True
         )
+        # See https://docs.pydantic.dev/latest/api/json_schema/#pydantic.json_schema.GenerateJsonSchema
+        input_schema["$schema"] = json_schema_uri
 
         output_schema = None
         # Get the return annotation from the signature
