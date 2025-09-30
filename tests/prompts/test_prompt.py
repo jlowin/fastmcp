@@ -241,6 +241,47 @@ class TestRenderPrompt:
             )
         ]
 
+    async def test_pydantic_field_defaults(self):
+        """Test that Pydantic Field defaults are properly extracted and used."""
+        from pydantic import Field
+
+        def prompt_with_field_default(
+            name: str, age: int = Field(default=25, description="User's age")
+        ) -> str:
+            return f"Hello, {name}! You're {age} years old."
+
+        prompt = Prompt.from_function(prompt_with_field_default)
+        result = await prompt.render(arguments={"name": "Alice"})
+
+        assert result == [
+            PromptMessage(
+                role="user",
+                content=TextContent(
+                    type="text", text="Hello, Alice! You're 25 years old."
+                ),
+            )
+        ]
+
+    async def test_python_default_parameters(self):
+        """Test that regular Python default parameters still work."""
+
+        def prompt_with_python_default(
+            name: str, age: int = 30, city: str = "Unknown"
+        ) -> str:
+            return f"Hello, {name}! You're {age} years old from {city}."
+
+        prompt = Prompt.from_function(prompt_with_python_default)
+        result = await prompt.render(arguments={"name": "Bob"})
+
+        assert result == [
+            PromptMessage(
+                role="user",
+                content=TextContent(
+                    type="text", text="Hello, Bob! You're 30 years old from Unknown."
+                ),
+            )
+        ]
+
 
 class TestPromptTypeConversion:
     async def test_list_of_integers_as_string_args(self):

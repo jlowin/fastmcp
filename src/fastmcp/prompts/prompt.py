@@ -13,6 +13,7 @@ from mcp.types import ContentBlock, PromptMessage, Role, TextContent
 from mcp.types import Prompt as MCPPrompt
 from mcp.types import PromptArgument as MCPPromptArgument
 from pydantic import Field, TypeAdapter
+from pydantic.fields import FieldInfo
 
 from fastmcp.exceptions import PromptError
 from fastmcp.server.dependencies import get_context
@@ -311,6 +312,21 @@ class FunctionPrompt(Prompt):
             else:
                 # Parameter not in function signature, pass as-is
                 converted_kwargs[param_name] = param_value
+
+        # Add missing parameters with default values
+        for param_name, param in sig.parameters.items():
+            if (
+                param_name not in converted_kwargs
+                and param.default != inspect.Parameter.empty
+            ):
+                default_value = param.default
+                # Extract actual default from Pydantic Field objects
+                if (
+                    isinstance(default_value, FieldInfo)
+                    and default_value.default is not ...
+                ):
+                    default_value = default_value.default
+                converted_kwargs[param_name] = default_value
 
         return converted_kwargs
 
