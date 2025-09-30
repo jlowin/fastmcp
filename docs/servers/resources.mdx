@@ -414,11 +414,12 @@ With these two templates defined, clients can request a variety of resources:
 
 ### RFC 6570 URI Templates
 
-<VersionBadge version="2.2.4" />
 
 FastMCP implements [RFC 6570 URI Templates](https://datatracker.ietf.org/doc/html/rfc6570) for resource templates, providing a standardized way to define parameterized URIs. This includes support for simple expansion, wildcard path parameters, and form-style query parameters.
 
 #### Wildcard Parameters
+
+<VersionBadge version="2.2.4" />
 
 Resource templates support wildcard parameters that can match multiple path segments. While standard parameters (`{param}`) only match a single path segment and don't cross "/" boundaries, wildcard parameters (`{param*}`) can capture multiple segments including slashes. Wildcards capture all subsequent path segments *up until* the defined part of the URI template (whether literal or another parameter). This allows you to have multiple wildcard parameters in a single URI template.
 
