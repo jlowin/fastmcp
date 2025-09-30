@@ -262,7 +262,9 @@ class AzureProvider(OAuthProxy):
 
         modified_params = params_to_use.model_copy(update={"scopes": final_scopes})
 
-        return await super().authorize(client, modified_params)
+        auth_url = await super().authorize(client, modified_params)
+        separator = "&" if "?" in auth_url else "?"
+        return f"{auth_url}{separator}prompt=select_account"
 
     def _add_prefix_to_scopes(self, scopes: list[str]) -> list[str]:
         """Add Application ID URI prefix for authorization request."""
