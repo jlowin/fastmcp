@@ -1,0 +1,54 @@
+name: Run static analysis
+
+env:
+  # enable colored output
+  # https://github.com/pytest-dev/pytest/issues/7443
+  PY_COLORS: 1
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "uv.lock"
+      - "pyproject.toml"
+      - ".github/workflows/**"
+
+  # run on all pull requests because these checks are required and will block merges otherwise
+  pull_request:
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  static_analysis:
+    timeout-minutes: 2
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Check lockfile is up to date
+        run: |
+          if ! uv lock --check; then
+            echo "❌ Lockfile is out of date!"
+            echo "To update the lockfile, run 'uv lock'."
+            exit 1
+          fi
+          echo "✅ Lockfile is up to date"
+      - name: Run pre-commit
+        run: uv run pre-commit run --all-files
+        env:
+          SKIP: no-commit-to-branch

@@ -1,0 +1,462 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "appearance": {
+    "default": "system",
+    "strict": false
+  },
+  "background": {
+    "color": {
+      "dark": "#222831",
+      "light": "#EEEEEE"
+    },
+    "decoration": "windows"
+  },
+  "banner": {
+    "content": "Host your server on [FastMCP Cloud](https://fastmcp.cloud) for free!"
+  },
+  "colors": {
+    "dark": "#f72585",
+    "light": "#4cc9f0",
+    "primary": "#2d00f7"
+  },
+  "contextual": {
+    "options": [
+      "copy",
+      "view"
+    ]
+  },
+  "description": "The fast, Pythonic way to build MCP servers and clients.",
+  "favicon": {
+    "dark": "/assets/brand/favicon.svg",
+    "light": "/assets/brand/favicon.svg"
+  },
+  "footer": {
+    "socials": {
+      "bluesky": "https://bsky.app/profile/jlowin.dev",
+      "github": "https://github.com/jlowin/fastmcp",
+      "x": "https://x.com/jlowin"
+    }
+  },
+  "integrations": {
+    "ga4": {
+      "measurementId": "G-64R5W1TJXG"
+    }
+  },
+  "interaction": {
+    "drilldown": false
+  },
+  "logo": {
+    "dark": "/assets/brand/wordmark-white.png",
+    "light": "/assets/brand/wordmark.png"
+  },
+  "name": "FastMCP",
+  "navbar": {
+    "links": [
+      {
+        "href": "https://fastmcp.cloud",
+        "icon": "cloud",
+        "label": "FastMCP Cloud"
+      }
+    ],
+    "primary": {
+      "href": "https://github.com/jlowin/fastmcp",
+      "type": "github"
+    }
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "getting-started/welcome",
+              "getting-started/installation",
+              "getting-started/quickstart"
+            ]
+          },
+          {
+            "group": "Servers",
+            "pages": [
+              "servers/server",
+              {
+                "group": "Core Components",
+                "icon": "toolbox",
+                "pages": [
+                  "servers/tools",
+                  "servers/resources",
+                  "servers/prompts"
+                ]
+              },
+              {
+                "group": "Advanced Features",
+                "icon": "stars",
+                "pages": [
+                  "servers/context",
+                  "servers/proxy",
+                  "servers/composition",
+                  "servers/elicitation",
+                  "servers/logging",
+                  "servers/progress",
+                  "servers/sampling",
+                  "servers/middleware"
+                ]
+              },
+              {
+                "group": "Authentication",
+                "icon": "shield-check",
+                "pages": [
+                  "servers/auth/authentication",
+                  "servers/auth/token-verification",
+                  "servers/auth/remote-oauth",
+                  "servers/auth/oauth-proxy",
+                  "servers/auth/oidc-proxy",
+                  "servers/auth/full-oauth-server"
+                ]
+              },
+              {
+                "group": "Deployment",
+                "icon": "rocket",
+                "pages": [
+                  "deployment/running-server",
+                  "deployment/server-configuration",
+                  "deployment/self-hosted",
+                  "deployment/fastmcp-cloud"
+                ]
+              }
+            ]
+          },
+          {
+            "group": "Clients",
+            "pages": [
+              {
+                "group": "Essentials",
+                "icon": "cube",
+                "pages": [
+                  "clients/client",
+                  "clients/transports"
+                ]
+              },
+              {
+                "group": "Core Operations",
+                "icon": "handshake",
+                "pages": [
+                  "clients/tools",
+                  "clients/resources",
+                  "clients/prompts"
+                ]
+              },
+              {
+                "group": "Advanced Features",
+                "icon": "stars",
+                "pages": [
+                  "clients/elicitation",
+                  "clients/logging",
+                  "clients/progress",
+                  "clients/sampling",
+                  "clients/messages",
+                  "clients/roots"
+                ]
+              },
+              {
+                "group": "Authentication",
+                "icon": "user-shield",
+                "pages": [
+                  "clients/auth/oauth",
+                  "clients/auth/bearer"
+                ]
+              }
+            ]
+          },
+          {
+            "group": "Integrations",
+            "pages": [
+              {
+                "group": "Authentication",
+                "icon": "key",
+                "pages": [
+                  "integrations/auth0",
+                  "integrations/authkit",
+                  "integrations/aws-cognito",
+                  "integrations/azure",
+                  "integrations/descope",
+                  "integrations/github",
+                  "integrations/scalekit",
+                  "integrations/google",
+                  "integrations/workos"
+                ]
+              },
+              {
+                "group": "Authorization",
+                "icon": "shield-check",
+                "pages": [
+                  "integrations/eunomia-authorization",
+                  "integrations/permit"
+                ]
+              },
+              {
+                "group": "AI Assistants",
+                "icon": "robot",
+                "pages": [
+                  "integrations/chatgpt",
+                  "integrations/claude-code",
+                  "integrations/claude-desktop",
+                  "integrations/cursor",
+                  "integrations/gemini-cli",
+                  "integrations/mcp-json-configuration"
+                ]
+              },
+              {
+                "group": "AI SDKs",
+                "icon": "code",
+                "pages": [
+                  "integrations/anthropic",
+                  "integrations/gemini",
+                  "integrations/openai"
+                ]
+              },
+              {
+                "group": "Web Frameworks",
+                "icon": "globe",
+                "pages": [
+                  "integrations/asgi",
+                  "integrations/fastapi",
+                  "integrations/openapi"
+                ]
+              }
+            ]
+          },
+          {
+            "group": "Patterns",
+            "pages": [
+              "patterns/tool-transformation",
+              "patterns/decorating-methods",
+              "patterns/cli",
+              "patterns/contrib"
+            ]
+          },
+          {
+            "group": "Development",
+            "pages": [
+              "development/contributing",
+              "development/tests",
+              "development/releases"
+            ]
+          }
+        ],
+        "tab": "Documentation"
+      },
+      {
+        "pages": [
+          "updates",
+          "changelog"
+        ],
+        "tab": "What's New"
+      },
+      {
+        "anchors": [
+          {
+            "anchor": "Python SDK",
+            "icon": "python",
+            "pages": [
+              "python-sdk/fastmcp-exceptions",
+              "python-sdk/fastmcp-mcp_config",
+              "python-sdk/fastmcp-settings",
+              {
+                "group": "fastmcp.cli",
+                "pages": [
+                  "python-sdk/fastmcp-cli-__init__",
+                  "python-sdk/fastmcp-cli-claude",
+                  "python-sdk/fastmcp-cli-cli",
+                  {
+                    "group": "install",
+                    "pages": [
+                      "python-sdk/fastmcp-cli-install-__init__",
+                      "python-sdk/fastmcp-cli-install-claude_code",
+                      "python-sdk/fastmcp-cli-install-claude_desktop",
+                      "python-sdk/fastmcp-cli-install-cursor",
+                      "python-sdk/fastmcp-cli-install-gemini_cli",
+                      "python-sdk/fastmcp-cli-install-mcp_json",
+                      "python-sdk/fastmcp-cli-install-shared"
+                    ]
+                  },
+                  "python-sdk/fastmcp-cli-run"
+                ]
+              },
+              {
+                "group": "fastmcp.client",
+                "pages": [
+                  "python-sdk/fastmcp-client-__init__",
+                  {
+                    "group": "auth",
+                    "pages": [
+                      "python-sdk/fastmcp-client-auth-__init__",
+                      "python-sdk/fastmcp-client-auth-bearer",
+                      "python-sdk/fastmcp-client-auth-oauth"
+                    ]
+                  },
+                  "python-sdk/fastmcp-client-client",
+                  "python-sdk/fastmcp-client-elicitation",
+                  "python-sdk/fastmcp-client-logging",
+                  "python-sdk/fastmcp-client-messages",
+                  "python-sdk/fastmcp-client-oauth_callback",
+                  "python-sdk/fastmcp-client-progress",
+                  "python-sdk/fastmcp-client-roots",
+                  "python-sdk/fastmcp-client-sampling",
+                  "python-sdk/fastmcp-client-transports"
+                ]
+              },
+              {
+                "group": "fastmcp.prompts",
+                "pages": [
+                  "python-sdk/fastmcp-prompts-__init__",
+                  "python-sdk/fastmcp-prompts-prompt",
+                  "python-sdk/fastmcp-prompts-prompt_manager"
+                ]
+              },
+              {
+                "group": "fastmcp.resources",
+                "pages": [
+                  "python-sdk/fastmcp-resources-__init__",
+                  "python-sdk/fastmcp-resources-resource",
+                  "python-sdk/fastmcp-resources-resource_manager",
+                  "python-sdk/fastmcp-resources-template",
+                  "python-sdk/fastmcp-resources-types"
+                ]
+              },
+              {
+                "group": "fastmcp.server",
+                "pages": [
+                  "python-sdk/fastmcp-server-__init__",
+                  {
+                    "group": "auth",
+                    "pages": [
+                      "python-sdk/fastmcp-server-auth-__init__",
+                      "python-sdk/fastmcp-server-auth-auth",
+                      "python-sdk/fastmcp-server-auth-oauth_proxy",
+                      "python-sdk/fastmcp-server-auth-oidc_proxy",
+                      {
+                        "group": "providers",
+                        "pages": [
+                          "python-sdk/fastmcp-server-auth-providers-__init__",
+                          "python-sdk/fastmcp-server-auth-providers-auth0",
+                          "python-sdk/fastmcp-server-auth-providers-aws",
+                          "python-sdk/fastmcp-server-auth-providers-azure",
+                          "python-sdk/fastmcp-server-auth-providers-bearer",
+                          "python-sdk/fastmcp-server-auth-providers-descope",
+                          "python-sdk/fastmcp-server-auth-providers-github",
+                          "python-sdk/fastmcp-server-auth-providers-google",
+                          "python-sdk/fastmcp-server-auth-providers-in_memory",
+                          "python-sdk/fastmcp-server-auth-providers-jwt",
+                          "python-sdk/fastmcp-server-auth-providers-scalekit",
+                          "python-sdk/fastmcp-server-auth-providers-workos"
+                        ]
+                      },
+                      "python-sdk/fastmcp-server-auth-redirect_validation"
+                    ]
+                  },
+                  "python-sdk/fastmcp-server-context",
+                  "python-sdk/fastmcp-server-dependencies",
+                  "python-sdk/fastmcp-server-elicitation",
+                  "python-sdk/fastmcp-server-http",
+                  "python-sdk/fastmcp-server-low_level",
+                  {
+                    "group": "middleware",
+                    "pages": [
+                      "python-sdk/fastmcp-server-middleware-__init__",
+                      "python-sdk/fastmcp-server-middleware-error_handling",
+                      "python-sdk/fastmcp-server-middleware-logging",
+                      "python-sdk/fastmcp-server-middleware-middleware",
+                      "python-sdk/fastmcp-server-middleware-rate_limiting",
+                      "python-sdk/fastmcp-server-middleware-timing"
+                    ]
+                  },
+                  "python-sdk/fastmcp-server-openapi",
+                  "python-sdk/fastmcp-server-proxy",
+                  "python-sdk/fastmcp-server-server"
+                ]
+              },
+              {
+                "group": "fastmcp.tools",
+                "pages": [
+                  "python-sdk/fastmcp-tools-__init__",
+                  "python-sdk/fastmcp-tools-tool",
+                  "python-sdk/fastmcp-tools-tool_manager",
+                  "python-sdk/fastmcp-tools-tool_transform"
+                ]
+              },
+              {
+                "group": "fastmcp.utilities",
+                "pages": [
+                  "python-sdk/fastmcp-utilities-__init__",
+                  "python-sdk/fastmcp-utilities-auth",
+                  "python-sdk/fastmcp-utilities-cli",
+                  "python-sdk/fastmcp-utilities-components",
+                  "python-sdk/fastmcp-utilities-exceptions",
+                  "python-sdk/fastmcp-utilities-http",
+                  "python-sdk/fastmcp-utilities-inspect",
+                  "python-sdk/fastmcp-utilities-json_schema",
+                  "python-sdk/fastmcp-utilities-json_schema_type",
+                  "python-sdk/fastmcp-utilities-logging",
+                  "python-sdk/fastmcp-utilities-mcp_config",
+                  {
+                    "group": "mcp_server_config",
+                    "pages": [
+                      "python-sdk/fastmcp-utilities-mcp_server_config-__init__",
+                      {
+                        "group": "v1",
+                        "pages": [
+                          "python-sdk/fastmcp-utilities-mcp_server_config-v1-__init__",
+                          {
+                            "group": "environments",
+                            "pages": [
+                              "python-sdk/fastmcp-utilities-mcp_server_config-v1-environments-__init__",
+                              "python-sdk/fastmcp-utilities-mcp_server_config-v1-environments-base",
+                              "python-sdk/fastmcp-utilities-mcp_server_config-v1-environments-uv"
+                            ]
+                          },
+                          "python-sdk/fastmcp-utilities-mcp_server_config-v1-mcp_server_config",
+                          {
+                            "group": "sources",
+                            "pages": [
+                              "python-sdk/fastmcp-utilities-mcp_server_config-v1-sources-__init__",
+                              "python-sdk/fastmcp-utilities-mcp_server_config-v1-sources-base",
+                              "python-sdk/fastmcp-utilities-mcp_server_config-v1-sources-filesystem"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  "python-sdk/fastmcp-utilities-openapi",
+                  "python-sdk/fastmcp-utilities-storage",
+                  "python-sdk/fastmcp-utilities-tests",
+                  "python-sdk/fastmcp-utilities-types"
+                ]
+              }
+            ]
+          }
+        ],
+        "tab": "SDK Reference"
+      }
+    ]
+  },
+  "redirects": [
+    {
+      "destination": "/servers/proxy",
+      "source": "/patterns/proxy"
+    },
+    {
+      "destination": "/servers/composition",
+      "source": "/patterns/composition"
+    }
+  ],
+  "search": {
+    "prompt": "Search the docs..."
+  },
+  "theme": "mint",
+  "thumbnails": {
+    "appearance": "light",
+    "background": "/assets/brand/thumbnail-background.png"
+  }
+}

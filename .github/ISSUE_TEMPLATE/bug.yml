@@ -1,0 +1,71 @@
+name: 🐛 Bug Report
+description: Report a bug or unexpected behavior in FastMCP
+labels: [bug, pending]
+
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for contributing to FastMCP! 🙏
+
+  - type: markdown
+    attributes:
+      value: |
+        ### Before you submit
+
+        To help us help you, please:
+
+        - 🔄 **Make sure you're testing on the latest version of FastMCP** - many issues are already fixed in newer versions
+        - 🔍 **Check if someone else has already reported this issue** or if it's been fixed on the main branch
+        - 📋 **You MUST include a copy/pasteable and properly formatted MRE** (minimal reproducible example) below or your issue may be closed without response
+
+        Thanks for helping to make FastMCP better! 🚀
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: |
+        Please explain what you're experiencing and what you would expect to happen instead.
+
+        Provide as much detail as possible to help us understand and solve your problem quickly.
+    validations:
+      required: true
+
+  - type: textarea
+    id: example
+    attributes:
+      label: Example Code
+      description: >
+        If applicable, please provide a self-contained,
+        [minimal, reproducible example](https://stackoverflow.com/help/minimal-reproducible-example)
+        demonstrating the bug. If possible, your example should be a single-file script.
+
+      placeholder: |
+        import asyncio
+        from fastmcp import FastMCP, Client
+
+        mcp = FastMCP()
+
+        async def demo():
+            async with Client(mcp) as client:
+                ... # show the bug here
+
+        if __name__ == "__main__":
+            asyncio.run(demo())
+      render: Python
+
+  - type: textarea
+    id: version
+    attributes:
+      label: Version Information
+      description: |
+        Please tell us about your FastMCP version, MCP version, Python version, and OS, as well as any other relevant details about your environment.
+
+        To get the basic information, run the following command in your terminal and paste the output below:
+
+        ```bash
+        fastmcp version --copy
+        ```
+      render: Text
+    validations:
+      required: true

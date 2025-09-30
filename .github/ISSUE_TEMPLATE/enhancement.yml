@@ -1,0 +1,34 @@
+name: 💡 Enhancement Request
+description: Suggest an idea or improvement for FastMCP
+labels: [enhancement, pending]
+
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for contributing to FastMCP! 🙏
+
+  - type: markdown
+    attributes:
+      value: |
+        ### Before you submit
+
+        To help us evaluate your enhancement request:
+
+        - 🔍 **Check if this has already been requested** - search existing issues first
+        - 💭 **Think about the broader impact** - how would this affect other users?
+        - 📋 **Consider implementation complexity** - is this a small change or a major feature?
+
+        Thanks for helping to make FastMCP better! 🚀
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Enhancement
+      description: |
+        Please describe the enhancement:
+
+        - What problem or use case would it solve?
+        - How would it improve your workflow or experience with FastMCP?
+        - Are there any alternative solutions you've considered?
+    validations:
+      required: true
