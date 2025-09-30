@@ -195,9 +195,13 @@ class TestStructuredLoggingMiddleware:
 
         assert result == "test_result"
         assert mock_call_next.called
-        assert remove_line_numbers(caplog.text) == snapshot("""\
+
+        # Normalize duration_ms values for consistent snapshots
+        log_text = re.sub(r'"duration_ms": [\d.]+', '"duration_ms": X.XX', caplog.text)
+
+        assert remove_line_numbers(log_text) == snapshot("""\
 INFO     fastmcp.structured:logging.py:LINE_NUMBER Processing message: {"event": "request_start", "timestamp": "2023-01-01T00:00:00+00:00", "method": "test_method", "type": "request", "source": "client"}
-INFO     fastmcp.structured:logging.py:LINE_NUMBER Completed message: {"event": "request_success", "timestamp": "2023-01-01T00:00:00+00:00", "method": "test_method", "type": "request", "source": "client"}
+INFO     fastmcp.structured:logging.py:LINE_NUMBER Completed message: {"event": "request_success", "timestamp": "2023-01-01T00:00:00+00:00", "method": "test_method", "type": "request", "source": "client", "duration_ms": X.XX}
 
 """)
 
@@ -322,7 +326,14 @@ class TestLoggingMiddleware:
         success_message = log_lines[1]
         assert success_message.startswith("Completed message: ")
         success_json = success_message[len("Completed message: ") :]
-        assert json.loads(success_json) == snapshot(
+        success_data = json.loads(success_json)
+        # Check duration_ms exists and is positive
+        assert "duration_ms" in success_data
+        assert isinstance(success_data["duration_ms"], int | float)
+        assert success_data["duration_ms"] > 0
+        # Remove duration_ms for snapshot comparison
+        success_data.pop("duration_ms")
+        assert success_data == snapshot(
             {
                 "event": "request_success",
                 "timestamp": "2023-01-01T00:00:00+00:00",
@@ -562,15 +573,18 @@ class TestLoggingMiddlewareIntegration:
                         arguments={"items": ["a", "b", "c"], "mode": "batch"},
                     )
 
+        # Normalize duration_ms values for consistent snapshots
+        log_text = re.sub(r"duration_ms=[\d.]+", "duration_ms=X.XX", caplog.text)
+
         # Should have processing and completion logs for both operations
-        assert remove_line_numbers(caplog.text) == snapshot("""\
+        assert remove_line_numbers(log_text) == snapshot("""\
 INFO     mcp.server.lowlevel.server:server.py:LINE_NUMBER Processing request of type CallToolRequest
 INFO     fastmcp.requests:logging.py:LINE_NUMBER Processing message: event=request_start timestamp=2023-01-01T00:00:00+00:00 method=tools/call type=request source=client
-INFO     fastmcp.requests:logging.py:LINE_NUMBER Completed message: event=request_success timestamp=2023-01-01T00:00:00+00:00 method=tools/call type=request source=client
+INFO     fastmcp.requests:logging.py:LINE_NUMBER Completed message: event=request_success timestamp=2023-01-01T00:00:00+00:00 method=tools/call type=request source=client duration_ms=X.XX
 INFO     mcp.server.lowlevel.server:server.py:LINE_NUMBER Processing request of type ListToolsRequest
 INFO     mcp.server.lowlevel.server:server.py:LINE_NUMBER Processing request of type CallToolRequest
 INFO     fastmcp.requests:logging.py:LINE_NUMBER Processing message: event=request_start timestamp=2023-01-01T00:00:00+00:00 method=tools/call type=request source=client
-INFO     fastmcp.requests:logging.py:LINE_NUMBER Completed message: event=request_success timestamp=2023-01-01T00:00:00+00:00 method=tools/call type=request source=client
+INFO     fastmcp.requests:logging.py:LINE_NUMBER Completed message: event=request_success timestamp=2023-01-01T00:00:00+00:00 method=tools/call type=request source=client duration_ms=X.XX
 
 """)
 
@@ -617,6 +631,8 @@ INFO     fastmcp.requests:logging.py:LINE_NUMBER Completed message: event=reques
         import re
 
         log_text = re.sub(r"\[Client-[^\]]+\]", "[Client-XXXX]", log_text)
+        # Normalize duration_ms values for consistent snapshots
+        log_text = re.sub(r"duration_ms=[\d.]+", "duration_ms=X.XX", log_text)
 
         assert remove_line_numbers(log_text) == snapshot("""\
 DEBUG    fastmcp.fastmcp.client.transports:transports.py:LINE_NUMBER Inferred transport: <FastMCPTransport(server='LoggingTestServer')>
@@ -624,7 +640,7 @@ DEBUG    fastmcp.fastmcp.client.client:client.py:LINE_NUMBER [Client-XXXX] calle
 DEBUG    fastmcp.fastmcp.server.server:server.py:LINE_NUMBER [LoggingTestServer] Handler called: list_tools
 DEBUG    fastmcp.fastmcp.server.server:server.py:LINE_NUMBER [LoggingTestServer] Handler called: call_tool simple_operation with {'data': 'payload_test'}
 INFO     fastmcp.requests:logging.py:LINE_NUMBER Processing message: event=request_start timestamp=2023-01-01T00:00:00+00:00 method=tools/call type=request source=client payload={"_meta":null,"name":"simple_operation","arguments":{"data":"payload_test"}} payload_type=CallToolRequestParams
-INFO     fastmcp.requests:logging.py:LINE_NUMBER Completed message: event=request_success timestamp=2023-01-01T00:00:00+00:00 method=tools/call type=request source=client
+INFO     fastmcp.requests:logging.py:LINE_NUMBER Completed message: event=request_success timestamp=2023-01-01T00:00:00+00:00 method=tools/call type=request source=client duration_ms=X.XX
 DEBUG    fastmcp.fastmcp.server.server:server.py:LINE_NUMBER [LoggingTestServer] Handler called: list_tools
 
 """)
@@ -662,6 +678,8 @@ DEBUG    fastmcp.fastmcp.server.server:server.py:LINE_NUMBER [LoggingTestServer]
         import re
 
         log_text = re.sub(r"\[Client-[^\]]+\]", "[Client-XXXX]", caplog.text)
+        # Normalize duration_ms values for consistent snapshots
+        log_text = re.sub(r'"duration_ms": [\d.]+', '"duration_ms": X.XX', log_text)
 
         assert remove_line_numbers(log_text) == snapshot("""\
 DEBUG    fastmcp.fastmcp.client.transports:transports.py:LINE_NUMBER Inferred transport: <FastMCPTransport(server='LoggingTestServer')>
@@ -669,7 +687,7 @@ DEBUG    fastmcp.fastmcp.client.client:client.py:LINE_NUMBER [Client-XXXX] calle
 DEBUG    fastmcp.fastmcp.server.server:server.py:LINE_NUMBER [LoggingTestServer] Handler called: list_tools
 DEBUG    fastmcp.fastmcp.server.server:server.py:LINE_NUMBER [LoggingTestServer] Handler called: call_tool simple_operation with {'data': 'json_test'}
 INFO     fastmcp.structured:logging.py:LINE_NUMBER Processing message: {"event": "request_start", "timestamp": "2023-01-01T00:00:00+00:00", "method": "tools/call", "type": "request", "source": "client", "payload": "{\\"_meta\\":null,\\"name\\":\\"simple_operation\\",\\"arguments\\":{\\"data\\":\\"json_test\\"}}", "payload_type": "CallToolRequestParams"}
-INFO     fastmcp.structured:logging.py:LINE_NUMBER Completed message: {"event": "request_success", "timestamp": "2023-01-01T00:00:00+00:00", "method": "tools/call", "type": "request", "source": "client"}
+INFO     fastmcp.structured:logging.py:LINE_NUMBER Completed message: {"event": "request_success", "timestamp": "2023-01-01T00:00:00+00:00", "method": "tools/call", "type": "request", "source": "client", "duration_ms": X.XX}
 DEBUG    fastmcp.fastmcp.server.server:server.py:LINE_NUMBER [LoggingTestServer] Handler called: list_tools
 
 """)

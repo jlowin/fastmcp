@@ -2,6 +2,7 @@
 
 import json
 import logging
+import time
 from collections.abc import Callable
 from logging import Logger
 from typing import Any
@@ -86,9 +87,15 @@ class BaseLoggingMiddleware(Middleware):
         return message
 
     def _create_after_message(
-        self, context: MiddlewareContext[Any], event: str
-    ) -> dict[str, str | int]:
-        return self._create_base_message(context, event)
+        self,
+        context: MiddlewareContext[Any],
+        event: str,
+        duration_ms: float | None = None,
+    ) -> dict[str, str | int | float]:
+        message = self._create_base_message(context, event)
+        if duration_ms is not None:
+            message["duration_ms"] = round(duration_ms, 2)
+        return message
 
     def _create_base_message(
         self,
@@ -122,11 +129,13 @@ class BaseLoggingMiddleware(Middleware):
         formatted_message = self._format_message(request_start_log_message)
         self.logger.log(self.log_level, f"Processing message: {formatted_message}")
 
+        start_time = time.perf_counter()
         try:
             result = await call_next(context)
+            duration_ms = (time.perf_counter() - start_time) * 1000
 
             request_success_log_message = self._create_after_message(
-                context, "request_success"
+                context, "request_success", duration_ms=duration_ms
             )
 
             formatted_message = self._format_message(request_success_log_message)
@@ -134,8 +143,10 @@ class BaseLoggingMiddleware(Middleware):
 
             return result
         except Exception as e:
+            duration_ms = (time.perf_counter() - start_time) * 1000
             self.logger.log(
-                logging.ERROR, f"Failed message: {context.method or 'unknown'} - {e}"
+                logging.ERROR,
+                f"Failed message: {context.method or 'unknown'} - {e} (duration: {duration_ms:.2f}ms)",
             )
             raise
 
