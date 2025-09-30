@@ -24,6 +24,7 @@ jobs:
       contents: read
       issues: write
       pull-requests: write
+      id-token: write
 
     steps:
       - name: Checkout base repository
