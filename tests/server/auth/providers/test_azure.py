@@ -237,3 +237,40 @@ class TestAzureProvider:
         scope_parts = scope_value.split(" ") if scope_value else []
         assert "api://my-api/read" in scope_parts
         assert "api://my-api/profile" in scope_parts
+
+    @pytest.mark.asyncio
+    async def test_authorize_appends_unprefixed_additional_scopes(self):
+        """authorize() should append additional_authorize_scopes without prefixing them."""
+        provider = AzureProvider(
+            client_id="test_client",
+            client_secret="test_secret",
+            tenant_id="common",
+            identifier_uri="api://my-api",
+            required_scopes=["read"],
+            base_url="https://srv.example",
+            additional_authorize_scopes=["Mail.Read", "User.Read"],
+        )
+
+        client = OAuthClientInformationFull(
+            client_id="dummy",
+            client_secret="secret",
+            redirect_uris=[AnyUrl("http://localhost:12345/callback")],
+        )
+
+        params = AuthorizationParams(
+            redirect_uri=AnyUrl("http://localhost:12345/callback"),
+            redirect_uri_provided_explicitly=True,
+            scopes=["read"],
+            state="abc",
+            code_challenge="xyz",
+        )
+
+        url = await provider.authorize(client, params)
+
+        parsed = urlparse(url)
+        qs = parse_qs(parsed.query)
+        scope_value = qs.get("scope", [""])[0]
+        scope_parts = scope_value.split(" ") if scope_value else []
+        assert "api://my-api/read" in scope_parts
+        assert "Mail.Read" in scope_parts
+        assert "User.Read" in scope_parts

@@ -40,11 +40,17 @@ class AzureProviderSettings(BaseSettings):
     base_url: str | None = None
     redirect_path: str | None = None
     required_scopes: list[str] | None = None
+    additional_authorize_scopes: list[str] | None = None
     allowed_client_redirect_uris: list[str] | None = None
 
     @field_validator("required_scopes", mode="before")
     @classmethod
     def _parse_scopes(cls, v: object) -> list[str] | None:
+        return parse_scopes(v)
+
+    @field_validator("additional_authorize_scopes", mode="before")
+    @classmethod
+    def _parse_additional_authorize_scopes(cls, v: object) -> list[str] | None:
         return parse_scopes(v)
 
 
@@ -96,6 +102,7 @@ class AzureProvider(OAuthProxy):
         base_url: str | NotSetT = NotSet,
         redirect_path: str | NotSetT = NotSet,
         required_scopes: list[str] | None | NotSetT = NotSet,
+        additional_authorize_scopes: list[str] | None | NotSetT = NotSet,
         allowed_client_redirect_uris: list[str] | NotSetT = NotSet,
         client_storage: KVStorage | None = None,
     ) -> None:
@@ -110,7 +117,11 @@ class AzureProvider(OAuthProxy):
                 against your app's client ID.
             base_url: Public URL of your FastMCP server (for OAuth callbacks)
             redirect_path: Redirect path configured in Azure (defaults to "/auth/callback")
-            required_scopes: Required scopes.
+            required_scopes: Required scopes. These are validated on tokens and used as defaults
+                when the client does not request specific scopes.
+            additional_authorize_scopes: Additional scopes to include in the authorization request
+                without prefixing. Use this to request upstream scopes such as Microsoft Graph
+                permissions. These are not used for token validation.
             allowed_client_redirect_uris: List of allowed redirect URI patterns for MCP clients.
                 If None (default), all URIs are allowed. If empty list, no URIs are allowed.
             client_storage: Storage implementation for OAuth client registrations.
@@ -127,6 +138,7 @@ class AzureProvider(OAuthProxy):
                     "base_url": base_url,
                     "redirect_path": redirect_path,
                     "required_scopes": required_scopes,
+                    "additional_authorize_scopes": additional_authorize_scopes,
                     "allowed_client_redirect_uris": allowed_client_redirect_uris,
                 }.items()
                 if v is not NotSet
@@ -155,6 +167,7 @@ class AzureProvider(OAuthProxy):
 
         # Apply defaults
         self.identifier_uri = settings.identifier_uri or f"api://{settings.client_id}"
+        self.additional_authorize_scopes = settings.additional_authorize_scopes or []
         tenant_id_final = settings.tenant_id
 
         # Always validate tokens against the app's API client ID using JWT
@@ -243,8 +256,11 @@ class AzureProvider(OAuthProxy):
             else original_scopes
         )
 
-        # Create modified params with prefixed scopes
-        modified_params = params_to_use.model_copy(update={"scopes": prefixed_scopes})
+        final_scopes = list(prefixed_scopes)
+        if self.additional_authorize_scopes:
+            final_scopes.extend(self.additional_authorize_scopes)
+
+        modified_params = params_to_use.model_copy(update={"scopes": final_scopes})
 
         return await super().authorize(client, modified_params)
 

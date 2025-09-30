@@ -109,6 +109,8 @@ auth_provider = AzureProvider(
     required_scopes=["your-scope"],                 # Name of scope created when configuring your App
     # identifier_uri defaults to api://{client_id}
     # identifier_uri="api://your-api-id",
+    # Optional: request additional upstream scopes in the authorize request
+    # additional_authorize_scopes=["User.Read", "offline_access", "openid", "email"],
     # redirect_path="/auth/callback"                  # Default value, customize if needed
 )
 
@@ -233,7 +235,11 @@ Redirect path configured in your Azure App registration
 </ParamField>
 
 <ParamField path="FASTMCP_SERVER_AUTH_AZURE_REQUIRED_SCOPES" default="">
-Comma-, space-, or JSON-separated list of required scopes.
+Comma-, space-, or JSON-separated list of required scopes for your API. These are validated on tokens and used as defaults if the client does not request specific scopes.
+</ParamField>
+
+<ParamField path="FASTMCP_SERVER_AUTH_AZURE_ADDITIONAL_AUTHORIZE_SCOPES" default="">
+Comma-, space-, or JSON-separated list of additional scopes to include in the authorization request without prefixing. Use this to request upstream scopes such as Microsoft Graph permissions. These are not used for token validation.
 </ParamField>
 
 <ParamField path="FASTMCP_SERVER_AUTH_AZURE_IDENTIFIER_URI" default="api://{client_id}">
@@ -254,6 +260,8 @@ FASTMCP_SERVER_AUTH_AZURE_BASE_URL=https://your-server.com
 FASTMCP_SERVER_AUTH_AZURE_REQUIRED_SCOPES=read,write
 # Optional custom API configuration
 # FASTMCP_SERVER_AUTH_AZURE_IDENTIFIER_URI=api://your-api-id
+# Request additional upstream scopes (optional)
+# FASTMCP_SERVER_AUTH_AZURE_ADDITIONAL_AUTHORIZE_SCOPES=User.Read,Mail.Read
 ```
 
 With environment variables set, your server code simplifies to:
