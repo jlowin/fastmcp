@@ -337,7 +337,7 @@ async with Client("https://protected-server.com/mcp", auth="oauth") as client:
 
 - **Production-Ready:** Persistent storage, token refresh, comprehensive error handling
 - **Zero-Config OAuth:** Just pass `auth="oauth"` for automatic setup
-- **Enterprise Integration:** WorkOS SSO, Azure Active Directory, Auth0 tenants, Scalelit SSO
+- **Enterprise Integration:** WorkOS SSO, Azure Active Directory, Auth0 tenants, Scalekit SSO
 - **Developer Experience:** Automatic browser launch, local callback server, environment variable support
 - **Advanced Architecture:** Full OIDC support, Dynamic Client Registration (DCR), and unique OAuth proxy pattern that enables DCR with any provider
 
