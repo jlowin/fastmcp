@@ -60,9 +60,25 @@ Create an App registration in Azure Portal to get the credentials needed for aut
         - Admin consent display name/description: as appropriate for your org
         - Who can consent: as needed (Admins only or Admins and users)
 
+    - **Configure Access Token Version**: Ensure your app uses access token v2
+      - Go to **Manifest** in the App registration sidebar.
+      - Find the `requestedAccessTokenVersion` property and set it to `2`:
+        ```json
+        "api": {
+            "requestedAccessTokenVersion": 2
+        }
+        ```
+      - Click **Save** at the top of the manifest editor.
+
+    <Warning>
+    Access token v2 is required for FastMCP's Azure integration to work correctly. If this is not set, you may encounter authentication errors.
+    </Warning>
+
     <Note>
     In FastMCP's `AzureProvider`, set `identifier_uri` to your Application ID URI (optional; defaults to `api://{client_id}`) and set `required_scopes` to the unprefixed scope names (e.g., `read`, `write`). During authorization, FastMCP automatically prefixes scopes with your `identifier_uri`.
     </Note>
+
+
 </Step>
 
 
