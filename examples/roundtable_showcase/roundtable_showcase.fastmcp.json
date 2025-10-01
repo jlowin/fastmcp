@@ -1,0 +1,79 @@
+{
+  "name": "roundtable_showcase",
+  "description": "Production showcase of Roundtable MCP Server built with FastMCP",
+  "version": "1.0.0",
+  "author": "Roundtable Team",
+  "repository": "https://github.com/askbudi/roundtable",
+  "license": "MIT",
+  "keywords": ["mcp", "ai", "coding", "assistant", "unification"],
+
+  "server": {
+    "module": "roundtable_showcase",
+    "class": "RoundtableShowcase",
+    "name": "Roundtable MCP Showcase",
+    "version": "2.0.0"
+  },
+
+  "tools": [
+    {
+      "name": "discover_ai_tools",
+      "description": "Discover available AI coding assistants and their capabilities",
+      "category": "discovery"
+    },
+    {
+      "name": "create_unified_session",
+      "description": "Create a unified session across multiple AI tools",
+      "category": "session_management"
+    },
+    {
+      "name": "get_session_status",
+      "description": "Get status and details of an active session",
+      "category": "monitoring"
+    },
+    {
+      "name": "demonstrate_zero_config",
+      "description": "Demonstrate zero-configuration setup capabilities",
+      "category": "configuration"
+    },
+    {
+      "name": "showcase_enterprise_features",
+      "description": "Showcase enterprise-grade features available through FastMCP",
+      "category": "enterprise"
+    }
+  ],
+
+  "features": {
+    "zero_configuration": true,
+    "session_management": true,
+    "multi_tool_support": true,
+    "enterprise_grade": true,
+    "auto_discovery": true,
+    "error_recovery": true
+  },
+
+  "deployment": {
+    "production_ready": true,
+    "scalability": "high",
+    "monitoring": "comprehensive",
+    "security": "enterprise"
+  },
+
+  "integration": {
+    "editors": ["vscode", "cursor", "jetbrains", "vim", "emacs"],
+    "ai_providers": ["claude", "codex", "gemini", "local_models"],
+    "protocols": ["stdio", "http", "websocket"]
+  },
+
+  "examples": {
+    "basic_usage": "python roundtable_showcase.py",
+    "mcp_server": "python -m fastmcp run roundtable_showcase:showcase.mcp",
+    "production_deployment": "docker run -p 8000:8000 roundtable-mcp"
+  },
+
+  "documentation": {
+    "website": "https://askbudi.ai/roundtable",
+    "repository": "https://github.com/askbudi/roundtable",
+    "package": "https://pypi.org/project/roundtable-ai/",
+    "examples": "https://github.com/askbudi/roundtable/tree/main/examples"
+  }
+}
