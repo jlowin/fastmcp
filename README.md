@@ -28,7 +28,7 @@
 >
 > FastMCP pioneered Python MCP development, and FastMCP 1.0 was incorporated into the [official MCP SDK](https://github.com/modelcontextprotocol/python-sdk) in 2024.
 >
-> **This is FastMCP 2.0** — the actively maintained, production-ready framework that extends far beyond basic protocol implementation. While the SDK provides core functionality, FastMCP 2.0 delivers everything needed for production: advanced MCP patterns (server composition, proxying, OpenAPI/FastAPI generation, tool transformation), enterprise auth (Google, GitHub, WorkOS, Azure, Auth0, and more), deployment tools, testing utilities, and comprehensive client libraries.
+> **This is FastMCP 2.0** — the actively maintained, production-ready framework that extends far beyond basic protocol implementation. While the SDK provides core functionality, FastMCP 2.0 delivers everything needed for production: advanced MCP patterns (server composition, proxying, OpenAPI/FastAPI generation, tool transformation), enterprise auth (Google, GitHub, WorkOS, Azure, Auth0, Scalekit, and more), deployment tools, testing utilities, and comprehensive client libraries.
 >
 > **For production MCP applications, install FastMCP:** `pip install fastmcp`
 
@@ -126,7 +126,7 @@ FastMCP handles all the complex protocol details so you can focus on building. I
 
 🐍 **Pythonic:** Feels natural to Python developers
 
-🔍 **Complete:** Everything for production — enterprise auth (Google, GitHub, Azure, Auth0, WorkOS), deployment tools, testing frameworks, client libraries, and more
+🔍 **Complete:** Everything for production — enterprise auth (Google, GitHub, Azure, Auth0, WorkOS, Scalekit), deployment tools, testing frameworks, client libraries, and more
 
 FastMCP provides the shortest path from idea to production. Deploy locally, to the cloud with [FastMCP Cloud](https://fastmcp.cloud), or to your own infrastructure.
 
@@ -312,6 +312,7 @@ FastMCP provides comprehensive authentication support that sets it apart from ba
 - **Auth0**
 - **WorkOS**
 - **Descope**
+- **Scalekit**
 - **JWT/Custom**
 - **API Keys**
 
@@ -336,7 +337,7 @@ async with Client("https://protected-server.com/mcp", auth="oauth") as client:
 
 - **Production-Ready:** Persistent storage, token refresh, comprehensive error handling
 - **Zero-Config OAuth:** Just pass `auth="oauth"` for automatic setup
-- **Enterprise Integration:** WorkOS SSO, Azure Active Directory, Auth0 tenants
+- **Enterprise Integration:** WorkOS SSO, Azure Active Directory, Auth0 tenants, Scalekit SSO
 - **Developer Experience:** Automatic browser launch, local callback server, environment variable support
 - **Advanced Architecture:** Full OIDC support, Dynamic Client Registration (DCR), and unique OAuth proxy pattern that enables DCR with any provider
 
