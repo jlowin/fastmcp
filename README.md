@@ -79,6 +79,7 @@ There are two ways to access the LLM-friendly documentation:
   - [📚 Documentation](#-documentation)
   - [What is MCP?](#what-is-mcp)
   - [Why FastMCP?](#why-fastmcp)
+  - [Production Showcase](#production-showcase)
   - [Installation](#installation)
   - [Core Concepts](#core-concepts)
     - [The `FastMCP` Server](#the-fastmcp-server)
@@ -129,6 +130,31 @@ FastMCP handles all the complex protocol details so you can focus on building. I
 🔍 **Complete:** Everything for production — enterprise auth (Google, GitHub, Azure, Auth0, WorkOS), deployment tools, testing frameworks, client libraries, and more
 
 FastMCP provides the shortest path from idea to production. Deploy locally, to the cloud with [FastMCP Cloud](https://fastmcp.cloud), or to your own infrastructure.
+
+## Production Showcase
+
+### 🎯 Roundtable MCP Server - Zero-Configuration AI Tool Management
+
+**[Roundtable](https://github.com/askbudi/roundtable)** demonstrates FastMCP's production-ready capabilities in a real-world enterprise application. Built entirely on FastMCP 2.0, it showcases advanced framework features including session management, enterprise-grade architecture, and zero-configuration intelligence.
+
+**What it does:** Unifies multiple AI coding assistants (Claude Code, Cursor, Codex, Gemini) through a single MCP interface, automatically detecting available tools and managing sessions intelligently.
+
+**FastMCP Features Demonstrated:**
+- 🏗️ **Enterprise Architecture** - Production-ready session management and working directory control
+- 🔍 **Zero-Configuration** - Intelligent auto-discovery of CLI tools with availability caching
+- 🐍 **Pythonic Interface** - Clean, FastMCP-native implementation patterns
+- 🚀 **Session Context** - Advanced context management across multiple AI tool interactions
+- 📦 **Production Deployment** - Published to PyPI as `roundtable-ai` with complete MCP compliance
+
+```bash
+# Install and run this production FastMCP server
+pip install roundtable-ai
+roundtable-ai  # Starts MCP server via stdio transport
+```
+
+**Perfect for developers who want to see FastMCP's enterprise-grade capabilities in action.** Roundtable serves as a comprehensive reference implementation of FastMCP best practices for production applications.
+
+---
 
 ## Installation
 
