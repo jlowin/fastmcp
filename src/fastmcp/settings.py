@@ -2,9 +2,11 @@ from __future__ import annotations as _annotations
 
 import inspect
 import warnings
+from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
+from key_value.aio.protocols import AsyncKeyValue
 from pydantic import Field, ImportString, field_validator
 from pydantic.fields import FieldInfo
 from pydantic_settings import (
@@ -22,6 +24,8 @@ logger = get_logger(__name__)
 LOG_LEVEL = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
 DuplicateBehavior = Literal["warn", "error", "replace", "ignore"]
+
+TEN_MB_IN_BYTES = 1024 * 1024 * 10
 
 if TYPE_CHECKING:
     from fastmcp.server.auth.auth import AuthProvider
@@ -56,6 +60,27 @@ class ExtendedEnvSettingsSource(EnvSettingsSource):
 
 class ExtendedSettingsConfigDict(SettingsConfigDict, total=False):
     env_prefixes: list[str] | None
+
+
+class DiskStorageSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="FASTMCP_STORAGE_",
+        extra="ignore",
+    )
+
+    directory: Annotated[
+        str | None,
+        Field(
+            description="A custom path to store data in. If set to `None` (default), a folder called `data` will be created in the `home` directory."
+        ),
+    ] = None
+
+    max_collection_size: Annotated[
+        int,
+        Field(
+            description="The maximum size for each collection in the storage directory, in bytes."
+        ),
+    ] = TEN_MB_IN_BYTES  # 10MB
 
 
 class ExperimentalSettings(BaseSettings):
@@ -146,6 +171,13 @@ class Settings(BaseSettings):
         return self
 
     home: Path = Path.home() / ".fastmcp"
+
+    storage: Annotated[
+        DiskStorageSettings | None,
+        Field(
+            description="The default storage settings for the server. Defaults to disk storage, if set to None, data will be stored in memory by default."
+        ),
+    ] = DiskStorageSettings()
 
     test_mode: bool = False
 
@@ -378,6 +410,22 @@ class Settings(BaseSettings):
         auth_class = type_adapter.validate_python(self.server_auth)
 
         return auth_class
+
+    @cached_property
+    def key_value_store(self) -> AsyncKeyValue:
+        """A default data store that can be leveraged as a fallback for components that require storage."""
+        if not self.storage:
+            from key_value.aio.stores.memory import MemoryStore
+
+            return MemoryStore()
+
+        from key_value.aio.stores.disk.multi_store import MultiDiskStore
+
+        base_directory: Path = self.storage.directory or (self.home / "data")
+
+        return MultiDiskStore(
+            base_directory=base_directory, max_size=self.storage.max_collection_size
+        )
 
 
 def __getattr__(name: str):

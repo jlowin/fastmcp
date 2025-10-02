@@ -11,6 +11,7 @@ Choose based on your WorkOS setup and authentication requirements.
 from __future__ import annotations
 
 import httpx
+from key_value.aio.protocols import AsyncKeyValue
 from pydantic import AnyHttpUrl, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from starlette.responses import JSONResponse
@@ -21,7 +22,6 @@ from fastmcp.server.auth.oauth_proxy import OAuthProxy
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 from fastmcp.utilities.auth import parse_scopes
 from fastmcp.utilities.logging import get_logger
-from fastmcp.utilities.storage import KVStorage
 from fastmcp.utilities.types import NotSet, NotSetT
 
 logger = get_logger(__name__)
@@ -168,7 +168,7 @@ class WorkOSProvider(OAuthProxy):
         required_scopes: list[str] | None | NotSetT = NotSet,
         timeout_seconds: int | NotSetT = NotSet,
         allowed_client_redirect_uris: list[str] | NotSetT = NotSet,
-        client_storage: KVStorage | None = None,
+        client_storage: AsyncKeyValue | None = None,
     ):
         """Initialize WorkOS OAuth provider.
 
