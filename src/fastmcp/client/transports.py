@@ -328,7 +328,10 @@ class StdioTransport(ClientTransport):
                        after the connection context exits, allowing reuse in
                        subsequent connections.
             errlog: Optional file-like object for subprocess stderr. Defaults
-                   to sys.stderr if not provided.
+                   to sys.stderr if not provided. When set, server errors will
+                   be written to the descriptor instead of appearing in the
+                   console. Passing arbitrary TextIO objects may cause deadlocks
+                   (see: https://github.com/jlowin/fastmcp/pull/1991#issuecomment-3367205480).
         """
         self.command = command
         self.args = args
@@ -496,7 +499,10 @@ class PythonStdioTransport(StdioTransport):
                        after the connection context exits, allowing reuse in
                        subsequent connections.
             errlog: Optional file-like object for subprocess stderr. Defaults
-                   to sys.stderr if not provided.
+                   to sys.stderr if not provided. When set, server errors will
+                   be written to the descriptor instead of appearing in the
+                   console. Passing arbitrary TextIO objects may cause deadlocks
+                   (see: https://github.com/jlowin/fastmcp/pull/1991#issuecomment-3367205480).
         """
         script_path = Path(script_path).resolve()
         if not script_path.is_file():
@@ -575,7 +581,10 @@ class NodeStdioTransport(StdioTransport):
                        after the connection context exits, allowing reuse in
                        subsequent connections.
             errlog: Optional file-like object for subprocess stderr. Defaults
-                   to sys.stderr if not provided.
+                   to sys.stderr if not provided. When set, server errors will
+                   be written to the descriptor instead of appearing in the
+                   console. Passing arbitrary TextIO objects may cause deadlocks
+                   (see: https://github.com/jlowin/fastmcp/pull/1991#issuecomment-3367205480).
         """
         script_path = Path(script_path).resolve()
         if not script_path.is_file():
