@@ -2,6 +2,7 @@ import asyncio
 import gc
 import inspect
 import os
+import sys
 import weakref
 
 import psutil
@@ -253,3 +254,83 @@ class TestKeepAlive:
         with pytest.raises(RuntimeError, match="Client failed to connect"):
             async with client:
                 pass
+
+
+class TestErrlog:
+    @pytest.fixture
+    def stdio_script_with_stderr(self, tmp_path):
+        script = inspect.cleandoc('''
+            import sys
+            from fastmcp import FastMCP
+
+            mcp = FastMCP()
+
+            @mcp.tool
+            def write_error(message: str) -> str:
+                """Writes a message to stderr and returns it"""
+                print(message, file=sys.stderr, flush=True)
+                return message
+
+            if __name__ == "__main__":
+                mcp.run()
+            ''')
+        script_file = tmp_path / "stderr_script.py"
+        script_file.write_text(script)
+        return script_file
+
+    async def test_errlog_parameter_accepted_by_stdio_transport(self, tmp_path):
+        """Test that errlog parameter can be set on StdioTransport"""
+        errlog_file = tmp_path / "errors.log"
+        with open(errlog_file, "w") as errlog:
+            transport = StdioTransport(
+                command="python", args=["script.py"], errlog=errlog
+            )
+            assert transport.errlog == errlog
+
+    async def test_errlog_parameter_accepted_by_python_stdio_transport(
+        self, tmp_path, stdio_script_with_stderr
+    ):
+        """Test that errlog parameter can be set on PythonStdioTransport"""
+        errlog_file = tmp_path / "errors.log"
+        with open(errlog_file, "w") as errlog:
+            transport = PythonStdioTransport(
+                script_path=stdio_script_with_stderr, errlog=errlog
+            )
+            assert transport.errlog == errlog
+
+    async def test_errlog_captures_stderr_output(
+        self, tmp_path, stdio_script_with_stderr
+    ):
+        """Test that stderr output is written to the errlog file"""
+        errlog_file = tmp_path / "errors.log"
+
+        with open(errlog_file, "w") as errlog:
+            transport = PythonStdioTransport(
+                script_path=stdio_script_with_stderr, errlog=errlog
+            )
+            client = Client(transport=transport)
+
+            async with client:
+                await client.call_tool("write_error", {"message": "Test error message"})
+
+            # Need to wait a bit for stderr to flush
+            await asyncio.sleep(0.1)
+
+        content = errlog_file.read_text()
+        assert "Test error message" in content
+
+    async def test_errlog_none_uses_default_behavior(
+        self, tmp_path, stdio_script_with_stderr
+    ):
+        """Test that errlog=None uses default stderr handling"""
+        transport = PythonStdioTransport(
+            script_path=stdio_script_with_stderr, errlog=None
+        )
+        client = Client(transport=transport)
+
+        async with client:
+            # Should work without error even without explicit errlog
+            result = await client.call_tool(
+                "write_error", {"message": "Default stderr"}
+            )
+            assert result.data == "Default stderr"

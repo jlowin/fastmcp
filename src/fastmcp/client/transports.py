@@ -8,7 +8,7 @@ import sys
 import warnings
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any, Literal, TypeVar, cast, overload
+from typing import Any, Literal, TextIO, TypeVar, cast, overload
 
 import anyio
 import httpx
@@ -313,6 +313,7 @@ class StdioTransport(ClientTransport):
         env: dict[str, str] | None = None,
         cwd: str | None = None,
         keep_alive: bool | None = None,
+        errlog: TextIO | None = None,
     ):
         """
         Initialize a Stdio transport.
@@ -326,6 +327,8 @@ class StdioTransport(ClientTransport):
                        Defaults to True. When True, the subprocess remains active
                        after the connection context exits, allowing reuse in
                        subsequent connections.
+            errlog: Optional file-like object where stderr output from the subprocess
+                   should be written. If not provided, stderr is captured internally.
         """
         self.command = command
         self.args = args
@@ -334,6 +337,7 @@ class StdioTransport(ClientTransport):
         if keep_alive is None:
             keep_alive = True
         self.keep_alive = keep_alive
+        self.errlog = errlog
 
         self._session: ClientSession | None = None
         self._connect_task: asyncio.Task | None = None
@@ -368,6 +372,7 @@ class StdioTransport(ClientTransport):
                 args=self.args,
                 env=self.env,
                 cwd=self.cwd,
+                errlog=self.errlog,
                 session_kwargs=session_kwargs,
                 ready_event=self._ready_event,
                 stop_event=self._stop_event,
@@ -421,6 +426,7 @@ async def _stdio_transport_connect_task(
     args: list[str],
     env: dict[str, str] | None,
     cwd: str | None,
+    errlog: TextIO | None,
     session_kwargs: SessionKwargs,
     ready_event: anyio.Event,
     stop_event: anyio.Event,
@@ -438,7 +444,10 @@ async def _stdio_transport_connect_task(
                     env=env,
                     cwd=cwd,
                 )
-                transport = await stack.enter_async_context(stdio_client(server_params))
+                errlog_kwargs = {"errlog": errlog} if errlog is not None else {}
+                transport = await stack.enter_async_context(
+                    stdio_client(server_params, **errlog_kwargs)
+                )
                 read_stream, write_stream = transport
                 session_future.set_result(
                     await stack.enter_async_context(
@@ -471,6 +480,7 @@ class PythonStdioTransport(StdioTransport):
         cwd: str | None = None,
         python_cmd: str = sys.executable,
         keep_alive: bool | None = None,
+        errlog: TextIO | None = None,
     ):
         """
         Initialize a Python transport.
@@ -485,6 +495,8 @@ class PythonStdioTransport(StdioTransport):
                        Defaults to True. When True, the subprocess remains active
                        after the connection context exits, allowing reuse in
                        subsequent connections.
+            errlog: Optional file-like object where stderr output from the subprocess
+                   should be written. If not provided, stderr is captured internally.
         """
         script_path = Path(script_path).resolve()
         if not script_path.is_file():
@@ -502,6 +514,7 @@ class PythonStdioTransport(StdioTransport):
             env=env,
             cwd=cwd,
             keep_alive=keep_alive,
+            errlog=errlog,
         )
         self.script_path = script_path
 
@@ -516,6 +529,7 @@ class FastMCPStdioTransport(StdioTransport):
         env: dict[str, str] | None = None,
         cwd: str | None = None,
         keep_alive: bool | None = None,
+        errlog: TextIO | None = None,
     ):
         script_path = Path(script_path).resolve()
         if not script_path.is_file():
@@ -529,6 +543,7 @@ class FastMCPStdioTransport(StdioTransport):
             env=env,
             cwd=cwd,
             keep_alive=keep_alive,
+            errlog=errlog,
         )
         self.script_path = script_path
 
@@ -544,6 +559,7 @@ class NodeStdioTransport(StdioTransport):
         cwd: str | None = None,
         node_cmd: str = "node",
         keep_alive: bool | None = None,
+        errlog: TextIO | None = None,
     ):
         """
         Initialize a Node transport.
@@ -558,6 +574,8 @@ class NodeStdioTransport(StdioTransport):
                        Defaults to True. When True, the subprocess remains active
                        after the connection context exits, allowing reuse in
                        subsequent connections.
+            errlog: Optional file-like object where stderr output from the subprocess
+                   should be written. If not provided, stderr is captured internally.
         """
         script_path = Path(script_path).resolve()
         if not script_path.is_file():
@@ -570,7 +588,12 @@ class NodeStdioTransport(StdioTransport):
             full_args.extend(args)
 
         super().__init__(
-            command=node_cmd, args=full_args, env=env, cwd=cwd, keep_alive=keep_alive
+            command=node_cmd,
+            args=full_args,
+            env=env,
+            cwd=cwd,
+            keep_alive=keep_alive,
+            errlog=errlog,
         )
         self.script_path = script_path
 
