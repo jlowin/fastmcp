@@ -327,8 +327,8 @@ class StdioTransport(ClientTransport):
                        Defaults to True. When True, the subprocess remains active
                        after the connection context exits, allowing reuse in
                        subsequent connections.
-            errlog: Optional file-like object where stderr output from the subprocess
-                   should be written. If not provided, stderr is captured internally.
+            errlog: Optional file-like object for subprocess stderr. Defaults
+                   to sys.stderr if not provided.
         """
         self.command = command
         self.args = args
@@ -495,8 +495,8 @@ class PythonStdioTransport(StdioTransport):
                        Defaults to True. When True, the subprocess remains active
                        after the connection context exits, allowing reuse in
                        subsequent connections.
-            errlog: Optional file-like object where stderr output from the subprocess
-                   should be written. If not provided, stderr is captured internally.
+            errlog: Optional file-like object for subprocess stderr. Defaults
+                   to sys.stderr if not provided.
         """
         script_path = Path(script_path).resolve()
         if not script_path.is_file():
@@ -574,8 +574,8 @@ class NodeStdioTransport(StdioTransport):
                        Defaults to True. When True, the subprocess remains active
                        after the connection context exits, allowing reuse in
                        subsequent connections.
-            errlog: Optional file-like object where stderr output from the subprocess
-                   should be written. If not provided, stderr is captured internally.
+            errlog: Optional file-like object for subprocess stderr. Defaults
+                   to sys.stderr if not provided.
         """
         script_path = Path(script_path).resolve()
         if not script_path.is_file():
