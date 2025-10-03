@@ -2,7 +2,6 @@ import asyncio
 import gc
 import inspect
 import os
-import sys
 import weakref
 
 import psutil
