@@ -574,3 +574,105 @@ You can chain transformations by using an already transformed tool as the parent
 
 ### Context-Aware Tool Factories
 You can write functions that act as "factories," generating specialized versions of a tool for different contexts. For example, you could create a `get_my_data` tool that is specific to the currently logged-in user by hiding the `user_id` parameter and providing it automatically.
+
+### Building Wrapper Servers
+
+A powerful pattern enabled by tool transformation is building wrapper servers that add validation, authorization, or rate limiting to existing MCP servers. This pattern involves connecting to an upstream server as a client, listing its tools, transforming them with custom logic, and exposing them through a new FastMCP server.
+
+This is particularly useful for:
+- Adding authentication or authorization checks
+- Implementing rate limiting or usage tracking
+- Validating inputs before passing to expensive operations
+- Adding logging or monitoring
+- Filtering or adapting tools for specific use cases
+
+Here's a complete example showing how to build a wrapper server that adds validation logic to tools from an upstream code search server:
+
+```python
+from fastmcp import FastMCP
+from fastmcp.client import Client
+from fastmcp.tools import Tool
+from fastmcp.tools.tool_transform import TransformedTool, forward_raw
+from mcp.types import ToolResult
+
+# Connect to the upstream server
+upstream_server = FastMCP("Code Search")
+
+@upstream_server.tool
+async def search_code(owner: str, repo: str, query: str) -> dict:
+    """Search for code in a GitHub repository."""
+    # Actual search implementation
+    return {"results": [...]}
+
+# Create a wrapper server with validation
+wrapper_server = FastMCP("Validated Code Search")
+
+async def validate_repository(owner: str, repo: str, **kwargs) -> ToolResult:
+    """Validate that the repository meets minimum criteria before searching."""
+
+    # Example validation: check if repo is in allowlist
+    allowed_repos = {"fastmcp", "python", "requests"}
+    if repo not in allowed_repos:
+        raise ValueError(
+            f"Repository {owner}/{repo} is not in the allowlist. "
+            f"Allowed repositories: {', '.join(allowed_repos)}"
+        )
+
+    # Validation passed - forward to the original tool
+    return await forward_raw(owner=owner, repo=repo, **kwargs)
+
+# Transform the tool with validation logic
+validated_search_tool = TransformedTool.from_tool(
+    tool=Tool.from_function(fn=search_code),
+    transform_fn=validate_repository,
+)
+
+wrapper_server.add_tool(validated_search_tool)
+```
+
+For more complex scenarios where you're wrapping multiple tools from an upstream server, you can use the Client to list and transform tools programmatically:
+
+```python
+from fastmcp import FastMCP
+from fastmcp.client import Client
+from fastmcp.tools.tool_transform import TransformedTool
+from mcp.types import ToolResult
+
+async def create_wrapper_server():
+    """Create a wrapper server that adds validation to all upstream tools."""
+
+    # Connect to upstream server
+    async with Client(upstream_server) as client:
+        # List all available tools
+        tools_response = await client.list_tools()
+
+        # Create wrapper server
+        wrapper = FastMCP("Wrapper Server")
+
+        # Transform each tool with validation
+        for tool in tools_response.tools:
+            # Create validation logic specific to this tool
+            async def validate_and_forward(**kwargs) -> ToolResult:
+                # Add your validation logic here
+                # For example: check rate limits, validate permissions, etc.
+
+                # Forward to the original tool via the client
+                return await client.call_tool(tool.name, kwargs)
+
+            # Create transformed tool
+            transformed_tool = TransformedTool.from_tool(
+                tool=tool,
+                transform_fn=validate_and_forward,
+            )
+
+            wrapper.add_tool(transformed_tool)
+
+        return wrapper
+
+# Use the wrapper server
+wrapper_server = await create_wrapper_server()
+```
+
+<Tip>
+When building wrapper servers, consider using middleware for cross-cutting concerns like logging and rate limiting, reserving tool transformations for logic specific to individual tools.
+</Tip>
