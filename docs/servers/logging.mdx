@@ -9,6 +9,8 @@ import { VersionBadge } from '/snippets/version-badge.mdx'
 
 <Tip>
 This documentation covers **MCP client logging** - sending messages from your server to MCP clients. For standard server-side logging (e.g., writing to files, console), use `fastmcp.utilities.logging.get_logger()` or Python's built-in `logging` module.
+
+For production observability and distributed tracing, see the [OpenTelemetry Integration](/integrations/opentelemetry) guide.
 </Tip>
 
 Server logging allows MCP tools to send debug, info, warning, and error messages back to the client. This provides visibility into function execution and helps with debugging during development and operation.
