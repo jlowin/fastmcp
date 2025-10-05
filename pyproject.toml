@@ -46,7 +46,6 @@ openai = ["openai>=1.102.0"]
 
 [dependency-groups]
 dev = [
-    "anyio>=4.11.0",
     "dirty-equals>=0.9.0",
     "fastmcp[openai]",
     # add optional dependencies for fastmcp dev

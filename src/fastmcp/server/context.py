@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Literal, cast, get_origin, overload
 
+import anyio
 from mcp import LoggingLevel, ServerSession
 from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.lowlevel.server import request_ctx
@@ -51,7 +52,7 @@ logger = get_logger(__name__)
 
 T = TypeVar("T", default=Any)
 _current_context: ContextVar[Context | None] = ContextVar("context", default=None)  # type: ignore[assignment]
-_flush_lock = asyncio.Lock()
+_flush_lock = anyio.Lock()
 
 
 @dataclass

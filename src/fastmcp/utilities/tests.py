@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import copy
 import logging
 import multiprocessing
@@ -8,6 +7,7 @@ import socket
 import time
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
+from functools import partial
 from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import parse_qs, urlparse
 
@@ -207,28 +207,16 @@ async def run_server_async(
     # Wait a tiny bit for the port to be released if it was just used
     await anyio.sleep(0.01)
 
-    async def run_with_cancellation_handling():
-        """
-        Wrap server.run_async to handle CancelledError on cleanup.
-
-        Note: When pytest is run with `-s` flag, you may see CancelledError
-        tracebacks from uvicorn during test cleanup. These are harmless and
-        expected - they occur when the task group cancels running servers.
-        Without `-s`, pytest captures this output.
-        """
-        try:
-            await server.run_async(
-                host=host,
-                port=port,
-                transport=transport,
-                path=path,
-                show_banner=False,
-            )
-        except asyncio.CancelledError:
-            # Expected when task group is cancelled during cleanup
-            pass
-
-    task_group.start_soon(run_with_cancellation_handling)
+    task_group.start_soon(
+        partial(
+            server.run_async,
+            host=host,
+            port=port,
+            transport=transport,
+            path=path,
+            show_banner=False,
+        )
+    )
 
     # Give the server a moment to start
     await anyio.sleep(0.1)

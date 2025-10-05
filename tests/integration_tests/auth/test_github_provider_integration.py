@@ -11,16 +11,16 @@ with the following configuration:
 """
 
 import os
-from collections.abc import Generator
 from urllib.parse import parse_qs, urlparse
 
 import httpx
 import pytest
+from anyio.abc import TaskGroup
 
 from fastmcp import FastMCP
 from fastmcp.client import Client
 from fastmcp.server.auth.providers.github import GitHubProvider
-from fastmcp.utilities.tests import HeadlessOAuth, run_server_in_process
+from fastmcp.utilities.tests import HeadlessOAuth, run_server_async
 
 FASTMCP_TEST_AUTH_GITHUB_CLIENT_ID = os.getenv("FASTMCP_TEST_AUTH_GITHUB_CLIENT_ID")
 FASTMCP_TEST_AUTH_GITHUB_CLIENT_SECRET = os.getenv(
@@ -35,7 +35,7 @@ pytestmark = pytest.mark.xfail(
 )
 
 
-def create_github_server(host: str = "127.0.0.1", port: int = 9100, **kwargs) -> None:
+def create_github_server(base_url: str) -> FastMCP:
     """Create FastMCP server with GitHub OAuth protection."""
     assert FASTMCP_TEST_AUTH_GITHUB_CLIENT_ID is not None
     assert FASTMCP_TEST_AUTH_GITHUB_CLIENT_SECRET is not None
@@ -44,7 +44,7 @@ def create_github_server(host: str = "127.0.0.1", port: int = 9100, **kwargs) ->
     auth = GitHubProvider(
         client_id=FASTMCP_TEST_AUTH_GITHUB_CLIENT_ID,
         client_secret=FASTMCP_TEST_AUTH_GITHUB_CLIENT_SECRET,
-        base_url=f"http://{host}:{port}",
+        base_url=base_url,
     )
 
     # Create FastMCP server with GitHub authentication
@@ -60,13 +60,10 @@ def create_github_server(host: str = "127.0.0.1", port: int = 9100, **kwargs) ->
         """Returns user info from OAuth context."""
         return "📝 GitHub OAuth user authenticated successfully"
 
-    # Run the server
-    server.run(host=host, port=port, **kwargs)
+    return server
 
 
-def create_github_server_with_mock_callback(
-    host: str = "127.0.0.1", port: int = 9100, **kwargs
-) -> None:
+def create_github_server_with_mock_callback(base_url: str) -> FastMCP:
     """Create FastMCP server with GitHub OAuth that mocks the callback for testing."""
     assert FASTMCP_TEST_AUTH_GITHUB_CLIENT_ID is not None
     assert FASTMCP_TEST_AUTH_GITHUB_CLIENT_SECRET is not None
@@ -75,7 +72,7 @@ def create_github_server_with_mock_callback(
     auth = GitHubProvider(
         client_id=FASTMCP_TEST_AUTH_GITHUB_CLIENT_ID,
         client_secret=FASTMCP_TEST_AUTH_GITHUB_CLIENT_SECRET,
-        base_url=f"http://{host}:{port}",
+        base_url=base_url,
     )
 
     # Mock the authorize method to return a fake code instead of redirecting to GitHub
@@ -152,29 +149,25 @@ def create_github_server_with_mock_callback(
         """Returns user info from OAuth context."""
         return "📝 GitHub OAuth user authenticated successfully"
 
-    # Run the server
-    server.run(host=host, port=port, **kwargs)
+    return server
 
 
-@pytest.fixture(scope="module")
-def github_server() -> Generator[str, None, None]:
-    """Start GitHub OAuth server in background process on fixed port 9100."""
-    with run_server_in_process(
-        create_github_server, transport="http", host="127.0.0.1", port=9100
-    ) as url:
-        yield f"{url}/mcp"
+@pytest.fixture
+async def github_server(task_group: TaskGroup) -> str:
+    """Start GitHub OAuth server with AnyIO task group on fixed port 9100."""
+    base_url = "http://127.0.0.1:9100"
+    server = create_github_server(base_url)
+    url = await run_server_async(task_group, server, port=9100, transport="http")
+    return url
 
 
-@pytest.fixture(scope="module")
-def github_server_with_mock() -> Generator[str, None, None]:
-    """Start GitHub OAuth server with mocked callback in background process on port 9101."""
-    with run_server_in_process(
-        create_github_server_with_mock_callback,
-        transport="http",
-        host="127.0.0.1",
-        port=9101,
-    ) as url:
-        yield f"{url}/mcp"
+@pytest.fixture
+async def github_server_with_mock(task_group: TaskGroup) -> str:
+    """Start GitHub OAuth server with mocked callback on port 9101."""
+    base_url = "http://127.0.0.1:9101"
+    server = create_github_server_with_mock_callback(base_url)
+    url = await run_server_async(task_group, server, port=9101, transport="http")
+    return url
 
 
 @pytest.fixture

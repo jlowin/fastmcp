@@ -531,7 +531,6 @@ openai = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "anyio" },
     { name = "dirty-equals" },
     { name = "fastapi" },
     { name = "fastmcp", extra = ["openai"] },
@@ -576,7 +575,6 @@ provides-extras = ["openai"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "anyio", specifier = ">=4.11.0" },
     { name = "dirty-equals", specifier = ">=0.9.0" },
     { name = "fastapi", specifier = ">=0.115.12" },
     { name = "fastmcp", extras = ["openai"] },

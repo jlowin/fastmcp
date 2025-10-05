@@ -3,7 +3,6 @@ import json
 import sys
 from unittest.mock import AsyncMock, call
 
-import anyio
 import pytest
 from anyio.abc import TaskGroup
 from mcp import McpError
@@ -14,14 +13,6 @@ from fastmcp.client.transports import StreamableHttpTransport
 from fastmcp.server.dependencies import get_http_request
 from fastmcp.server.server import FastMCP
 from fastmcp.utilities.tests import run_server_async
-
-
-@pytest.fixture(scope="module")
-async def task_group():
-    """Provides a task group for running servers in-process."""
-    async with anyio.create_task_group() as tg:
-        yield tg
-        tg.cancel_scope.cancel()
 
 
 def create_test_server() -> FastMCP:
@@ -82,7 +73,7 @@ def create_test_server() -> FastMCP:
     return server
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 async def streamable_http_server(request, task_group: TaskGroup):
     """Start a test server and return its URL."""
     import fastmcp
@@ -100,7 +91,7 @@ async def streamable_http_server(request, task_group: TaskGroup):
     return url
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 async def streamable_http_server_with_streamable_http_alias(task_group: TaskGroup):
     """Test that the "streamable-http" transport alias works."""
     server = create_test_server()
@@ -108,7 +99,7 @@ async def streamable_http_server_with_streamable_http_alias(task_group: TaskGrou
     return url
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 async def nested_server(task_group: TaskGroup):
     """Test nested server mounts with Starlette."""
     import uvicorn
@@ -137,22 +128,7 @@ async def nested_server(task_group: TaskGroup):
         ws="websockets-sansio",
     )
 
-    async def run_uvicorn():
-        """
-        Run uvicorn server for nested mount testing.
-
-        Note: When pytest is run with `-s` flag, you may see CancelledError
-        tracebacks from uvicorn during test cleanup. These are harmless and
-        expected - they occur when the task group cancels running servers.
-        """
-        try:
-            uvicorn_server = uvicorn.Server(config)
-            await uvicorn_server.serve()
-        except asyncio.CancelledError:
-            # Expected when task group is cancelled during cleanup
-            pass
-
-    task_group.start_soon(run_uvicorn)
+    task_group.start_soon(uvicorn.Server(config).serve)
 
     return f"http://127.0.0.1:{port}/nest-outer/nest-inner/final/mcp"
 
