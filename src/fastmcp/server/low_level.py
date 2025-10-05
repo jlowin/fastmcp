@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import weakref
 from contextlib import AsyncExitStack
 from typing import TYPE_CHECKING, Any
 
@@ -33,7 +34,15 @@ class MiddlewareServerSession(ServerSession):
 
     def __init__(self, fastmcp: FastMCP, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fastmcp = fastmcp
+        self._fastmcp_ref: weakref.ref[FastMCP] = weakref.ref(fastmcp)
+
+    @property
+    def fastmcp(self) -> FastMCP:
+        """Get the FastMCP instance."""
+        fastmcp = self._fastmcp_ref()
+        if fastmcp is None:
+            raise RuntimeError("FastMCP instance is no longer available")
+        return fastmcp
 
     async def _received_request(
         self,
@@ -80,8 +89,8 @@ class MiddlewareServerSession(ServerSession):
 class LowLevelServer(_Server[LifespanResultT, RequestT]):
     def __init__(self, fastmcp: FastMCP, *args: Any, **kwargs: Any):
         super().__init__(*args, **kwargs)
-        # store a reference to the FastMCP server for middleware integration
-        self.fastmcp = fastmcp
+        # Store a weak reference to FastMCP to avoid circular references
+        self._fastmcp_ref: weakref.ref[FastMCP] = weakref.ref(fastmcp)
 
         # FastMCP servers support notifications for all components
         self.notification_options = NotificationOptions(
@@ -89,7 +98,14 @@ class LowLevelServer(_Server[LifespanResultT, RequestT]):
             resources_changed=True,
             tools_changed=True,
         )
-        # Reference to FastMCP server for middleware integration
+
+    @property
+    def fastmcp(self) -> FastMCP:
+        """Get the FastMCP instance."""
+        fastmcp = self._fastmcp_ref()
+        if fastmcp is None:
+            raise RuntimeError("FastMCP instance is no longer available")
+        return fastmcp
 
     def create_initialization_options(
         self,
@@ -131,8 +147,6 @@ class LowLevelServer(_Server[LifespanResultT, RequestT]):
 
             async with anyio.create_task_group() as tg:
                 async for message in session.incoming_messages:
-                    logger.debug("Received message: %s", message)
-
                     tg.start_soon(
                         self._handle_message,
                         message,
