@@ -13,7 +13,6 @@ from typing import (
     Any,
     Protocol,
     TypeAlias,
-    TypeVar,
     Union,
     get_args,
     get_origin,
@@ -23,12 +22,17 @@ from typing import (
 import mcp.types
 from mcp.types import Annotations, ContentBlock, ModelPreferences, SamplingMessage
 from pydantic import AnyUrl, BaseModel, ConfigDict, Field, TypeAdapter, UrlConstraints
+from typing_extensions import TypeVar
 
-T = TypeVar("T")
+T = TypeVar("T", default=Any)
 
 # sentinel values for optional arguments
 NotSet = ...
 NotSetT: TypeAlias = EllipsisType
+
+
+def get_fn_name(fn: Callable[..., Any]) -> str:
+    return fn.__name__  # ty: ignore[unresolved-attribute]
 
 
 class FastMCPBaseModel(BaseModel):
@@ -80,11 +84,11 @@ def get_cached_typeadapter(cls: T) -> TypeAdapter[T]:
                 # Handle both functions and methods
                 if inspect.ismethod(cls):
                     actual_func = cls.__func__
-                    code = actual_func.__code__
-                    globals_dict = actual_func.__globals__
-                    name = actual_func.__name__
-                    defaults = actual_func.__defaults__
-                    closure = actual_func.__closure__
+                    code = actual_func.__code__  # ty: ignore[unresolved-attribute]
+                    globals_dict = actual_func.__globals__  # ty: ignore[unresolved-attribute]
+                    name = actual_func.__name__  # ty: ignore[unresolved-attribute]
+                    defaults = actual_func.__defaults__  # ty: ignore[unresolved-attribute]
+                    closure = actual_func.__closure__  # ty: ignore[unresolved-attribute]
                 else:
                     code = cls.__code__
                     globals_dict = cls.__globals__

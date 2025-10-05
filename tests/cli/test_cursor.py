@@ -239,11 +239,14 @@ class TestInstallCursor:
         """Test cursor installation with editable package."""
         mock_open_deeplink.return_value = True
 
+        # Use an absolute path that works on all platforms
+        editable_path = Path.cwd() / "local" / "package"
+
         result = install_cursor(
             file=Path("/path/to/server.py"),
             server_object="custom_app",
             name="test-server",
-            with_editable=Path("/local/package"),
+            with_editable=[editable_path],
         )
 
         assert result is True
@@ -255,9 +258,10 @@ class TestInstallCursor:
         config_data = json.loads(decoded)
 
         assert "--with-editable" in config_data["args"]
-        # Check for the editable path in a platform-agnostic way
-        editable_path_str = str(Path("/local/package"))
-        assert editable_path_str in config_data["args"]
+        # Check that the path was resolved (should be absolute)
+        editable_idx = config_data["args"].index("--with-editable") + 1
+        resolved_path = config_data["args"][editable_idx]
+        assert Path(resolved_path).is_absolute()
         assert "server.py:custom_app" in " ".join(config_data["args"])
 
     @patch("fastmcp.cli.install.cursor.open_deeplink")
@@ -295,10 +299,9 @@ class TestInstallCursor:
 
             # Count occurrences of each package
             args_str = " ".join(config_data["args"])
-            assert args_str.count("numpy") == 1
-            assert args_str.count("pandas") == 1
-            # fastmcp appears twice: once as --with fastmcp and once as the command
-            assert args_str.count("fastmcp") == 2
+            assert args_str.count("--with numpy") == 1
+            assert args_str.count("--with pandas") == 1
+            assert args_str.count("--with fastmcp") == 1
 
 
 class TestCursorCommand:
@@ -324,7 +327,7 @@ class TestCursorCommand:
             file=Path("server.py"),
             server_object=None,
             name="test-server",
-            with_editable=None,
+            with_editable=[],
             with_packages=[],
             env_vars={},
             python_version=None,
@@ -350,4 +353,5 @@ class TestCursorCommand:
         with pytest.raises(SystemExit) as exc_info:
             await cursor_command("server.py")
 
+        assert isinstance(exc_info.value, SystemExit)
         assert exc_info.value.code == 1

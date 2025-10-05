@@ -24,14 +24,15 @@ from __future__ import annotations
 import time
 
 import httpx
-from pydantic import AnyHttpUrl, SecretStr
+from pydantic import AnyHttpUrl, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from fastmcp.server.auth import TokenVerifier
 from fastmcp.server.auth.auth import AccessToken
 from fastmcp.server.auth.oauth_proxy import OAuthProxy
-from fastmcp.server.auth.registry import register_provider
+from fastmcp.utilities.auth import parse_scopes
 from fastmcp.utilities.logging import get_logger
+from fastmcp.utilities.storage import KVStorage
 from fastmcp.utilities.types import NotSet, NotSetT
 
 logger = get_logger(__name__)
@@ -52,6 +53,12 @@ class GoogleProviderSettings(BaseSettings):
     redirect_path: str | None = None
     required_scopes: list[str] | None = None
     timeout_seconds: int | None = None
+    allowed_client_redirect_uris: list[str] | None = None
+
+    @field_validator("required_scopes", mode="before")
+    @classmethod
+    def _parse_scopes(cls, v):
+        return parse_scopes(v)
 
 
 class GoogleTokenVerifier(TokenVerifier):
@@ -173,7 +180,6 @@ class GoogleTokenVerifier(TokenVerifier):
             return None
 
 
-@register_provider("Google")
 class GoogleProvider(OAuthProxy):
     """Complete Google OAuth provider for FastMCP.
 
@@ -195,7 +201,7 @@ class GoogleProvider(OAuthProxy):
         auth = GoogleProvider(
             client_id="123456789.apps.googleusercontent.com",
             client_secret="GOCSPX-abc123...",
-            base_url="https://my-server.com"  # Optional, defaults to http://localhost:8000
+            base_url="https://my-server.com"
         )
 
         mcp = FastMCP("My App", auth=auth)
@@ -209,8 +215,10 @@ class GoogleProvider(OAuthProxy):
         client_secret: str | NotSetT = NotSet,
         base_url: AnyHttpUrl | str | NotSetT = NotSet,
         redirect_path: str | NotSetT = NotSet,
-        required_scopes: list[str] | None | NotSetT = NotSet,
+        required_scopes: list[str] | NotSetT = NotSet,
         timeout_seconds: int | NotSetT = NotSet,
+        allowed_client_redirect_uris: list[str] | NotSetT = NotSet,
+        client_storage: KVStorage | None = None,
     ):
         """Initialize Google OAuth provider.
 
@@ -224,7 +232,12 @@ class GoogleProvider(OAuthProxy):
                 - "https://www.googleapis.com/auth/userinfo.email" for email access
                 - "https://www.googleapis.com/auth/userinfo.profile" for profile info
             timeout_seconds: HTTP request timeout for Google API calls
+            allowed_client_redirect_uris: List of allowed redirect URI patterns for MCP clients.
+                If None (default), all URIs are allowed. If empty list, no URIs are allowed.
+            client_storage: Storage implementation for OAuth client registrations.
+                Defaults to file-based storage if not specified.
         """
+
         settings = GoogleProviderSettings.model_validate(
             {
                 k: v
@@ -235,6 +248,7 @@ class GoogleProvider(OAuthProxy):
                     "redirect_path": redirect_path,
                     "required_scopes": required_scopes,
                     "timeout_seconds": timeout_seconds,
+                    "allowed_client_redirect_uris": allowed_client_redirect_uris,
                 }.items()
                 if v is not NotSet
             }
@@ -251,11 +265,10 @@ class GoogleProvider(OAuthProxy):
             )
 
         # Apply defaults
-        base_url_final = settings.base_url or "http://localhost:8000"
-        redirect_path_final = settings.redirect_path or "/auth/callback"
         timeout_seconds_final = settings.timeout_seconds or 10
         # Google requires at least one scope - openid is the minimal OIDC scope
         required_scopes_final = settings.required_scopes or ["openid"]
+        allowed_client_redirect_uris_final = settings.allowed_client_redirect_uris
 
         # Create Google token verifier
         token_verifier = GoogleTokenVerifier(
@@ -275,9 +288,11 @@ class GoogleProvider(OAuthProxy):
             upstream_client_id=settings.client_id,
             upstream_client_secret=client_secret_str,
             token_verifier=token_verifier,
-            base_url=base_url_final,
-            redirect_path=redirect_path_final,
-            issuer_url=base_url_final,  # We act as the issuer for client registration
+            base_url=settings.base_url,
+            redirect_path=settings.redirect_path,
+            issuer_url=settings.base_url,  # We act as the issuer for client registration
+            allowed_client_redirect_uris=allowed_client_redirect_uris_final,
+            client_storage=client_storage,
         )
 
         logger.info(

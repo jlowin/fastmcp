@@ -20,24 +20,24 @@ uv run pytest                        # Run full test suite
 
 ## Repository Structure
 
-| Path             | Purpose                                                |
-| ---------------- | ------------------------------------------------------ |
-| `src/fastmcp/`   | Library source code (Python ≥ 3.10)                   |
-| `├─server/`    | Server implementation, `FastMCP`, auth, networking    |
-| `│  ├─auth/`   | Authentication providers (Bearer, JWT, WorkOS)        |
-| `│  └─middleware/` | Error handling, logging, rate limiting             |
-| `├─client/`    | High-level client SDK + transports                    |
-| `│  └─auth/`   | Client authentication (Bearer, OAuth)                 |
-| `├─tools/`     | Tool implementations + `ToolManager`                  |
-| `├─resources/` | Resources, templates + `ResourceManager`              |
-| `├─prompts/`   | Prompt templates + `PromptManager`                     |
-| `├─cli/`       | FastMCP CLI commands (`run`, `dev`, `install`)         |
-| `├─contrib/`   | Community contributions (bulk caller, mixins)         |
-| `├─experimental/` | Experimental features (new OpenAPI parser)         |
-| `└─utilities/` | Shared utilities (logging, JSON schema, HTTP)         |
-| `tests/`         | Comprehensive pytest suite with markers               |
-| `docs/`          | Mintlify documentation (published to gofastmcp.com)   |
-| `examples/`      | Runnable demo servers (echo, smart_home, atproto)     |
+| Path               | Purpose                                             |
+| ------------------ | --------------------------------------------------- |
+| `src/fastmcp/`     | Library source code (Python ≥ 3.10)                 |
+| `├─server/`        | Server implementation, `FastMCP`, auth, networking  |
+| `│  ├─auth/`       | Authentication providers (Bearer, JWT, WorkOS)      |
+| `│  └─middleware/` | Error handling, logging, rate limiting              |
+| `├─client/`        | High-level client SDK + transports                  |
+| `│  └─auth/`       | Client authentication (Bearer, OAuth)               |
+| `├─tools/`         | Tool implementations + `ToolManager`                |
+| `├─resources/`     | Resources, templates + `ResourceManager`            |
+| `├─prompts/`       | Prompt templates + `PromptManager`                  |
+| `├─cli/`           | FastMCP CLI commands (`run`, `dev`, `install`)      |
+| `├─contrib/`       | Community contributions (bulk caller, mixins)       |
+| `├─experimental/`  | Experimental features (new OpenAPI parser)          |
+| `└─utilities/`     | Shared utilities (logging, JSON schema, HTTP)       |
+| `tests/`           | Comprehensive pytest suite with markers             |
+| `docs/`            | Mintlify documentation (published to gofastmcp.com) |
+| `examples/`        | Runnable demo servers (echo, smart_home, atproto)   |
 
 ## Core MCP Objects
 
@@ -48,6 +48,15 @@ When modifying MCP functionality, changes typically need to be applied across al
 - **Resource Templates** (`src/resources/` + `ResourceManager`)
 - **Prompts** (`src/prompts/` + `PromptManager`)
 
+## Writing Style
+
+- Be brief and to the point. Do not regurgitate information that can easily be gleaned from the code, except to guide the reader to where the code is located.
+- **NEVER** use "This isn't..." or "not just..." constructions. State what something IS directly. Avoid defensive writing patterns like:
+  - "This isn't X, it's Y" or "Not just X, but Y" → Just say "This is Y"
+  - "Not just about X" → State the actual purpose
+  - "We're not doing X, we're doing Y" → Just explain what you're doing
+  - Any variation of explaining what something isn't before what it is
+
 ## Testing Best Practices
 
 ### Testing Standards
@@ -55,9 +64,13 @@ When modifying MCP functionality, changes typically need to be applied across al
 - Every test: atomic, self-contained, single functionality
 - Use parameterization for multiple examples of same functionality
 - Use separate tests for different functionality pieces
-- Put imports at the top of the file, not in the test body
+- **ALWAYS** Put imports at the top of the file, not in the test body
 - **NEVER** add `@pytest.mark.asyncio` to tests - `asyncio_mode = "auto"` is set globally
 - **ALWAYS** run pytest after significant changes
+
+### Inline Snapshots
+
+FastMCP uses `inline-snapshot` for testing complex data structures. On first run with empty `snapshot()`, pytest will auto-populate the expected value when running `pytest --inline-snapshot=create`. To update snapshots after intentional changes, run `pytest --inline-snapshot=fix`. This is particularly useful for testing JSON schemas and API responses.
 
 ### Always Use In-Memory Transport
 
@@ -203,6 +216,7 @@ If something needs work, your review should help it get there through specific, 
 ### Review Checklist
 
 Before approving, verify:
+
 - [ ] All required development workflow steps completed (uv sync, pre-commit, pytest)
 - [ ] Changes align with repository patterns and conventions
 - [ ] API changes are documented and backwards-compatible where possible

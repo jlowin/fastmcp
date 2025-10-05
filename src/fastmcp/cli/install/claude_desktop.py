@@ -10,6 +10,7 @@ from rich import print
 
 from fastmcp.mcp_config import StdioMCPServer, update_config_file
 from fastmcp.utilities.logging import get_logger
+from fastmcp.utilities.mcp_server_config.v1.environments.uv import UVEnvironment
 
 from .shared import process_common_args
 
@@ -39,7 +40,7 @@ def install_claude_desktop(
     server_object: str | None,
     name: str,
     *,
-    with_editable: Path | None = None,
+    with_editable: list[Path] | None = None,
     with_packages: list[str] | None = None,
     env_vars: dict[str, str] | None = None,
     python_version: str | None = None,
@@ -52,7 +53,7 @@ def install_claude_desktop(
         file: Path to the server file
         server_object: Optional server object name (for :object suffix)
         name: Name for the server in Claude's config
-        with_editable: Optional directory to install in editable mode
+        with_editable: Optional list of directories to install in editable mode
         with_packages: Optional list of additional packages to install
         env_vars: Optional dictionary of environment variables
         python_version: Optional Python version to use
@@ -72,45 +73,26 @@ def install_claude_desktop(
 
     config_file = config_dir / "claude_desktop_config.json"
 
-    # Build uv run command
-    args = ["run"]
-
-    # Add Python version if specified
-    if python_version:
-        args.extend(["--python", python_version])
-
-    # Add project if specified
-    if project:
-        args.extend(["--project", str(project)])
-
-    # Collect all packages in a set to deduplicate
-    packages = {"fastmcp"}
-    if with_packages:
-        packages.update(pkg for pkg in with_packages if pkg)
-
-    # Add all packages with --with
-    for pkg in sorted(packages):
-        args.extend(["--with", pkg])
-
-    if with_editable:
-        args.extend(["--with-editable", str(with_editable)])
-
-    if with_requirements:
-        args.extend(["--with-requirements", str(with_requirements)])
-
+    env_config = UVEnvironment(
+        python=python_version,
+        dependencies=(with_packages or []) + ["fastmcp"],
+        requirements=with_requirements,
+        project=project,
+        editable=with_editable,
+    )
     # Build server spec from parsed components
     if server_object:
         server_spec = f"{file.resolve()}:{server_object}"
     else:
         server_spec = str(file.resolve())
 
-    # Add fastmcp run command
-    args.extend(["fastmcp", "run", server_spec])
+    # Build the full command
+    full_command = env_config.build_command(["fastmcp", "run", server_spec])
 
     # Create server configuration
     server_config = StdioMCPServer(
-        command="uv",
-        args=args,
+        command=full_command[0],
+        args=full_command[1:],
         env=env_vars or {},
     )
 
@@ -151,28 +133,29 @@ async def claude_desktop_command(
         ),
     ] = None,
     with_editable: Annotated[
-        Path | None,
+        list[Path] | None,
         cyclopts.Parameter(
-            name=["--with-editable", "-e"],
-            help="Directory with pyproject.toml to install in editable mode",
+            "--with-editable",
+            help="Directory with pyproject.toml to install in editable mode (can be used multiple times)",
+            negative="",
         ),
     ] = None,
     with_packages: Annotated[
-        list[str],
+        list[str] | None,
         cyclopts.Parameter(
             "--with",
-            help="Additional packages to install",
+            help="Additional packages to install (can be used multiple times)",
             negative="",
         ),
-    ] = [],
+    ] = None,
     env_vars: Annotated[
-        list[str],
+        list[str] | None,
         cyclopts.Parameter(
             "--env",
-            help="Environment variables in KEY=VALUE format",
+            help="Environment variables in KEY=VALUE format (can be used multiple times)",
             negative="",
         ),
-    ] = [],
+    ] = None,
     env_file: Annotated[
         Path | None,
         cyclopts.Parameter(
@@ -207,6 +190,10 @@ async def claude_desktop_command(
     Args:
         server_spec: Python file to install, optionally with :object suffix
     """
+    # Convert None to empty lists for list parameters
+    with_editable = with_editable or []
+    with_packages = with_packages or []
+    env_vars = env_vars or []
     file, server_object, name, with_packages, env_dict = await process_common_args(
         server_spec, server_name, with_packages, env_vars, env_file
     )

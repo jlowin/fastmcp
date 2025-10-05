@@ -32,8 +32,9 @@ def fastmcp_server():
     async def elicit(ctx: Context) -> str:
         """Elicit a response from the user."""
         result = await ctx.elicit("What is your name?", response_type=str)
+
         if result.action == "accept":
-            return f"You said your name was: {result.data}!"
+            return f"You said your name was: {result.data}!"  # ty: ignore[possibly-unbound-attribute]
         else:
             return "No name provided"
 
@@ -102,6 +103,7 @@ def run_nested_server(host: str, port: int) -> None:
             port=port,
             log_level="error",
             lifespan="on",
+            ws="websockets-sansio",
         )
     )
     server.run()
@@ -224,9 +226,9 @@ class TestTimeout:
         with pytest.raises(McpError, match="Timed out"):
             async with Client(
                 transport=StreamableHttpTransport(streamable_http_server),
-                timeout=0.1,
+                timeout=0.02,
             ) as client:
-                await client.call_tool("sleep", {"seconds": 0.2})
+                await client.call_tool("sleep", {"seconds": 0.05})
 
     async def test_timeout_tool_call(self, streamable_http_server: str):
         async with Client(

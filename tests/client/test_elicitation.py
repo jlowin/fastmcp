@@ -15,6 +15,7 @@ from fastmcp.server.elicitation import (
     AcceptedElicitation,
     CancelledElicitation,
     DeclinedElicitation,
+    get_elicitation_schema,
     validate_elicitation_json_schema,
 )
 from fastmcp.utilities.types import TypeAdapter
@@ -35,7 +36,7 @@ def fastmcp_server():
             response_type=Person,
         )
         if result.action == "accept":
-            return f"Hello, {result.data.name}!"
+            return f"Hello, {result.data.name}!"  # type: ignore[attr-defined]
         else:
             return "No name provided."
 
@@ -127,7 +128,7 @@ async def test_elicitation_cancel_action():
         if result.action == "cancel":
             return "Request was canceled"
         elif result.action == "accept":
-            return f"Age: {result.data}"
+            return f"Age: {result.data}"  # type: ignore[attr-defined]
         else:
             return "No response provided"
 
@@ -321,6 +322,9 @@ async def test_elicitation_handler_error():
     async def failing_elicit(context: Context) -> str:
         try:
             result = await context.elicit(message="This will fail", response_type=str)
+
+            assert isinstance(result, AcceptedElicitation)
+
             assert result.action == "accept"
             return f"Got: {result.data}"
         except Exception as e:
@@ -344,11 +348,17 @@ async def test_elicitation_multiple_calls():
         name_result = await context.elicit(
             message="What's your name?", response_type=str
         )
+
+        assert isinstance(name_result, AcceptedElicitation)
+
         if name_result.action != "accept":
             return "Form abandoned"
 
         # Second question
         age_result = await context.elicit(message="What's your age?", response_type=int)
+
+        assert isinstance(age_result, AcceptedElicitation)
+
         if age_result.action != "accept":
             return f"Hello {name_result.data}, form incomplete"
 
@@ -402,6 +412,9 @@ async def test_structured_response_type(
         result = await context.elicit(
             message="Please provide your information", response_type=structured_type
         )
+
+        assert isinstance(result, AcceptedElicitation)
+
         if result.action == "accept":
             if isinstance(result.data, dict):
                 return f"User: {result.data['name']}, age: {result.data['age']}"
@@ -639,3 +652,80 @@ async def test_elicitation_implicit_acceptance_must_be_dict(fastmcp_server):
             match="Elicitation responses must be serializable as a JSON object",
         ):
             await client.call_tool("ask_for_name")
+
+
+def test_enum_elicitation_schema_inline():
+    """Test that enum schemas are generated inline without $ref/$defs for MCP compatibility."""
+
+    class Priority(Enum):
+        LOW = "low"
+        MEDIUM = "medium"
+        HIGH = "high"
+
+    @dataclass
+    class TaskRequest:
+        title: str
+        priority: Priority
+
+    # Generate elicitation schema
+    schema = get_elicitation_schema(TaskRequest)
+
+    # Verify no $defs section exists (enums should be inlined)
+    assert "$defs" not in schema, (
+        "Schema should not contain $defs - enums must be inline"
+    )
+
+    # Verify no $ref in properties
+    for prop_name, prop_schema in schema.get("properties", {}).items():
+        assert "$ref" not in prop_schema, (
+            f"Property {prop_name} contains $ref - should be inline"
+        )
+
+    # Verify the priority field has inline enum values
+    priority_schema = schema["properties"]["priority"]
+    assert "enum" in priority_schema, "Priority should have enum values inline"
+    assert priority_schema["enum"] == ["low", "medium", "high"]
+    assert priority_schema.get("type") == "string"
+
+    # Verify title field is a simple string
+    assert schema["properties"]["title"]["type"] == "string"
+
+
+def test_enum_elicitation_schema_with_enum_names():
+    """Test that enum schemas can include enumNames for better UI display."""
+
+    class TaskStatus(Enum):
+        NOT_STARTED = "not_started"
+        IN_PROGRESS = "in_progress"
+        COMPLETED = "completed"
+        ON_HOLD = "on_hold"
+
+    @dataclass
+    class TaskUpdate:
+        task_id: str
+        status: TaskStatus
+
+    # Generate elicitation schema
+    schema = get_elicitation_schema(TaskUpdate)
+
+    # Verify enum is inline
+    assert "$defs" not in schema
+    assert "$ref" not in str(schema)
+
+    status_schema = schema["properties"]["status"]
+    assert "enum" in status_schema
+    assert status_schema["enum"] == [
+        "not_started",
+        "in_progress",
+        "completed",
+        "on_hold",
+    ]
+
+    # Check if enumNames were added for display
+    assert "enumNames" in status_schema
+    assert status_schema["enumNames"] == [
+        "Not Started",
+        "In Progress",
+        "Completed",
+        "On Hold",
+    ]

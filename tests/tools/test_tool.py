@@ -1,19 +1,22 @@
-import json
 from dataclasses import dataclass
 from typing import Annotated, Any
 
 import pytest
+from dirty_equals import HasName
+from inline_snapshot import snapshot
 from mcp.types import (
     AudioContent,
+    BlobResourceContents,
     EmbeddedResource,
     ImageContent,
+    ResourceLink,
     TextContent,
     TextResourceContents,
 )
 from pydantic import AnyUrl, BaseModel, Field, TypeAdapter
 from typing_extensions import TypedDict
 
-from fastmcp.tools.tool import Tool, _convert_to_content
+from fastmcp.tools.tool import Tool, ToolResult, _convert_to_content
 from fastmcp.utilities.json_schema import compress_schema
 from fastmcp.utilities.tests import caplog_for_fastmcp
 from fastmcp.utilities.types import Audio, File, Image
@@ -29,20 +32,29 @@ class TestToolFromFunction:
 
         tool = Tool.from_function(add)
 
-        assert tool.name == "add"
-        assert tool.description == "Add two numbers."
-        assert len(tool.parameters["properties"]) == 2
-        assert tool.parameters["properties"]["a"]["type"] == "integer"
-        assert tool.parameters["properties"]["b"]["type"] == "integer"
-        # With primitive wrapping, int return type becomes object with result property
-        expected_schema = {
-            "type": "object",
-            "properties": {"result": {"type": "integer", "title": "Result"}},
-            "required": ["result"],
-            "title": "_WrappedResult",
-            "x-fastmcp-wrap-result": True,
-        }
-        assert tool.output_schema == expected_schema
+        assert tool.model_dump(exclude_none=True) == snapshot(
+            {
+                "name": "add",
+                "description": "Add two numbers.",
+                "tags": set(),
+                "enabled": True,
+                "parameters": {
+                    "properties": {
+                        "a": {"type": "integer"},
+                        "b": {"type": "integer"},
+                    },
+                    "required": ["a", "b"],
+                    "type": "object",
+                },
+                "output_schema": {
+                    "properties": {"result": {"type": "integer"}},
+                    "required": ["result"],
+                    "type": "object",
+                    "x-fastmcp-wrap-result": True,
+                },
+                "fn": HasName("add"),
+            }
+        )
 
     def test_meta_parameter(self):
         """Test that meta parameter is properly handled."""
@@ -56,6 +68,7 @@ class TestToolFromFunction:
 
         assert tool.meta == meta_data
         mcp_tool = tool.to_mcp_tool()
+
         # MCP tool includes fastmcp meta, so check that our meta is included
         assert mcp_tool.meta is not None
         assert meta_data.items() <= mcp_tool.meta.items()
@@ -69,9 +82,26 @@ class TestToolFromFunction:
 
         tool = Tool.from_function(fetch_data)
 
-        assert tool.name == "fetch_data"
-        assert tool.description == "Fetch data from URL."
-        assert tool.parameters["properties"]["url"]["type"] == "string"
+        assert tool.model_dump(exclude_none=True) == snapshot(
+            {
+                "name": "fetch_data",
+                "description": "Fetch data from URL.",
+                "tags": set(),
+                "enabled": True,
+                "parameters": {
+                    "properties": {"url": {"type": "string"}},
+                    "required": ["url"],
+                    "type": "object",
+                },
+                "output_schema": {
+                    "properties": {"result": {"type": "string"}},
+                    "required": ["result"],
+                    "type": "object",
+                    "x-fastmcp-wrap-result": True,
+                },
+                "fn": HasName("fetch_data"),
+            }
+        )
 
     def test_callable_object(self):
         class Adder:
@@ -82,11 +112,29 @@ class TestToolFromFunction:
                 return x + y
 
         tool = Tool.from_function(Adder())
-        assert tool.name == "Adder"
-        assert tool.description == "Adds two numbers."
-        assert len(tool.parameters["properties"]) == 2
-        assert tool.parameters["properties"]["x"]["type"] == "integer"
-        assert tool.parameters["properties"]["y"]["type"] == "integer"
+
+        assert tool.model_dump(exclude_none=True, exclude={"fn"}) == snapshot(
+            {
+                "name": "Adder",
+                "description": "Adds two numbers.",
+                "tags": set(),
+                "enabled": True,
+                "parameters": {
+                    "properties": {
+                        "x": {"type": "integer"},
+                        "y": {"type": "integer"},
+                    },
+                    "required": ["x", "y"],
+                    "type": "object",
+                },
+                "output_schema": {
+                    "properties": {"result": {"type": "integer"}},
+                    "required": ["result"],
+                    "type": "object",
+                    "x-fastmcp-wrap-result": True,
+                },
+            }
+        )
 
     def test_async_callable_object(self):
         class Adder:
@@ -97,11 +145,29 @@ class TestToolFromFunction:
                 return x + y
 
         tool = Tool.from_function(Adder())
-        assert tool.name == "Adder"
-        assert tool.description == "Adds two numbers."
-        assert len(tool.parameters["properties"]) == 2
-        assert tool.parameters["properties"]["x"]["type"] == "integer"
-        assert tool.parameters["properties"]["y"]["type"] == "integer"
+
+        assert tool.model_dump(exclude_none=True, exclude={"fn"}) == snapshot(
+            {
+                "name": "Adder",
+                "description": "Adds two numbers.",
+                "tags": set(),
+                "enabled": True,
+                "parameters": {
+                    "properties": {
+                        "x": {"type": "integer"},
+                        "y": {"type": "integer"},
+                    },
+                    "required": ["x", "y"],
+                    "type": "object",
+                },
+                "output_schema": {
+                    "properties": {"result": {"type": "integer"}},
+                    "required": ["result"],
+                    "type": "object",
+                    "x-fastmcp-wrap-result": True,
+                },
+            }
+        )
 
     def test_pydantic_model_function(self):
         """Test registering a function that takes a Pydantic model."""
@@ -116,20 +182,44 @@ class TestToolFromFunction:
 
         tool = Tool.from_function(create_user)
 
-        assert tool.name == "create_user"
-        assert tool.description == "Create a new user."
-        assert "name" in tool.parameters["$defs"]["UserInput"]["properties"]
-        assert "age" in tool.parameters["$defs"]["UserInput"]["properties"]
-        assert "flag" in tool.parameters["properties"]
+        assert tool.model_dump(exclude_none=True) == snapshot(
+            {
+                "name": "create_user",
+                "description": "Create a new user.",
+                "tags": set(),
+                "enabled": True,
+                "parameters": {
+                    "$defs": {
+                        "UserInput": {
+                            "properties": {
+                                "name": {"type": "string"},
+                                "age": {"type": "integer"},
+                            },
+                            "required": ["name", "age"],
+                            "type": "object",
+                        }
+                    },
+                    "properties": {
+                        "user": {"$ref": "#/$defs/UserInput"},
+                        "flag": {"type": "boolean"},
+                    },
+                    "required": ["user", "flag"],
+                    "type": "object",
+                },
+                "output_schema": {"additionalProperties": True, "type": "object"},
+                "fn": HasName("create_user"),
+            }
+        )
 
     async def test_tool_with_image_return(self):
         def image_tool(data: bytes) -> Image:
             return Image(data=data)
 
         tool = Tool.from_function(image_tool)
+        assert tool.parameters["properties"]["data"]["type"] == "string"
+        assert tool.output_schema is None
 
         result = await tool.run({"data": "test.png"})
-        assert tool.parameters["properties"]["data"]["type"] == "string"
         assert isinstance(result.content[0], ImageContent)
 
     async def test_tool_with_audio_return(self):
@@ -137,9 +227,10 @@ class TestToolFromFunction:
             return Audio(data=data)
 
         tool = Tool.from_function(audio_tool)
+        assert tool.parameters["properties"]["data"]["type"] == "string"
+        assert tool.output_schema is None
 
         result = await tool.run({"data": "test.wav"})
-        assert tool.parameters["properties"]["data"]["type"] == "string"
         assert isinstance(result.content[0], AudioContent)
 
     async def test_tool_with_file_return(self):
@@ -147,15 +238,20 @@ class TestToolFromFunction:
             return File(data=data, format="octet-stream")
 
         tool = Tool.from_function(file_tool)
-
-        result = await tool.run({"data": "test.bin"})
         assert tool.parameters["properties"]["data"]["type"] == "string"
-        assert len(result.content) == 1
-        assert isinstance(result.content[0], EmbeddedResource)
-        assert result.content[0].type == "resource"
-        assert hasattr(result.content[0], "resource")
-        resource = result.content[0].resource
-        assert resource.mimeType == "application/octet-stream"
+        assert tool.output_schema is None
+
+        result: ToolResult = await tool.run({"data": "test.bin"})
+        assert result.content[0].model_dump(exclude_none=True) == snapshot(
+            {
+                "type": "resource",
+                "resource": {
+                    "uri": AnyUrl("file:///resource.octet-stream"),
+                    "mimeType": "application/octet-stream",
+                    "blob": "dGVzdC5iaW4=",
+                },
+            }
+        )
 
     def test_non_callable_fn(self):
         with pytest.raises(TypeError, match="not a callable object"):
@@ -163,7 +259,18 @@ class TestToolFromFunction:
 
     def test_lambda(self):
         tool = Tool.from_function(lambda x: x, name="my_tool")
-        assert tool.name == "my_tool"
+        assert tool.model_dump(exclude_none=True, exclude={"fn"}) == snapshot(
+            {
+                "name": "my_tool",
+                "tags": set(),
+                "enabled": True,
+                "parameters": {
+                    "properties": {"x": {"title": "X"}},
+                    "required": ["x"],
+                    "type": "object",
+                },
+            }
+        )
 
     def test_lambda_with_no_name(self):
         with pytest.raises(
@@ -177,8 +284,25 @@ class TestToolFromFunction:
             return _a + _b
 
         tool = Tool.from_function(add)
-        assert tool.parameters["properties"]["_a"]["type"] == "integer"
-        assert tool.parameters["properties"]["_b"]["type"] == "integer"
+
+        assert tool.model_dump(
+            exclude_none=True, exclude={"output_schema", "fn"}
+        ) == snapshot(
+            {
+                "name": "add",
+                "description": "Add two numbers.",
+                "tags": set(),
+                "enabled": True,
+                "parameters": {
+                    "properties": {
+                        "_a": {"type": "integer"},
+                        "_b": {"type": "integer"},
+                    },
+                    "required": ["_a", "_b"],
+                    "type": "object",
+                },
+            }
+        )
 
     def test_tool_with_varargs_not_allowed(self):
         def func(a: int, b: int, *args: int) -> int:
@@ -209,9 +333,30 @@ class TestToolFromFunction:
         obj = MyClass()
 
         tool = Tool.from_function(obj.add)
-        assert tool.name == "add"
-        assert tool.description == "Add two numbers."
         assert "self" not in tool.parameters["properties"]
+
+        assert tool.model_dump(exclude_none=True, exclude={"fn"}) == snapshot(
+            {
+                "name": "add",
+                "description": "Add two numbers.",
+                "tags": set(),
+                "enabled": True,
+                "parameters": {
+                    "properties": {
+                        "x": {"type": "integer"},
+                        "y": {"type": "integer"},
+                    },
+                    "required": ["x", "y"],
+                    "type": "object",
+                },
+                "output_schema": {
+                    "properties": {"result": {"type": "integer"}},
+                    "required": ["result"],
+                    "type": "object",
+                    "x-fastmcp-wrap-result": True,
+                },
+            }
+        )
 
     async def test_instance_method_with_varargs_not_allowed(self):
         class MyClass:
@@ -316,12 +461,12 @@ class TestToolFromFunctionOutputSchema:
             # Non-object types get wrapped
             expected_schema = {
                 "type": "object",
-                "properties": {"result": {**base_schema, "title": "Result"}},
+                "properties": {"result": base_schema},
                 "required": ["result"],
-                "title": "_WrappedResult",
                 "x-fastmcp-wrap-result": True,
             }
             assert tool.output_schema == expected_schema
+            # # Note: Parameterized test - keeping original assertion for multiple parameter values
         else:
             # Object types remain unwrapped
             assert tool.output_schema == base_schema
@@ -339,13 +484,12 @@ class TestToolFromFunctionOutputSchema:
             return 1
 
         tool = Tool.from_function(func)
-        base_schema = TypeAdapter(annotation).json_schema()
 
+        base_schema = TypeAdapter(annotation).json_schema()
         expected_schema = {
             "type": "object",
-            "properties": {"result": {**base_schema, "title": "Result"}},
+            "properties": {"result": base_schema},
             "required": ["result"],
-            "title": "_WrappedResult",
             "x-fastmcp-wrap-result": True,
         }
         assert tool.output_schema == expected_schema
@@ -393,7 +537,9 @@ class TestToolFromFunctionOutputSchema:
             return Person(name="John", age=30)
 
         tool = Tool.from_function(func)
-        expected_schema = compress_schema(TypeAdapter(Person).json_schema())
+        expected_schema = compress_schema(
+            TypeAdapter(Person).json_schema(), prune_titles=True
+        )
         assert tool.output_schema == expected_schema
 
     async def test_base_model_return_annotation(self):
@@ -405,8 +551,17 @@ class TestToolFromFunctionOutputSchema:
             return Person(name="John", age=30)
 
         tool = Tool.from_function(func)
-        expected_schema = compress_schema(TypeAdapter(Person).json_schema())
-        assert tool.output_schema == expected_schema
+
+        assert tool.output_schema == snapshot(
+            {
+                "properties": {
+                    "name": {"type": "string"},
+                    "age": {"type": "integer"},
+                },
+                "required": ["name", "age"],
+                "type": "object",
+            }
+        )
 
     async def test_typeddict_return_annotation(self):
         class Person(TypedDict):
@@ -417,8 +572,16 @@ class TestToolFromFunctionOutputSchema:
             return Person(name="John", age=30)
 
         tool = Tool.from_function(func)
-        expected_schema = compress_schema(TypeAdapter(Person).json_schema())
-        assert tool.output_schema == expected_schema
+        assert tool.output_schema == snapshot(
+            {
+                "properties": {
+                    "name": {"type": "string"},
+                    "age": {"type": "integer"},
+                },
+                "required": ["name", "age"],
+                "type": "object",
+            }
+        )
 
     async def test_unserializable_return_annotation(self):
         class Unserializable:
@@ -593,14 +756,14 @@ class TestToolFromFunctionOutputSchema:
 
         # Don't specify output_schema - should infer and wrap
         tool = Tool.from_function(func)
-        expected_schema = {
-            "type": "object",
-            "properties": {"result": {"type": "integer", "title": "Result"}},
-            "required": ["result"],
-            "title": "_WrappedResult",
-            "x-fastmcp-wrap-result": True,
-        }
-        assert tool.output_schema == expected_schema
+        assert tool.output_schema == snapshot(
+            {
+                "properties": {"result": {"type": "integer"}},
+                "required": ["result"],
+                "type": "object",
+                "x-fastmcp-wrap-result": True,
+            }
+        )
 
         result = await tool.run({})
         assert result.structured_content == {"result": 42}
@@ -665,14 +828,14 @@ class TestToolFromFunctionOutputSchema:
 
         # Inferred schema should wrap string type
         tool = Tool.from_function(func)
-        expected_schema = {
-            "type": "object",
-            "properties": {"result": {"type": "string", "title": "Result"}},
-            "required": ["result"],
-            "title": "_WrappedResult",
-            "x-fastmcp-wrap-result": True,
-        }
-        assert tool.output_schema == expected_schema
+        assert tool.output_schema == snapshot(
+            {
+                "properties": {"result": {"type": "string"}},
+                "required": ["result"],
+                "type": "object",
+                "x-fastmcp-wrap-result": True,
+            }
+        )
 
         result = await tool.run({})
         # Unstructured content
@@ -769,238 +932,218 @@ class TestToolFromFunctionOutputSchema:
                 Tool.from_function(func, output_schema=schema)
 
 
+class SampleModel(BaseModel):
+    x: int
+    y: str
+
+
 class TestConvertResultToContent:
     """Tests for the _convert_to_content helper function."""
 
-    def test_none_result(self):
-        """Test that None results in an empty list."""
-        result = _convert_to_content(None)
-        assert isinstance(result, list)
-        assert len(result) == 0
-
-    def test_text_content_result(self):
-        """Test that TextContent is returned as a list containing itself."""
-        content = TextContent(type="text", text="hello")
-        result = _convert_to_content(content)
-        assert isinstance(result, list)
-        assert len(result) == 1
-        assert result[0] is content
-
-    def test_image_content_result(self):
-        """Test that ImageContent is returned as a list containing itself."""
-        content = ImageContent(type="image", data="fakeimagedata", mimeType="image/png")
-        result = _convert_to_content(content)
-        assert isinstance(result, list)
-        assert len(result) == 1
-        assert result[0] is content
-
-    def test_embedded_resource_result(self):
-        """Test that EmbeddedResource is returned as a list containing itself."""
-        content = EmbeddedResource(
-            type="resource",
-            resource=TextResourceContents(
-                uri=AnyUrl("resource://test"),
-                mimeType="text/plain",
-                text="resource content",
+    @pytest.mark.parametrize(
+        argnames=("result", "expected"),
+        argvalues=[
+            (True, "true"),
+            ("hello", "hello"),
+            (123, "123"),
+            (123.45, "123.45"),
+            ({"key": "value"}, '{"key":"value"}'),
+            (
+                SampleModel(x=1, y="hello"),
+                '{"x":1,"y":"hello"}',
             ),
+        ],
+        ids=[
+            "boolean",
+            "string",
+            "integer",
+            "float",
+            "object",
+            "basemodel",
+        ],
+    )
+    def test_convert_singular(self, result, expected):
+        """Test that a single item is converted to a TextContent."""
+        converted = _convert_to_content(result)
+        assert converted == [TextContent(type="text", text=expected)]
+
+    @pytest.mark.parametrize(
+        argnames=("result", "expected_text"),
+        argvalues=[
+            ([None], "[null]"),
+            ([None, None], "[null,null]"),
+            ([True], "[true]"),
+            ([True, False], "[true,false]"),
+            (["hello"], '["hello"]'),
+            (["hello", "world"], '["hello","world"]'),
+            ([123], "[123]"),
+            ([123, 456], "[123,456]"),
+            ([123.45], "[123.45]"),
+            ([123.45, 456.78], "[123.45,456.78]"),
+            ([{"key": "value"}], '[{"key":"value"}]'),
+            (
+                [{"key": "value"}, {"key2": "value2"}],
+                '[{"key":"value"},{"key2":"value2"}]',
+            ),
+            ([SampleModel(x=1, y="hello")], '[{"x":1,"y":"hello"}]'),
+            (
+                [SampleModel(x=1, y="hello"), SampleModel(x=2, y="world")],
+                '[{"x":1,"y":"hello"},{"x":2,"y":"world"}]',
+            ),
+            ([1, "two", None, {"c": 3}, False], '[1,"two",null,{"c":3},false]'),
+        ],
+        ids=[
+            "none",
+            "none_many",
+            "boolean",
+            "boolean_many",
+            "string",
+            "string_many",
+            "integer",
+            "integer_many",
+            "float",
+            "float_many",
+            "object",
+            "object_many",
+            "basemodel",
+            "basemodel_many",
+            "mixed",
+        ],
+    )
+    def test_convert_list(self, result, expected_text):
+        """Test that a list is converted to a TextContent."""
+        converted = _convert_to_content(result)
+        assert converted == [TextContent(type="text", text=expected_text)]
+
+    @pytest.mark.parametrize(
+        argnames="content_block",
+        argvalues=[
+            (TextContent(type="text", text="hello")),
+            (ImageContent(type="image", data="fakeimagedata", mimeType="image/png")),
+            (AudioContent(type="audio", data="fakeaudiodata", mimeType="audio/mpeg")),
+            (
+                ResourceLink(
+                    type="resource_link",
+                    name="test resource",
+                    uri=AnyUrl("resource://test"),
+                )
+            ),
+            (
+                EmbeddedResource(
+                    type="resource",
+                    resource=TextResourceContents(
+                        uri=AnyUrl("resource://test"),
+                        mimeType="text/plain",
+                        text="resource content",
+                    ),
+                )
+            ),
+        ],
+        ids=["text", "image", "audio", "resource link", "embedded resource"],
+    )
+    def test_convert_content_block(self, content_block):
+        converted = _convert_to_content(content_block)
+        assert converted == [content_block]
+
+        converted = _convert_to_content([content_block, content_block])
+        assert converted == [content_block, content_block]
+
+    @pytest.mark.parametrize(
+        argnames=("result", "expected"),
+        argvalues=[
+            (
+                Image(data=b"fakeimagedata"),
+                [
+                    ImageContent(
+                        type="image", data="ZmFrZWltYWdlZGF0YQ==", mimeType="image/png"
+                    )
+                ],
+            ),
+            (
+                Audio(data=b"fakeaudiodata"),
+                [
+                    AudioContent(
+                        type="audio", data="ZmFrZWF1ZGlvZGF0YQ==", mimeType="audio/wav"
+                    )
+                ],
+            ),
+            (
+                File(data=b"filedata", format="octet-stream"),
+                [
+                    EmbeddedResource(
+                        type="resource",
+                        resource=BlobResourceContents(
+                            uri=AnyUrl("file:///resource.octet-stream"),
+                            blob="ZmlsZWRhdGE=",
+                            mimeType="application/octet-stream",
+                        ),
+                    )
+                ],
+            ),
+        ],
+        ids=["image", "audio", "file"],
+    )
+    def test_convert_helpers(self, result, expected):
+        converted = _convert_to_content(result)
+        assert converted == expected
+
+        converted = _convert_to_content([result, result])
+        assert converted == expected * 2
+
+    def test_convert_mixed_content(self):
+        result = [
+            "hello",
+            123,
+            123.45,
+            {"key": "value"},
+            SampleModel(x=1, y="hello"),
+            Image(data=b"fakeimagedata"),
+            Audio(data=b"fakeaudiodata"),
+            ResourceLink(
+                type="resource_link",
+                name="test resource",
+                uri=AnyUrl("resource://test"),
+            ),
+            EmbeddedResource(
+                type="resource",
+                resource=TextResourceContents(
+                    uri=AnyUrl("resource://test"),
+                    mimeType="text/plain",
+                    text="resource content",
+                ),
+            ),
+        ]
+
+        converted = _convert_to_content(result)
+
+        assert converted == snapshot(
+            [
+                TextContent(type="text", text="hello"),
+                TextContent(type="text", text="123"),
+                TextContent(type="text", text="123.45"),
+                TextContent(type="text", text='{"key":"value"}'),
+                TextContent(type="text", text='{"x":1,"y":"hello"}'),
+                ImageContent(
+                    type="image", data="ZmFrZWltYWdlZGF0YQ==", mimeType="image/png"
+                ),
+                AudioContent(
+                    type="audio", data="ZmFrZWF1ZGlvZGF0YQ==", mimeType="audio/wav"
+                ),
+                ResourceLink(
+                    name="test resource",
+                    uri=AnyUrl("resource://test"),
+                    type="resource_link",
+                ),
+                EmbeddedResource(
+                    type="resource",
+                    resource=TextResourceContents(
+                        uri=AnyUrl("resource://test"),
+                        mimeType="text/plain",
+                        text="resource content",
+                    ),
+                ),
+            ]
         )
-        result = _convert_to_content(content)
-        assert isinstance(result, list)
-        assert len(result) == 1
-        assert result[0] is content
-
-    def test_image_object_result(self):
-        """Test that an Image object is converted to ImageContent."""
-        image_obj = Image(data=b"fakeimagedata")
-
-        result = _convert_to_content(image_obj)
-
-        assert isinstance(result, list)
-        assert len(result) == 1
-        assert isinstance(result[0], ImageContent)
-        assert result[0].data == "ZmFrZWltYWdlZGF0YQ=="
-
-    def test_audio_object_result(self):
-        """Test that an Audio object is converted to AudioContent."""
-        audio_obj = Audio(data=b"fakeaudiodata")
-
-        result = _convert_to_content(audio_obj)
-
-        assert isinstance(result, list)
-        assert len(result) == 1
-        assert isinstance(result[0], AudioContent)
-        assert result[0].data == "ZmFrZWF1ZGlvZGF0YQ=="
-
-    def test_file_object_result(self):
-        """Test that a File object is converted to EmbeddedResource with BlobResourceContents."""
-        file_obj = File(data=b"filedata", format="octet-stream")
-
-        result = _convert_to_content(file_obj)
-
-        assert isinstance(result, list)
-        assert len(result) == 1
-        assert isinstance(result[0], EmbeddedResource)
-        assert result[0].type == "resource"
-        assert hasattr(result[0], "resource")
-        resource = result[0].resource
-        assert resource.mimeType == "application/octet-stream"
-        # Check for blob attribute and its value
-        assert hasattr(resource, "blob")
-        assert getattr(resource, "blob") == "ZmlsZWRhdGE="  # base64 encoded "filedata"
-        # Convert URI to string for startswith check
-        assert str(resource.uri).startswith("file:///resource.octet-stream")
-
-    def test_file_object_text_result(self):
-        """Test that a File object with text data is converted to EmbeddedResource with TextResourceContents."""
-        file_obj = File(data=b"sometext", format="plain")
-        result = _convert_to_content(file_obj)
-        assert isinstance(result, list)
-        assert len(result) == 1
-        assert isinstance(result[0], EmbeddedResource)
-        assert result[0].type == "resource"
-        resource = result[0].resource
-        assert isinstance(resource, TextResourceContents)
-        assert resource.mimeType == "text/plain"
-        assert resource.text == "sometext"
-
-    def test_basic_type_result(self):
-        """Test that a basic type is converted to TextContent."""
-        result = _convert_to_content(123)
-        assert isinstance(result, list)
-        assert len(result) == 1
-        assert isinstance(result[0], TextContent)
-        assert result[0].text == "123"
-
-        result = _convert_to_content("hello")
-        assert isinstance(result, list)
-        assert len(result) == 1
-        assert isinstance(result[0], TextContent)
-        assert result[0].text == "hello"
-
-        result = _convert_to_content({"a": 1, "b": 2})
-        assert isinstance(result, list)
-        assert len(result) == 1
-        assert isinstance(result[0], TextContent)
-        assert result[0].text == '{"a":1,"b":2}'
-
-    def test_list_of_basic_types(self):
-        """Test that a list of basic types is converted to a single TextContent."""
-        result = _convert_to_content([1, "two", {"c": 3}])
-        assert isinstance(result, list)
-        assert len(result) == 1
-        assert isinstance(result[0], TextContent)
-        assert result[0].text == '[1,"two",{"c":3}]'
-
-    def test_list_of_mcp_types(self):
-        """Test that a list of MCP types is returned as a list of those types."""
-        content1 = TextContent(type="text", text="hello")
-        content2 = ImageContent(
-            type="image", data="fakeimagedata2", mimeType="image/png"
-        )
-        result = _convert_to_content([content1, content2])
-        assert isinstance(result, list)
-        assert len(result) == 2
-        assert result[0] is content1
-        assert result[1] is content2
-
-    def test_list_of_mixed_types(self):
-        """Test that a list of mixed types is converted correctly."""
-        content1 = TextContent(type="text", text="hello")
-        image_obj = Image(data=b"fakeimagedata")
-        basic_data = {"a": 1}
-        result = _convert_to_content([content1, image_obj, basic_data])
-
-        assert isinstance(result, list)
-        assert len(result) == 3
-
-        text_content_count = sum(isinstance(item, TextContent) for item in result)
-        image_content_count = sum(isinstance(item, ImageContent) for item in result)
-
-        assert text_content_count == 2
-        assert image_content_count == 1
-
-        text_item = next(item for item in result if isinstance(item, TextContent))
-        assert text_item.text == '[{"a":1}]'
-
-        image_item = next(item for item in result if isinstance(item, ImageContent))
-        assert image_item.data == "ZmFrZWltYWdlZGF0YQ=="
-
-    def test_list_of_mixed_types_list(self):
-        """Test that a list of mixed types, including a list as one of the elements, is converted correctly."""
-        content1 = TextContent(type="text", text="hello")
-        image_obj = Image(data=b"fakeimagedata")
-        basic_data = [{"a": 1}, {"b": 2}]
-        result = _convert_to_content([content1, image_obj, basic_data])
-
-        assert isinstance(result, list)
-        assert len(result) == 3
-
-        text_content_count = sum(isinstance(item, TextContent) for item in result)
-        image_content_count = sum(isinstance(item, ImageContent) for item in result)
-
-        assert text_content_count == 2
-        assert image_content_count == 1
-
-        text_item = next(item for item in result if isinstance(item, TextContent))
-        assert text_item.text == '[[{"a":1},{"b":2}]]'
-
-        image_item = next(item for item in result if isinstance(item, ImageContent))
-        assert image_item.data == "ZmFrZWltYWdlZGF0YQ=="
-
-    def test_list_of_mixed_types_with_audio(self):
-        """Test that a list of mixed types including Audio is converted correctly."""
-        content1 = TextContent(type="text", text="hello")
-        audio_obj = Audio(data=b"fakeaudiodata")
-        basic_data = {"a": 1}
-        result = _convert_to_content([content1, audio_obj, basic_data])
-
-        assert isinstance(result, list)
-        assert len(result) == 3
-
-        text_content_count = sum(isinstance(item, TextContent) for item in result)
-        audio_content_count = sum(isinstance(item, AudioContent) for item in result)
-
-        assert text_content_count == 2
-        assert audio_content_count == 1
-
-        text_item = next(item for item in result if isinstance(item, TextContent))
-        assert text_item.text == '[{"a":1}]'
-
-        audio_item = next(item for item in result if isinstance(item, AudioContent))
-        assert audio_item.data == "ZmFrZWF1ZGlvZGF0YQ=="
-
-    def test_list_of_mixed_types_with_file(self):
-        """Test that a list of mixed types including File is converted correctly."""
-        content1 = TextContent(type="text", text="hello")
-        file_obj = File(data=b"filedata", format="octet-stream")
-        basic_data = {"a": 1}
-        result = _convert_to_content([content1, file_obj, basic_data])
-
-        assert isinstance(result, list)
-        assert len(result) == 3
-
-        text_content_count = sum(isinstance(item, TextContent) for item in result)
-        embedded_content_count = sum(
-            isinstance(item, EmbeddedResource) and item.type == "resource"
-            for item in result
-        )
-
-        assert text_content_count == 2
-        assert embedded_content_count == 1
-
-        text_item = next(item for item in result if isinstance(item, TextContent))
-        assert text_item.text == '[{"a":1}]'
-
-        embedded_item = next(
-            item
-            for item in result
-            if isinstance(item, EmbeddedResource) and item.type == "resource"
-        )
-        resource = embedded_item.resource
-        assert resource.mimeType == "application/octet-stream"
-        # Check for blob attribute and its value
-        assert hasattr(resource, "blob")
-        assert getattr(resource, "blob") == "ZmlsZWRhdGE="
 
     def test_empty_list(self):
         """Test that an empty list results in an empty list."""
@@ -1016,17 +1159,17 @@ class TestConvertResultToContent:
         assert isinstance(result[0], TextContent)
         assert result[0].text == "{}"
 
-    def test_with_custom_serializer(self):
+    def test_custom_serializer(self):
         """Test that a custom serializer is used for non-MCP types."""
 
         def custom_serializer(data):
             return f"Serialized: {data}"
 
         result = _convert_to_content({"a": 1}, serializer=custom_serializer)
-        assert isinstance(result, list)
-        assert len(result) == 1
-        assert isinstance(result[0], TextContent)
-        assert result[0].text == "Serialized: {'a': 1}"
+
+        assert result == snapshot(
+            [TextContent(type="text", text="Serialized: {'a': 1}")]
+        )
 
     def test_custom_serializer_error_fallback(self, caplog):
         """Test that if a custom serializer fails, it falls back to the default."""
@@ -1040,55 +1183,9 @@ class TestConvertResultToContent:
             )
 
         assert isinstance(result, list)
-        assert len(result) == 1
-        assert isinstance(result[0], TextContent)
-        # Should fall back to default serializer (pydantic_core.to_json)
-        assert json.loads(result[0].text) == {"a": 1}
+        assert result == snapshot([TextContent(type="text", text='{"a":1}')])
+
         assert "Error serializing tool result" in caplog.text
-
-    def test_process_as_single_item_flag(self):
-        """Test that _process_as_single_item forces list to be treated as one item."""
-
-        result = _convert_to_content([1, "two", {"c": 3}], _process_as_single_item=True)
-        assert isinstance(result, list)
-        assert len(result) == 1
-        assert isinstance(result[0], TextContent)
-        assert result[0].text == '[1,"two",{"c":3}]'
-
-        content1 = TextContent(type="text", text="hello")
-        result = _convert_to_content([1, content1], _process_as_single_item=True)
-        assert isinstance(result, list)
-        assert len(result) == 1
-        assert isinstance(result[0], TextContent)
-
-        assert json.loads(result[0].text) == [
-            1,
-            {"type": "text", "text": "hello", "annotations": None, "_meta": None},
-        ]
-
-    def test_single_element_list_preserves_structure(self):
-        """Test that single-element lists preserve their list structure."""
-
-        # Test with a single integer
-        result = _convert_to_content([1])
-        assert isinstance(result, list)
-        assert len(result) == 1
-        assert isinstance(result[0], TextContent)
-        assert result[0].text == "[1]"  # Should be "[1]", not "1"
-
-        # Test with a single string
-        result = _convert_to_content(["hello"])
-        assert isinstance(result, list)
-        assert len(result) == 1
-        assert isinstance(result[0], TextContent)
-        assert result[0].text == '["hello"]'  # Should be ["hello"], not "hello"
-
-        # Test with a single dict
-        result = _convert_to_content([{"a": 1}])
-        assert isinstance(result, list)
-        assert len(result) == 1
-        assert isinstance(result[0], TextContent)
-        assert result[0].text == '[{"a":1}]'  # Should be wrapped in a list
 
 
 class TestAutomaticStructuredContent:
@@ -1213,9 +1310,30 @@ class TestAutomaticStructuredContent:
 
         result = await tool.run({})
 
-        # Should only have content, no structured content
-        assert len(result.content) == 1
-        assert isinstance(result.content[0], TextContent)
+        assert result.structured_content is None
+        assert result.content == snapshot(
+            [TextContent(type="text", text="[1,2,3,4,5]")]
+        )
+
+    async def test_audio_return_creates_no_structured_content(self):
+        """Test that audio returns don't create structured content."""
+
+        def get_audio() -> AudioContent:
+            """No return annotation."""
+            return Audio(data=b"fakeaudiodata").to_audio_content()
+
+        # No output schema
+        tool = Tool.from_function(get_audio)
+
+        result = await tool.run({})
+
+        assert result.content == snapshot(
+            [
+                AudioContent(
+                    type="audio", data="ZmFrZWF1ZGlvZGF0YQ==", mimeType="audio/wav"
+                )
+            ]
+        )
         assert result.structured_content is None
 
     async def test_int_return_with_schema_creates_structured_content(self):
@@ -1280,8 +1398,8 @@ class TestAutomaticStructuredContent:
         async with Client(mcp) as client:
             result = await client.call_tool("get_profile", {"user_id": "456"})
 
-            # Client should deserialize back to a dataclass (type name preserved with new compression)
-            assert result.data.__class__.__name__ == "UserProfile"
+            # Client should deserialize back to a dataclass (but type name is lost with title pruning)
+            assert result.data.__class__.__name__ == "Root"
             assert result.data.name == "Bob"
             assert result.data.age == 25
             assert result.data.verified is True

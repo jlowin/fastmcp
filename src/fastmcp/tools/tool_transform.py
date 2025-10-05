@@ -34,7 +34,7 @@ _current_tool: ContextVar[TransformedTool | None] = ContextVar(  # type: ignore[
 )
 
 
-async def forward(**kwargs) -> ToolResult:
+async def forward(**kwargs: Any) -> ToolResult:
     """Forward to parent tool with argument transformation applied.
 
     This function can only be called from within a transformed tool's custom
@@ -64,7 +64,7 @@ async def forward(**kwargs) -> ToolResult:
     return await tool.forwarding_fn(**kwargs)
 
 
-async def forward_raw(**kwargs) -> ToolResult:
+async def forward_raw(**kwargs: Any) -> ToolResult:
     """Forward directly to parent tool without transformation.
 
     This function bypasses all argument transformation and validation, calling the parent
@@ -681,7 +681,7 @@ class TransformedTool(Tool):
             schema = compress_schema(schema, prune_defs=True)
 
         # Create forwarding function that closes over everything it needs
-        async def _forward(**kwargs):
+        async def _forward(**kwargs: Any):
             # Validate arguments
             valid_args = set(new_props.keys())
             provided_args = set(kwargs.keys())
@@ -841,11 +841,29 @@ class TransformedTool(Tool):
             if "default" in param_schema:
                 final_required.discard(param_name)
 
-        return {
+        # Merge $defs from both schemas, with override taking precedence
+        merged_defs = base_schema.get("$defs", {}).copy()
+        override_defs = override_schema.get("$defs", {})
+
+        for def_name, def_schema in override_defs.items():
+            if def_name in merged_defs:
+                base_def = merged_defs[def_name].copy()
+                base_def.update(def_schema)
+                merged_defs[def_name] = base_def
+            else:
+                merged_defs[def_name] = def_schema.copy()
+
+        result = {
             "type": "object",
             "properties": merged_props,
             "required": list(final_required),
         }
+
+        if merged_defs:
+            result["$defs"] = merged_defs
+            result = compress_schema(result, prune_defs=True)
+
+        return result
 
     @staticmethod
     def _function_has_kwargs(fn: Callable[..., Any]) -> bool:
@@ -916,7 +934,7 @@ def apply_transformations_to_tools(
     tools: dict[str, Tool],
     transformations: dict[str, ToolTransformConfig],
 ) -> dict[str, Tool]:
-    """Apply a list of transformations to a list of tools. Tools that do not have any transforamtions
+    """Apply a list of transformations to a list of tools. Tools that do not have any transformations
     are left unchanged.
     """
 

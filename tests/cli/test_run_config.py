@@ -6,20 +6,21 @@ from pathlib import Path
 
 import pytest
 
-from fastmcp.cli.run import load_fastmcp_config
-from fastmcp.utilities.fastmcp_config import (
-    DeploymentConfig,
-    EntrypointConfig,
-    EnvironmentConfig,
+from fastmcp.cli.run import load_mcp_server_config
+from fastmcp.utilities.mcp_server_config import (
+    Deployment,
+    MCPServerConfig,
 )
+from fastmcp.utilities.mcp_server_config.v1.environments.uv import UVEnvironment
+from fastmcp.utilities.mcp_server_config.v1.sources.filesystem import FileSystemSource
 
 
 @pytest.fixture
 def sample_config(tmp_path):
     """Create a sample fastmcp.json configuration file with nested structure."""
     config_data = {
-        "$schema": "https://gofastmcp.com/schemas/fastmcp_config/v1.json",
-        "entrypoint": "server.py",
+        "$schema": "https://gofastmcp.com/public/schemas/fastmcp.json/v1.json",
+        "source": {"path": "server.py"},
         "environment": {"python": "3.11", "dependencies": ["requests"]},
         "deployment": {"transport": "stdio", "env": {"TEST_VAR": "test_value"}},
     }
@@ -42,32 +43,32 @@ def test_tool(message: str) -> str:
     return config_file
 
 
-def test_load_fastmcp_config(sample_config, monkeypatch):
+def test_load_mcp_server_config(sample_config, monkeypatch):
     """Test loading configuration and returning config subsets."""
 
     # Capture environment changes
     original_env = dict(os.environ)
 
     try:
-        entrypoint, deployment, environment = load_fastmcp_config(sample_config)
+        config = load_mcp_server_config(sample_config)
 
         # Check that we got the right types
-        assert isinstance(entrypoint, EntrypointConfig)
-        assert isinstance(deployment, DeploymentConfig)
-        assert isinstance(environment, EnvironmentConfig)
+        assert isinstance(config, MCPServerConfig)
+        assert isinstance(config.source, FileSystemSource)
+        assert isinstance(config.deployment, Deployment)
+        assert isinstance(config.environment, UVEnvironment)
 
-        # Check entrypoint
-        assert entrypoint.file.endswith("server.py")
-        assert Path(entrypoint.file).is_absolute()
-        assert entrypoint.object is None
+        # Check source - path is not resolved yet, only during load_server
+        assert config.source.path == "server.py"
+        assert config.source.entrypoint is None
 
         # Check environment config
-        assert environment.python == "3.11"
-        assert environment.dependencies == ["requests"]
+        assert config.environment.python == "3.11"
+        assert config.environment.dependencies == ["requests"]
 
         # Check deployment config
-        assert deployment.transport == "stdio"
-        assert deployment.env == {"TEST_VAR": "test_value"}
+        assert config.deployment.transport == "stdio"
+        assert config.deployment.env == {"TEST_VAR": "test_value"}
 
         # Check that environment variables were applied
         assert os.environ.get("TEST_VAR") == "test_value"
@@ -78,10 +79,10 @@ def test_load_fastmcp_config(sample_config, monkeypatch):
         os.environ.update(original_env)
 
 
-def test_load_config_with_object_entrypoint(tmp_path):
-    """Test loading config with object-format entrypoint."""
+def test_load_config_with_entrypoint_source(tmp_path):
+    """Test loading config with entrypoint-format source."""
     config_data = {
-        "entrypoint": {"file": "src/server.py", "object": "app"},
+        "source": {"path": "src/server.py", "entrypoint": "app"},
         "deployment": {"transport": "http", "port": 8000},
     }
 
@@ -94,29 +95,25 @@ def test_load_config_with_object_entrypoint(tmp_path):
     server_file = src_dir / "server.py"
     server_file.write_text("# Server")
 
-    entrypoint, deployment, environment = load_fastmcp_config(config_file)
+    config = load_mcp_server_config(config_file)
 
-    # Check entrypoint resolution
-    assert entrypoint.file == str(server_file.resolve())
-    assert entrypoint.object == "app"
+    # Check source - path is not resolved yet, only during load_server
+    assert config.source.path == "src/server.py"
+    assert config.source.entrypoint == "app"
 
     # Check deployment
-    assert deployment is not None
-    assert deployment.transport == "http"
-    assert deployment.port == 8000
-
-    # No environment config
-    assert environment is None
+    assert config.deployment.transport == "http"
+    assert config.deployment.port == 8000
 
 
 def test_load_config_with_cwd(tmp_path):
-    """Test that DeploymentConfig applies working directory change."""
+    """Test that Deployment applies working directory change."""
 
     # Create a subdirectory
     subdir = tmp_path / "subdir"
     subdir.mkdir()
 
-    config_data = {"entrypoint": "server.py", "deployment": {"cwd": "subdir"}}
+    config_data = {"source": {"path": "server.py"}, "deployment": {"cwd": "subdir"}}
 
     config_file = tmp_path / "fastmcp.json"
     config_file.write_text(json.dumps(config_data))
@@ -128,7 +125,7 @@ def test_load_config_with_cwd(tmp_path):
     original_cwd = os.getcwd()
 
     try:
-        entrypoint, deployment, environment = load_fastmcp_config(config_file)
+        config = load_mcp_server_config(config_file)  # noqa: F841
 
         # Check that working directory was changed
         assert Path.cwd() == subdir.resolve()
@@ -147,7 +144,7 @@ def test_load_config_with_relative_cwd(tmp_path):
     subdir2.mkdir(parents=True)
 
     config_data = {
-        "entrypoint": "server.py",
+        "source": {"path": "server.py"},
         "deployment": {
             "cwd": "../"  # Relative to config file location
         },
@@ -163,7 +160,7 @@ def test_load_config_with_relative_cwd(tmp_path):
     original_cwd = os.getcwd()
 
     try:
-        entrypoint, deployment, environment = load_fastmcp_config(config_file)
+        config = load_mcp_server_config(config_file)  # noqa: F841
 
         # Should change to parent directory of config file
         assert Path.cwd() == subdir1.resolve()
@@ -173,8 +170,8 @@ def test_load_config_with_relative_cwd(tmp_path):
 
 
 def test_load_minimal_config(tmp_path):
-    """Test loading minimal configuration with only entrypoint."""
-    config_data = {"entrypoint": "server.py"}
+    """Test loading minimal configuration with only source."""
+    config_data = {"source": {"path": "server.py"}}
 
     config_file = tmp_path / "fastmcp.json"
     config_file.write_text(json.dumps(config_data))
@@ -183,21 +180,17 @@ def test_load_minimal_config(tmp_path):
     server_file = tmp_path / "server.py"
     server_file.write_text("# Server")
 
-    entrypoint, deployment, environment = load_fastmcp_config(config_file)
+    config = load_mcp_server_config(config_file)
 
-    # Check we got entrypoint
-    assert isinstance(entrypoint, EntrypointConfig)
-    assert entrypoint.file == str(server_file.resolve())
-
-    # No deployment or environment
-    assert deployment is None
-    assert environment is None
+    # Check we got source - path is not resolved yet, only during load_server
+    assert isinstance(config.source, FileSystemSource)
+    assert config.source.path == "server.py"
 
 
 def test_load_config_with_server_args(tmp_path):
     """Test configuration with server arguments."""
     config_data = {
-        "entrypoint": "server.py",
+        "source": {"path": "server.py"},
         "deployment": {"args": ["--debug", "--config", "custom.json"]},
     }
 
@@ -208,16 +201,56 @@ def test_load_config_with_server_args(tmp_path):
     server_file = tmp_path / "server.py"
     server_file.write_text("# Server")
 
-    entrypoint, deployment, environment = load_fastmcp_config(config_file)
+    config = load_mcp_server_config(config_file)
 
-    assert deployment is not None
-    assert deployment.args == ["--debug", "--config", "custom.json"]
+    assert config.deployment.args == ["--debug", "--config", "custom.json"]
+
+
+def test_load_config_with_log_level(tmp_path):
+    """Test configuration with log_level setting."""
+    config_data = {
+        "source": {"path": "server.py"},
+        "deployment": {"log_level": "DEBUG"},
+    }
+
+    config_file = tmp_path / "fastmcp.json"
+    config_file.write_text(json.dumps(config_data))
+
+    # Create server file
+    server_file = tmp_path / "server.py"
+    server_file.write_text("# Server")
+
+    config = load_mcp_server_config(config_file)
+
+    assert config.deployment.log_level == "DEBUG"
+
+
+def test_load_config_with_various_log_levels(tmp_path):
+    """Test that all valid log levels are accepted."""
+    valid_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+
+    for level in valid_levels:
+        config_data = {
+            "source": {"path": "server.py"},
+            "deployment": {"log_level": level},
+        }
+
+        config_file = tmp_path / f"fastmcp_{level}.json"
+        config_file.write_text(json.dumps(config_data))
+
+        # Create server file
+        server_file = tmp_path / "server.py"
+        server_file.write_text("# Server")
+
+        config = load_mcp_server_config(config_file)
+
+        assert config.deployment.log_level == level
 
 
 def test_config_subset_independence(tmp_path):
     """Test that config subsets can be used independently."""
     config_data = {
-        "entrypoint": "server.py",
+        "source": {"path": "server.py"},
         "environment": {"python": "3.12", "dependencies": ["pandas"]},
         "deployment": {"transport": "http", "host": "0.0.0.0", "port": 3000},
     }
@@ -229,36 +262,20 @@ def test_config_subset_independence(tmp_path):
     server_file = tmp_path / "server.py"
     server_file.write_text("# Server")
 
-    entrypoint, deployment, environment = load_fastmcp_config(config_file)
+    config = load_mcp_server_config(config_file)
 
     # Each subset should be independently usable
-    assert entrypoint.file == str(server_file.resolve())
-    assert entrypoint.object is None
+    # Path is not resolved yet, only during load_server
+    assert config.source.path == "server.py"
+    assert config.source.entrypoint is None
 
-    assert environment is not None
-    assert environment.python == "3.12"
-    assert environment.dependencies == ["pandas"]
-    assert environment.needs_uv()  # Has dependencies
+    assert config.environment.python == "3.12"
+    assert config.environment.dependencies == ["pandas"]
+    assert config.environment._must_run_with_uv()  # Has dependencies
 
-    assert deployment is not None
-    assert deployment.transport == "http"
-    assert deployment.host == "0.0.0.0"
-    assert deployment.port == 3000
-
-    # Can merge deployment config with CLI args
-    merged = deployment.merge_with_cli_args(
-        transport=None,  # Keep config value
-        host="localhost",  # Override
-        port=8080,  # Override
-        path="/api",  # New value
-        log_level=None,
-        server_args=None,
-    )
-
-    assert merged["transport"] == "http"  # Kept from config
-    assert merged["host"] == "localhost"  # CLI override
-    assert merged["port"] == 8080  # CLI override
-    assert merged["path"] == "/api"  # CLI value
+    assert config.deployment.transport == "http"
+    assert config.deployment.host == "0.0.0.0"
+    assert config.deployment.port == 3000
 
 
 def test_environment_config_path_resolution(tmp_path):
@@ -268,11 +285,11 @@ def test_environment_config_path_resolution(tmp_path):
     reqs_file.write_text("fastmcp>=2.0")
 
     config_data = {
-        "entrypoint": "server.py",
+        "source": {"path": "server.py"},
         "environment": {
             "requirements": "requirements.txt",
             "project": ".",
-            "editable": "../other-project",
+            "editable": ["../other-project"],
         },
     }
 
@@ -283,16 +300,13 @@ def test_environment_config_path_resolution(tmp_path):
     server_file = tmp_path / "server.py"
     server_file.write_text("# Server")
 
-    entrypoint, deployment, environment = load_fastmcp_config(config_file)
+    config = load_mcp_server_config(config_file)
 
-    # Check that UV args are built with resolved paths
-    assert environment is not None
-    uv_args = environment.build_uv_args(["fastmcp", "run", "server.py"])
+    # Check that UV command is built with resolved paths
+    uv_cmd = config.environment.build_command(["fastmcp", "run", "server.py"])
 
-    assert "--with-requirements" in uv_args
-    assert "--project" in uv_args
+    assert "--with-requirements" in uv_cmd
+    assert "--project" in uv_cmd
     # Path should be resolved relative to config file
-    req_idx = uv_args.index("--with-requirements") + 1
-    assert (
-        Path(uv_args[req_idx]).is_absolute() or uv_args[req_idx] == "requirements.txt"
-    )
+    req_idx = uv_cmd.index("--with-requirements") + 1
+    assert Path(uv_cmd[req_idx]).is_absolute() or uv_cmd[req_idx] == "requirements.txt"

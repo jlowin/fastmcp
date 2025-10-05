@@ -78,7 +78,7 @@ class MiddlewareServerSession(ServerSession):
 
 
 class LowLevelServer(_Server[LifespanResultT, RequestT]):
-    def __init__(self, fastmcp: FastMCP, *args, **kwargs):
+    def __init__(self, fastmcp: FastMCP, *args: Any, **kwargs: Any):
         super().__init__(*args, **kwargs)
         # store a reference to the FastMCP server for middleware integration
         self.fastmcp = fastmcp

@@ -3,9 +3,9 @@ from __future__ import annotations as _annotations
 import inspect
 import warnings
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, ImportString, field_validator
 from pydantic.fields import FieldInfo
 from pydantic_settings import (
     BaseSettings,
@@ -22,6 +22,9 @@ logger = get_logger(__name__)
 LOG_LEVEL = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
 DuplicateBehavior = Literal["warn", "error", "replace", "ignore"]
+
+if TYPE_CHECKING:
+    from fastmcp.server.auth.auth import AuthProvider
 
 
 class ExtendedEnvSettingsSource(EnvSettingsSource):
@@ -146,6 +149,7 @@ class Settings(BaseSettings):
 
     test_mode: bool = False
 
+    log_enabled: bool = True
     log_level: LOG_LEVEL = "INFO"
 
     @field_validator("log_level", mode="before")
@@ -261,18 +265,26 @@ class Settings(BaseSettings):
         Field(
             description=inspect.cleandoc(
                 """
-                Configure the authentication provider for the server. Auth
-                providers are registered with a specific key, and providing that
-                key here will cause the server to automatically configure the
-                provider from the environment.
+                Configure the authentication provider for the server by specifying
+                the full module path to an AuthProvider class (e.g., 
+                'fastmcp.server.auth.providers.google.GoogleProvider').
+
+                The specified class will be imported and instantiated automatically
+                during FastMCP server creation. Any class that inherits from AuthProvider
+                can be used, including custom implementations.
 
                 If None, no automatic configuration will take place.
 
-                This setting is *always* overriden by any auth provider passed to the
+                This setting is *always* overridden by any auth provider passed to the
                 FastMCP constructor.
 
                 Note that most auth providers require additional configuration
                 that must be provided via env vars.
+
+                Examples:
+                  - fastmcp.server.auth.providers.google.GoogleProvider
+                  - fastmcp.server.auth.providers.jwt.JWTVerifier
+                  - mycompany.auth.CustomAuthProvider
                 """
             ),
         ),
@@ -314,7 +326,7 @@ class Settings(BaseSettings):
                 Whether to include FastMCP meta in the server's MCP responses.
                 If True, a `_fastmcp` key will be added to the `meta` field of
                 all MCP component responses. This key will contain a dict of
-                various FastMCP-specific metadata, such as tags. 
+                various FastMCP-specific metadata, such as tags.
                 """
             ),
         ),
@@ -333,6 +345,39 @@ class Settings(BaseSettings):
             ),
         ),
     ] = False
+
+    show_cli_banner: Annotated[
+        bool,
+        Field(
+            default=True,
+            description=inspect.cleandoc(
+                """
+                If True, the server banner will be displayed when running the server via CLI.
+                This setting can be overridden by the --no-banner CLI flag.
+                Set to False via FASTMCP_SHOW_CLI_BANNER=false to suppress the banner.
+                """
+            ),
+        ),
+    ] = True
+
+    @property
+    def server_auth_class(self) -> AuthProvider | None:
+        from fastmcp.utilities.types import get_cached_typeadapter
+
+        if not self.server_auth:
+            return None
+
+        # https://github.com/jlowin/fastmcp/issues/1749
+        # Pydantic imports the module in an ImportString during model validation, but we don't want the server
+        # auth module imported during settings creation as it imports dependencies we aren't ready for yet.
+        # To fix this while limiting breaking changes, we delay the import by only creating the ImportString
+        # when the class is actually needed
+
+        type_adapter = get_cached_typeadapter(ImportString)
+
+        auth_class = type_adapter.validate_python(self.server_auth)
+
+        return auth_class
 
 
 def __getattr__(name: str):

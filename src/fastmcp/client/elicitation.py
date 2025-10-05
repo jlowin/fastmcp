@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from typing import Any, Generic, TypeAlias, TypeVar
+from typing import Any, Generic, TypeAlias
 
 import mcp.types
 from mcp import ClientSession
@@ -10,12 +10,13 @@ from mcp.shared.context import LifespanContextT, RequestContext
 from mcp.types import ElicitRequestParams
 from mcp.types import ElicitResult as MCPElicitResult
 from pydantic_core import to_jsonable_python
+from typing_extensions import TypeVar
 
 from fastmcp.utilities.json_schema_type import json_schema_to_type
 
 __all__ = ["ElicitRequestParams", "ElicitResult", "ElicitationHandler"]
 
-T = TypeVar("T")
+T = TypeVar("T", default=Any)
 
 
 class ElicitResult(MCPElicitResult, Generic[T]):
@@ -58,7 +59,12 @@ def create_elicitation_callback(
                     "Elicitation responses must be serializable as a JSON object (dict). Received: "
                     f"{result.content!r}"
                 )
-            return MCPElicitResult(**result.model_dump() | {"content": content})
+            return MCPElicitResult(
+                _meta=result.meta,
+                action=result.action,
+                content=content,
+            )
+
         except Exception as e:
             return mcp.types.ErrorData(
                 code=mcp.types.INTERNAL_ERROR,

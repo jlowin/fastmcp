@@ -36,8 +36,8 @@ from fastmcp.client.auth.oauth import OAuth
 from fastmcp.mcp_config import MCPConfig, infer_transport_type_from_url
 from fastmcp.server.dependencies import get_http_headers
 from fastmcp.server.server import FastMCP
-from fastmcp.utilities.fastmcp_config.v1.fastmcp_config import EnvironmentConfig
 from fastmcp.utilities.logging import get_logger
+from fastmcp.utilities.mcp_server_config.v1.environments.uv import UVEnvironment
 
 logger = get_logger(__name__)
 
@@ -583,21 +583,21 @@ class UvStdioTransport(StdioTransport):
         command: str,
         args: list[str] | None = None,
         module: bool = False,
-        project_directory: str | None = None,
+        project_directory: Path | None = None,
         python_version: str | None = None,
         with_packages: list[str] | None = None,
-        with_requirements: str | None = None,
+        with_requirements: Path | None = None,
         env_vars: dict[str, str] | None = None,
         keep_alive: bool | None = None,
     ):
         # Basic validation
-        if project_directory and not Path(project_directory).exists():
+        if project_directory and not project_directory.exists():
             raise NotADirectoryError(
                 f"Project directory not found: {project_directory}"
             )
 
-        # Create EnvironmentConfig from provided parameters (internal use)
-        env_config = EnvironmentConfig(
+        # Create Environment from provided parameters (internal use)
+        env_config = UVEnvironment(
             python=python_version,
             dependencies=with_packages,
             requirements=with_requirements,
@@ -609,7 +609,7 @@ class UvStdioTransport(StdioTransport):
         uv_args: list[str] = []
 
         # Check if we need any environment setup
-        if env_config.needs_uv():
+        if env_config._must_run_with_uv():
             # Use the config to build args, but we need to handle the command differently
             # since transport has specific needs
             uv_args = ["run"]
@@ -902,7 +902,8 @@ class MCPConfigTransport(ClientTransport):
 
         # otherwise create a composite client
         else:
-            self._composite_server = FastMCP[Any]()
+            name = FastMCP.generate_name("MCPRouter")
+            self._composite_server = FastMCP[Any](name=name)
 
             for name, server, transport in mcp_config_to_servers_and_transports(
                 self.config

@@ -5,6 +5,104 @@ icon: "sparkles"
 tag: NEW
 ---
 
+<Update label="FastMCP 2.12.4" description="September 26, 2025" tags={["Releases"]}>
+<Card
+title="FastMCP 2.12.4: OIDC What You Did There"
+href="https://github.com/jlowin/fastmcp/releases/tag/v2.12.4"
+cta="Read the release notes"
+>
+FastMCP 2.12.4 adds comprehensive OIDC support and expands authentication options with AWS Cognito and Descope providers. The release also includes improvements to logging middleware, URL handling for nested resources, persistent OAuth client registration storage, and various fixes to the experimental OpenAPI parser.
+
+🔐 **OIDC Configuration** brings native support for OpenID Connect, enabling seamless integration with enterprise identity providers.
+
+🏢 **Enterprise Authentication** expands with AWS Cognito and Descope providers, broadening the authentication ecosystem.
+
+🛠️ **Improved Reliability** through enhanced URL handling, persistent OAuth storage, and numerous parser fixes based on community feedback.
+</Card>
+</Update>
+
+<Update label="FastMCP 2.12.3" description="September 17, 2025" tags={["Releases"]}>
+<Card
+title="FastMCP 2.12.3: Double Time"
+href="https://github.com/jlowin/fastmcp/releases/tag/v2.12.3"
+cta="Read the release notes"
+>
+FastMCP 2.12.3 focuses on performance and developer experience improvements. This release includes optimized auth provider imports that reduce server startup time, enhanced OIDC authentication flows, and automatic inline snapshot creation for testing.
+</Card>
+</Update>
+
+<Update label="FastMCP 2.12.2" description="September 3, 2025" tags={["Releases"]}>
+<Card
+title="FastMCP 2.12.2: Perchance to Stream"
+href="https://github.com/jlowin/fastmcp/releases/tag/v2.12.2"
+cta="Read the release notes"
+>
+Hotfix for streamable-http transport validation in fastmcp.json configuration files, resolving a parsing error when CLI arguments were merged against the configuration spec.
+</Card>
+</Update>
+
+<Update label="FastMCP 2.12.1" description="September 3, 2025" tags={["Releases"]}>
+<Card
+title="FastMCP 2.12.1: OAuth to Joy"
+href="https://github.com/jlowin/fastmcp/releases/tag/v2.12.1"
+cta="Read the release notes"
+>
+FastMCP 2.12.1 strengthens OAuth proxy implementation with improved client storage reliability, PKCE forwarding, configurable token endpoint authentication methods, and expanded scope handling based on extensive community testing.
+</Card>
+</Update>
+
+<Update label="FastMCP 2.12" description="August 31, 2025" tags={["Releases"]}>
+<Card 
+title="FastMCP 2.12: Auth to the Races" 
+href="https://github.com/jlowin/fastmcp/releases/tag/v2.12.0" 
+cta="Read the release notes"  
+>
+FastMCP 2.12 represents one of our most significant releases to date. After extensive testing and iteration with the community, we're shipping major improvements to authentication, configuration, and MCP feature adoption.
+
+🔐 **OAuth Proxy** bridges the gap for providers that don't support Dynamic Client Registration, enabling authentication with GitHub, Google, WorkOS, and Azure through minimal configuration.
+
+📋 **Declarative JSON Configuration** introduces `fastmcp.json` as the single source of truth for server settings, making MCP servers as portable and shareable as container images.
+
+🧠 **Sampling API Fallback** tackles adoption challenges by letting servers generate completions server-side when clients don't support the feature, encouraging innovation while maintaining compatibility.
+</Card>
+</Update>
+
+<Update label="FastMCP 2.11" description="August 1, 2025" tags={["Releases"]}>
+<Card 
+title="FastMCP 2.11: Auth to a Good Start" 
+href="https://github.com/jlowin/fastmcp/releases/tag/v2.11.0" 
+cta="Read the release notes"  
+>
+FastMCP 2.11 brings enterprise-ready authentication and dramatic performance improvements.
+
+🔒 **Comprehensive OAuth 2.1 Support** with WorkOS AuthKit integration, Dynamic Client Registration, and support for separate resource and authorization servers.
+
+⚡ **Experimental OpenAPI Parser** delivers dramatic performance gains through single-pass schema processing and optimized memory usage (enable with environment variable).
+
+💾 **Enhanced State Management** provides persistent state across tool calls with a simple dictionary interface, improving context handling and type annotations.
+
+This release emphasizes speed and simplicity while setting the foundation for future enterprise features.
+</Card>
+</Update>
+
+<Update label="FastMCP 2.10" description="July 2, 2025" tags={["Releases"]}>
+<Card 
+title="FastMCP 2.10: Great Spec-tations" 
+href="https://github.com/jlowin/fastmcp/releases/tag/v2.10.0" 
+cta="Read the release notes"  
+>
+FastMCP 2.10 achieves full compliance with the 6/18/2025 MCP specification update, introducing powerful new communication patterns.
+
+💬 **Elicitation Support** enables dynamic server-client communication and "human-in-the-loop" workflows, allowing servers to request additional information during execution.
+
+📊 **Output Schemas** provide structured outputs for tools, making results more predictable and easier to parse programmatically.
+
+🛠️ **Enhanced HTTP Routing** with OpenAPI extensions support and configurable algorithms for more flexible API integration.
+
+This release includes a breaking change to `client.call_tool()` return signatures but significantly expands the interaction capabilities of MCP servers.
+</Card>
+</Update>
+
 <Update label="FastMCP 2.9" description="June 23, 2025" tags={["Releases", "Blog Posts"]}>
 <Card 
 title="FastMCP 2.9: MCP-Native Middleware" href="https://www.jlowin.dev/blog/fastmcp-2-9-middleware" 

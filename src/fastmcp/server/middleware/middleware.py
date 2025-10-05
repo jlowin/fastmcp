@@ -11,11 +11,12 @@ from typing import (
     Generic,
     Literal,
     Protocol,
-    TypeVar,
     runtime_checkable,
 )
 
 import mcp.types as mt
+from mcp.server.lowlevel.helper_types import ReadResourceContents
+from typing_extensions import TypeVar
 
 from fastmcp.prompts.prompt import Prompt
 from fastmcp.resources.resource import Resource
@@ -34,8 +35,8 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 
-T = TypeVar("T")
-R = TypeVar("R", covariant=True)
+T = TypeVar("T", default=Any)
+R = TypeVar("R", covariant=True, default=Any)
 
 
 @runtime_checkable
@@ -163,8 +164,8 @@ class Middleware:
     async def on_read_resource(
         self,
         context: MiddlewareContext[mt.ReadResourceRequestParams],
-        call_next: CallNext[mt.ReadResourceRequestParams, mt.ReadResourceResult],
-    ) -> mt.ReadResourceResult:
+        call_next: CallNext[mt.ReadResourceRequestParams, list[ReadResourceContents]],
+    ) -> list[ReadResourceContents]:
         return await call_next(context)
 
     async def on_get_prompt(

@@ -7,13 +7,14 @@ using the OAuth Proxy pattern for non-DCR OAuth flows.
 from __future__ import annotations
 
 import httpx
-from pydantic import SecretStr
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from fastmcp.server.auth import AccessToken, TokenVerifier
 from fastmcp.server.auth.oauth_proxy import OAuthProxy
-from fastmcp.server.auth.registry import register_provider
+from fastmcp.utilities.auth import parse_scopes
 from fastmcp.utilities.logging import get_logger
+from fastmcp.utilities.storage import KVStorage
 from fastmcp.utilities.types import NotSet, NotSetT
 
 logger = get_logger(__name__)
@@ -35,6 +36,12 @@ class AzureProviderSettings(BaseSettings):
     redirect_path: str | None = None
     required_scopes: list[str] | None = None
     timeout_seconds: int | None = None
+    allowed_client_redirect_uris: list[str] | None = None
+
+    @field_validator("required_scopes", mode="before")
+    @classmethod
+    def _parse_scopes(cls, v):
+        return parse_scopes(v)
 
 
 class AzureTokenVerifier(TokenVerifier):
@@ -108,7 +115,6 @@ class AzureTokenVerifier(TokenVerifier):
             return None
 
 
-@register_provider("AZURE")
 class AzureProvider(OAuthProxy):
     """Azure (Microsoft Entra) OAuth provider for FastMCP.
 
@@ -154,6 +160,8 @@ class AzureProvider(OAuthProxy):
         redirect_path: str | NotSetT = NotSet,
         required_scopes: list[str] | None | NotSetT = NotSet,
         timeout_seconds: int | NotSetT = NotSet,
+        allowed_client_redirect_uris: list[str] | NotSetT = NotSet,
+        client_storage: KVStorage | None = None,
     ):
         """Initialize Azure OAuth provider.
 
@@ -165,6 +173,10 @@ class AzureProvider(OAuthProxy):
             redirect_path: Redirect path configured in Azure (defaults to "/auth/callback")
             required_scopes: Required scopes (defaults to ["User.Read", "email", "openid", "profile"])
             timeout_seconds: HTTP request timeout for Azure API calls
+            allowed_client_redirect_uris: List of allowed redirect URI patterns for MCP clients.
+                If None (default), all URIs are allowed. If empty list, no URIs are allowed.
+            client_storage: Storage implementation for OAuth client registrations.
+                Defaults to file-based storage if not specified.
         """
         settings = AzureProviderSettings.model_validate(
             {
@@ -177,6 +189,7 @@ class AzureProvider(OAuthProxy):
                     "redirect_path": redirect_path,
                     "required_scopes": required_scopes,
                     "timeout_seconds": timeout_seconds,
+                    "allowed_client_redirect_uris": allowed_client_redirect_uris,
                 }.items()
                 if v is not NotSet
             }
@@ -201,8 +214,7 @@ class AzureProvider(OAuthProxy):
 
         # Apply defaults
         tenant_id_final = settings.tenant_id
-        base_url_final = settings.base_url or "http://localhost:8000"
-        redirect_path_final = settings.redirect_path or "/auth/callback"
+
         timeout_seconds_final = settings.timeout_seconds or 10
         # Default scopes for Azure - User.Read gives us access to user info via Graph API
         scopes_final = settings.required_scopes or [
@@ -211,6 +223,7 @@ class AzureProvider(OAuthProxy):
             "openid",
             "profile",
         ]
+        allowed_client_redirect_uris_final = settings.allowed_client_redirect_uris
 
         # Extract secret string from SecretStr
         client_secret_str = (
@@ -238,9 +251,11 @@ class AzureProvider(OAuthProxy):
             upstream_client_id=settings.client_id,
             upstream_client_secret=client_secret_str,
             token_verifier=token_verifier,
-            base_url=base_url_final,
-            redirect_path=redirect_path_final,
-            issuer_url=base_url_final,
+            base_url=settings.base_url,
+            redirect_path=settings.redirect_path,
+            issuer_url=settings.base_url,
+            allowed_client_redirect_uris=allowed_client_redirect_uris_final,
+            client_storage=client_storage,
         )
 
         logger.info(
