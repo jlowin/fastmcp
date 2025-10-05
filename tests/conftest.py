@@ -5,6 +5,12 @@ from typing import Any
 import pytest
 
 
+@pytest.fixture
+def anyio_backend():
+    """Configure AnyIO to only use asyncio backend (not trio)."""
+    return "asyncio"
+
+
 def pytest_collection_modifyitems(items):
     """Automatically mark tests in integration_tests folder with 'integration' marker."""
     for item in items:
