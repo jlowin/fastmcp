@@ -180,8 +180,8 @@ class TestTools:
     async def test_call_tool_result_same_as_original(
         self, fastmcp_server: FastMCP, proxy_server: FastMCPProxy
     ):
-        result = await fastmcp_server._mcp_call_tool("greet", {"name": "Alice"})
-        proxy_result = await proxy_server._mcp_call_tool("greet", {"name": "Alice"})
+        result = await fastmcp_server._call_tool_mcp("greet", {"name": "Alice"})
+        proxy_result = await proxy_server._call_tool_mcp("greet", {"name": "Alice"})
 
         assert result == proxy_result
 
