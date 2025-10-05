@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import copy
 import logging
 import multiprocessing
@@ -10,8 +11,10 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import parse_qs, urlparse
 
+import anyio
 import httpx
 import uvicorn
+from anyio.abc import TaskGroup
 
 from fastmcp import settings
 from fastmcp.client.auth.oauth import OAuth
@@ -138,6 +141,99 @@ def run_server_in_process(
         proc.join(timeout=2)
         if proc.is_alive():
             raise RuntimeError("Server process failed to terminate even after kill")
+
+
+async def run_server_async(
+    task_group: TaskGroup,
+    server: FastMCP,
+    port: int | None = None,
+    transport: str = "http",
+    path: str = "/mcp",
+    host: str = "127.0.0.1",
+) -> str:
+    """
+    Start a FastMCP server in an AnyIO task group for in-process async testing.
+
+    This is the recommended way to test FastMCP servers. It runs the server
+    as an async task in the same process, eliminating subprocess coordination,
+    sleeps, and cleanup issues.
+
+    Args:
+        task_group: AnyIO task group to run the server in
+        server: FastMCP server instance
+        port: Port to bind to (default: find available port)
+        transport: Transport type ("http" or "sse")
+        path: URL path for the server (default: "/mcp")
+        host: Host to bind to (default: "127.0.0.1")
+
+    Returns:
+        Server URL string
+
+    Example:
+        ```python
+        import anyio
+        import pytest
+        from anyio.abc import TaskGroup
+        from fastmcp import FastMCP, Client
+        from fastmcp.client.transports import StreamableHttpTransport
+        from fastmcp.utilities.tests import run_server_async
+
+        @pytest.fixture
+        async def task_group():
+            async with anyio.create_task_group() as tg:
+                yield tg
+                tg.cancel_scope.cancel()
+
+        @pytest.fixture
+        async def server(task_group: TaskGroup):
+            mcp = FastMCP("test")
+
+            @mcp.tool()
+            def greet(name: str) -> str:
+                return f"Hello, {name}!"
+
+            url = await run_server_async(task_group, mcp)
+            return url
+
+        async def test_greet(server: str):
+            async with Client(StreamableHttpTransport(server)) as client:
+                result = await client.call_tool("greet", {"name": "World"})
+                assert result.content[0].text == "Hello, World!"
+        ```
+    """
+    if port is None:
+        port = find_available_port()
+
+    # Wait a tiny bit for the port to be released if it was just used
+    await anyio.sleep(0.01)
+
+    async def run_with_cancellation_handling():
+        """
+        Wrap server.run_async to handle CancelledError on cleanup.
+
+        Note: When pytest is run with `-s` flag, you may see CancelledError
+        tracebacks from uvicorn during test cleanup. These are harmless and
+        expected - they occur when the task group cancels running servers.
+        Without `-s`, pytest captures this output.
+        """
+        try:
+            await server.run_async(
+                host=host,
+                port=port,
+                transport=transport,
+                path=path,
+                show_banner=False,
+            )
+        except asyncio.CancelledError:
+            # Expected when task group is cancelled during cleanup
+            pass
+
+    task_group.start_soon(run_with_cancellation_handling)
+
+    # Give the server a moment to start
+    await anyio.sleep(0.1)
+
+    return f"http://{host}:{port}{path}"
 
 
 @contextmanager

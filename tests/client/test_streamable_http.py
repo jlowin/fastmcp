@@ -1,28 +1,33 @@
 import asyncio
 import json
 import sys
-from collections.abc import AsyncGenerator
 from unittest.mock import AsyncMock, call
 
+import anyio
 import pytest
-import uvicorn
+from anyio.abc import TaskGroup
 from mcp import McpError
-from starlette.applications import Starlette
-from starlette.routing import Mount
 
 from fastmcp import Context
 from fastmcp.client import Client
 from fastmcp.client.transports import StreamableHttpTransport
 from fastmcp.server.dependencies import get_http_request
 from fastmcp.server.server import FastMCP
-from fastmcp.utilities.tests import run_server_in_process
+from fastmcp.utilities.tests import run_server_async
 
 
-def fastmcp_server():
-    """Fixture that creates a FastMCP server with tools, resources, and prompts."""
+@pytest.fixture(scope="module")
+async def task_group():
+    """Provides a task group for running servers in-process."""
+    async with anyio.create_task_group() as tg:
+        yield tg
+        tg.cancel_scope.cancel()
+
+
+def create_test_server() -> FastMCP:
+    """Create a FastMCP server with tools, resources, and prompts."""
     server = FastMCP("TestServer")
 
-    # Add a tool
     @server.tool
     def greet(name: str) -> str:
         """Greet someone by name."""
@@ -38,7 +43,6 @@ def fastmcp_server():
         else:
             return "No name provided"
 
-    # Add a second tool
     @server.tool
     def add(a: int, b: int) -> int:
         """Add two numbers together."""
@@ -57,12 +61,10 @@ def fastmcp_server():
         await ctx.report_progress(0.75, 1.0, "Almost there!")
         return f"Hello, {name}!"
 
-    # Add a resource
     @server.resource(uri="data://users")
     async def get_users():
         return ["Alice", "Bob", "Charlie"]
 
-    # Add a resource template
     @server.resource(uri="data://user/{user_id}")
     async def get_user(user_id: str):
         return {"id": user_id, "name": f"User {user_id}", "active": True}
@@ -70,10 +72,8 @@ def fastmcp_server():
     @server.resource(uri="request://headers")
     async def get_headers() -> dict[str, str]:
         request = get_http_request()
-
         return dict(request.headers)
 
-    # Add a prompt
     @server.prompt
     def welcome(name: str) -> str:
         """Example greeting prompt."""
@@ -82,51 +82,79 @@ def fastmcp_server():
     return server
 
 
-def run_server(host: str, port: int, stateless_http: bool = False, **kwargs) -> None:
-    server = fastmcp_server()
-    server.settings.stateless_http = stateless_http
-    server.run(host=host, port=port, **kwargs)
+@pytest.fixture(scope="module")
+async def streamable_http_server(request, task_group: TaskGroup):
+    """Start a test server and return its URL."""
+    import fastmcp
 
-
-def run_nested_server(host: str, port: int) -> None:
-    mcp_app = fastmcp_server().http_app(path="/final/mcp")
-
-    mount = Starlette(routes=[Mount("/nest-inner", app=mcp_app)])
-    mount2 = Starlette(
-        routes=[Mount("/nest-outer", app=mount)],
-        lifespan=mcp_app.lifespan,
-    )
-    server = uvicorn.Server(
-        config=uvicorn.Config(
-            app=mount2,
-            host=host,
-            port=port,
-            log_level="error",
-            lifespan="on",
-            ws="websockets-sansio",
-        )
-    )
-    server.run()
-
-
-@pytest.fixture()
-async def streamable_http_server(
-    request,
-) -> AsyncGenerator[str, None]:
     stateless_http = getattr(request, "param", False)
-    with run_server_in_process(
-        run_server, stateless_http=stateless_http, transport="http"
-    ) as url:
-        yield f"{url}/mcp"
+    if stateless_http:
+        fastmcp.settings.stateless_http = True
+
+    server = create_test_server()
+    url = await run_server_async(task_group, server)
+
+    if stateless_http:
+        fastmcp.settings.stateless_http = False
+
+    return url
 
 
-@pytest.fixture()
-async def streamable_http_server_with_streamable_http_alias() -> AsyncGenerator[
-    str, None
-]:
+@pytest.fixture(scope="module")
+async def streamable_http_server_with_streamable_http_alias(task_group: TaskGroup):
     """Test that the "streamable-http" transport alias works."""
-    with run_server_in_process(run_server, transport="streamable-http") as url:
-        yield f"{url}/mcp"
+    server = create_test_server()
+    url = await run_server_async(task_group, server, transport="streamable-http")
+    return url
+
+
+@pytest.fixture(scope="module")
+async def nested_server(task_group: TaskGroup):
+    """Test nested server mounts with Starlette."""
+    import uvicorn
+    from starlette.applications import Starlette
+    from starlette.routing import Mount
+
+    from fastmcp.utilities.http import find_available_port
+
+    server = create_test_server()
+    mcp_app = server.http_app(path="/final/mcp")
+
+    # Nest the app under multiple mounts to test URL resolution
+    inner = Starlette(routes=[Mount("/nest-inner", app=mcp_app)])
+    outer = Starlette(
+        routes=[Mount("/nest-outer", app=inner)], lifespan=mcp_app.lifespan
+    )
+
+    # Run uvicorn with the nested ASGI app
+    port = find_available_port()
+
+    config = uvicorn.Config(
+        app=outer,
+        host="127.0.0.1",
+        port=port,
+        log_level="critical",  # Suppress error logs from cancellation
+        ws="websockets-sansio",
+    )
+
+    async def run_uvicorn():
+        """
+        Run uvicorn server for nested mount testing.
+
+        Note: When pytest is run with `-s` flag, you may see CancelledError
+        tracebacks from uvicorn during test cleanup. These are harmless and
+        expected - they occur when the task group cancels running servers.
+        """
+        try:
+            uvicorn_server = uvicorn.Server(config)
+            await uvicorn_server.serve()
+        except asyncio.CancelledError:
+            # Expected when task group is cancelled during cleanup
+            pass
+
+    task_group.start_soon(run_uvicorn)
+
+    return f"http://127.0.0.1:{port}/nest-outer/nest-inner/final/mcp"
 
 
 async def test_ping(streamable_http_server: str):
@@ -203,16 +231,11 @@ async def test_elicitation_tool(streamable_http_server: str, request):
         assert result.data == "You said your name was: Alice!"
 
 
-async def test_nested_streamable_http_server_resolves_correctly():
-    # tests patch for
-    # https://github.com/modelcontextprotocol/python-sdk/pull/659
-
-    with run_server_in_process(run_nested_server) as url:
-        async with Client(
-            transport=StreamableHttpTransport(f"{url}/nest-outer/nest-inner/final/mcp")
-        ) as client:
-            result = await client.ping()
-            assert result is True
+async def test_nested_streamable_http_server_resolves_correctly(nested_server: str):
+    """Test patch for https://github.com/modelcontextprotocol/python-sdk/pull/659"""
+    async with Client(transport=StreamableHttpTransport(nested_server)) as client:
+        result = await client.ping()
+        assert result is True
 
 
 @pytest.mark.skipif(

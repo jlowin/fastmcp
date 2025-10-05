@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def anyio_backend():
     """Configure AnyIO to only use asyncio backend (not trio)."""
     return "asyncio"
