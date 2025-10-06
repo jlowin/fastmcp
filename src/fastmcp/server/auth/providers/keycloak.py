@@ -8,7 +8,6 @@ for seamless MCP client authentication.
 from __future__ import annotations
 
 import json
-from typing import Any
 from urllib.parse import urlencode
 
 import httpx
@@ -183,7 +182,6 @@ class KeycloakAuthProvider(RemoteAuthProvider):
     def get_routes(
         self,
         mcp_path: str | None = None,
-        mcp_endpoint: Any | None = None,
     ) -> list[Route]:
         """Get OAuth routes including authorization server metadata endpoint.
 
@@ -199,10 +197,9 @@ class KeycloakAuthProvider(RemoteAuthProvider):
 
         Args:
             mcp_path: The path where the MCP endpoint is mounted (e.g., "/mcp")
-            mcp_endpoint: The MCP endpoint handler to protect with auth
         """
         # Get the standard protected resource routes from RemoteAuthProvider
-        routes = super().get_routes(mcp_path, mcp_endpoint)
+        routes = super().get_routes(mcp_path)
 
         async def oauth_authorization_server_metadata(request):
             """Return OAuth authorization server metadata for this FastMCP authorization server proxy."""
