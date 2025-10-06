@@ -447,9 +447,8 @@ async def _stdio_transport_connect_task(
                     env=env,
                     cwd=cwd,
                 )
-                errlog_kwargs = {"errlog": errlog} if errlog is not None else {}
                 transport = await stack.enter_async_context(
-                    stdio_client(server_params, **errlog_kwargs)
+                    stdio_client(server_params, errlog=errlog or sys.stderr)
                 )
                 read_stream, write_stream = transport
                 session_future.set_result(
