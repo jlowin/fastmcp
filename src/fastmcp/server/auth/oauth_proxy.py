@@ -28,6 +28,10 @@ from urllib.parse import urlencode
 import httpx
 from authlib.common.security import generate_token
 from authlib.integrations.httpx_client import AsyncOAuth2Client
+from mcp.server.auth.handlers.token import TokenErrorResponse, TokenSuccessResponse
+from mcp.server.auth.handlers.token import TokenHandler as _SDKTokenHandler
+from mcp.server.auth.json_response import PydanticJSONResponse
+from mcp.server.auth.middleware.client_auth import ClientAuthenticator
 from mcp.server.auth.provider import (
     AccessToken,
     AuthorizationCode,
@@ -35,6 +39,7 @@ from mcp.server.auth.provider import (
     RefreshToken,
     TokenError,
 )
+from mcp.server.auth.routes import cors_middleware
 from mcp.server.auth.settings import (
     ClientRegistrationOptions,
     RevocationOptions,
@@ -84,7 +89,10 @@ class ProxyDCRClient(OAuthClientInformationFull):
     """
 
     def __init__(
-        self, *args, allowed_redirect_uri_patterns: list[str] | None = None, **kwargs
+        self,
+        *args: Any,
+        allowed_redirect_uri_patterns: list[str] | None = None,
+        **kwargs: Any,
     ):
         """Initialize with allowed redirect URI patterns.
 
@@ -120,6 +128,55 @@ DEFAULT_AUTH_CODE_EXPIRY_SECONDS: Final[int] = 5 * 60  # 5 minutes
 
 # HTTP client timeout
 HTTP_TIMEOUT_SECONDS: Final[int] = 30
+
+
+class TokenHandler(_SDKTokenHandler):
+    """TokenHandler that returns OAuth 2.1 compliant error responses.
+
+    The MCP SDK always returns HTTP 400 for all client authentication issues.
+    However, OAuth 2.1 Section 5.3 and the MCP specification require that
+    invalid or expired tokens MUST receive a HTTP 401 response.
+
+    This handler extends the base MCP SDK TokenHandler to transform client
+    authentication failures into OAuth 2.1 compliant responses:
+    - Changes 'unauthorized_client' to 'invalid_client' error code
+    - Returns HTTP 401 status code instead of 400 for client auth failures
+
+    Per OAuth 2.1 Section 5.3: "The authorization server MAY return an HTTP 401
+    (Unauthorized) status code to indicate which HTTP authentication schemes
+    are supported."
+
+    Per MCP spec: "Invalid or expired tokens MUST receive a HTTP 401 response."
+    """
+
+    def response(self, obj: TokenSuccessResponse | TokenErrorResponse):
+        """Override response method to provide OAuth 2.1 compliant error handling."""
+        # Check if this is a client authentication failure (not just unauthorized for grant type)
+        # unauthorized_client can mean two things:
+        # 1. Client authentication failed (client_id not found or wrong credentials) -> invalid_client 401
+        # 2. Client not authorized for this grant type -> unauthorized_client 400 (correct per spec)
+        if (
+            isinstance(obj, TokenErrorResponse)
+            and obj.error == "unauthorized_client"
+            and obj.error_description
+            and "Invalid client_id" in obj.error_description
+        ):
+            # Transform client auth failure to OAuth 2.1 compliant response
+            return PydanticJSONResponse(
+                content=TokenErrorResponse(
+                    error="invalid_client",
+                    error_description=obj.error_description,
+                    error_uri=obj.error_uri,
+                ),
+                status_code=401,
+                headers={
+                    "Cache-Control": "no-store",
+                    "Pragma": "no-cache",
+                },
+            )
+
+        # Otherwise use default behavior from parent class
+        return super().response(obj)
 
 
 class OAuthProxy(OAuthProvider):
@@ -819,7 +876,6 @@ class OAuthProxy(OAuthProvider):
     def get_routes(
         self,
         mcp_path: str | None = None,
-        mcp_endpoint: Any | None = None,
     ) -> list[Route]:
         """Get OAuth routes with custom proxy token handler.
 
@@ -828,10 +884,10 @@ class OAuthProxy(OAuthProvider):
 
         Args:
             mcp_path: The path where the MCP endpoint is mounted (e.g., "/mcp")
-            mcp_endpoint: The MCP endpoint handler to protect with auth
+                This is used to advertise the resource URL in metadata.
         """
         # Get standard OAuth routes from parent class
-        routes = super().get_routes(mcp_path, mcp_endpoint)
+        routes = super().get_routes(mcp_path)
         custom_routes = []
         token_route_found = False
 
@@ -844,9 +900,7 @@ class OAuthProxy(OAuthProvider):
                 f"Route {i}: {route} - path: {getattr(route, 'path', 'N/A')}, methods: {getattr(route, 'methods', 'N/A')}"
             )
 
-            # Keep all standard OAuth routes unchanged - our DCR-compliant flow handles everything
-            custom_routes.append(route)
-
+            # Replace the token endpoint with our custom handler that returns proper OAuth 2.1 error codes
             if (
                 isinstance(route, Route)
                 and route.path == "/token"
@@ -854,6 +908,22 @@ class OAuthProxy(OAuthProvider):
                 and "POST" in route.methods
             ):
                 token_route_found = True
+                # Replace with our OAuth 2.1 compliant token handler
+                token_handler = TokenHandler(
+                    provider=self, client_authenticator=ClientAuthenticator(self)
+                )
+                custom_routes.append(
+                    Route(
+                        path="/token",
+                        endpoint=cors_middleware(
+                            token_handler.handle, ["POST", "OPTIONS"]
+                        ),
+                        methods=["POST", "OPTIONS"],
+                    )
+                )
+            else:
+                # Keep all other standard OAuth routes unchanged
+                custom_routes.append(route)
 
         # Add OAuth callback endpoint for forwarding to client callbacks
         custom_routes.append(
