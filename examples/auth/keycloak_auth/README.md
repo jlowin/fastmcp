@@ -1,236 +1,55 @@
 # Keycloak OAuth Example
 
-This example demonstrates how to protect a FastMCP server with Keycloak using OAuth 2.0/OpenID Connect.
+Demonstrates FastMCP server protection with Keycloak OAuth.
 
-## Features
+## Setup
 
-- **Local Keycloak Instance**: Complete Docker setup with preconfigured realm
-- **Dynamic Client Registration**: Automatic OIDC endpoint discovery
-- **Pre-configured Test User**: Ready-to-use credentials for testing
-- **JWT Token Verification**: Secure token validation with JWKS
+### 1. Prepare the Realm Configuration
 
-## Quick Start
+Review the realm configuration file: [`keycloak/realm-fastmcp.json`](keycloak/realm-fastmcp.json)
 
-### 1. Start Keycloak
+**Optional**: Customize the file for your environment:
+- **Realm name**: Change `"realm": "fastmcp"` to match your project
+- **Trusted hosts**: Update the `"trusted-hosts"` section for your environment
+- **Test user**: Review credentials (`testuser` / `password123`) and change for security
 
-```bash
-cd examples/auth/keycloak_auth
-./start-keycloak.sh
-```
+### 2. Set Up Keycloak
 
-Wait for Keycloak to be ready (check with `docker logs -f keycloak-fastmcp`).
+Choose one of the following options:
 
-### 2. Verify Keycloak Setup
+**Option A: Local Keycloak Instance (Recommended for Testing)**
 
-Open [http://localhost:8080](http://localhost:8080) in your browser:
+See [keycloak/README.md](keycloak/README.md) for details.
 
-- **Admin Console**: [http://localhost:8080/admin](http://localhost:8080/admin)
-  - Username: `admin`
-  - Password: `admin123`
-- **FastMCP Realm**: [http://localhost:8080/realms/fastmcp](http://localhost:8080/realms/fastmcp)
+**Note:** The realm will be automatically imported on startup. 
 
-### 3. Install Dependencies
+**Option B: Existing Keycloak Instance**
 
-```bash
-pip install -r requirements.txt
-```
+Manually import the realm:
+- Log in to your Keycloak Admin Console
+- Click **Manage realms** → **Create realm**
+- Drag the `realm-fastmcp.json` file into the **Resource file** box
+- Click **Create**
 
-### 4. Configure Environment
+### 3. Run the Example
 
-```bash
-cp .env.example .env
-```
+1. Set environment variables:
 
-The default configuration works with the Docker setup:
-
-```env
-FASTMCP_SERVER_AUTH_KEYCLOAK_REALM_URL=http://localhost:8080/realms/fastmcp
-FASTMCP_SERVER_AUTH_KEYCLOAK_BASE_URL=http://localhost:8000
-```
-
-### 5. Start the FastMCP Server
-
-```bash
-python server.py
-```
-
-### 6. Test with Client
-
-```bash
-python client.py
-```
-
-The client will:
-1. Open your browser to Keycloak login page
-2. Authenticate and redirect back to the client
-3. Call protected FastMCP tools
-4. Display user information from the access token
-
-## Test Credentials
-
-The preconfigured realm includes a test user:
-
-- **Username**: `testuser`
-- **Password**: `password123`
-- **Email**: `testuser@example.com`
-
-## Keycloak Configuration
-
-### Realm: `fastmcp`
-
-The Docker setup automatically imports a preconfigured realm with:
-
-- **Client ID**: `fastmcp-client`
-- **Client Secret**: `fastmcp-client-secret-12345`
-- **Redirect URIs**: `http://localhost:8000/auth/callback`, `http://localhost:8000/*`
-- **Scopes**: `openid`, `profile`, `email`
-
-### Client Configuration
-
-The client is configured for:
-- **Authorization Code Flow** (recommended for server-side applications)
-- **Dynamic Client Registration** supported
-- **PKCE** enabled for additional security
-- **JWT Access Tokens** with RS256 signature
-
-### Token Claims
-
-The access tokens include:
-- `sub`: User identifier
-- `preferred_username`: Username
-- `email`: User email address
-- `realm_access`: Realm-level roles
-- `resource_access`: Client-specific roles
-
-## Advanced Configuration
-
-### Custom Realm Configuration
-
-To use your own Keycloak realm:
-
-1. Update the realm URL in `.env`:
-   ```env
-   FASTMCP_SERVER_AUTH_KEYCLOAK_REALM_URL=https://your-keycloak.com/realms/your-realm
+   ```bash
+   export FASTMCP_SERVER_AUTH_KEYCLOAK_REALM_URL="http://localhost:8080/realms/fastmcp"
+   export FASTMCP_SERVER_AUTH_KEYCLOAK_BASE_URL="http://localhost:8000"
    ```
 
-2. Ensure your client is configured with:
-   - Authorization Code Flow enabled
-   - Correct redirect URIs
-   - Required scopes (minimum: `openid`)
+2. Run the server:
 
-### Production Deployment
+   ```bash
+   python server.py
+   ```
 
-For production use:
+3. In another terminal, run the client:
 
-1. **Use HTTPS**: Update all URLs to use HTTPS
-2. **Secure Client Secret**: Use environment variables or secret management
-3. **Configure CORS**: Set appropriate web origins in Keycloak
-4. **Token Validation**: Consider shorter token lifespans
-5. **Logging**: Adjust log levels for production
+   ```bash
+   python client.py
+   ```
 
-### Custom Token Verifier
-
-You can provide a custom JWT verifier:
-
-```python
-from fastmcp.server.auth.providers.jwt import JWTVerifier
-
-custom_verifier = JWTVerifier(
-    jwks_uri="https://your-keycloak.com/realms/your-realm/protocol/openid-connect/certs",
-    issuer="https://your-keycloak.com/realms/your-realm",
-    audience="your-client-id",
-    required_scopes=["api:read", "api:write"]
-)
-
-auth = KeycloakAuthProvider(
-    realm_url="https://your-keycloak.com/realms/your-realm",
-    base_url="https://your-fastmcp-server.com",
-    token_verifier=custom_verifier,
-)
-```
-
-## Troubleshooting
-
-### Common Issues
-
-1. **"Failed to discover Keycloak endpoints"**
-   - Check that Keycloak is running: `docker-compose ps`
-   - Verify the realm URL is correct
-   - Ensure the realm exists in Keycloak
-
-2. **"Invalid redirect URI"**
-   - Check that the redirect URI in your client matches the base_url
-   - Default should be: `http://localhost:8000/auth/callback`
-
-3. **"Token verification failed"**
-   - Verify the JWKS URI is accessible
-   - Check that the token issuer matches your realm
-   - Ensure required scopes are configured
-
-4. **"Authentication failed"**
-   - Try the test user credentials: `testuser` / `password123`
-   - Check Keycloak admin console for user status
-   - Verify client configuration in Keycloak
-
-### Debug Mode
-
-Enable debug logging:
-
-```python
-import logging
-logging.basicConfig(level=logging.DEBUG)
-```
-
-### Keycloak Logs
-
-View Keycloak container logs:
-
-```bash
-docker-compose logs -f keycloak
-```
-
-## Architecture
-
-```
-┌─────────────┐    ┌─────────────┐    ┌─────────────┐
-│   Client    │    │   FastMCP   │    │  Keycloak   │
-│             │    │   Server    │    │             │
-└─────────────┘    └─────────────┘    └─────────────┘
-       │                   │                   │
-       │  1. Call tool     │                   │
-       ├──────────────────►│                   │
-       │                   │ 2. Redirect to    │
-       │                   │    OAuth login    │
-       │                   ├──────────────────►│
-       │  3. Auth redirect │                   │
-       │◄──────────────────────────────────────┤
-       │                   │                   │
-       │  4. Login & authorize                 │
-       ├──────────────────────────────────────►│
-       │                   │                   │
-       │  5. Auth code     │                   │
-       │◄──────────────────┤                   │
-       │                   │ 6. Exchange code  │
-       │                   │    for tokens     │
-       │                   ├──────────────────►│
-       │                   │                   │
-       │  7. Tool response │ 8. Verify token   │
-       │◄──────────────────┤                   │
-       │                   │                   │
-```
-
-## Security Considerations
-
-- **HTTPS Only**: Always use HTTPS in production
-- **Token Expiration**: Configure appropriate token lifespans
-- **Scope Validation**: Use least-privilege scopes
-- **CORS Configuration**: Restrict origins appropriately
-- **Client Secrets**: Store securely and rotate regularly
-- **Audit Logging**: Enable Keycloak event logging
-
-## Related Documentation
-
-- [FastMCP Authentication Guide](https://docs.fastmcp.com/auth)
-- [Keycloak Documentation](https://www.keycloak.org/documentation)
-- [OAuth 2.0 RFC](https://tools.ietf.org/html/rfc6749)
-- [OpenID Connect Specification](https://openid.net/specs/openid-connect-core-1_0.html)
+The client will open your browser for Keycloak authentication.
