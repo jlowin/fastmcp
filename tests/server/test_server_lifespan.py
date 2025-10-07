@@ -185,42 +185,33 @@ class TestLifespanConflicts:
         with pytest.raises(
             ValueError, match="Cannot specify both session_lifespan and server_lifespan"
         ):
-            FastMCP(
-                "TestServer",
+            _ = FastMCP(
+                name="TestServer",
                 session_lifespan=session_lifespan,
                 server_lifespan=server_lifespan,
             )
 
     async def test_lifespan_with_server_lifespan_ok(self):
-        """Test that providing both lifespan and server_lifespan works (lifespan is ignored)."""
-        lifespan_events = []
-        server_lifespan_events = []
+        """Test that providing both lifespan and server_lifespan raises a ValueError."""
 
         @asynccontextmanager
         async def my_lifespan(mcp: FastMCP) -> AsyncIterator[None]:
-            lifespan_events.append("enter")
             yield
-            lifespan_events.append("exit")
 
-        @asynccontextmanager
-        async def my_server_lifespan(mcp: FastMCP) -> AsyncIterator[None]:
-            server_lifespan_events.append("enter")
-            yield
-            server_lifespan_events.append("exit")
+        with pytest.raises(
+            expected_exception=ValueError,
+            match="Cannot specify both session_lifespan and server_lifespan",
+        ):
+            _ = FastMCP(
+                name="TestServer", lifespan=my_lifespan, server_lifespan=my_lifespan
+            )
 
-        # This should work - lifespan is used as fallback for session_lifespan
-        # when session_lifespan is not provided
-        mcp = FastMCP(
-            "TestServer", lifespan=my_lifespan, server_lifespan=my_server_lifespan
-        )
-
-        @mcp.tool
-        def test_tool() -> str:
-            return "ok"
-
-        async with Client(mcp) as client:
-            await client.call_tool("test_tool", {})
-            # Server lifespan should be used
-            assert len(server_lifespan_events) > 0
-            # Session lifespan (from lifespan param) should also be entered
-            assert len(lifespan_events) > 0
+        with pytest.raises(
+            expected_exception=ValueError,
+            match="Cannot specify both session_lifespan and server_lifespan",
+        ):
+            _ = FastMCP(
+                name="TestServer",
+                session_lifespan=my_lifespan,
+                server_lifespan=my_lifespan,
+            )

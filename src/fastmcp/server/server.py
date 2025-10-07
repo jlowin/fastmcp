@@ -381,11 +381,11 @@ class FastMCP(Generic[LifespanResultT]):
 
     async def __aenter__(self) -> None:
         """Enter the server-wide lifespan context."""
-        if self._server_lifespan_stack is not None:
-            # Already entered
+        if self._server_lifespan is None:
             return
 
-        if self._server_lifespan is None:
+        if self._server_lifespan_stack is not None:
+            # Already entered
             return
 
         self._server_lifespan_stack = AsyncExitStack()
@@ -405,6 +405,9 @@ class FastMCP(Generic[LifespanResultT]):
         exc_tb: TracebackType | None,
     ) -> None:
         """Exit the server-wide lifespan context."""
+        if self._server_lifespan is None:
+            return
+
         if self._server_lifespan_stack is not None:
             await self._server_lifespan_stack.aclose()
             self._server_lifespan_stack = None
