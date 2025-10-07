@@ -832,13 +832,21 @@ class FastMCPTransport(ClientTransport):
                         **session_kwargs,
                     ) as client_session:
                         yield client_session
-                finally:
+                except Exception as e:
                     if (
                         isinstance(self.server, FastMCP)
                         and self.server._server_lifespan is not None
                     ):
-                        await self.server.__aexit__()
+                        _ = await self.server.__aexit__(type(e), e, None)
+                    raise e
+                finally:
                     tg.cancel_scope.cancel()
+
+                if (
+                    isinstance(self.server, FastMCP)
+                    and self.server._server_lifespan is not None
+                ):
+                    _ = await self.server.__aexit__(None, None, None)
 
     def __repr__(self) -> str:
         return f"<FastMCPTransport(server='{self.server.name}')>"

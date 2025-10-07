@@ -129,6 +129,8 @@ class TestSessionLifespan:
             # Session lifespan should have been entered
             assert "enter" in session_events
 
+        assert session_events == ["enter", "exit"]
+
     async def test_lifespan_aliases_to_session_lifespan(self):
         """Test that lifespan parameter is used as session_lifespan when session_lifespan is not provided."""
         lifespan_events = []
@@ -147,8 +149,10 @@ class TestSessionLifespan:
             return "ok"
 
         async with Client(mcp) as client:
-            await client.call_tool("test_tool", {})
+            _ = await client.call_tool("test_tool", {})
             assert "enter" in lifespan_events
+
+        assert lifespan_events == ["enter", "exit"]
 
     async def test_has_lifespan_flag_session_lifespan(self):
         """Test that _has_lifespan is True when session_lifespan is provided."""
