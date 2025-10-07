@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
 import warnings
 from collections.abc import Awaitable, Callable
@@ -72,25 +73,24 @@ class ProxyToolManager(ToolManager, ProxyManagerMixin):
     def __init__(self, client_factory: ClientFactoryT, **kwargs: Any):
         super().__init__(**kwargs)
         self.client_factory = client_factory
+        self._proxy_tools_cache: dict[str, Tool] | None = None
+        self._fetch_lock = asyncio.Lock()
 
     async def get_tools(self) -> dict[str, Tool]:
         """Gets the unfiltered tool inventory including local, mounted, and proxy tools."""
         # First get local and mounted tools from parent
         all_tools = await super().get_tools()
 
-        # Then add proxy tools, but don't overwrite existing ones
-        try:
-            client = await self._get_client()
-            async with client:
-                client_tools = await client.list_tools()
-                for tool in client_tools:
-                    if tool.name not in all_tools:
-                        all_tools[tool.name] = ProxyTool.from_mcp_tool(client, tool)
-        except McpError as e:
-            if e.error.code == METHOD_NOT_FOUND:
-                pass  # No tools available from proxy
-            else:
-                raise e
+        # Then add proxy tools from cache or fetch them (with lock to prevent concurrent fetches)
+        if self._proxy_tools_cache is None:
+            async with self._fetch_lock:
+                # Double-check after acquiring lock in case another task already fetched
+                if self._proxy_tools_cache is None:
+                    self._proxy_tools_cache = await self._fetch_proxy_tools()
+
+        for tool_name, tool in self._proxy_tools_cache.items():
+            if tool_name not in all_tools:
+                all_tools[tool_name] = tool
 
         transformed_tools = apply_transformations_to_tools(
             tools=all_tools,
@@ -98,6 +98,22 @@ class ProxyToolManager(ToolManager, ProxyManagerMixin):
         )
 
         return transformed_tools
+
+    async def _fetch_proxy_tools(self) -> dict[str, Tool]:
+        """Fetch tools from the remote proxy client."""
+        proxy_tools: dict[str, Tool] = {}
+        try:
+            client = await self._get_client()
+            async with client:
+                client_tools = await client.list_tools()
+                for tool in client_tools:
+                    proxy_tools[tool.name] = ProxyTool.from_mcp_tool(client, tool)
+        except McpError as e:
+            if e.error.code == METHOD_NOT_FOUND:
+                pass  # No tools available from proxy
+            else:
+                raise e
+        return proxy_tools
 
     async def list_tools(self) -> list[Tool]:
         """Gets the filtered list of tools including local, mounted, and proxy tools."""
@@ -126,52 +142,82 @@ class ProxyResourceManager(ResourceManager, ProxyManagerMixin):
     def __init__(self, client_factory: ClientFactoryT, **kwargs: Any):
         super().__init__(**kwargs)
         self.client_factory = client_factory
+        self._proxy_resources_cache: dict[str, Resource] | None = None
+        self._proxy_templates_cache: dict[str, ResourceTemplate] | None = None
+        self._fetch_resources_lock = asyncio.Lock()
+        self._fetch_templates_lock = asyncio.Lock()
 
     async def get_resources(self) -> dict[str, Resource]:
         """Gets the unfiltered resource inventory including local, mounted, and proxy resources."""
         # First get local and mounted resources from parent
         all_resources = await super().get_resources()
 
-        # Then add proxy resources, but don't overwrite existing ones
+        # Then add proxy resources from cache or fetch them (with lock to prevent concurrent fetches)
+        if self._proxy_resources_cache is None:
+            async with self._fetch_resources_lock:
+                # Double-check after acquiring lock
+                if self._proxy_resources_cache is None:
+                    self._proxy_resources_cache = await self._fetch_proxy_resources()
+
+        for uri, resource in self._proxy_resources_cache.items():
+            if uri not in all_resources:
+                all_resources[uri] = resource
+
+        return all_resources
+
+    async def _fetch_proxy_resources(self) -> dict[str, Resource]:
+        """Fetch resources from the remote proxy client."""
+        proxy_resources: dict[str, Resource] = {}
         try:
             client = await self._get_client()
             async with client:
                 client_resources = await client.list_resources()
                 for resource in client_resources:
-                    if str(resource.uri) not in all_resources:
-                        all_resources[str(resource.uri)] = (
-                            ProxyResource.from_mcp_resource(client, resource)
-                        )
+                    proxy_resources[str(resource.uri)] = (
+                        ProxyResource.from_mcp_resource(client, resource)
+                    )
         except McpError as e:
             if e.error.code == METHOD_NOT_FOUND:
                 pass  # No resources available from proxy
             else:
                 raise e
-
-        return all_resources
+        return proxy_resources
 
     async def get_resource_templates(self) -> dict[str, ResourceTemplate]:
         """Gets the unfiltered template inventory including local, mounted, and proxy templates."""
         # First get local and mounted templates from parent
         all_templates = await super().get_resource_templates()
 
-        # Then add proxy templates, but don't overwrite existing ones
+        # Then add proxy templates from cache or fetch them (with lock to prevent concurrent fetches)
+        if self._proxy_templates_cache is None:
+            async with self._fetch_templates_lock:
+                # Double-check after acquiring lock
+                if self._proxy_templates_cache is None:
+                    self._proxy_templates_cache = await self._fetch_proxy_templates()
+
+        for uri_template, template in self._proxy_templates_cache.items():
+            if uri_template not in all_templates:
+                all_templates[uri_template] = template
+
+        return all_templates
+
+    async def _fetch_proxy_templates(self) -> dict[str, ResourceTemplate]:
+        """Fetch resource templates from the remote proxy client."""
+        proxy_templates: dict[str, ResourceTemplate] = {}
         try:
             client = await self._get_client()
             async with client:
                 client_templates = await client.list_resource_templates()
                 for template in client_templates:
-                    if template.uriTemplate not in all_templates:
-                        all_templates[template.uriTemplate] = (
-                            ProxyTemplate.from_mcp_template(client, template)
-                        )
+                    proxy_templates[template.uriTemplate] = (
+                        ProxyTemplate.from_mcp_template(client, template)
+                    )
         except McpError as e:
             if e.error.code == METHOD_NOT_FOUND:
                 pass  # No templates available from proxy
             else:
                 raise e
-
-        return all_templates
+        return proxy_templates
 
     async def list_resources(self) -> list[Resource]:
         """Gets the filtered list of resources including local, mounted, and proxy resources."""
@@ -207,29 +253,44 @@ class ProxyPromptManager(PromptManager, ProxyManagerMixin):
     def __init__(self, client_factory: ClientFactoryT, **kwargs: Any):
         super().__init__(**kwargs)
         self.client_factory = client_factory
+        self._proxy_prompts_cache: dict[str, Prompt] | None = None
+        self._fetch_lock = asyncio.Lock()
 
     async def get_prompts(self) -> dict[str, Prompt]:
         """Gets the unfiltered prompt inventory including local, mounted, and proxy prompts."""
         # First get local and mounted prompts from parent
         all_prompts = await super().get_prompts()
 
-        # Then add proxy prompts, but don't overwrite existing ones
+        # Then add proxy prompts from cache or fetch them (with lock to prevent concurrent fetches)
+        if self._proxy_prompts_cache is None:
+            async with self._fetch_lock:
+                # Double-check after acquiring lock
+                if self._proxy_prompts_cache is None:
+                    self._proxy_prompts_cache = await self._fetch_proxy_prompts()
+
+        for prompt_name, prompt in self._proxy_prompts_cache.items():
+            if prompt_name not in all_prompts:
+                all_prompts[prompt_name] = prompt
+
+        return all_prompts
+
+    async def _fetch_proxy_prompts(self) -> dict[str, Prompt]:
+        """Fetch prompts from the remote proxy client."""
+        proxy_prompts: dict[str, Prompt] = {}
         try:
             client = await self._get_client()
             async with client:
                 client_prompts = await client.list_prompts()
                 for prompt in client_prompts:
-                    if prompt.name not in all_prompts:
-                        all_prompts[prompt.name] = ProxyPrompt.from_mcp_prompt(
-                            client, prompt
-                        )
+                    proxy_prompts[prompt.name] = ProxyPrompt.from_mcp_prompt(
+                        client, prompt
+                    )
         except McpError as e:
             if e.error.code == METHOD_NOT_FOUND:
                 pass  # No prompts available from proxy
             else:
                 raise e
-
-        return all_prompts
+        return proxy_prompts
 
     async def list_prompts(self) -> list[Prompt]:
         """Gets the filtered list of prompts including local, mounted, and proxy prompts."""
