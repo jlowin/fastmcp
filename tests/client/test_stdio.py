@@ -255,7 +255,7 @@ class TestKeepAlive:
                 pass
 
 
-class TestErrlog:
+class TestLogFile:
     @pytest.fixture
     def stdio_script_with_stderr(self, tmp_path):
         script = inspect.cleandoc('''
@@ -277,35 +277,35 @@ class TestErrlog:
         script_file.write_text(script)
         return script_file
 
-    async def test_errlog_parameter_accepted_by_stdio_transport(self, tmp_path):
-        """Test that errlog parameter can be set on StdioTransport"""
-        errlog_file = tmp_path / "errors.log"
-        with open(errlog_file, "w") as errlog:
+    async def test_log_file_parameter_accepted_by_stdio_transport(self, tmp_path):
+        """Test that log_file parameter can be set on StdioTransport"""
+        log_file_path = tmp_path / "errors.log"
+        with open(log_file_path, "w") as log_file:
             transport = StdioTransport(
-                command="python", args=["script.py"], errlog=errlog
+                command="python", args=["script.py"], log_file=log_file
             )
-            assert transport.errlog == errlog
+            assert transport.log_file == log_file
 
-    async def test_errlog_parameter_accepted_by_python_stdio_transport(
+    async def test_log_file_parameter_accepted_by_python_stdio_transport(
         self, tmp_path, stdio_script_with_stderr
     ):
-        """Test that errlog parameter can be set on PythonStdioTransport"""
-        errlog_file = tmp_path / "errors.log"
-        with open(errlog_file, "w") as errlog:
+        """Test that log_file parameter can be set on PythonStdioTransport"""
+        log_file_path = tmp_path / "errors.log"
+        with open(log_file_path, "w") as log_file:
             transport = PythonStdioTransport(
-                script_path=stdio_script_with_stderr, errlog=errlog
+                script_path=stdio_script_with_stderr, log_file=log_file
             )
-            assert transport.errlog == errlog
+            assert transport.log_file == log_file
 
-    async def test_errlog_captures_stderr_output(
+    async def test_log_file_captures_stderr_output(
         self, tmp_path, stdio_script_with_stderr
     ):
-        """Test that stderr output is written to the errlog file"""
-        errlog_file = tmp_path / "errors.log"
+        """Test that stderr output is written to the log_file"""
+        log_file_path = tmp_path / "errors.log"
 
-        with open(errlog_file, "w") as errlog:
+        with open(log_file_path, "w") as log_file:
             transport = PythonStdioTransport(
-                script_path=stdio_script_with_stderr, errlog=errlog
+                script_path=stdio_script_with_stderr, log_file=log_file
             )
             client = Client(transport=transport)
 
@@ -315,20 +315,20 @@ class TestErrlog:
             # Need to wait a bit for stderr to flush
             await asyncio.sleep(0.1)
 
-        content = errlog_file.read_text()
+        content = log_file_path.read_text()
         assert "Test error message" in content
 
-    async def test_errlog_none_uses_default_behavior(
+    async def test_log_file_none_uses_default_behavior(
         self, tmp_path, stdio_script_with_stderr
     ):
-        """Test that errlog=None uses default stderr handling"""
+        """Test that log_file=None uses default stderr handling"""
         transport = PythonStdioTransport(
-            script_path=stdio_script_with_stderr, errlog=None
+            script_path=stdio_script_with_stderr, log_file=None
         )
         client = Client(transport=transport)
 
         async with client:
-            # Should work without error even without explicit errlog
+            # Should work without error even without explicit log_file
             result = await client.call_tool(
                 "write_error", {"message": "Default stderr"}
             )
