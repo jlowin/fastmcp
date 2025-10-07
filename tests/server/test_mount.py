@@ -890,19 +890,6 @@ class TestAsProxyKwarg:
         assert mcp._tool_manager._mounted_servers[0].server is not sub
         assert isinstance(mcp._tool_manager._mounted_servers[0].server, FastMCPProxy)
 
-    async def test_as_proxy_defaults_true_if_lifespan(self):
-        @asynccontextmanager
-        async def lifespan(mcp: FastMCP):
-            yield
-
-        mcp = FastMCP("Main")
-        sub = FastMCP("Sub", lifespan=lifespan)
-
-        mcp.mount(sub, "sub")
-
-        assert mcp._tool_manager._mounted_servers[0].server is not sub
-        assert isinstance(mcp._tool_manager._mounted_servers[0].server, FastMCPProxy)
-
     async def test_as_proxy_defaults_true_if_server_lifespan(self):
         """Test that as_proxy defaults to True when server_lifespan is provided."""
 
@@ -969,7 +956,7 @@ class TestAsProxyKwarg:
             yield
 
         mcp = FastMCP("Main")
-        sub = FastMCP("Sub", lifespan=lifespan)
+        sub = FastMCP("Sub", server_lifespan=lifespan)
 
         @sub.tool
         def hello():

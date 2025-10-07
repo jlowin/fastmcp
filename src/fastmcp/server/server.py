@@ -202,7 +202,9 @@ class FastMCP(Generic[LifespanResultT]):
             self._session_lifespan = _server_lifespan_proxy_factory(server=self)
 
         # Track whether this server has any custom lifespan behavior configured
-        self._has_lifespan: bool = any([self._session_lifespan, self._server_lifespan])
+        self._has_lifespan: bool = (
+            self._session_lifespan is not None or self._server_lifespan is not None
+        )
 
         # Generate random ID if no name provided
         self._mcp_server = LowLevelServer[LifespanResultT](
@@ -287,28 +289,22 @@ class FastMCP(Generic[LifespanResultT]):
         session_lifespan: LifespanCallable | None = None,
         server_lifespan: LifespanCallable | None = None,
     ) -> tuple[LifespanCallable | None, LifespanCallable | None]:
-        if session_lifespan is not None:
-            if server_lifespan is not None:
-                raise ValueError(
-                    "Cannot specify both session_lifespan and server_lifespan."
-                )
-
+        if lifespan is not None:
             if fastmcp.settings.deprecation_warnings:
                 import warnings
 
                 warnings.warn(
-                    "The session_lifespan parameter is deprecated (as of 2.13.0). For the same behavior, "
-                    + "use the lifespan parameter instead.",
+                    "The lifespan parameter is deprecated (as of 2.13.0). For the same behavior, "
+                    + "use the session_lifespan parameter instead.",
                     DeprecationWarning,
                     stacklevel=2,
                 )
-            # Keep the provided session_lifespan. If it was not provided, fall back to lifespan below.
-        else:
-            session_lifespan = lifespan
 
-        if all([session_lifespan, server_lifespan]):
+        session_lifespan = lifespan or session_lifespan
+
+        if session_lifespan and server_lifespan:
             raise ValueError(
-                "Cannot specify both session_lifespan and server_lifespan."
+                "Cannot specify both session_lifespan (or lifespan) and server_lifespan."
             )
 
         return session_lifespan, server_lifespan

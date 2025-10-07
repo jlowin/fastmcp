@@ -98,17 +98,17 @@ class TestSessionLifespan:
 
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
-            _ = FastMCP(name="TestServer", session_lifespan=session_lifespan)
+            _ = FastMCP(name="TestServer", lifespan=session_lifespan)
 
             # Should have emitted a deprecation warning
             assert len(w) == 1
             assert issubclass(w[0].category, DeprecationWarning)
-            assert "session_lifespan parameter is deprecated" in str(w[0].message)
-            assert "use the lifespan parameter instead" in str(w[0].message)
+            assert "lifespan parameter is deprecated" in str(w[0].message)
+            assert "use the session_lifespan parameter instead" in str(w[0].message)
 
-    async def test_session_lifespan_still_works(self):
+    async def test_lifespan_still_works(self):
         """Test that session_lifespan still functions despite deprecation."""
-        session_events = []
+        session_events: list[str] = []
 
         @asynccontextmanager
         async def session_lifespan(mcp: FastMCP) -> AsyncIterator[None]:
@@ -118,7 +118,7 @@ class TestSessionLifespan:
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            mcp = FastMCP("TestServer", session_lifespan=session_lifespan)
+            mcp = FastMCP("TestServer", lifespan=session_lifespan)
 
         @mcp.tool
         def test_tool() -> str:
@@ -183,7 +183,8 @@ class TestLifespanConflicts:
             yield
 
         with pytest.raises(
-            ValueError, match="Cannot specify both session_lifespan and server_lifespan"
+            expected_exception=ValueError,
+            match="Cannot specify both",
         ):
             _ = FastMCP(
                 name="TestServer",
@@ -200,7 +201,7 @@ class TestLifespanConflicts:
 
         with pytest.raises(
             expected_exception=ValueError,
-            match="Cannot specify both session_lifespan and server_lifespan",
+            match="Cannot specify both",
         ):
             _ = FastMCP(
                 name="TestServer", lifespan=my_lifespan, server_lifespan=my_lifespan
@@ -208,7 +209,7 @@ class TestLifespanConflicts:
 
         with pytest.raises(
             expected_exception=ValueError,
-            match="Cannot specify both session_lifespan and server_lifespan",
+            match="Cannot specify both",
         ):
             _ = FastMCP(
                 name="TestServer",
