@@ -811,6 +811,11 @@ class FastMCPTransport(ClientTransport):
 
             # Create a cancel scope for the server task
             async with anyio.create_task_group() as tg:
+                if (
+                    isinstance(self.server, FastMCP)
+                    and self.server._server_lifespan is not None
+                ):
+                    await self.server.__aenter__()
                 tg.start_soon(
                     lambda: self.server._mcp_server.run(
                         server_read,
@@ -828,6 +833,11 @@ class FastMCPTransport(ClientTransport):
                     ) as client_session:
                         yield client_session
                 finally:
+                    if (
+                        isinstance(self.server, FastMCP)
+                        and self.server._server_lifespan is not None
+                    ):
+                        await self.server.__aexit__()
                     tg.cancel_scope.cancel()
 
     def __repr__(self) -> str:
