@@ -787,7 +787,7 @@ class OAuthProxy(OAuthProvider):
         )
 
         # Handle refresh token rotation if new one provided
-        if "refresh_token" in token_response:
+        if "refresh_token" in token_response and token_response["refresh_token"]:
             new_refresh_token = token_response["refresh_token"]
             if new_refresh_token != refresh_token.token:
                 # Remove old refresh token
