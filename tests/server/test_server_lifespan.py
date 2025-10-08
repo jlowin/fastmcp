@@ -70,21 +70,6 @@ class TestServerLifespan:
             result = await client.call_tool("get_db_info", {})
             assert result.data == "mock_db"
 
-    async def test_has_lifespan_flag_server_lifespan(self):
-        """Test that _has_lifespan is True when server_lifespan is provided."""
-
-        @asynccontextmanager
-        async def server_lifespan(mcp: FastMCP) -> AsyncIterator[None]:
-            yield
-
-        mcp = FastMCP("TestServer", server_lifespan=server_lifespan)
-        assert mcp._has_lifespan is True
-
-    async def test_has_lifespan_flag_no_lifespan(self):
-        """Test that _has_lifespan is False when no lifespan is provided."""
-        mcp = FastMCP("TestServer")
-        assert mcp._has_lifespan is False
-
 
 class TestSessionLifespan:
     """Test session_lifespan functionality (deprecated but still supported)."""
@@ -153,19 +138,6 @@ class TestSessionLifespan:
             assert "enter" in lifespan_events
 
         assert lifespan_events == ["enter", "exit"]
-
-    async def test_has_lifespan_flag_session_lifespan(self):
-        """Test that _has_lifespan is True when session_lifespan is provided."""
-
-        @asynccontextmanager
-        async def session_lifespan(mcp: FastMCP) -> AsyncIterator[None]:
-            yield
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            mcp = FastMCP("TestServer", session_lifespan=session_lifespan)
-
-        assert mcp._has_lifespan is True
 
 
 class TestLifespanConflicts:
