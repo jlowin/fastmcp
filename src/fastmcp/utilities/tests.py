@@ -66,6 +66,7 @@ def _run_server(mcp_server: FastMCP, transport: Literal["sse"], port: int) -> No
             host="127.0.0.1",
             port=port,
             log_level="error",
+            ws="websockets-sansio",
         )
     )
     uvicorn_server.run()
@@ -74,11 +75,11 @@ def _run_server(mcp_server: FastMCP, transport: Literal["sse"], port: int) -> No
 @contextmanager
 def run_server_in_process(
     server_fn: Callable[..., None],
-    *args,
+    *args: Any,
     provide_host_and_port: bool = True,
     host: str = "127.0.0.1",
     port: int | None = None,
-    **kwargs,
+    **kwargs: Any,
 ) -> Generator[str, None, None]:
     """
     Context manager that runs a FastMCP server in a separate process and
@@ -143,10 +144,10 @@ def run_server_in_process(
 def caplog_for_fastmcp(caplog):
     """Context manager to capture logs from FastMCP loggers even when propagation is disabled."""
     caplog.clear()
-    logger = logging.getLogger("FastMCP")
+    logger = logging.getLogger("fastmcp")
     logger.addHandler(caplog.handler)
     try:
-        yield
+        yield caplog
     finally:
         logger.removeHandler(caplog.handler)
 

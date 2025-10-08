@@ -15,6 +15,7 @@ dependencies = [
     "pydantic[email]>=2.11.7",
     "pyperclip>=1.9.0",
     "openapi-core>=0.19.5",
+    "websockets>=15.0.1",
 ]
 
 requires-python = ">=3.10"
@@ -41,7 +42,6 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-websockets = ["websockets>=15.0.1"]
 openai = ["openai>=1.102.0"]
 
 [dependency-groups]
@@ -64,6 +64,7 @@ dev = [
     "pytest-flakefinder",
     "pytest-httpx>=0.35.0",
     "pytest-report>=0.2.1",
+    "pytest-retry>=1.7.0",
     "pytest-timeout>=2.4.0",
     "pytest-xdist>=3.6.1",
     "ruff",
@@ -141,3 +142,6 @@ extend-select = ["I", "UP"]
 "__init__.py" = ["F401", "I001", "RUF013"]
 # allow imports not at the top of the file
 "src/fastmcp/__init__.py" = ["E402"]
+
+[tool.codespell]
+ignore-words-list = "asend,shttp,te"
