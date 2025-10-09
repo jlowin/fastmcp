@@ -105,22 +105,28 @@ async def inspect_fastmcp_v2(mcp: FastMCP[Any]) -> FastMCPInfo:
         FastMCPInfo dataclass containing the extracted information
     """
     # Get all components and apply server-level filtering
-    all_tools = await mcp._tool_manager.list_tools()
-    all_prompts = await mcp._prompt_manager.list_prompts()
-    all_resources = await mcp._resource_manager.list_resources()
-    all_templates = await mcp._resource_manager.list_resource_templates()
+    all_tools = await mcp.get_tools()
+    all_prompts = await mcp.get_prompts()
+    all_resources = await mcp.get_resources()
+    all_templates = await mcp.get_resource_templates()
 
     # Filter components based on server's include_tags/exclude_tags
-    tools_list = [tool for tool in all_tools if mcp._should_enable_component(tool)]
+    tools_list = [
+        tool for tool in all_tools.values() if mcp._should_enable_component(tool)
+    ]
     prompts_list = [
-        prompt for prompt in all_prompts if mcp._should_enable_component(prompt)
+        prompt
+        for prompt in all_prompts.values()
+        if mcp._should_enable_component(prompt)
     ]
     resources_list = [
-        resource for resource in all_resources if mcp._should_enable_component(resource)
+        resource
+        for resource in all_resources.values()
+        if mcp._should_enable_component(resource)
     ]
     templates_list = [
         template
-        for template in all_templates
+        for template in all_templates.values()
         if mcp._should_enable_component(template)
     ]
 
