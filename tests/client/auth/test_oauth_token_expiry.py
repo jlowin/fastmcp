@@ -4,13 +4,11 @@ import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-import pytest
 from mcp.shared.auth import OAuthToken
 
 from fastmcp.client.auth.oauth import FileTokenStorage
 
 
-@pytest.mark.asyncio
 async def test_token_storage_with_expiry(tmp_path: Path):
     """Test that tokens are stored with absolute expiry time and loaded correctly."""
     storage = FileTokenStorage("http://test.example.com", cache_dir=tmp_path)
@@ -52,7 +50,6 @@ async def test_token_storage_with_expiry(tmp_path: Path):
     assert 3595 <= loaded_token.expires_in <= 3600
 
 
-@pytest.mark.asyncio
 async def test_expired_token_returns_none(tmp_path: Path):
     """Test that expired tokens return None when loaded."""
     storage = FileTokenStorage("http://test.example.com", cache_dir=tmp_path)
@@ -79,7 +76,6 @@ async def test_expired_token_returns_none(tmp_path: Path):
     assert loaded_token is None
 
 
-@pytest.mark.asyncio
 async def test_token_without_expiry(tmp_path: Path):
     """Test that tokens without expires_in are handled correctly."""
     storage = FileTokenStorage("http://test.example.com", cache_dir=tmp_path)
@@ -109,7 +105,6 @@ async def test_token_without_expiry(tmp_path: Path):
     assert loaded_token.expires_in is None
 
 
-@pytest.mark.asyncio
 async def test_invalid_format_returns_none(tmp_path: Path):
     """Test that invalid token format returns None."""
     storage = FileTokenStorage("http://test.example.com", cache_dir=tmp_path)
@@ -129,7 +124,6 @@ async def test_invalid_format_returns_none(tmp_path: Path):
     assert loaded_token is None
 
 
-@pytest.mark.asyncio
 async def test_token_expiry_recalculated_on_load(tmp_path: Path):
     """Test that expires_in is correctly recalculated when loading tokens."""
     storage = FileTokenStorage("http://test.example.com", cache_dir=tmp_path)

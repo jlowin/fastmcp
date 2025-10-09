@@ -58,7 +58,6 @@ dev = [
     "pyinstrument>=5.0.2",
     "pyperclip>=1.9.0",
     "pytest>=8.3.3",
-    "pytest-asyncio>=0.23.5",
     "pytest-cov>=6.1.1",
     "pytest-env>=1.1.5",
     "pytest-flakefinder",
@@ -97,9 +96,7 @@ fallback-version = "0.0.0"
 
 
 [tool.pytest.ini_options]
-asyncio_mode = "auto"
-asyncio_default_fixture_loop_scope = "session"
-asyncio_default_test_loop_scope = "session"
+anyio_mode = "auto"
 # filterwarnings = ["error::DeprecationWarning"]
 timeout = 5
 env = [
