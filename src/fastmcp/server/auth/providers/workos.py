@@ -11,6 +11,7 @@ Choose based on your WorkOS setup and authentication requirements.
 from __future__ import annotations
 
 import httpx
+from key_value.aio.protocols import AsyncKeyValue
 from pydantic import AnyHttpUrl, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from starlette.responses import JSONResponse
@@ -22,7 +23,6 @@ from fastmcp.server.auth.providers.jwt import JWTVerifier
 from fastmcp.settings import ENV_FILE
 from fastmcp.utilities.auth import parse_scopes
 from fastmcp.utilities.logging import get_logger
-from fastmcp.utilities.storage import KVStorage
 from fastmcp.utilities.types import NotSet, NotSetT
 
 logger = get_logger(__name__)
@@ -169,7 +169,7 @@ class WorkOSProvider(OAuthProxy):
         required_scopes: list[str] | None | NotSetT = NotSet,
         timeout_seconds: int | NotSetT = NotSet,
         allowed_client_redirect_uris: list[str] | NotSetT = NotSet,
-        client_storage: KVStorage | None = None,
+        client_storage: AsyncKeyValue | None = None,
     ):
         """Initialize WorkOS OAuth provider.
 
@@ -183,8 +183,7 @@ class WorkOSProvider(OAuthProxy):
             timeout_seconds: HTTP request timeout for WorkOS API calls
             allowed_client_redirect_uris: List of allowed redirect URI patterns for MCP clients.
                 If None (default), all URIs are allowed. If empty list, no URIs are allowed.
-            client_storage: Storage implementation for OAuth client registrations.
-                Defaults to file-based storage if not specified.
+            client_storage: An AsyncKeyValue-compatible store for client registrations, registrations are stored in memory if not provided
         """
 
         settings = WorkOSProviderSettings.model_validate(
