@@ -412,6 +412,219 @@ class TestFastMCP1xCompatibility:
         assert len(info2x.templates) == 0
 
 
+class TestInspectWithTagFiltering:
+    """Tests for inspect functionality with include_tags and exclude_tags."""
+
+    async def test_inspect_with_include_tags_filters_tools(self):
+        """Test that inspect respects include_tags for tools."""
+        mcp = FastMCP("TaggedServer", include_tags={"api"})
+
+        @mcp.tool(tags={"api"})
+        def api_tool() -> str:
+            """API tool."""
+            return "api"
+
+        @mcp.tool(tags={"internal"})
+        def internal_tool() -> str:
+            """Internal tool."""
+            return "internal"
+
+        @mcp.tool(tags={"api", "internal"})
+        def mixed_tool() -> str:
+            """Mixed tool."""
+            return "mixed"
+
+        info = await inspect_fastmcp(mcp)
+
+        # Only tools with 'api' tag should be included
+        assert len(info.tools) == 2
+        tool_names = [tool.name for tool in info.tools]
+        assert "api_tool" in tool_names
+        assert "mixed_tool" in tool_names
+        assert "internal_tool" not in tool_names
+
+    async def test_inspect_with_exclude_tags_filters_tools(self):
+        """Test that inspect respects exclude_tags for tools."""
+        mcp = FastMCP("TaggedServer", exclude_tags={"internal"})
+
+        @mcp.tool(tags={"api"})
+        def api_tool() -> str:
+            """API tool."""
+            return "api"
+
+        @mcp.tool(tags={"internal"})
+        def internal_tool() -> str:
+            """Internal tool."""
+            return "internal"
+
+        @mcp.tool(tags={"api", "internal"})
+        def mixed_tool() -> str:
+            """Mixed tool."""
+            return "mixed"
+
+        info = await inspect_fastmcp(mcp)
+
+        # Only tools without 'internal' tag should be included
+        assert len(info.tools) == 1
+        tool_names = [tool.name for tool in info.tools]
+        assert "api_tool" in tool_names
+        assert "internal_tool" not in tool_names
+        assert "mixed_tool" not in tool_names
+
+    async def test_inspect_with_include_tags_filters_prompts(self):
+        """Test that inspect respects include_tags for prompts."""
+        mcp = FastMCP("TaggedServer", include_tags={"user-facing"})
+
+        @mcp.prompt(tags={"user-facing"})
+        def user_prompt(text: str) -> list:
+            """User prompt."""
+            return [{"role": "user", "content": text}]
+
+        @mcp.prompt(tags={"admin"})
+        def admin_prompt(text: str) -> list:
+            """Admin prompt."""
+            return [{"role": "user", "content": text}]
+
+        info = await inspect_fastmcp(mcp)
+
+        # Only prompts with 'user-facing' tag should be included
+        assert len(info.prompts) == 1
+        prompt_names = [prompt.name for prompt in info.prompts]
+        assert "user_prompt" in prompt_names
+        assert "admin_prompt" not in prompt_names
+
+    async def test_inspect_with_include_tags_filters_resources(self):
+        """Test that inspect respects include_tags for resources."""
+        mcp = FastMCP("TaggedServer", include_tags={"public"})
+
+        @mcp.resource("resource://public", tags={"public"})
+        def public_resource() -> str:
+            """Public resource."""
+            return "public data"
+
+        @mcp.resource("resource://private", tags={"private"})
+        def private_resource() -> str:
+            """Private resource."""
+            return "private data"
+
+        info = await inspect_fastmcp(mcp)
+
+        # Only resources with 'public' tag should be included
+        assert len(info.resources) == 1
+        resource_uris = [res.uri for res in info.resources]
+        assert "resource://public" in resource_uris
+        assert "resource://private" not in resource_uris
+
+    async def test_inspect_with_include_tags_filters_templates(self):
+        """Test that inspect respects include_tags for resource templates."""
+        mcp = FastMCP("TaggedServer", include_tags={"public"})
+
+        @mcp.resource("resource://public/{id}", tags={"public"})
+        def public_template(id: str) -> str:
+            """Public template."""
+            return f"public {id}"
+
+        @mcp.resource("resource://private/{id}", tags={"private"})
+        def private_template(id: str) -> str:
+            """Private template."""
+            return f"private {id}"
+
+        info = await inspect_fastmcp(mcp)
+
+        # Only templates with 'public' tag should be included
+        assert len(info.templates) == 1
+        template_uris = [tmpl.uri_template for tmpl in info.templates]
+        assert "resource://public/{id}" in template_uris
+        assert "resource://private/{id}" not in template_uris
+
+    async def test_inspect_with_multiple_component_types_filtered(self):
+        """Test that inspect filters all component types consistently."""
+        mcp = FastMCP("TaggedServer", include_tags={"api"})
+
+        @mcp.tool(tags={"api"})
+        def api_tool() -> str:
+            return "api"
+
+        @mcp.tool(tags={"internal"})
+        def internal_tool() -> str:
+            return "internal"
+
+        @mcp.prompt(tags={"api"})
+        def api_prompt() -> list:
+            return [{"role": "user", "content": "api"}]
+
+        @mcp.prompt(tags={"internal"})
+        def internal_prompt() -> list:
+            return [{"role": "user", "content": "internal"}]
+
+        @mcp.resource("resource://api", tags={"api"})
+        def api_resource() -> str:
+            return "api"
+
+        @mcp.resource("resource://internal", tags={"internal"})
+        def internal_resource() -> str:
+            return "internal"
+
+        info = await inspect_fastmcp(mcp)
+
+        # All component types should be filtered
+        assert len(info.tools) == 1
+        assert len(info.prompts) == 1
+        assert len(info.resources) == 1
+        assert info.tools[0].name == "api_tool"
+        assert info.prompts[0].name == "api_prompt"
+        assert info.resources[0].uri == "resource://api"
+
+    async def test_format_mcp_respects_filtering(self):
+        """Test that format_mcp_info also respects tag filtering."""
+        mcp = FastMCP("TaggedServer", include_tags={"api"})
+
+        @mcp.tool(tags={"api"})
+        def api_tool() -> str:
+            """API tool."""
+            return "api"
+
+        @mcp.tool(tags={"internal"})
+        def internal_tool() -> str:
+            """Internal tool."""
+            return "internal"
+
+        json_bytes = await format_mcp_info(mcp)
+
+        import json
+
+        data = json.loads(json_bytes)
+
+        # Only tools with 'api' tag should be in MCP format
+        assert len(data["tools"]) == 1
+        assert data["tools"][0]["name"] == "api_tool"
+
+    async def test_format_fastmcp_respects_filtering(self):
+        """Test that format_fastmcp_info also respects tag filtering."""
+        mcp = FastMCP("TaggedServer", include_tags={"api"})
+
+        @mcp.tool(tags={"api"})
+        def api_tool() -> str:
+            """API tool."""
+            return "api"
+
+        @mcp.tool(tags={"internal"})
+        def internal_tool() -> str:
+            """Internal tool."""
+            return "internal"
+
+        info = await inspect_fastmcp(mcp)
+        json_bytes = await format_fastmcp_info(info)
+
+        import json
+
+        data = json.loads(json_bytes)
+
+        # Only tools with 'api' tag should be in FastMCP format
+        assert len(data["tools"]) == 1
+        assert data["tools"][0]["name"] == "api_tool"
+
+
 class TestFormatFunctions:
     """Tests for the formatting functions."""
 

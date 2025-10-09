@@ -104,21 +104,35 @@ async def inspect_fastmcp_v2(mcp: FastMCP[Any]) -> FastMCPInfo:
     Returns:
         FastMCPInfo dataclass containing the extracted information
     """
-    # Get all the components using FastMCP2's direct methods
-    tools_dict = await mcp.get_tools()
-    prompts_dict = await mcp.get_prompts()
-    resources_dict = await mcp.get_resources()
-    templates_dict = await mcp.get_resource_templates()
+    # Get all components and apply server-level filtering
+    all_tools = await mcp._tool_manager.list_tools()
+    all_prompts = await mcp._prompt_manager.list_prompts()
+    all_resources = await mcp._resource_manager.list_resources()
+    all_templates = await mcp._resource_manager.list_resource_templates()
+
+    # Filter components based on server's include_tags/exclude_tags
+    tools_list = [tool for tool in all_tools if mcp._should_enable_component(tool)]
+    prompts_list = [
+        prompt for prompt in all_prompts if mcp._should_enable_component(prompt)
+    ]
+    resources_list = [
+        resource for resource in all_resources if mcp._should_enable_component(resource)
+    ]
+    templates_list = [
+        template
+        for template in all_templates
+        if mcp._should_enable_component(template)
+    ]
 
     # Extract detailed tool information
     tool_infos = []
-    for key, tool in tools_dict.items():
+    for tool in tools_list:
         # Convert to MCP tool to get input schema
-        mcp_tool = tool.to_mcp_tool(name=key)
+        mcp_tool = tool.to_mcp_tool(name=tool.key)
         tool_infos.append(
             ToolInfo(
-                key=key,
-                name=tool.name or key,
+                key=tool.key,
+                name=tool.name or tool.key,
                 description=tool.description,
                 input_schema=mcp_tool.inputSchema if mcp_tool.inputSchema else {},
                 output_schema=tool.output_schema,
@@ -132,11 +146,11 @@ async def inspect_fastmcp_v2(mcp: FastMCP[Any]) -> FastMCPInfo:
 
     # Extract detailed prompt information
     prompt_infos = []
-    for key, prompt in prompts_dict.items():
+    for prompt in prompts_list:
         prompt_infos.append(
             PromptInfo(
-                key=key,
-                name=prompt.name or key,
+                key=prompt.key,
+                name=prompt.name or prompt.key,
                 description=prompt.description,
                 arguments=[arg.model_dump() for arg in prompt.arguments]
                 if prompt.arguments
@@ -150,11 +164,11 @@ async def inspect_fastmcp_v2(mcp: FastMCP[Any]) -> FastMCPInfo:
 
     # Extract detailed resource information
     resource_infos = []
-    for key, resource in resources_dict.items():
+    for resource in resources_list:
         resource_infos.append(
             ResourceInfo(
-                key=key,
-                uri=key,  # For v2, key is the URI
+                key=resource.key,
+                uri=resource.key,  # For v2, key is the URI
                 name=resource.name,
                 description=resource.description,
                 mime_type=resource.mime_type,
@@ -170,11 +184,11 @@ async def inspect_fastmcp_v2(mcp: FastMCP[Any]) -> FastMCPInfo:
 
     # Extract detailed template information
     template_infos = []
-    for key, template in templates_dict.items():
+    for template in templates_list:
         template_infos.append(
             TemplateInfo(
-                key=key,
-                uri_template=key,  # For v2, key is the URI template
+                key=template.key,
+                uri_template=template.key,  # For v2, key is the URI template
                 name=template.name,
                 description=template.description,
                 mime_type=template.mime_type,
