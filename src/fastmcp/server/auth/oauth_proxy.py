@@ -19,11 +19,14 @@ production use with enterprise identity providers.
 from __future__ import annotations
 
 import hashlib
+import hmac
+import json
 import secrets
 import time
-from base64 import urlsafe_b64encode
+from base64 import urlsafe_b64decode, urlsafe_b64encode
 from typing import TYPE_CHECKING, Any, Final
 from urllib.parse import urlencode
+import zlib
 
 import httpx
 from authlib.common.security import generate_token
@@ -47,7 +50,7 @@ from mcp.server.auth.settings import (
     ClientRegistrationOptions,
     RevocationOptions,
 )
-from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
+from mcp.shared.auth import OAuthClientInformationFull, OAuthToken, OAuthClientMetadata
 from pydantic import AnyHttpUrl, AnyUrl, Field, SecretStr
 from starlette.requests import Request
 from starlette.responses import RedirectResponse
@@ -1068,3 +1071,145 @@ class OAuthProxy(OAuthProvider):
                 url="data:text/html,<h1>OAuth Error</h1><p>Internal server error during IdP callback</p>",
                 status_code=302,
             )
+
+
+class StatelessOAuthProxy(OAuthProxy):
+
+    def __init__(
+        self,
+        *,
+        upstream_authorization_endpoint: str,
+        upstream_token_endpoint: str,
+        upstream_client_id: str,
+        upstream_client_secret: str,
+        upstream_revocation_endpoint: str | None = None,
+        token_verifier: TokenVerifier,
+        base_url: AnyHttpUrl | str,
+        redirect_path: str = "/auth/callback",
+        issuer_url: AnyHttpUrl | str | None = None,
+        service_documentation_url: AnyHttpUrl | str | None = None,
+        allowed_client_redirect_uris: list[str] | None = None,
+        valid_scopes: list[str] | None = None,
+        forward_pkce: bool = True,
+        token_endpoint_auth_method: str | None = None,
+        extra_authorize_params: dict[str, str] | None = None,
+        extra_token_params: dict[str, str] | None = None,
+        stateless_client_registration_secret: bytes | None = None,
+        stateless_client_check_hmac: bool = False,
+    ):
+        super().__init__(
+            upstream_authorization_endpoint=upstream_authorization_endpoint,
+            upstream_token_endpoint=upstream_token_endpoint,
+            upstream_client_id=upstream_client_id,
+            upstream_client_secret=upstream_client_secret,
+            upstream_revocation_endpoint=upstream_revocation_endpoint,
+            token_verifier=token_verifier,
+            base_url=base_url,
+            redirect_path=redirect_path,
+            issuer_url=issuer_url,
+            service_documentation_url=service_documentation_url,
+            allowed_client_redirect_uris=allowed_client_redirect_uris,
+            valid_scopes=valid_scopes,
+            forward_pkce=forward_pkce,
+            token_endpoint_auth_method=token_endpoint_auth_method,
+            extra_authorize_params=extra_authorize_params,
+            extra_token_params=extra_token_params,
+        )
+
+        self.stateless_client_registration_secret = (
+            stateless_client_registration_secret or secrets.token_bytes(72)
+        )
+        self.stateless_client_check_hmac = stateless_client_check_hmac
+
+    async def generate_client_id(
+        self,
+        client_metadata: OAuthClientMetadata,
+        client_id_issued_at: int,
+        client_secret: str | None,
+        client_secret_expires_at: int | None,
+    ) -> str:
+
+        # Manually creating the metadata dictionary to keep it minimal
+        client_record = {
+            "redirect_uris": client_metadata.redirect_uris or [],
+            "token_endpoint_auth_method": client_metadata.token_endpoint_auth_method
+            or "client_secret_post",
+            "grant_types": client_metadata.grant_types
+            or [
+                "authorization_code",
+                "refresh_token",
+            ],
+            "response_types": ["code"],
+            "scope": client_metadata.scope,
+            "client_id": "implicit",
+            "client_secret": client_secret,
+            "client_id_issued_at": client_id_issued_at,
+            "client_secret_expires_at": client_secret_expires_at,
+        }
+
+        def serializer(o: Any) -> str:
+            if isinstance(o, (AnyUrl, AnyHttpUrl)):
+                return str(o)
+            raise TypeError(f"Object of type {o.__class__.__name__} is not JSON serializable")
+        # Remove any None values to save space
+        json_string = json.dumps(
+            {key: value for key, value in client_record.items() if value is not None},
+            default=serializer,
+        )
+
+        # Maximum compression and wbits set to remove header and checksum
+        json_compressed = zlib.compress(json_string.encode("utf-8"), level=9, wbits=-15)
+
+        # Base64 encode and strip the padding
+        json_b64 = urlsafe_b64encode(json_compressed).decode("utf-8").rstrip("=")
+
+        hmac_hash = hmac.digest(
+            self.stateless_client_registration_secret,
+            json_b64.encode("utf-8"),
+            hashlib.sha3_512,
+        )
+        hmac_b64 = urlsafe_b64encode(hmac_hash).decode("utf-8").rstrip("=")
+
+        return f"{json_b64}.{hmac_b64}"
+
+    async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
+        """Get client information by ID. This is generally the random ID
+        provided to the DCR client during registration, not the upstream client ID.
+
+        For unregistered clients, returns None (which will raise an error in the SDK).
+        """
+
+        json_b64, hmac_b64 = client_id.rsplit(".", 1) if "." in client_id else (None,None)
+
+        if json_b64 is None or hmac_b64 is None:
+            logger.debug("Client ID format invalid: %s", client_id)
+            return None
+
+        if self.stateless_client_check_hmac:
+            try:
+                actual_hmac = urlsafe_b64decode(hmac_b64 + "==") # HMAC is fixed length, so we can pad it with fixed length
+            except Exception:
+                logger.debug("Client ID HMAC base64 decoding failed: %s", client_id)
+                return None
+
+            expected_hmac = hmac.digest(
+                self.stateless_client_registration_secret,
+                json_b64.encode("utf-8"),
+                hashlib.sha3_512,
+            )
+
+            if not hmac.compare_digest(expected_hmac, actual_hmac):
+                logger.debug("Client ID HMAC validation failed: %s", client_id)
+                return None
+
+        try:
+            json_compressed = urlsafe_b64decode(json_b64 + ("==" * (4 - len(json_b64) % 4))) # Add padding back for decompression
+            json_string = zlib.decompress(json_compressed, wbits=-15).decode('utf-8')
+            client = ProxyDCRClient.model_validate_json(json_string)
+        except Exception:
+            logger.debug("Client ID JSON decompression or parsing failed: %s", client_id)
+            return None
+
+        client.client_id = client_id  # Replace the placeholder with the full client_id
+
+        return client
