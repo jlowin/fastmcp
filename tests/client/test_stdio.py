@@ -280,27 +280,54 @@ class TestLogFile:
     async def test_log_file_parameter_accepted_by_stdio_transport(self, tmp_path):
         """Test that log_file parameter can be set on StdioTransport"""
         log_file_path = tmp_path / "errors.log"
-        with open(log_file_path, "w") as log_file:
-            transport = StdioTransport(
-                command="python", args=["script.py"], log_file=log_file
-            )
-            assert transport.log_file == log_file
+        transport = StdioTransport(
+            command="python", args=["script.py"], log_file=log_file_path
+        )
+        assert transport.log_file == log_file_path
 
     async def test_log_file_parameter_accepted_by_python_stdio_transport(
         self, tmp_path, stdio_script_with_stderr
     ):
         """Test that log_file parameter can be set on PythonStdioTransport"""
         log_file_path = tmp_path / "errors.log"
+        transport = PythonStdioTransport(
+            script_path=stdio_script_with_stderr, log_file=log_file_path
+        )
+        assert transport.log_file == log_file_path
+
+    async def test_log_file_parameter_accepts_textio(self, tmp_path):
+        """Test that log_file parameter can accept a TextIO object"""
+        log_file_path = tmp_path / "errors.log"
         with open(log_file_path, "w") as log_file:
-            transport = PythonStdioTransport(
-                script_path=stdio_script_with_stderr, log_file=log_file
+            transport = StdioTransport(
+                command="python", args=["script.py"], log_file=log_file
             )
             assert transport.log_file == log_file
 
-    async def test_log_file_captures_stderr_output(
+    async def test_log_file_captures_stderr_output_with_path(
         self, tmp_path, stdio_script_with_stderr
     ):
-        """Test that stderr output is written to the log_file"""
+        """Test that stderr output is written to the log_file when using Path"""
+        log_file_path = tmp_path / "errors.log"
+
+        transport = PythonStdioTransport(
+            script_path=stdio_script_with_stderr, log_file=log_file_path
+        )
+        client = Client(transport=transport)
+
+        async with client:
+            await client.call_tool("write_error", {"message": "Test error message"})
+
+        # Need to wait a bit for stderr to flush
+        await asyncio.sleep(0.1)
+
+        content = log_file_path.read_text()
+        assert "Test error message" in content
+
+    async def test_log_file_captures_stderr_output_with_textio(
+        self, tmp_path, stdio_script_with_stderr
+    ):
+        """Test that stderr output is written to the log_file when using TextIO"""
         log_file_path = tmp_path / "errors.log"
 
         with open(log_file_path, "w") as log_file:
@@ -310,13 +337,15 @@ class TestLogFile:
             client = Client(transport=transport)
 
             async with client:
-                await client.call_tool("write_error", {"message": "Test error message"})
+                await client.call_tool(
+                    "write_error", {"message": "Test error with TextIO"}
+                )
 
             # Need to wait a bit for stderr to flush
             await asyncio.sleep(0.1)
 
         content = log_file_path.read_text()
-        assert "Test error message" in content
+        assert "Test error with TextIO" in content
 
     async def test_log_file_none_uses_default_behavior(
         self, tmp_path, stdio_script_with_stderr

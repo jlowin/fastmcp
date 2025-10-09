@@ -313,7 +313,7 @@ class StdioTransport(ClientTransport):
         env: dict[str, str] | None = None,
         cwd: str | None = None,
         keep_alive: bool | None = None,
-        log_file: TextIO | None = None,
+        log_file: Path | TextIO | None = None,
     ):
         """
         Initialize a Stdio transport.
@@ -327,11 +327,11 @@ class StdioTransport(ClientTransport):
                        Defaults to True. When True, the subprocess remains active
                        after the connection context exits, allowing reuse in
                        subsequent connections.
-            log_file: Optional file-like object for subprocess stderr. Defaults
-                   to sys.stderr if not provided. When set, server errors will
-                   be written to the descriptor instead of appearing in the
-                   console. Passing arbitrary TextIO objects may cause deadlocks
-                   (see: https://github.com/jlowin/fastmcp/pull/1991#issuecomment-3367205480).
+            log_file: Optional path or file-like object where subprocess stderr will
+                   be written. Can be a Path or TextIO object. Defaults to sys.stderr
+                   if not provided. When a Path is provided, the file will be created
+                   if it doesn't exist, or appended to if it does. When set, server
+                   errors will be written to this file instead of appearing in the console.
         """
         self.command = command
         self.args = args
@@ -429,7 +429,7 @@ async def _stdio_transport_connect_task(
     args: list[str],
     env: dict[str, str] | None,
     cwd: str | None,
-    log_file: TextIO | None,
+    log_file: Path | TextIO | None,
     session_kwargs: SessionKwargs,
     ready_event: anyio.Event,
     stop_event: anyio.Event,
@@ -447,8 +447,18 @@ async def _stdio_transport_connect_task(
                     env=env,
                     cwd=cwd,
                 )
+                # Handle log_file: Path needs to be opened, TextIO used as-is
+                if log_file is None:
+                    log_file_handle = sys.stderr
+                elif isinstance(log_file, Path):
+                    log_file_handle = open(log_file, "a")
+                    stack.callback(log_file_handle.close)
+                else:
+                    # Must be TextIO - use it directly
+                    log_file_handle = log_file
+
                 transport = await stack.enter_async_context(
-                    stdio_client(server_params, errlog=log_file or sys.stderr)
+                    stdio_client(server_params, errlog=log_file_handle)
                 )
                 read_stream, write_stream = transport
                 session_future.set_result(
@@ -482,7 +492,7 @@ class PythonStdioTransport(StdioTransport):
         cwd: str | None = None,
         python_cmd: str = sys.executable,
         keep_alive: bool | None = None,
-        log_file: TextIO | None = None,
+        log_file: Path | TextIO | None = None,
     ):
         """
         Initialize a Python transport.
@@ -497,11 +507,11 @@ class PythonStdioTransport(StdioTransport):
                        Defaults to True. When True, the subprocess remains active
                        after the connection context exits, allowing reuse in
                        subsequent connections.
-            log_file: Optional file-like object for subprocess stderr. Defaults
-                   to sys.stderr if not provided. When set, server errors will
-                   be written to the descriptor instead of appearing in the
-                   console. Passing arbitrary TextIO objects may cause deadlocks
-                   (see: https://github.com/jlowin/fastmcp/pull/1991#issuecomment-3367205480).
+            log_file: Optional path or file-like object where subprocess stderr will
+                   be written. Can be a Path or TextIO object. Defaults to sys.stderr
+                   if not provided. When a Path is provided, the file will be created
+                   if it doesn't exist, or appended to if it does. When set, server
+                   errors will be written to this file instead of appearing in the console.
         """
         script_path = Path(script_path).resolve()
         if not script_path.is_file():
@@ -534,7 +544,7 @@ class FastMCPStdioTransport(StdioTransport):
         env: dict[str, str] | None = None,
         cwd: str | None = None,
         keep_alive: bool | None = None,
-        log_file: TextIO | None = None,
+        log_file: Path | TextIO | None = None,
     ):
         script_path = Path(script_path).resolve()
         if not script_path.is_file():
@@ -564,7 +574,7 @@ class NodeStdioTransport(StdioTransport):
         cwd: str | None = None,
         node_cmd: str = "node",
         keep_alive: bool | None = None,
-        log_file: TextIO | None = None,
+        log_file: Path | TextIO | None = None,
     ):
         """
         Initialize a Node transport.
@@ -579,11 +589,11 @@ class NodeStdioTransport(StdioTransport):
                        Defaults to True. When True, the subprocess remains active
                        after the connection context exits, allowing reuse in
                        subsequent connections.
-            log_file: Optional file-like object for subprocess stderr. Defaults
-                   to sys.stderr if not provided. When set, server errors will
-                   be written to the descriptor instead of appearing in the
-                   console. Passing arbitrary TextIO objects may cause deadlocks
-                   (see: https://github.com/jlowin/fastmcp/pull/1991#issuecomment-3367205480).
+            log_file: Optional path or file-like object where subprocess stderr will
+                   be written. Can be a Path or TextIO object. Defaults to sys.stderr
+                   if not provided. When a Path is provided, the file will be created
+                   if it doesn't exist, or appended to if it does. When set, server
+                   errors will be written to this file instead of appearing in the console.
         """
         script_path = Path(script_path).resolve()
         if not script_path.is_file():
