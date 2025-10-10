@@ -582,7 +582,7 @@ class FastMCP(Generic[LifespanResultT]):
                 # Tool from mounted server - already filtered, include as-is
                 mcp_tools.append(tool)
             else:
-                # Local tool or proxy tool - apply this server's tag filtering
+                # Local tool or proxy tool - apply this server's filtering
                 if self._should_enable_component(tool):
                     mcp_tools.append(tool)
 
