@@ -18,7 +18,7 @@ services:
       - --import-realm
 
     volumes:
-      - ./keycloak/realm-fastmcp.json:/opt/keycloak/data/import/realm-export.json
+      - ./realm-fastmcp.json:/opt/keycloak/data/import/realm-export.json
 
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health/ready"]
