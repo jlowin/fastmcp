@@ -6,8 +6,12 @@ This test suite verifies:
 3. Consent flow redirects correctly through /consent endpoint
 4. CSRF protection works with cookies
 5. State persists across storage backends
+6. Security headers (X-Frame-Options) are set correctly
+7. Cookie signing and tampering detection
+8. Auto-approve behavior with valid cookies
 """
 
+import re
 import secrets
 import time
 from urllib.parse import parse_qs, urlparse
@@ -42,6 +46,20 @@ class MockTokenVerifier(TokenVerifier):
         )
 
 
+class _Verifier(TokenVerifier):
+    """Minimal token verifier for security tests."""
+
+    def __init__(self):
+        self.required_scopes = ["read"]
+
+    async def verify_token(self, token: str):
+        from fastmcp.server.auth.auth import AccessToken
+
+        return AccessToken(
+            token=token, client_id="c", scopes=self.required_scopes, expires_at=None
+        )
+
+
 @pytest.fixture
 def storage():
     """Create a fresh in-memory storage for each test."""
@@ -61,6 +79,57 @@ def oauth_proxy_with_storage(storage):
         redirect_path="/auth/callback",
         client_storage=storage,  # Use our test storage
     )
+
+
+@pytest.fixture
+def oauth_proxy_https():
+    """OAuthProxy configured with HTTPS base_url for __Host- cookies."""
+    return OAuthProxy(
+        upstream_authorization_endpoint="https://github.com/login/oauth/authorize",
+        upstream_token_endpoint="https://github.com/login/oauth/access_token",
+        upstream_client_id="client-id",
+        upstream_client_secret="client-secret",
+        token_verifier=_Verifier(),
+        base_url="https://myserver.example",
+        client_storage=MemoryStore(),
+    )
+
+
+async def _start_flow(
+    proxy: OAuthProxy, client_id: str, redirect: str
+) -> tuple[str, str]:
+    """Register client and start auth; returns (txn_id, consent_url)."""
+    await proxy.register_client(
+        OAuthClientInformationFull(
+            client_id=client_id,
+            client_secret="s",
+            redirect_uris=[AnyUrl(redirect)],
+        )
+    )
+    params = AuthorizationParams(
+        redirect_uri=AnyUrl(redirect),
+        redirect_uri_provided_explicitly=True,
+        state="client-state-xyz",
+        code_challenge="challenge",
+        code_challenge_method="S256",
+        scopes=["read"],
+    )
+    consent_url = await proxy.authorize(
+        OAuthClientInformationFull(
+            client_id=client_id,
+            client_secret="s",
+            redirect_uris=[AnyUrl(redirect)],
+        ),
+        params,
+    )
+    qs = parse_qs(urlparse(consent_url).query)
+    return qs["txn_id"][0], consent_url
+
+
+def _extract_csrf(html: str) -> str | None:
+    """Extract CSRF token from HTML form."""
+    m = re.search(r"name=\"csrf_token\"\s+value=\"([^\"]+)\"", html)
+    return m.group(1) if m else None
 
 
 class TestServerSideStorage:
@@ -465,3 +534,124 @@ class TestStoragePersistence:
         assert txn_model.client_state == "pydantic-state"
         assert txn_model.code_challenge == "pydantic-challenge"
         assert txn_model.scopes == ["read", "write"]
+
+
+class TestConsentSecurity:
+    """Tests for consent page security features."""
+
+    async def test_consent_sets_xfo_header(self, oauth_proxy_https):
+        """Verify consent page sets X-Frame-Options header to prevent clickjacking."""
+        txn_id, _ = await _start_flow(
+            oauth_proxy_https, "client-a", "http://localhost:5001/callback"
+        )
+        app = Starlette(routes=oauth_proxy_https.get_routes())
+        with TestClient(app) as c:
+            r = c.get(f"/consent?txn_id={txn_id}")
+            assert r.status_code == 200
+            assert r.headers.get("X-Frame-Options") == "DENY"
+
+    async def test_deny_sets_cookie_and_redirects_with_error(self, oauth_proxy_https):
+        """Verify denying consent sets signed cookie and redirects with error."""
+        client_redirect = "http://localhost:5002/callback"
+        txn_id, _ = await _start_flow(oauth_proxy_https, "client-b", client_redirect)
+        app = Starlette(routes=oauth_proxy_https.get_routes())
+        with TestClient(app) as c:
+            consent = c.get(f"/consent?txn_id={txn_id}")
+            csrf = _extract_csrf(consent.text)
+            assert csrf
+            # Persist consent page cookies on client instance to avoid per-request deprecation
+            for k, v in consent.cookies.items():
+                c.cookies.set(k, v)
+            r = c.post(
+                "/consent/submit",
+                data={"action": "deny", "txn_id": txn_id, "csrf_token": csrf},
+                follow_redirects=False,
+            )
+            assert r.status_code in (302, 303)
+            loc = r.headers.get("location", "")
+            parsed = urlparse(loc)
+            assert parsed.scheme == "http" and parsed.netloc.startswith("localhost")
+            q = parse_qs(parsed.query)
+            assert q.get("error") == ["access_denied"]
+            assert q.get("state") == ["client-state-xyz"]
+            # Signed denied cookie should be set
+            assert "MCP_DENIED_CLIENTS" in ";\n".join(
+                r.headers.get("set-cookie", "").splitlines()
+            )
+
+    async def test_approve_sets_cookie_and_redirects_to_upstream(
+        self, oauth_proxy_https
+    ):
+        """Verify approving consent sets signed cookie and redirects to upstream."""
+        txn_id, _ = await _start_flow(
+            oauth_proxy_https, "client-c", "http://localhost:5003/callback"
+        )
+        app = Starlette(routes=oauth_proxy_https.get_routes())
+        with TestClient(app) as c:
+            consent = c.get(f"/consent?txn_id={txn_id}")
+            csrf = _extract_csrf(consent.text)
+            assert csrf
+            for k, v in consent.cookies.items():
+                c.cookies.set(k, v)
+            r = c.post(
+                "/consent/submit",
+                data={"action": "approve", "txn_id": txn_id, "csrf_token": csrf},
+                follow_redirects=False,
+            )
+            assert r.status_code in (302, 303)
+            loc = r.headers.get("location", "")
+            assert loc.startswith("https://github.com/login/oauth/authorize")
+            assert f"state={txn_id}" in loc
+            # Signed approved cookie should be set with __Host- prefix for HTTPS
+            set_cookie = ";\n".join(r.headers.get("set-cookie", "").splitlines())
+            assert "__Host-MCP_APPROVED_CLIENTS" in set_cookie
+
+    async def test_tampered_cookie_is_ignored(self, oauth_proxy_https):
+        """Verify tampered approval cookie is ignored and consent page shown."""
+        txn_id, _ = await _start_flow(
+            oauth_proxy_https, "client-d", "http://localhost:5004/callback"
+        )
+        app = Starlette(routes=oauth_proxy_https.get_routes())
+        with TestClient(app) as c:
+            # Create a tampered cookie (invalid signature)
+            # Value format: payload.signature; using wrong signature to force failure
+            tampered_value = "W10=.invalidsig"
+            c.cookies.set("__Host-MCP_APPROVED_CLIENTS", tampered_value)
+            r = c.get(f"/consent?txn_id={txn_id}", follow_redirects=False)
+            # Should not auto-redirect to upstream; should show consent page
+            assert r.status_code == 200
+            # httpx returns a URL object; compare path or stringify
+            assert urlparse(str(r.request.url)).path == "/consent"
+
+    async def test_autoapprove_cookie_skips_consent(self, oauth_proxy_https):
+        """Verify valid approval cookie auto-approves and redirects to upstream."""
+        client_id = "client-e"
+        redirect = "http://localhost:5005/callback"
+        txn_id, _ = await _start_flow(oauth_proxy_https, client_id, redirect)
+        app = Starlette(routes=oauth_proxy_https.get_routes())
+        with TestClient(app) as c:
+            # Approve once to set approved cookie
+            consent = c.get(f"/consent?txn_id={txn_id}")
+            csrf = _extract_csrf(consent.text)
+            for k, v in consent.cookies.items():
+                c.cookies.set(k, v)
+            r = c.post(
+                "/consent/submit",
+                data={"action": "approve", "txn_id": txn_id, "csrf_token": csrf},
+                follow_redirects=False,
+            )
+            # Extract approved cookie value
+            set_cookie = ";\n".join(r.headers.get("set-cookie", "").splitlines())
+            m = re.search(r"__Host-MCP_APPROVED_CLIENTS=([^;]+)", set_cookie)
+            assert m, "approved cookie should be set"
+            approved_cookie = m.group(1)
+
+            # Start a new flow for the same client and redirect
+            new_txn, _ = await _start_flow(oauth_proxy_https, client_id, redirect)
+            # Should auto-redirect to upstream when visiting consent due to cookie
+            c.cookies.set("__Host-MCP_APPROVED_CLIENTS", approved_cookie)
+            r2 = c.get(f"/consent?txn_id={new_txn}", follow_redirects=False)
+            assert r2.status_code in (302, 303)
+            assert r2.headers.get("location", "").startswith(
+                "https://github.com/login/oauth/authorize"
+            )
