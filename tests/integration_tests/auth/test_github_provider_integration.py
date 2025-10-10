@@ -265,7 +265,7 @@ async def test_github_oauth_authorization_redirect(github_server: str):
 
         # Step 3: Visit consent page to get CSRF token
         consent_response = await http_client.get(
-            f"{base_url}{consent_location}", follow_redirects=False
+            consent_location, follow_redirects=False
         )
         assert consent_response.status_code == 200
 
