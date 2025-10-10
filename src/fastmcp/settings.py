@@ -170,7 +170,7 @@ class Settings(BaseSettings):
                 """
             )
         ),
-    ] = False
+    ] = True
 
     deprecation_warnings: Annotated[
         bool,
