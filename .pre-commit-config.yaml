@@ -11,7 +11,6 @@ repos:
     hooks:
       - id: prettier
         types_or: [yaml, json5]
-        language_version: "22.17.0"
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     # Ruff version.
