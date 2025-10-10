@@ -105,34 +105,14 @@ async def inspect_fastmcp_v2(mcp: FastMCP[Any]) -> FastMCPInfo:
         FastMCPInfo dataclass containing the extracted information
     """
     # Get all components and apply server-level filtering
-    all_tools = await mcp.get_tools()
-    all_prompts = await mcp.get_prompts()
-    all_resources = await mcp.get_resources()
-    all_templates = await mcp.get_resource_templates()
-
-    # Filter components based on server's include_tags/exclude_tags
-    tools_list = [
-        tool for tool in all_tools.values() if mcp._should_enable_component(tool)
-    ]
-    prompts_list = [
-        prompt
-        for prompt in all_prompts.values()
-        if mcp._should_enable_component(prompt)
-    ]
-    resources_list = [
-        resource
-        for resource in all_resources.values()
-        if mcp._should_enable_component(resource)
-    ]
-    templates_list = [
-        template
-        for template in all_templates.values()
-        if mcp._should_enable_component(template)
-    ]
+    filtered_tools = await mcp._list_tools_middleware()
+    filtered_prompts = await mcp._list_prompts_middleware()
+    filtered_resources = await mcp._list_resources_middleware()
+    filtered_templates = await mcp._list_resource_templates_middleware()
 
     # Extract detailed tool information
     tool_infos = []
-    for tool in tools_list:
+    for tool in filtered_tools:
         # Convert to MCP tool to get input schema
         mcp_tool = tool.to_mcp_tool(name=tool.key)
         tool_infos.append(
@@ -152,7 +132,7 @@ async def inspect_fastmcp_v2(mcp: FastMCP[Any]) -> FastMCPInfo:
 
     # Extract detailed prompt information
     prompt_infos = []
-    for prompt in prompts_list:
+    for prompt in filtered_prompts:
         prompt_infos.append(
             PromptInfo(
                 key=prompt.key,
@@ -170,7 +150,7 @@ async def inspect_fastmcp_v2(mcp: FastMCP[Any]) -> FastMCPInfo:
 
     # Extract detailed resource information
     resource_infos = []
-    for resource in resources_list:
+    for resource in filtered_resources:
         resource_infos.append(
             ResourceInfo(
                 key=resource.key,
@@ -190,7 +170,7 @@ async def inspect_fastmcp_v2(mcp: FastMCP[Any]) -> FastMCPInfo:
 
     # Extract detailed template information
     template_infos = []
-    for template in templates_list:
+    for template in filtered_templates:
         template_infos.append(
             TemplateInfo(
                 key=template.key,
