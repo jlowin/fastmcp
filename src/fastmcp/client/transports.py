@@ -828,8 +828,6 @@ class FastMCPTransport(ClientTransport):
                             **session_kwargs,
                         ) as client_session:
                             yield client_session
-                    except Exception as e:
-                        raise e
                     finally:
                         tg.cancel_scope.cancel()
 
