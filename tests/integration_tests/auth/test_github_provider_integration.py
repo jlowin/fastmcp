@@ -84,6 +84,8 @@ def create_github_server_with_mock_callback(
         import secrets
         import time
 
+        from fastmcp.server.auth.oauth_proxy import ClientCode
+
         # Generate a fake authorization code
         fake_code = secrets.token_urlsafe(32)
 
@@ -94,17 +96,21 @@ def create_github_server_with_mock_callback(
             "expires_in": 3600,
         }
 
-        # Store the mock tokens in the proxy's client codes
-        auth._client_codes[fake_code] = {
-            "client_id": client.client_id,
-            "redirect_uri": str(params.redirect_uri),
-            "code_challenge": params.code_challenge,
-            "code_challenge_method": getattr(params, "code_challenge_method", "S256"),
-            "scopes": params.scopes or [],
-            "idp_tokens": mock_tokens,
-            "expires_at": int(time.time() + 300),  # 5 minutes
-            "created_at": time.time(),
-        }
+        # Store the mock tokens in the proxy's code storage
+        await auth._code_store.put(
+            key=fake_code,
+            value=ClientCode(
+                code=fake_code,
+                client_id=client.client_id,
+                redirect_uri=str(params.redirect_uri),
+                code_challenge=params.code_challenge,
+                code_challenge_method=getattr(params, "code_challenge_method", "S256"),
+                scopes=params.scopes or [],
+                idp_tokens=mock_tokens,
+                expires_at=int(time.time() + 300),  # 5 minutes
+                created_at=time.time(),
+            ),
+        )
 
         # Return the redirect to the client's callback with the fake code
         callback_params = {
