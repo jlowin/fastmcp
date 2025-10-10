@@ -100,9 +100,6 @@ async def default_lifespan(server: FastMCP[LifespanResultT]) -> AsyncIterator[An
 
     Args:
         server: The server instance this lifespan is managing
-
-    Returns:
-        An empty context object
     """
     yield {}
 
@@ -116,8 +113,14 @@ def _lifespan_proxy(
     async def wrap(
         low_level_server: LowLevelServer[LifespanResultT],
     ) -> AsyncIterator[LifespanResultT]:
-        if isinstance(fastmcp_server._lifespan_result, NotSetT):
-            raise RuntimeError("FastMCP server has no lifespan result")
+        if fastmcp_server._lifespan == default_lifespan:
+            yield {}
+            return
+
+        if not fastmcp_server._lifespan_result_set:
+            raise RuntimeError(
+                "FastMCP server has a lifespan but no lifespan result is set, which means the server's context manager was not entered."
+            )
 
         yield fastmcp_server._lifespan_result
 
@@ -184,8 +187,9 @@ class FastMCP(Generic[LifespanResultT]):
         )
         self._tool_serializer = tool_serializer
 
-        self._lifespan = lifespan or default_lifespan
-        self._lifespan_result: LifespanResultT | NotSetT = NotSet
+        self._lifespan: LifespanCallable[LifespanResultT] = lifespan or default_lifespan
+        self._lifespan_result: LifespanResultT | None = None
+        self._lifespan_result_set = False
 
         # Generate random ID if no name provided
         self._mcp_server = LowLevelServer[LifespanResultT](
@@ -330,12 +334,13 @@ class FastMCP(Generic[LifespanResultT]):
 
     @asynccontextmanager
     async def _lifespan_manager(self) -> AsyncIterator[None]:
-        if not isinstance(self._lifespan_result, NotSetT):
+        if self._lifespan_result_set:
             yield
             return
 
         async with self._lifespan(self) as lifespan_result:
             self._lifespan_result = lifespan_result
+            self._lifespan_result_set = True
 
             async with AsyncExitStack[bool | None]() as stack:
                 for server in self._mounted_servers:
@@ -345,7 +350,8 @@ class FastMCP(Generic[LifespanResultT]):
 
                 yield
 
-        self._lifespan_result = NotSet
+        self._lifespan_result_set = False
+        self._lifespan_result = None
 
     async def run_async(
         self,
