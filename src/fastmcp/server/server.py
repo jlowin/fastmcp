@@ -191,7 +191,7 @@ class FastMCP(Generic[LifespanResultT]):
         self._mcp_server = LowLevelServer[LifespanResultT](
             fastmcp=self,
             name=name or self.generate_name(),
-            version=version,
+            version=version or fastmcp.__version__,
             instructions=instructions,
             lifespan=_lifespan_proxy(fastmcp_server=self),
         )
