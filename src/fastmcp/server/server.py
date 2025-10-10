@@ -721,7 +721,7 @@ class FastMCP(Generic[LifespanResultT]):
                 # Template from mounted server - already filtered, include as-is
                 mcp_templates.append(template)
             else:
-                # Local template or proxy template - apply this server's tag filtering
+                # Local template or proxy template - apply this server's filtering
                 if self._should_enable_component(template):
                     mcp_templates.append(template)
 
