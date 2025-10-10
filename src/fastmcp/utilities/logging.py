@@ -56,7 +56,6 @@ def configure_logging(
     # Configure the handler for normal logs
     handler = RichHandler(
         console=Console(stderr=True),
-        rich_tracebacks=enable_rich_tracebacks,
         **rich_kwargs,
     )
     handler.setFormatter(formatter)
