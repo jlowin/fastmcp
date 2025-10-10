@@ -574,14 +574,17 @@ class FastMCP(Generic[LifespanResultT]):
 
         mcp_tools: list[Tool] = []
         for tool in tools:
-            # Only apply parent's tag filtering to local tools
-            # Mounted server tools are already filtered by their own rules
-            if tool.key in local_tool_keys:
-                if self._should_enable_component(tool):
-                    mcp_tools.append(tool)
-            else:
+            # Only skip filtering if:
+            # 1. This server has mounted servers, AND
+            # 2. The tool is from a mounted server (not in local tools)
+            # For proxy servers with no mounted servers, all tools should be filtered
+            if self._mounted_servers and tool.key not in local_tool_keys:
                 # Tool from mounted server - already filtered, include as-is
                 mcp_tools.append(tool)
+            else:
+                # Local tool or proxy tool - apply this server's tag filtering
+                if self._should_enable_component(tool):
+                    mcp_tools.append(tool)
 
         return mcp_tools
 
@@ -639,14 +642,17 @@ class FastMCP(Generic[LifespanResultT]):
 
         mcp_resources: list[Resource] = []
         for resource in resources:
-            # Only apply parent's tag filtering to local resources
-            # Mounted server resources are already filtered by their own rules
-            if resource.key in local_resource_keys:
-                if self._should_enable_component(resource):
-                    mcp_resources.append(resource)
-            else:
+            # Only skip filtering if:
+            # 1. This server has mounted servers, AND
+            # 2. The resource is from a mounted server (not in local resources)
+            # For proxy servers with no mounted servers, all resources should be filtered
+            if self._mounted_servers and resource.key not in local_resource_keys:
                 # Resource from mounted server - already filtered, include as-is
                 mcp_resources.append(resource)
+            else:
+                # Local resource or proxy resource - apply this server's tag filtering
+                if self._should_enable_component(resource):
+                    mcp_resources.append(resource)
 
         return mcp_resources
 
@@ -707,14 +713,17 @@ class FastMCP(Generic[LifespanResultT]):
 
         mcp_templates: list[ResourceTemplate] = []
         for template in templates:
-            # Only apply parent's tag filtering to local templates
-            # Mounted server templates are already filtered by their own rules
-            if template.key in local_template_keys:
-                if self._should_enable_component(template):
-                    mcp_templates.append(template)
-            else:
+            # Only skip filtering if:
+            # 1. This server has mounted servers, AND
+            # 2. The template is from a mounted server (not in local templates)
+            # For proxy servers with no mounted servers, all templates should be filtered
+            if self._mounted_servers and template.key not in local_template_keys:
                 # Template from mounted server - already filtered, include as-is
                 mcp_templates.append(template)
+            else:
+                # Local template or proxy template - apply this server's tag filtering
+                if self._should_enable_component(template):
+                    mcp_templates.append(template)
 
         return mcp_templates
 
@@ -773,14 +782,17 @@ class FastMCP(Generic[LifespanResultT]):
 
         mcp_prompts: list[Prompt] = []
         for prompt in prompts:
-            # Only apply parent's tag filtering to local prompts
-            # Mounted server prompts are already filtered by their own rules
-            if prompt.key in local_prompt_keys:
-                if self._should_enable_component(prompt):
-                    mcp_prompts.append(prompt)
-            else:
+            # Only skip filtering if:
+            # 1. This server has mounted servers, AND
+            # 2. The prompt is from a mounted server (not in local prompts)
+            # For proxy servers with no mounted servers, all prompts should be filtered
+            if self._mounted_servers and prompt.key not in local_prompt_keys:
                 # Prompt from mounted server - already filtered, include as-is
                 mcp_prompts.append(prompt)
+            else:
+                # Local prompt or proxy prompt - apply this server's tag filtering
+                if self._should_enable_component(prompt):
+                    mcp_prompts.append(prompt)
 
         return mcp_prompts
 
