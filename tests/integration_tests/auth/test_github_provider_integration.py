@@ -11,6 +11,7 @@ with the following configuration:
 """
 
 import os
+import re
 from collections.abc import Generator
 from urllib.parse import parse_qs, urlparse
 
@@ -210,11 +211,12 @@ async def test_github_oauth_credentials_available():
 
 
 async def test_github_oauth_authorization_redirect(github_server: str):
-    """Test that GitHub OAuth authorization redirects to GitHub correctly.
+    """Test that GitHub OAuth authorization redirects to GitHub correctly through consent flow.
 
     Since HeadlessOAuth can't handle real GitHub redirects, we test that:
     1. DCR client registration works
-    2. Authorization endpoint redirects to GitHub with correct parameters
+    2. Authorization endpoint redirects to consent page
+    3. Consent approval redirects to GitHub with correct parameters
     """
     # Extract base URL
     parsed = urlparse(github_server)
@@ -241,7 +243,7 @@ async def test_github_oauth_authorization_redirect(github_server: str):
         client_id = client_info["client_id"]
         assert client_id is not None
 
-        # Step 2: Test authorization endpoint redirects to GitHub
+        # Step 2: Test authorization endpoint redirects to consent page
         auth_url = f"{base_url}/authorize"
         auth_params = {
             "response_type": "code",
@@ -256,9 +258,44 @@ async def test_github_oauth_authorization_redirect(github_server: str):
             auth_url, params=auth_params, follow_redirects=False
         )
 
-        # Should redirect to GitHub
+        # Should redirect to consent page (confused deputy protection)
         assert auth_response.status_code == 302
-        redirect_location = auth_response.headers["location"]
+        consent_location = auth_response.headers["location"]
+        assert "/consent" in consent_location
+
+        # Step 3: Visit consent page to get CSRF token
+        consent_response = await http_client.get(
+            f"{base_url}{consent_location}", follow_redirects=False
+        )
+        assert consent_response.status_code == 200
+
+        # Extract CSRF token from consent page HTML
+        csrf_match = re.search(
+            r'name="csrf_token"\s+value="([^"]+)"', consent_response.text
+        )
+        assert csrf_match, "CSRF token not found in consent page"
+        csrf_token = csrf_match.group(1)
+
+        # Extract txn_id from consent URL
+        txn_id_match = re.search(r"txn_id=([^&]+)", consent_location)
+        assert txn_id_match, "txn_id not found in consent URL"
+        txn_id = txn_id_match.group(1)
+
+        # Step 4: Approve consent
+        approve_response = await http_client.post(
+            f"{base_url}/consent/submit",
+            data={
+                "action": "approve",
+                "txn_id": txn_id,
+                "csrf_token": csrf_token,
+            },
+            cookies=consent_response.cookies,
+            follow_redirects=False,
+        )
+
+        # Should redirect to GitHub
+        assert approve_response.status_code in (302, 303)
+        redirect_location = approve_response.headers["location"]
 
         # Parse redirect URL - should be GitHub
         redirect_parsed = urlparse(redirect_location)
