@@ -624,6 +624,156 @@ class TestInspectWithTagFiltering:
         assert len(data["tools"]) == 1
         assert data["tools"][0]["name"] == "api_tool"
 
+    async def test_inspect_mounted_servers_with_tag_filtering(self):
+        """Test that inspect respects tag filtering in mounted servers."""
+        # Create child servers with different tag filtering rules
+        child1 = FastMCP("child1", include_tags={"admin"})
+
+        @child1.tool(tags={"admin"})
+        def child1_admin_tool() -> str:
+            """Child1 Admin Tool."""
+            return "admin"
+
+        @child1.tool(tags={"public"})
+        def child1_public_tool() -> str:
+            """Child1 Public Tool (should be hidden)."""
+            return "public"
+
+        child2 = FastMCP("child2", exclude_tags={"internal"})
+
+        @child2.tool(tags={"public"})
+        def child2_public_tool() -> str:
+            """Child2 Public Tool."""
+            return "public"
+
+        @child2.tool(tags={"internal"})
+        def child2_internal_tool() -> str:
+            """Child2 Internal Tool (should be hidden)."""
+            return "internal"
+
+        # Create parent server with its own filtering
+        parent = FastMCP("parent", include_tags={"show"})
+
+        @parent.tool(tags={"show"})
+        def parent_show_tool() -> str:
+            """Parent Show Tool."""
+            return "show"
+
+        @parent.tool()
+        def parent_hide_tool() -> str:
+            """Parent Hide Tool (should be hidden)."""
+            return "hide"
+
+        # Mount children
+        parent.mount(child1, prefix="c1")
+        parent.mount(child2, prefix="c2")
+
+        # Inspect the parent server
+        info = await inspect_fastmcp(parent)
+
+        # Verify parent's filtering is applied to local tools only
+        parent_tool_keys = [t.key for t in info.tools if not t.key.startswith("c1_") and not t.key.startswith("c2_")]
+        assert "parent_show_tool" in parent_tool_keys
+        assert "parent_hide_tool" not in parent_tool_keys
+
+        # Verify child1's filtering is preserved (only admin tools)
+        child1_tool_keys = [t.key for t in info.tools if t.key.startswith("c1_")]
+        assert "c1_child1_admin_tool" in child1_tool_keys
+        assert "c1_child1_public_tool" not in child1_tool_keys
+
+        # Verify child2's filtering is preserved (exclude internal tools)
+        child2_tool_keys = [t.key for t in info.tools if t.key.startswith("c2_")]
+        assert "c2_child2_public_tool" in child2_tool_keys
+        assert "c2_child2_internal_tool" not in child2_tool_keys
+
+    async def test_inspect_mounted_servers_with_resources_filtering(self):
+        """Test that inspect respects tag filtering for resources in mounted servers."""
+        # Create child server with resource filtering
+        child = FastMCP("child", include_tags={"public"})
+
+        @child.resource("resource://child/public", tags={"public"})
+        def child_public_resource() -> str:
+            """Child Public Resource."""
+            return "public"
+
+        @child.resource("resource://child/private", tags={"private"})
+        def child_private_resource() -> str:
+            """Child Private Resource (should be hidden)."""
+            return "private"
+
+        # Create parent server with its own filtering
+        parent = FastMCP("parent", include_tags={"show"})
+
+        @parent.resource("resource://parent/show", tags={"show"})
+        def parent_show_resource() -> str:
+            """Parent Show Resource."""
+            return "show"
+
+        @parent.resource("resource://parent/hide")
+        def parent_hide_resource() -> str:
+            """Parent Hide Resource (should be hidden)."""
+            return "hide"
+
+        # Mount child
+        parent.mount(child, prefix="c")
+
+        # Inspect the parent server
+        info = await inspect_fastmcp(parent)
+
+        # Verify parent's resources
+        parent_resource_uris = [r.uri for r in info.resources if not r.uri.startswith("resource://c/")]
+        assert "resource://parent/show" in parent_resource_uris
+        assert "resource://parent/hide" not in parent_resource_uris
+
+        # Verify child's filtering is preserved
+        child_resource_uris = [r.uri for r in info.resources if r.uri.startswith("resource://c/")]
+        assert "resource://c/child/public" in child_resource_uris
+        assert "resource://c/child/private" not in child_resource_uris
+
+    async def test_inspect_mounted_servers_with_prompts_filtering(self):
+        """Test that inspect respects tag filtering for prompts in mounted servers."""
+        # Create child server with prompt filtering
+        child = FastMCP("child", exclude_tags={"internal"})
+
+        @child.prompt(tags={"user"})
+        def child_user_prompt() -> list:
+            """Child User Prompt."""
+            return [{"role": "user", "content": "user"}]
+
+        @child.prompt(tags={"internal"})
+        def child_internal_prompt() -> list:
+            """Child Internal Prompt (should be hidden)."""
+            return [{"role": "user", "content": "internal"}]
+
+        # Create parent server with its own filtering
+        parent = FastMCP("parent", include_tags={"api"})
+
+        @parent.prompt(tags={"api"})
+        def parent_api_prompt() -> list:
+            """Parent API Prompt."""
+            return [{"role": "user", "content": "api"}]
+
+        @parent.prompt()
+        def parent_other_prompt() -> list:
+            """Parent Other Prompt (should be hidden)."""
+            return [{"role": "user", "content": "other"}]
+
+        # Mount child
+        parent.mount(child, prefix="c")
+
+        # Inspect the parent server
+        info = await inspect_fastmcp(parent)
+
+        # Verify parent's prompts
+        parent_prompt_keys = [p.key for p in info.prompts if not p.key.startswith("c_")]
+        assert "parent_api_prompt" in parent_prompt_keys
+        assert "parent_other_prompt" not in parent_prompt_keys
+
+        # Verify child's filtering is preserved
+        child_prompt_keys = [p.key for p in info.prompts if p.key.startswith("c_")]
+        assert "c_child_user_prompt" in child_prompt_keys
+        assert "c_child_internal_prompt" not in child_prompt_keys
+
 
 class TestFormatFunctions:
     """Tests for the formatting functions."""

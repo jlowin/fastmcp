@@ -560,13 +560,27 @@ class FastMCP(Generic[LifespanResultT]):
         context: MiddlewareContext[mcp.types.ListToolsRequest],
     ) -> list[Tool]:
         """
-        List all available tools
+        List all available tools.
+
+        Note: Mounted servers have already applied their own filtering via
+        _list_tools_middleware(), so we should NOT re-filter them with the
+        parent's tags. Only apply tag filtering to local tools.
         """
+        # Get all tools - this includes both local tools and filtered tools from mounted servers
         tools = await self._tool_manager.list_tools()  # type: ignore[reportPrivateUsage]
+
+        # Get the set of local tool keys (not from mounted servers)
+        local_tool_keys = set(self._tool_manager._tools.keys())
 
         mcp_tools: list[Tool] = []
         for tool in tools:
-            if self._should_enable_component(tool):
+            # Only apply parent's tag filtering to local tools
+            # Mounted server tools are already filtered by their own rules
+            if tool.key in local_tool_keys:
+                if self._should_enable_component(tool):
+                    mcp_tools.append(tool)
+            else:
+                # Tool from mounted server - already filtered, include as-is
                 mcp_tools.append(tool)
 
         return mcp_tools
@@ -611,13 +625,27 @@ class FastMCP(Generic[LifespanResultT]):
         context: MiddlewareContext[dict[str, Any]],
     ) -> list[Resource]:
         """
-        List all available resources
+        List all available resources.
+
+        Note: Mounted servers have already applied their own filtering via
+        _list_resources_middleware(), so we should NOT re-filter them with the
+        parent's tags. Only apply tag filtering to local resources.
         """
+        # Get all resources - this includes both local resources and filtered resources from mounted servers
         resources = await self._resource_manager.list_resources()  # type: ignore[reportPrivateUsage]
+
+        # Get the set of local resource keys (not from mounted servers)
+        local_resource_keys = set(self._resource_manager._resources.keys())
 
         mcp_resources: list[Resource] = []
         for resource in resources:
-            if self._should_enable_component(resource):
+            # Only apply parent's tag filtering to local resources
+            # Mounted server resources are already filtered by their own rules
+            if resource.key in local_resource_keys:
+                if self._should_enable_component(resource):
+                    mcp_resources.append(resource)
+            else:
+                # Resource from mounted server - already filtered, include as-is
                 mcp_resources.append(resource)
 
         return mcp_resources
@@ -665,13 +693,27 @@ class FastMCP(Generic[LifespanResultT]):
         context: MiddlewareContext[dict[str, Any]],
     ) -> list[ResourceTemplate]:
         """
-        List all available resource templates
+        List all available resource templates.
+
+        Note: Mounted servers have already applied their own filtering via
+        _list_resource_templates_middleware(), so we should NOT re-filter them with the
+        parent's tags. Only apply tag filtering to local templates.
         """
+        # Get all templates - this includes both local templates and filtered templates from mounted servers
         templates = await self._resource_manager.list_resource_templates()  # type: ignore[reportPrivateUsage]
+
+        # Get the set of local template keys (not from mounted servers)
+        local_template_keys = set(self._resource_manager._templates.keys())
 
         mcp_templates: list[ResourceTemplate] = []
         for template in templates:
-            if self._should_enable_component(template):
+            # Only apply parent's tag filtering to local templates
+            # Mounted server templates are already filtered by their own rules
+            if template.key in local_template_keys:
+                if self._should_enable_component(template):
+                    mcp_templates.append(template)
+            else:
+                # Template from mounted server - already filtered, include as-is
                 mcp_templates.append(template)
 
         return mcp_templates
@@ -717,13 +759,27 @@ class FastMCP(Generic[LifespanResultT]):
         context: MiddlewareContext[mcp.types.ListPromptsRequest],
     ) -> list[Prompt]:
         """
-        List all available prompts
+        List all available prompts.
+
+        Note: Mounted servers have already applied their own filtering via
+        _list_prompts_middleware(), so we should NOT re-filter them with the
+        parent's tags. Only apply tag filtering to local prompts.
         """
+        # Get all prompts - this includes both local prompts and filtered prompts from mounted servers
         prompts = await self._prompt_manager.list_prompts()  # type: ignore[reportPrivateUsage]
+
+        # Get the set of local prompt keys (not from mounted servers)
+        local_prompt_keys = set(self._prompt_manager._prompts.keys())
 
         mcp_prompts: list[Prompt] = []
         for prompt in prompts:
-            if self._should_enable_component(prompt):
+            # Only apply parent's tag filtering to local prompts
+            # Mounted server prompts are already filtered by their own rules
+            if prompt.key in local_prompt_keys:
+                if self._should_enable_component(prompt):
+                    mcp_prompts.append(prompt)
+            else:
+                # Prompt from mounted server - already filtered, include as-is
                 mcp_prompts.append(prompt)
 
         return mcp_prompts
