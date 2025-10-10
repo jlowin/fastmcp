@@ -790,7 +790,7 @@ class FastMCP(Generic[LifespanResultT]):
                 # Prompt from mounted server - already filtered, include as-is
                 mcp_prompts.append(prompt)
             else:
-                # Local prompt or proxy prompt - apply this server's tag filtering
+                # Local prompt or proxy prompt - apply this server's filtering
                 if self._should_enable_component(prompt):
                     mcp_prompts.append(prompt)
 
