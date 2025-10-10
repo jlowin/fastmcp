@@ -672,7 +672,11 @@ class TestInspectWithTagFiltering:
         info = await inspect_fastmcp(parent)
 
         # Verify parent's filtering is applied to local tools only
-        parent_tool_keys = [t.key for t in info.tools if not t.key.startswith("c1_") and not t.key.startswith("c2_")]
+        parent_tool_keys = [
+            t.key
+            for t in info.tools
+            if not t.key.startswith("c1_") and not t.key.startswith("c2_")
+        ]
         assert "parent_show_tool" in parent_tool_keys
         assert "parent_hide_tool" not in parent_tool_keys
 
@@ -721,12 +725,16 @@ class TestInspectWithTagFiltering:
         info = await inspect_fastmcp(parent)
 
         # Verify parent's resources
-        parent_resource_uris = [r.uri for r in info.resources if not r.uri.startswith("resource://c/")]
+        parent_resource_uris = [
+            r.uri for r in info.resources if not r.uri.startswith("resource://c/")
+        ]
         assert "resource://parent/show" in parent_resource_uris
         assert "resource://parent/hide" not in parent_resource_uris
 
         # Verify child's filtering is preserved
-        child_resource_uris = [r.uri for r in info.resources if r.uri.startswith("resource://c/")]
+        child_resource_uris = [
+            r.uri for r in info.resources if r.uri.startswith("resource://c/")
+        ]
         assert "resource://c/child/public" in child_resource_uris
         assert "resource://c/child/private" not in child_resource_uris
 
