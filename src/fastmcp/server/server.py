@@ -650,7 +650,7 @@ class FastMCP(Generic[LifespanResultT]):
                 # Resource from mounted server - already filtered, include as-is
                 mcp_resources.append(resource)
             else:
-                # Local resource or proxy resource - apply this server's tag filtering
+                # Local resource or proxy resource - apply this server's filtering
                 if self._should_enable_component(resource):
                     mcp_resources.append(resource)
 
