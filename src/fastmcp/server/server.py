@@ -739,6 +739,7 @@ class FastMCP(Generic[LifespanResultT]):
         ]
 
         # 2. Get from mounted servers with resource prefix handling
+        # Mounted servers apply their own filtering, but we also apply parent's filtering
         # Use a dict to implement "later wins" deduplication by key
         all_resources: dict[str, Resource] = {
             resource.key: resource for resource in filtered_local
@@ -748,6 +749,10 @@ class FastMCP(Generic[LifespanResultT]):
             try:
                 child_resources = await mounted.server._list_resources_middleware()
                 for resource in child_resources:
+                    # Apply parent server's filtering to mounted components
+                    if not self._should_enable_component(resource):
+                        continue
+
                     key = resource.key
                     if mounted.prefix:
                         key = add_resource_prefix(
@@ -826,6 +831,7 @@ class FastMCP(Generic[LifespanResultT]):
         ]
 
         # 2. Get from mounted servers with resource prefix handling
+        # Mounted servers apply their own filtering, but we also apply parent's filtering
         # Use a dict to implement "later wins" deduplication by key
         all_templates: dict[str, ResourceTemplate] = {
             template.key: template for template in filtered_local
@@ -837,6 +843,10 @@ class FastMCP(Generic[LifespanResultT]):
                     await mounted.server._list_resource_templates_middleware()
                 )
                 for template in child_templates:
+                    # Apply parent server's filtering to mounted components
+                    if not self._should_enable_component(template):
+                        continue
+
                     key = template.key
                     if mounted.prefix:
                         key = add_resource_prefix(
@@ -915,6 +925,7 @@ class FastMCP(Generic[LifespanResultT]):
         ]
 
         # 2. Get from mounted servers
+        # Mounted servers apply their own filtering, but we also apply parent's filtering
         # Use a dict to implement "later wins" deduplication by key
         all_prompts: dict[str, Prompt] = {
             prompt.key: prompt for prompt in filtered_local
@@ -924,6 +935,10 @@ class FastMCP(Generic[LifespanResultT]):
             try:
                 child_prompts = await mounted.server._list_prompts_middleware()
                 for prompt in child_prompts:
+                    # Apply parent server's filtering to mounted components
+                    if not self._should_enable_component(prompt):
+                        continue
+
                     key = prompt.key
                     if mounted.prefix:
                         key = f"{mounted.prefix}_{prompt.key}"
@@ -1007,6 +1022,12 @@ class FastMCP(Generic[LifespanResultT]):
                 try_name = tool_name[len(mounted.prefix) + 1 :]
 
             try:
+                # First, get the tool to check if parent's filter allows it
+                tool = await mounted.server._tool_manager.get_tool(try_name)
+                if not self._should_enable_component(tool):
+                    # Parent filter blocks this tool, continue searching
+                    continue
+
                 return await mounted.server._call_tool_middleware(
                     try_name, context.message.arguments or {}
                 )
@@ -1088,6 +1109,11 @@ class FastMCP(Generic[LifespanResultT]):
                 )
 
             try:
+                # First, get the resource to check if parent's filter allows it
+                resource = await mounted.server._resource_manager.get_resource(key)
+                if not self._should_enable_component(resource):
+                    # Parent filter blocks this resource, continue searching
+                    continue
                 result = await mounted.server._read_resource_middleware(key)
                 return result
             except NotFoundError:
@@ -1164,6 +1190,11 @@ class FastMCP(Generic[LifespanResultT]):
                 try_name = name[len(mounted.prefix) + 1 :]
 
             try:
+                # First, get the prompt to check if parent's filter allows it
+                prompt = await mounted.server._prompt_manager.get_prompt(try_name)
+                if not self._should_enable_component(prompt):
+                    # Parent filter blocks this prompt, continue searching
+                    continue
                 return await mounted.server._get_prompt_middleware(
                     try_name, context.message.arguments
                 )
