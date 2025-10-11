@@ -123,7 +123,7 @@ def run_server_in_process(
             elif attempt < 15:
                 time.sleep(0.1)
             else:
-                time.sleep(0.2)
+                time.sleep(2)
             attempt += 1
     else:
         raise RuntimeError(f"Server failed to start after {max_attempts} attempts")
