@@ -349,6 +349,7 @@
                           "python-sdk/fastmcp-server-auth-providers-in_memory",
                           "python-sdk/fastmcp-server-auth-providers-jwt",
                           "python-sdk/fastmcp-server-auth-providers-scalekit",
+                          "python-sdk/fastmcp-server-auth-providers-supabase",
                           "python-sdk/fastmcp-server-auth-providers-workos"
                         ]
                       },
@@ -429,9 +430,9 @@
                     ]
                   },
                   "python-sdk/fastmcp-utilities-openapi",
-                  "python-sdk/fastmcp-utilities-storage",
                   "python-sdk/fastmcp-utilities-tests",
-                  "python-sdk/fastmcp-utilities-types"
+                  "python-sdk/fastmcp-utilities-types",
+                  "python-sdk/fastmcp-utilities-ui"
                 ]
               }
             ]
