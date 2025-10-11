@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import inspect
+import logging
 import warnings
 import weakref
 from collections.abc import Generator, Mapping, Sequence
@@ -64,6 +65,36 @@ class LogData:
 
     msg: str
     extra: Mapping[str, Any] | None = None
+
+
+LogDestination = Literal["CLIENT", "CLIENT_AND_SERVER"]
+"""Destination for log messages sent via Context logging methods.
+
+- CLIENT: Send log message only to the MCP client (default behavior)
+- CLIENT_AND_SERVER: Send log message to both the MCP client and the server's Python logger
+"""
+
+
+def _map_mcp_to_python_level(mcp_level: LoggingLevel) -> int:
+    """Map MCP log levels to Python logging levels.
+
+    Args:
+        mcp_level: MCP logging level
+
+    Returns:
+        Python logging level constant
+    """
+    level_map = {
+        "debug": logging.DEBUG,
+        "info": logging.INFO,
+        "notice": logging.INFO,
+        "warning": logging.WARNING,
+        "error": logging.ERROR,
+        "critical": logging.CRITICAL,
+        "alert": logging.CRITICAL,
+        "emergency": logging.CRITICAL,
+    }
+    return level_map.get(mcp_level.lower(), logging.INFO)
 
 
 @contextmanager
@@ -213,6 +244,7 @@ class Context:
         level: LoggingLevel | None = None,
         logger_name: str | None = None,
         extra: Mapping[str, Any] | None = None,
+        log_to: LogDestination = "CLIENT",
     ) -> None:
         """Send a log message to the client.
 
@@ -222,9 +254,19 @@ class Context:
                 "alert", or "emergency". Default is "info".
             logger_name: Optional logger name
             extra: Optional mapping for additional arguments
+            log_to: Destination for the log message. "CLIENT" (default) sends only to the MCP client.
+                "CLIENT_AND_SERVER" sends to both the client and the server's Python logger.
         """
         if level is None:
             level = "info"
+
+        # Log to server first (if requested) to ensure it's captured even if client send fails
+        if log_to == "CLIENT_AND_SERVER":
+            server_logger = get_logger(logger_name or "server.context")
+            log_level = _map_mcp_to_python_level(level)
+            server_logger.log(log_level, message, extra=extra)
+
+        # Then send to client
         data = LogData(msg=message, extra=extra)
         await self.session.send_log_message(
             level=level,
@@ -302,10 +344,15 @@ class Context:
         message: str,
         logger_name: str | None = None,
         extra: Mapping[str, Any] | None = None,
+        log_to: LogDestination = "CLIENT",
     ) -> None:
         """Send a debug log message."""
         await self.log(
-            level="debug", message=message, logger_name=logger_name, extra=extra
+            level="debug",
+            message=message,
+            logger_name=logger_name,
+            extra=extra,
+            log_to=log_to,
         )
 
     async def info(
@@ -313,10 +360,15 @@ class Context:
         message: str,
         logger_name: str | None = None,
         extra: Mapping[str, Any] | None = None,
+        log_to: LogDestination = "CLIENT",
     ) -> None:
         """Send an info log message."""
         await self.log(
-            level="info", message=message, logger_name=logger_name, extra=extra
+            level="info",
+            message=message,
+            logger_name=logger_name,
+            extra=extra,
+            log_to=log_to,
         )
 
     async def warning(
@@ -324,10 +376,15 @@ class Context:
         message: str,
         logger_name: str | None = None,
         extra: Mapping[str, Any] | None = None,
+        log_to: LogDestination = "CLIENT",
     ) -> None:
         """Send a warning log message."""
         await self.log(
-            level="warning", message=message, logger_name=logger_name, extra=extra
+            level="warning",
+            message=message,
+            logger_name=logger_name,
+            extra=extra,
+            log_to=log_to,
         )
 
     async def error(
@@ -335,10 +392,15 @@ class Context:
         message: str,
         logger_name: str | None = None,
         extra: Mapping[str, Any] | None = None,
+        log_to: LogDestination = "CLIENT",
     ) -> None:
         """Send an error log message."""
         await self.log(
-            level="error", message=message, logger_name=logger_name, extra=extra
+            level="error",
+            message=message,
+            logger_name=logger_name,
+            extra=extra,
+            log_to=log_to,
         )
 
     async def list_roots(self) -> list[Root]:

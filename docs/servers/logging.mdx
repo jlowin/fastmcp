@@ -71,12 +71,68 @@ async def process_transaction(transaction_id: str, amount: float, ctx: Context):
     # ... processing logic ...
 ```
 
+## Logging to Both Client and Server
+
+By default, `ctx.log()` and its convenience methods (`debug`, `info`, `warning`, `error`) send messages **only to the MCP client**. To also capture these messages in your server's Python logs, use the `log_to` parameter with `"CLIENT_AND_SERVER"`:
+
+```python
+from fastmcp import FastMCP, Context
+
+mcp = FastMCP("MyServer")
+
+@mcp.tool
+async def process_data(data: dict, ctx: Context) -> str:
+    # Send to client only (default behavior)
+    await ctx.info("Starting processing")
+
+    # Send to both client AND server logs
+    await ctx.info(
+        "Critical operation starting",
+        log_to="CLIENT_AND_SERVER"
+    )
+
+    # Works with all log levels
+    await ctx.debug("Debug info", log_to="CLIENT_AND_SERVER")
+    await ctx.warning("Warning message", log_to="CLIENT_AND_SERVER")
+    await ctx.error("Error occurred", log_to="CLIENT_AND_SERVER")
+
+    return "done"
+```
+
+### When to Use `CLIENT_AND_SERVER`
+
+Use `log_to="CLIENT_AND_SERVER"` when you need:
+
+- **Server-side monitoring**: Integrate with centralized logging systems (e.g., ELK, Datadog, Splunk)
+- **Debugging without client access**: Investigate issues by examining server logs directly
+- **Audit trails**: Maintain server-side records of all operations for compliance
+- **Observability**: Connect with systems like OpenTelemetry for metrics and tracing
+- **Operational visibility**: Monitor what tools are doing in production environments
+
+### Log Routing
+
+When `log_to="CLIENT_AND_SERVER"` is used:
+
+1. **Server logs first**: Message is written to the server's Python logger before being sent to the client
+2. **Then client send**: Message is sent to the MCP client via the protocol
+3. **Failure safety**: Server logs capture the message even if client communication fails
+
+Server logs use the FastMCP logging system (`fastmcp.*` namespace) and respect your server's logging configuration. You can customize the logger name using the `logger_name` parameter:
+
+```python
+await ctx.info(
+    "Custom subsystem log",
+    logger_name="my_app.subsystem",
+    log_to="CLIENT_AND_SERVER"
+)
+```
+
 ## Logging Methods
 
 <Card icon="code" title="Context Logging Methods">
 <ResponseField name="ctx.debug" type="async method">
   Send debug-level messages for detailed execution information
-  
+
   <Expandable title="parameters">
     <ResponseField name="message" type="str">
       The debug message to send to the client
@@ -84,12 +140,15 @@ async def process_transaction(transaction_id: str, amount: float, ctx: Context):
     <ResponseField name="extra" type="dict | None" default="None">
       Optional dictionary for structured logging data
     </ResponseField>
+    <ResponseField name="log_to" type="Literal['CLIENT', 'CLIENT_AND_SERVER']" default="CLIENT">
+      Destination for the log message. "CLIENT" sends only to the MCP client. "CLIENT_AND_SERVER" sends to both the client and the server's Python logger.
+    </ResponseField>
   </Expandable>
 </ResponseField>
 
 <ResponseField name="ctx.info" type="async method">
   Send informational messages about normal execution
-  
+
   <Expandable title="parameters">
     <ResponseField name="message" type="str">
       The information message to send to the client
@@ -97,12 +156,15 @@ async def process_transaction(transaction_id: str, amount: float, ctx: Context):
     <ResponseField name="extra" type="dict | None" default="None">
       Optional dictionary for structured logging data
     </ResponseField>
+    <ResponseField name="log_to" type="Literal['CLIENT', 'CLIENT_AND_SERVER']" default="CLIENT">
+      Destination for the log message. "CLIENT" sends only to the MCP client. "CLIENT_AND_SERVER" sends to both the client and the server's Python logger.
+    </ResponseField>
   </Expandable>
 </ResponseField>
 
 <ResponseField name="ctx.warning" type="async method">
   Send warning messages for potential issues that didn't prevent execution
-  
+
   <Expandable title="parameters">
     <ResponseField name="message" type="str">
       The warning message to send to the client
@@ -110,12 +172,15 @@ async def process_transaction(transaction_id: str, amount: float, ctx: Context):
     <ResponseField name="extra" type="dict | None" default="None">
       Optional dictionary for structured logging data
     </ResponseField>
+    <ResponseField name="log_to" type="Literal['CLIENT', 'CLIENT_AND_SERVER']" default="CLIENT">
+      Destination for the log message. "CLIENT" sends only to the MCP client. "CLIENT_AND_SERVER" sends to both the client and the server's Python logger.
+    </ResponseField>
   </Expandable>
 </ResponseField>
 
 <ResponseField name="ctx.error" type="async method">
   Send error messages for problems that occurred during execution
-  
+
   <Expandable title="parameters">
     <ResponseField name="message" type="str">
       The error message to send to the client
@@ -123,26 +188,32 @@ async def process_transaction(transaction_id: str, amount: float, ctx: Context):
     <ResponseField name="extra" type="dict | None" default="None">
       Optional dictionary for structured logging data
     </ResponseField>
+    <ResponseField name="log_to" type="Literal['CLIENT', 'CLIENT_AND_SERVER']" default="CLIENT">
+      Destination for the log message. "CLIENT" sends only to the MCP client. "CLIENT_AND_SERVER" sends to both the client and the server's Python logger.
+    </ResponseField>
   </Expandable>
 </ResponseField>
 
 <ResponseField name="ctx.log" type="async method">
   Generic logging method with custom level and logger name
-  
+
   <Expandable title="parameters">
     <ResponseField name="level" type="Literal['debug', 'info', 'warning', 'error']">
       The log level for the message
     </ResponseField>
-    
+
     <ResponseField name="message" type="str">
       The message to send to the client
     </ResponseField>
-    
+
     <ResponseField name="logger_name" type="str | None" default="None">
       Optional custom logger name for categorizing messages
     </ResponseField>
     <ResponseField name="extra" type="dict | None" default="None">
       Optional dictionary for structured logging data
+    </ResponseField>
+    <ResponseField name="log_to" type="Literal['CLIENT', 'CLIENT_AND_SERVER']" default="CLIENT">
+      Destination for the log message. "CLIENT" sends only to the MCP client. "CLIENT_AND_SERVER" sends to both the client and the server's Python logger.
     </ResponseField>
   </Expandable>
 </ResponseField>
