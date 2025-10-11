@@ -1,0 +1,95 @@
+{
+  "realm": "fastmcp",
+  "displayName": "FastMCP Realm",
+  "enabled": true,
+  "keycloakVersion": "26.3.5",
+  "registrationAllowed": true,
+  "components": {
+    "org.keycloak.services.clientregistration.policy.ClientRegistrationPolicy": [
+      {
+        "name": "Trusted Hosts",
+        "providerId": "trusted-hosts",
+        "subType": "anonymous",
+        "subComponents": {},
+        "config": {
+          "host-sending-registration-request-must-match": [
+            "true"
+          ],
+          "trusted-hosts": [
+            "localhost",
+            "172.17.0.1",
+            "172.18.0.1"
+          ],
+          "client-uris-must-match": [
+            "true"
+          ]
+        }
+      }
+    ]
+  },
+  "users": [
+    {
+      "username": "testuser",
+      "email": "testuser@example.com",
+      "firstName": "Test",
+      "lastName": "User",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "password123",
+          "temporary": false
+        }
+      ]
+    }
+  ],
+  "clientPolicies": {
+    "policies": [
+      {
+        "name": "Allowed Client Scopes",
+        "enabled": true,
+        "conditions": [
+          {
+            "condition": "client-scopes",
+            "configuration": {
+              "allowed-client-scopes": [
+                "openid",
+                "profile",
+                "email",
+                "roles",
+                "offline_access",
+                "web-origins",
+                "basic"
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "name": "Allowed Client URIs",
+        "enabled": true,
+        "conditions": [
+          {
+            "condition": "client-uris",
+            "configuration": {
+              "uris": [
+                "http://localhost:8000/*"
+              ]
+            }
+          }
+        ]
+      }
+    ],
+    "profiles": [
+      {
+        "name": "dynamic-client-registration-profile",
+        "to-clients-dynamically-registered": true,
+        "policies": [
+          "Allowed Client URIs",
+          "Allowed Client Scopes"
+        ]
+      }
+    ]
+  }
+}
