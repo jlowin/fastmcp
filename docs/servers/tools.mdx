@@ -721,7 +721,41 @@ FastMCP supports a wide variety of parameter types to give you flexibility when 
 
 FastMCP generally supports all types that Pydantic supports as fields, including all Pydantic custom types. This means you can use any type that can be validated and parsed by Pydantic in your tool parameters.
 
-FastMCP supports **type coercion** when possible. This means that if a client sends data that doesn't match the expected type, FastMCP will attempt to convert it to the appropriate type. For example, if a client sends a string for a parameter annotated as `int`, FastMCP will attempt to convert it to an integer. If the conversion is not possible, FastMCP will return a validation error.
+#### Input Validation Modes
+
+By default, FastMCP uses Pydantic's flexible validation that coerces compatible inputs to match your type annotations. This improves compatibility with LLM clients that may send string representations of values (like `"10"` for an integer parameter).
+
+If you need stricter validation that rejects any type mismatches, you can enable strict input validation. Strict mode uses the MCP SDK's built-in JSON Schema validation to validate inputs against the exact schema before passing them to your function:
+
+```python
+# Enable strict validation for this server
+mcp = FastMCP("StrictServer", strict_input_validation=True)
+
+@mcp.tool
+def add_numbers(a: int, b: int) -> int:
+    """Add two numbers."""
+    return a + b
+
+# With strict_input_validation=True, sending {"a": "10", "b": "20"} will fail
+# With strict_input_validation=False (default), it will be coerced to integers
+```
+
+**Validation Behavior Comparison:**
+
+| Input Type | strict_input_validation=False (default) | strict_input_validation=True |
+| :--------- | :-------------------------------------- | :--------------------------- |
+| String integers (`"10"` for `int`) | ✅ Coerced to integer | ❌ Validation error |
+| String floats (`"3.14"` for `float`) | ✅ Coerced to float | ❌ Validation error |
+| String booleans (`"true"` for `bool`) | ✅ Coerced to boolean | ❌ Validation error |
+| Lists with string elements (`["1", "2"]` for `list[int]`) | ✅ Elements coerced | ❌ Validation error |
+| Pydantic model fields with type mismatches | ✅ Fields coerced | ❌ Validation error |
+| Invalid values (`"abc"` for `int`) | ❌ Validation error | ❌ Validation error |
+
+<Note>
+**Note on Pydantic Models:** Even with `strict_input_validation=False`, Pydantic model parameters must be provided as JSON objects (dicts), not as stringified JSON. For example, `{"user": {"name": "Alice"}}` works, but `{"user": '{"name": "Alice"}'}` does not.
+</Note>
+
+The default flexible validation mode is recommended for most use cases as it handles common LLM client behaviors gracefully while still providing strong type safety through Pydantic's validation.
 
 ### Built-in Types
 
@@ -739,7 +773,7 @@ def process_values(
     # Implementation...
 ```
 
-These types provide clear expectations to the LLM about what values are acceptable and allow FastMCP to validate inputs properly. Even if a client provides a string like "42", it will be coerced to an integer for parameters annotated as `int`.
+These types provide clear expectations to the LLM about what values are acceptable and allow FastMCP to validate inputs properly. With the default validation mode (`strict_input_validation=False`), if a client provides a string like `"42"`, it will be automatically coerced to the integer `42` for parameters annotated as `int`.
 
 ### Date and Time Types
 
