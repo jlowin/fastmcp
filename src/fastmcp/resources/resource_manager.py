@@ -296,9 +296,6 @@ class ResourceManager:
         # 1. Check local resources first. The server will have already applied its filter.
         if uri_str in self._resources:
             resource = await self.get_resource(uri_str)
-            if not resource:
-                raise NotFoundError(f"Resource {uri_str!r} not found")
-
             try:
                 return await resource.read()
 

@@ -103,9 +103,6 @@ class PromptManager:
         Internal API for servers: Finds and renders a prompt, respecting the
         filtered protocol path.
         """
-        if name not in self._prompts:
-            raise NotFoundError(f"Unknown prompt: {name}")
-
         prompt = await self.get_prompt(name)
         try:
             messages = await prompt.render(arguments)
