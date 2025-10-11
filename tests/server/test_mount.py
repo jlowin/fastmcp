@@ -329,18 +329,15 @@ class TestMultipleServerMount:
             record.message for record in caplog.records if record.levelname == "WARNING"
         ]
         assert any(
-            "Failed to get tools from server: 'unreachable_proxy', mounted at: 'unreachable'"
-            in msg
+            "Failed to list tools from mounted server 'unreachable_proxy'" in msg
             for msg in warning_messages
         )
         assert any(
-            "Failed to get resources from server: 'unreachable_proxy', mounted at: 'unreachable'"
-            in msg
+            "Failed to list resources from 'unreachable_proxy'" in msg
             for msg in warning_messages
         )
         assert any(
-            "Failed to get prompts from server: 'unreachable_proxy', mounted at: 'unreachable'"
-            in msg
+            "Failed to list prompts from mounted server 'unreachable_proxy'" in msg
             for msg in warning_messages
         )
 
@@ -871,7 +868,7 @@ class TestAsProxyKwarg:
         sub = FastMCP("Sub")
 
         mcp.mount(sub, "sub")
-        assert mcp._tool_manager._mounted_servers[0].server is sub
+        assert mcp._mounted_servers[0].server is sub
 
     async def test_as_proxy_false(self):
         mcp = FastMCP("Main")
@@ -879,7 +876,7 @@ class TestAsProxyKwarg:
 
         mcp.mount(sub, "sub", as_proxy=False)
 
-        assert mcp._tool_manager._mounted_servers[0].server is sub
+        assert mcp._mounted_servers[0].server is sub
 
     async def test_as_proxy_true(self):
         mcp = FastMCP("Main")
@@ -887,8 +884,8 @@ class TestAsProxyKwarg:
 
         mcp.mount(sub, "sub", as_proxy=True)
 
-        assert mcp._tool_manager._mounted_servers[0].server is not sub
-        assert isinstance(mcp._tool_manager._mounted_servers[0].server, FastMCPProxy)
+        assert mcp._mounted_servers[0].server is not sub
+        assert isinstance(mcp._mounted_servers[0].server, FastMCPProxy)
 
     async def test_as_proxy_defaults_true_if_lifespan(self):
         @asynccontextmanager
@@ -900,8 +897,8 @@ class TestAsProxyKwarg:
 
         mcp.mount(sub, "sub")
 
-        assert mcp._tool_manager._mounted_servers[0].server is not sub
-        assert isinstance(mcp._tool_manager._mounted_servers[0].server, FastMCPProxy)
+        assert mcp._mounted_servers[0].server is not sub
+        assert isinstance(mcp._mounted_servers[0].server, FastMCPProxy)
 
     async def test_as_proxy_ignored_for_proxy_mounts_default(self):
         mcp = FastMCP("Main")
@@ -910,7 +907,7 @@ class TestAsProxyKwarg:
 
         mcp.mount(sub_proxy, "sub")
 
-        assert mcp._tool_manager._mounted_servers[0].server is sub_proxy
+        assert mcp._mounted_servers[0].server is sub_proxy
 
     async def test_as_proxy_ignored_for_proxy_mounts_false(self):
         mcp = FastMCP("Main")
@@ -919,7 +916,7 @@ class TestAsProxyKwarg:
 
         mcp.mount(sub_proxy, "sub", as_proxy=False)
 
-        assert mcp._tool_manager._mounted_servers[0].server is sub_proxy
+        assert mcp._mounted_servers[0].server is sub_proxy
 
     async def test_as_proxy_ignored_for_proxy_mounts_true(self):
         mcp = FastMCP("Main")
@@ -928,7 +925,7 @@ class TestAsProxyKwarg:
 
         mcp.mount(sub_proxy, "sub", as_proxy=True)
 
-        assert mcp._tool_manager._mounted_servers[0].server is sub_proxy
+        assert mcp._mounted_servers[0].server is sub_proxy
 
     async def test_as_proxy_mounts_still_have_live_link(self):
         mcp = FastMCP("Main")
