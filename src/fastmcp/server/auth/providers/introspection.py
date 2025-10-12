@@ -148,9 +148,7 @@ class IntrospectionTokenVerifier(TokenVerifier):
 
         self.introspection_url = settings.introspection_url
         self.client_id = settings.client_id
-        self.client_secret = (
-            settings.client_secret.get_secret_value() if settings.client_secret else ""
-        )
+        self.client_secret = settings.client_secret.get_secret_value()
         self.timeout_seconds = settings.timeout_seconds
         self.logger = get_logger(__name__)
 
