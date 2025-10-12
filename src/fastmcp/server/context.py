@@ -4,6 +4,7 @@ import asyncio
 import copy
 import inspect
 import logging
+import sys
 import warnings
 import weakref
 from collections.abc import Generator, Mapping, Sequence
@@ -67,34 +68,25 @@ class LogData:
     extra: Mapping[str, Any] | None = None
 
 
-LogDestination = Literal["CLIENT", "CLIENT_AND_SERVER"]
-"""Destination for log messages sent via Context logging methods.
+tee_logger = get_logger("context.sent_to_client")
 
-- CLIENT: Send log message only to the MCP client (default behavior)
-- CLIENT_AND_SERVER: Send log message to both the MCP client and the server's Python logger
-"""
+# This effectively disables the tee logger entirely
+tee_logger.setLevel(level=sys.maxsize)
 
+def tee_client_logs_to_server(level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]) -> None:
+    """Tee client logs to the server."""
+    tee_logger.setLevel(level=level)
 
-def _map_mcp_to_python_level(mcp_level: LoggingLevel) -> int:
-    """Map MCP log levels to Python logging levels.
-
-    Args:
-        mcp_level: MCP logging level
-
-    Returns:
-        Python logging level constant
-    """
-    level_map = {
-        "debug": logging.DEBUG,
-        "info": logging.INFO,
-        "notice": logging.INFO,
-        "warning": logging.WARNING,
-        "error": logging.ERROR,
-        "critical": logging.CRITICAL,
-        "alert": logging.CRITICAL,
-        "emergency": logging.CRITICAL,
-    }
-    return level_map.get(mcp_level.lower(), logging.INFO)
+_mcp_level_to_python_level = {
+    "debug": logging.DEBUG,
+    "info": logging.INFO,
+    "notice": logging.INFO,
+    "warning": logging.WARNING,
+    "error": logging.ERROR,
+    "critical": logging.CRITICAL,
+    "alert": logging.CRITICAL,
+    "emergency": logging.CRITICAL,
+}
 
 
 @contextmanager
@@ -244,7 +236,6 @@ class Context:
         level: LoggingLevel | None = None,
         logger_name: str | None = None,
         extra: Mapping[str, Any] | None = None,
-        log_to: LogDestination = "CLIENT",
     ) -> None:
         """Send a log message to the client.
 
@@ -254,24 +245,14 @@ class Context:
                 "alert", or "emergency". Default is "info".
             logger_name: Optional logger name
             extra: Optional mapping for additional arguments
-            log_to: Destination for the log message. "CLIENT" (default) sends only to the MCP client.
-                "CLIENT_AND_SERVER" sends to both the client and the server's Python logger.
         """
-        if level is None:
-            level = "info"
-
-        # Log to server first (if requested) to ensure it's captured even if client send fails
-        if log_to == "CLIENT_AND_SERVER":
-            server_logger = get_logger(logger_name or "server.context")
-            log_level = _map_mcp_to_python_level(level)
-            server_logger.log(log_level, message, extra=extra)
-
-        # Then send to client
         data = LogData(msg=message, extra=extra)
-        await self.session.send_log_message(
-            level=level,
+
+        await _log_to_server_and_client(
             data=data,
-            logger=logger_name,
+            session=self.session,
+            level=level or "info",
+            logger_name=logger_name,
             related_request_id=self.request_id,
         )
 
@@ -344,7 +325,6 @@ class Context:
         message: str,
         logger_name: str | None = None,
         extra: Mapping[str, Any] | None = None,
-        log_to: LogDestination = "CLIENT",
     ) -> None:
         """Send a debug log message."""
         await self.log(
@@ -352,7 +332,6 @@ class Context:
             message=message,
             logger_name=logger_name,
             extra=extra,
-            log_to=log_to,
         )
 
     async def info(
@@ -360,7 +339,6 @@ class Context:
         message: str,
         logger_name: str | None = None,
         extra: Mapping[str, Any] | None = None,
-        log_to: LogDestination = "CLIENT",
     ) -> None:
         """Send an info log message."""
         await self.log(
@@ -368,7 +346,6 @@ class Context:
             message=message,
             logger_name=logger_name,
             extra=extra,
-            log_to=log_to,
         )
 
     async def warning(
@@ -376,7 +353,6 @@ class Context:
         message: str,
         logger_name: str | None = None,
         extra: Mapping[str, Any] | None = None,
-        log_to: LogDestination = "CLIENT",
     ) -> None:
         """Send a warning log message."""
         await self.log(
@@ -384,7 +360,6 @@ class Context:
             message=message,
             logger_name=logger_name,
             extra=extra,
-            log_to=log_to,
         )
 
     async def error(
@@ -392,7 +367,6 @@ class Context:
         message: str,
         logger_name: str | None = None,
         extra: Mapping[str, Any] | None = None,
-        log_to: LogDestination = "CLIENT",
     ) -> None:
         """Send an error log message."""
         await self.log(
@@ -400,7 +374,6 @@ class Context:
             message=message,
             logger_name=logger_name,
             extra=extra,
-            log_to=log_to,
         )
 
     async def list_roots(self) -> list[Root]:
@@ -737,3 +710,28 @@ def _parse_model_preferences(
         raise ValueError(
             "model_preferences must be one of: ModelPreferences, str, list[str], or None."
         )
+
+
+async def _log_to_server_and_client(
+    data: LogData,
+    session: ServerSession,
+    level: LoggingLevel,
+    logger_name: str | None = None,
+    related_request_id: str | None = None,
+) -> None:
+    """Log a message to the server and client."""
+
+    msg_prefix = f"[To Client:{logger_name}]" if logger_name else "[To Client]"
+
+    tee_logger.log(
+        level=_mcp_level_to_python_level[level],
+        msg=f"{msg_prefix} {data.msg}",
+        extra=data.extra,
+    )
+
+    await session.send_log_message(
+        level=level,
+        data=data,
+        logger=logger_name,
+        related_request_id=related_request_id,
+    )

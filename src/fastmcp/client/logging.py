@@ -7,6 +7,7 @@ from mcp.types import LoggingMessageNotificationParams
 from fastmcp.utilities.logging import get_logger
 
 logger = get_logger(__name__)
+from_server_logger = logger.getChild("from_server")
 
 LogMessage: TypeAlias = LoggingMessageNotificationParams
 LogHandler: TypeAlias = Callable[[LogMessage], Awaitable[None]]
@@ -19,25 +20,24 @@ async def default_log_handler(message: LogMessage) -> None:
 
     # Map MCP log levels to Python logging levels
     level_map = {
-        "debug": logger.debug,
-        "info": logger.info,
-        "notice": logger.info,  # Python doesn't have 'notice', map to info
-        "warning": logger.warning,
-        "error": logger.error,
-        "critical": logger.critical,
-        "alert": logger.critical,  # Map alert to critical
-        "emergency": logger.critical,  # Map emergency to critical
+        "debug": from_server_logger.debug,
+        "info": from_server_logger.info,
+        "notice": from_server_logger.info,  # Python doesn't have 'notice', map to info
+        "warning": from_server_logger.warning,
+        "error": from_server_logger.error,
+        "critical": from_server_logger.critical,
+        "alert": from_server_logger.critical,  # Map alert to critical
+        "emergency": from_server_logger.critical,  # Map emergency to critical
     }
 
     # Get the appropriate logging function based on the message level
     log_fn = level_map.get(message.level.lower(), logger.info)
 
     # Include logger name if available
-    if message.logger:
-        msg = f"[{message.logger}] {msg}"
+    msg_prefix = f"[From Server:{message.logger}]" if message.logger else "[From Server]"
 
     # Log with appropriate level and extra data
-    log_fn(f"Server log: {msg}", extra=extra)
+    log_fn(f"{msg_prefix} {msg}", extra=extra)
 
 
 def create_log_callback(handler: LogHandler | None = None) -> LoggingFnT:
