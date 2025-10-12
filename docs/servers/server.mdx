@@ -73,7 +73,9 @@ The `FastMCP` constructor accepts several arguments:
   How to handle duplicate prompt registrations
 </ParamField>
 
+
 <ParamField body="strict_input_validation" type="bool" default="False">
+  <VersionBadge version="2.13.0" />
   Controls how tool input parameters are validated. When `False` (default), FastMCP uses Pydantic's flexible validation that coerces compatible inputs (e.g., `"10"` → `10` for int parameters). When `True`, uses the MCP SDK's JSON Schema validation to validate inputs against the exact schema before passing them to your function, rejecting any type mismatches. The default mode improves compatibility with LLM clients while maintaining type safety. See [Input Validation Modes](/servers/tools#input-validation-modes) for details
 </ParamField>
 

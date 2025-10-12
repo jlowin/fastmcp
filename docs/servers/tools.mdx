@@ -9,8 +9,6 @@ import { VersionBadge } from '/snippets/version-badge.mdx'
 
 Tools are the core building blocks that allow your LLM to interact with external systems, execute code, and access data that isn't in its training data. In FastMCP, tools are Python functions exposed to LLMs through the MCP protocol.
 
-## What Are Tools?
-
 Tools in FastMCP transform regular Python functions into capabilities that LLMs can invoke during conversations. When an LLM decides to use a tool:
 
 1.  It sends a request with parameters based on the tool's schema.
@@ -20,9 +18,8 @@ Tools in FastMCP transform regular Python functions into capabilities that LLMs 
 
 This allows LLMs to perform tasks like querying databases, calling APIs, making calculations, or accessing files—extending their capabilities beyond what's in their training data.
 
-## Tools
 
-### The `@tool` Decorator
+## The `@tool` Decorator
 
 Creating a tool is as simple as decorating a Python function with `@mcp.tool`:
 
@@ -49,7 +46,7 @@ The way you define your Python function dictates how the tool appears and behave
 Functions with `*args` or `**kwargs` are not supported as tools. This restriction exists because FastMCP needs to generate a complete parameter schema for the MCP protocol, which isn't possible with variable argument lists.
 </Tip>
 
-#### Decorator Arguments
+### Decorator Arguments
 
 While FastMCP infers the name and description from your function, you can override these and add additional metadata using arguments to the `@mcp.tool` decorator:
 
@@ -117,7 +114,7 @@ def search_products_implementation(query: str, category: str | None = None) -> l
 </Card>
 
 
-### Async and Synchronous Tools
+### Async Support
 
 FastMCP is an async-first framework that seamlessly supports both asynchronous (`async def`) and synchronous (`def`) functions as tools. Async tools are preferred for I/O-bound operations to keep your server responsive.
 
@@ -170,15 +167,13 @@ def my_tool() -> None:
 ```
 </CodeGroup>
 
+## Arguments
+
+By default, FastMCP converts Python functions into MCP tools by inspecting the function's signature and type annotations. This allows you to use standard Python type annotations for your tools. In general, the framework strives to "just work": idiomatic Python behaviors like parameter defaults and type annotations are automatically translated into MCP schemas. However, there are a number of ways to customize the behavior of your tools.
 
 ### Type Annotations
 
-Type annotations for parameters are essential for proper tool functionality. They:
-1. Inform the LLM about the expected data types for each parameter
-2. Enable FastMCP to validate input data from clients
-3. Generate accurate JSON schemas for the MCP protocol
-
-Use standard Python type annotations for parameters:
+MCP tools have typed arguments, and FastMCP uses type annotations to determine those types. Therefore, you should use standard Python type annotations for tool arguments:
 
 ```python
 @mcp.tool
@@ -206,7 +201,64 @@ FastMCP supports a wide range of type annotations, including all Pydantic types:
 | UUIDs                   | `UUID`                        | Universally unique identifiers - see [UUIDs](#uuids) |
 | Pydantic models         | `UserData`                    | Complex structured data - see [Pydantic Models](#pydantic-models) |
 
-For additional type annotations not listed here, see the [Parameter Types](#parameter-types) section below for more detailed information and examples.
+For additional type annotations not listed here, see the [Argument Types](#argument-types) section below for more detailed information and examples.
+
+### Optional Arguments
+
+FastMCP follows Python's standard function parameter conventions. Parameters without default values are required, while those with default values are optional.
+
+```python
+@mcp.tool
+def search_products(
+    query: str,                   # Required - no default value
+    max_results: int = 10,        # Optional - has default value
+    sort_by: str = "relevance",   # Optional - has default value
+    category: str | None = None   # Optional - can be None
+) -> list[dict]:
+    """Search the product catalog."""
+    # Implementation...
+```
+
+In this example, the LLM must provide a `query` parameter, while `max_results`, `sort_by`, and `category` will use their default values if not explicitly provided.
+
+### Validation Modes
+
+<VersionBadge version="2.13.0" />
+
+By default, FastMCP uses Pydantic's flexible validation that coerces compatible inputs to match your type annotations. This improves compatibility with LLM clients that may send string representations of values (like `"10"` for an integer parameter).
+
+If you need stricter validation that rejects any type mismatches, you can enable strict input validation. Strict mode uses the MCP SDK's built-in JSON Schema validation to validate inputs against the exact schema before passing them to your function:
+
+```python
+# Enable strict validation for this server
+mcp = FastMCP("StrictServer", strict_input_validation=True)
+
+@mcp.tool
+def add_numbers(a: int, b: int) -> int:
+    """Add two numbers."""
+    return a + b
+
+# With strict_input_validation=True, sending {"a": "10", "b": "20"} will fail
+# With strict_input_validation=False (default), it will be coerced to integers
+```
+
+**Validation Behavior Comparison:**
+
+| Input Type | strict_input_validation=False (default) | strict_input_validation=True |
+| :--------- | :-------------------------------------- | :--------------------------- |
+| String integers (`"10"` for `int`) | ✅ Coerced to integer | ❌ Validation error |
+| String floats (`"3.14"` for `float`) | ✅ Coerced to float | ❌ Validation error |
+| String booleans (`"true"` for `bool`) | ✅ Coerced to boolean | ❌ Validation error |
+| Lists with string elements (`["1", "2"]` for `list[int]`) | ✅ Elements coerced | ❌ Validation error |
+| Pydantic model fields with type mismatches | ✅ Fields coerced | ❌ Validation error |
+| Invalid values (`"abc"` for `int`) | ❌ Validation error | ❌ Validation error |
+
+<Note>
+**Note on Pydantic Models:** Even with `strict_input_validation=False`, Pydantic model parameters must be provided as JSON objects (dicts), not as stringified JSON. For example, `{"user": {"name": "Alice"}}` works, but `{"user": '{"name": "Alice"}'}` does not.
+</Note>
+
+The default flexible validation mode is recommended for most use cases as it handles common LLM client behaviors gracefully while still providing strong type safety through Pydantic's validation.
+
 ### Parameter Metadata
 
 You can provide additional metadata about parameters in several ways:
@@ -281,24 +333,6 @@ Field provides several validation and documentation features:
 
 
 
-### Optional Arguments
-
-FastMCP follows Python's standard function parameter conventions. Parameters without default values are required, while those with default values are optional.
-
-```python
-@mcp.tool
-def search_products(
-    query: str,                   # Required - no default value
-    max_results: int = 10,        # Optional - has default value
-    sort_by: str = "relevance",   # Optional - has default value
-    category: str | None = None   # Optional - can be None
-) -> list[dict]:
-    """Search the product catalog."""
-    # Implementation...
-```
-
-In this example, the LLM must provide a `query` parameter, while `max_results`, `sort_by`, and `category` will use their default values if not explicitly provided.
-
 
 ### Excluding Arguments
 
@@ -322,34 +356,8 @@ With this configuration, `user_id` will not appear in the tool's parameter schem
 
 For more complex tool transformations, see [Transforming Tools](/patterns/tool-transformation).
 
-### Disabling Tools
 
-<VersionBadge version="2.8.0" />
-
-You can control the visibility and availability of tools by enabling or disabling them. This is useful for feature flagging, maintenance, or dynamically changing the toolset available to a client. Disabled tools will not appear in the list of available tools returned by `list_tools`, and attempting to call a disabled tool will result in an "Unknown tool" error, just as if the tool did not exist.
-
-By default, all tools are enabled. You can disable a tool upon creation using the `enabled` parameter in the decorator:
-
-```python
-@mcp.tool(enabled=False)
-def maintenance_tool():
-    """This tool is currently under maintenance."""
-    return "This tool is disabled."
-```
-
-You can also toggle a tool's state programmatically after it has been created:
-
-```python
-@mcp.tool
-def dynamic_tool():
-    return "I am a dynamic tool."
-
-# Disable and re-enable the tool
-dynamic_tool.disable()
-dynamic_tool.enable()
-```
-
-### Return Values
+## Return Values
 
 
 FastMCP tools can return data in two complementary formats: **traditional content blocks** (like text and images) and **structured outputs** (machine-readable JSON). When you add return type annotations, FastMCP automatically generates **output schemas** to validate the structured data and enables clients to deserialize results back to Python objects.
@@ -362,7 +370,7 @@ Understanding how these three concepts work together:
 
 The following sections explain each concept in detail.
 
-#### Content Blocks
+### Content Blocks
 
 FastMCP automatically converts tool return values into appropriate MCP content blocks:
 
@@ -374,7 +382,7 @@ FastMCP automatically converts tool return values into appropriate MCP content b
 - **A list of any of the above**: Converts each item appropriately
 - **`None`**: Results in an empty response
 
-#### Structured Output
+### Structured Output
 
 <VersionBadge version="2.10.0" />
 
@@ -389,7 +397,7 @@ The 6/18/2025 MCP spec update [introduced](https://modelcontextprotocol.io/speci
 This automatic behavior enables clients to receive machine-readable data alongside human-readable content without requiring explicit output schemas for object-like returns.
 </Note>
 
-##### Object-like Results (Automatic Structured Content)
+#### Object-like Results (Automatic Structured Content)
 
 <CodeGroup>
 ```python Dict Return (No Schema Needed)
@@ -412,7 +420,7 @@ def get_user_data(user_id: str) -> dict:
 ```
 </CodeGroup>
 
-##### Non-object Results (Schema Required)
+#### Non-object Results (Schema Required)
 
 <CodeGroup>
 ```python Integer Return (No Schema)
@@ -444,7 +452,7 @@ def calculate_sum(a: int, b: int) -> int:
 ```
 </CodeGroup>
 
-##### Complex Type Example
+#### Complex Type Example
 
 <CodeGroup>
 ```python Tool Definition
@@ -487,7 +495,7 @@ def get_user_profile(user_id: str) -> Person:
 ```
 </CodeGroup>
 
-#### Output Schemas
+### Output Schemas
 
 <VersionBadge version="2.10.0" />
 
@@ -495,7 +503,7 @@ The 6/18/2025 MCP spec update [introduced](https://modelcontextprotocol.io/speci
 
 When you add return type annotations to your functions, FastMCP automatically generates JSON schemas that describe the expected output format. These schemas help MCP clients understand and validate the structured data they receive.
 
-##### Primitive Type Wrapping
+#### Primitive Type Wrapping
 
 For primitive return types (like `int`, `str`, `bool`), FastMCP automatically wraps the result under a `"result"` key to create valid structured output:
 
@@ -524,7 +532,7 @@ def calculate_sum(a: int, b: int) -> int:
 ```
 </CodeGroup>
 
-##### Manual Schema Control
+#### Manual Schema Control
 
 You can override the automatically generated schema by providing a custom `output_schema`:
 
@@ -550,7 +558,7 @@ Schema generation works for most common types including basic types, collections
 - However, you can provide structured output without an output schema (using `ToolResult`)
 </Warning>
 
-#### Full Control with ToolResult
+### Full Control with ToolResult
 
 For complete control over both traditional content and structured output, return a `ToolResult` object:
 
@@ -575,7 +583,7 @@ When returning `ToolResult`:
 If your return type annotation cannot be converted to a JSON schema (e.g., complex custom classes without Pydantic support), the output schema will be omitted but the tool will still function normally with traditional content.
 </Note>
 
-### Error Handling
+## Error Handling
 
 <VersionBadge version="2.4.1" />
 
@@ -613,7 +621,33 @@ def divide(a: float, b: float) -> float:
 
 When `mask_error_details=True`, only error messages from `ToolError` will include details, other exceptions will be converted to a generic message.
 
-### Annotations
+## Disabling Tools
+
+<VersionBadge version="2.8.0" />
+
+You can control the visibility and availability of tools by enabling or disabling them. This is useful for feature flagging, maintenance, or dynamically changing the toolset available to a client. Disabled tools will not appear in the list of available tools returned by `list_tools`, and attempting to call a disabled tool will result in an "Unknown tool" error, just as if the tool did not exist.
+
+By default, all tools are enabled. You can disable a tool upon creation using the `enabled` parameter in the decorator:
+
+```python
+@mcp.tool(enabled=False)
+def maintenance_tool():
+    """This tool is currently under maintenance."""
+    return "This tool is disabled."
+```
+
+You can also toggle a tool's state programmatically after it has been created:
+
+```python
+@mcp.tool
+def dynamic_tool():
+    return "I am a dynamic tool."
+
+# Disable and re-enable the tool
+dynamic_tool.disable()
+dynamic_tool.enable()
+```
+## MCP Annotations
 
 <VersionBadge version="2.2.7" />
 
@@ -652,7 +686,7 @@ FastMCP supports these standard annotations:
 
 Remember that annotations help make better user experiences but should be treated as advisory hints. They help client applications present appropriate UI elements and safety controls, but won't enforce security boundaries on their own. Always focus on making your annotations accurately represent what your tool actually does.
 
-### Notifications
+## Notifications
 
 <VersionBadge version="2.9.1" />
 
@@ -674,7 +708,7 @@ Notifications are only sent when these operations occur within an active MCP req
 
 Clients can handle these notifications using a [message handler](/clients/messages) to automatically refresh their tool lists or update their interfaces.
 
-## MCP Context
+## Accessing the MCP Context
 
 Tools can access MCP features like logging, reading resources, or reporting progress through the `Context` object. To use it, add a parameter to your tool function with the type hint `Context`.
 
@@ -715,47 +749,13 @@ The Context object provides access to:
 
 For full documentation on the Context object and all its capabilities, see the [Context documentation](/servers/context).
 
-## Parameter Types
+## Supported Argument Types
 
-FastMCP supports a wide variety of parameter types to give you flexibility when designing your tools.
+FastMCP supports a wide variety of argument types to give you flexibility when designing your tools.
 
 FastMCP generally supports all types that Pydantic supports as fields, including all Pydantic custom types. This means you can use any type that can be validated and parsed by Pydantic in your tool parameters.
 
-#### Input Validation Modes
 
-By default, FastMCP uses Pydantic's flexible validation that coerces compatible inputs to match your type annotations. This improves compatibility with LLM clients that may send string representations of values (like `"10"` for an integer parameter).
-
-If you need stricter validation that rejects any type mismatches, you can enable strict input validation. Strict mode uses the MCP SDK's built-in JSON Schema validation to validate inputs against the exact schema before passing them to your function:
-
-```python
-# Enable strict validation for this server
-mcp = FastMCP("StrictServer", strict_input_validation=True)
-
-@mcp.tool
-def add_numbers(a: int, b: int) -> int:
-    """Add two numbers."""
-    return a + b
-
-# With strict_input_validation=True, sending {"a": "10", "b": "20"} will fail
-# With strict_input_validation=False (default), it will be coerced to integers
-```
-
-**Validation Behavior Comparison:**
-
-| Input Type | strict_input_validation=False (default) | strict_input_validation=True |
-| :--------- | :-------------------------------------- | :--------------------------- |
-| String integers (`"10"` for `int`) | ✅ Coerced to integer | ❌ Validation error |
-| String floats (`"3.14"` for `float`) | ✅ Coerced to float | ❌ Validation error |
-| String booleans (`"true"` for `bool`) | ✅ Coerced to boolean | ❌ Validation error |
-| Lists with string elements (`["1", "2"]` for `list[int]`) | ✅ Elements coerced | ❌ Validation error |
-| Pydantic model fields with type mismatches | ✅ Fields coerced | ❌ Validation error |
-| Invalid values (`"abc"` for `int`) | ❌ Validation error | ❌ Validation error |
-
-<Note>
-**Note on Pydantic Models:** Even with `strict_input_validation=False`, Pydantic model parameters must be provided as JSON objects (dicts), not as stringified JSON. For example, `{"user": {"name": "Alice"}}` works, but `{"user": '{"name": "Alice"}'}` does not.
-</Note>
-
-The default flexible validation mode is recommended for most use cases as it handles common LLM client behaviors gracefully while still providing strong type safety through Pydantic's validation.
 
 ### Built-in Types
 
