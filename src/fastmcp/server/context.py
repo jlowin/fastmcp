@@ -4,14 +4,15 @@ import asyncio
 import copy
 import inspect
 import logging
-import sys
 import warnings
 import weakref
+from asyncio.locks import Lock
 from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from enum import Enum
+from logging import Logger
 from typing import Any, Literal, cast, get_origin, overload
 
 from mcp import LoggingLevel, ServerSession
@@ -46,14 +47,21 @@ from fastmcp.server.elicitation import (
     get_elicitation_schema,
 )
 from fastmcp.server.server import FastMCP
-from fastmcp.utilities.logging import get_logger
+from fastmcp.utilities.logging import clamp_logger, get_logger
 from fastmcp.utilities.types import get_cached_typeadapter
 
-logger = get_logger(__name__)
+logger: Logger = get_logger(name=__name__)
+to_client_logger: Logger = logger.getChild(suffix="to_client")
+
+# Convert all levels of server -> client messages to debug level
+# This clamp be undone at runtime by calling `unclamp_logger` or calling
+# `clamp_logger` with a different max level.
+clamp_logger(logger=to_client_logger, max_level="DEBUG")
+
 
 T = TypeVar("T", default=Any)
 _current_context: ContextVar[Context | None] = ContextVar("context", default=None)  # type: ignore[assignment]
-_flush_lock = asyncio.Lock()
+_flush_lock: Lock = asyncio.Lock()
 
 
 @dataclass
@@ -67,15 +75,6 @@ class LogData:
     msg: str
     extra: Mapping[str, Any] | None = None
 
-
-tee_logger = get_logger("context.sent_to_client")
-
-# This effectively disables the tee logger entirely
-tee_logger.setLevel(level=sys.maxsize)
-
-def tee_client_logs_to_server(level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]) -> None:
-    """Tee client logs to the server."""
-    tee_logger.setLevel(level=level)
 
 _mcp_level_to_python_level = {
     "debug": logging.DEBUG,
@@ -239,6 +238,8 @@ class Context:
     ) -> None:
         """Send a log message to the client.
 
+        Messages sent to Clients are also logged to the `fastmcp.context.sent_to_client` logger with a level of `DEBUG`.
+
         Args:
             message: Log message
             level: Optional log level. One of "debug", "info", "notice", "warning", "error", "critical",
@@ -326,7 +327,9 @@ class Context:
         logger_name: str | None = None,
         extra: Mapping[str, Any] | None = None,
     ) -> None:
-        """Send a debug log message."""
+        """Send a `DEBUG`-level message to the connected MCP Client.
+
+        Messages sent to Clients are also logged to the `fastmcp.context.sent_to_client` logger with a level of `DEBUG`."""
         await self.log(
             level="debug",
             message=message,
@@ -340,7 +343,9 @@ class Context:
         logger_name: str | None = None,
         extra: Mapping[str, Any] | None = None,
     ) -> None:
-        """Send an info log message."""
+        """Send a `INFO`-level message to the connected MCP Client.
+
+        Messages sent to Clients are also logged to the `fastmcp.context.sent_to_client` logger with a level of `DEBUG`."""
         await self.log(
             level="info",
             message=message,
@@ -354,7 +359,9 @@ class Context:
         logger_name: str | None = None,
         extra: Mapping[str, Any] | None = None,
     ) -> None:
-        """Send a warning log message."""
+        """Send a `WARNING`-level message to the connected MCP Client.
+
+        Messages sent to Clients are also logged to the `fastmcp.context.sent_to_client` logger with a level of `DEBUG`."""
         await self.log(
             level="warning",
             message=message,
@@ -368,7 +375,9 @@ class Context:
         logger_name: str | None = None,
         extra: Mapping[str, Any] | None = None,
     ) -> None:
-        """Send an error log message."""
+        """Send a `ERROR`-level message to the connected MCP Client.
+
+        Messages sent to Clients are also logged to the `fastmcp.context.sent_to_client` logger with a level of `DEBUG`."""
         await self.log(
             level="error",
             message=message,
@@ -723,7 +732,7 @@ async def _log_to_server_and_client(
 
     msg_prefix = f"[To Client:{logger_name}]" if logger_name else "[To Client]"
 
-    tee_logger.log(
+    to_client_logger.log(
         level=_mcp_level_to_python_level[level],
         msg=f"{msg_prefix} {data.msg}",
         extra=data.extra,

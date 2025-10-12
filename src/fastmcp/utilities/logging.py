@@ -6,6 +6,7 @@ from typing import Any, Literal, cast
 
 from rich.console import Console
 from rich.logging import RichHandler
+from typing_extensions import override
 
 import fastmcp
 
@@ -141,3 +142,40 @@ def temporary_log_level(
             )
     else:
         yield
+
+
+class ClampedLogFilter(logging.Filter):
+    def __init__(
+        self, max_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+    ):
+        self.max_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = (
+            max_level
+        )
+        self.max_level_no: int = logging.getLevelNamesMapping()[max_level]  # ty: ignore[unresolved-attribute]
+
+        super().__init__()
+
+    @override
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.levelno >= self.max_level_no:
+            record.levelno = self.max_level_no
+            record.levelname = self.max_level
+            return True
+        return True
+
+
+def clamp_logger(
+    logger: logging.Logger,
+    max_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+) -> None:
+    """Clamp the logger to a maximum level -- anything equal or greater than the max level will be set to the max level."""
+    unclamp_logger(logger=logger)
+
+    logger.addFilter(filter=ClampedLogFilter(max_level=max_level))
+
+
+def unclamp_logger(logger: logging.Logger) -> None:
+    """Remove all clamped log filters from the logger."""
+    for filter in logger.filters[:]:
+        if isinstance(filter, ClampedLogFilter):
+            logger.removeFilter(filter)

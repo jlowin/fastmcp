@@ -1,4 +1,5 @@
 from collections.abc import Awaitable, Callable
+from logging import Logger
 from typing import TypeAlias
 
 from mcp.client.session import LoggingFnT
@@ -6,8 +7,8 @@ from mcp.types import LoggingMessageNotificationParams
 
 from fastmcp.utilities.logging import get_logger
 
-logger = get_logger(__name__)
-from_server_logger = logger.getChild("from_server")
+logger: Logger = get_logger(__name__)
+from_server_logger: Logger = logger.getChild(suffix="from_server")
 
 LogMessage: TypeAlias = LoggingMessageNotificationParams
 LogHandler: TypeAlias = Callable[[LogMessage], Awaitable[None]]
@@ -34,10 +35,12 @@ async def default_log_handler(message: LogMessage) -> None:
     log_fn = level_map.get(message.level.lower(), logger.info)
 
     # Include logger name if available
-    msg_prefix = f"[From Server:{message.logger}]" if message.logger else "[From Server]"
+    msg_prefix: str = (
+        f"[From Server:{message.logger}]" if message.logger else "[From Server]"
+    )
 
     # Log with appropriate level and extra data
-    log_fn(f"{msg_prefix} {msg}", extra=extra)
+    log_fn(msg=f"{msg_prefix} {msg}", extra=extra)
 
 
 def create_log_callback(handler: LogHandler | None = None) -> LoggingFnT:
