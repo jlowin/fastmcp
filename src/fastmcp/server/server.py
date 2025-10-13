@@ -116,7 +116,7 @@ def _lifespan_proxy(
     async def wrap(
         low_level_server: LowLevelServer[LifespanResultT],
     ) -> AsyncIterator[LifespanResultT]:
-        if fastmcp_server._lifespan == default_lifespan:
+        if fastmcp_server._lifespan is default_lifespan:
             yield {}
             return
 
