@@ -54,7 +54,7 @@ logger: Logger = get_logger(name=__name__)
 to_client_logger: Logger = logger.getChild(suffix="to_client")
 
 # Convert all levels of server -> client messages to debug level
-# This clamp be undone at runtime by calling `_unclamp_logger` or calling
+# This clamp can be undone at runtime by calling `_unclamp_logger` or calling
 # `_clamp_logger` with a different max level.
 _clamp_logger(logger=to_client_logger, max_level="DEBUG")
 
@@ -238,7 +238,7 @@ class Context:
     ) -> None:
         """Send a log message to the client.
 
-        Messages sent to Clients are also logged to the `fastmcp.context.sent_to_client` logger with a level of `DEBUG`.
+        Messages sent to Clients are also logged to the `fastmcp.server.context.to_client` logger with a level of `DEBUG`.
 
         Args:
             message: Log message
@@ -329,7 +329,7 @@ class Context:
     ) -> None:
         """Send a `DEBUG`-level message to the connected MCP Client.
 
-        Messages sent to Clients are also logged to the `fastmcp.context.sent_to_client` logger with a level of `DEBUG`."""
+        Messages sent to Clients are also logged to the `fastmcp.server.context.to_client` logger with a level of `DEBUG`."""
         await self.log(
             level="debug",
             message=message,
@@ -345,7 +345,7 @@ class Context:
     ) -> None:
         """Send a `INFO`-level message to the connected MCP Client.
 
-        Messages sent to Clients are also logged to the `fastmcp.context.sent_to_client` logger with a level of `DEBUG`."""
+        Messages sent to Clients are also logged to the `fastmcp.server.context.to_client` logger with a level of `DEBUG`."""
         await self.log(
             level="info",
             message=message,
@@ -361,7 +361,7 @@ class Context:
     ) -> None:
         """Send a `WARNING`-level message to the connected MCP Client.
 
-        Messages sent to Clients are also logged to the `fastmcp.context.sent_to_client` logger with a level of `DEBUG`."""
+        Messages sent to Clients are also logged to the `fastmcp.server.context.to_client` logger with a level of `DEBUG`."""
         await self.log(
             level="warning",
             message=message,
@@ -377,7 +377,7 @@ class Context:
     ) -> None:
         """Send a `ERROR`-level message to the connected MCP Client.
 
-        Messages sent to Clients are also logged to the `fastmcp.context.sent_to_client` logger with a level of `DEBUG`."""
+        Messages sent to Clients are also logged to the `fastmcp.server.context.to_client` logger with a level of `DEBUG`."""
         await self.log(
             level="error",
             message=message,
