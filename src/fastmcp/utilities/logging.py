@@ -215,8 +215,8 @@ def _clamp_logger(
     If max_level is provided, messages logged at a higher level than `max_level` will have their level decreased to `max_level`.
 
     Args:
-        min_level: The upper bound of the clamp
-        max_level: The lower bound of the clamp
+        min_level: The lower bound of the clamp
+        max_level: The upper bound of the clamp
     """
     _unclamp_logger(logger=logger)
 
