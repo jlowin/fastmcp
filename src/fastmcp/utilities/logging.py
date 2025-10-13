@@ -147,50 +147,84 @@ def temporary_log_level(
         yield
 
 
-class ClampedLogFilter(logging.Filter):
+class _ClampedLogFilter(logging.Filter):
+    min_level: tuple[int, str] | None
+    max_level: tuple[int, str] | None
+
     def __init__(
-        self, max_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+        self,
+        min_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+        | None = None,
+        max_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+        | None = None,
     ):
-        self.max_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = (
-            max_level
-        )
+        self.min_level = None
+        self.max_level = None
 
-        self.max_level_no: int
-
-        if max_level == "DEBUG":
-            self.max_level_no = logging.DEBUG
-        elif max_level == "INFO":
-            self.max_level_no = logging.INFO
-        elif max_level == "WARNING":
-            self.max_level_no = logging.WARNING
-        elif max_level == "ERROR":
-            self.max_level_no = logging.ERROR
-        elif max_level == "CRITICAL":
-            self.max_level_no = logging.CRITICAL
+        if min_level_no := self._level_to_no(level=min_level):
+            self.min_level = (min_level_no, str(min_level))
+        if max_level_no := self._level_to_no(level=max_level):
+            self.max_level = (max_level_no, str(max_level))
 
         super().__init__()
 
+    def _level_to_no(
+        self, level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] | None
+    ) -> int | None:
+        if level == "DEBUG":
+            return logging.DEBUG
+        elif level == "INFO":
+            return logging.INFO
+        elif level == "WARNING":
+            return logging.WARNING
+        elif level == "ERROR":
+            return logging.ERROR
+        elif level == "CRITICAL":
+            return logging.CRITICAL
+        else:
+            return None
+
     @override
     def filter(self, record: logging.LogRecord) -> bool:
-        if record.levelno >= self.max_level_no:
-            record.levelno = self.max_level_no
-            record.levelname = self.max_level
-            return True
+        if self.max_level:
+            max_level_no, max_level_name = self.max_level
+
+            if record.levelno > max_level_no:
+                record.levelno = max_level_no
+                record.levelname = max_level_name
+                return True
+
+        if self.min_level:
+            min_level_no, min_level_name = self.min_level
+            if record.levelno < min_level_no:
+                record.levelno = min_level_no
+                record.levelname = min_level_name
+                return True
+
         return True
 
 
-def clamp_logger(
+def _clamp_logger(
     logger: logging.Logger,
-    max_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+    min_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] | None = None,
+    max_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] | None = None,
 ) -> None:
-    """Clamp the logger to a maximum level -- anything equal or greater than the max level will be set to the max level."""
-    unclamp_logger(logger=logger)
+    """Clamp the logger to a minimum and maximum level.
 
-    logger.addFilter(filter=ClampedLogFilter(max_level=max_level))
+    If min_level is provided, messages logged at a lower level than `min_level` will have their level increased to `min_level`.
+    If max_level is provided, messages logged at a higher level than `max_level` will have their level decreased to `max_level`.
+
+    Args:
+        min_level: The upper bound of the clamp
+        max_level: The lower bound of the clamp
+    """
+    _unclamp_logger(logger=logger)
+
+    logger.addFilter(filter=_ClampedLogFilter(min_level=min_level, max_level=max_level))
 
 
-def unclamp_logger(logger: logging.Logger) -> None:
+def _unclamp_logger(logger: logging.Logger) -> None:
     """Remove all clamped log filters from the logger."""
     for filter in logger.filters[:]:
-        if isinstance(filter, ClampedLogFilter):
+        if isinstance(filter, _ClampedLogFilter):
             logger.removeFilter(filter)

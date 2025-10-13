@@ -47,16 +47,16 @@ from fastmcp.server.elicitation import (
     get_elicitation_schema,
 )
 from fastmcp.server.server import FastMCP
-from fastmcp.utilities.logging import clamp_logger, get_logger
+from fastmcp.utilities.logging import _clamp_logger, get_logger
 from fastmcp.utilities.types import get_cached_typeadapter
 
 logger: Logger = get_logger(name=__name__)
 to_client_logger: Logger = logger.getChild(suffix="to_client")
 
 # Convert all levels of server -> client messages to debug level
-# This clamp be undone at runtime by calling `unclamp_logger` or calling
-# `clamp_logger` with a different max level.
-clamp_logger(logger=to_client_logger, max_level="DEBUG")
+# This clamp be undone at runtime by calling `_unclamp_logger` or calling
+# `_clamp_logger` with a different max level.
+_clamp_logger(logger=to_client_logger, max_level="DEBUG")
 
 
 T = TypeVar("T", default=Any)
