@@ -1,5 +1,5 @@
 ---
-title: Server Logging
+title: Client Logging
 sidebarTitle: Logging
 description: Send log messages back to MCP clients through the context.
 icon: receipt
@@ -71,60 +71,17 @@ async def process_transaction(transaction_id: str, amount: float, ctx: Context):
     # ... processing logic ...
 ```
 
-## Logging to Both Client and Server
+## Server Logs
 
-By default, `ctx.log()` and its convenience methods (`debug`, `info`, `warning`, `error`) send messages **only to the MCP client**. To also capture these messages in your server's Python logs, use the `log_to` parameter with `"CLIENT_AND_SERVER"`:
-
-```python
-from fastmcp import FastMCP, Context
-
-mcp = FastMCP("MyServer")
-
-@mcp.tool
-async def process_data(data: dict, ctx: Context) -> str:
-    # Send to client only (default behavior)
-    await ctx.info("Starting processing")
-
-    # Send to both client AND server logs
-    await ctx.info(
-        "Critical operation starting",
-        log_to="CLIENT_AND_SERVER"
-    )
-
-    # Works with all log levels
-    await ctx.debug("Debug info", log_to="CLIENT_AND_SERVER")
-    await ctx.warning("Warning message", log_to="CLIENT_AND_SERVER")
-    await ctx.error("Error occurred", log_to="CLIENT_AND_SERVER")
-
-    return "done"
-```
-
-### When to Use `CLIENT_AND_SERVER`
-
-Use `log_to="CLIENT_AND_SERVER"` when you need:
-
-- **Server-side monitoring**: Integrate with centralized logging systems (e.g., ELK, Datadog, Splunk)
-- **Debugging without client access**: Investigate issues by examining server logs directly
-- **Audit trails**: Maintain server-side records of all operations for compliance
-- **Observability**: Connect with systems like OpenTelemetry for metrics and tracing
-- **Operational visibility**: Monitor what tools are doing in production environments
-
-### Log Routing
-
-When `log_to="CLIENT_AND_SERVER"` is used:
-
-1. **Server logs first**: Message is written to the server's Python logger before being sent to the client
-2. **Then client send**: Message is sent to the MCP client via the protocol
-3. **Failure safety**: Server logs capture the message even if client communication fails
-
-Server logs use the FastMCP logging system (`fastmcp.*` namespace) and respect your server's logging configuration. You can customize the logger name using the `logger_name` parameter:
+Client Logging in the form of `ctx.log()` and its convenience methods (`debug`, `info`, `warning`, `error`) are meant for sending messages to the MCP clients. Messages sent to clients are also logged to the server's log at `DEBUG` level. Enable debug logging on the server or enable debug logging on the `fastmcp.server.to_client` logger to see these messages in the server's log.
 
 ```python
-await ctx.info(
-    "Custom subsystem log",
-    logger_name="my_app.subsystem",
-    log_to="CLIENT_AND_SERVER"
-)
+import logging
+
+from fastmcp.utilities.logging import get_logger
+
+to_client_logger = get_logger(name="fastmcp.server.to_client")
+to_client_logger.setLevel(level=logging.DEBUG)
 ```
 
 ## Logging Methods
