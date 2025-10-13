@@ -20,7 +20,10 @@ def get_logger(name: str) -> logging.Logger:
     Returns:
         a configured logger instance
     """
-    return logging.getLogger(f"fastmcp.{name}")
+    if name.startswith("fastmcp."):
+        return logging.getLogger(name=name)
+
+    return logging.getLogger(name=f"fastmcp.{name}")
 
 
 def configure_logging(

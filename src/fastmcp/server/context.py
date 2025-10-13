@@ -730,11 +730,14 @@ async def _log_to_server_and_client(
 ) -> None:
     """Log a message to the server and client."""
 
-    msg_prefix = f"[To Client:{logger_name}]" if logger_name else "[To Client]"
+    msg_prefix = f"Sending {level.upper()} to client"
+
+    if logger_name:
+        msg_prefix += f" ({logger_name})"
 
     to_client_logger.log(
         level=_mcp_level_to_python_level[level],
-        msg=f"{msg_prefix} {data.msg}",
+        msg=f"{msg_prefix}: {data.msg}",
         extra=data.extra,
     )
 
