@@ -154,7 +154,19 @@ class ClampedLogFilter(logging.Filter):
         self.max_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = (
             max_level
         )
-        self.max_level_no: int = logging.getLevelNamesMapping()[max_level]  # ty: ignore[unresolved-attribute]
+
+        self.max_level_no: int
+
+        if max_level == "DEBUG":
+            self.max_level_no = logging.DEBUG
+        elif max_level == "INFO":
+            self.max_level_no = logging.INFO
+        elif max_level == "WARNING":
+            self.max_level_no = logging.WARNING
+        elif max_level == "ERROR":
+            self.max_level_no = logging.ERROR
+        elif max_level == "CRITICAL":
+            self.max_level_no = logging.CRITICAL
 
         super().__init__()
 
