@@ -73,14 +73,14 @@ async def process_transaction(transaction_id: str, amount: float, ctx: Context):
 
 ## Server Logs
 
-Client Logging in the form of `ctx.log()` and its convenience methods (`debug`, `info`, `warning`, `error`) are meant for sending messages to the MCP clients. Messages sent to clients are also logged to the server's log at `DEBUG` level. Enable debug logging on the server or enable debug logging on the `fastmcp.server.to_client` logger to see these messages in the server's log.
+Client Logging in the form of `ctx.log()` and its convenience methods (`debug`, `info`, `warning`, `error`) are meant for sending messages to the MCP clients. Messages sent to clients are also logged to the server's log at `DEBUG` level. Enable debug logging on the server or enable debug logging on the `fastmcp.server.context.to_client` logger to see these messages in the server's log.
 
 ```python
 import logging
 
 from fastmcp.utilities.logging import get_logger
 
-to_client_logger = get_logger(name="fastmcp.server.to_client")
+to_client_logger = get_logger(name="fastmcp.server.context.to_client")
 to_client_logger.setLevel(level=logging.DEBUG)
 ```
 
