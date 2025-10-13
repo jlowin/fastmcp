@@ -100,6 +100,9 @@ async def default_lifespan(server: FastMCP[LifespanResultT]) -> AsyncIterator[An
 
     Args:
         server: The server instance this lifespan is managing
+
+    Returns:
+        An empty dictionary as the lifespan result.
     """
     yield {}
 
@@ -119,7 +122,8 @@ def _lifespan_proxy(
 
         if not fastmcp_server._lifespan_result_set:
             raise RuntimeError(
-                "FastMCP server has a lifespan but no lifespan result is set, which means the server's context manager was not entered."
+                "FastMCP server has a lifespan defined but no lifespan result is set, which means the server's context manager was not entered. "
+                + " Are you running the server in a way that supports lifespans? If so, please file an issue at https://github.com/jlowin/fastmcp/issues."
             )
 
         yield fastmcp_server._lifespan_result
