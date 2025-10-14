@@ -2393,7 +2393,7 @@ class FastMCP(Generic[LifespanResultT]):
             from warnings import warn
 
             warn(
-                message="When importing from a server with a lifespan, the lifespan from the imported server will not be used. ",
+                message="When importing from a server with a lifespan, the lifespan from the imported server will not be used.",
                 category=RuntimeWarning,
                 stacklevel=2,
             )
