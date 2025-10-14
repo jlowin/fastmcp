@@ -9,6 +9,7 @@ from mcp import McpError
 from mcp.client.auth import OAuthClientProvider
 from pydantic import AnyUrl
 
+import fastmcp
 from fastmcp.client import Client
 from fastmcp.client.auth.bearer import BearerAuth
 from fastmcp.client.transports import (
@@ -435,11 +436,8 @@ async def test_server_info_custom_version():
     async with client:
         result = client.initialize_result
         assert result.serverInfo.name == "DefaultVersionServer"
-        # Should fall back to MCP library version
-        assert result.serverInfo.version is not None
-        assert (
-            result.serverInfo.version != "1.2.3"
-        )  # Should be different from custom version
+        # Should fall back to FastMCP version
+        assert result.serverInfo.version == fastmcp.__version__
 
 
 async def test_client_nested_context_manager(fastmcp_server):
@@ -680,7 +678,8 @@ class TestErrorHandling:
         async with Client(transport=FastMCPTransport(mcp)) as client:
             result = await client.call_tool_mcp("validated_tool", {"x": "abc"})
             assert result.isError
-            assert "'abc' is not of type 'integer'" in result.content[0].text  # type: ignore[attr-defined]
+            # Pydantic validation error message should NOT be masked
+            assert "Input should be a valid integer" in result.content[0].text  # type: ignore[attr-defined]
 
     async def test_specific_tool_errors_are_sent_to_client(self):
         mcp = FastMCP("TestServer")
@@ -943,12 +942,7 @@ class TestInferTransport:
         transport = infer_transport(config)
         assert isinstance(transport, MCPConfigTransport)
         assert isinstance(transport.transport, FastMCPTransport)
-        assert (
-            len(
-                cast(FastMCP, transport.transport.server)._tool_manager._mounted_servers
-            )
-            == 2
-        )
+        assert len(cast(FastMCP, transport.transport.server)._mounted_servers) == 2
 
     def test_infer_fastmcp_server(self, fastmcp_server):
         """FastMCP server instances should infer to FastMCPTransport."""
