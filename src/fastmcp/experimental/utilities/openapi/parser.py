@@ -625,6 +625,24 @@ class OpenAPIParser(
         for response in responses.values():
             if response.content_schema:
                 for content_schema in response.content_schema.values():
+                    # Check if the content schema itself is a top-level $ref
+                    if "$ref" in content_schema and isinstance(
+                        content_schema.get("$ref"), str
+                    ):
+                        ref = content_schema["$ref"]
+                        # Handle both converted and unconverted refs
+                        if ref.startswith("#/$defs/"):
+                            schema_name = ref.split("/")[-1]
+                        elif ref.startswith("#/components/schemas/"):
+                            schema_name = ref.split("/")[-1]
+                        else:
+                            schema_name = None
+
+                        # Add the top-level schema itself
+                        if schema_name and schema_name in all_schemas:
+                            needed_schemas.add(schema_name)
+
+                    # Extract all dependencies (transitive refs within the schema)
                     deps = self._extract_schema_dependencies(
                         content_schema, all_schemas
                     )
