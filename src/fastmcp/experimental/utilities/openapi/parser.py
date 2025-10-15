@@ -474,9 +474,22 @@ class OpenAPIParser(
                         and media_type_obj.media_type_schema
                     ):
                         try:
-                            schema_dict = self._extract_schema_as_dict(
-                                media_type_obj.media_type_schema
-                            )
+                            # Track if this is a top-level $ref before resolution
+                            top_level_schema_name = None
+                            media_schema = media_type_obj.media_type_schema
+                            if isinstance(media_schema, self.reference_cls):
+                                ref_str = media_schema.ref
+                                if isinstance(ref_str, str) and ref_str.startswith(
+                                    "#/components/schemas/"
+                                ):
+                                    top_level_schema_name = ref_str.split("/")[-1]
+
+                            schema_dict = self._extract_schema_as_dict(media_schema)
+                            # Add marker for top-level schema if it was a ref
+                            if top_level_schema_name:
+                                schema_dict["x-fastmcp-top-level-schema"] = (
+                                    top_level_schema_name
+                                )
                             resp_info.content_schema[media_type_str] = schema_dict
                         except ValueError as e:
                             # Re-raise ValueError for external reference errors
@@ -625,21 +638,10 @@ class OpenAPIParser(
         for response in responses.values():
             if response.content_schema:
                 for content_schema in response.content_schema.values():
-                    # Check if the content schema itself is a top-level $ref
-                    if "$ref" in content_schema and isinstance(
-                        content_schema.get("$ref"), str
-                    ):
-                        ref = content_schema["$ref"]
-                        # Handle both converted and unconverted refs
-                        if ref.startswith("#/$defs/"):
-                            schema_name = ref.split("/")[-1]
-                        elif ref.startswith("#/components/schemas/"):
-                            schema_name = ref.split("/")[-1]
-                        else:
-                            schema_name = None
-
-                        # Add the top-level schema itself
-                        if schema_name and schema_name in all_schemas:
+                    # Check if this schema was originally a top-level $ref
+                    if "x-fastmcp-top-level-schema" in content_schema:
+                        schema_name = content_schema["x-fastmcp-top-level-schema"]
+                        if schema_name in all_schemas:
                             needed_schemas.add(schema_name)
 
                     # Extract all dependencies (transitive refs within the schema)
