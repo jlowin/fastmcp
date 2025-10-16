@@ -111,6 +111,12 @@ def search_products_implementation(query: str, category: str | None = None) -> l
   
   Optional meta information about the tool. This data is passed through to the MCP client as the `_meta` field of the client-side tool object and can be used for custom metadata, versioning, or other application-specific purposes.
 </ParamField>
+
+<ParamField body="serializer" type="ToolResultSerializerType | None = None">
+  <VersionBadge version="2.12.5" />
+  
+  Custom serializer function for tool results. If provided, overrides the server's default `tool_serializer`. The function should accept any value and return a string. See [Custom Serializers](#custom-serializers) for details.
+</ParamField>
 </Card>
 
 
@@ -425,6 +431,39 @@ Each helper class accepts either `path=` or `data=` (mutually exclusive):
 - **`format`**: Optional format override (e.g., "png", "wav", "pdf")
 - **`name`**: Optional name for `File` when using `data=`
 - **`annotations`**: Optional MCP annotations for the content
+
+#### Custom Serializers
+
+<VersionBadge version="2.12.5" />
+
+You can customize how tool results are serialized to text content by providing a custom serializer function. This is useful when you need specific output formats like YAML, pretty-printed JSON, or integration with high-performance serializers.
+
+```python
+import yaml
+from fastmcp import FastMCP
+
+mcp = FastMCP()
+
+# Per-tool custom serializer
+@mcp.tool(serializer=yaml.dump)
+def get_config() -> dict:
+    """Returns configuration as YAML."""
+    return {"database": "postgres", "port": 5432}
+
+# Server-level default serializer
+mcp = FastMCP(tool_serializer=yaml.dump)
+
+@mcp.tool
+def get_status() -> dict:
+    """Uses server's default YAML serializer."""
+    return {"status": "running"}
+```
+
+The `serializer` parameter accepts a function that takes any value and returns a string. Per-tool serializers override the server's default `tool_serializer`.
+
+<Tip>
+Custom serializers only affect text content blocks. Structured content (when enabled) is always serialized as JSON according to the MCP specification.
+</Tip>
 
 ### Structured Output
 
