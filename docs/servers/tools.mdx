@@ -426,6 +426,27 @@ Each helper class accepts either `path=` or `data=` (mutually exclusive):
 - **`name`**: Optional name for `File` when using `data=`
 - **`annotations`**: Optional MCP annotations for the content
 
+<Warning>
+**Container Limitations:** `Image`, `Audio`, and `File` objects must be returned directly or in a list/tuple at the top level. They cannot be nested inside dictionaries or other data structures.
+
+```python
+# ✅ Works - direct return
+return Image(path="chart.png")
+
+# ✅ Works - list of images
+return [Image(path="chart1.png"), Image(path="chart2.png")]
+
+# ❌ Does not work - nested in dict
+return {"image": Image(path="chart.png")}  # Returns string representation
+
+# ✅ Alternative - use MCP native types directly
+from mcp.types import ImageContent
+return {"image": Image(path="chart.png").to_image_content()}
+```
+
+To return media alongside structured data, either return them separately in a list or use `ToolResult` to control both content blocks and structured output independently.
+</Warning>
+
 ### Structured Output
 
 <VersionBadge version="2.10.0" />
