@@ -57,7 +57,7 @@ from fastmcp.server.low_level import LowLevelServer
 from fastmcp.server.middleware import Middleware, MiddlewareContext
 from fastmcp.settings import Settings
 from fastmcp.tools import ToolManager
-from fastmcp.tools.tool import FunctionTool, Tool, ToolResult
+from fastmcp.tools.tool import FunctionTool, Tool, ToolResult, ToolResultSerializerType
 from fastmcp.tools.tool_transform import ToolTransformConfig
 from fastmcp.utilities.cli import log_server_banner
 from fastmcp.utilities.components import FastMCPComponent
@@ -1337,6 +1337,7 @@ class FastMCP(Generic[LifespanResultT]):
         exclude_args: list[str] | None = None,
         meta: dict[str, Any] | None = None,
         enabled: bool | None = None,
+        serializer: ToolResultSerializerType | None = None,
     ) -> FunctionTool: ...
 
     @overload
@@ -1353,6 +1354,7 @@ class FastMCP(Generic[LifespanResultT]):
         exclude_args: list[str] | None = None,
         meta: dict[str, Any] | None = None,
         enabled: bool | None = None,
+        serializer: ToolResultSerializerType | None = None,
     ) -> Callable[[AnyFunction], FunctionTool]: ...
 
     def tool(
@@ -1368,6 +1370,7 @@ class FastMCP(Generic[LifespanResultT]):
         exclude_args: list[str] | None = None,
         meta: dict[str, Any] | None = None,
         enabled: bool | None = None,
+        serializer: ToolResultSerializerType | None = None,
     ) -> Callable[[AnyFunction], FunctionTool] | FunctionTool:
         """Decorator to register a tool.
 
@@ -1392,6 +1395,8 @@ class FastMCP(Generic[LifespanResultT]):
             exclude_args: Optional list of argument names to exclude from the tool schema
             meta: Optional meta information about the tool
             enabled: Optional boolean to enable or disable the tool
+            serializer: Optional custom serializer function for tool results. If not provided,
+                uses the server's default tool_serializer
 
         Examples:
             Register a tool with a custom name:
@@ -1415,6 +1420,11 @@ class FastMCP(Generic[LifespanResultT]):
 
             # Direct function call
             server.tool(my_function, name="custom_name")
+
+            # Custom serializer for a specific tool
+            @server.tool(serializer=yaml.dump)
+            def get_data() -> dict:
+                return {"key": "value"}
             ```
         """
         if isinstance(annotations, dict):
@@ -1450,7 +1460,9 @@ class FastMCP(Generic[LifespanResultT]):
                 annotations=cast(ToolAnnotations | None, annotations),
                 exclude_args=exclude_args,
                 meta=meta,
-                serializer=self._tool_serializer,
+                serializer=serializer
+                if serializer is not None
+                else self._tool_serializer,
                 enabled=enabled,
             )
             self.add_tool(tool)
@@ -1483,6 +1495,7 @@ class FastMCP(Generic[LifespanResultT]):
             annotations=annotations,
             exclude_args=exclude_args,
             meta=meta,
+            serializer=serializer,
             enabled=enabled,
         )
 

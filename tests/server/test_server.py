@@ -130,6 +130,32 @@ class TestTools:
         assert tools["g-tool"].name == "g-tool"
         assert tools["g-tool"].description == "add two to a number"
 
+    async def test_tool_with_custom_serializer(self):
+        """Test that a custom serializer can be passed to individual tools."""
+        mcp = FastMCP()
+
+        def custom_yaml_serializer(data: Any) -> str:
+            return f"YAML: {data}"
+
+        @mcp.tool(serializer=custom_yaml_serializer)
+        def get_data() -> dict:
+            """Get some data."""
+            return {"value": 42}
+
+        @mcp.tool
+        def get_other_data() -> dict:
+            """Get other data."""
+            return {"value": 100}
+
+        # Check that custom serializer is used for the first tool
+        result1 = await mcp._call_tool_mcp("get_data", {})
+        assert result1[0][0].text == "YAML: {'value': 42}"  # type: ignore[attr-defined]
+
+        # Check that default serializer is used for the second tool
+        result2 = await mcp._call_tool_mcp("get_other_data", {})
+        assert "100" in result2[0][0].text  # type: ignore[attr-defined]
+        assert "YAML:" not in result2[0][0].text  # type: ignore[attr-defined]
+
 
 class TestToolDecorator:
     async def test_no_tools_before_decorator(self):
