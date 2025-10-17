@@ -179,8 +179,9 @@ mcp = FastMCP("Protected Server", auth=auth)
 # Create MCP app with internal path
 mcp_app = mcp.http_app(path="/mcp")
 
-# Get well-known routes (mounted at root level)
-well_known_routes = auth.get_routes(mcp_path="/mcp")
+# Get well-known discovery routes (mounted at root level for RFC compliance)
+# Use the FULL path including mount prefix
+well_known_routes = auth.get_well_known_routes(mcp_path="/api/mcp")
 
 # Mount everything
 app = Starlette(

@@ -83,7 +83,7 @@ class TestOAuthMounting:
 
         # Get well-known routes for the FULL mount path (/api/mcp)
         # and mount them at root level on the parent app
-        well_known_routes = auth_provider.get_routes(mcp_path="/api/mcp")
+        well_known_routes = auth_provider.get_well_known_routes(mcp_path="/api/mcp")
 
         parent_app = Starlette(
             routes=[
@@ -165,7 +165,9 @@ class TestOAuthMounting:
         mcp_app = mcp.http_app(path="/mcp")
 
         # Get well-known routes for the FULL nested mount path
-        well_known_routes = auth_provider.get_routes(mcp_path="/outer/inner/mcp")
+        well_known_routes = auth_provider.get_well_known_routes(
+            mcp_path="/outer/inner/mcp"
+        )
 
         # Create nested mounts
         inner_app = Starlette(

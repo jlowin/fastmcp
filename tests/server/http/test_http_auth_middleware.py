@@ -41,7 +41,7 @@ class TestStreamableHTTPAppResourceMetadataURL:
         assert isinstance(route.endpoint, RequireAuthMiddleware)
         assert (
             str(route.endpoint.resource_metadata_url)
-            == "https://resource.example.com/.well-known/oauth-protected-resource"
+            == "https://resource.example.com/.well-known/oauth-protected-resource/mcp"
         )
 
     def test_trailing_slash_handling_in_resource_server_url(self, rsa_key_pair):
@@ -62,7 +62,7 @@ class TestStreamableHTTPAppResourceMetadataURL:
         # Should not have double slash
         assert (
             str(route.endpoint.resource_metadata_url)
-            == "https://resource.example.com/.well-known/oauth-protected-resource"
+            == "https://resource.example.com/.well-known/oauth-protected-resource/mcp"
         )
 
     def test_no_auth_provider_mounts_without_require_auth_middleware(
