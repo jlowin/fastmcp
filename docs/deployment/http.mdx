@@ -245,10 +245,38 @@ Your existing API remains at `http://localhost:8000/api/` while MCP is available
 
 <VersionBadge version="2.13.0" />
 
+<Tip>
+This section only applies if you're **mounting an OAuth-protected FastMCP server under a path prefix** (like `/api`) inside another application using `Mount()`.
+
+If you're deploying your FastMCP server at root level without any `Mount()` prefix, the well-known routes are automatically included in `mcp.http_app()` and you don't need to do anything special.
+</Tip>
+
 OAuth specifications (RFC 8414 and RFC 9728) require discovery metadata to be accessible at well-known paths under the root level of your domain. When you mount an OAuth-protected FastMCP server under a path prefix like `/api`, this creates a routing challenge: your operational OAuth endpoints move under the prefix, but discovery endpoints must remain at the root.
 
 <Warning>
-You **must** ensure that your `.well-known` routes are accessible at the root level of your domain. FastMCP can not do this automatically if your server is mounted under a path prefix. Follow the instructions below to configure your server correctly.
+**Common Mistakes to Avoid:**
+
+1. **Forgetting to mount `.well-known` routes at root** - FastMCP cannot do this automatically when your server is mounted under a path prefix. You must explicitly mount well-known routes at the root level.
+
+2. **Including mount prefix in both base_url AND mcp_path** - The mount prefix (like `/api`) should only be in `base_url`, not in `mcp_path`. Otherwise you'll get double paths.
+
+   ✅ **Correct:**
+   ```python
+   base_url = "http://localhost:8000/api"
+   mcp_path = "/mcp"
+   # Result: /api/mcp
+   ```
+
+   ❌ **Wrong:**
+   ```python
+   base_url = "http://localhost:8000/api"
+   mcp_path = "/api/mcp"
+   # Result: /api/api/mcp (double prefix!)
+   ```
+
+3. **Not setting issuer_url when mounting** - Without `issuer_url` set to root level, OAuth discovery will attempt path-scoped discovery first (which will 404), adding unnecessary error logs.
+
+Follow the configuration instructions below to set up mounting correctly.
 </Warning>
 
 ### Route Types
@@ -269,21 +297,34 @@ When you mount your MCP app under a prefix, operational routes move with it, but
 
 ### Configuration Parameters
 
-Two parameters control where these routes are located:
+Three parameters control where routes are located and how they combine:
+
+**`base_url`** tells clients where to find operational endpoints. This includes any Starlette `Mount()` path prefix (e.g., `/api`):
+
+```python
+base_url="http://localhost:8000/api"  # Includes mount prefix
+```
+
+**`mcp_path`** is the internal FastMCP endpoint path, which gets appended to `base_url`:
+
+```python
+mcp_path="/mcp"  # Internal MCP path, NOT the mount prefix
+```
 
 **`issuer_url`** tells clients where to find discovery metadata. This should point to the root level of your server where well-known routes are mounted:
 
 ```python
-issuer_url="http://localhost:8000"
+issuer_url="http://localhost:8000"  # Root level, no prefix
 ```
 
-**`base_url`** tells clients where to find operational endpoints. This includes any mount path prefix:
+**Key Invariant:** `base_url + mcp_path = actual externally-accessible MCP URL`
 
-```python
-base_url="http://localhost:8000/api"
-```
+Example:
+- `base_url`: `http://localhost:8000/api` (mount prefix `/api`)
+- `mcp_path`: `/mcp` (internal path)
+- Result: `http://localhost:8000/api/mcp` (final MCP endpoint)
 
-These URLs differ when mounting under a prefix because discovery metadata lives at the root while operational endpoints live under the mount path.
+Note that the mount prefix (`/api` from `Mount("/api", ...)`) goes in `base_url`, while `mcp_path` is just the internal MCP route. Don't include the mount prefix in both places or you'll get `/api/api/mcp`.
 
 ### Mounting Strategy
 

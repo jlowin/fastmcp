@@ -64,26 +64,27 @@ class TestOAuthMounting:
     async def test_well_known_with_mounted_app(self, test_tokens):
         """Test that .well-known routes work when explicitly mounted at root.
 
-        When mounting a FastMCP app under a prefix, users should:
-        1. Get the well-known routes from auth provider with the FULL mount path
-        2. Mount those routes directly on the parent app (at root level)
-        3. Mount the MCP app under the desired prefix
+        This test uses the CANONICAL pattern for mounting:
+        - base_url includes the mount prefix ("/api")
+        - mcp_path is just the internal MCP path ("/mcp")
+        - These combine: base_url + mcp_path = actual URL
 
-        This ensures RFC 9728 compliance - the well-known endpoint is at root.
+        The well-known routes are mounted at root level for RFC 9728 compliance.
         """
         token_verifier = StaticTokenVerifier(tokens=test_tokens)
+        # CANONICAL PATTERN: base_url includes the mount prefix
         auth_provider = RemoteAuthProvider(
             token_verifier=token_verifier,
             authorization_servers=[AnyHttpUrl("https://auth.example.com")],
-            base_url="https://api.example.com",
+            base_url="https://api.example.com/api",  # Includes /api mount prefix
         )
 
         mcp = FastMCP("test-server", auth=auth_provider)
         mcp_app = mcp.http_app(path="/mcp")
 
-        # Get well-known routes for the FULL mount path (/api/mcp)
-        # and mount them at root level on the parent app
-        well_known_routes = auth_provider.get_well_known_routes(mcp_path="/api/mcp")
+        # Pass just the internal mcp_path, NOT the full mount path
+        # The auth provider will combine base_url + mcp_path internally
+        well_known_routes = auth_provider.get_well_known_routes(mcp_path="/mcp")
 
         parent_app = Starlette(
             routes=[
@@ -152,22 +153,21 @@ class TestOAuthMounting:
     async def test_nested_mounting(self, test_tokens):
         """Test .well-known routes with deeply nested mounts.
 
-        Same pattern as single mount - explicitly mount well-known routes at root.
+        Uses CANONICAL pattern: base_url includes all mount prefixes.
         """
         token_verifier = StaticTokenVerifier(tokens=test_tokens)
+        # CANONICAL PATTERN: base_url includes full mount path /outer/inner
         auth_provider = RemoteAuthProvider(
             token_verifier=token_verifier,
             authorization_servers=[AnyHttpUrl("https://auth.example.com")],
-            base_url="https://api.example.com",
+            base_url="https://api.example.com/outer/inner",  # Includes nested mount path
         )
 
         mcp = FastMCP("test-server", auth=auth_provider)
         mcp_app = mcp.http_app(path="/mcp")
 
-        # Get well-known routes for the FULL nested mount path
-        well_known_routes = auth_provider.get_well_known_routes(
-            mcp_path="/outer/inner/mcp"
-        )
+        # Pass just the internal mcp_path
+        well_known_routes = auth_provider.get_well_known_routes(mcp_path="/mcp")
 
         # Create nested mounts
         inner_app = Starlette(
