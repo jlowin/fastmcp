@@ -107,6 +107,7 @@
                 "group": "Advanced Features",
                 "icon": "stars",
                 "pages": [
+                  "servers/icons",
                   "servers/context",
                   "servers/proxy",
                   "servers/composition",
