@@ -374,6 +374,7 @@
                     "group": "middleware",
                     "pages": [
                       "python-sdk/fastmcp-server-middleware-__init__",
+                      "python-sdk/fastmcp-server-middleware-caching",
                       "python-sdk/fastmcp-server-middleware-error_handling",
                       "python-sdk/fastmcp-server-middleware-logging",
                       "python-sdk/fastmcp-server-middleware-middleware",
