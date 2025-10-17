@@ -78,7 +78,6 @@ class TestRemoteAuthProvider:
         assert len(routes) == 1
 
         # Check that the route is the OAuth protected resource metadata endpoint
-        # When called without mcp_path, it creates route at /.well-known/oauth-protected-resource
         route = routes[0]
         assert route.path == "/.well-known/oauth-protected-resource"
         assert route.methods is not None
@@ -100,10 +99,10 @@ class TestRemoteAuthProvider:
         )
 
         metadata_url = provider._get_resource_url(
-            "/.well-known/oauth-protected-resource/mcp"
+            "/.well-known/oauth-protected-resource"
         )
         assert metadata_url == AnyHttpUrl(
-            "https://api.example.com/.well-known/oauth-protected-resource/mcp"
+            "https://api.example.com/.well-known/oauth-protected-resource"
         )
 
     def test_get_resource_url_with_nested_base_url(self):
@@ -122,10 +121,10 @@ class TestRemoteAuthProvider:
         )
 
         metadata_url = provider._get_resource_url(
-            "/.well-known/oauth-protected-resource/mcp"
+            "/.well-known/oauth-protected-resource"
         )
         assert metadata_url == AnyHttpUrl(
-            "https://api.example.com/v1/.well-known/oauth-protected-resource/mcp"
+            "https://api.example.com/v1/.well-known/oauth-protected-resource"
         )
 
     def test_get_resource_url_handles_trailing_slash(self):
@@ -144,10 +143,10 @@ class TestRemoteAuthProvider:
         )
 
         metadata_url = provider._get_resource_url(
-            "/.well-known/oauth-protected-resource/mcp"
+            "/.well-known/oauth-protected-resource"
         )
         assert metadata_url == AnyHttpUrl(
-            "https://api.example.com/.well-known/oauth-protected-resource/mcp"
+            "https://api.example.com/.well-known/oauth-protected-resource"
         )
 
 
@@ -196,7 +195,7 @@ class TestRemoteAuthProviderIntegration:
             transport=httpx.ASGITransport(app=mcp_http_app),
             base_url="https://api.example.com",
         ) as client:
-            response = await client.get("/.well-known/oauth-protected-resource/mcp")
+            response = await client.get("/.well-known/oauth-protected-resource")
             assert response.status_code == 200
 
     async def test_protected_resource_metadata_endpoint_resource_field(self):
@@ -210,7 +209,7 @@ class TestRemoteAuthProviderIntegration:
             transport=httpx.ASGITransport(app=mcp_http_app),
             base_url="https://api.example.com",
         ) as client:
-            response = await client.get("/.well-known/oauth-protected-resource/mcp")
+            response = await client.get("/.well-known/oauth-protected-resource")
             data = response.json()
 
             # This is the key test - ensure resource field contains the full MCP URL
@@ -229,20 +228,20 @@ class TestRemoteAuthProviderIntegration:
             transport=httpx.ASGITransport(app=mcp_http_app),
             base_url="https://api.example.com",
         ) as client:
-            response = await client.get("/.well-known/oauth-protected-resource/mcp")
+            response = await client.get("/.well-known/oauth-protected-resource")
             data = response.json()
 
             assert data["authorization_servers"] == ["https://auth.example.com/"]
 
     @pytest.mark.parametrize(
-        "base_url,expected_resource,well_known_path",
+        "base_url,expected_resource",
         [
-            ("https://api.example.com", "https://api.example.com/mcp", "/.well-known/oauth-protected-resource/mcp"),
-            ("https://api.example.com/", "https://api.example.com/mcp", "/.well-known/oauth-protected-resource/mcp"),
-            ("https://api.example.com/v1/", "https://api.example.com/v1/mcp", "/.well-known/oauth-protected-resource/v1/mcp"),
+            ("https://api.example.com", "https://api.example.com/mcp"),
+            ("https://api.example.com/", "https://api.example.com/mcp"),
+            ("https://api.example.com/v1/", "https://api.example.com/v1/mcp"),
         ],
     )
-    async def test_base_url_configurations(self, base_url: str, expected_resource: str, well_known_path: str):
+    async def test_base_url_configurations(self, base_url: str, expected_resource: str):
         """Test different base_url configurations."""
         auth_provider = self._create_test_auth_provider(base_url=base_url)
         mcp = FastMCP("test-server", auth=auth_provider)
@@ -252,8 +251,7 @@ class TestRemoteAuthProviderIntegration:
             transport=httpx.ASGITransport(app=mcp_http_app),
             base_url="https://test.example.com",
         ) as client:
-            # RFC 9728: path-scoped well-known URL based on resource location
-            response = await client.get(well_known_path)
+            response = await client.get("/.well-known/oauth-protected-resource")
 
             assert response.status_code == 200
             data = response.json()
@@ -277,7 +275,7 @@ class TestRemoteAuthProviderIntegration:
             transport=httpx.ASGITransport(app=mcp_http_app),
             base_url="https://api.example.com",
         ) as client:
-            response = await client.get("/.well-known/oauth-protected-resource/mcp")
+            response = await client.get("/.well-known/oauth-protected-resource")
 
             data = response.json()
             assert data["resource"] == "https://api.example.com/mcp"
@@ -300,7 +298,7 @@ class TestRemoteAuthProviderIntegration:
             transport=httpx.ASGITransport(app=mcp_http_app),
             base_url="https://api.example.com",
         ) as client:
-            response = await client.get("/.well-known/oauth-protected-resource/mcp")
+            response = await client.get("/.well-known/oauth-protected-resource")
 
             data = response.json()
             assert set(data["authorization_servers"]) == {
@@ -384,7 +382,7 @@ class TestRemoteAuthProviderIntegration:
             transport=httpx.ASGITransport(app=mcp_http_app),
             base_url="https://my-server.com",
         ) as client:
-            response = await client.get("/.well-known/oauth-protected-resource/mcp")
+            response = await client.get("/.well-known/oauth-protected-resource")
 
             assert response.status_code == 200
             data = response.json()
@@ -420,7 +418,7 @@ class TestRemoteAuthProviderIntegration:
             transport=httpx.ASGITransport(app=mcp_http_app),
             base_url="https://my-server.com",
         ) as client:
-            response = await client.get("/.well-known/oauth-protected-resource/mcp")
+            response = await client.get("/.well-known/oauth-protected-resource")
 
             assert response.status_code == 200
             data = response.json()
@@ -457,7 +455,7 @@ class TestRemoteAuthProviderIntegration:
             transport=httpx.ASGITransport(app=mcp_http_app),
             base_url="https://my-server.com",
         ) as client:
-            response = await client.get("/.well-known/oauth-protected-resource/mcp")
+            response = await client.get("/.well-known/oauth-protected-resource")
 
             assert response.status_code == 200
             data = response.json()
