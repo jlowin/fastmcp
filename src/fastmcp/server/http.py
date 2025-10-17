@@ -6,6 +6,7 @@ from contextvars import ContextVar
 from typing import TYPE_CHECKING
 
 from mcp.server.auth.middleware.bearer_auth import RequireAuthMiddleware
+from mcp.server.auth.routes import build_resource_metadata_url
 from mcp.server.lowlevel.server import LifespanResultT
 from mcp.server.sse import SseServerTransport
 from mcp.server.streamable_http import EventStore
@@ -173,13 +174,19 @@ def create_sse_app(
         server_middleware.extend(auth_middleware)
 
         # Create protected SSE endpoint route with GET method only
+        # Use RFC 9728 path-scoped well-known URL for WWW-Authenticate header
+        resource_url = auth._get_resource_url(sse_path)
+        metadata_url = (
+            build_resource_metadata_url(resource_url) if resource_url else None
+        )
+
         server_routes.append(
             Route(
                 sse_path,
                 endpoint=RequireAuthMiddleware(
                     handle_sse,
                     auth.required_scopes,
-                    auth._get_resource_url("/.well-known/oauth-protected-resource"),
+                    metadata_url,
                 ),
                 methods=["GET"],
             )
@@ -192,7 +199,7 @@ def create_sse_app(
                 app=RequireAuthMiddleware(
                     sse.handle_post_message,
                     auth.required_scopes,
-                    auth._get_resource_url("/.well-known/oauth-protected-resource"),
+                    metadata_url,
                 ),
             )
         )
@@ -295,13 +302,19 @@ def create_streamable_http_app(
         server_middleware.extend(auth_middleware)
 
         # Create protected HTTP endpoint route
+        # Use RFC 9728 path-scoped well-known URL for WWW-Authenticate header
+        resource_url = auth._get_resource_url(streamable_http_path)
+        metadata_url = (
+            build_resource_metadata_url(resource_url) if resource_url else None
+        )
+
         server_routes.append(
             Route(
                 streamable_http_path,
                 endpoint=RequireAuthMiddleware(
                     streamable_http_app,
                     auth.required_scopes,
-                    auth._get_resource_url("/.well-known/oauth-protected-resource"),
+                    metadata_url,
                 ),
             )
         )
