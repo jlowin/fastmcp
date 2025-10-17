@@ -64,6 +64,29 @@ def derive_encryption_key(upstream_secret: str) -> bytes:
     return base64.urlsafe_b64encode(key_material)
 
 
+def derive_key_from_secret(secret: str | bytes, salt: str, info: bytes) -> bytes:
+    """Derive 32-byte key from user-provided secret (string or bytes).
+
+    Accepts any length input and derives a proper cryptographic key.
+    Uses HKDF to stretch weak inputs into strong keys.
+
+    Args:
+        secret: User-provided secret (any string or bytes)
+        salt: Application-specific salt string
+        info: Key purpose identifier
+
+    Returns:
+        32-byte key suitable for HS256 JWT signing or Fernet encryption
+    """
+    secret_bytes = secret.encode() if isinstance(secret, str) else secret
+    return HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt.encode(),
+        info=info,
+    ).derive(secret_bytes)
+
+
 class JWTIssuer:
     """Issues and validates FastMCP-signed JWT tokens using HS256.
 
