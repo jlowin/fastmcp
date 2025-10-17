@@ -32,10 +32,10 @@ class TestAuthProviderBase:
     async def test_www_authenticate_header_points_to_base_url(
         self, basic_remote_provider
     ):
-        """Test that WWW-Authenticate header always points to base URL's .well-known.
+        """Test that WWW-Authenticate header points to RFC 9728-compliant metadata URL.
 
-        This test verifies the fix for issue #1685 where the WWW-Authenticate header
-        was incorrectly including the MCP path in the .well-known URL.
+        The WWW-Authenticate header includes the resource path per RFC 9728,
+        so clients can discover where the metadata is actually registered.
         """
         mcp = FastMCP("test-server", auth=basic_remote_provider)
         # Mount MCP at a non-root path
@@ -57,8 +57,7 @@ class TestAuthProviderBase:
             assert match is not None
             metadata_url = match.group(1)
 
-            # RFC 9728: Should be path-scoped well-known URL
-            # Resource is at /api/v1/mcp, so well-known is at /.well-known/oauth-protected-resource/api/v1/mcp
+            # The metadata URL includes the resource path per RFC 9728
             assert (
                 metadata_url
                 == "https://my-server.com/.well-known/oauth-protected-resource/api/v1/mcp"
@@ -78,7 +77,7 @@ class TestAuthProviderBase:
             transport=httpx.ASGITransport(app=mcp_http_app),
             base_url="https://my-server.com",
         ) as client:
-            # Get the .well-known metadata
+            # The .well-known metadata is at a path-aware location per RFC 9728
             response = await client.get("/.well-known/oauth-protected-resource/mcp")
             assert response.status_code == 200
 
@@ -95,7 +94,7 @@ class TestAuthProviderBase:
             transport=httpx.ASGITransport(app=mcp_http_app),
             base_url="https://my-server.com",
         ) as client:
-            # RFC 9728: path-scoped well-known URL
+            # The .well-known metadata includes the resource path per RFC 9728
             response = await client.get(
                 "/.well-known/oauth-protected-resource/api/v2/services/mcp"
             )

@@ -196,6 +196,7 @@ class TestRemoteAuthProviderIntegration:
             transport=httpx.ASGITransport(app=mcp_http_app),
             base_url="https://api.example.com",
         ) as client:
+            # The metadata URL is path-aware per RFC 9728
             response = await client.get("/.well-known/oauth-protected-resource/mcp")
             assert response.status_code == 200
 
@@ -210,6 +211,7 @@ class TestRemoteAuthProviderIntegration:
             transport=httpx.ASGITransport(app=mcp_http_app),
             base_url="https://api.example.com",
         ) as client:
+            # The metadata URL is path-aware per RFC 9728
             response = await client.get("/.well-known/oauth-protected-resource/mcp")
             data = response.json()
 
@@ -229,45 +231,40 @@ class TestRemoteAuthProviderIntegration:
             transport=httpx.ASGITransport(app=mcp_http_app),
             base_url="https://api.example.com",
         ) as client:
+            # The metadata URL is path-aware per RFC 9728
             response = await client.get("/.well-known/oauth-protected-resource/mcp")
             data = response.json()
 
             assert data["authorization_servers"] == ["https://auth.example.com/"]
 
     @pytest.mark.parametrize(
-        "base_url,expected_resource,well_known_path",
+        "base_url,expected_resource",
         [
-            (
-                "https://api.example.com",
-                "https://api.example.com/mcp",
-                "/.well-known/oauth-protected-resource/mcp",
-            ),
-            (
-                "https://api.example.com/",
-                "https://api.example.com/mcp",
-                "/.well-known/oauth-protected-resource/mcp",
-            ),
-            (
-                "https://api.example.com/v1/",
-                "https://api.example.com/v1/mcp",
-                "/.well-known/oauth-protected-resource/v1/mcp",
-            ),
+            ("https://api.example.com", "https://api.example.com/mcp"),
+            ("https://api.example.com/", "https://api.example.com/mcp"),
+            ("https://api.example.com/v1/", "https://api.example.com/v1/mcp"),
         ],
     )
-    async def test_base_url_configurations(
-        self, base_url: str, expected_resource: str, well_known_path: str
-    ):
+    async def test_base_url_configurations(self, base_url: str, expected_resource: str):
         """Test different base_url configurations."""
+        from urllib.parse import urlparse
+
         auth_provider = self._create_test_auth_provider(base_url=base_url)
         mcp = FastMCP("test-server", auth=auth_provider)
         mcp_http_app = mcp.http_app()
+
+        # Extract the path from the expected resource to construct metadata URL
+        resource_parsed = urlparse(expected_resource)
+        # Remove leading slash if present to avoid double slashes
+        resource_path = resource_parsed.path.lstrip("/")
+        metadata_path = f"/.well-known/oauth-protected-resource/{resource_path}"
 
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=mcp_http_app),
             base_url="https://test.example.com",
         ) as client:
-            # RFC 9728: path-scoped well-known URL based on resource location
-            response = await client.get(well_known_path)
+            # The metadata URL is path-aware per RFC 9728
+            response = await client.get(metadata_path)
 
             assert response.status_code == 200
             data = response.json()
@@ -291,6 +288,7 @@ class TestRemoteAuthProviderIntegration:
             transport=httpx.ASGITransport(app=mcp_http_app),
             base_url="https://api.example.com",
         ) as client:
+            # The metadata URL is path-aware per RFC 9728
             response = await client.get("/.well-known/oauth-protected-resource/mcp")
 
             data = response.json()
@@ -314,6 +312,7 @@ class TestRemoteAuthProviderIntegration:
             transport=httpx.ASGITransport(app=mcp_http_app),
             base_url="https://api.example.com",
         ) as client:
+            # The metadata URL is path-aware per RFC 9728
             response = await client.get("/.well-known/oauth-protected-resource/mcp")
 
             data = response.json()
@@ -398,6 +397,7 @@ class TestRemoteAuthProviderIntegration:
             transport=httpx.ASGITransport(app=mcp_http_app),
             base_url="https://my-server.com",
         ) as client:
+            # The metadata URL is path-aware per RFC 9728
             response = await client.get("/.well-known/oauth-protected-resource/mcp")
 
             assert response.status_code == 200
@@ -434,6 +434,7 @@ class TestRemoteAuthProviderIntegration:
             transport=httpx.ASGITransport(app=mcp_http_app),
             base_url="https://my-server.com",
         ) as client:
+            # The metadata URL is path-aware per RFC 9728
             response = await client.get("/.well-known/oauth-protected-resource/mcp")
 
             assert response.status_code == 200
@@ -471,6 +472,7 @@ class TestRemoteAuthProviderIntegration:
             transport=httpx.ASGITransport(app=mcp_http_app),
             base_url="https://my-server.com",
         ) as client:
+            # The metadata URL is path-aware per RFC 9728
             response = await client.get("/.well-known/oauth-protected-resource/mcp")
 
             assert response.status_code == 200

@@ -39,6 +39,7 @@ class TestStreamableHTTPAppResourceMetadataURL:
         route = next(r for r in app.routes if isinstance(r, Route) and r.path == "/mcp")
 
         assert isinstance(route.endpoint, RequireAuthMiddleware)
+        # The metadata URL includes the resource path per RFC 9728
         assert (
             str(route.endpoint.resource_metadata_url)
             == "https://resource.example.com/.well-known/oauth-protected-resource/mcp"
@@ -59,7 +60,8 @@ class TestStreamableHTTPAppResourceMetadataURL:
         )
         route = next(r for r in app.routes if isinstance(r, Route) and r.path == "/mcp")
         assert isinstance(route.endpoint, RequireAuthMiddleware)
-        # Should not have double slash
+        # The metadata URL includes the resource path per RFC 9728
+        # Trailing slash in base_url is normalized
         assert (
             str(route.endpoint.resource_metadata_url)
             == "https://resource.example.com/.well-known/oauth-protected-resource/mcp"
