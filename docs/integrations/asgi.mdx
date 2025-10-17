@@ -152,6 +152,68 @@ app = Starlette(
 
 In this setup, the MCP server is accessible at the `/outer/inner/mcp/` path.
 
+## Mounting OAuth-Protected Servers
+
+When mounting an OAuth-protected FastMCP server under a path prefix, you need to ensure OAuth discovery endpoints are accessible at the root level for RFC 9728 compliance.
+
+### Understanding `base_url` with Mounting
+
+The `base_url` parameter represents **where the OAuth endpoints will be publicly accessible**, including any mount path:
+
+```python
+from fastmcp import FastMCP
+from fastmcp.server.auth.providers.github import GitHubProvider
+from starlette.applications import Starlette
+from starlette.routing import Mount
+
+# Create OAuth provider
+auth = GitHubProvider(
+    client_id="your-client-id",
+    client_secret="your-client-secret",
+    base_url="http://localhost:8000/api",  # Where OAuth endpoints will be accessible
+    issuer_url="http://localhost:8000",  # Where auth server metadata is located (root level)
+)
+
+mcp = FastMCP("Protected Server", auth=auth)
+
+# Create MCP app with internal path
+mcp_app = mcp.http_app(path="/mcp")
+
+# Get well-known routes (mounted at root level)
+well_known_routes = auth.get_routes(mcp_path="/mcp")
+
+# Mount everything
+app = Starlette(
+    routes=[
+        *well_known_routes,  # Well-known discovery routes at root level
+        Mount("/api", app=mcp_app),  # MCP app under /api prefix
+    ],
+    lifespan=mcp_app.lifespan,
+)
+```
+
+**Key Parameters:**
+
+- `base_url`: Where OAuth endpoints (authorize, token, callback) will be accessible. **Includes the mount path.**
+- `issuer_url`: Where auth server metadata is located. **Should be root level** when well-known routes are mounted at root.
+- `mcp_path`: Internal MCP path that combines with `base_url` to form the resource URL.
+
+**How it works:**
+
+1. `base_url="http://localhost:8000/api"` - OAuth endpoints accessible under `/api`
+2. `issuer_url="http://localhost:8000"` - Auth server metadata at root level
+3. Internal MCP routes created at `/mcp`
+4. When mounted under `/api`, they become accessible at `/api/mcp`
+5. Well-known routes mounted at root for RFC compliance
+
+**Result:**
+- MCP endpoint: `http://localhost:8000/api/mcp`
+- OAuth callback: `http://localhost:8000/api/auth/callback`
+- Auth server metadata: `http://localhost:8000/.well-known/oauth-authorization-server`
+- Protected resource metadata: `http://localhost:8000/.well-known/oauth-protected-resource/api/mcp`
+
+For more details on OAuth authentication, see the [Authentication guide](/servers/auth).
+
 ## Custom Middleware
 
 <VersionBadge version="2.3.2" />

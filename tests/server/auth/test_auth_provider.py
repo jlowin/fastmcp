@@ -57,10 +57,11 @@ class TestAuthProviderBase:
             assert match is not None
             metadata_url = match.group(1)
 
-            # Should point to base URL, not include /api/v1/mcp
+            # RFC 9728: Should be path-scoped well-known URL
+            # Resource is at /api/v1/mcp, so well-known is at /.well-known/oauth-protected-resource/api/v1/mcp
             assert (
                 metadata_url
-                == "https://my-server.com/.well-known/oauth-protected-resource"
+                == "https://my-server.com/.well-known/oauth-protected-resource/api/v1/mcp"
             )
 
     async def test_automatic_resource_url_capture(self, basic_remote_provider):
@@ -78,7 +79,7 @@ class TestAuthProviderBase:
             base_url="https://my-server.com",
         ) as client:
             # Get the .well-known metadata
-            response = await client.get("/.well-known/oauth-protected-resource")
+            response = await client.get("/.well-known/oauth-protected-resource/mcp")
             assert response.status_code == 200
 
             data = response.json()
@@ -94,7 +95,8 @@ class TestAuthProviderBase:
             transport=httpx.ASGITransport(app=mcp_http_app),
             base_url="https://my-server.com",
         ) as client:
-            response = await client.get("/.well-known/oauth-protected-resource")
+            # RFC 9728: path-scoped well-known URL
+            response = await client.get("/.well-known/oauth-protected-resource/api/v2/services/mcp")
             assert response.status_code == 200
 
             data = response.json()
