@@ -246,16 +246,24 @@ class TestRemoteAuthProviderIntegration:
     )
     async def test_base_url_configurations(self, base_url: str, expected_resource: str):
         """Test different base_url configurations."""
+        from urllib.parse import urlparse
+
         auth_provider = self._create_test_auth_provider(base_url=base_url)
         mcp = FastMCP("test-server", auth=auth_provider)
         mcp_http_app = mcp.http_app()
+
+        # Extract the path from the expected resource to construct metadata URL
+        resource_parsed = urlparse(expected_resource)
+        # Remove leading slash if present to avoid double slashes
+        resource_path = resource_parsed.path.lstrip("/")
+        metadata_path = f"/.well-known/oauth-protected-resource/{resource_path}"
 
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=mcp_http_app),
             base_url="https://test.example.com",
         ) as client:
             # The metadata URL is path-aware per RFC 9728
-            response = await client.get("/.well-known/oauth-protected-resource/mcp")
+            response = await client.get(metadata_path)
 
             assert response.status_code == 200
             data = response.json()
