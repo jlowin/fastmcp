@@ -140,6 +140,85 @@ def run_server_in_process(
             raise RuntimeError("Server process failed to terminate even after kill")
 
 
+async def run_server_async(
+    task_group,
+    server: FastMCP,
+    port: int | None = None,
+    transport: Literal["http", "streamable-http", "sse"] = "http",
+    path: str = "/mcp",
+    host: str = "127.0.0.1",
+) -> str:
+    """
+    Start a FastMCP server in an AnyIO task group for in-process async testing.
+
+    This is the recommended way to test FastMCP servers. It runs the server
+    as an async task in the same process, eliminating subprocess coordination,
+    sleeps, and cleanup issues.
+
+    Args:
+        task_group: AnyIO task group to run the server in
+        server: FastMCP server instance
+        port: Port to bind to (default: find available port)
+        transport: Transport type ("http", "streamable-http", or "sse")
+        path: URL path for the server (default: "/mcp")
+        host: Host to bind to (default: "127.0.0.1")
+
+    Returns:
+        Server URL string
+
+    Example:
+        ```python
+        import anyio
+        import pytest
+        from anyio.abc import TaskGroup
+        from fastmcp import FastMCP, Client
+        from fastmcp.client.transports import StreamableHttpTransport
+        from fastmcp.utilities.tests import run_server_async
+
+        @pytest.fixture
+        async def server(task_group: TaskGroup):
+            mcp = FastMCP("test")
+
+            @mcp.tool()
+            def greet(name: str) -> str:
+                return f"Hello, {name}!"
+
+            url = await run_server_async(task_group, mcp)
+            return url
+
+        async def test_greet(server: str):
+            async with Client(StreamableHttpTransport(server)) as client:
+                result = await client.call_tool("greet", {"name": "World"})
+                assert result.content[0].text == "Hello, World!"
+        ```
+    """
+    from functools import partial
+
+    import anyio
+
+    if port is None:
+        port = find_available_port()
+
+    # Wait a tiny bit for the port to be released if it was just used
+    await anyio.sleep(0.01)
+
+    task_group.start_soon(
+        partial(
+            server.run_http_async,
+            host=host,
+            port=port,
+            transport=transport,
+            path=path,
+            show_banner=False,
+        )
+    )
+
+    # Give the server a moment to start
+    await anyio.sleep(0.1)
+
+    return f"http://{host}:{port}{path}"
+
+
 @contextmanager
 def caplog_for_fastmcp(caplog):
     """Context manager to capture logs from FastMCP loggers even when propagation is disabled."""
