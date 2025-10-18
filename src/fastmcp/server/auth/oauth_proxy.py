@@ -300,7 +300,7 @@ def create_consent_html(
                     attacks</a>, where malicious clients could impersonate you
                     and steal access.<br><br>
                     <a
-                    href="https://gofastmcp.com/servers/auth/oauth-proxy#confused-deputy-attacks/"
+                    href="https://gofastmcp.com/servers/auth/oauth-proxy#confused-deputy-attacks"
                     target="_blank" class="tooltip-link">Learn more about
                     FastMCP security →</a>
                 </span>
