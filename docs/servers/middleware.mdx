@@ -496,7 +496,11 @@ See the Contrib modules for caching middleware implementations that support addi
 
 ### Logging Middleware
 
-Request and response logging is crucial for debugging, monitoring, and understanding usage patterns in your MCP server. FastMCP provides comprehensive logging middleware at `fastmcp.server.middleware.logging`. 
+Request and response logging is crucial for debugging, monitoring, and understanding usage patterns in your MCP server. FastMCP provides comprehensive logging middleware at `fastmcp.server.middleware.logging`.
+
+<Tip>
+For production observability with distributed tracing, see the [OpenTelemetry Integration](/integrations/opentelemetry) guide for instrumenting your server with OpenTelemetry spans and logging.
+</Tip> 
 
 Here's an example of how it works:
 
