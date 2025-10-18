@@ -7,14 +7,11 @@ import socket
 import time
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
-from functools import partial
 from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import parse_qs, urlparse
 
-import anyio
 import httpx
 import uvicorn
-from anyio.abc import TaskGroup
 
 from fastmcp import settings
 from fastmcp.client.auth.oauth import OAuth
@@ -144,10 +141,10 @@ def run_server_in_process(
 
 
 async def run_server_async(
-    task_group: TaskGroup,
+    task_group,
     server: FastMCP,
     port: int | None = None,
-    transport: str = "http",
+    transport: Literal["http", "streamable-http", "sse"] = "http",
     path: str = "/mcp",
     host: str = "127.0.0.1",
 ) -> str:
@@ -162,7 +159,7 @@ async def run_server_async(
         task_group: AnyIO task group to run the server in
         server: FastMCP server instance
         port: Port to bind to (default: find available port)
-        transport: Transport type ("http" or "sse")
+        transport: Transport type ("http", "streamable-http", or "sse")
         path: URL path for the server (default: "/mcp")
         host: Host to bind to (default: "127.0.0.1")
 
@@ -177,12 +174,6 @@ async def run_server_async(
         from fastmcp import FastMCP, Client
         from fastmcp.client.transports import StreamableHttpTransport
         from fastmcp.utilities.tests import run_server_async
-
-        @pytest.fixture
-        async def task_group():
-            async with anyio.create_task_group() as tg:
-                yield tg
-                tg.cancel_scope.cancel()
 
         @pytest.fixture
         async def server(task_group: TaskGroup):
@@ -201,6 +192,10 @@ async def run_server_async(
                 assert result.content[0].text == "Hello, World!"
         ```
     """
+    from functools import partial
+
+    import anyio
+
     if port is None:
         port = find_available_port()
 
@@ -209,7 +204,7 @@ async def run_server_async(
 
     task_group.start_soon(
         partial(
-            server.run_async,
+            server.run_http_async,
             host=host,
             port=port,
             transport=transport,

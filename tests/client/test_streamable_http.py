@@ -4,7 +4,6 @@ import sys
 from unittest.mock import AsyncMock, call
 
 import pytest
-from anyio.abc import TaskGroup
 from mcp import McpError
 
 from fastmcp import Context
@@ -74,7 +73,7 @@ def create_test_server() -> FastMCP:
 
 
 @pytest.fixture
-async def streamable_http_server(request, task_group: TaskGroup):
+async def streamable_http_server(request, task_group):
     """Start a test server and return its URL."""
     import fastmcp
 
@@ -84,23 +83,22 @@ async def streamable_http_server(request, task_group: TaskGroup):
 
     server = create_test_server()
     url = await run_server_async(task_group, server)
+    yield url
 
     if stateless_http:
         fastmcp.settings.stateless_http = False
 
-    return url
-
 
 @pytest.fixture
-async def streamable_http_server_with_streamable_http_alias(task_group: TaskGroup):
+async def streamable_http_server_with_streamable_http_alias(task_group):
     """Test that the "streamable-http" transport alias works."""
     server = create_test_server()
     url = await run_server_async(task_group, server, transport="streamable-http")
-    return url
+    yield url
 
 
 @pytest.fixture
-async def nested_server(task_group: TaskGroup):
+async def nested_server():
     """Test nested server mounts with Starlette."""
     import uvicorn
     from starlette.applications import Starlette
@@ -124,13 +122,22 @@ async def nested_server(task_group: TaskGroup):
         app=outer,
         host="127.0.0.1",
         port=port,
-        log_level="critical",  # Suppress error logs from cancellation
+        log_level="critical",
         ws="websockets-sansio",
     )
 
-    task_group.start_soon(uvicorn.Server(config).serve)
+    # Use the simple asyncio pattern
+    server_task = asyncio.create_task(uvicorn.Server(config).serve())
+    await asyncio.sleep(0.1)
 
-    return f"http://127.0.0.1:{port}/nest-outer/nest-inner/final/mcp"
+    yield f"http://127.0.0.1:{port}/nest-outer/nest-inner/final/mcp"
+
+    # Cleanup
+    server_task.cancel()
+    try:
+        await server_task
+    except asyncio.CancelledError:
+        pass
 
 
 async def test_ping(streamable_http_server: str):
