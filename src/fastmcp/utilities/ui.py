@@ -138,8 +138,8 @@ INFO_BOX_STYLES = """
     }
 
     .warning-box {
-        background: #fffbeb;
-        border: 1px solid #fcd34d;
+        background: #f0f9ff;
+        border: 1px solid #bae6fd;
         border-radius: 0.5rem;
         padding: 1rem;
         margin-bottom: 1.5rem;
@@ -149,7 +149,7 @@ INFO_BOX_STYLES = """
     .warning-box p {
         margin-bottom: 0.5rem;
         line-height: 1.5;
-        color: #92400e;
+        color: #6b7280;
         font-size: 0.9375rem;
     }
 
@@ -158,7 +158,19 @@ INFO_BOX_STYLES = """
     }
 
     .warning-box strong {
+        color: #0ea5e9;
         font-weight: 600;
+    }
+
+    .warning-box a {
+        color: #0ea5e9;
+        text-decoration: underline;
+        font-weight: 600;
+    }
+
+    .warning-box a:hover {
+        color: #0284c7;
+        text-decoration: underline;
     }
 """
 
