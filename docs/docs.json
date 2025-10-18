@@ -190,6 +190,7 @@
                   "integrations/github",
                   "integrations/scalekit",
                   "integrations/google",
+                  "integrations/supabase",
                   "integrations/workos"
                 ]
               },
