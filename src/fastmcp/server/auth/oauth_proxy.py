@@ -257,7 +257,7 @@ def create_consent_html(
 
     warning_box = f"""
         <div class="warning-box">
-            <p><strong>{client_display}</strong> is requesting access to a FastMCP server named <strong>{server_display}</strong>.</p>
+            <p><strong>{client_display}</strong> is requesting access to <strong>{server_display}</strong>.</p>
             <p>Review the details below before approving.</p>
         </div>
     """
