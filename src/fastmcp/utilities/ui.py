@@ -143,7 +143,7 @@ INFO_BOX_STYLES = """
         border-radius: 0.5rem;
         padding: 1rem;
         margin-bottom: 1.5rem;
-        text-align: left;
+        text-align: center;
     }
 
     .warning-box p {
@@ -362,9 +362,19 @@ def create_page(
     """
 
 
-def create_logo() -> str:
-    """Create FastMCP logo HTML."""
-    return f'<img src="{FASTMCP_LOGO_URL}" alt="FastMCP" class="logo" />'
+def create_logo(icon_url: str | None = None, alt_text: str = "FastMCP") -> str:
+    """Create logo HTML.
+
+    Args:
+        icon_url: Optional custom icon URL. If not provided, uses the FastMCP logo.
+        alt_text: Alt text for the logo image.
+
+    Returns:
+        HTML for logo image tag.
+    """
+    url = icon_url or FASTMCP_LOGO_URL
+    alt = html.escape(alt_text)
+    return f'<img src="{html.escape(url)}" alt="{alt}" class="logo" />'
 
 
 def create_status_message(message: str, is_success: bool = True) -> str:
