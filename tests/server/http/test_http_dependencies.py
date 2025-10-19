@@ -1,7 +1,6 @@
 import json
 
 import pytest
-from anyio.abc import TaskGroup
 
 from fastmcp.client import Client
 from fastmcp.client.transports import SSETransport, StreamableHttpTransport
@@ -39,19 +38,19 @@ def fastmcp_server():
 
 
 @pytest.fixture
-async def shttp_server(task_group: TaskGroup):
+async def shttp_server():
     """Start a test server with StreamableHttp transport."""
     server = fastmcp_server()
-    url = await run_server_async(task_group, server, transport="http")
-    return url
+    async with run_server_async(server, transport="http") as url:
+        yield url
 
 
 @pytest.fixture
-async def sse_server(task_group: TaskGroup):
+async def sse_server():
     """Start a test server with SSE transport."""
     server = fastmcp_server()
-    url = await run_server_async(task_group, server, transport="sse")
-    return url
+    async with run_server_async(server, transport="sse") as url:
+        yield url
 
 
 async def test_http_headers_resource_shttp(shttp_server: str):

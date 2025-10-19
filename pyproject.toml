@@ -17,6 +17,7 @@ dependencies = [
     "openapi-core>=0.19.5",
     "py-key-value-aio[disk,memory]>=0.2.2,<0.3.0",
     "websockets>=15.0.1",
+    "pytest-asyncio>=1.2.0",
 ]
 
 requires-python = ">=3.10"
@@ -97,7 +98,7 @@ fallback-version = "0.0.0"
 
 
 [tool.pytest.ini_options]
-anyio_mode = "auto"
+asyncio_mode = "auto"
 # filterwarnings = ["error::DeprecationWarning"]
 timeout = 5
 env = [

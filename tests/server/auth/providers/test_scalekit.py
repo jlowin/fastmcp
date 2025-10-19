@@ -5,7 +5,6 @@ from unittest.mock import patch
 
 import httpx
 import pytest
-from anyio.abc import TaskGroup
 
 from fastmcp import Client, FastMCP
 from fastmcp.client.transports import StreamableHttpTransport
@@ -110,7 +109,7 @@ class TestScalekitProvider:
 
 
 @pytest.fixture
-async def mcp_server_url(task_group: TaskGroup):
+async def mcp_server_url():
     """Start Scalekit server."""
     mcp = FastMCP(
         auth=ScalekitProvider(
@@ -125,8 +124,8 @@ async def mcp_server_url(task_group: TaskGroup):
     def add(a: int, b: int) -> int:
         return a + b
 
-    url = await run_server_async(task_group, mcp, transport="http")
-    return url
+    async with run_server_async(mcp, transport="http") as url:
+        yield url
 
 
 @pytest.fixture

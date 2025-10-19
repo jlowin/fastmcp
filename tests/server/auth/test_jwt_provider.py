@@ -1,8 +1,8 @@
+from collections.abc import AsyncGenerator
 from typing import Any
 
 import httpx
 import pytest
-from anyio.abc import TaskGroup
 from pytest_httpx import HTTPXMock
 
 from fastmcp import Client, FastMCP
@@ -130,7 +130,7 @@ def create_mcp_server(
 
 
 @pytest.fixture
-async def mcp_server_url(task_group: TaskGroup, rsa_key_pair: RSAKeyPair) -> str:
+async def mcp_server_url(rsa_key_pair: RSAKeyPair) -> AsyncGenerator[str, None]:
     server = create_mcp_server(
         public_key=rsa_key_pair.public_key,
         auth_kwargs=dict(
@@ -138,8 +138,8 @@ async def mcp_server_url(task_group: TaskGroup, rsa_key_pair: RSAKeyPair) -> str
             audience="https://api.example.com",
         ),
     )
-    url = await run_server_async(task_group, server, transport="http")
-    return url
+    async with run_server_async(server, transport="http") as url:
+        yield url
 
 
 class TestRSAKeyPair:
@@ -1017,9 +1017,7 @@ class TestFastMCPBearerAuth:
         assert exc_info.value.response.status_code == 401
         assert "tools" not in locals()
 
-    async def test_token_with_insufficient_scopes(
-        self, task_group: TaskGroup, rsa_key_pair: RSAKeyPair
-    ):
+    async def test_token_with_insufficient_scopes(self, rsa_key_pair: RSAKeyPair):
         token = rsa_key_pair.create_token(
             subject="test-user",
             issuer="https://test.example.com",
@@ -1031,21 +1029,19 @@ class TestFastMCPBearerAuth:
             public_key=rsa_key_pair.public_key,
             auth_kwargs=dict(required_scopes=["read", "write"]),
         )
-        mcp_server_url = await run_server_async(task_group, server, transport="http")
 
-        with pytest.raises(httpx.HTTPStatusError) as exc_info:
-            async with Client(mcp_server_url, auth=BearerAuth(token)) as client:
-                tools = await client.list_tools()  # noqa: F841
-        # JWTVerifier returns 401 when verify_token returns None (invalid token)
-        # This is correct behavior - when TokenVerifier.verify_token returns None,
-        # it indicates the token is invalid (not just insufficient permissions)
-        assert isinstance(exc_info.value, httpx.HTTPStatusError)
-        assert exc_info.value.response.status_code == 401
-        assert "tools" not in locals()
+        async with run_server_async(server, transport="http") as mcp_server_url:
+            with pytest.raises(httpx.HTTPStatusError) as exc_info:
+                async with Client(mcp_server_url, auth=BearerAuth(token)) as client:
+                    tools = await client.list_tools()  # noqa: F841
+            # JWTVerifier returns 401 when verify_token returns None (invalid token)
+            # This is correct behavior - when TokenVerifier.verify_token returns None,
+            # it indicates the token is invalid (not just insufficient permissions)
+            assert isinstance(exc_info.value, httpx.HTTPStatusError)
+            assert exc_info.value.response.status_code == 401
+            assert "tools" not in locals()
 
-    async def test_token_with_sufficient_scopes(
-        self, task_group: TaskGroup, rsa_key_pair: RSAKeyPair
-    ):
+    async def test_token_with_sufficient_scopes(self, rsa_key_pair: RSAKeyPair):
         token = rsa_key_pair.create_token(
             subject="test-user",
             issuer="https://test.example.com",
@@ -1057,11 +1053,11 @@ class TestFastMCPBearerAuth:
             public_key=rsa_key_pair.public_key,
             auth_kwargs=dict(required_scopes=["read", "write"]),
         )
-        mcp_server_url = await run_server_async(task_group, server, transport="http")
 
-        async with Client(mcp_server_url, auth=BearerAuth(token)) as client:
-            tools = await client.list_tools()
-        assert tools
+        async with run_server_async(server, transport="http") as mcp_server_url:
+            async with Client(mcp_server_url, auth=BearerAuth(token)) as client:
+                tools = await client.list_tools()
+            assert tools
 
 
 class TestJWTVerifierImport:

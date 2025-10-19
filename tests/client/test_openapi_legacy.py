@@ -1,7 +1,6 @@
 import json
 
 import pytest
-from anyio.abc import TaskGroup
 from fastapi import FastAPI, Request
 
 from fastmcp import Client, FastMCP
@@ -44,27 +43,27 @@ def fastmcp_server_for_headers() -> FastMCP:
 
 
 @pytest.fixture
-async def shttp_server(task_group: TaskGroup):
+async def shttp_server():
     """Start a test server with StreamableHttp transport."""
     server = fastmcp_server_for_headers()
-    url = await run_server_async(task_group, server, transport="http")
-    return url
+    async with run_server_async(server, transport="http") as url:
+        yield url
 
 
 @pytest.fixture
-async def sse_server(task_group: TaskGroup):
+async def sse_server():
     """Start a test server with SSE transport."""
     server = fastmcp_server_for_headers()
-    url = await run_server_async(task_group, server, transport="sse")
-    return url
+    async with run_server_async(server, transport="sse") as url:
+        yield url
 
 
 @pytest.fixture
-async def proxy_server(task_group: TaskGroup, shttp_server: str):
+async def proxy_server(shttp_server: str):
     """Start a proxy server."""
     proxy = FastMCP.as_proxy(StreamableHttpTransport(shttp_server))
-    url = await run_server_async(task_group, proxy, transport="http")
-    return url
+    async with run_server_async(proxy, transport="http") as url:
+        yield url
 
 
 async def test_fastapi_client_headers_streamable_http_resource(shttp_server: str):

@@ -6,7 +6,6 @@ from urllib.parse import urlparse
 
 import httpx
 import pytest
-from anyio.abc import TaskGroup
 
 from fastmcp import Client, FastMCP
 from fastmcp.client.transports import StreamableHttpTransport
@@ -158,7 +157,7 @@ class TestWorkOSProvider:
 
 
 @pytest.fixture
-async def mcp_server_url(task_group: TaskGroup):
+async def mcp_server_url():
     """Start AuthKit server."""
     mcp = FastMCP(
         auth=AuthKitProvider(
@@ -171,8 +170,8 @@ async def mcp_server_url(task_group: TaskGroup):
     def add(a: int, b: int) -> int:
         return a + b
 
-    url = await run_server_async(task_group, mcp, transport="http")
-    return url
+    async with run_server_async(mcp, transport="http") as url:
+        yield url
 
 
 @pytest.fixture

@@ -2,7 +2,6 @@ import socket
 from collections.abc import Callable
 from typing import Any
 
-import anyio
 import pytest
 
 
@@ -58,11 +57,3 @@ def free_port_factory(worker_id):
                     return port
 
     return get_port
-
-
-@pytest.fixture
-async def task_group():
-    """Provide an anyio task group for running async servers in tests."""
-    async with anyio.create_task_group() as tg:
-        yield tg
-        tg.cancel_scope.cancel()

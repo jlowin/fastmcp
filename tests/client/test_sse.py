@@ -2,9 +2,7 @@ import asyncio
 import json
 import sys
 
-import anyio
 import pytest
-from anyio.abc import TaskGroup
 from mcp import McpError
 
 from fastmcp.client import Client
@@ -56,11 +54,11 @@ def create_test_server() -> FastMCP:
 
 
 @pytest.fixture
-async def sse_server(task_group: TaskGroup):
+async def sse_server():
     """Start a test server with SSE transport and return its URL."""
     server = create_test_server()
-    url = await run_server_async(task_group, server, transport="sse")
-    return url
+    async with run_server_async(server, transport="sse") as url:
+        yield url
 
 
 async def test_ping(sse_server: str):
@@ -82,15 +80,15 @@ async def test_http_headers(sse_server: str):
 
 
 @pytest.fixture
-async def sse_server_custom_path(task_group: TaskGroup):
+async def sse_server_custom_path():
     """Start a test server with SSE on a custom path."""
     server = create_test_server()
-    url = await run_server_async(task_group, server, transport="sse", path="/help")
-    return url
+    async with run_server_async(server, transport="sse", path="/help") as url:
+        yield url
 
 
 @pytest.fixture
-async def nested_sse_server(task_group: TaskGroup):
+async def nested_sse_server():
     """Test nested server mounts with SSE."""
     import uvicorn
     from starlette.applications import Starlette
@@ -116,10 +114,17 @@ async def nested_sse_server(task_group: TaskGroup):
         ws="websockets-sansio",
     )
 
-    task_group.start_soon(uvicorn.Server(config).serve)
-    await anyio.sleep(0.1)
+    server_task = asyncio.create_task(uvicorn.Server(config).serve())
+    await asyncio.sleep(0.1)
 
-    return f"http://127.0.0.1:{port}/nest-outer/nest-inner/mcp/sse/"
+    try:
+        yield f"http://127.0.0.1:{port}/nest-outer/nest-inner/mcp/sse/"
+    finally:
+        server_task.cancel()
+        try:
+            await server_task
+        except asyncio.CancelledError:
+            pass
 
 
 async def test_run_server_on_path(sse_server_custom_path: str):

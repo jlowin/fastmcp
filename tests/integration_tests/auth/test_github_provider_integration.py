@@ -12,11 +12,11 @@ with the following configuration:
 
 import os
 import re
+from collections.abc import AsyncGenerator
 from urllib.parse import parse_qs, urlparse
 
 import httpx
 import pytest
-from anyio.abc import TaskGroup
 
 from fastmcp import FastMCP
 from fastmcp.client import Client
@@ -160,21 +160,21 @@ def create_github_server_with_mock_callback(base_url: str) -> FastMCP:
 
 
 @pytest.fixture
-async def github_server(task_group: TaskGroup) -> str:
-    """Start GitHub OAuth server with AnyIO task group on fixed port 9100."""
+async def github_server() -> AsyncGenerator[str, None]:
+    """Start GitHub OAuth server on fixed port 9100."""
     base_url = "http://127.0.0.1:9100"
     server = create_github_server(base_url)
-    url = await run_server_async(task_group, server, port=9100, transport="http")
-    return url
+    async with run_server_async(server, port=9100, transport="http") as url:
+        yield url
 
 
 @pytest.fixture
-async def github_server_with_mock(task_group: TaskGroup) -> str:
+async def github_server_with_mock() -> AsyncGenerator[str, None]:
     """Start GitHub OAuth server with mocked callback on port 9101."""
     base_url = "http://127.0.0.1:9101"
     server = create_github_server_with_mock_callback(base_url)
-    url = await run_server_async(task_group, server, port=9101, transport="http")
-    return url
+    async with run_server_async(server, port=9101, transport="http") as url:
+        yield url
 
 
 @pytest.fixture

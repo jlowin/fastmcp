@@ -73,7 +73,7 @@ def create_test_server() -> FastMCP:
 
 
 @pytest.fixture
-async def streamable_http_server(request, task_group):
+async def streamable_http_server(request):
     """Start a test server and return its URL."""
     import fastmcp
 
@@ -82,19 +82,19 @@ async def streamable_http_server(request, task_group):
         fastmcp.settings.stateless_http = True
 
     server = create_test_server()
-    url = await run_server_async(task_group, server)
-    yield url
+    async with run_server_async(server) as url:
+        yield url
 
     if stateless_http:
         fastmcp.settings.stateless_http = False
 
 
 @pytest.fixture
-async def streamable_http_server_with_streamable_http_alias(task_group):
+async def streamable_http_server_with_streamable_http_alias():
     """Test that the "streamable-http" transport alias works."""
     server = create_test_server()
-    url = await run_server_async(task_group, server, transport="streamable-http")
-    yield url
+    async with run_server_async(server, transport="streamable-http") as url:
+        yield url
 
 
 @pytest.fixture

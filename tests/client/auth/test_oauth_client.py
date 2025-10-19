@@ -2,7 +2,6 @@ from urllib.parse import urlparse
 
 import httpx
 import pytest
-from anyio.abc import TaskGroup
 
 from fastmcp.client import Client
 from fastmcp.client.transports import StreamableHttpTransport
@@ -37,12 +36,12 @@ def fastmcp_server(issuer_url: str):
 
 
 @pytest.fixture
-async def streamable_http_server(task_group: TaskGroup):
+async def streamable_http_server():
     """Start OAuth-enabled server."""
     port = find_available_port()
     server = fastmcp_server(f"http://127.0.0.1:{port}")
-    url = await run_server_async(task_group, server, port=port, transport="http")
-    return url
+    async with run_server_async(server, port=port, transport="http") as url:
+        yield url
 
 
 @pytest.fixture
