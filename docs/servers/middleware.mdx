@@ -461,7 +461,7 @@ from fastmcp.server.middleware.caching import ResponseCachingMiddleware
 mcp.add_middleware(ResponseCachingMiddleware())
 ```
 
-Out of the box, it caches call/list tool, resources, and prompts to an in-memory cache with TTL-based expiration. Sending a notification of a tool/resource/prompt change will invalidate the cache for the affected method. List calls are stored under global keys—when sharing a storage backend across multiple servers, consider namespacing collections to prevent conflicts. See [Storage Backends](/servers/storage-backends) for advanced configuration options.
+Out of the box, it caches call/list tool, resources, and prompts to an in-memory cache with TTL-based expiration. Cache entries expire based on their TTL; there is no event-based cache invalidation. List calls are stored under global keys—when sharing a storage backend across multiple servers, consider namespacing collections to prevent conflicts. See [Storage Backends](/servers/storage-backends) for advanced configuration options.
 
 Each method can be configured individually, for example, caching list tools for 30 seconds, limiting caching to specific tools, and disabling caching for resource reads:
 
