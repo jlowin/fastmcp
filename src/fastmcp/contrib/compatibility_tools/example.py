@@ -50,28 +50,35 @@ async def main() -> None:
         # Use list_resources tool
         print("\n=== Resources (via tool) ===")
         resources = await client.call_tool("list_resources", {})
-        for resource in resources.content[0].text:  # type: ignore[attr-defined]
-            print(f"  {resource}")
+        for resource in resources.structured_content["resources"]:  # type: ignore[index]
+            print(f"  - {resource['uri']}: {resource['name']}")
 
         # Use get_resource tool
         print("\n=== Get Resource (via tool) ===")
         resource_content = await client.call_tool(
             "get_resource", {"uri": "config://settings"}
         )
-        print(f"  {resource_content.content[0].text}")  # type: ignore[attr-defined]
+        contents = resource_content.structured_content["contents"]  # type: ignore[index]
+        print(
+            f"  {contents[0]['uri']}: {contents[0].get('text', contents[0].get('blob'))}"
+        )
 
         # Use list_prompts tool
         print("\n=== Prompts (via tool) ===")
         prompts = await client.call_tool("list_prompts", {})
-        for prompt in prompts.content[0].text:  # type: ignore[attr-defined]
-            print(f"  {prompt}")
+        for prompt in prompts.structured_content["prompts"]:  # type: ignore[index]
+            print(
+                f"  - {prompt['name']}: {prompt.get('description', 'No description')}"
+            )
 
         # Use get_prompt tool
         print("\n=== Get Prompt (via tool) ===")
         prompt_result = await client.call_tool(
             "get_prompt", {"name": "greeting", "arguments": {"name": "World"}}
         )
-        print(f"  {prompt_result.content[0].text}")  # type: ignore[attr-defined]
+        messages = prompt_result.structured_content["messages"]  # type: ignore[index]
+        for msg in messages:
+            print(f"  {msg['role']}: {msg['content']}")
 
 
 if __name__ == "__main__":

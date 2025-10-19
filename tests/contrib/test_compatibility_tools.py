@@ -104,12 +104,15 @@ async def test_list_resources_via_client(server_with_resources_and_prompts: Fast
 
     async with Client(mcp) as client:
         result = await client.call_tool("list_resources", {})
-        # Check structured content (None because output_schema=None)
-        assert result.structured_content is None
-        # Check text content
-        assert len(result.content) == 1
-        content = result.content[0]
-        assert hasattr(content, "text")
+        # Parse the structured content (raw MCP object)
+        assert result.structured_content is not None
+        # Verify it has the expected structure
+        assert "resources" in result.structured_content
+        resources = result.structured_content["resources"]
+        assert len(resources) == 2
+        uris = [r["uri"] for r in resources]
+        assert "config://settings" in uris
+        assert "data://users" in uris
 
 
 async def test_get_resource_via_client(server_with_resources_and_prompts: FastMCP):
@@ -119,17 +122,16 @@ async def test_get_resource_via_client(server_with_resources_and_prompts: FastMC
 
     async with Client(mcp) as client:
         result = await client.call_tool("get_resource", {"uri": "config://settings"})
-        # Check that we got content
-        assert len(result.content) == 1
-        content = result.content[0]
-        assert hasattr(content, "text")
-        # Verify the data includes expected fields
-        import json
-
-        data = json.loads(content.text)  # type: ignore[attr-defined]
-        assert data["uri"] == "config://settings"
-        assert data["mimeType"] == "text/plain"
-        assert "text" in data
+        # Parse the structured content (raw MCP object)
+        assert result.structured_content is not None
+        assert "contents" in result.structured_content
+        contents = result.structured_content["contents"]
+        assert len(contents) == 1
+        # Verify the content structure
+        content = contents[0]
+        assert "uri" in content
+        assert content["uri"] == "config://settings"
+        assert "text" in content or "blob" in content
 
 
 async def test_get_resource_nonexistent(server_with_resources_and_prompts: FastMCP):
@@ -152,10 +154,14 @@ async def test_list_prompts_via_client(server_with_resources_and_prompts: FastMC
 
     async with Client(mcp) as client:
         result = await client.call_tool("list_prompts", {})
-        assert result.structured_content is None
-        assert len(result.content) == 1
-        content = result.content[0]
-        assert hasattr(content, "text")
+        # Parse the structured content (raw MCP object)
+        assert result.structured_content is not None
+        assert "prompts" in result.structured_content
+        prompts = result.structured_content["prompts"]
+        assert len(prompts) == 2
+        names = [p["name"] for p in prompts]
+        assert "greeting" in names
+        assert "system_prompt" in names
 
 
 async def test_get_prompt_with_args_via_client(
@@ -169,16 +175,14 @@ async def test_get_prompt_with_args_via_client(
         result = await client.call_tool(
             "get_prompt", {"name": "greeting", "arguments": {"name": "World"}}
         )
-        assert len(result.content) == 1
-        content = result.content[0]
-        assert hasattr(content, "text")
-        # Verify the data
-        import json
-
-        data = json.loads(content.text)  # type: ignore[attr-defined]
-        assert data["name"] == "greeting"
-        assert "description" in data
-        assert "messages" in data
+        # Parse the structured content (raw MCP object)
+        assert result.structured_content is not None
+        assert "messages" in result.structured_content
+        messages = result.structured_content["messages"]
+        assert len(messages) > 0
+        # Verify message structure
+        assert "role" in messages[0]
+        assert "content" in messages[0]
 
 
 async def test_get_prompt_without_args_via_client(
@@ -193,16 +197,14 @@ async def test_get_prompt_without_args_via_client(
             "get_prompt",
             {"name": "system_prompt", "arguments": {"context": "testing"}},
         )
-        assert len(result.content) == 1
-        content = result.content[0]
-        assert hasattr(content, "text")
-        # Verify the data
-        import json
-
-        data = json.loads(content.text)  # type: ignore[attr-defined]
-        assert data["name"] == "system_prompt"
-        assert "description" in data
-        assert "messages" in data
+        # Parse the structured content (raw MCP object)
+        assert result.structured_content is not None
+        assert "messages" in result.structured_content
+        messages = result.structured_content["messages"]
+        assert len(messages) > 0
+        # Verify message structure
+        assert "role" in messages[0]
+        assert "content" in messages[0]
 
 
 async def test_get_prompt_nonexistent(server_with_resources_and_prompts: FastMCP):
@@ -243,20 +245,18 @@ async def test_tools_work_with_mounted_servers():
 
     # Test that tools see both parent and child resources
     async with Client(parent) as client:
-        import json
-
         result = await client.call_tool("list_resources", {})
-        resources = json.loads(result.content[0].text)  # type: ignore[attr-defined]
+        assert result.structured_content is not None
+        resources = result.structured_content["resources"]
         uris = [r["uri"] for r in resources]
         assert "parent://resource" in uris
-        assert "child://resource" in uris
+        # Child resources are prefixed with the mount path
+        assert any("child" in uri for uri in uris)
 
         # Test that tools see both parent and child prompts
         result = await client.call_tool("list_prompts", {})
-        # Since output_schema=None, parse the JSON from text content
-        import json
-
-        prompts = json.loads(result.content[0].text)  # type: ignore[attr-defined]
+        assert result.structured_content is not None
+        prompts = result.structured_content["prompts"]
         names = [p["name"] for p in prompts]
         # Verify we have both parent and child prompts
         # The child prompt gets a prefix when mounted
@@ -266,8 +266,6 @@ async def test_tools_work_with_mounted_servers():
 
 async def test_get_resource_basic_functionality():
     """Test get_resource basic functionality."""
-    import json
-
     mcp = FastMCP("Test Server")
 
     @mcp.resource("test://data")
@@ -278,7 +276,10 @@ async def test_get_resource_basic_functionality():
 
     async with Client(mcp) as client:
         result = await client.call_tool("get_resource", {"uri": "test://data"})
-        data = json.loads(result.content[0].text)  # type: ignore[attr-defined]
-        assert data["uri"] == "test://data"
-        assert "mimeType" in data
-        assert "text" in data
+        assert result.structured_content is not None
+        assert "contents" in result.structured_content
+        contents = result.structured_content["contents"]
+        assert len(contents) == 1
+        content = contents[0]
+        assert "uri" in content
+        assert content["uri"] == "test://data"

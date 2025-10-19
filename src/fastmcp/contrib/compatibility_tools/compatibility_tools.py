@@ -29,91 +29,63 @@ from __future__ import annotations
 
 from typing import Any
 
+import mcp.types
+
 from fastmcp.server.context import Context
 from fastmcp.tools.tool import Tool
 
 
-async def list_resources(ctx: Context) -> list[dict[str, Any]]:
+async def list_resources(ctx: Context) -> mcp.types.ListResourcesResult:
     """List all available resources on this server.
 
-    Returns a list of resources with their URI, name, description, and MIME type.
+    Returns the raw MCP protocol ListResourcesResult object.
     """
-    resources = await ctx.fastmcp.get_resources()
-    return [
-        {
-            "uri": resource.uri,
-            "name": resource.name,
-            "description": resource.description,
-            "mimeType": resource.mime_type,
-        }
-        for resource in resources.values()
-    ]
+    resources = await ctx.fastmcp._list_resources_mcp()
+    return mcp.types.ListResourcesResult(resources=resources)
 
 
-async def get_resource(uri: str, ctx: Context) -> dict[str, Any]:
+async def get_resource(uri: str, ctx: Context) -> mcp.types.ReadResourceResult:
     """Read a resource by its URI.
 
     Args:
         uri: The URI of the resource to read
 
     Returns:
-        A dictionary containing the resource content and metadata
+        The raw MCP protocol ReadResourceResult object.
     """
-    contents = await ctx.read_resource(uri)
-
-    # Return first content block if single, all if multiple
-    if len(contents) == 1:
-        content = contents[0]
-        result: dict[str, Any] = {
-            "uri": uri,
-            "mimeType": content.mime_type or "text/plain",
-        }
-        # ReadResourceContents has a 'content' attribute (str or bytes)
-        if isinstance(content.content, str):
-            result["text"] = content.content
-        else:
-            result["blob"] = content.content
-        return result
-
-    return {
-        "uri": uri,
-        "contents": [
-            {
-                "mimeType": c.mime_type or "text/plain",
-                "text": c.content if isinstance(c.content, str) else None,
-                "blob": c.content if isinstance(c.content, bytes) else None,
-            }
-            for c in contents
-        ],
-    }
+    contents = await ctx.fastmcp._read_resource_mcp(uri)
+    # Convert ReadResourceContents to proper MCP types
+    mcp_contents: list[
+        mcp.types.TextResourceContents | mcp.types.BlobResourceContents
+    ] = [
+        mcp.types.TextResourceContents(
+            uri=uri,  # type: ignore[arg-type]
+            mimeType=c.mime_type,
+            text=c.content,  # type: ignore[arg-type]
+        )
+        if isinstance(c.content, str)
+        else mcp.types.BlobResourceContents(
+            uri=uri,  # type: ignore[arg-type]
+            mimeType=c.mime_type,
+            blob=c.content,  # type: ignore[arg-type]
+        )
+        for c in contents
+    ]
+    return mcp.types.ReadResourceResult(contents=mcp_contents)
 
 
-async def list_prompts(ctx: Context) -> list[dict[str, Any]]:
+async def list_prompts(ctx: Context) -> mcp.types.ListPromptsResult:
     """List all available prompts on this server.
 
-    Returns a list of prompts with their name, description, and arguments.
+    Returns the raw MCP protocol ListPromptsResult object.
     """
-    prompts = await ctx.fastmcp.get_prompts()
-    return [
-        {
-            "name": prompt.name,
-            "description": prompt.description,
-            "arguments": [
-                {
-                    "name": arg.name,
-                    "description": arg.description,
-                    "required": arg.required,
-                }
-                for arg in (prompt.arguments or [])
-            ],
-        }
-        for prompt in prompts.values()
-    ]
+    prompts = await ctx.fastmcp._list_prompts_mcp()
+    return mcp.types.ListPromptsResult(prompts=prompts)
 
 
 async def get_prompt(
     name: str, arguments: dict[str, Any] | None = None, ctx: Context | None = None
-) -> dict[str, Any]:
+) -> mcp.types.GetPromptResult:
     """Get a prompt by name with optional arguments.
 
     Args:
@@ -121,27 +93,12 @@ async def get_prompt(
         arguments: Optional dictionary of arguments to pass to the prompt
 
     Returns:
-        A dictionary containing the prompt messages and metadata
+        The raw MCP protocol GetPromptResult object.
     """
     if ctx is None:
         raise ValueError("Context is required for get_prompt")
 
-    result = await ctx.fastmcp._get_prompt_mcp(name, arguments)
-    return {
-        "name": name,
-        "description": result.description,
-        "messages": [
-            {
-                "role": msg.role,
-                "content": (
-                    msg.content.text
-                    if hasattr(msg.content, "text")
-                    else str(msg.content)
-                ),
-            }
-            for msg in result.messages
-        ],
-    }
+    return await ctx.fastmcp._get_prompt_mcp(name, arguments)
 
 
 # Create Tool instances from functions
