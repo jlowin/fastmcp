@@ -144,6 +144,95 @@ The py-key-value-aio library includes additional implementations for various sto
 
 For configuration details on these backends, consult the [py-key-value-aio documentation](https://github.com/strawgate/py-key-value-aio).
 
+## Storage Patterns
+
+### Multi-Tier Caching with PassthroughCacheWrapper
+
+For optimal performance in distributed deployments, combine fast in-memory caching with a persistent remote store like Redis. The `PassthroughCacheWrapper` automatically manages both tiers, checking the memory cache first before falling back to the remote store.
+
+This pattern reduces network round trips and improves response latency:
+
+```python
+from fastmcp.server.middleware.caching import ResponseCachingMiddleware
+from key_value.aio.stores.memory import MemoryStore
+from key_value.aio.stores.redis import RedisStore
+from key_value.aio.wrappers.passthrough_cache import PassthroughCacheWrapper
+
+# Fast local memory cache + persistent Redis backend
+memory_cache = MemoryStore()
+redis_store = RedisStore(host="redis.example.com", port=6379)
+
+cache_store = PassthroughCacheWrapper(
+    primary_key_value=redis_store,      # Primary persistent store
+    cache_key_value=memory_cache         # Secondary fast cache
+)
+
+middleware = ResponseCachingMiddleware(cache_storage=cache_store)
+```
+
+**How it works:**
+- Reads check the in-memory cache first (very fast)
+- If not found, reads from Redis (persistent)
+- Writes go to both stores (consistency)
+- Each store can be configured with different TTLs
+
+### TTL Clamping Strategy
+
+Use TTL clamping to keep frequently accessed data in memory while still delegating to a remote store for persistence. Set a short TTL on the memory tier and a longer TTL on the remote tier:
+
+```python
+from fastmcp.server.middleware.caching import ResponseCachingMiddleware
+from key_value.aio.stores.memory import MemoryStore
+from key_value.aio.stores.redis import RedisStore
+from key_value.aio.wrappers.ttl_clamp import TTLClampWrapper
+from key_value.aio.wrappers.passthrough_cache import PassthroughCacheWrapper
+
+# Memory cache: 5 minute TTL (short-lived)
+memory_cache = TTLClampWrapper(
+    key_value=MemoryStore(),
+    ttl=300  # 5 minutes
+)
+
+# Redis: full TTL (persistent)
+redis_store = RedisStore(host="redis.example.com", port=6379)
+
+# Combine with passthrough caching
+cache_store = PassthroughCacheWrapper(
+    primary_key_value=redis_store,
+    cache_key_value=memory_cache
+)
+
+middleware = ResponseCachingMiddleware(
+    cache_storage=cache_store,
+    # Cache tool calls for 1 hour (stored in both tiers)
+    # Memory keeps it for 5 minutes, Redis keeps it for full hour
+)
+```
+
+**Benefit:** Reduces cache memory usage while maintaining data availability in the remote store.
+
+### Custom Storage Implementation
+
+Wrap any user-provided store to ensure consistent behavior:
+
+```python
+from fastmcp.server.middleware.caching import ResponseCachingMiddleware
+from key_value.aio.stores.disk import DiskStore
+from key_value.aio.wrappers.passthrough_cache import PassthroughCacheWrapper
+from key_value.aio.stores.memory import MemoryStore
+
+# Your custom or user-provided store
+user_store = DiskStore(directory="/custom/storage/path")
+
+# Optional: Wrap in a passthrough cache for better performance
+enhanced_store = PassthroughCacheWrapper(
+    primary_key_value=user_store,
+    cache_key_value=MemoryStore()
+)
+
+middleware = ResponseCachingMiddleware(cache_storage=enhanced_store)
+```
+
 ## Use Cases in FastMCP
 
 ### Server-Side OAuth Token Storage
