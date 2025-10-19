@@ -161,19 +161,25 @@ def create_github_server_with_mock_callback(base_url: str) -> FastMCP:
 
 @pytest.fixture
 async def github_server() -> AsyncGenerator[str, None]:
-    """Start GitHub OAuth server on fixed port 9100."""
-    base_url = "http://127.0.0.1:9100"
+    """Start GitHub OAuth server on a random available port."""
+    from fastmcp.utilities.http import find_available_port
+
+    port = find_available_port()
+    base_url = f"http://127.0.0.1:{port}"
     server = create_github_server(base_url)
-    async with run_server_async(server, port=9100, transport="http") as url:
+    async with run_server_async(server, port=port, transport="http") as url:
         yield url
 
 
 @pytest.fixture
 async def github_server_with_mock() -> AsyncGenerator[str, None]:
-    """Start GitHub OAuth server with mocked callback on port 9101."""
-    base_url = "http://127.0.0.1:9101"
+    """Start GitHub OAuth server with mocked callback on a random available port."""
+    from fastmcp.utilities.http import find_available_port
+
+    port = find_available_port()
+    base_url = f"http://127.0.0.1:{port}"
     server = create_github_server_with_mock_callback(base_url)
-    async with run_server_async(server, port=9101, transport="http") as url:
+    async with run_server_async(server, port=port, transport="http") as url:
         yield url
 
 
