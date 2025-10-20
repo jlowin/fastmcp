@@ -20,7 +20,7 @@
     "primary": "#2d00f7"
   },
   "fonts": {
-    "heading": { "family": "Source Serif Pro" },
+    "heading": { "family": "Google Sans" },
     "body": { "family": "BlinkMacSystemFont" }
   },
   "contextual": {
