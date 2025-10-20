@@ -47,7 +47,7 @@ Create an App registration in Azure Portal to get the credentials needed for aut
     </Warning>
     
     <Tip>
-    If you want to use a custom callback path (e.g., `/auth/azure/callback`), make sure to set the same path in both your Azure App registration and the `redirect_path` parameter when configuring the AzureProvider.
+    If you want to use a custom callback path (e.g., `/auth/azure/callback`), make sure to set the same path in both your Azure App registration and the `redirect_path` parameter when configuring the AzureDCRProvider.
     </Tip>
 
     - **Expose an API**: Configure your Application ID URI and define scopes
@@ -75,7 +75,7 @@ Create an App registration in Azure Portal to get the credentials needed for aut
     </Warning>
 
     <Note>
-    In FastMCP's `AzureProvider`, set `identifier_uri` to your Application ID URI (optional; defaults to `api://{client_id}`) and set `required_scopes` to the unprefixed scope names (e.g., `read`, `write`). During authorization, FastMCP automatically prefixes scopes with your `identifier_uri`.
+    In FastMCP's `AzureDCRProvider`, set `identifier_uri` to your Application ID URI (optional; defaults to `api://{client_id}`) and set `required_scopes` to the unprefixed scope names (e.g., `read`, `write`). During authorization, FastMCP automatically prefixes scopes with your `identifier_uri`.
     </Note>
 
 
@@ -110,14 +110,14 @@ Create an App registration in Azure Portal to get the credentials needed for aut
 
 ### Step 2: FastMCP Configuration
 
-Create your FastMCP server using the `AzureProvider`, which handles Azure's OAuth flow automatically:
+Create your FastMCP server using the `AzureDCRProvider`, which handles Azure's OAuth flow automatically:
 
 ```python server.py
 from fastmcp import FastMCP
-from fastmcp.server.auth.providers.azure import AzureProvider
+from fastmcp.server.auth.providers.azure import AzureDCRProvider
 
-# The AzureProvider handles Azure's token format and validation
-auth_provider = AzureProvider(
+# The AzureDCRProvider handles Azure's token format and validation
+auth_provider = AzureDCRProvider(
     client_id="835f09b6-0f0f-40cc-85cb-f32c5829a149",  # Your Azure App Client ID
     client_secret="your-client-secret",                 # Your Azure App Client Secret
     tenant_id="08541b6e-646d-43de-a0eb-834e6713d6d5", # Your Azure Tenant ID (REQUIRED)
@@ -139,7 +139,7 @@ async def get_user_info() -> dict:
     from fastmcp.server.dependencies import get_access_token
     
     token = get_access_token()
-    # The AzureProvider stores user data in token claims
+    # The AzureDCRProvider stores user data in token claims
     return {
         "azure_id": token.claims.get("sub"),
         "email": token.claims.get("email"),
@@ -217,7 +217,7 @@ Setting this environment variable allows the Azure provider to be used automatic
 
 <Card>
 <ParamField path="FASTMCP_SERVER_AUTH" default="Not set">
-Set to `fastmcp.server.auth.providers.azure.AzureProvider` to use Azure authentication.
+Set to `fastmcp.server.auth.providers.azure.AzureDCRProvider` to use Azure authentication.
 </ParamField>
 </Card>
 
@@ -226,15 +226,15 @@ Set to `fastmcp.server.auth.providers.azure.AzureProvider` to use Azure authenti
 These environment variables provide default values for the Azure provider, whether it's instantiated manually or configured via `FASTMCP_SERVER_AUTH`.
 
 <Card>
-<ParamField path="FASTMCP_SERVER_AUTH_AZURE_CLIENT_ID" required>
+<ParamField path="FASTMCP_SERVER_AUTH_AZURE_DCR_CLIENT_ID" required>
 Your Azure App registration Client ID (e.g., `835f09b6-0f0f-40cc-85cb-f32c5829a149`)
 </ParamField>
 
-<ParamField path="FASTMCP_SERVER_AUTH_AZURE_CLIENT_SECRET" required>
+<ParamField path="FASTMCP_SERVER_AUTH_AZURE_DCR_CLIENT_SECRET" required>
 Your Azure App registration Client Secret
 </ParamField>
 
-<ParamField path="FASTMCP_SERVER_AUTH_AZURE_TENANT_ID" required>
+<ParamField path="FASTMCP_SERVER_AUTH_AZURE_DCR_TENANT_ID" required>
 Your Azure tenant ID (specific ID, "organizations", or "consumers")
 
 <Note>
@@ -242,27 +242,27 @@ This is **REQUIRED**. Find your tenant ID in Azure Portal under Microsoft Entra 
 </Note>
 </ParamField>
 
-<ParamField path="FASTMCP_SERVER_AUTH_AZURE_BASE_URL" default="http://localhost:8000">
+<ParamField path="FASTMCP_SERVER_AUTH_AZURE_DCR_BASE_URL" default="http://localhost:8000">
 Public URL where OAuth endpoints will be accessible (includes any mount path)
 </ParamField>
 
-<ParamField path="FASTMCP_SERVER_AUTH_AZURE_ISSUER_URL" default="Uses BASE_URL">
+<ParamField path="FASTMCP_SERVER_AUTH_AZURE_DCR_ISSUER_URL" default="Uses BASE_URL">
 Issuer URL for OAuth metadata (defaults to `BASE_URL`). Set to root-level URL when mounting under a path prefix to avoid 404 logs. See [HTTP Deployment guide](/deployment/http#mounting-authenticated-servers) for details.
 </ParamField>
 
-<ParamField path="FASTMCP_SERVER_AUTH_AZURE_REDIRECT_PATH" default="/auth/callback">
+<ParamField path="FASTMCP_SERVER_AUTH_AZURE_DCR_REDIRECT_PATH" default="/auth/callback">
 Redirect path configured in your Azure App registration
 </ParamField>
 
-<ParamField path="FASTMCP_SERVER_AUTH_AZURE_REQUIRED_SCOPES" default="">
+<ParamField path="FASTMCP_SERVER_AUTH_AZURE_DCR_REQUIRED_SCOPES" default="">
 Comma-, space-, or JSON-separated list of required scopes for your API. These are validated on tokens and used as defaults if the client does not request specific scopes.
 </ParamField>
 
-<ParamField path="FASTMCP_SERVER_AUTH_AZURE_ADDITIONAL_AUTHORIZE_SCOPES" default="">
+<ParamField path="FASTMCP_SERVER_AUTH_AZURE_DCR_ADDITIONAL_AUTHORIZE_SCOPES" default="">
 Comma-, space-, or JSON-separated list of additional scopes to include in the authorization request without prefixing. Use this to request upstream scopes such as Microsoft Graph permissions. These are not used for token validation.
 </ParamField>
 
-<ParamField path="FASTMCP_SERVER_AUTH_AZURE_IDENTIFIER_URI" default="api://{client_id}">
+<ParamField path="FASTMCP_SERVER_AUTH_AZURE_DCR_IDENTIFIER_URI" default="api://{client_id}">
 Application ID URI used to prefix scopes during authorization.
 </ParamField>
 </Card>
@@ -270,18 +270,18 @@ Application ID URI used to prefix scopes during authorization.
 Example `.env` file:
 ```bash
 # Use the Azure provider
-FASTMCP_SERVER_AUTH=fastmcp.server.auth.providers.azure.AzureProvider
+FASTMCP_SERVER_AUTH=fastmcp.server.auth.providers.azure.AzureDCRProvider
 
 # Azure OAuth credentials
-FASTMCP_SERVER_AUTH_AZURE_CLIENT_ID=835f09b6-0f0f-40cc-85cb-f32c5829a149
-FASTMCP_SERVER_AUTH_AZURE_CLIENT_SECRET=your-client-secret-here
-FASTMCP_SERVER_AUTH_AZURE_TENANT_ID=08541b6e-646d-43de-a0eb-834e6713d6d5
-FASTMCP_SERVER_AUTH_AZURE_BASE_URL=https://your-server.com
-FASTMCP_SERVER_AUTH_AZURE_REQUIRED_SCOPES=read,write
+FASTMCP_SERVER_AUTH_AZURE_DCR_CLIENT_ID=835f09b6-0f0f-40cc-85cb-f32c5829a149
+FASTMCP_SERVER_AUTH_AZURE_DCR_CLIENT_SECRET=your-client-secret-here
+FASTMCP_SERVER_AUTH_AZURE_DCR_TENANT_ID=08541b6e-646d-43de-a0eb-834e6713d6d5
+FASTMCP_SERVER_AUTH_AZURE_DCR_BASE_URL=https://your-server.com
+FASTMCP_SERVER_AUTH_AZURE_DCR_REQUIRED_SCOPES=read,write
 # Optional custom API configuration
-# FASTMCP_SERVER_AUTH_AZURE_IDENTIFIER_URI=api://your-api-id
+# FASTMCP_SERVER_AUTH_AZURE_DCR_IDENTIFIER_URI=api://your-api-id
 # Request additional upstream scopes (optional)
-# FASTMCP_SERVER_AUTH_AZURE_ADDITIONAL_AUTHORIZE_SCOPES=User.Read,Mail.Read
+# FASTMCP_SERVER_AUTH_AZURE_DCR_ADDITIONAL_AUTHORIZE_SCOPES=User.Read,Mail.Read
 ```
 
 With environment variables set, your server code simplifies to:

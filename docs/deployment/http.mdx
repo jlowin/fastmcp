@@ -394,7 +394,7 @@ When mounting an OAuth-protected server under a path prefix, declare your URLs u
 
 ```python
 from fastmcp import FastMCP
-from fastmcp.server.auth.providers.github import GitHubProvider
+from fastmcp.server.auth.providers.github import GitHubDCRProvider
 from starlette.applications import Starlette
 from starlette.routing import Mount
 
@@ -407,7 +407,7 @@ MCP_PATH = "/mcp"
 Create the auth provider with both `issuer_url` and `base_url`:
 
 ```python
-auth = GitHubProvider(
+auth = GitHubDCRProvider(
     client_id="your-client-id",
     client_secret="your-client-secret",
     issuer_url=ROOT_URL,  # Discovery metadata at root
@@ -454,7 +454,7 @@ Here's a complete working example showing all the pieces together:
 
 ```python
 from fastmcp import FastMCP
-from fastmcp.server.auth.providers.github import GitHubProvider
+from fastmcp.server.auth.providers.github import GitHubDCRProvider
 from starlette.applications import Starlette
 from starlette.routing import Mount
 import uvicorn
@@ -465,7 +465,7 @@ MOUNT_PREFIX = "/api"
 MCP_PATH = "/mcp"
 
 # Create OAuth provider
-auth = GitHubProvider(
+auth = GitHubDCRProvider(
     client_id="your-client-id",
     client_secret="your-client-secret",
     issuer_url=ROOT_URL,
@@ -565,13 +565,13 @@ The two keys can be any secret strings (environment variables, secret manager, e
 Add two parameters to your auth provider and use persistent storage and HTTPS:
 
 ```python {4-7}
-auth = GitHubProvider(
+auth = GitHubDCRProvider(
     client_id=os.environ["GITHUB_CLIENT_ID"],
     client_secret=os.environ["GITHUB_CLIENT_SECRET"],
     jwt_signing_key=os.environ["JWT_SIGNING_KEY"],
     token_encryption_key=os.environ["TOKEN_ENCRYPTION_KEY"],
     client_storage=RedisStore(host="redis.example.com", ...),
-    base_url="https://your-server.com"  # use HTTPS 
+    base_url="https://your-server.com"  # use HTTPS
 )
 ```
 

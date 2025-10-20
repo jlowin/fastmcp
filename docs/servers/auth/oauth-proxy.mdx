@@ -131,7 +131,7 @@ mcp = FastMCP(name="My Server", auth=auth)
 
   **Example with mounting:**
   ```python
-  auth = GitHubProvider(
+  auth = GitHubDCRProvider(
       base_url="http://localhost:8000/api",  # OAuth endpoints under /api
       issuer_url="http://localhost:8000"     # Auth server metadata at root
   )
@@ -289,9 +289,9 @@ auth = OAuthProxy(
 FastMCP includes pre-configured providers for common services:
 
 ```python
-from fastmcp.server.auth.providers.github import GitHubProvider
+from fastmcp.server.auth.providers.github import GitHubDCRProvider
 
-auth = GitHubProvider(
+auth = GitHubDCRProvider(
     client_id="your-github-app-id",
     client_secret="your-github-app-secret",
     base_url="https://your-server.com"
@@ -300,7 +300,7 @@ auth = GitHubProvider(
 mcp = FastMCP(name="My Server", auth=auth)
 ```
 
-Available providers include `GitHubProvider`, `GoogleProvider`, and others. These handle token verification automatically.
+Available providers include `GitHubDCRProvider`, `GoogleDCRProvider`, and others. These handle token verification automatically.
 
 ### Token Verification
 
@@ -524,12 +524,12 @@ For production deployments, configure the OAuth proxy through environment variab
 
 ```bash
 # Specify the provider implementation
-export FASTMCP_SERVER_AUTH=fastmcp.server.auth.providers.github.GitHubProvider
+export FASTMCP_SERVER_AUTH=fastmcp.server.auth.providers.github.GitHubDCRProvider
 
 # Provider-specific credentials
-export FASTMCP_SERVER_AUTH_GITHUB_CLIENT_ID="Ov23li..."
-export FASTMCP_SERVER_AUTH_GITHUB_CLIENT_SECRET="abc123..."
-export FASTMCP_SERVER_AUTH_GITHUB_BASE_URL="https://your-production-server.com"
+export FASTMCP_SERVER_AUTH_GITHUB_DCR_CLIENT_ID="Ov23li..."
+export FASTMCP_SERVER_AUTH_GITHUB_DCR_CLIENT_SECRET="abc123..."
+export FASTMCP_SERVER_AUTH_GITHUB_DCR_BASE_URL="https://your-production-server.com"
 ```
 
 With environment configuration, your server code simplifies to:

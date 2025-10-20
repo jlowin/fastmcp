@@ -48,7 +48,7 @@ Create an Application in your Auth0 settings to get the credentials needed for a
     </Warning>
 
     <Tip>
-    If you want to use a custom callback path (e.g., `/auth/auth0/callback`), make sure to set the same path in both your Auth0 Application settings and the `redirect_path` parameter when configuring the Auth0Provider.
+    If you want to use a custom callback path (e.g., `/auth/auth0/callback`), make sure to set the same path in both your Auth0 Application settings and the `redirect_path` parameter when configuring the Auth0DCRProvider.
     </Tip>
 </Step>
 
@@ -77,14 +77,14 @@ Create an Application in your Auth0 settings to get the credentials needed for a
 
 ### Step 2: FastMCP Configuration
 
-Create your FastMCP server using the `Auth0Provider`.
+Create your FastMCP server using the `Auth0DCRProvider`.
 
 ```python server.py
 from fastmcp import FastMCP
-from fastmcp.server.auth.providers.auth0 import Auth0Provider
+from fastmcp.server.auth.providers.auth0 import Auth0DCRProvider
 
-# The Auth0Provider utilizes Auth0 OIDC configuration
-auth_provider = Auth0Provider(
+# The Auth0DCRProvider utilizes Auth0 OIDC configuration
+auth_provider = Auth0DCRProvider(
     config_url="https://.../.well-known/openid-configuration",  # Your Auth0 configuration URL
     client_id="tv2ObNgaZAWWhhycr7Bz1LU2mxlnsmsB",               # Your Auth0 application Client ID
     client_secret="vPYqbjemq...",                               # Your Auth0 application Client Secret
@@ -163,7 +163,7 @@ Setting this environment variable allows the Auth0 provider to be used automatic
 
 <Card>
 <ParamField path="FASTMCP_SERVER_AUTH" default="Not set">
-Set to `fastmcp.server.auth.providers.auth0.Auth0Provider` to use Auth0 authentication.
+Set to `fastmcp.server.auth.providers.auth0.Auth0DCRProvider` to use Auth0 authentication.
 </ParamField>
 </Card>
 
@@ -172,51 +172,51 @@ Set to `fastmcp.server.auth.providers.auth0.Auth0Provider` to use Auth0 authenti
 These environment variables provide default values for the Auth0 provider, whether it's instantiated manually or configured via `FASTMCP_SERVER_AUTH`.
 
 <Card>
-<ParamField path="FASTMCP_SERVER_AUTH_AUTH0_CONFIG_URL" required>
+<ParamField path="FASTMCP_SERVER_AUTH_AUTH0_DCR_CONFIG_URL" required>
 Your Auth0 Application Configuration URL (e.g., `https://.../.well-known/openid-configuration`)
 </ParamField>
 
-<ParamField path="FASTMCP_SERVER_AUTH_AUTH0_CLIENT_ID" required>
+<ParamField path="FASTMCP_SERVER_AUTH_AUTH0_DCR_CLIENT_ID" required>
 Your Auth0 Application Client ID (e.g., `tv2ObNgaZAWWhhycr7Bz1LU2mxlnsmsB`)
 </ParamField>
 
-<ParamField path="FASTMCP_SERVER_AUTH_AUTH0_CLIENT_SECRET" required>
+<ParamField path="FASTMCP_SERVER_AUTH_AUTH0_DCR_CLIENT_SECRET" required>
 Your Auth0 Application Client Secret (e.g., `vPYqbjemq...`)
 </ParamField>
 
-<ParamField path="FASTMCP_SERVER_AUTH_AUTH0_AUDIENCE" required>
+<ParamField path="FASTMCP_SERVER_AUTH_AUTH0_DCR_AUDIENCE" required>
 Your Auth0 API Audience
 </ParamField>
 
-<ParamField path="FASTMCP_SERVER_AUTH_AUTH0_BASE_URL" required>
+<ParamField path="FASTMCP_SERVER_AUTH_AUTH0_DCR_BASE_URL" required>
 Public URL where OAuth endpoints will be accessible (includes any mount path)
 </ParamField>
 
-<ParamField path="FASTMCP_SERVER_AUTH_AUTH0_ISSUER_URL" default="Uses BASE_URL">
+<ParamField path="FASTMCP_SERVER_AUTH_AUTH0_DCR_ISSUER_URL" default="Uses BASE_URL">
 Issuer URL for OAuth metadata (defaults to `BASE_URL`). Set to root-level URL when mounting under a path prefix to avoid 404 logs. See [HTTP Deployment guide](/deployment/http#mounting-authenticated-servers) for details.
 </ParamField>
 
-<ParamField path="FASTMCP_SERVER_AUTH_AUTH0_REDIRECT_PATH" default="/auth/callback">
+<ParamField path="FASTMCP_SERVER_AUTH_AUTH0_DCR_REDIRECT_PATH" default="/auth/callback">
 Redirect path configured in your Auth0 Application
 </ParamField>
 
-<ParamField path="FASTMCP_SERVER_AUTH_AUTH0_REQUIRED_SCOPES" default='["openid"]'>
-Comma-, space-, or JSON-separated list of required AUth0 scopes (e.g., `openid email` or `["openid","email"]`)
+<ParamField path="FASTMCP_SERVER_AUTH_AUTH0_DCR_REQUIRED_SCOPES" default='["openid"]'>
+Comma-, space-, or JSON-separated list of required Auth0 scopes (e.g., `openid email` or `["openid","email"]`)
 </ParamField>
 </Card>
 
 Example `.env` file:
 ```bash
 # Use the Auth0 provider
-FASTMCP_SERVER_AUTH=fastmcp.server.auth.providers.auth0.Auth0Provider
+FASTMCP_SERVER_AUTH=fastmcp.server.auth.providers.auth0.Auth0DCRProvider
 
 # Auth0 configuration and credentials
-FASTMCP_SERVER_AUTH_AUTH0_CONFIG_URL=https://.../.well-known/openid-configuration
-FASTMCP_SERVER_AUTH_AUTH0_CLIENT_ID=tv2ObNgaZAWWhhycr7Bz1LU2mxlnsmsB
-FASTMCP_SERVER_AUTH_AUTH0_CLIENT_SECRET=vPYqbjemq...
-FASTMCP_SERVER_AUTH_AUTH0_AUDIENCE=https://...
-FASTMCP_SERVER_AUTH_AUTH0_BASE_URL=https://your-server.com
-FASTMCP_SERVER_AUTH_AUTH0_REQUIRED_SCOPES=openid,email
+FASTMCP_SERVER_AUTH_AUTH0_DCR_CONFIG_URL=https://.../.well-known/openid-configuration
+FASTMCP_SERVER_AUTH_AUTH0_DCR_CLIENT_ID=tv2ObNgaZAWWhhycr7Bz1LU2mxlnsmsB
+FASTMCP_SERVER_AUTH_AUTH0_DCR_CLIENT_SECRET=vPYqbjemq...
+FASTMCP_SERVER_AUTH_AUTH0_DCR_AUDIENCE=https://...
+FASTMCP_SERVER_AUTH_AUTH0_DCR_BASE_URL=https://your-server.com
+FASTMCP_SERVER_AUTH_AUTH0_DCR_REQUIRED_SCOPES=openid,email
 ```
 
 With environment variables set, your server code simplifies to:

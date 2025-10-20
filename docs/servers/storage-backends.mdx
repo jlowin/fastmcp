@@ -57,10 +57,10 @@ middleware = ResponseCachingMiddleware(
 Or with OAuth token storage:
 
 ```python
-from fastmcp.server.auth.providers.github import GitHubProvider
+from fastmcp.server.auth.providers.github import GitHubDCRProvider
 from key_value.aio.stores.disk import DiskStore
 
-auth = GitHubProvider(
+auth = GitHubDCRProvider(
     client_id="your-id",
     client_secret="your-secret",
     base_url="https://your-server.com",
@@ -110,10 +110,10 @@ For OAuth token storage:
 
 ```python
 import os
-from fastmcp.server.auth.providers.github import GitHubProvider
+from fastmcp.server.auth.providers.github import GitHubDCRProvider
 from key_value.aio.stores.redis import RedisStore
 
-auth = GitHubProvider(
+auth = GitHubDCRProvider(
     client_id=os.environ["GITHUB_CLIENT_ID"],
     client_secret=os.environ["GITHUB_CLIENT_SECRET"],
     base_url="https://your-server.com",
@@ -152,9 +152,9 @@ The [OAuth Proxy](/servers/auth/oauth-proxy) and OAuth auth providers use storag
 
 ```python
 # In-memory storage (default behavior - lost on restart)
-from fastmcp.server.auth.providers.github import GitHubProvider
+from fastmcp.server.auth.providers.github import GitHubDCRProvider
 
-auth = GitHubProvider(
+auth = GitHubDCRProvider(
     client_id="your-id",
     client_secret="your-secret",
     base_url="https://your-server.com"
@@ -165,10 +165,10 @@ For production with token persistence across restarts, configure persistent stor
 
 ```python
 import os
-from fastmcp.server.auth.providers.github import GitHubProvider
+from fastmcp.server.auth.providers.github import GitHubDCRProvider
 from key_value.aio.stores.redis import RedisStore
 
-auth = GitHubProvider(
+auth = GitHubDCRProvider(
     client_id=os.environ["GITHUB_CLIENT_ID"],
     client_secret=os.environ["GITHUB_CLIENT_SECRET"],
     base_url="https://your-server.com",

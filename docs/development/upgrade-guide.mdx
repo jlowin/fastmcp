@@ -25,7 +25,7 @@ By default, these keys are ephemeral (random salt at startup, not persisted). Fo
 If you want tokens to survive server restarts, add two new parameters:
 
 ```python
-auth = GitHubProvider(
+auth = GitHubDCRProvider(
     client_id=os.environ["GITHUB_CLIENT_ID"],
     client_secret=os.environ["GITHUB_CLIENT_SECRET"],
     base_url="https://your-server.com",
