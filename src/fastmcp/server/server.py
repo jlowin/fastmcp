@@ -59,6 +59,7 @@ from fastmcp.settings import Settings
 from fastmcp.tools import ToolManager
 from fastmcp.tools.tool import FunctionTool, Tool, ToolResult
 from fastmcp.tools.tool_transform import ToolTransformConfig
+from fastmcp.ui import UIManager
 from fastmcp.utilities.cli import log_server_banner
 from fastmcp.utilities.components import FastMCPComponent
 from fastmcp.utilities.logging import get_logger, temporary_log_level
@@ -192,6 +193,7 @@ class FastMCP(Generic[LifespanResultT]):
             duplicate_behavior=on_duplicate_prompts,
             mask_error_details=mask_error_details,
         )
+        self._ui_manager: UIManager | None = None
         self._tool_serializer = tool_serializer
 
         self._lifespan: LifespanCallable[LifespanResultT] = lifespan or default_lifespan
@@ -356,6 +358,13 @@ class FastMCP(Generic[LifespanResultT]):
             return []
         else:
             return list(self._mcp_server.icons)
+
+    @property
+    def ui(self) -> UIManager:
+        """Access UI components and integrations."""
+        if self._ui_manager is None:
+            self._ui_manager = UIManager(self)
+        return self._ui_manager
 
     @asynccontextmanager
     async def _lifespan_manager(self) -> AsyncIterator[None]:
