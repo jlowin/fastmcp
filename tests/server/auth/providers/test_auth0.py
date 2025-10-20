@@ -6,7 +6,10 @@ from unittest.mock import patch
 import pytest
 
 from fastmcp.server.auth.oidc_dcr_proxy import OIDCConfiguration
-from fastmcp.server.auth.providers.auth0 import Auth0Provider, Auth0ProviderSettings
+from fastmcp.server.auth.providers.auth0 import (
+    Auth0DCRProvider,
+    Auth0DCRProviderSettings,
+)
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 
 TEST_CONFIG_URL = "https://example.com/.well-known/openid-configuration"
@@ -32,7 +35,7 @@ def valid_oidc_configuration_dict():
     }
 
 
-class TestAuth0ProviderSettings:
+class TestAuth0DCRProviderSettings:
     """Test settings for Auth0 OAuth provider."""
 
     def test_settings_from_env_vars(self):
@@ -40,18 +43,18 @@ class TestAuth0ProviderSettings:
         with patch.dict(
             os.environ,
             {
-                "FASTMCP_SERVER_AUTH_AUTH0_CONFIG_URL": TEST_CONFIG_URL,
-                "FASTMCP_SERVER_AUTH_AUTH0_CLIENT_ID": TEST_CLIENT_ID,
-                "FASTMCP_SERVER_AUTH_AUTH0_CLIENT_SECRET": TEST_CLIENT_SECRET,
-                "FASTMCP_SERVER_AUTH_AUTH0_AUDIENCE": TEST_AUDIENCE,
-                "FASTMCP_SERVER_AUTH_AUTH0_BASE_URL": TEST_BASE_URL,
-                "FASTMCP_SERVER_AUTH_AUTH0_REDIRECT_PATH": TEST_REDIRECT_PATH,
-                "FASTMCP_SERVER_AUTH_AUTH0_REQUIRED_SCOPES": ",".join(
+                "FASTMCP_SERVER_AUTH_AUTH0_DCR_CONFIG_URL": TEST_CONFIG_URL,
+                "FASTMCP_SERVER_AUTH_AUTH0_DCR_CLIENT_ID": TEST_CLIENT_ID,
+                "FASTMCP_SERVER_AUTH_AUTH0_DCR_CLIENT_SECRET": TEST_CLIENT_SECRET,
+                "FASTMCP_SERVER_AUTH_AUTH0_DCR_AUDIENCE": TEST_AUDIENCE,
+                "FASTMCP_SERVER_AUTH_AUTH0_DCR_BASE_URL": TEST_BASE_URL,
+                "FASTMCP_SERVER_AUTH_AUTH0_DCR_REDIRECT_PATH": TEST_REDIRECT_PATH,
+                "FASTMCP_SERVER_AUTH_AUTH0_DCR_REQUIRED_SCOPES": ",".join(
                     TEST_REQUIRED_SCOPES
                 ),
             },
         ):
-            settings = Auth0ProviderSettings()
+            settings = Auth0DCRProviderSettings()
 
             assert str(settings.config_url) == TEST_CONFIG_URL
             assert settings.client_id == TEST_CLIENT_ID
@@ -69,11 +72,11 @@ class TestAuth0ProviderSettings:
         with patch.dict(
             os.environ,
             {
-                "FASTMCP_SERVER_AUTH_AUTH0_CLIENT_ID": TEST_CLIENT_ID,
-                "FASTMCP_SERVER_AUTH_AUTH0_CLIENT_SECRET": TEST_CLIENT_SECRET,
+                "FASTMCP_SERVER_AUTH_AUTH0_DCR_CLIENT_ID": TEST_CLIENT_ID,
+                "FASTMCP_SERVER_AUTH_AUTH0_DCR_CLIENT_SECRET": TEST_CLIENT_SECRET,
             },
         ):
-            settings = Auth0ProviderSettings.model_validate(
+            settings = Auth0DCRProviderSettings.model_validate(
                 {
                     "client_id": "explicit_client_id",
                     "client_secret": "explicit_secret",
@@ -87,20 +90,20 @@ class TestAuth0ProviderSettings:
             )
 
 
-class TestAuth0Provider:
-    """Test Auth0Provider initialization."""
+class TestAuth0DCRProvider:
+    """Test Auth0DCRProvider initialization."""
 
     def test_init_with_explicit_params(self, valid_oidc_configuration_dict):
         """Test initialization with explicit parameters."""
         with patch(
-            "fastmcp.server.auth.oidc_proxy.OIDCConfiguration.get_oidc_configuration"
+            "fastmcp.server.auth.oidc_dcr_proxy.OIDCConfiguration.get_oidc_configuration"
         ) as mock_get:
             oidc_config = OIDCConfiguration.model_validate(
                 valid_oidc_configuration_dict
             )
             mock_get.return_value = oidc_config
 
-            provider = Auth0Provider(
+            provider = Auth0DCRProvider(
                 config_url=TEST_CONFIG_URL,
                 client_id=TEST_CLIENT_ID,
                 client_secret=TEST_CLIENT_SECRET,
@@ -141,16 +144,16 @@ class TestAuth0Provider:
             patch.dict(
                 os.environ,
                 {
-                    "FASTMCP_SERVER_AUTH_AUTH0_CONFIG_URL": TEST_CONFIG_URL,
-                    "FASTMCP_SERVER_AUTH_AUTH0_CLIENT_ID": TEST_CLIENT_ID,
-                    "FASTMCP_SERVER_AUTH_AUTH0_CLIENT_SECRET": TEST_CLIENT_SECRET,
-                    "FASTMCP_SERVER_AUTH_AUTH0_AUDIENCE": TEST_AUDIENCE,
-                    "FASTMCP_SERVER_AUTH_AUTH0_BASE_URL": TEST_BASE_URL,
-                    "FASTMCP_SERVER_AUTH_AUTH0_REQUIRED_SCOPES": scopes_env,
+                    "FASTMCP_SERVER_AUTH_AUTH0_DCR_CONFIG_URL": TEST_CONFIG_URL,
+                    "FASTMCP_SERVER_AUTH_AUTH0_DCR_CLIENT_ID": TEST_CLIENT_ID,
+                    "FASTMCP_SERVER_AUTH_AUTH0_DCR_CLIENT_SECRET": TEST_CLIENT_SECRET,
+                    "FASTMCP_SERVER_AUTH_AUTH0_DCR_AUDIENCE": TEST_AUDIENCE,
+                    "FASTMCP_SERVER_AUTH_AUTH0_DCR_BASE_URL": TEST_BASE_URL,
+                    "FASTMCP_SERVER_AUTH_AUTH0_DCR_REQUIRED_SCOPES": scopes_env,
                 },
             ),
             patch(
-                "fastmcp.server.auth.oidc_proxy.OIDCConfiguration.get_oidc_configuration"
+                "fastmcp.server.auth.oidc_dcr_proxy.OIDCConfiguration.get_oidc_configuration"
             ) as mock_get,
         ):
             oidc_config = OIDCConfiguration.model_validate(
@@ -158,7 +161,7 @@ class TestAuth0Provider:
             )
             mock_get.return_value = oidc_config
 
-            provider = Auth0Provider()
+            provider = Auth0DCRProvider()
 
             mock_get.assert_called_once()
 
@@ -183,15 +186,15 @@ class TestAuth0Provider:
             patch.dict(
                 os.environ,
                 {
-                    "FASTMCP_SERVER_AUTH_AUTH0_CONFIG_URL": TEST_CONFIG_URL,
-                    "FASTMCP_SERVER_AUTH_AUTH0_CLIENT_ID": TEST_CLIENT_ID,
-                    "FASTMCP_SERVER_AUTH_AUTH0_CLIENT_SECRET": TEST_CLIENT_SECRET,
-                    "FASTMCP_SERVER_AUTH_AUTH0_AUDIENCE": TEST_AUDIENCE,
-                    "FASTMCP_SERVER_AUTH_AUTH0_BASE_URL": TEST_BASE_URL,
+                    "FASTMCP_SERVER_AUTH_AUTH0_DCR_CONFIG_URL": TEST_CONFIG_URL,
+                    "FASTMCP_SERVER_AUTH_AUTH0_DCR_CLIENT_ID": TEST_CLIENT_ID,
+                    "FASTMCP_SERVER_AUTH_AUTH0_DCR_CLIENT_SECRET": TEST_CLIENT_SECRET,
+                    "FASTMCP_SERVER_AUTH_AUTH0_DCR_AUDIENCE": TEST_AUDIENCE,
+                    "FASTMCP_SERVER_AUTH_AUTH0_DCR_BASE_URL": TEST_BASE_URL,
                 },
             ),
             patch(
-                "fastmcp.server.auth.oidc_proxy.OIDCConfiguration.get_oidc_configuration"
+                "fastmcp.server.auth.oidc_dcr_proxy.OIDCConfiguration.get_oidc_configuration"
             ) as mock_get,
         ):
             oidc_config = OIDCConfiguration.model_validate(
@@ -199,7 +202,7 @@ class TestAuth0Provider:
             )
             mock_get.return_value = oidc_config
 
-            provider = Auth0Provider(
+            provider = Auth0DCRProvider(
                 client_id="explicit_client",
                 client_secret="explicit_secret",
             )
@@ -214,28 +217,28 @@ class TestAuth0Provider:
         # Clear environment variables to test proper error handling
         with patch.dict(os.environ, {}, clear=True):
             with pytest.raises(ValueError, match="config_url is required"):
-                Auth0Provider()
+                Auth0DCRProvider()
 
     def test_init_missing_client_id_raises_error(self):
         """Test that missing client_id raises ValueError."""
         # Clear environment variables to test proper error handling
         with patch.dict(os.environ, {}, clear=True):
             with pytest.raises(ValueError, match="client_id is required"):
-                Auth0Provider(config_url=TEST_CONFIG_URL)
+                Auth0DCRProvider(config_url=TEST_CONFIG_URL)
 
     def test_init_missing_client_secret_raises_error(self):
         """Test that missing client_secret raises ValueError."""
         # Clear environment variables to test proper error handling
         with patch.dict(os.environ, {}, clear=True):
             with pytest.raises(ValueError, match="client_secret is required"):
-                Auth0Provider(config_url=TEST_CONFIG_URL, client_id=TEST_CLIENT_ID)
+                Auth0DCRProvider(config_url=TEST_CONFIG_URL, client_id=TEST_CLIENT_ID)
 
     def test_init_missing_audience_raises_error(self):
         """Test that missing audience raises ValueError."""
         # Clear environment variables to test proper error handling
         with patch.dict(os.environ, {}, clear=True):
             with pytest.raises(ValueError, match="audience is required"):
-                Auth0Provider(
+                Auth0DCRProvider(
                     config_url=TEST_CONFIG_URL,
                     client_id=TEST_CLIENT_ID,
                     client_secret=TEST_CLIENT_SECRET,
@@ -246,7 +249,7 @@ class TestAuth0Provider:
         # Clear environment variables to test proper error handling
         with patch.dict(os.environ, {}, clear=True):
             with pytest.raises(ValueError, match="base_url is required"):
-                Auth0Provider(
+                Auth0DCRProvider(
                     config_url=TEST_CONFIG_URL,
                     client_id=TEST_CLIENT_ID,
                     client_secret=TEST_CLIENT_SECRET,
@@ -256,14 +259,14 @@ class TestAuth0Provider:
     def test_init_defaults(self, valid_oidc_configuration_dict):
         """Test that default values are applied correctly."""
         with patch(
-            "fastmcp.server.auth.oidc_proxy.OIDCConfiguration.get_oidc_configuration"
+            "fastmcp.server.auth.oidc_dcr_proxy.OIDCConfiguration.get_oidc_configuration"
         ) as mock_get:
             oidc_config = OIDCConfiguration.model_validate(
                 valid_oidc_configuration_dict
             )
             mock_get.return_value = oidc_config
 
-            provider = Auth0Provider(
+            provider = Auth0DCRProvider(
                 config_url=TEST_CONFIG_URL,
                 client_id=TEST_CLIENT_ID,
                 client_secret=TEST_CLIENT_SECRET,

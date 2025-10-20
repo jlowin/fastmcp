@@ -5,15 +5,15 @@ from unittest.mock import patch
 
 import pytest
 
-from fastmcp.server.auth.providers.google import GoogleProvider
+from fastmcp.server.auth.providers.google import GoogleDCRProvider
 
 
-class TestGoogleProvider:
+class TestGoogleDCRProvider:
     """Test Google OAuth provider functionality."""
 
     def test_init_with_explicit_params(self):
-        """Test GoogleProvider initialization with explicit parameters."""
-        provider = GoogleProvider(
+        """Test GoogleDCRProvider initialization with explicit parameters."""
+        provider = GoogleDCRProvider(
             client_id="123456789.apps.googleusercontent.com",
             client_secret="GOCSPX-test123",
             base_url="https://myserver.com",
@@ -32,17 +32,17 @@ class TestGoogleProvider:
         ],
     )
     def test_init_with_env_vars(self, scopes_env):
-        """Test GoogleProvider initialization from environment variables."""
+        """Test GoogleDCRProvider initialization from environment variables."""
         with patch.dict(
             os.environ,
             {
-                "FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_ID": "env123.apps.googleusercontent.com",
-                "FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_SECRET": "GOCSPX-env456",
-                "FASTMCP_SERVER_AUTH_GOOGLE_BASE_URL": "https://envserver.com",
-                "FASTMCP_SERVER_AUTH_GOOGLE_REQUIRED_SCOPES": scopes_env,
+                "FASTMCP_SERVER_AUTH_GOOGLE_DCR_CLIENT_ID": "env123.apps.googleusercontent.com",
+                "FASTMCP_SERVER_AUTH_GOOGLE_DCR_CLIENT_SECRET": "GOCSPX-env456",
+                "FASTMCP_SERVER_AUTH_GOOGLE_DCR_BASE_URL": "https://envserver.com",
+                "FASTMCP_SERVER_AUTH_GOOGLE_DCR_REQUIRED_SCOPES": scopes_env,
             },
         ):
-            provider = GoogleProvider()
+            provider = GoogleDCRProvider()
 
             assert provider._upstream_client_id == "env123.apps.googleusercontent.com"
             assert (
@@ -59,18 +59,18 @@ class TestGoogleProvider:
         # Clear environment variables to test proper error handling
         with patch.dict(os.environ, {}, clear=True):
             with pytest.raises(ValueError, match="client_id is required"):
-                GoogleProvider(client_secret="GOCSPX-test123")
+                GoogleDCRProvider(client_secret="GOCSPX-test123")
 
     def test_init_missing_client_secret_raises_error(self):
         """Test that missing client_secret raises ValueError."""
         # Clear environment variables to test proper error handling
         with patch.dict(os.environ, {}, clear=True):
             with pytest.raises(ValueError, match="client_secret is required"):
-                GoogleProvider(client_id="123456789.apps.googleusercontent.com")
+                GoogleDCRProvider(client_id="123456789.apps.googleusercontent.com")
 
     def test_init_defaults(self):
         """Test that default values are applied correctly."""
-        provider = GoogleProvider(
+        provider = GoogleDCRProvider(
             client_id="123456789.apps.googleusercontent.com",
             client_secret="GOCSPX-test123",
         )
@@ -82,7 +82,7 @@ class TestGoogleProvider:
 
     def test_oauth_endpoints_configured_correctly(self):
         """Test that OAuth endpoints are configured correctly."""
-        provider = GoogleProvider(
+        provider = GoogleDCRProvider(
             client_id="123456789.apps.googleusercontent.com",
             client_secret="GOCSPX-test123",
             base_url="https://myserver.com",
@@ -102,7 +102,7 @@ class TestGoogleProvider:
     def test_google_specific_scopes(self):
         """Test handling of Google-specific scope formats."""
         # Just test that the provider accepts Google-specific scopes without error
-        provider = GoogleProvider(
+        provider = GoogleDCRProvider(
             client_id="123456789.apps.googleusercontent.com",
             client_secret="GOCSPX-test123",
             required_scopes=[

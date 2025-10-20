@@ -2,7 +2,7 @@
 
 This module provides two WorkOS authentication strategies:
 
-1. WorkOSProvider - OAuth proxy for WorkOS Connect applications (non-DCR)
+1. WorkOSDCRProvider - OAuth DCR proxy for WorkOS Connect applications
 2. AuthKitProvider - DCR-compliant provider for WorkOS AuthKit
 
 Choose based on your WorkOS setup and authentication requirements.
@@ -10,17 +10,24 @@ Choose based on your WorkOS setup and authentication requirements.
 
 from __future__ import annotations
 
+import warnings
+
 import httpx
 from key_value.aio.protocols import AsyncKeyValue
 from pydantic import AnyHttpUrl, SecretStr, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from fastmcp.server.auth import AccessToken, RemoteAuthProvider, TokenVerifier
 from fastmcp.server.auth.oauth_dcr_proxy import OAuthDCRProxy
 from fastmcp.server.auth.providers.jwt import JWTVerifier
-from fastmcp.settings import ENV_FILE
+from fastmcp.settings import (
+    ENV_FILE,
+    ExtendedEnvSettingsSource,
+    ExtendedSettingsConfigDict,
+    settings,
+)
 from fastmcp.utilities.auth import parse_scopes
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.types import NotSet, NotSetT
@@ -28,14 +35,31 @@ from fastmcp.utilities.types import NotSet, NotSetT
 logger = get_logger(__name__)
 
 
-class WorkOSProviderSettings(BaseSettings):
-    """Settings for WorkOS OAuth provider."""
+class WorkOSDCRProviderSettings(BaseSettings):
+    """Settings for WorkOS OAuth DCR provider."""
 
-    model_config = SettingsConfigDict(
-        env_prefix="FASTMCP_SERVER_AUTH_WORKOS_",
+    model_config = ExtendedSettingsConfigDict(
+        env_prefix="FASTMCP_SERVER_AUTH_WORKOS_DCR_",
+        env_prefixes=["FASTMCP_SERVER_AUTH_WORKOS_DCR_", "FASTMCP_SERVER_AUTH_WORKOS_"],
         env_file=ENV_FILE,
         extra="ignore",
     )
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls,
+        init_settings,
+        env_settings,
+        dotenv_settings,
+        file_secret_settings,
+    ):
+        return (
+            init_settings,
+            ExtendedEnvSettingsSource(settings_cls),
+            dotenv_settings,
+            file_secret_settings,
+        )
 
     client_id: str | None = None
     client_secret: SecretStr | None = None
@@ -125,14 +149,14 @@ class WorkOSTokenVerifier(TokenVerifier):
             return None
 
 
-class WorkOSProvider(OAuthDCRProxy):
-    """Complete WorkOS OAuth provider for FastMCP.
+class WorkOSDCRProvider(OAuthDCRProxy):
+    """Complete WorkOS OAuth DCR provider for FastMCP.
 
-    This provider implements WorkOS AuthKit OAuth using the OAuth Proxy pattern.
+    This provider implements WorkOS AuthKit OAuth using the OAuth DCR Proxy pattern.
     It provides OAuth2 authentication for users through WorkOS Connect applications.
 
     Features:
-    - Transparent OAuth proxy to WorkOS AuthKit
+    - Transparent OAuth DCR proxy to WorkOS AuthKit
     - Automatic token validation via userinfo endpoint
     - User information extraction from ID tokens
     - Support for standard OAuth scopes (openid, profile, email)
@@ -146,9 +170,9 @@ class WorkOSProvider(OAuthDCRProxy):
     Example:
         ```python
         from fastmcp import FastMCP
-        from fastmcp.server.auth.providers.workos import WorkOSProvider
+        from fastmcp.server.auth.providers.workos import WorkOSDCRProvider
 
-        auth = WorkOSProvider(
+        auth = WorkOSDCRProvider(
             client_id="client_123",
             client_secret="sk_test_456",
             authkit_domain="https://your-app.authkit.app",
@@ -190,7 +214,7 @@ class WorkOSProvider(OAuthDCRProxy):
             client_storage: An AsyncKeyValue-compatible store for client registrations, registrations are stored in memory if not provided
         """
 
-        settings = WorkOSProviderSettings.model_validate(
+        provider_settings = WorkOSDCRProviderSettings.model_validate(
             {
                 k: v
                 for k, v in {
@@ -209,31 +233,35 @@ class WorkOSProvider(OAuthDCRProxy):
         )
 
         # Validate required settings
-        if not settings.client_id:
+        if not provider_settings.client_id:
             raise ValueError(
-                "client_id is required - set via parameter or FASTMCP_SERVER_AUTH_WORKOS_CLIENT_ID"
+                "client_id is required - set via parameter or FASTMCP_SERVER_AUTH_WORKOS_DCR_CLIENT_ID"
             )
-        if not settings.client_secret:
+        if not provider_settings.client_secret:
             raise ValueError(
-                "client_secret is required - set via parameter or FASTMCP_SERVER_AUTH_WORKOS_CLIENT_SECRET"
+                "client_secret is required - set via parameter or FASTMCP_SERVER_AUTH_WORKOS_DCR_CLIENT_SECRET"
             )
-        if not settings.authkit_domain:
+        if not provider_settings.authkit_domain:
             raise ValueError(
-                "authkit_domain is required - set via parameter or FASTMCP_SERVER_AUTH_WORKOS_AUTHKIT_DOMAIN"
+                "authkit_domain is required - set via parameter or FASTMCP_SERVER_AUTH_WORKOS_DCR_AUTHKIT_DOMAIN"
             )
 
         # Apply defaults and ensure authkit_domain is a full URL
-        authkit_domain_str = settings.authkit_domain
+        authkit_domain_str = provider_settings.authkit_domain
         if not authkit_domain_str.startswith(("http://", "https://")):
             authkit_domain_str = f"https://{authkit_domain_str}"
         authkit_domain_final = authkit_domain_str.rstrip("/")
-        timeout_seconds_final = settings.timeout_seconds or 10
-        scopes_final = settings.required_scopes or []
-        allowed_client_redirect_uris_final = settings.allowed_client_redirect_uris
+        timeout_seconds_final = provider_settings.timeout_seconds or 10
+        scopes_final = provider_settings.required_scopes or []
+        allowed_client_redirect_uris_final = (
+            provider_settings.allowed_client_redirect_uris
+        )
 
         # Extract secret string from SecretStr
         client_secret_str = (
-            settings.client_secret.get_secret_value() if settings.client_secret else ""
+            provider_settings.client_secret.get_secret_value()
+            if provider_settings.client_secret
+            else ""
         )
 
         # Create WorkOS token verifier
@@ -247,26 +275,43 @@ class WorkOSProvider(OAuthDCRProxy):
         super().__init__(
             upstream_authorization_endpoint=f"{authkit_domain_final}/oauth2/authorize",
             upstream_token_endpoint=f"{authkit_domain_final}/oauth2/token",
-            upstream_client_id=settings.client_id,
+            upstream_client_id=provider_settings.client_id,
             upstream_client_secret=client_secret_str,
             token_verifier=token_verifier,
-            base_url=settings.base_url,
-            redirect_path=settings.redirect_path,
-            issuer_url=settings.issuer_url
-            or settings.base_url,  # Default to base_url if not specified
+            base_url=provider_settings.base_url,
+            redirect_path=provider_settings.redirect_path,
+            issuer_url=provider_settings.issuer_url
+            or provider_settings.base_url,  # Default to base_url if not specified
             allowed_client_redirect_uris=allowed_client_redirect_uris_final,
             client_storage=client_storage,
         )
 
         logger.info(
-            "Initialized WorkOS OAuth provider for client %s with AuthKit domain %s",
-            settings.client_id,
+            "Initialized WorkOS OAuth DCR provider for client %s with AuthKit domain %s",
+            provider_settings.client_id,
             authkit_domain_final,
         )
 
 
+# Deprecated alias for backwards compatibility
+class WorkOSProvider(WorkOSDCRProvider):
+    """Deprecated: Use WorkOSDCRProvider instead.
+
+    This alias is provided for backwards compatibility and will be removed in a future version.
+    """
+
+    def __init__(self, **kwargs):
+        if settings.deprecation_warnings:
+            warnings.warn(
+                "WorkOSProvider is deprecated, use WorkOSDCRProvider instead",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        super().__init__(**kwargs)
+
+
 class AuthKitProviderSettings(BaseSettings):
-    model_config = SettingsConfigDict(
+    model_config = ExtendedSettingsConfigDict(
         env_prefix="FASTMCP_SERVER_AUTH_AUTHKITPROVIDER_",
         env_file=ENV_FILE,
         extra="ignore",

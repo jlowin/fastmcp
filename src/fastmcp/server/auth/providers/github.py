@@ -7,10 +7,10 @@ GitHub's OAuth flow, token validation, and user management.
 Example:
     ```python
     from fastmcp import FastMCP
-    from fastmcp.server.auth.providers.github import GitHubProvider
+    from fastmcp.server.auth.providers.github import GitHubDCRProvider
 
     # Simple GitHub OAuth protection
-    auth = GitHubProvider(
+    auth = GitHubDCRProvider(
         client_id="your-github-client-id",
         client_secret="your-github-client-secret"
     )
@@ -21,15 +21,22 @@ Example:
 
 from __future__ import annotations
 
+import warnings
+
 import httpx
 from key_value.aio.protocols import AsyncKeyValue
 from pydantic import AnyHttpUrl, SecretStr, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings
 
 from fastmcp.server.auth import TokenVerifier
 from fastmcp.server.auth.auth import AccessToken
 from fastmcp.server.auth.oauth_dcr_proxy import OAuthDCRProxy
-from fastmcp.settings import ENV_FILE
+from fastmcp.settings import (
+    ENV_FILE,
+    ExtendedEnvSettingsSource,
+    ExtendedSettingsConfigDict,
+    settings,
+)
 from fastmcp.utilities.auth import parse_scopes
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.types import NotSet, NotSetT
@@ -37,14 +44,31 @@ from fastmcp.utilities.types import NotSet, NotSetT
 logger = get_logger(__name__)
 
 
-class GitHubProviderSettings(BaseSettings):
-    """Settings for GitHub OAuth provider."""
+class GitHubDCRProviderSettings(BaseSettings):
+    """Settings for GitHub OAuth DCR provider."""
 
-    model_config = SettingsConfigDict(
-        env_prefix="FASTMCP_SERVER_AUTH_GITHUB_",
+    model_config = ExtendedSettingsConfigDict(
+        env_prefix="FASTMCP_SERVER_AUTH_GITHUB_DCR_",
+        env_prefixes=["FASTMCP_SERVER_AUTH_GITHUB_DCR_", "FASTMCP_SERVER_AUTH_GITHUB_"],
         env_file=ENV_FILE,
         extra="ignore",
     )
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls,
+        init_settings,
+        env_settings,
+        dotenv_settings,
+        file_secret_settings,
+    ):
+        return (
+            init_settings,
+            ExtendedEnvSettingsSource(settings_cls),
+            dotenv_settings,
+            file_secret_settings,
+        )
 
     client_id: str | None = None
     client_secret: SecretStr | None = None
@@ -166,8 +190,8 @@ class GitHubTokenVerifier(TokenVerifier):
             return None
 
 
-class GitHubProvider(OAuthDCRProxy):
-    """Complete GitHub OAuth provider for FastMCP.
+class GitHubDCRProvider(OAuthDCRProxy):
+    """Complete GitHub OAuth DCR provider for FastMCP.
 
     This provider makes it trivial to add GitHub OAuth protection to any
     FastMCP server. Just provide your GitHub OAuth app credentials and
@@ -182,9 +206,9 @@ class GitHubProvider(OAuthDCRProxy):
     Example:
         ```python
         from fastmcp import FastMCP
-        from fastmcp.server.auth.providers.github import GitHubProvider
+        from fastmcp.server.auth.providers.github import GitHubDCRProvider
 
-        auth = GitHubProvider(
+        auth = GitHubDCRProvider(
             client_id="Ov23li...",
             client_secret="abc123...",
             base_url="https://my-server.com"
@@ -223,7 +247,7 @@ class GitHubProvider(OAuthDCRProxy):
             client_storage: An AsyncKeyValue-compatible store for client registrations, registrations are stored in memory if not provided
         """
 
-        settings = GitHubProviderSettings.model_validate(
+        provider_settings = GitHubDCRProviderSettings.model_validate(
             {
                 k: v
                 for k, v in {
@@ -241,20 +265,21 @@ class GitHubProvider(OAuthDCRProxy):
         )
 
         # Validate required settings
-        if not settings.client_id:
+        if not provider_settings.client_id:
             raise ValueError(
-                "client_id is required - set via parameter or FASTMCP_SERVER_AUTH_GITHUB_CLIENT_ID"
+                "client_id is required - set via parameter or FASTMCP_SERVER_AUTH_GITHUB_DCR_CLIENT_ID"
             )
-        if not settings.client_secret:
+        if not provider_settings.client_secret:
             raise ValueError(
-                "client_secret is required - set via parameter or FASTMCP_SERVER_AUTH_GITHUB_CLIENT_SECRET"
+                "client_secret is required - set via parameter or FASTMCP_SERVER_AUTH_GITHUB_DCR_CLIENT_SECRET"
             )
 
         # Apply defaults
-
-        timeout_seconds_final = settings.timeout_seconds or 10
-        required_scopes_final = settings.required_scopes or ["user"]
-        allowed_client_redirect_uris_final = settings.allowed_client_redirect_uris
+        timeout_seconds_final = provider_settings.timeout_seconds or 10
+        required_scopes_final = provider_settings.required_scopes or ["user"]
+        allowed_client_redirect_uris_final = (
+            provider_settings.allowed_client_redirect_uris
+        )
 
         # Create GitHub token verifier
         token_verifier = GitHubTokenVerifier(
@@ -264,26 +289,45 @@ class GitHubProvider(OAuthDCRProxy):
 
         # Extract secret string from SecretStr
         client_secret_str = (
-            settings.client_secret.get_secret_value() if settings.client_secret else ""
+            provider_settings.client_secret.get_secret_value()
+            if provider_settings.client_secret
+            else ""
         )
 
         # Initialize OAuth proxy with GitHub endpoints
         super().__init__(
             upstream_authorization_endpoint="https://github.com/login/oauth/authorize",
             upstream_token_endpoint="https://github.com/login/oauth/access_token",
-            upstream_client_id=settings.client_id,
+            upstream_client_id=provider_settings.client_id,
             upstream_client_secret=client_secret_str,
             token_verifier=token_verifier,
-            base_url=settings.base_url,
-            redirect_path=settings.redirect_path,
-            issuer_url=settings.issuer_url
-            or settings.base_url,  # Default to base_url if not specified
+            base_url=provider_settings.base_url,
+            redirect_path=provider_settings.redirect_path,
+            issuer_url=provider_settings.issuer_url
+            or provider_settings.base_url,  # Default to base_url if not specified
             allowed_client_redirect_uris=allowed_client_redirect_uris_final,
             client_storage=client_storage,
         )
 
         logger.info(
-            "Initialized GitHub OAuth provider for client %s with scopes: %s",
-            settings.client_id,
+            "Initialized GitHub OAuth DCR provider for client %s with scopes: %s",
+            provider_settings.client_id,
             required_scopes_final,
         )
+
+
+# Deprecated alias for backwards compatibility
+class GitHubProvider(GitHubDCRProvider):
+    """Deprecated: Use GitHubDCRProvider instead.
+
+    This alias is provided for backwards compatibility and will be removed in a future version.
+    """
+
+    def __init__(self, **kwargs):
+        if settings.deprecation_warnings:
+            warnings.warn(
+                "GitHubProvider is deprecated, use GitHubDCRProvider instead",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        super().__init__(**kwargs)

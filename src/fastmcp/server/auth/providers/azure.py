@@ -6,15 +6,21 @@ using the OAuth Proxy pattern for non-DCR OAuth flows.
 
 from __future__ import annotations
 
+import warnings
 from typing import TYPE_CHECKING
 
 from key_value.aio.protocols import AsyncKeyValue
 from pydantic import SecretStr, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings
 
 from fastmcp.server.auth.oauth_dcr_proxy import OAuthDCRProxy
 from fastmcp.server.auth.providers.jwt import JWTVerifier
-from fastmcp.settings import ENV_FILE
+from fastmcp.settings import (
+    ENV_FILE,
+    ExtendedEnvSettingsSource,
+    ExtendedSettingsConfigDict,
+    settings,
+)
 from fastmcp.utilities.auth import parse_scopes
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.types import NotSet, NotSetT
@@ -26,14 +32,31 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-class AzureProviderSettings(BaseSettings):
-    """Settings for Azure OAuth provider."""
+class AzureDCRProviderSettings(BaseSettings):
+    """Settings for Azure OAuth DCR provider."""
 
-    model_config = SettingsConfigDict(
-        env_prefix="FASTMCP_SERVER_AUTH_AZURE_",
+    model_config = ExtendedSettingsConfigDict(
+        env_prefix="FASTMCP_SERVER_AUTH_AZURE_DCR_",
+        env_prefixes=["FASTMCP_SERVER_AUTH_AZURE_DCR_", "FASTMCP_SERVER_AUTH_AZURE_"],
         env_file=ENV_FILE,
         extra="ignore",
     )
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls,
+        init_settings,
+        env_settings,
+        dotenv_settings,
+        file_secret_settings,
+    ):
+        return (
+            init_settings,
+            ExtendedEnvSettingsSource(settings_cls),
+            dotenv_settings,
+            file_secret_settings,
+        )
 
     client_id: str | None = None
     client_secret: SecretStr | None = None
@@ -57,8 +80,8 @@ class AzureProviderSettings(BaseSettings):
         return parse_scopes(v)
 
 
-class AzureProvider(OAuthDCRProxy):
-    """Azure (Microsoft Entra) OAuth provider for FastMCP.
+class AzureDCRProvider(OAuthDCRProxy):
+    """Azure (Microsoft Entra) OAuth DCR provider for FastMCP.
 
     This provider implements Azure/Microsoft Entra ID authentication using the
     OAuth Proxy pattern. It supports both organizational accounts and personal
@@ -80,9 +103,9 @@ class AzureProvider(OAuthDCRProxy):
     Example:
         ```python
         from fastmcp import FastMCP
-        from fastmcp.server.auth.providers.azure import AzureProvider
+        from fastmcp.server.auth.providers.azure import AzureDCRProvider
 
-        auth = AzureProvider(
+        auth = AzureDCRProvider(
             client_id="your-client-id",
             client_secret="your-client-secret",
             tenant_id="your-tenant-id",
@@ -132,7 +155,7 @@ class AzureProvider(OAuthDCRProxy):
                 If None (default), all URIs are allowed. If empty list, no URIs are allowed.
             client_storage: An AsyncKeyValue-compatible store for client registrations, registrations are stored in memory if not provided
         """
-        settings = AzureProviderSettings.model_validate(
+        provider_settings = AzureDCRProviderSettings.model_validate(
             {
                 k: v
                 for k, v in {
@@ -152,29 +175,33 @@ class AzureProvider(OAuthDCRProxy):
         )
 
         # Validate required settings
-        if not settings.client_id:
-            msg = "client_id is required - set via parameter or FASTMCP_SERVER_AUTH_AZURE_CLIENT_ID"
+        if not provider_settings.client_id:
+            msg = "client_id is required - set via parameter or FASTMCP_SERVER_AUTH_AZURE_DCR_CLIENT_ID"
             raise ValueError(msg)
-        if not settings.client_secret:
-            msg = "client_secret is required - set via parameter or FASTMCP_SERVER_AUTH_AZURE_CLIENT_SECRET"
+        if not provider_settings.client_secret:
+            msg = "client_secret is required - set via parameter or FASTMCP_SERVER_AUTH_AZURE_DCR_CLIENT_SECRET"
             raise ValueError(msg)
 
         # Validate tenant_id is provided
-        if not settings.tenant_id:
+        if not provider_settings.tenant_id:
             msg = (
                 "tenant_id is required - set via parameter or "
-                "FASTMCP_SERVER_AUTH_AZURE_TENANT_ID. Use your Azure tenant ID "
+                "FASTMCP_SERVER_AUTH_AZURE_DCR_TENANT_ID. Use your Azure tenant ID "
                 "(found in Azure Portal), 'organizations', or 'consumers'"
             )
             raise ValueError(msg)
 
-        if not settings.required_scopes:
+        if not provider_settings.required_scopes:
             raise ValueError("required_scopes is required")
 
         # Apply defaults
-        self.identifier_uri = settings.identifier_uri or f"api://{settings.client_id}"
-        self.additional_authorize_scopes = settings.additional_authorize_scopes or []
-        tenant_id_final = settings.tenant_id
+        self.identifier_uri = (
+            provider_settings.identifier_uri or f"api://{provider_settings.client_id}"
+        )
+        self.additional_authorize_scopes = (
+            provider_settings.additional_authorize_scopes or []
+        )
+        tenant_id_final = provider_settings.tenant_id
 
         # Always validate tokens against the app's API client ID using JWT
         issuer = f"https://login.microsoftonline.com/{tenant_id_final}/v2.0"
@@ -185,14 +212,16 @@ class AzureProvider(OAuthDCRProxy):
         token_verifier = JWTVerifier(
             jwks_uri=jwks_uri,
             issuer=issuer,
-            audience=settings.client_id,
+            audience=provider_settings.client_id,
             algorithm="RS256",
-            required_scopes=settings.required_scopes,
+            required_scopes=provider_settings.required_scopes,
         )
 
         # Extract secret string from SecretStr
         client_secret_str = (
-            settings.client_secret.get_secret_value() if settings.client_secret else ""
+            provider_settings.client_secret.get_secret_value()
+            if provider_settings.client_secret
+            else ""
         )
 
         # Build Azure OAuth endpoints with tenant
@@ -207,23 +236,40 @@ class AzureProvider(OAuthDCRProxy):
         super().__init__(
             upstream_authorization_endpoint=authorization_endpoint,
             upstream_token_endpoint=token_endpoint,
-            upstream_client_id=settings.client_id,
+            upstream_client_id=provider_settings.client_id,
             upstream_client_secret=client_secret_str,
             token_verifier=token_verifier,
-            base_url=settings.base_url,
-            redirect_path=settings.redirect_path,
-            issuer_url=settings.issuer_url
-            or settings.base_url,  # Default to base_url if not specified
-            allowed_client_redirect_uris=settings.allowed_client_redirect_uris,
+            base_url=provider_settings.base_url,
+            redirect_path=provider_settings.redirect_path,
+            issuer_url=provider_settings.issuer_url
+            or provider_settings.base_url,  # Default to base_url if not specified
+            allowed_client_redirect_uris=provider_settings.allowed_client_redirect_uris,
             client_storage=client_storage,
         )
 
         logger.info(
-            "Initialized Azure OAuth provider for client %s with tenant %s%s",
-            settings.client_id,
+            "Initialized Azure OAuth DCR provider for client %s with tenant %s%s",
+            provider_settings.client_id,
             tenant_id_final,
             f" and identifier_uri {self.identifier_uri}" if self.identifier_uri else "",
         )
+
+
+# Deprecated alias for backwards compatibility
+class AzureProvider(AzureDCRProvider):
+    """Deprecated: Use AzureDCRProvider instead.
+
+    This alias is provided for backwards compatibility and will be removed in a future version.
+    """
+
+    def __init__(self, **kwargs):
+        if settings.deprecation_warnings:
+            warnings.warn(
+                "AzureProvider is deprecated, use AzureDCRProvider instead",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        super().__init__(**kwargs)
 
     async def authorize(
         self,

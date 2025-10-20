@@ -7,10 +7,10 @@ Google's OAuth flow, token validation, and user management.
 Example:
     ```python
     from fastmcp import FastMCP
-    from fastmcp.server.auth.providers.google import GoogleProvider
+    from fastmcp.server.auth.providers.google import GoogleDCRProvider
 
     # Simple Google OAuth protection
-    auth = GoogleProvider(
+    auth = GoogleDCRProvider(
         client_id="your-google-client-id.apps.googleusercontent.com",
         client_secret="your-google-client-secret"
     )
@@ -22,16 +22,22 @@ Example:
 from __future__ import annotations
 
 import time
+import warnings
 
 import httpx
 from key_value.aio.protocols import AsyncKeyValue
 from pydantic import AnyHttpUrl, SecretStr, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings
 
 from fastmcp.server.auth import TokenVerifier
 from fastmcp.server.auth.auth import AccessToken
 from fastmcp.server.auth.oauth_dcr_proxy import OAuthDCRProxy
-from fastmcp.settings import ENV_FILE
+from fastmcp.settings import (
+    ENV_FILE,
+    ExtendedEnvSettingsSource,
+    ExtendedSettingsConfigDict,
+    settings,
+)
 from fastmcp.utilities.auth import parse_scopes
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.types import NotSet, NotSetT
@@ -39,14 +45,31 @@ from fastmcp.utilities.types import NotSet, NotSetT
 logger = get_logger(__name__)
 
 
-class GoogleProviderSettings(BaseSettings):
-    """Settings for Google OAuth provider."""
+class GoogleDCRProviderSettings(BaseSettings):
+    """Settings for Google OAuth DCR provider."""
 
-    model_config = SettingsConfigDict(
-        env_prefix="FASTMCP_SERVER_AUTH_GOOGLE_",
+    model_config = ExtendedSettingsConfigDict(
+        env_prefix="FASTMCP_SERVER_AUTH_GOOGLE_DCR_",
+        env_prefixes=["FASTMCP_SERVER_AUTH_GOOGLE_DCR_", "FASTMCP_SERVER_AUTH_GOOGLE_"],
         env_file=ENV_FILE,
         extra="ignore",
     )
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls,
+        init_settings,
+        env_settings,
+        dotenv_settings,
+        file_secret_settings,
+    ):
+        return (
+            init_settings,
+            ExtendedEnvSettingsSource(settings_cls),
+            dotenv_settings,
+            file_secret_settings,
+        )
 
     client_id: str | None = None
     client_secret: SecretStr | None = None
@@ -182,8 +205,8 @@ class GoogleTokenVerifier(TokenVerifier):
             return None
 
 
-class GoogleProvider(OAuthDCRProxy):
-    """Complete Google OAuth provider for FastMCP.
+class GoogleDCRProvider(OAuthDCRProxy):
+    """Complete Google OAuth DCR provider for FastMCP.
 
     This provider makes it trivial to add Google OAuth protection to any
     FastMCP server. Just provide your Google OAuth app credentials and
@@ -198,9 +221,9 @@ class GoogleProvider(OAuthDCRProxy):
     Example:
         ```python
         from fastmcp import FastMCP
-        from fastmcp.server.auth.providers.google import GoogleProvider
+        from fastmcp.server.auth.providers.google import GoogleDCRProvider
 
-        auth = GoogleProvider(
+        auth = GoogleDCRProvider(
             client_id="123456789.apps.googleusercontent.com",
             client_secret="GOCSPX-abc123...",
             base_url="https://my-server.com"
@@ -242,7 +265,7 @@ class GoogleProvider(OAuthDCRProxy):
             client_storage: An AsyncKeyValue-compatible store for client registrations, registrations are stored in memory if not provided
         """
 
-        settings = GoogleProviderSettings.model_validate(
+        provider_settings = GoogleDCRProviderSettings.model_validate(
             {
                 k: v
                 for k, v in {
@@ -260,20 +283,22 @@ class GoogleProvider(OAuthDCRProxy):
         )
 
         # Validate required settings
-        if not settings.client_id:
+        if not provider_settings.client_id:
             raise ValueError(
-                "client_id is required - set via parameter or FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_ID"
+                "client_id is required - set via parameter or FASTMCP_SERVER_AUTH_GOOGLE_DCR_CLIENT_ID"
             )
-        if not settings.client_secret:
+        if not provider_settings.client_secret:
             raise ValueError(
-                "client_secret is required - set via parameter or FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_SECRET"
+                "client_secret is required - set via parameter or FASTMCP_SERVER_AUTH_GOOGLE_DCR_CLIENT_SECRET"
             )
 
         # Apply defaults
-        timeout_seconds_final = settings.timeout_seconds or 10
+        timeout_seconds_final = provider_settings.timeout_seconds or 10
         # Google requires at least one scope - openid is the minimal OIDC scope
-        required_scopes_final = settings.required_scopes or ["openid"]
-        allowed_client_redirect_uris_final = settings.allowed_client_redirect_uris
+        required_scopes_final = provider_settings.required_scopes or ["openid"]
+        allowed_client_redirect_uris_final = (
+            provider_settings.allowed_client_redirect_uris
+        )
 
         # Create Google token verifier
         token_verifier = GoogleTokenVerifier(
@@ -283,26 +308,45 @@ class GoogleProvider(OAuthDCRProxy):
 
         # Extract secret string from SecretStr
         client_secret_str = (
-            settings.client_secret.get_secret_value() if settings.client_secret else ""
+            provider_settings.client_secret.get_secret_value()
+            if provider_settings.client_secret
+            else ""
         )
 
         # Initialize OAuth proxy with Google endpoints
         super().__init__(
             upstream_authorization_endpoint="https://accounts.google.com/o/oauth2/v2/auth",
             upstream_token_endpoint="https://oauth2.googleapis.com/token",
-            upstream_client_id=settings.client_id,
+            upstream_client_id=provider_settings.client_id,
             upstream_client_secret=client_secret_str,
             token_verifier=token_verifier,
-            base_url=settings.base_url,
-            redirect_path=settings.redirect_path,
-            issuer_url=settings.issuer_url
-            or settings.base_url,  # Default to base_url if not specified
+            base_url=provider_settings.base_url,
+            redirect_path=provider_settings.redirect_path,
+            issuer_url=provider_settings.issuer_url
+            or provider_settings.base_url,  # Default to base_url if not specified
             allowed_client_redirect_uris=allowed_client_redirect_uris_final,
             client_storage=client_storage,
         )
 
         logger.info(
-            "Initialized Google OAuth provider for client %s with scopes: %s",
-            settings.client_id,
+            "Initialized Google OAuth DCR provider for client %s with scopes: %s",
+            provider_settings.client_id,
             required_scopes_final,
         )
+
+
+# Deprecated alias for backwards compatibility
+class GoogleProvider(GoogleDCRProvider):
+    """Deprecated: Use GoogleDCRProvider instead.
+
+    This alias is provided for backwards compatibility and will be removed in a future version.
+    """
+
+    def __init__(self, **kwargs):
+        if settings.deprecation_warnings:
+            warnings.warn(
+                "GoogleProvider is deprecated, use GoogleDCRProvider instead",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        super().__init__(**kwargs)

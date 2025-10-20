@@ -23,15 +23,22 @@ Example:
 
 from __future__ import annotations
 
+import warnings
+
 from key_value.aio.protocols import AsyncKeyValue
 from pydantic import AnyHttpUrl, SecretStr, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings
 
 from fastmcp.server.auth import TokenVerifier
 from fastmcp.server.auth.auth import AccessToken
 from fastmcp.server.auth.oidc_dcr_proxy import OIDCDCRProxy
 from fastmcp.server.auth.providers.jwt import JWTVerifier
-from fastmcp.settings import ENV_FILE
+from fastmcp.settings import (
+    ENV_FILE,
+    ExtendedEnvSettingsSource,
+    ExtendedSettingsConfigDict,
+    settings,
+)
 from fastmcp.utilities.auth import parse_scopes
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.types import NotSet, NotSetT
@@ -39,14 +46,34 @@ from fastmcp.utilities.types import NotSet, NotSetT
 logger = get_logger(__name__)
 
 
-class AWSCognitoProviderSettings(BaseSettings):
-    """Settings for AWS Cognito OAuth provider."""
+class AWSCognitoDCRProviderSettings(BaseSettings):
+    """Settings for AWS Cognito OAuth DCR provider."""
 
-    model_config = SettingsConfigDict(
-        env_prefix="FASTMCP_SERVER_AUTH_AWS_COGNITO_",
+    model_config = ExtendedSettingsConfigDict(
+        env_prefix="FASTMCP_SERVER_AUTH_AWS_COGNITO_DCR_",
+        env_prefixes=[
+            "FASTMCP_SERVER_AUTH_AWS_COGNITO_DCR_",
+            "FASTMCP_SERVER_AUTH_AWS_COGNITO_",
+        ],
         env_file=ENV_FILE,
         extra="ignore",
     )
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls,
+        init_settings,
+        env_settings,
+        dotenv_settings,
+        file_secret_settings,
+    ):
+        return (
+            init_settings,
+            ExtendedEnvSettingsSource(settings_cls),
+            dotenv_settings,
+            file_secret_settings,
+        )
 
     user_pool_id: str | None = None
     aws_region: str | None = None
@@ -91,8 +118,8 @@ class AWSCognitoTokenVerifier(JWTVerifier):
         )
 
 
-class AWSCognitoProvider(OIDCDCRProxy):
-    """Complete AWS Cognito OAuth provider for FastMCP.
+class AWSCognitoDCRProvider(OIDCDCRProxy):
+    """Complete AWS Cognito OAuth DCR provider for FastMCP.
 
     This provider makes it trivial to add AWS Cognito OAuth protection to any
     FastMCP server using OIDC Discovery. Just provide your Cognito User Pool details,
@@ -107,9 +134,9 @@ class AWSCognitoProvider(OIDCDCRProxy):
     Example:
         ```python
         from fastmcp import FastMCP
-        from fastmcp.server.auth.providers.aws_cognito import AWSCognitoProvider
+        from fastmcp.server.auth.providers.aws_cognito import AWSCognitoDCRProvider
 
-        auth = AWSCognitoProvider(
+        auth = AWSCognitoDCRProvider(
             user_pool_id="eu-central-1_XXXXXXXXX",
             aws_region="eu-central-1",
             client_id="your-cognito-client-id",
@@ -153,7 +180,7 @@ class AWSCognitoProvider(OIDCDCRProxy):
             client_storage: An AsyncKeyValue-compatible store for client registrations, registrations are stored in memory if not provided
         """
 
-        settings = AWSCognitoProviderSettings.model_validate(
+        provider_settings = AWSCognitoDCRProviderSettings.model_validate(
             {
                 k: v
                 for k, v in {
@@ -172,56 +199,77 @@ class AWSCognitoProvider(OIDCDCRProxy):
         )
 
         # Validate required settings
-        if not settings.user_pool_id:
+        if not provider_settings.user_pool_id:
             raise ValueError(
-                "user_pool_id is required - set via parameter or FASTMCP_SERVER_AUTH_AWS_COGNITO_USER_POOL_ID"
+                "user_pool_id is required - set via parameter or FASTMCP_SERVER_AUTH_AWS_COGNITO_DCR_USER_POOL_ID"
             )
-        if not settings.client_id:
+        if not provider_settings.client_id:
             raise ValueError(
-                "client_id is required - set via parameter or FASTMCP_SERVER_AUTH_AWS_COGNITO_CLIENT_ID"
+                "client_id is required - set via parameter or FASTMCP_SERVER_AUTH_AWS_COGNITO_DCR_CLIENT_ID"
             )
-        if not settings.client_secret:
+        if not provider_settings.client_secret:
             raise ValueError(
-                "client_secret is required - set via parameter or FASTMCP_SERVER_AUTH_AWS_COGNITO_CLIENT_SECRET"
+                "client_secret is required - set via parameter or FASTMCP_SERVER_AUTH_AWS_COGNITO_DCR_CLIENT_SECRET"
             )
 
         # Apply defaults
-        required_scopes_final = settings.required_scopes or ["openid"]
-        allowed_client_redirect_uris_final = settings.allowed_client_redirect_uris
-        aws_region_final = settings.aws_region or "eu-central-1"
-        redirect_path_final = settings.redirect_path or "/auth/callback"
+        required_scopes_final = provider_settings.required_scopes or ["openid"]
+        allowed_client_redirect_uris_final = (
+            provider_settings.allowed_client_redirect_uris
+        )
+        aws_region_final = provider_settings.aws_region or "eu-central-1"
+        redirect_path_final = provider_settings.redirect_path or "/auth/callback"
 
         # Construct OIDC discovery URL
-        config_url = f"https://cognito-idp.{aws_region_final}.amazonaws.com/{settings.user_pool_id}/.well-known/openid-configuration"
+        config_url = f"https://cognito-idp.{aws_region_final}.amazonaws.com/{provider_settings.user_pool_id}/.well-known/openid-configuration"
 
         # Extract secret string from SecretStr
         client_secret_str = (
-            settings.client_secret.get_secret_value() if settings.client_secret else ""
+            provider_settings.client_secret.get_secret_value()
+            if provider_settings.client_secret
+            else ""
         )
 
         # Store Cognito-specific info for claim filtering
-        self.user_pool_id = settings.user_pool_id
+        self.user_pool_id = provider_settings.user_pool_id
         self.aws_region = aws_region_final
 
         # Initialize OIDC proxy with Cognito discovery
         super().__init__(
             config_url=config_url,
-            client_id=settings.client_id,
+            client_id=provider_settings.client_id,
             client_secret=client_secret_str,
             algorithm="RS256",
             required_scopes=required_scopes_final,
-            base_url=settings.base_url,
-            issuer_url=settings.issuer_url,
+            base_url=provider_settings.base_url,
+            issuer_url=provider_settings.issuer_url,
             redirect_path=redirect_path_final,
             allowed_client_redirect_uris=allowed_client_redirect_uris_final,
             client_storage=client_storage,
         )
 
         logger.info(
-            "Initialized AWS Cognito OAuth provider for client %s with scopes: %s",
-            settings.client_id,
+            "Initialized AWS Cognito OAuth DCR provider for client %s with scopes: %s",
+            provider_settings.client_id,
             required_scopes_final,
         )
+
+
+# Deprecated alias for backwards compatibility
+class AWSCognitoProvider(AWSCognitoDCRProvider):
+    """Deprecated: Use AWSCognitoDCRProvider instead.
+
+    This alias is provided for backwards compatibility and will be removed in a future version.
+    """
+
+    def __init__(self, **kwargs):
+        if settings.deprecation_warnings:
+            warnings.warn(
+                "AWSCognitoProvider is deprecated, use AWSCognitoDCRProvider instead",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        super().__init__(**kwargs)
 
     def get_token_verifier(
         self,

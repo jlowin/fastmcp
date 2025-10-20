@@ -9,16 +9,16 @@ from mcp.server.auth.provider import AuthorizationParams
 from mcp.shared.auth import OAuthClientInformationFull
 from pydantic import AnyUrl
 
-from fastmcp.server.auth.providers.azure import AzureProvider
+from fastmcp.server.auth.providers.azure import AzureDCRProvider
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 
 
-class TestAzureProvider:
+class TestAzureDCRProvider:
     """Test Azure OAuth provider functionality."""
 
     def test_init_with_explicit_params(self):
-        """Test AzureProvider initialization with explicit parameters."""
-        provider = AzureProvider(
+        """Test AzureDCRProvider initialization with explicit parameters."""
+        provider = AzureDCRProvider(
             client_id="12345678-1234-1234-1234-123456789012",
             client_secret="azure_secret_123",
             tenant_id="87654321-4321-4321-4321-210987654321",
@@ -43,18 +43,18 @@ class TestAzureProvider:
         ],
     )
     def test_init_with_env_vars(self, scopes_env):
-        """Test AzureProvider initialization from environment variables."""
+        """Test AzureDCRProvider initialization from environment variables."""
         with patch.dict(
             os.environ,
             {
-                "FASTMCP_SERVER_AUTH_AZURE_CLIENT_ID": "env-client-id",
-                "FASTMCP_SERVER_AUTH_AZURE_CLIENT_SECRET": "env-secret",
-                "FASTMCP_SERVER_AUTH_AZURE_TENANT_ID": "env-tenant-id",
-                "FASTMCP_SERVER_AUTH_AZURE_BASE_URL": "https://envserver.com",
-                "FASTMCP_SERVER_AUTH_AZURE_REQUIRED_SCOPES": scopes_env,
+                "FASTMCP_SERVER_AUTH_AZURE_DCR_CLIENT_ID": "env-client-id",
+                "FASTMCP_SERVER_AUTH_AZURE_DCR_CLIENT_SECRET": "env-secret",
+                "FASTMCP_SERVER_AUTH_AZURE_DCR_TENANT_ID": "env-tenant-id",
+                "FASTMCP_SERVER_AUTH_AZURE_DCR_BASE_URL": "https://envserver.com",
+                "FASTMCP_SERVER_AUTH_AZURE_DCR_REQUIRED_SCOPES": scopes_env,
             },
         ):
-            provider = AzureProvider()
+            provider = AzureDCRProvider()
 
             assert provider._upstream_client_id == "env-client-id"
             assert provider._upstream_client_secret.get_secret_value() == "env-secret"
@@ -72,7 +72,7 @@ class TestAzureProvider:
     def test_init_missing_client_id_raises_error(self):
         """Test that missing client_id raises ValueError."""
         with pytest.raises(ValueError, match="client_id is required"):
-            AzureProvider(
+            AzureDCRProvider(
                 client_secret="test_secret",
                 tenant_id="test-tenant",
             )
@@ -80,7 +80,7 @@ class TestAzureProvider:
     def test_init_missing_client_secret_raises_error(self):
         """Test that missing client_secret raises ValueError."""
         with pytest.raises(ValueError, match="client_secret is required"):
-            AzureProvider(
+            AzureDCRProvider(
                 client_id="test_client",
                 tenant_id="test-tenant",
             )
@@ -88,14 +88,14 @@ class TestAzureProvider:
     def test_init_missing_tenant_id_raises_error(self):
         """Test that missing tenant_id raises ValueError."""
         with pytest.raises(ValueError, match="tenant_id is required"):
-            AzureProvider(
+            AzureDCRProvider(
                 client_id="test_client",
                 client_secret="test_secret",
             )
 
     def test_init_defaults(self):
         """Test that default values are applied correctly."""
-        provider = AzureProvider(
+        provider = AzureDCRProvider(
             client_id="test_client",
             client_secret="test_secret",
             tenant_id="test-tenant",
@@ -109,7 +109,7 @@ class TestAzureProvider:
 
     def test_oauth_endpoints_configured_correctly(self):
         """Test that OAuth endpoints are configured correctly."""
-        provider = AzureProvider(
+        provider = AzureDCRProvider(
             client_id="test_client",
             client_secret="test_secret",
             tenant_id="my-tenant-id",
@@ -133,7 +133,7 @@ class TestAzureProvider:
     def test_special_tenant_values(self):
         """Test that special tenant values are accepted."""
         # Test with "organizations"
-        provider1 = AzureProvider(
+        provider1 = AzureDCRProvider(
             client_id="test_client",
             client_secret="test_secret",
             tenant_id="organizations",
@@ -143,7 +143,7 @@ class TestAzureProvider:
         assert "/organizations/" in parsed.path
 
         # Test with "consumers"
-        provider2 = AzureProvider(
+        provider2 = AzureDCRProvider(
             client_id="test_client",
             client_secret="test_secret",
             tenant_id="consumers",
@@ -155,7 +155,7 @@ class TestAzureProvider:
     def test_azure_specific_scopes(self):
         """Test handling of Azure-specific scope formats."""
         # Just test that the provider accepts Azure-specific scopes without error
-        provider = AzureProvider(
+        provider = AzureDCRProvider(
             client_id="test_client",
             client_secret="test_secret",
             tenant_id="test-tenant",
@@ -173,7 +173,7 @@ class TestAzureProvider:
 
     def test_init_does_not_require_api_client_id_anymore(self):
         """API client ID is no longer required; audience is client_id."""
-        provider = AzureProvider(
+        provider = AzureDCRProvider(
             client_id="test_client",
             client_secret="test_secret",
             tenant_id="test-tenant",
@@ -183,7 +183,7 @@ class TestAzureProvider:
 
     def test_init_with_custom_audience_uses_jwt_verifier(self):
         """When audience is provided, JWTVerifier is configured with JWKS and issuer."""
-        provider = AzureProvider(
+        provider = AzureDCRProvider(
             client_id="test_client",
             client_secret="test_secret",
             tenant_id="my-tenant",
@@ -204,7 +204,7 @@ class TestAzureProvider:
     @pytest.mark.asyncio
     async def test_authorize_filters_resource_and_prefixes_scopes_with_audience(self):
         """authorize() should drop resource and prefix non-openid scopes with audience."""
-        provider = AzureProvider(
+        provider = AzureDCRProvider(
             client_id="test_client",
             client_secret="test_secret",
             tenant_id="common",
@@ -255,7 +255,7 @@ class TestAzureProvider:
     @pytest.mark.asyncio
     async def test_authorize_appends_unprefixed_additional_scopes(self):
         """authorize() should append additional_authorize_scopes without prefixing them."""
-        provider = AzureProvider(
+        provider = AzureDCRProvider(
             client_id="test_client",
             client_secret="test_secret",
             tenant_id="common",

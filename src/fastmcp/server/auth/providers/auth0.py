@@ -6,10 +6,10 @@ just the configuration URL, client ID, client secret, audience, and base URL.
 Example:
     ```python
     from fastmcp import FastMCP
-    from fastmcp.server.auth.providers.auth0 import Auth0Provider
+    from fastmcp.server.auth.providers.auth0 import Auth0DCRProvider
 
     # Simple Auth0 OAuth protection
-    auth = Auth0Provider(
+    auth = Auth0DCRProvider(
         config_url="https://auth0.config.url",
         client_id="your-auth0-client-id",
         client_secret="your-auth0-client-secret",
@@ -21,12 +21,19 @@ Example:
     ```
 """
 
+import warnings
+
 from key_value.aio.protocols import AsyncKeyValue
 from pydantic import AnyHttpUrl, SecretStr, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings
 
 from fastmcp.server.auth.oidc_dcr_proxy import OIDCDCRProxy
-from fastmcp.settings import ENV_FILE
+from fastmcp.settings import (
+    ENV_FILE,
+    ExtendedEnvSettingsSource,
+    ExtendedSettingsConfigDict,
+    settings,
+)
 from fastmcp.utilities.auth import parse_scopes
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.types import NotSet, NotSetT
@@ -34,14 +41,31 @@ from fastmcp.utilities.types import NotSet, NotSetT
 logger = get_logger(__name__)
 
 
-class Auth0ProviderSettings(BaseSettings):
-    """Settings for Auth0 OIDC provider."""
+class Auth0DCRProviderSettings(BaseSettings):
+    """Settings for Auth0 OIDC DCR provider."""
 
-    model_config = SettingsConfigDict(
-        env_prefix="FASTMCP_SERVER_AUTH_AUTH0_",
+    model_config = ExtendedSettingsConfigDict(
+        env_prefix="FASTMCP_SERVER_AUTH_AUTH0_DCR_",
+        env_prefixes=["FASTMCP_SERVER_AUTH_AUTH0_DCR_", "FASTMCP_SERVER_AUTH_AUTH0_"],
         env_file=ENV_FILE,
         extra="ignore",
     )
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls,
+        init_settings,
+        env_settings,
+        dotenv_settings,
+        file_secret_settings,
+    ):
+        return (
+            init_settings,
+            ExtendedEnvSettingsSource(settings_cls),
+            dotenv_settings,
+            file_secret_settings,
+        )
 
     config_url: AnyHttpUrl | None = None
     client_id: str | None = None
@@ -59,8 +83,8 @@ class Auth0ProviderSettings(BaseSettings):
         return parse_scopes(v)
 
 
-class Auth0Provider(OIDCDCRProxy):
-    """An Auth0 provider implementation for FastMCP.
+class Auth0DCRProvider(OIDCDCRProxy):
+    """An Auth0 DCR provider implementation for FastMCP.
 
     This provider is a complete Auth0 integration that's ready to use with
     just the configuration URL, client ID, client secret, audience, and base URL.
@@ -68,10 +92,10 @@ class Auth0Provider(OIDCDCRProxy):
     Example:
         ```python
         from fastmcp import FastMCP
-        from fastmcp.server.auth.providers.auth0 import Auth0Provider
+        from fastmcp.server.auth.providers.auth0 import Auth0DCRProvider
 
         # Simple Auth0 OAuth protection
-        auth = Auth0Provider(
+        auth = Auth0DCRProvider(
             config_url="https://auth0.config.url",
             client_id="your-auth0-client-id",
             client_secret="your-auth0-client-secret",
@@ -113,7 +137,7 @@ class Auth0Provider(OIDCDCRProxy):
                 If None (default), all URIs are allowed. If empty list, no URIs are allowed.
             client_storage: An AsyncKeyValue-compatible store for client registrations, registrations are stored in memory if not provided
         """
-        settings = Auth0ProviderSettings.model_validate(
+        provider_settings = Auth0DCRProviderSettings.model_validate(
             {
                 k: v
                 for k, v in {
@@ -131,50 +155,67 @@ class Auth0Provider(OIDCDCRProxy):
             }
         )
 
-        if not settings.config_url:
+        if not provider_settings.config_url:
             raise ValueError(
-                "config_url is required - set via parameter or FASTMCP_SERVER_AUTH_AUTH0_CONFIG_URL"
+                "config_url is required - set via parameter or FASTMCP_SERVER_AUTH_AUTH0_DCR_CONFIG_URL"
             )
 
-        if not settings.client_id:
+        if not provider_settings.client_id:
             raise ValueError(
-                "client_id is required - set via parameter or FASTMCP_SERVER_AUTH_AUTH0_CLIENT_ID"
+                "client_id is required - set via parameter or FASTMCP_SERVER_AUTH_AUTH0_DCR_CLIENT_ID"
             )
 
-        if not settings.client_secret:
+        if not provider_settings.client_secret:
             raise ValueError(
-                "client_secret is required - set via parameter or FASTMCP_SERVER_AUTH_AUTH0_CLIENT_SECRET"
+                "client_secret is required - set via parameter or FASTMCP_SERVER_AUTH_AUTH0_DCR_CLIENT_SECRET"
             )
 
-        if not settings.audience:
+        if not provider_settings.audience:
             raise ValueError(
-                "audience is required - set via parameter or FASTMCP_SERVER_AUTH_AUTH0_AUDIENCE"
+                "audience is required - set via parameter or FASTMCP_SERVER_AUTH_AUTH0_DCR_AUDIENCE"
             )
 
-        if not settings.base_url:
+        if not provider_settings.base_url:
             raise ValueError(
-                "base_url is required - set via parameter or FASTMCP_SERVER_AUTH_AUTH0_BASE_URL"
+                "base_url is required - set via parameter or FASTMCP_SERVER_AUTH_AUTH0_DCR_BASE_URL"
             )
 
-        auth0_required_scopes = settings.required_scopes or ["openid"]
+        auth0_required_scopes = provider_settings.required_scopes or ["openid"]
 
         init_kwargs = {
-            "config_url": settings.config_url,
-            "client_id": settings.client_id,
-            "client_secret": settings.client_secret.get_secret_value(),
-            "audience": settings.audience,
-            "base_url": settings.base_url,
-            "issuer_url": settings.issuer_url,
-            "redirect_path": settings.redirect_path,
+            "config_url": provider_settings.config_url,
+            "client_id": provider_settings.client_id,
+            "client_secret": provider_settings.client_secret.get_secret_value(),
+            "audience": provider_settings.audience,
+            "base_url": provider_settings.base_url,
+            "issuer_url": provider_settings.issuer_url,
+            "redirect_path": provider_settings.redirect_path,
             "required_scopes": auth0_required_scopes,
-            "allowed_client_redirect_uris": settings.allowed_client_redirect_uris,
+            "allowed_client_redirect_uris": provider_settings.allowed_client_redirect_uris,
             "client_storage": client_storage,
         }
 
         super().__init__(**init_kwargs)
 
         logger.info(
-            "Initialized Auth0 OAuth provider for client %s with scopes: %s",
-            settings.client_id,
+            "Initialized Auth0 OAuth DCR provider for client %s with scopes: %s",
+            provider_settings.client_id,
             auth0_required_scopes,
         )
+
+
+# Deprecated alias for backwards compatibility
+class Auth0Provider(Auth0DCRProvider):
+    """Deprecated: Use Auth0DCRProvider instead.
+
+    This alias is provided for backwards compatibility and will be removed in a future version.
+    """
+
+    def __init__(self, **kwargs):
+        if settings.deprecation_warnings:
+            warnings.warn(
+                "Auth0Provider is deprecated, use Auth0DCRProvider instead",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        super().__init__(**kwargs)

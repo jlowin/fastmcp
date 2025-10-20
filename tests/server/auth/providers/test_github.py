@@ -1,4 +1,4 @@
-"""Unit tests for GitHub OAuth provider."""
+"""Unit tests for GitHub OAuth DCR provider."""
 
 import os
 from unittest.mock import MagicMock, patch
@@ -6,28 +6,28 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from fastmcp.server.auth.providers.github import (
-    GitHubProvider,
-    GitHubProviderSettings,
+    GitHubDCRProvider,
+    GitHubDCRProviderSettings,
     GitHubTokenVerifier,
 )
 
 
-class TestGitHubProviderSettings:
-    """Test settings for GitHub OAuth provider."""
+class TestGitHubDCRProviderSettings:
+    """Test settings for GitHub OAuth DCR provider."""
 
     def test_settings_from_env_vars(self):
         """Test that settings can be loaded from environment variables."""
         with patch.dict(
             os.environ,
             {
-                "FASTMCP_SERVER_AUTH_GITHUB_CLIENT_ID": "env_client_id",
-                "FASTMCP_SERVER_AUTH_GITHUB_CLIENT_SECRET": "env_secret",
-                "FASTMCP_SERVER_AUTH_GITHUB_BASE_URL": "https://example.com",
-                "FASTMCP_SERVER_AUTH_GITHUB_REDIRECT_PATH": "/custom/callback",
-                "FASTMCP_SERVER_AUTH_GITHUB_TIMEOUT_SECONDS": "30",
+                "FASTMCP_SERVER_AUTH_GITHUB_DCR_CLIENT_ID": "env_client_id",
+                "FASTMCP_SERVER_AUTH_GITHUB_DCR_CLIENT_SECRET": "env_secret",
+                "FASTMCP_SERVER_AUTH_GITHUB_DCR_BASE_URL": "https://example.com",
+                "FASTMCP_SERVER_AUTH_GITHUB_DCR_REDIRECT_PATH": "/custom/callback",
+                "FASTMCP_SERVER_AUTH_GITHUB_DCR_TIMEOUT_SECONDS": "30",
             },
         ):
-            settings = GitHubProviderSettings()
+            settings = GitHubDCRProviderSettings()
 
             assert settings.client_id == "env_client_id"
             assert (
@@ -43,11 +43,11 @@ class TestGitHubProviderSettings:
         with patch.dict(
             os.environ,
             {
-                "FASTMCP_SERVER_AUTH_GITHUB_CLIENT_ID": "env_client_id",
-                "FASTMCP_SERVER_AUTH_GITHUB_CLIENT_SECRET": "env_secret",
+                "FASTMCP_SERVER_AUTH_GITHUB_DCR_CLIENT_ID": "env_client_id",
+                "FASTMCP_SERVER_AUTH_GITHUB_DCR_CLIENT_SECRET": "env_secret",
             },
         ):
-            settings = GitHubProviderSettings.model_validate(
+            settings = GitHubDCRProviderSettings.model_validate(
                 {
                     "client_id": "explicit_client_id",
                     "client_secret": "explicit_secret",
@@ -61,12 +61,12 @@ class TestGitHubProviderSettings:
             )
 
 
-class TestGitHubProvider:
-    """Test GitHubProvider initialization."""
+class TestGitHubDCRProvider:
+    """Test GitHubDCRProvider initialization."""
 
     def test_init_with_explicit_params(self):
         """Test initialization with explicit parameters."""
-        provider = GitHubProvider(
+        provider = GitHubDCRProvider(
             client_id="test_client",
             client_secret="test_secret",
             base_url="https://example.com",
@@ -95,13 +95,13 @@ class TestGitHubProvider:
         with patch.dict(
             os.environ,
             {
-                "FASTMCP_SERVER_AUTH_GITHUB_CLIENT_ID": "env_client_id",
-                "FASTMCP_SERVER_AUTH_GITHUB_CLIENT_SECRET": "env_secret",
-                "FASTMCP_SERVER_AUTH_GITHUB_BASE_URL": "https://env-example.com",
-                "FASTMCP_SERVER_AUTH_GITHUB_REQUIRED_SCOPES": scopes_env,
+                "FASTMCP_SERVER_AUTH_GITHUB_DCR_CLIENT_ID": "env_client_id",
+                "FASTMCP_SERVER_AUTH_GITHUB_DCR_CLIENT_SECRET": "env_secret",
+                "FASTMCP_SERVER_AUTH_GITHUB_DCR_BASE_URL": "https://env-example.com",
+                "FASTMCP_SERVER_AUTH_GITHUB_DCR_REQUIRED_SCOPES": scopes_env,
             },
         ):
-            provider = GitHubProvider()
+            provider = GitHubDCRProvider()
 
             assert provider._upstream_client_id == "env_client_id"
             assert provider._upstream_client_secret.get_secret_value() == "env_secret"
@@ -113,11 +113,11 @@ class TestGitHubProvider:
         with patch.dict(
             os.environ,
             {
-                "FASTMCP_SERVER_AUTH_GITHUB_CLIENT_ID": "env_client_id",
-                "FASTMCP_SERVER_AUTH_GITHUB_CLIENT_SECRET": "env_secret",
+                "FASTMCP_SERVER_AUTH_GITHUB_DCR_CLIENT_ID": "env_client_id",
+                "FASTMCP_SERVER_AUTH_GITHUB_DCR_CLIENT_SECRET": "env_secret",
             },
         ):
-            provider = GitHubProvider(
+            provider = GitHubDCRProvider(
                 client_id="explicit_client",
                 client_secret="explicit_secret",
             )
@@ -132,18 +132,18 @@ class TestGitHubProvider:
         # Clear environment variables to test proper error handling
         with patch.dict(os.environ, {}, clear=True):
             with pytest.raises(ValueError, match="client_id is required"):
-                GitHubProvider(client_secret="test_secret")
+                GitHubDCRProvider(client_secret="test_secret")
 
     def test_init_missing_client_secret_raises_error(self):
         """Test that missing client_secret raises ValueError."""
         # Clear environment variables to test proper error handling
         with patch.dict(os.environ, {}, clear=True):
             with pytest.raises(ValueError, match="client_secret is required"):
-                GitHubProvider(client_id="test_client")
+                GitHubDCRProvider(client_id="test_client")
 
     def test_init_defaults(self):
         """Test that default values are applied correctly."""
-        provider = GitHubProvider(
+        provider = GitHubDCRProvider(
             client_id="test_client",
             client_secret="test_secret",
         )

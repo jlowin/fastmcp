@@ -9,16 +9,16 @@ import pytest
 
 from fastmcp import Client, FastMCP
 from fastmcp.client.transports import StreamableHttpTransport
-from fastmcp.server.auth.providers.workos import AuthKitProvider, WorkOSProvider
+from fastmcp.server.auth.providers.workos import AuthKitProvider, WorkOSDCRProvider
 from fastmcp.utilities.tests import HeadlessOAuth, run_server_async
 
 
-class TestWorkOSProvider:
+class TestWorkOSDCRProvider:
     """Test WorkOS OAuth provider functionality."""
 
     def test_init_with_explicit_params(self):
-        """Test WorkOSProvider initialization with explicit parameters."""
-        provider = WorkOSProvider(
+        """Test WorkOSDCRProvider initialization with explicit parameters."""
+        provider = WorkOSDCRProvider(
             client_id="client_test123",
             client_secret="secret_test456",
             authkit_domain="https://test.authkit.app",
@@ -38,18 +38,18 @@ class TestWorkOSProvider:
         ],
     )
     def test_init_with_env_vars(self, scopes_env):
-        """Test WorkOSProvider initialization from environment variables."""
+        """Test WorkOSDCRProvider initialization from environment variables."""
         with patch.dict(
             os.environ,
             {
-                "FASTMCP_SERVER_AUTH_WORKOS_CLIENT_ID": "env_client",
-                "FASTMCP_SERVER_AUTH_WORKOS_CLIENT_SECRET": "env_secret",
-                "FASTMCP_SERVER_AUTH_WORKOS_AUTHKIT_DOMAIN": "https://env.authkit.app",
-                "FASTMCP_SERVER_AUTH_WORKOS_BASE_URL": "https://envserver.com",
-                "FASTMCP_SERVER_AUTH_WORKOS_REQUIRED_SCOPES": scopes_env,
+                "FASTMCP_SERVER_AUTH_WORKOS_DCR_CLIENT_ID": "env_client",
+                "FASTMCP_SERVER_AUTH_WORKOS_DCR_CLIENT_SECRET": "env_secret",
+                "FASTMCP_SERVER_AUTH_WORKOS_DCR_AUTHKIT_DOMAIN": "https://env.authkit.app",
+                "FASTMCP_SERVER_AUTH_WORKOS_DCR_BASE_URL": "https://envserver.com",
+                "FASTMCP_SERVER_AUTH_WORKOS_DCR_REQUIRED_SCOPES": scopes_env,
             },
         ):
-            provider = WorkOSProvider()
+            provider = WorkOSDCRProvider()
 
             assert provider._upstream_client_id == "env_client"
             assert provider._upstream_client_secret.get_secret_value() == "env_secret"
@@ -62,7 +62,7 @@ class TestWorkOSProvider:
     def test_init_missing_client_id_raises_error(self):
         """Test that missing client_id raises ValueError."""
         with pytest.raises(ValueError, match="client_id is required"):
-            WorkOSProvider(
+            WorkOSDCRProvider(
                 client_secret="test_secret",
                 authkit_domain="https://test.authkit.app",
             )
@@ -70,7 +70,7 @@ class TestWorkOSProvider:
     def test_init_missing_client_secret_raises_error(self):
         """Test that missing client_secret raises ValueError."""
         with pytest.raises(ValueError, match="client_secret is required"):
-            WorkOSProvider(
+            WorkOSDCRProvider(
                 client_id="test_client",
                 authkit_domain="https://test.authkit.app",
             )
@@ -78,7 +78,7 @@ class TestWorkOSProvider:
     def test_init_missing_authkit_domain_raises_error(self):
         """Test that missing authkit_domain raises ValueError."""
         with pytest.raises(ValueError, match="authkit_domain is required"):
-            WorkOSProvider(
+            WorkOSDCRProvider(
                 client_id="test_client",
                 client_secret="test_secret",
             )
@@ -86,7 +86,7 @@ class TestWorkOSProvider:
     def test_authkit_domain_https_prefix_handling(self):
         """Test that authkit_domain handles missing https:// prefix."""
         # Without https:// - should add it
-        provider1 = WorkOSProvider(
+        provider1 = WorkOSDCRProvider(
             client_id="test_client",
             client_secret="test_secret",
             authkit_domain="test.authkit.app",
@@ -98,7 +98,7 @@ class TestWorkOSProvider:
         assert parsed.path == "/oauth2/authorize"
 
         # With https:// - should keep it
-        provider2 = WorkOSProvider(
+        provider2 = WorkOSDCRProvider(
             client_id="test_client",
             client_secret="test_secret",
             authkit_domain="https://test.authkit.app",
@@ -110,7 +110,7 @@ class TestWorkOSProvider:
         assert parsed.path == "/oauth2/authorize"
 
         # With http:// - should be preserved
-        provider3 = WorkOSProvider(
+        provider3 = WorkOSDCRProvider(
             client_id="test_client",
             client_secret="test_secret",
             authkit_domain="http://localhost:8080",
@@ -123,7 +123,7 @@ class TestWorkOSProvider:
 
     def test_init_defaults(self):
         """Test that default values are applied correctly."""
-        provider = WorkOSProvider(
+        provider = WorkOSDCRProvider(
             client_id="test_client",
             client_secret="test_secret",
             authkit_domain="https://test.authkit.app",
@@ -136,7 +136,7 @@ class TestWorkOSProvider:
 
     def test_oauth_endpoints_configured_correctly(self):
         """Test that OAuth endpoints are configured correctly."""
-        provider = WorkOSProvider(
+        provider = WorkOSDCRProvider(
             client_id="test_client",
             client_secret="test_secret",
             authkit_domain="https://test.authkit.app",

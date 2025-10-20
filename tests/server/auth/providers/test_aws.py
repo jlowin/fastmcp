@@ -7,8 +7,8 @@ from unittest.mock import patch
 import pytest
 
 from fastmcp.server.auth.providers.aws import (
-    AWSCognitoProvider,
-    AWSCognitoProviderSettings,
+    AWSCognitoDCRProvider,
+    AWSCognitoDCRProviderSettings,
 )
 
 
@@ -38,7 +38,7 @@ def mock_cognito_oidc_discovery():
         yield
 
 
-class TestAWSCognitoProviderSettings:
+class TestAWSCognitoDCRProviderSettings:
     """Test settings for AWS Cognito OAuth provider."""
 
     def test_settings_from_env_vars(self):
@@ -46,15 +46,15 @@ class TestAWSCognitoProviderSettings:
         with patch.dict(
             os.environ,
             {
-                "FASTMCP_SERVER_AUTH_AWS_COGNITO_USER_POOL_ID": "us-east-1_XXXXXXXXX",
-                "FASTMCP_SERVER_AUTH_AWS_COGNITO_AWS_REGION": "us-east-1",
-                "FASTMCP_SERVER_AUTH_AWS_COGNITO_CLIENT_ID": "env_client_id",
-                "FASTMCP_SERVER_AUTH_AWS_COGNITO_CLIENT_SECRET": "env_secret",
-                "FASTMCP_SERVER_AUTH_AWS_COGNITO_BASE_URL": "https://example.com",
-                "FASTMCP_SERVER_AUTH_AWS_COGNITO_REDIRECT_PATH": "/custom/callback",
+                "FASTMCP_SERVER_AUTH_AWS_COGNITO_DCR_USER_POOL_ID": "us-east-1_XXXXXXXXX",
+                "FASTMCP_SERVER_AUTH_AWS_COGNITO_DCR_AWS_REGION": "us-east-1",
+                "FASTMCP_SERVER_AUTH_AWS_COGNITO_DCR_CLIENT_ID": "env_client_id",
+                "FASTMCP_SERVER_AUTH_AWS_COGNITO_DCR_CLIENT_SECRET": "env_secret",
+                "FASTMCP_SERVER_AUTH_AWS_COGNITO_DCR_BASE_URL": "https://example.com",
+                "FASTMCP_SERVER_AUTH_AWS_COGNITO_DCR_REDIRECT_PATH": "/custom/callback",
             },
         ):
-            settings = AWSCognitoProviderSettings()
+            settings = AWSCognitoDCRProviderSettings()
 
             assert settings.user_pool_id == "us-east-1_XXXXXXXXX"
             assert settings.aws_region == "us-east-1"
@@ -71,12 +71,12 @@ class TestAWSCognitoProviderSettings:
         with patch.dict(
             os.environ,
             {
-                "FASTMCP_SERVER_AUTH_AWS_COGNITO_USER_POOL_ID": "env_pool_id",
-                "FASTMCP_SERVER_AUTH_AWS_COGNITO_CLIENT_ID": "env_client_id",
-                "FASTMCP_SERVER_AUTH_AWS_COGNITO_CLIENT_SECRET": "env_secret",
+                "FASTMCP_SERVER_AUTH_AWS_COGNITO_DCR_USER_POOL_ID": "env_pool_id",
+                "FASTMCP_SERVER_AUTH_AWS_COGNITO_DCR_CLIENT_ID": "env_client_id",
+                "FASTMCP_SERVER_AUTH_AWS_COGNITO_DCR_CLIENT_SECRET": "env_secret",
             },
         ):
-            settings = AWSCognitoProviderSettings.model_validate(
+            settings = AWSCognitoDCRProviderSettings.model_validate(
                 {
                     "user_pool_id": "explicit_pool_id",
                     "client_id": "explicit_client_id",
@@ -92,13 +92,13 @@ class TestAWSCognitoProviderSettings:
             )
 
 
-class TestAWSCognitoProvider:
-    """Test AWSCognitoProvider initialization."""
+class TestAWSCognitoDCRProvider:
+    """Test AWSCognitoDCRProvider initialization."""
 
     def test_init_with_explicit_params(self):
         """Test initialization with explicit parameters."""
         with mock_cognito_oidc_discovery():
-            provider = AWSCognitoProvider(
+            provider = AWSCognitoDCRProvider(
                 user_pool_id="us-east-1_XXXXXXXXX",
                 aws_region="us-east-1",
                 client_id="test_client",
@@ -137,16 +137,16 @@ class TestAWSCognitoProvider:
         with patch.dict(
             os.environ,
             {
-                "FASTMCP_SERVER_AUTH_AWS_COGNITO_USER_POOL_ID": "us-east-1_XXXXXXXXX",
-                "FASTMCP_SERVER_AUTH_AWS_COGNITO_AWS_REGION": "us-east-1",
-                "FASTMCP_SERVER_AUTH_AWS_COGNITO_CLIENT_ID": "env_client_id",
-                "FASTMCP_SERVER_AUTH_AWS_COGNITO_CLIENT_SECRET": "env_secret",
-                "FASTMCP_SERVER_AUTH_AWS_COGNITO_BASE_URL": "https://env-example.com",
-                "FASTMCP_SERVER_AUTH_AWS_COGNITO_REQUIRED_SCOPES": scopes_env,
+                "FASTMCP_SERVER_AUTH_AWS_COGNITO_DCR_USER_POOL_ID": "us-east-1_XXXXXXXXX",
+                "FASTMCP_SERVER_AUTH_AWS_COGNITO_DCR_AWS_REGION": "us-east-1",
+                "FASTMCP_SERVER_AUTH_AWS_COGNITO_DCR_CLIENT_ID": "env_client_id",
+                "FASTMCP_SERVER_AUTH_AWS_COGNITO_DCR_CLIENT_SECRET": "env_secret",
+                "FASTMCP_SERVER_AUTH_AWS_COGNITO_DCR_BASE_URL": "https://env-example.com",
+                "FASTMCP_SERVER_AUTH_AWS_COGNITO_DCR_REQUIRED_SCOPES": scopes_env,
             },
         ):
             with mock_cognito_oidc_discovery():
-                provider = AWSCognitoProvider()
+                provider = AWSCognitoDCRProvider()
 
                 assert provider._upstream_client_id == "env_client_id"
                 assert (
@@ -160,13 +160,13 @@ class TestAWSCognitoProvider:
         with patch.dict(
             os.environ,
             {
-                "FASTMCP_SERVER_AUTH_AWS_COGNITO_USER_POOL_ID": "env_pool_id",
-                "FASTMCP_SERVER_AUTH_AWS_COGNITO_CLIENT_ID": "env_client_id",
-                "FASTMCP_SERVER_AUTH_AWS_COGNITO_CLIENT_SECRET": "env_secret",
+                "FASTMCP_SERVER_AUTH_AWS_COGNITO_DCR_USER_POOL_ID": "env_pool_id",
+                "FASTMCP_SERVER_AUTH_AWS_COGNITO_DCR_CLIENT_ID": "env_client_id",
+                "FASTMCP_SERVER_AUTH_AWS_COGNITO_DCR_CLIENT_SECRET": "env_secret",
             },
         ):
             with mock_cognito_oidc_discovery():
-                provider = AWSCognitoProvider(
+                provider = AWSCognitoDCRProvider(
                     user_pool_id="explicit_pool_id",
                     client_id="explicit_client",
                     client_secret="explicit_secret",
@@ -185,7 +185,7 @@ class TestAWSCognitoProvider:
         """Test that missing user_pool_id raises ValueError."""
         with patch.dict(os.environ, {}, clear=True):
             with pytest.raises(ValueError, match="user_pool_id is required"):
-                AWSCognitoProvider(
+                AWSCognitoDCRProvider(
                     client_id="test_client",
                     client_secret="test_secret",
                 )
@@ -194,7 +194,7 @@ class TestAWSCognitoProvider:
         """Test that missing client_id raises ValueError."""
         with patch.dict(os.environ, {}, clear=True):
             with pytest.raises(ValueError, match="client_id is required"):
-                AWSCognitoProvider(
+                AWSCognitoDCRProvider(
                     user_pool_id="us-east-1_XXXXXXXXX",
                     client_secret="test_secret",
                 )
@@ -203,7 +203,7 @@ class TestAWSCognitoProvider:
         """Test that missing client_secret raises ValueError."""
         with patch.dict(os.environ, {}, clear=True):
             with pytest.raises(ValueError, match="client_secret is required"):
-                AWSCognitoProvider(
+                AWSCognitoDCRProvider(
                     user_pool_id="us-east-1_XXXXXXXXX",
                     client_id="test_client",
                 )
@@ -211,7 +211,7 @@ class TestAWSCognitoProvider:
     def test_init_defaults(self):
         """Test that default values are applied correctly."""
         with mock_cognito_oidc_discovery():
-            provider = AWSCognitoProvider(
+            provider = AWSCognitoDCRProvider(
                 user_pool_id="us-east-1_XXXXXXXXX",
                 client_id="test_client",
                 client_secret="test_secret",
@@ -227,7 +227,7 @@ class TestAWSCognitoProvider:
     def test_oidc_discovery_integration(self):
         """Test that OIDC discovery endpoints are used correctly."""
         with mock_cognito_oidc_discovery():
-            provider = AWSCognitoProvider(
+            provider = AWSCognitoDCRProvider(
                 user_pool_id="us-west-2_YYYYYYYY",
                 aws_region="us-west-2",
                 client_id="test_client",
