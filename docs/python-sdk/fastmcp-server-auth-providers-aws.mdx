@@ -31,13 +31,21 @@ Example:
 
 ## Classes
 
-### `AWSCognitoProviderSettings` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/auth/providers/aws.py#L42" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+### `AWSCognitoDCRProviderSettings` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/auth/providers/aws.py#L49" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 
-Settings for AWS Cognito OAuth provider.
+Settings for AWS Cognito OAuth DCR provider.
 
 
-### `AWSCognitoTokenVerifier` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/auth/providers/aws.py#L67" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+**Methods:**
+
+#### `settings_customise_sources` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/auth/providers/aws.py#L63" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+settings_customise_sources(cls, settings_cls, init_settings, env_settings, dotenv_settings, file_secret_settings)
+```
+
+### `AWSCognitoTokenVerifier` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/auth/providers/aws.py#L94" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 
 Token verifier that filters claims to Cognito-specific subset.
@@ -45,7 +53,7 @@ Token verifier that filters claims to Cognito-specific subset.
 
 **Methods:**
 
-#### `verify_token` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/auth/providers/aws.py#L70" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+#### `verify_token` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/auth/providers/aws.py#L97" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 ```python
 verify_token(self, token: str) -> AccessToken | None
@@ -54,10 +62,10 @@ verify_token(self, token: str) -> AccessToken | None
 Verify token and filter claims to Cognito-specific subset.
 
 
-### `AWSCognitoProvider` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/auth/providers/aws.py#L94" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+### `AWSCognitoDCRProvider` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/auth/providers/aws.py#L121" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 
-Complete AWS Cognito OAuth provider for FastMCP.
+Complete AWS Cognito OAuth DCR provider for FastMCP.
 
 This provider makes it trivial to add AWS Cognito OAuth protection to any
 FastMCP server using OIDC Discovery. Just provide your Cognito User Pool details,
@@ -70,9 +78,17 @@ Features:
 - Support for Cognito User Pools
 
 
+### `AWSCognitoProvider` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/auth/providers/aws.py#L259" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+
+Deprecated: Use AWSCognitoDCRProvider instead.
+
+This alias is provided for backwards compatibility and will be removed in a future version.
+
+
 **Methods:**
 
-#### `get_token_verifier` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/auth/providers/aws.py#L226" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+#### `get_token_verifier` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/auth/providers/aws.py#L274" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 ```python
 get_token_verifier(self) -> TokenVerifier

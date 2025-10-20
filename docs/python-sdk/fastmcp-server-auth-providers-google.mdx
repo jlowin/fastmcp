@@ -15,10 +15,10 @@ Google's OAuth flow, token validation, and user management.
 Example:
     ```python
     from fastmcp import FastMCP
-    from fastmcp.server.auth.providers.google import GoogleProvider
+    from fastmcp.server.auth.providers.google import GoogleDCRProvider
 
     # Simple Google OAuth protection
-    auth = GoogleProvider(
+    auth = GoogleDCRProvider(
         client_id="your-google-client-id.apps.googleusercontent.com",
         client_secret="your-google-client-secret"
     )
@@ -29,13 +29,21 @@ Example:
 
 ## Classes
 
-### `GoogleProviderSettings` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/auth/providers/google.py#L42" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+### `GoogleDCRProviderSettings` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/auth/providers/google.py#L48" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 
-Settings for Google OAuth provider.
+Settings for Google OAuth DCR provider.
 
 
-### `GoogleTokenVerifier` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/auth/providers/google.py#L66" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+**Methods:**
+
+#### `settings_customise_sources` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/auth/providers/google.py#L59" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+settings_customise_sources(cls, settings_cls, init_settings, env_settings, dotenv_settings, file_secret_settings)
+```
+
+### `GoogleTokenVerifier` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/auth/providers/google.py#L89" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 
 Token verifier for Google OAuth tokens.
@@ -46,7 +54,7 @@ by calling Google's tokeninfo API to check if they're valid and get user info.
 
 **Methods:**
 
-#### `verify_token` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/auth/providers/google.py#L88" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+#### `verify_token` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/auth/providers/google.py#L111" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 ```python
 verify_token(self, token: str) -> AccessToken | None
@@ -55,10 +63,10 @@ verify_token(self, token: str) -> AccessToken | None
 Verify Google OAuth token by calling Google's tokeninfo API.
 
 
-### `GoogleProvider` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/auth/providers/google.py#L185" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+### `GoogleDCRProvider` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/auth/providers/google.py#L208" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 
-Complete Google OAuth provider for FastMCP.
+Complete Google OAuth DCR provider for FastMCP.
 
 This provider makes it trivial to add Google OAuth protection to any
 FastMCP server. Just provide your Google OAuth app credentials and
@@ -69,4 +77,12 @@ Features:
 - Automatic token validation via Google's tokeninfo API
 - User information extraction from Google APIs
 - Minimal configuration required
+
+
+### `GoogleProvider` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/auth/providers/google.py#L339" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+
+Deprecated: Use GoogleDCRProvider instead.
+
+This alias is provided for backwards compatibility and will be removed in a future version.
 

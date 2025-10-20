@@ -19,12 +19,11 @@
     "light": "#4cc9f0",
     "primary": "#2d00f7"
   },
-  "fonts": {
-    "heading": { "family": "Google Sans" },
-    "body": { "family": "BlinkMacSystemFont" }
-  },
   "contextual": {
-    "options": ["copy", "view"]
+    "options": [
+      "copy",
+      "view"
+    ]
   },
   "description": "The fast, Pythonic way to build MCP servers and clients.",
   "errors": {
@@ -37,6 +36,14 @@
   "favicon": {
     "dark": "/assets/brand/favicon.svg",
     "light": "/assets/brand/favicon.svg"
+  },
+  "fonts": {
+    "body": {
+      "family": "BlinkMacSystemFont"
+    },
+    "heading": {
+      "family": "Google Sans"
+    }
   },
   "footer": {
     "socials": {
@@ -150,7 +157,10 @@
               {
                 "group": "Essentials",
                 "icon": "cube",
-                "pages": ["clients/client", "clients/transports"]
+                "pages": [
+                  "clients/client",
+                  "clients/transports"
+                ]
               },
               {
                 "group": "Core Operations",
@@ -176,7 +186,10 @@
               {
                 "group": "Authentication",
                 "icon": "user-shield",
-                "pages": ["clients/auth/oauth", "clients/auth/bearer"]
+                "pages": [
+                  "clients/auth/oauth",
+                  "clients/auth/bearer"
+                ]
               }
             ]
           },
@@ -230,7 +243,10 @@
               {
                 "group": "API Integration",
                 "icon": "globe",
-                "pages": ["integrations/fastapi", "integrations/openapi"]
+                "pages": [
+                  "integrations/fastapi",
+                  "integrations/openapi"
+                ]
               }
             ]
           },
@@ -336,7 +352,9 @@
                       "python-sdk/fastmcp-server-auth-__init__",
                       "python-sdk/fastmcp-server-auth-auth",
                       "python-sdk/fastmcp-server-auth-jwt_issuer",
+                      "python-sdk/fastmcp-server-auth-oauth_dcr_proxy",
                       "python-sdk/fastmcp-server-auth-oauth_proxy",
+                      "python-sdk/fastmcp-server-auth-oidc_dcr_proxy",
                       "python-sdk/fastmcp-server-auth-oidc_proxy",
                       {
                         "group": "providers",
@@ -461,17 +479,17 @@
   "search": {
     "prompt": "Search the docs..."
   },
+  "styling": {
+    "codeblocks": {
+      "theme": {
+        "dark": "dark-plus",
+        "light": "snazzy-light"
+      }
+    }
+  },
   "theme": "almond",
   "thumbnails": {
     "appearance": "light",
     "background": "/assets/brand/thumbnail-background.png"
-  },
-  "styling": {
-    "codeblocks": {
-      "theme": {
-        "light": "snazzy-light",
-        "dark": "dark-plus"
-      }
-    }
   }
 }

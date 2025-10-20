@@ -14,10 +14,10 @@ just the configuration URL, client ID, client secret, audience, and base URL.
 Example:
     ```python
     from fastmcp import FastMCP
-    from fastmcp.server.auth.providers.auth0 import Auth0Provider
+    from fastmcp.server.auth.providers.auth0 import Auth0DCRProvider
 
     # Simple Auth0 OAuth protection
-    auth = Auth0Provider(
+    auth = Auth0DCRProvider(
         config_url="https://auth0.config.url",
         client_id="your-auth0-client-id",
         client_secret="your-auth0-client-secret",
@@ -31,17 +31,33 @@ Example:
 
 ## Classes
 
-### `Auth0ProviderSettings` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/auth/providers/auth0.py#L37" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+### `Auth0DCRProviderSettings` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/auth/providers/auth0.py#L44" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 
-Settings for Auth0 OIDC provider.
+Settings for Auth0 OIDC DCR provider.
 
 
-### `Auth0Provider` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/auth/providers/auth0.py#L62" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+**Methods:**
+
+#### `settings_customise_sources` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/auth/providers/auth0.py#L55" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+settings_customise_sources(cls, settings_cls, init_settings, env_settings, dotenv_settings, file_secret_settings)
+```
+
+### `Auth0DCRProvider` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/auth/providers/auth0.py#L86" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 
-An Auth0 provider implementation for FastMCP.
+An Auth0 DCR provider implementation for FastMCP.
 
 This provider is a complete Auth0 integration that's ready to use with
 just the configuration URL, client ID, client secret, audience, and base URL.
+
+
+### `Auth0Provider` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/auth/providers/auth0.py#L208" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+
+Deprecated: Use Auth0DCRProvider instead.
+
+This alias is provided for backwards compatibility and will be removed in a future version.
 
