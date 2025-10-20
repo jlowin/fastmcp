@@ -1,4 +1,4 @@
-"""Tests for OpenAI widget decorator."""
+"""Tests for OpenAI widget decorator (basic usage)."""
 
 from fastmcp import FastMCP
 
@@ -7,7 +7,11 @@ async def test_widget_decorator_basic():
     """Test basic widget decorator usage."""
     app = FastMCP("test")
 
-    @app.ui.openai.widget
+    @app.ui.openai.widget(
+        identifier="my_widget",
+        template_uri="ui://widget/test.html",
+        html="<div>Test Widget</div>",
+    )
     def my_widget(x: int) -> str:
         return f"Result: {x}"
 
@@ -18,10 +22,14 @@ async def test_widget_decorator_basic():
 
 
 async def test_widget_decorator_with_name():
-    """Test widget decorator with custom name."""
+    """Test widget decorator with custom identifier."""
     app = FastMCP("test")
 
-    @app.ui.openai.widget("custom_widget")
+    @app.ui.openai.widget(
+        identifier="custom_widget",
+        template_uri="ui://widget/custom.html",
+        html="<div>Custom</div>",
+    )
     def my_function(x: int) -> str:
         return f"Result: {x}"
 
@@ -30,24 +38,16 @@ async def test_widget_decorator_with_name():
     assert tools["custom_widget"].name == "custom_widget"
 
 
-async def test_widget_decorator_with_name_kwarg():
-    """Test widget decorator with name as keyword argument."""
-    app = FastMCP("test")
-
-    @app.ui.openai.widget(name="named_widget")
-    def my_function(x: int) -> str:
-        return f"Result: {x}"
-
-    tools = await app.get_tools()
-    assert "named_widget" in tools
-    assert tools["named_widget"].name == "named_widget"
-
-
 async def test_widget_decorator_with_description():
     """Test widget decorator with description."""
     app = FastMCP("test")
 
-    @app.ui.openai.widget(description="This is a test widget")
+    @app.ui.openai.widget(
+        identifier="my_widget",
+        template_uri="ui://widget/test.html",
+        html="<div>Test</div>",
+        description="This is a test widget",
+    )
     def my_widget(x: int) -> str:
         return f"Result: {x}"
 
@@ -60,7 +60,12 @@ async def test_widget_decorator_with_title():
     """Test widget decorator with title."""
     app = FastMCP("test")
 
-    @app.ui.openai.widget(title="My Widget Title")
+    @app.ui.openai.widget(
+        identifier="my_widget",
+        template_uri="ui://widget/test.html",
+        html="<div>Test</div>",
+        title="My Widget Title",
+    )
     def my_widget(x: int) -> str:
         return f"Result: {x}"
 
@@ -73,10 +78,16 @@ async def test_widget_can_be_called():
     """Test that registered widgets can be called as tools."""
     app = FastMCP("test")
 
-    @app.ui.openai.widget
-    def calculator(x: int, y: int) -> int:
-        return x + y
+    @app.ui.openai.widget(
+        identifier="calculator",
+        template_uri="ui://widget/calc.html",
+        html="<div>Calc</div>",
+    )
+    def calculator(x: int, y: int) -> dict:
+        return {"result": x + y}
 
     # Call the tool through the tool manager
     result = await app._tool_manager.call_tool("calculator", {"x": 5, "y": 3})
-    assert result.content[0].text == "8"  # type: ignore[attr-defined]
+
+    # The result should be auto-transformed
+    assert '"structuredContent":{"result":8}' in result.content[0].text  # type: ignore[attr-defined]
