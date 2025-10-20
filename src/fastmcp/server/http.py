@@ -10,14 +10,11 @@ from mcp.server.auth.routes import build_resource_metadata_url
 from mcp.server.lowlevel.server import LifespanResultT
 from mcp.server.sse import SseServerTransport
 from mcp.server.streamable_http import (
-    MCP_PROTOCOL_VERSION_HEADER,
-    MCP_SESSION_ID_HEADER,
     EventStore,
 )
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
-from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 from starlette.routing import BaseRoute, Mount, Route
@@ -184,47 +181,27 @@ def create_sse_app(
             build_resource_metadata_url(resource_url) if resource_url else None
         )
 
-        # Create protected SSE endpoint route with CORS support for OPTIONS
+        # Create protected SSE endpoint route
         server_routes.append(
             Route(
                 sse_path,
-                endpoint=CORSMiddleware(
-                    app=RequireAuthMiddleware(
-                        handle_sse,
-                        auth.required_scopes,
-                        resource_metadata_url,
-                    ),
-                    allow_origins=["*"],
-                    allow_methods=["GET", "OPTIONS"],
-                    allow_headers=[
-                        MCP_PROTOCOL_VERSION_HEADER,
-                        MCP_SESSION_ID_HEADER,
-                        "Authorization",
-                    ],
-                    expose_headers=[MCP_SESSION_ID_HEADER],
+                endpoint=RequireAuthMiddleware(
+                    handle_sse,
+                    auth.required_scopes,
+                    resource_metadata_url,
                 ),
-                methods=["GET", "OPTIONS"],
+                methods=["GET"],
             )
         )
 
-        # Wrap the SSE message endpoint with CORS and RequireAuthMiddleware
+        # Wrap the SSE message endpoint with RequireAuthMiddleware
         server_routes.append(
             Mount(
                 message_path,
-                app=CORSMiddleware(
-                    app=RequireAuthMiddleware(
-                        sse.handle_post_message,
-                        auth.required_scopes,
-                        resource_metadata_url,
-                    ),
-                    allow_origins=["*"],
-                    allow_methods=["POST", "OPTIONS"],
-                    allow_headers=[
-                        MCP_PROTOCOL_VERSION_HEADER,
-                        MCP_SESSION_ID_HEADER,
-                        "Authorization",
-                    ],
-                    expose_headers=[MCP_SESSION_ID_HEADER],
+                app=RequireAuthMiddleware(
+                    sse.handle_post_message,
+                    auth.required_scopes,
+                    resource_metadata_url,
                 ),
             )
         )
@@ -332,26 +309,16 @@ def create_streamable_http_app(
             build_resource_metadata_url(resource_url) if resource_url else None
         )
 
-        # Create protected HTTP endpoint route with CORS support for OPTIONS
+        # Create protected HTTP endpoint route
         server_routes.append(
             Route(
                 streamable_http_path,
-                endpoint=CORSMiddleware(
-                    app=RequireAuthMiddleware(
-                        streamable_http_app,
-                        auth.required_scopes,
-                        resource_metadata_url,
-                    ),
-                    allow_origins=["*"],
-                    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
-                    allow_headers=[
-                        MCP_PROTOCOL_VERSION_HEADER,
-                        MCP_SESSION_ID_HEADER,
-                        "Authorization",
-                    ],
-                    expose_headers=[MCP_SESSION_ID_HEADER],
+                endpoint=RequireAuthMiddleware(
+                    streamable_http_app,
+                    auth.required_scopes,
+                    resource_metadata_url,
                 ),
-                methods=["GET", "POST", "DELETE", "OPTIONS"],
+                methods=["GET", "POST", "DELETE"],
             )
         )
     else:
