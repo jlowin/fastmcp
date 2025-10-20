@@ -39,14 +39,6 @@ class StreamableHTTPASGIApp:
         self.session_manager = session_manager
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        # DEBUG: Log headers to diagnose session ID issue
-        if scope["type"] == "http":
-            headers = dict(scope.get("headers", []))
-            session_id = headers.get(b"mcp-session-id", b"<MISSING>").decode()
-            logger.debug(
-                f"🔍 StreamableHTTP request: method={scope['method']}, session_id={session_id}, all_headers={headers}"
-            )
-
         try:
             await self.session_manager.handle_request(scope, receive, send)
         except RuntimeError as e:
