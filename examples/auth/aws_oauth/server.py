@@ -18,14 +18,14 @@ import os
 from dotenv import load_dotenv
 
 from fastmcp import FastMCP
-from fastmcp.server.auth.providers.aws import AWSCognitoProvider
+from fastmcp.server.auth.providers.aws import AWSCognitoDCRProvider
 from fastmcp.server.dependencies import get_access_token
 
 logging.basicConfig(level=logging.DEBUG)
 
 load_dotenv(".env", override=True)
 
-auth = AWSCognitoProvider(
+auth = AWSCognitoDCRProvider(
     user_pool_id=os.getenv("FASTMCP_SERVER_AUTH_AWS_COGNITO_USER_POOL_ID") or "",
     aws_region=os.getenv("FASTMCP_SERVER_AUTH_AWS_COGNITO_AWS_REGION")
     or "eu-central-1",

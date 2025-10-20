@@ -1,7 +1,8 @@
 """Test that deprecated provider imports still work.
 
 This test file verifies that the old provider class names (without DCR suffix)
-can still be imported and are subclasses of the new DCR providers.
+can still be imported, are subclasses of the new DCR providers, and emit the
+correct deprecation warnings when instantiated.
 """
 
 

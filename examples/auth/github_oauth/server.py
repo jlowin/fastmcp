@@ -13,9 +13,9 @@ To run:
 import os
 
 from fastmcp import FastMCP
-from fastmcp.server.auth.providers.github import GitHubProvider
+from fastmcp.server.auth.providers.github import GitHubDCRProvider
 
-auth = GitHubProvider(
+auth = GitHubDCRProvider(
     client_id=os.getenv("FASTMCP_SERVER_AUTH_GITHUB_CLIENT_ID") or "",
     client_secret=os.getenv("FASTMCP_SERVER_AUTH_GITHUB_CLIENT_SECRET") or "",
     base_url="http://localhost:8000",

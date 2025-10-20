@@ -14,9 +14,9 @@ To run:
 import os
 
 from fastmcp import FastMCP
-from fastmcp.server.auth.providers.workos import WorkOSProvider
+from fastmcp.server.auth.providers.workos import WorkOSDCRProvider
 
-auth = WorkOSProvider(
+auth = WorkOSDCRProvider(
     client_id=os.getenv("WORKOS_CLIENT_ID") or "",
     client_secret=os.getenv("WORKOS_CLIENT_SECRET") or "",
     authkit_domain=os.getenv("WORKOS_AUTHKIT_DOMAIN") or "https://your-app.authkit.app",

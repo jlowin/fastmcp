@@ -13,9 +13,9 @@ To run:
 import os
 
 from fastmcp import FastMCP
-from fastmcp.server.auth.providers.google import GoogleProvider
+from fastmcp.server.auth.providers.google import GoogleDCRProvider
 
-auth = GoogleProvider(
+auth = GoogleDCRProvider(
     client_id=os.getenv("FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_ID") or "",
     client_secret=os.getenv("FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_SECRET") or "",
     base_url="http://localhost:8000",

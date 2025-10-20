@@ -15,9 +15,9 @@ To run:
 import os
 
 from fastmcp import FastMCP
-from fastmcp.server.auth.providers.azure import AzureProvider
+from fastmcp.server.auth.providers.azure import AzureDCRProvider
 
-auth = AzureProvider(
+auth = AzureDCRProvider(
     client_id=os.getenv("AZURE_CLIENT_ID") or "",
     client_secret=os.getenv("AZURE_CLIENT_SECRET") or "",
     tenant_id=os.getenv("AZURE_TENANT_ID")

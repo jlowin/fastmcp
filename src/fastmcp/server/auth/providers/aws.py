@@ -29,11 +29,12 @@ from key_value.aio.protocols import AsyncKeyValue
 from pydantic import AnyHttpUrl, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+import fastmcp.settings as settings_module
 from fastmcp.server.auth import TokenVerifier
 from fastmcp.server.auth.auth import AccessToken
 from fastmcp.server.auth.oidc_dcr_proxy import OIDCDCRProxy
 from fastmcp.server.auth.providers.jwt import JWTVerifier
-from fastmcp.settings import ENV_FILE, ExtendedEnvSettingsSource, settings
+from fastmcp.settings import ENV_FILE, ExtendedEnvSettingsSource
 from fastmcp.utilities.auth import parse_scopes
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.types import NotSet, NotSetT
@@ -258,7 +259,7 @@ class AWSCognitoProvider(AWSCognitoDCRProvider):
     """
 
     def __init__(self, **kwargs):
-        if settings.deprecation_warnings:
+        if settings_module.settings.deprecation_warnings:
             warnings.warn(
                 "AWSCognitoProvider is deprecated, use AWSCognitoDCRProvider instead",
                 DeprecationWarning,
