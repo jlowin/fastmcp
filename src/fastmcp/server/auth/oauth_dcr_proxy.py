@@ -607,20 +607,11 @@ class OAuthDCRProxy(OAuthProvider):
             )
         # Redirect URI validation (consent flow provides primary protection)
         if allowed_client_redirect_uris is None:
-            logger.info(
-                "allowed_client_redirect_uris not specified; accepting all redirect URIs. "
-                "Consent flow provides protection against confused deputy attacks. "
-                "Configure allowed patterns for defense-in-depth."
-            )
             self._allowed_client_redirect_uris = None
         elif (
             isinstance(allowed_client_redirect_uris, list)
             and not allowed_client_redirect_uris
         ):
-            logger.warning(
-                "allowed_client_redirect_uris is empty list; no redirect URIs will be accepted. "
-                "This will block all OAuth clients."
-            )
             self._allowed_client_redirect_uris = []
         else:
             self._allowed_client_redirect_uris = allowed_client_redirect_uris
@@ -776,7 +767,7 @@ class OAuthDCRProxy(OAuthProvider):
             )
             logger.info(
                 "Using ephemeral JWT signing key - tokens will NOT survive server restart. "
-                "For production, provide explicit jwt_signing_key parameter."
+                "For production, provide explicit jwt_signing_key parameter and use persistent storage."
             )
 
         # Initialize JWT issuer
@@ -809,7 +800,7 @@ class OAuthDCRProxy(OAuthProvider):
             encryption_key = base64.urlsafe_b64encode(key_material)
             logger.info(
                 "Using ephemeral token encryption key - encrypted tokens will NOT survive server restart. "
-                "For production, provide explicit token_encryption_key parameter."
+                "For production, provide explicit token_encryption_key parameter and use persistent storage."
             )
 
         self._token_encryption = TokenEncryption(encryption_key)
