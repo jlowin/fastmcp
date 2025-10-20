@@ -12,7 +12,7 @@ from key_value.aio.stores.memory import MemoryStore
 from mcp.shared.auth import OAuthClientInformationFull
 from pydantic import AnyUrl
 
-from fastmcp.server.auth.oauth_proxy import OAuthProxy
+from fastmcp.server.auth.oauth_dcr_proxy import OAuthDCRProxy
 
 
 class TestOAuthProxyStorage:
@@ -39,9 +39,9 @@ class TestOAuthProxyStorage:
         """Create in-memory storage for testing."""
         return MemoryStore()
 
-    def create_proxy(self, jwt_verifier, storage=None) -> OAuthProxy:
+    def create_proxy(self, jwt_verifier, storage=None) -> OAuthDCRProxy:
         """Create an OAuth proxy with specified storage."""
-        return OAuthProxy(
+        return OAuthDCRProxy(
             upstream_authorization_endpoint="https://github.com/login/oauth/authorize",
             upstream_token_endpoint="https://github.com/login/oauth/access_token",
             upstream_client_id="test-client-id",
@@ -109,7 +109,7 @@ class TestOAuthProxyStorage:
         self, jwt_verifier, temp_storage
     ):
         """Test that ProxyDCRClient is created with redirect URI patterns."""
-        proxy = OAuthProxy(
+        proxy = OAuthDCRProxy(
             upstream_authorization_endpoint="https://github.com/login/oauth/authorize",
             upstream_token_endpoint="https://github.com/login/oauth/access_token",
             upstream_client_id="test-client-id",

@@ -5,7 +5,7 @@ from mcp.shared.auth import InvalidRedirectUriError
 from pydantic import AnyUrl
 
 from fastmcp.server.auth.auth import TokenVerifier
-from fastmcp.server.auth.oauth_proxy import OAuthProxy, ProxyDCRClient
+from fastmcp.server.auth.oauth_dcr_proxy import OAuthDCRProxy, ProxyDCRClient
 
 
 class MockTokenVerifier(TokenVerifier):
@@ -103,7 +103,7 @@ class TestOAuthProxyRedirectValidation:
 
     def test_proxy_default_allows_all(self):
         """Test that OAuth proxy defaults to allowing all URIs for DCR compatibility."""
-        proxy = OAuthProxy(
+        proxy = OAuthDCRProxy(
             upstream_authorization_endpoint="https://auth.example.com/authorize",
             upstream_token_endpoint="https://auth.example.com/token",
             upstream_client_id="test-client",
@@ -119,7 +119,7 @@ class TestOAuthProxyRedirectValidation:
         """Test OAuth proxy with custom redirect patterns."""
         custom_patterns = ["http://localhost:*", "https://*.myapp.com/*"]
 
-        proxy = OAuthProxy(
+        proxy = OAuthDCRProxy(
             upstream_authorization_endpoint="https://auth.example.com/authorize",
             upstream_token_endpoint="https://auth.example.com/token",
             upstream_client_id="test-client",
@@ -133,7 +133,7 @@ class TestOAuthProxyRedirectValidation:
 
     def test_proxy_empty_list_validation(self):
         """Test OAuth proxy with empty list (allow none)."""
-        proxy = OAuthProxy(
+        proxy = OAuthDCRProxy(
             upstream_authorization_endpoint="https://auth.example.com/authorize",
             upstream_token_endpoint="https://auth.example.com/token",
             upstream_client_id="test-client",
@@ -149,7 +149,7 @@ class TestOAuthProxyRedirectValidation:
         """Test that registered clients use the configured patterns."""
         custom_patterns = ["https://app.example.com/*"]
 
-        proxy = OAuthProxy(
+        proxy = OAuthDCRProxy(
             upstream_authorization_endpoint="https://auth.example.com/authorize",
             upstream_token_endpoint="https://auth.example.com/token",
             upstream_client_id="test-client",
@@ -181,7 +181,7 @@ class TestOAuthProxyRedirectValidation:
         """Test that unregistered clients return None."""
         custom_patterns = ["http://localhost:*", "http://127.0.0.1:*"]
 
-        proxy = OAuthProxy(
+        proxy = OAuthDCRProxy(
             upstream_authorization_endpoint="https://auth.example.com/authorize",
             upstream_token_endpoint="https://auth.example.com/token",
             upstream_client_id="test-client",

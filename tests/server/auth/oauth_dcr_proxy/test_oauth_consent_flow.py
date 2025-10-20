@@ -25,7 +25,7 @@ from starlette.applications import Starlette
 from starlette.testclient import TestClient
 
 from fastmcp.server.auth.auth import TokenVerifier
-from fastmcp.server.auth.oauth_proxy import OAuthProxy
+from fastmcp.server.auth.oauth_dcr_proxy import OAuthDCRProxy
 
 
 class MockTokenVerifier(TokenVerifier):
@@ -69,7 +69,7 @@ def storage():
 @pytest.fixture
 def oauth_proxy_with_storage(storage):
     """Create OAuth proxy with explicit storage backend."""
-    return OAuthProxy(
+    return OAuthDCRProxy(
         upstream_authorization_endpoint="https://github.com/login/oauth/authorize",
         upstream_token_endpoint="https://github.com/login/oauth/access_token",
         upstream_client_id="test-upstream-client",
@@ -84,7 +84,7 @@ def oauth_proxy_with_storage(storage):
 @pytest.fixture
 def oauth_proxy_https():
     """OAuthProxy configured with HTTPS base_url for __Host- cookies."""
-    return OAuthProxy(
+    return OAuthDCRProxy(
         upstream_authorization_endpoint="https://github.com/login/oauth/authorize",
         upstream_token_endpoint="https://github.com/login/oauth/access_token",
         upstream_client_id="client-id",
@@ -96,7 +96,7 @@ def oauth_proxy_https():
 
 
 async def _start_flow(
-    proxy: OAuthProxy, client_id: str, redirect: str
+    proxy: OAuthDCRProxy, client_id: str, redirect: str
 ) -> tuple[str, str]:
     """Register client and start auth; returns (txn_id, consent_url)."""
     await proxy.register_client(
@@ -503,7 +503,7 @@ class TestStoragePersistence:
 
     async def test_storage_uses_pydantic_adapter(self, oauth_proxy_with_storage):
         """Verify that PydanticAdapter serializes/deserializes correctly."""
-        from fastmcp.server.auth.oauth_proxy import OAuthTransaction
+        from fastmcp.server.auth.oauth_dcr_proxy import OAuthTransaction
 
         client = OAuthClientInformationFull(
             client_id="pydantic-test-client",
@@ -674,7 +674,7 @@ class TestConsentPageServerIcon:
         verifier.verify_token = Mock(return_value=None)
 
         # Create OAuthProxy
-        proxy = OAuthProxy(
+        proxy = OAuthDCRProxy(
             upstream_authorization_endpoint="https://oauth.example.com/authorize",
             upstream_token_endpoint="https://oauth.example.com/token",
             upstream_client_id="upstream-client",
@@ -705,7 +705,7 @@ class TestConsentPageServerIcon:
         await proxy.register_client(client_info)
 
         # Create a transaction manually
-        from fastmcp.server.auth.oauth_proxy import OAuthTransaction
+        from fastmcp.server.auth.oauth_dcr_proxy import OAuthTransaction
 
         txn_id = "test-txn-id"
         transaction = OAuthTransaction(
@@ -745,7 +745,7 @@ class TestConsentPageServerIcon:
         verifier.verify_token = Mock(return_value=None)
 
         # Create OAuthProxy
-        proxy = OAuthProxy(
+        proxy = OAuthDCRProxy(
             upstream_authorization_endpoint="https://oauth.example.com/authorize",
             upstream_token_endpoint="https://oauth.example.com/token",
             upstream_client_id="upstream-client",
@@ -769,7 +769,7 @@ class TestConsentPageServerIcon:
         await proxy.register_client(client_info)
 
         # Create a transaction
-        from fastmcp.server.auth.oauth_proxy import OAuthTransaction
+        from fastmcp.server.auth.oauth_dcr_proxy import OAuthTransaction
 
         txn_id = "test-txn-id"
         transaction = OAuthTransaction(
@@ -811,7 +811,7 @@ class TestConsentPageServerIcon:
         verifier.verify_token = Mock(return_value=None)
 
         # Create OAuthProxy
-        proxy = OAuthProxy(
+        proxy = OAuthDCRProxy(
             upstream_authorization_endpoint="https://oauth.example.com/authorize",
             upstream_token_endpoint="https://oauth.example.com/token",
             upstream_client_id="upstream-client",
@@ -839,7 +839,7 @@ class TestConsentPageServerIcon:
         await proxy.register_client(client_info)
 
         # Create a transaction
-        from fastmcp.server.auth.oauth_proxy import OAuthTransaction
+        from fastmcp.server.auth.oauth_dcr_proxy import OAuthTransaction
 
         txn_id = "test-txn-id"
         transaction = OAuthTransaction(

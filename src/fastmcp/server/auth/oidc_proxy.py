@@ -17,7 +17,7 @@ from pydantic import AnyHttpUrl, BaseModel, model_validator
 from typing_extensions import Self
 
 from fastmcp.server.auth import TokenVerifier
-from fastmcp.server.auth.oauth_proxy import OAuthProxy
+from fastmcp.server.auth.oauth_dcr_proxy import OAuthDCRProxy
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 from fastmcp.utilities.logging import get_logger
 
@@ -169,7 +169,7 @@ class OIDCConfiguration(BaseModel):
             raise
 
 
-class OIDCProxy(OAuthProxy):
+class OIDCProxy(OAuthDCRProxy):
     """OAuth provider that wraps OAuthProxy to provide configuration via an OIDC configuration URL.
 
     This provider makes it easier to add OAuth protection for any upstream provider

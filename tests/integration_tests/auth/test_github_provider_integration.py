@@ -82,7 +82,7 @@ def create_github_server_with_mock_callback(base_url: str) -> FastMCP:
         import secrets
         import time
 
-        from fastmcp.server.auth.oauth_proxy import ClientCode
+        from fastmcp.server.auth.oauth_dcr_proxy import ClientCode
 
         # Generate a fake authorization code
         fake_code = secrets.token_urlsafe(32)

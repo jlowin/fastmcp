@@ -28,7 +28,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from fastmcp.server.auth import TokenVerifier
 from fastmcp.server.auth.auth import AccessToken
-from fastmcp.server.auth.oauth_proxy import OAuthProxy
+from fastmcp.server.auth.oauth_dcr_proxy import OAuthDCRProxy
 from fastmcp.settings import ENV_FILE
 from fastmcp.utilities.auth import parse_scopes
 from fastmcp.utilities.logging import get_logger
@@ -166,7 +166,7 @@ class GitHubTokenVerifier(TokenVerifier):
             return None
 
 
-class GitHubProvider(OAuthProxy):
+class GitHubProvider(OAuthDCRProxy):
     """Complete GitHub OAuth provider for FastMCP.
 
     This provider makes it trivial to add GitHub OAuth protection to any

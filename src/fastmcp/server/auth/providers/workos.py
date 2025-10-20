@@ -18,7 +18,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from fastmcp.server.auth import AccessToken, RemoteAuthProvider, TokenVerifier
-from fastmcp.server.auth.oauth_proxy import OAuthProxy
+from fastmcp.server.auth.oauth_dcr_proxy import OAuthDCRProxy
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 from fastmcp.settings import ENV_FILE
 from fastmcp.utilities.auth import parse_scopes
@@ -125,7 +125,7 @@ class WorkOSTokenVerifier(TokenVerifier):
             return None
 
 
-class WorkOSProvider(OAuthProxy):
+class WorkOSProvider(OAuthDCRProxy):
     """Complete WorkOS OAuth provider for FastMCP.
 
     This provider implements WorkOS AuthKit OAuth using the OAuth Proxy pattern.

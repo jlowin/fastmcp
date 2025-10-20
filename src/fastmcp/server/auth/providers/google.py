@@ -30,7 +30,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from fastmcp.server.auth import TokenVerifier
 from fastmcp.server.auth.auth import AccessToken
-from fastmcp.server.auth.oauth_proxy import OAuthProxy
+from fastmcp.server.auth.oauth_dcr_proxy import OAuthDCRProxy
 from fastmcp.settings import ENV_FILE
 from fastmcp.utilities.auth import parse_scopes
 from fastmcp.utilities.logging import get_logger
@@ -182,7 +182,7 @@ class GoogleTokenVerifier(TokenVerifier):
             return None
 
 
-class GoogleProvider(OAuthProxy):
+class GoogleProvider(OAuthDCRProxy):
     """Complete Google OAuth provider for FastMCP.
 
     This provider makes it trivial to add Google OAuth protection to any

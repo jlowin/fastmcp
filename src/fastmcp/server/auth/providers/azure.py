@@ -12,7 +12,7 @@ from key_value.aio.protocols import AsyncKeyValue
 from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from fastmcp.server.auth.oauth_proxy import OAuthProxy
+from fastmcp.server.auth.oauth_dcr_proxy import OAuthDCRProxy
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 from fastmcp.settings import ENV_FILE
 from fastmcp.utilities.auth import parse_scopes
@@ -57,7 +57,7 @@ class AzureProviderSettings(BaseSettings):
         return parse_scopes(v)
 
 
-class AzureProvider(OAuthProxy):
+class AzureProvider(OAuthDCRProxy):
     """Azure (Microsoft Entra) OAuth provider for FastMCP.
 
     This provider implements Azure/Microsoft Entra ID authentication using the
