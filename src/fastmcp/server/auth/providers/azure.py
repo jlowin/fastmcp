@@ -254,23 +254,6 @@ class AzureDCRProvider(OAuthDCRProxy):
             f" and identifier_uri {self.identifier_uri}" if self.identifier_uri else "",
         )
 
-
-# Deprecated alias for backwards compatibility
-class AzureProvider(AzureDCRProvider):
-    """Deprecated: Use AzureDCRProvider instead.
-
-    This alias is provided for backwards compatibility and will be removed in a future version.
-    """
-
-    def __init__(self, **kwargs):
-        if settings_module.settings.deprecation_warnings:
-            warnings.warn(
-                "AzureProvider is deprecated, use AzureDCRProvider instead",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-        super().__init__(**kwargs)
-
     async def authorize(
         self,
         client: OAuthClientInformationFull,
@@ -322,3 +305,20 @@ class AzureProvider(AzureDCRProvider):
     def _add_prefix_to_scopes(self, scopes: list[str]) -> list[str]:
         """Add Application ID URI prefix for authorization request."""
         return [f"{self.identifier_uri}/{scope}" for scope in scopes]
+
+
+# Deprecated alias for backwards compatibility
+class AzureProvider(AzureDCRProvider):
+    """Deprecated: Use AzureDCRProvider instead.
+
+    This alias is provided for backwards compatibility and will be removed in a future version.
+    """
+
+    def __init__(self, **kwargs):
+        if settings_module.settings.deprecation_warnings:
+            warnings.warn(
+                "AzureProvider is deprecated, use AzureDCRProvider instead",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        super().__init__(**kwargs)
