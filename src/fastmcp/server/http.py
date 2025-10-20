@@ -9,7 +9,11 @@ from mcp.server.auth.middleware.bearer_auth import RequireAuthMiddleware
 from mcp.server.auth.routes import build_resource_metadata_url
 from mcp.server.lowlevel.server import LifespanResultT
 from mcp.server.sse import SseServerTransport
-from mcp.server.streamable_http import MCP_PROTOCOL_VERSION_HEADER, EventStore
+from mcp.server.streamable_http import (
+    MCP_PROTOCOL_VERSION_HEADER,
+    MCP_SESSION_ID_HEADER,
+    EventStore,
+)
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
@@ -35,6 +39,14 @@ class StreamableHTTPASGIApp:
         self.session_manager = session_manager
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        # DEBUG: Log headers to diagnose session ID issue
+        if scope["type"] == "http":
+            headers = dict(scope.get("headers", []))
+            session_id = headers.get(b"mcp-session-id", b"<MISSING>").decode()
+            logger.debug(
+                f"🔍 StreamableHTTP request: method={scope['method']}, session_id={session_id}, all_headers={headers}"
+            )
+
         try:
             await self.session_manager.handle_request(scope, receive, send)
         except RuntimeError as e:
@@ -192,7 +204,12 @@ def create_sse_app(
                     ),
                     allow_origins=["*"],
                     allow_methods=["GET", "OPTIONS"],
-                    allow_headers=[MCP_PROTOCOL_VERSION_HEADER],
+                    allow_headers=[
+                        MCP_PROTOCOL_VERSION_HEADER,
+                        MCP_SESSION_ID_HEADER,
+                        "Authorization",
+                    ],
+                    expose_headers=[MCP_SESSION_ID_HEADER],
                 ),
                 methods=["GET", "OPTIONS"],
             )
@@ -210,7 +227,12 @@ def create_sse_app(
                     ),
                     allow_origins=["*"],
                     allow_methods=["POST", "OPTIONS"],
-                    allow_headers=[MCP_PROTOCOL_VERSION_HEADER],
+                    allow_headers=[
+                        MCP_PROTOCOL_VERSION_HEADER,
+                        MCP_SESSION_ID_HEADER,
+                        "Authorization",
+                    ],
+                    expose_headers=[MCP_SESSION_ID_HEADER],
                 ),
             )
         )
@@ -330,7 +352,12 @@ def create_streamable_http_app(
                     ),
                     allow_origins=["*"],
                     allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
-                    allow_headers=[MCP_PROTOCOL_VERSION_HEADER],
+                    allow_headers=[
+                        MCP_PROTOCOL_VERSION_HEADER,
+                        MCP_SESSION_ID_HEADER,
+                        "Authorization",
+                    ],
+                    expose_headers=[MCP_SESSION_ID_HEADER],
                 ),
                 methods=["GET", "POST", "DELETE", "OPTIONS"],
             )
