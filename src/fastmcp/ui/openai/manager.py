@@ -429,6 +429,8 @@ class OpenAIUIManager:
                 result = await fn(*args, **kwargs)
                 return transform_widget_response(result)
 
+            # Override return annotation to reflect actual return type
+            async_wrapper.__annotations__["return"] = dict[str, Any]
             return async_wrapper
         else:
 
@@ -437,4 +439,6 @@ class OpenAIUIManager:
                 result = fn(*args, **kwargs)
                 return transform_widget_response(result)
 
+            # Override return annotation to reflect actual return type
+            sync_wrapper.__annotations__["return"] = dict[str, Any]
             return sync_wrapper
