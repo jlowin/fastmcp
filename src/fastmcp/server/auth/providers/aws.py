@@ -29,7 +29,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from fastmcp.server.auth import TokenVerifier
 from fastmcp.server.auth.auth import AccessToken
-from fastmcp.server.auth.oidc_proxy import OIDCProxy
+from fastmcp.server.auth.oidc_dcr_proxy import OIDCDCRProxy
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 from fastmcp.settings import ENV_FILE
 from fastmcp.utilities.auth import parse_scopes
@@ -91,7 +91,7 @@ class AWSCognitoTokenVerifier(JWTVerifier):
         )
 
 
-class AWSCognitoProvider(OIDCProxy):
+class AWSCognitoProvider(OIDCDCRProxy):
     """Complete AWS Cognito OAuth provider for FastMCP.
 
     This provider makes it trivial to add AWS Cognito OAuth protection to any

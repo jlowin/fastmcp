@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from fastmcp.server.auth.oidc_proxy import OIDCConfiguration
+from fastmcp.server.auth.oidc_dcr_proxy import OIDCConfiguration
 from fastmcp.server.auth.providers.auth0 import Auth0Provider, Auth0ProviderSettings
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 

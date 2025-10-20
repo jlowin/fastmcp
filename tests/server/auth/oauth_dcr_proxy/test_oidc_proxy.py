@@ -7,7 +7,7 @@ import pytest
 from httpx import Response
 from pydantic import AnyHttpUrl
 
-from fastmcp.server.auth.oidc_proxy import OIDCConfiguration, OIDCProxy
+from fastmcp.server.auth.oidc_dcr_proxy import OIDCConfiguration, OIDCDCRProxy
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 
 TEST_ISSUER = "https://example.com"
@@ -440,7 +440,7 @@ def validate_proxy(mock_get, proxy, oidc_config):
     assert proxy.oidc_config == oidc_config
 
 
-class TestOIDCProxyInitialization:
+class TestOIDCDCRProxyInitialization:
     """Tests for OIDC proxy initialization."""
 
     def test_default_initialization(self, valid_oidc_configuration_dict):
@@ -453,7 +453,7 @@ class TestOIDCProxyInitialization:
             )
             mock_get.return_value = oidc_config
 
-            proxy = OIDCProxy(
+            proxy = OIDCDCRProxy(
                 config_url=TEST_CONFIG_URL,
                 client_id=TEST_CLIENT_ID,
                 client_secret=TEST_CLIENT_SECRET,
@@ -472,7 +472,7 @@ class TestOIDCProxyInitialization:
             )
             mock_get.return_value = oidc_config
 
-            proxy = OIDCProxy(
+            proxy = OIDCDCRProxy(
                 config_url=TEST_CONFIG_URL,
                 client_id=TEST_CLIENT_ID,
                 client_secret=TEST_CLIENT_SECRET,
@@ -495,7 +495,7 @@ class TestOIDCProxyInitialization:
             )
             mock_get.return_value = oidc_config
 
-            proxy = OIDCProxy(
+            proxy = OIDCDCRProxy(
                 config_url=TEST_CONFIG_URL,
                 client_id=TEST_CLIENT_ID,
                 client_secret=TEST_CLIENT_SECRET,
@@ -523,7 +523,7 @@ class TestOIDCProxyInitialization:
             )
             mock_get.return_value = oidc_config
 
-            proxy = OIDCProxy(
+            proxy = OIDCDCRProxy(
                 config_url=TEST_CONFIG_URL,
                 client_id=TEST_CLIENT_ID,
                 client_secret=TEST_CLIENT_SECRET,
@@ -548,7 +548,7 @@ class TestOIDCProxyInitialization:
             )
             mock_get.return_value = oidc_config
 
-            proxy = OIDCProxy(
+            proxy = OIDCDCRProxy(
                 config_url=TEST_CONFIG_URL,
                 client_id=TEST_CLIENT_ID,
                 client_secret=TEST_CLIENT_SECRET,
@@ -577,7 +577,7 @@ class TestOIDCProxyInitialization:
             mock_get.return_value = oidc_config
 
             with pytest.raises(ValueError, match="Missing required config URL"):
-                OIDCProxy(
+                OIDCDCRProxy(
                     config_url=None,  # type: ignore
                     client_id=TEST_CLIENT_ID,
                     client_secret=TEST_CLIENT_SECRET,
@@ -597,7 +597,7 @@ class TestOIDCProxyInitialization:
             mock_get.return_value = oidc_config
 
             with pytest.raises(ValueError, match="Missing required client id"):
-                OIDCProxy(
+                OIDCDCRProxy(
                     config_url=TEST_CONFIG_URL,
                     client_id=None,  # type: ignore
                     client_secret=TEST_CLIENT_SECRET,
@@ -617,7 +617,7 @@ class TestOIDCProxyInitialization:
             mock_get.return_value = oidc_config
 
             with pytest.raises(ValueError, match="Missing required client secret"):
-                OIDCProxy(
+                OIDCDCRProxy(
                     config_url=TEST_CONFIG_URL,
                     client_id=TEST_CLIENT_ID,
                     client_secret=None,  # type: ignore
@@ -637,7 +637,7 @@ class TestOIDCProxyInitialization:
             mock_get.return_value = oidc_config
 
             with pytest.raises(ValueError, match="Missing required base URL"):
-                OIDCProxy(
+                OIDCDCRProxy(
                     config_url=TEST_CONFIG_URL,
                     client_id=TEST_CLIENT_ID,
                     client_secret=TEST_CLIENT_SECRET,

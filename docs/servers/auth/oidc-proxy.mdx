@@ -39,10 +39,10 @@ Here's how to implement the OIDC proxy with any provider:
 
 ```python
 from fastmcp import FastMCP
-from fastmcp.server.auth.oidc_proxy import OIDCProxy
+from fastmcp.server.auth.oidc_dcr_proxy import OIDCDCRProxy
 
 # Create the OIDC proxy
-auth = OIDCProxy(
+auth = OIDCDCRProxy(
     # Provider's configuration URL
     config_url="https://provider.com/.well-known/openid-configuration",
 
@@ -62,7 +62,7 @@ mcp = FastMCP(name="My Server", auth=auth)
 
 ### Configuration Parameters
 
-<Card icon="code" title="OIDCProxy Parameters">
+<Card icon="code" title="OIDCDCRProxy Parameters">
 <ParamField body="config_url" type="str" required>
   URL of your OAuth provider's OIDC configuration
 </ParamField>
@@ -136,7 +136,7 @@ Set this if your provider requires a specific authentication method and the defa
 from fastmcp.utilities.storage import InMemoryStorage
 
 # Use in-memory storage for testing (clients lost on restart)
-auth = OIDCProxy(..., client_storage=InMemoryStorage())
+auth = OIDCDCRProxy(..., client_storage=InMemoryStorage())
 ```
 
 </ParamField>

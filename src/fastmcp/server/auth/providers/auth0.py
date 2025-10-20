@@ -25,7 +25,7 @@ from key_value.aio.protocols import AsyncKeyValue
 from pydantic import AnyHttpUrl, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from fastmcp.server.auth.oidc_proxy import OIDCProxy
+from fastmcp.server.auth.oidc_dcr_proxy import OIDCDCRProxy
 from fastmcp.settings import ENV_FILE
 from fastmcp.utilities.auth import parse_scopes
 from fastmcp.utilities.logging import get_logger
@@ -59,7 +59,7 @@ class Auth0ProviderSettings(BaseSettings):
         return parse_scopes(v)
 
 
-class Auth0Provider(OIDCProxy):
+class Auth0Provider(OIDCDCRProxy):
     """An Auth0 provider implementation for FastMCP.
 
     This provider is a complete Auth0 integration that's ready to use with
