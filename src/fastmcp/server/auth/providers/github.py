@@ -28,7 +28,7 @@ from key_value.aio.protocols import AsyncKeyValue
 from pydantic import AnyHttpUrl, SecretStr, field_validator
 from pydantic_settings import BaseSettings
 
-import fastmcp.settings as settings_module
+import fastmcp.settings
 from fastmcp.server.auth import TokenVerifier
 from fastmcp.server.auth.auth import AccessToken
 from fastmcp.server.auth.oauth_dcr_proxy import OAuthDCRProxy
@@ -324,7 +324,7 @@ class GitHubProvider(GitHubDCRProvider):
     """
 
     def __init__(self, **kwargs):
-        if settings_module.settings.deprecation_warnings:
+        if fastmcp.settings.settings.deprecation_warnings:
             warnings.warn(
                 "GitHubProvider is deprecated, use GitHubDCRProvider instead",
                 DeprecationWarning,

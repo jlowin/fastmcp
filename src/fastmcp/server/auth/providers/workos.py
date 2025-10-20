@@ -19,7 +19,7 @@ from pydantic_settings import BaseSettings
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
-import fastmcp.settings as settings_module
+import fastmcp.settings
 from fastmcp.server.auth import AccessToken, RemoteAuthProvider, TokenVerifier
 from fastmcp.server.auth.oauth_dcr_proxy import OAuthDCRProxy
 from fastmcp.server.auth.providers.jwt import JWTVerifier
@@ -301,7 +301,7 @@ class WorkOSProvider(WorkOSDCRProvider):
     """
 
     def __init__(self, **kwargs):
-        if settings_module.settings.deprecation_warnings:
+        if fastmcp.settings.settings.deprecation_warnings:
             warnings.warn(
                 "WorkOSProvider is deprecated, use WorkOSDCRProvider instead",
                 DeprecationWarning,

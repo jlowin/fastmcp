@@ -13,7 +13,7 @@ from key_value.aio.protocols import AsyncKeyValue
 from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings
 
-import fastmcp.settings as settings_module
+import fastmcp.settings
 from fastmcp.server.auth.oauth_dcr_proxy import OAuthDCRProxy
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 from fastmcp.settings import (
@@ -315,7 +315,7 @@ class AzureProvider(AzureDCRProvider):
     """
 
     def __init__(self, **kwargs):
-        if settings_module.settings.deprecation_warnings:
+        if fastmcp.settings.settings.deprecation_warnings:
             warnings.warn(
                 "AzureProvider is deprecated, use AzureDCRProvider instead",
                 DeprecationWarning,

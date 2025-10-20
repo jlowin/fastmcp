@@ -27,7 +27,7 @@ from key_value.aio.protocols import AsyncKeyValue
 from pydantic import AnyHttpUrl, SecretStr, field_validator
 from pydantic_settings import BaseSettings
 
-import fastmcp.settings as settings_module
+import fastmcp.settings
 from fastmcp.server.auth.oidc_dcr_proxy import OIDCDCRProxy
 from fastmcp.settings import (
     ENV_FILE,
@@ -212,7 +212,7 @@ class Auth0Provider(Auth0DCRProvider):
     """
 
     def __init__(self, **kwargs):
-        if settings_module.settings.deprecation_warnings:
+        if fastmcp.settings.settings.deprecation_warnings:
             warnings.warn(
                 "Auth0Provider is deprecated, use Auth0DCRProvider instead",
                 DeprecationWarning,
