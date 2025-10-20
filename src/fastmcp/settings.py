@@ -145,7 +145,6 @@ class Settings(BaseSettings):
         which accessed fastmcp.settings.settings
         """
         # Deprecated in 2.8.0
-        breakpoint()
         logger.warning(
             "Using fastmcp.settings.settings is deprecated. Use fastmcp.settings instead.",
         )
