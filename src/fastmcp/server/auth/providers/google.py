@@ -27,13 +27,17 @@ import warnings
 import httpx
 from key_value.aio.protocols import AsyncKeyValue
 from pydantic import AnyHttpUrl, SecretStr, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings
 
 import fastmcp.settings as settings_module
 from fastmcp.server.auth import TokenVerifier
 from fastmcp.server.auth.auth import AccessToken
 from fastmcp.server.auth.oauth_dcr_proxy import OAuthDCRProxy
-from fastmcp.settings import ENV_FILE, ExtendedEnvSettingsSource
+from fastmcp.settings import (
+    ENV_FILE,
+    ExtendedEnvSettingsSource,
+    ExtendedSettingsConfigDict,
+)
 from fastmcp.utilities.auth import parse_scopes
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.types import NotSet, NotSetT
@@ -44,7 +48,7 @@ logger = get_logger(__name__)
 class GoogleDCRProviderSettings(BaseSettings):
     """Settings for Google OAuth DCR provider."""
 
-    model_config = SettingsConfigDict(
+    model_config = ExtendedSettingsConfigDict(
         env_prefix="FASTMCP_SERVER_AUTH_GOOGLE_DCR_",
         env_prefixes=["FASTMCP_SERVER_AUTH_GOOGLE_DCR_", "FASTMCP_SERVER_AUTH_GOOGLE_"],
         env_file=ENV_FILE,

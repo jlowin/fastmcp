@@ -27,14 +27,18 @@ import warnings
 
 from key_value.aio.protocols import AsyncKeyValue
 from pydantic import AnyHttpUrl, SecretStr, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings
 
 import fastmcp.settings as settings_module
 from fastmcp.server.auth import TokenVerifier
 from fastmcp.server.auth.auth import AccessToken
 from fastmcp.server.auth.oidc_dcr_proxy import OIDCDCRProxy
 from fastmcp.server.auth.providers.jwt import JWTVerifier
-from fastmcp.settings import ENV_FILE, ExtendedEnvSettingsSource
+from fastmcp.settings import (
+    ENV_FILE,
+    ExtendedEnvSettingsSource,
+    ExtendedSettingsConfigDict,
+)
 from fastmcp.utilities.auth import parse_scopes
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.types import NotSet, NotSetT
@@ -45,7 +49,7 @@ logger = get_logger(__name__)
 class AWSCognitoDCRProviderSettings(BaseSettings):
     """Settings for AWS Cognito OAuth DCR provider."""
 
-    model_config = SettingsConfigDict(
+    model_config = ExtendedSettingsConfigDict(
         env_prefix="FASTMCP_SERVER_AUTH_AWS_COGNITO_DCR_",
         env_prefixes=[
             "FASTMCP_SERVER_AUTH_AWS_COGNITO_DCR_",

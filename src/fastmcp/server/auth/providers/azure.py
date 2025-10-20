@@ -11,12 +11,16 @@ from typing import TYPE_CHECKING
 
 from key_value.aio.protocols import AsyncKeyValue
 from pydantic import SecretStr, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings
 
 import fastmcp.settings as settings_module
 from fastmcp.server.auth.oauth_dcr_proxy import OAuthDCRProxy
 from fastmcp.server.auth.providers.jwt import JWTVerifier
-from fastmcp.settings import ENV_FILE, ExtendedEnvSettingsSource
+from fastmcp.settings import (
+    ENV_FILE,
+    ExtendedEnvSettingsSource,
+    ExtendedSettingsConfigDict,
+)
 from fastmcp.utilities.auth import parse_scopes
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.types import NotSet, NotSetT
@@ -31,7 +35,7 @@ logger = get_logger(__name__)
 class AzureDCRProviderSettings(BaseSettings):
     """Settings for Azure OAuth DCR provider."""
 
-    model_config = SettingsConfigDict(
+    model_config = ExtendedSettingsConfigDict(
         env_prefix="FASTMCP_SERVER_AUTH_AZURE_DCR_",
         env_prefixes=["FASTMCP_SERVER_AUTH_AZURE_DCR_", "FASTMCP_SERVER_AUTH_AZURE_"],
         env_file=ENV_FILE,
