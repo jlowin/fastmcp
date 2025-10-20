@@ -301,7 +301,7 @@ class WorkOSProvider(WorkOSDCRProvider):
     """
 
     def __init__(self, **kwargs):
-        if fastmcp.settings.settings.deprecation_warnings:
+        if fastmcp.settings.deprecation_warnings:
             warnings.warn(
                 "WorkOSProvider is deprecated, use WorkOSDCRProvider instead",
                 DeprecationWarning,

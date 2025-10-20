@@ -263,7 +263,7 @@ class AWSCognitoProvider(AWSCognitoDCRProvider):
     """
 
     def __init__(self, **kwargs):
-        if fastmcp.settings.settings.deprecation_warnings:
+        if fastmcp.settings.deprecation_warnings:
             warnings.warn(
                 "AWSCognitoProvider is deprecated, use AWSCognitoDCRProvider instead",
                 DeprecationWarning,

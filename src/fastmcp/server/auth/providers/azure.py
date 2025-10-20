@@ -315,7 +315,7 @@ class AzureProvider(AzureDCRProvider):
     """
 
     def __init__(self, **kwargs):
-        if fastmcp.settings.settings.deprecation_warnings:
+        if fastmcp.settings.deprecation_warnings:
             warnings.warn(
                 "AzureProvider is deprecated, use AzureDCRProvider instead",
                 DeprecationWarning,

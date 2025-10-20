@@ -343,7 +343,7 @@ class GoogleProvider(GoogleDCRProvider):
     """
 
     def __init__(self, **kwargs):
-        if fastmcp.settings.settings.deprecation_warnings:
+        if fastmcp.settings.deprecation_warnings:
             warnings.warn(
                 "GoogleProvider is deprecated, use GoogleDCRProvider instead",
                 DeprecationWarning,

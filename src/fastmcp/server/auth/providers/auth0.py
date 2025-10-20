@@ -212,7 +212,7 @@ class Auth0Provider(Auth0DCRProvider):
     """
 
     def __init__(self, **kwargs):
-        if fastmcp.settings.settings.deprecation_warnings:
+        if fastmcp.settings.deprecation_warnings:
             warnings.warn(
                 "Auth0Provider is deprecated, use Auth0DCRProvider instead",
                 DeprecationWarning,
