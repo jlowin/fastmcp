@@ -13,7 +13,7 @@ To run:
 import os
 
 from fastmcp import FastMCP
-from fastmcp.server.auth.providers.github import GitHubDCRProvider
+from fastmcp.server.auth.providers.github import GitHubProvider as GitHubDCRProvider
 
 auth = GitHubDCRProvider(
     client_id=os.getenv("FASTMCP_SERVER_AUTH_GITHUB_CLIENT_ID") or "",
