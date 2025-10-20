@@ -9,10 +9,11 @@ from mcp.server.auth.middleware.bearer_auth import RequireAuthMiddleware
 from mcp.server.auth.routes import build_resource_metadata_url
 from mcp.server.lowlevel.server import LifespanResultT
 from mcp.server.sse import SseServerTransport
-from mcp.server.streamable_http import EventStore
+from mcp.server.streamable_http import MCP_PROTOCOL_VERSION_HEADER, EventStore
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
+from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 from starlette.routing import BaseRoute, Mount, Route
@@ -179,27 +180,37 @@ def create_sse_app(
             build_resource_metadata_url(resource_url) if resource_url else None
         )
 
-        # Create protected SSE endpoint route with GET method only
+        # Create protected SSE endpoint route with CORS support for OPTIONS
         server_routes.append(
             Route(
                 sse_path,
-                endpoint=RequireAuthMiddleware(
-                    handle_sse,
-                    auth.required_scopes,
-                    resource_metadata_url,
+                endpoint=CORSMiddleware(
+                    app=RequireAuthMiddleware(
+                        handle_sse,
+                        auth.required_scopes,
+                        resource_metadata_url,
+                    ),
+                    allow_origins=["*"],
+                    allow_methods=["GET", "OPTIONS"],
+                    allow_headers=[MCP_PROTOCOL_VERSION_HEADER],
                 ),
-                methods=["GET"],
+                methods=["GET", "OPTIONS"],
             )
         )
 
-        # Wrap the SSE message endpoint with RequireAuthMiddleware
+        # Wrap the SSE message endpoint with CORS and RequireAuthMiddleware
         server_routes.append(
             Mount(
                 message_path,
-                app=RequireAuthMiddleware(
-                    sse.handle_post_message,
-                    auth.required_scopes,
-                    resource_metadata_url,
+                app=CORSMiddleware(
+                    app=RequireAuthMiddleware(
+                        sse.handle_post_message,
+                        auth.required_scopes,
+                        resource_metadata_url,
+                    ),
+                    allow_origins=["*"],
+                    allow_methods=["POST", "OPTIONS"],
+                    allow_headers=[MCP_PROTOCOL_VERSION_HEADER],
                 ),
             )
         )
@@ -307,15 +318,21 @@ def create_streamable_http_app(
             build_resource_metadata_url(resource_url) if resource_url else None
         )
 
-        # Create protected HTTP endpoint route
+        # Create protected HTTP endpoint route with CORS support for OPTIONS
         server_routes.append(
             Route(
                 streamable_http_path,
-                endpoint=RequireAuthMiddleware(
-                    streamable_http_app,
-                    auth.required_scopes,
-                    resource_metadata_url,
+                endpoint=CORSMiddleware(
+                    app=RequireAuthMiddleware(
+                        streamable_http_app,
+                        auth.required_scopes,
+                        resource_metadata_url,
+                    ),
+                    allow_origins=["*"],
+                    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+                    allow_headers=[MCP_PROTOCOL_VERSION_HEADER],
                 ),
+                methods=["GET", "POST", "DELETE", "OPTIONS"],
             )
         )
     else:
