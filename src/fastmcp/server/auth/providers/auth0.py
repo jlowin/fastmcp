@@ -25,15 +25,10 @@ import warnings
 
 from key_value.aio.protocols import AsyncKeyValue
 from pydantic import AnyHttpUrl, SecretStr, field_validator
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from fastmcp.server.auth.oidc_dcr_proxy import OIDCDCRProxy
-from fastmcp.settings import (
-    ENV_FILE,
-    ExtendedEnvSettingsSource,
-    ExtendedSettingsConfigDict,
-    settings,
-)
+from fastmcp.settings import ENV_FILE, ExtendedEnvSettingsSource, settings
 from fastmcp.utilities.auth import parse_scopes
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.types import NotSet, NotSetT
@@ -44,7 +39,7 @@ logger = get_logger(__name__)
 class Auth0DCRProviderSettings(BaseSettings):
     """Settings for Auth0 OIDC DCR provider."""
 
-    model_config = ExtendedSettingsConfigDict(
+    model_config = SettingsConfigDict(
         env_prefix="FASTMCP_SERVER_AUTH_AUTH0_DCR_",
         env_prefixes=["FASTMCP_SERVER_AUTH_AUTH0_DCR_", "FASTMCP_SERVER_AUTH_AUTH0_"],
         env_file=ENV_FILE,

@@ -15,19 +15,14 @@ import warnings
 import httpx
 from key_value.aio.protocols import AsyncKeyValue
 from pydantic import AnyHttpUrl, SecretStr, field_validator
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from fastmcp.server.auth import AccessToken, RemoteAuthProvider, TokenVerifier
 from fastmcp.server.auth.oauth_dcr_proxy import OAuthDCRProxy
 from fastmcp.server.auth.providers.jwt import JWTVerifier
-from fastmcp.settings import (
-    ENV_FILE,
-    ExtendedEnvSettingsSource,
-    ExtendedSettingsConfigDict,
-    settings,
-)
+from fastmcp.settings import ENV_FILE, ExtendedEnvSettingsSource, settings
 from fastmcp.utilities.auth import parse_scopes
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.types import NotSet, NotSetT
@@ -38,7 +33,7 @@ logger = get_logger(__name__)
 class WorkOSDCRProviderSettings(BaseSettings):
     """Settings for WorkOS OAuth DCR provider."""
 
-    model_config = ExtendedSettingsConfigDict(
+    model_config = SettingsConfigDict(
         env_prefix="FASTMCP_SERVER_AUTH_WORKOS_DCR_",
         env_prefixes=["FASTMCP_SERVER_AUTH_WORKOS_DCR_", "FASTMCP_SERVER_AUTH_WORKOS_"],
         env_file=ENV_FILE,
@@ -311,7 +306,7 @@ class WorkOSProvider(WorkOSDCRProvider):
 
 
 class AuthKitProviderSettings(BaseSettings):
-    model_config = ExtendedSettingsConfigDict(
+    model_config = SettingsConfigDict(
         env_prefix="FASTMCP_SERVER_AUTH_AUTHKITPROVIDER_",
         env_file=ENV_FILE,
         extra="ignore",
