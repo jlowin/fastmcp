@@ -127,7 +127,7 @@ def install_claude_code(
     # Build claude mcp add command
     cmd_parts = [claude_cmd, "mcp", "add", name]
 
-    # Add environment variables if specified (before the name and command)
+    # Add environment variables if specified
     if env_vars:
         for key, value in env_vars.items():
             cmd_parts.extend(["-e", f"{key}={value}"])
