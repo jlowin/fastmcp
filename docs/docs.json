@@ -19,11 +19,12 @@
     "light": "#4cc9f0",
     "primary": "#2d00f7"
   },
+  "fonts": {
+    "heading": { "family": "Google Sans" },
+    "body": { "family": "BlinkMacSystemFont" }
+  },
   "contextual": {
-    "options": [
-      "copy",
-      "view"
-    ]
+    "options": ["copy", "view"]
   },
   "description": "The fast, Pythonic way to build MCP servers and clients.",
   "errors": {
@@ -107,15 +108,16 @@
                 "group": "Advanced Features",
                 "icon": "stars",
                 "pages": [
-                  "servers/icons",
-                  "servers/context",
-                  "servers/proxy",
                   "servers/composition",
+                  "servers/context",
                   "servers/elicitation",
+                  "servers/icons",
                   "servers/logging",
+                  "servers/middleware",
                   "servers/progress",
+                  "servers/proxy",
                   "servers/sampling",
-                  "servers/middleware"
+                  "servers/storage-backends"
                 ]
               },
               {
@@ -148,10 +150,7 @@
               {
                 "group": "Essentials",
                 "icon": "cube",
-                "pages": [
-                  "clients/client",
-                  "clients/transports"
-                ]
+                "pages": ["clients/client", "clients/transports"]
               },
               {
                 "group": "Core Operations",
@@ -177,10 +176,7 @@
               {
                 "group": "Authentication",
                 "icon": "user-shield",
-                "pages": [
-                  "clients/auth/oauth",
-                  "clients/auth/bearer"
-                ]
+                "pages": ["clients/auth/oauth", "clients/auth/bearer"]
               }
             ]
           },
@@ -234,10 +230,7 @@
               {
                 "group": "API Integration",
                 "icon": "globe",
-                "pages": [
-                  "integrations/fastapi",
-                  "integrations/openapi"
-                ]
+                "pages": ["integrations/fastapi", "integrations/openapi"]
               }
             ]
           },
@@ -472,5 +465,13 @@
   "thumbnails": {
     "appearance": "light",
     "background": "/assets/brand/thumbnail-background.png"
+  },
+  "styling": {
+    "codeblocks": {
+      "theme": {
+        "light": "snazzy-light",
+        "dark": "dark-plus"
+      }
+    }
   }
 }
