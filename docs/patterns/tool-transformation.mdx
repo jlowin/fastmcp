@@ -456,7 +456,7 @@ In the following example, we wrap a parent tool that accepts two arguments `x` a
 ```python {12, 15}
 from fastmcp import FastMCP
 from fastmcp.tools import Tool
-from fastmcp.tools.tool_transform import forward
+from fastmcp.tools.tool_transform import forward, ArgTransform
 
 mcp = FastMCP()
 
@@ -548,7 +548,7 @@ Provide your own schema that differs from the parent. The tool must return data 
 
 **Remove Output Schema**
 ```python
-Tool.from_tool(parent_tool, output_schema=False)
+Tool.from_tool(parent_tool, output_schema=None)
 ```
 Removes the output schema declaration. Automatic structured content still works for object-like returns (dict, dataclass, Pydantic models) but primitive types won't be structured.
 

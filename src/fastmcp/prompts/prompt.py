@@ -4,12 +4,11 @@ from __future__ import annotations as _annotations
 
 import inspect
 import json
-from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
 import pydantic_core
-from mcp.types import ContentBlock, PromptMessage, Role, TextContent
+from mcp.types import ContentBlock, Icon, PromptMessage, Role, TextContent
 from mcp.types import Prompt as MCPPrompt
 from mcp.types import PromptArgument as MCPPromptArgument
 from pydantic import Field, TypeAdapter
@@ -62,7 +61,7 @@ class PromptArgument(FastMCPBaseModel):
     )
 
 
-class Prompt(FastMCPComponent, ABC):
+class Prompt(FastMCPComponent):
     """A prompt template that can be rendered with parameters."""
 
     arguments: list[PromptArgument] | None = Field(
@@ -106,6 +105,7 @@ class Prompt(FastMCPComponent, ABC):
             description=overrides.get("description", self.description),
             arguments=arguments,
             title=overrides.get("title", self.title),
+            icons=overrides.get("icons", self.icons),
             _meta=overrides.get(
                 "_meta", self.get_meta(include_fastmcp_meta=include_fastmcp_meta)
             ),
@@ -117,6 +117,7 @@ class Prompt(FastMCPComponent, ABC):
         name: str | None = None,
         title: str | None = None,
         description: str | None = None,
+        icons: list[Icon] | None = None,
         tags: set[str] | None = None,
         enabled: bool | None = None,
         meta: dict[str, Any] | None = None,
@@ -134,18 +135,22 @@ class Prompt(FastMCPComponent, ABC):
             name=name,
             title=title,
             description=description,
+            icons=icons,
             tags=tags,
             enabled=enabled,
             meta=meta,
         )
 
-    @abstractmethod
     async def render(
         self,
         arguments: dict[str, Any] | None = None,
     ) -> list[PromptMessage]:
-        """Render the prompt with arguments."""
-        raise NotImplementedError("Prompt.render() must be implemented by subclasses")
+        """Render the prompt with arguments.
+
+        This method is not implemented in the base Prompt class and must be
+        implemented by subclasses.
+        """
+        raise NotImplementedError("Subclasses must implement render()")
 
 
 class FunctionPrompt(Prompt):
@@ -160,6 +165,7 @@ class FunctionPrompt(Prompt):
         name: str | None = None,
         title: str | None = None,
         description: str | None = None,
+        icons: list[Icon] | None = None,
         tags: set[str] | None = None,
         enabled: bool | None = None,
         meta: dict[str, Any] | None = None,
@@ -253,6 +259,7 @@ class FunctionPrompt(Prompt):
             name=func_name,
             title=title,
             description=description,
+            icons=icons,
             arguments=arguments,
             tags=tags or set(),
             enabled=enabled if enabled is not None else True,

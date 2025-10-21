@@ -12,6 +12,7 @@ This implementation is based on:
 from collections.abc import Sequence
 
 import httpx
+from key_value.aio.protocols import AsyncKeyValue
 from pydantic import AnyHttpUrl, BaseModel, model_validator
 from typing_extensions import Self
 
@@ -19,7 +20,6 @@ from fastmcp.server.auth import TokenVerifier
 from fastmcp.server.auth.oauth_proxy import OAuthProxy
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 from fastmcp.utilities.logging import get_logger
-from fastmcp.utilities.storage import KVStorage
 
 logger = get_logger(__name__)
 
@@ -210,10 +210,11 @@ class OIDCProxy(OAuthProxy):
         required_scopes: list[str] | None = None,
         # FastMCP server configuration
         base_url: AnyHttpUrl | str,
+        issuer_url: AnyHttpUrl | str | None = None,
         redirect_path: str | None = None,
         # Client configuration
         allowed_client_redirect_uris: list[str] | None = None,
-        client_storage: KVStorage | None = None,
+        client_storage: AsyncKeyValue | None = None,
         # Token validation configuration
         token_endpoint_auth_method: str | None = None,
     ) -> None:
@@ -228,16 +229,16 @@ class OIDCProxy(OAuthProxy):
             timeout_seconds: HTTP request timeout in seconds
             algorithm: Token verifier algorithm
             required_scopes: Required OAuth scopes
-            base_url: Public URL of the server that exposes this FastMCP server; redirect path is
-                relative to this URL
+            base_url: Public URL where OAuth endpoints will be accessible (includes any mount path)
+            issuer_url: Issuer URL for OAuth metadata (defaults to base_url). Use root-level URL
+                to avoid 404s during discovery when mounting under a path.
             redirect_path: Redirect path configured in upstream OAuth app (defaults to "/auth/callback")
             allowed_client_redirect_uris: List of allowed redirect URI patterns for MCP clients.
                 Patterns support wildcards (e.g., "http://localhost:*", "https://*.example.com/*").
                 If None (default), only localhost redirect URIs are allowed.
                 If empty list, all redirect URIs are allowed (not recommended for production).
                 These are for MCP clients performing loopback redirects, NOT for the upstream OAuth app.
-            client_storage: Storage implementation for OAuth client registrations.
-                Defaults to file-based storage if not specified.
+            client_storage: An AsyncKeyValue-compatible store for client registrations, registrations are stored in memory if not provided
             token_endpoint_auth_method: Token endpoint authentication method for upstream server.
                 Common values: "client_secret_basic", "client_secret_post", "none".
                 If None, authlib will use its default (typically "client_secret_basic").
@@ -290,6 +291,7 @@ class OIDCProxy(OAuthProxy):
             "upstream_revocation_endpoint": revocation_endpoint,
             "token_verifier": token_verifier,
             "base_url": base_url,
+            "issuer_url": issuer_url or base_url,
             "service_documentation_url": self.oidc_config.service_documentation,
             "allowed_client_redirect_uris": allowed_client_redirect_uris,
             "client_storage": client_storage,
