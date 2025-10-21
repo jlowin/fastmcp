@@ -166,8 +166,9 @@ class TestKeycloakProviderIntegration:
                 auth_data = auth_server_response.json()
 
                 # Test protected resource metadata
+                # Per RFC 9728, when the resource is at /mcp, the metadata endpoint is at /.well-known/oauth-protected-resource/mcp
                 resource_response = await client.get(
-                    "/.well-known/oauth-protected-resource"
+                    "/.well-known/oauth-protected-resource/mcp"
                 )
                 assert resource_response.status_code == 200
                 resource_data = resource_response.json()
