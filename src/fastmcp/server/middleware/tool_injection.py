@@ -64,7 +64,7 @@ list_prompts_tool = Tool.from_function(
 )
 
 
-async def render_prompt(
+async def get_prompt(
     context: Context,
     name: Annotated[str, "The name of the prompt to render."],
     arguments: Annotated[dict[str, Any], "The arguments to pass to the prompt."],
@@ -75,8 +75,8 @@ async def render_prompt(
         return await client.get_prompt(name=name, arguments=arguments)
 
 
-render_prompt_tool = Tool.from_function(
-    fn=render_prompt,
+get_prompt_tool = Tool.from_function(
+    fn=get_prompt,
 )
 
 
@@ -111,7 +111,7 @@ class PromptToolMiddleware(ToolInjectionMiddleware):
     """A middleware for injecting prompts as tools into the context."""
 
     def __init__(self) -> None:
-        tools: list[Tool] = [list_prompts_tool, render_prompt_tool]
+        tools: list[Tool] = [list_prompts_tool, get_prompt_tool]
         super().__init__(tools=tools)
 
 

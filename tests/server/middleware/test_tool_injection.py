@@ -294,11 +294,11 @@ class TestPromptToolMiddleware:
             tools: list[MCPTool] = await client.list_tools()
 
         tool_names: list[str] = [tool.name for tool in tools]
-        # Should have: add, list_prompts, render_prompt
+        # Should have: add, list_prompts, get_prompt
         assert len(tools) == 3
         assert "add" in tool_names
         assert "list_prompts" in tool_names
-        assert "render_prompt" in tool_names
+        assert "get_prompt" in tool_names
 
     async def test_list_prompts_tool_works(self, server_with_prompts: FastMCP):
         """Test that the list_prompts tool can be called."""
@@ -344,14 +344,14 @@ class TestPromptToolMiddleware:
             ]
         )
 
-    async def test_render_prompt_tool_works(self, server_with_prompts: FastMCP):
-        """Test that the render_prompt tool can be called."""
+    async def test_get_prompt_tool_works(self, server_with_prompts: FastMCP):
+        """Test that the get_prompt tool can be called."""
         middleware = PromptToolMiddleware()
         server_with_prompts.add_middleware(middleware)
 
         async with Client[FastMCPTransport](server_with_prompts) as client:
             result: CallToolResult = await client.call_tool(
-                name="render_prompt",
+                name="get_prompt",
                 arguments={"name": "greeting", "arguments": {"name": "World"}},
             )
 
