@@ -665,8 +665,8 @@ class OAuthProxy(OAuthProvider):
         self._require_authorization_consent = require_authorization_consent
         if not require_authorization_consent:
             logger.warning(
-                "Consent screen disabled - only use for local development or testing. "
-                "In production, consent screens protect against confused deputy attacks."
+                "Authorization consent screen disabled - only use for local development or testing. "
+                "In production, this screen protects against confused deputy attacks."
             )
 
         # Extra parameters for authorization and token endpoints
