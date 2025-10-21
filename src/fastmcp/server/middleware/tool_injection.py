@@ -1,4 +1,4 @@
-"""A middleware for response caching."""
+"""A middleware for injecting tools into the MCP server context."""
 
 from collections.abc import Sequence
 from logging import Logger
