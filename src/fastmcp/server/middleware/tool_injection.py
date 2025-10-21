@@ -107,71 +107,17 @@ read_resource_tool = Tool.from_function(
 )
 
 
-class PromptToolMiddleware(Middleware):
+class PromptToolMiddleware(ToolInjectionMiddleware):
     """A middleware for injecting prompts as tools into the context."""
 
     def __init__(self) -> None:
-        super().__init__()
-
-    @override
-    async def on_list_tools(
-        self,
-        context: MiddlewareContext[mcp.types.ListToolsRequest],
-        call_next: CallNext[mcp.types.ListToolsRequest, Sequence[Tool]],
-    ) -> Sequence[Tool]:
-        """Inject prompts as tools into the response."""
-        return [*await call_next(context), list_prompts_tool, render_prompt_tool]
-
-    @override
-    async def on_call_tool(
-        self,
-        context: MiddlewareContext[mcp.types.CallToolRequestParams],
-        call_next: CallNext[mcp.types.CallToolRequestParams, ToolResult],
-    ) -> ToolResult:
-        """Intercept tool calls to injected tools."""
-        if context.message.name == render_prompt_tool.name:
-            return await render_prompt_tool.run(
-                arguments=context.message.arguments or {}
-            )
-
-        if context.message.name == list_prompts_tool.name:
-            return await list_prompts_tool.run(
-                arguments=context.message.arguments or {}
-            )
-
-        return await call_next(context)
+        tools: list[Tool] = [list_prompts_tool, render_prompt_tool]
+        super().__init__(tools=tools)
 
 
-class ResourceToolMiddleware(Middleware):
+class ResourceToolMiddleware(ToolInjectionMiddleware):
     """A middleware for injecting resources as tools into the context."""
 
     def __init__(self) -> None:
-        super().__init__()
-
-    @override
-    async def on_list_tools(
-        self,
-        context: MiddlewareContext[mcp.types.ListToolsRequest],
-        call_next: CallNext[mcp.types.ListToolsRequest, Sequence[Tool]],
-    ) -> Sequence[Tool]:
-        """Inject resources as tools into the response."""
-        return [*await call_next(context), list_resources_tool, read_resource_tool]
-
-    @override
-    async def on_call_tool(
-        self,
-        context: MiddlewareContext[mcp.types.CallToolRequestParams],
-        call_next: CallNext[mcp.types.CallToolRequestParams, ToolResult],
-    ) -> ToolResult:
-        """Intercept tool calls to injected tools."""
-        if context.message.name == list_resources_tool.name:
-            return await list_resources_tool.run(
-                arguments=context.message.arguments or {}
-            )
-
-        if context.message.name == read_resource_tool.name:
-            return await read_resource_tool.run(
-                arguments=context.message.arguments or {}
-            )
-
-        return await call_next(context)
+        tools: list[Tool] = [list_resources_tool, read_resource_tool]
+        super().__init__(tools=tools)
