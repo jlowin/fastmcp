@@ -2,7 +2,7 @@
 
 from collections.abc import Sequence
 from logging import Logger
-from typing import Any
+from typing import Annotated, Any
 
 import mcp.types
 from mcp.types import Prompt
@@ -65,7 +65,9 @@ list_prompts_tool = Tool.from_function(
 
 
 async def render_prompt(
-    context: Context, name: str, arguments: dict[str, Any]
+    context: Context,
+    name: Annotated[str, "The name of the prompt to render."],
+    arguments: Annotated[dict[str, Any], "The arguments to pass to the prompt."],
 ) -> mcp.types.GetPromptResult:
     """Render a prompt available on the server."""
 
@@ -91,7 +93,8 @@ list_resources_tool = Tool.from_function(
 
 
 async def read_resource(
-    context: Context, uri: AnyUrl | str
+    context: Context,
+    uri: Annotated[AnyUrl | str, "The URI of the resource to read."],
 ) -> list[mcp.types.TextResourceContents | mcp.types.BlobResourceContents]:
     """Read a resource available on the server."""
 
