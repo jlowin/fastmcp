@@ -125,7 +125,7 @@ def install_claude_code(
     full_command = env_config.build_command(["fastmcp", "run", server_spec])
 
     # Build claude mcp add command
-    cmd_parts = [claude_cmd, "mcp", "add"]
+    cmd_parts = [claude_cmd, "mcp", "add", name]
 
     # Add environment variables if specified (before the name and command)
     if env_vars:
@@ -133,7 +133,7 @@ def install_claude_code(
             cmd_parts.extend(["-e", f"{key}={value}"])
 
     # Add server name and command
-    cmd_parts.extend([name, "--"])
+    cmd_parts.append("--")
     cmd_parts.extend(full_command)
 
     try:
