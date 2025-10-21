@@ -67,7 +67,9 @@ list_prompts_tool = Tool.from_function(
 async def get_prompt(
     context: Context,
     name: Annotated[str, "The name of the prompt to render."],
-    arguments: Annotated[dict[str, Any], "The arguments to pass to the prompt."],
+    arguments: Annotated[
+        dict[str, Any] | None, "The arguments to pass to the prompt."
+    ] = None,
 ) -> mcp.types.GetPromptResult:
     """Render a prompt available on the server."""
 
@@ -78,6 +80,14 @@ async def get_prompt(
 get_prompt_tool = Tool.from_function(
     fn=get_prompt,
 )
+
+
+class PromptToolMiddleware(ToolInjectionMiddleware):
+    """A middleware for injecting prompts as tools into the context."""
+
+    def __init__(self) -> None:
+        tools: list[Tool] = [list_prompts_tool, get_prompt_tool]
+        super().__init__(tools=tools)
 
 
 async def list_resources(context: Context) -> list[mcp.types.Resource]:
@@ -105,14 +115,6 @@ async def read_resource(
 read_resource_tool = Tool.from_function(
     fn=read_resource,
 )
-
-
-class PromptToolMiddleware(ToolInjectionMiddleware):
-    """A middleware for injecting prompts as tools into the context."""
-
-    def __init__(self) -> None:
-        tools: list[Tool] = [list_prompts_tool, get_prompt_tool]
-        super().__init__(tools=tools)
 
 
 class ResourceToolMiddleware(ToolInjectionMiddleware):
