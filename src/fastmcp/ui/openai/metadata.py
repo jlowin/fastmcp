@@ -61,8 +61,7 @@ def build_widget_resource_meta(
         ```
     """
     return {
-        "openai/widgetDescription": widget_description
-        or f"{title} widget UI.",
+        "openai/widgetDescription": widget_description or f"{title} widget UI.",
         "openai/widgetPrefersBorder": widget_prefers_border,
         "openai/widgetCSP": {
             "resource_domains": _normalize_sequence(
@@ -94,7 +93,7 @@ def build_embedded_widget_resource(
         html: Widget HTML content
         title: Widget title
         mime_type: MIME type for the widget HTML
-        widget_description: Description of widget UI
+        widget_description: Description of widget UI (defaults to "{title} widget UI.")
         widget_prefers_border: Whether widget prefers a border
         widget_csp_resources: CSP resource_domains list
         widget_csp_connect: CSP connect_domains list
@@ -156,7 +155,7 @@ def build_widget_tool_meta(
         invoking: Status message shown while tool is executing
         invoked: Status message shown after tool completes
         mime_type: MIME type for the widget HTML
-        widget_description: Description of widget UI
+        widget_description: Description of widget UI (defaults to "{title} widget UI.")
         widget_prefers_border: Whether widget prefers a border
         widget_csp_resources: CSP resource_domains list
         widget_csp_connect: CSP connect_domains list

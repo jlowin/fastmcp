@@ -11,7 +11,7 @@ async def test_widget_with_dict_return():
     app = FastMCP("test")
 
     @app.ui.openai.widget(
-        identifier="test-widget",
+        name="test-widget",
         template_uri="ui://widget/test.html",
         html="<div>Test</div>",
     )
@@ -35,7 +35,7 @@ async def test_widget_with_str_return():
     app = FastMCP("test")
 
     @app.ui.openai.widget(
-        identifier="text-widget",
+        name="text-widget",
         template_uri="ui://widget/text.html",
         html="<div>Text</div>",
     )
@@ -56,7 +56,7 @@ async def test_widget_with_tuple_return():
     app = FastMCP("test")
 
     @app.ui.openai.widget(
-        identifier="combo-widget",
+        name="combo-widget",
         template_uri="ui://widget/combo.html",
         html="<div>Combo</div>",
     )
@@ -77,7 +77,7 @@ async def test_widget_with_async_function():
     app = FastMCP("test")
 
     @app.ui.openai.widget(
-        identifier="async-widget",
+        name="async-widget",
         template_uri="ui://widget/async.html",
         html="<div>Async</div>",
     )
@@ -99,7 +99,7 @@ async def test_widget_resource_registration():
     app = FastMCP("test")
 
     @app.ui.openai.widget(
-        identifier="widget-with-resource",
+        name="widget-with-resource",
         template_uri="ui://widget/test-resource.html",
         html="<div id='root'>Widget HTML</div>",
         title="Test Resource Widget",
@@ -122,7 +122,7 @@ async def test_widget_metadata():
     app = FastMCP("test")
 
     @app.ui.openai.widget(
-        identifier="meta-widget",
+        name="meta-widget",
         template_uri="ui://widget/meta.html",
         html="<div>Meta</div>",
         invoking="Loading widget...",
@@ -150,7 +150,7 @@ async def test_widget_csp_configuration():
     app = FastMCP("test")
 
     @app.ui.openai.widget(
-        identifier="csp-widget",
+        name="csp-widget",
         template_uri="ui://widget/csp.html",
         html="<div>CSP</div>",
         widget_csp_resources=["https://custom.com", "https://another.com"],
@@ -177,7 +177,7 @@ async def test_widget_with_title_and_description():
     app = FastMCP("test")
 
     @app.ui.openai.widget(
-        identifier="titled-widget",
+        name="titled-widget",
         template_uri="ui://widget/titled.html",
         html="<div>Title</div>",
         title="My Custom Title",
@@ -199,7 +199,7 @@ async def test_widget_with_tags():
     app = FastMCP("test")
 
     @app.ui.openai.widget(
-        identifier="tagged-widget",
+        name="tagged-widget",
         template_uri="ui://widget/tagged.html",
         html="<div>Tags</div>",
         tags={"visualization", "data"},
@@ -219,7 +219,7 @@ async def test_widget_with_enabled_false():
     app = FastMCP("test")
 
     @app.ui.openai.widget(
-        identifier="disabled-widget",
+        name="disabled-widget",
         template_uri="ui://widget/disabled.html",
         html="<div>Disabled</div>",
         enabled=False,
@@ -234,19 +234,19 @@ async def test_widget_with_enabled_false():
     assert tool.enabled is False
 
 
-async def test_widget_with_custom_identifier():
-    """Test widget with custom identifier different from function name."""
+async def test_widget_with_custom_name():
+    """Test widget with custom name different from function name."""
     app = FastMCP("test")
 
     @app.ui.openai.widget(
-        identifier="custom-id",
+        name="custom-id",
         template_uri="ui://widget/custom.html",
         html="<div>Custom</div>",
     )
     def some_function_name() -> dict:
         return {"test": "data"}
 
-    # Should be registered with custom identifier
+    # Should be registered with custom name
     tools = await app.get_tools()
     assert "custom-id" in tools
     assert "some_function_name" not in tools
@@ -257,7 +257,7 @@ async def test_widget_annotations():
     app = FastMCP("test")
 
     @app.ui.openai.widget(
-        identifier="annotated-widget",
+        name="annotated-widget",
         template_uri="ui://widget/annotated.html",
         html="<div>Annotated</div>",
     )
@@ -319,7 +319,7 @@ async def test_widget_invalid_return_type():
     app = FastMCP("test")
 
     @app.ui.openai.widget(
-        identifier="bad-return-widget",
+        name="bad-return-widget",
         template_uri="ui://widget/bad.html",
         html="<div>Bad</div>",
     )
@@ -340,7 +340,7 @@ async def test_widget_with_exclude_args():
     app = FastMCP("test")
 
     @app.ui.openai.widget(
-        identifier="exclude-args-widget",
+        name="exclude-args-widget",
         template_uri="ui://widget/exclude.html",
         html="<div>Exclude</div>",
         exclude_args=["secret_param"],

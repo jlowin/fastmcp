@@ -34,7 +34,7 @@ class OpenAIUIManager:
         self,
         name_or_fn: AnyFunction,
         *,
-        identifier: str | None = None,
+        name: str | None = None,
         template_uri: str,
         html: str,
         title: str | None = None,
@@ -61,7 +61,7 @@ class OpenAIUIManager:
         self,
         name_or_fn: str | None = None,
         *,
-        identifier: str | None = None,
+        name: str | None = None,
         template_uri: str,
         html: str,
         title: str | None = None,
@@ -87,7 +87,7 @@ class OpenAIUIManager:
         self,
         name_or_fn: str | AnyFunction | None = None,
         *,
-        identifier: str | None = None,
+        name: str | None = None,
         template_uri: str | None = None,
         html: str | None = None,
         title: str | None = None,
@@ -122,15 +122,15 @@ class OpenAIUIManager:
         - `tuple[str, dict]`: Both narrative text and structured data
 
         This decorator supports multiple calling patterns:
-        - @server.ui.openai.widget(identifier=..., template_uri=..., html=...)
-        - @server.ui.openai.widget("name", identifier=..., template_uri=..., html=...)
+        - @server.ui.openai.widget(name=..., template_uri=..., html=...)
+        - @server.ui.openai.widget("name", template_uri=..., html=...)
 
         Args:
             name_or_fn: Either a function (direct decoration) or string name
-            identifier: Tool name (defaults to function name or name_or_fn if str)
+            name: Tool name (defaults to function name or name_or_fn if str)
             template_uri: Widget template URI (e.g. "ui://widget/pizza-map.html")
             html: Widget HTML content (must include div and script tags)
-            title: Widget display title (defaults to identifier)
+            title: Widget display title (defaults to name)
             description: Tool description (defaults to function docstring)
             invoking: Status message while tool executes (e.g. "Hand-tossing a map")
             invoked: Status message after tool completes (e.g. "Served a fresh map")
@@ -155,7 +155,7 @@ class OpenAIUIManager:
             Register a widget with data only:
             ```python
             @app.ui.openai.widget(
-                identifier="pizza-map",
+                name="pizza-map",
                 template_uri="ui://widget/pizza-map.html",
                 html='<div id="root"></div><script src="..."></script>',
                 invoking="Hand-tossing a map",
@@ -169,7 +169,7 @@ class OpenAIUIManager:
             Register a widget with both text and data:
             ```python
             @app.ui.openai.widget(
-                identifier="weather",
+                name="weather",
                 template_uri="ui://widget/weather.html",
                 html='<div id="weather"></div>...'
             )
@@ -180,7 +180,7 @@ class OpenAIUIManager:
             Register a widget with text only:
             ```python
             @app.ui.openai.widget(
-                identifier="status",
+                name="status",
                 template_uri="ui://widget/status.html",
                 html='<div id="status"></div>...'
             )
@@ -209,16 +209,16 @@ class OpenAIUIManager:
                 )
             )
 
-        # Determine the widget identifier and function based on calling pattern
+        # Determine the widget name and function based on calling pattern
         if inspect.isroutine(name_or_fn):
             # Case 1: @widget(template_uri=..., html=...) - function passed directly
             fn = name_or_fn
-            widget_identifier = identifier or fn.__name__
+            widget_name = name or fn.__name__
 
             # Register immediately and return
             return self._register_widget(
                 fn=fn,
-                identifier=widget_identifier,
+                identifier=widget_name,
                 template_uri=template_uri,
                 html=html,
                 title=title,
@@ -242,15 +242,15 @@ class OpenAIUIManager:
 
         elif isinstance(name_or_fn, str):
             # Case 2: @widget("custom_name", template_uri=..., html=...)
-            if identifier is not None:
+            if name is not None:
                 raise TypeError(
                     "Cannot specify both a name as first argument and as keyword argument. "
-                    f"Use either @widget('{name_or_fn}', ...) or @widget(identifier='{identifier}', ...), not both."
+                    f"Use either @widget('{name_or_fn}', ...) or @widget(name='{name}', ...), not both."
                 )
-            widget_identifier = name_or_fn
+            widget_name = name_or_fn
         elif name_or_fn is None:
-            # Case 3: @widget(identifier="name", template_uri=..., html=...)
-            widget_identifier = identifier
+            # Case 3: @widget(name="name", template_uri=..., html=...)
+            widget_name = name
         else:
             raise TypeError(
                 f"First argument to @widget must be a function, string, or None, got {type(name_or_fn)}"
@@ -258,10 +258,10 @@ class OpenAIUIManager:
 
         # Return decorator that will be applied to the function
         def decorator(fn: AnyFunction) -> FunctionTool:
-            actual_identifier = widget_identifier or fn.__name__
+            actual_name = widget_name or fn.__name__
             return self._register_widget(
                 fn=fn,
-                identifier=actual_identifier,
+                identifier=actual_name,
                 template_uri=template_uri,
                 html=html,
                 title=title,

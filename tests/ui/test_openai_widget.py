@@ -8,7 +8,7 @@ async def test_widget_decorator_basic():
     app = FastMCP("test")
 
     @app.ui.openai.widget(
-        identifier="my_widget",
+        name="my_widget",
         template_uri="ui://widget/test.html",
         html="<div>Test Widget</div>",
     )
@@ -22,11 +22,11 @@ async def test_widget_decorator_basic():
 
 
 async def test_widget_decorator_with_name():
-    """Test widget decorator with custom identifier."""
+    """Test widget decorator with custom name."""
     app = FastMCP("test")
 
     @app.ui.openai.widget(
-        identifier="custom_widget",
+        name="custom_widget",
         template_uri="ui://widget/custom.html",
         html="<div>Custom</div>",
     )
@@ -43,7 +43,7 @@ async def test_widget_decorator_with_description():
     app = FastMCP("test")
 
     @app.ui.openai.widget(
-        identifier="my_widget",
+        name="my_widget",
         template_uri="ui://widget/test.html",
         html="<div>Test</div>",
         description="This is a test widget",
@@ -61,7 +61,7 @@ async def test_widget_decorator_with_title():
     app = FastMCP("test")
 
     @app.ui.openai.widget(
-        identifier="my_widget",
+        name="my_widget",
         template_uri="ui://widget/test.html",
         html="<div>Test</div>",
         title="My Widget Title",
@@ -79,7 +79,7 @@ async def test_widget_can_be_called():
     app = FastMCP("test")
 
     @app.ui.openai.widget(
-        identifier="calculator",
+        name="calculator",
         template_uri="ui://widget/calc.html",
         html="<div>Calc</div>",
     )
