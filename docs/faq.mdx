@@ -1,0 +1,57 @@
+---
+title: "Frequently Asked Questions"
+sidebarTitle: "FAQ"
+description: Common questions and troubleshooting for FastMCP
+icon: circle-question
+---
+
+<AccordionGroup>
+
+<Accordion title="Why am I seeing errors when connecting to my OAuth-protected server?" icon="triangle-exclamation" defaultOpen>
+
+If you're seeing errors like "Client Not Registered," "Authentication failed," or "invalid_token" when connecting to a FastMCP server using [OAuth Proxy](/servers/auth/oauth-proxy) or [OIDC Proxy](/servers/auth/oidc-proxy), here's what's happening:
+
+**The short version:**
+
+Your server restarted and lost all the client registrations and tokens it had stored in memory. This is expected behavior with the default configuration.
+
+**What you'll see:**
+
+- An error page in your browser saying "Client Not Registered"
+- Your MCP client (VS Code, Claude Desktop, etc.) stuck waiting indefinitely
+- Error messages like `"invalid_token"` or `"invalid_client"` in logs
+
+**How to fix it right now:**
+
+1. Close any error pages in your browser
+2. Clear authentication tokens in your MCP client (or restart it)
+3. Try connecting again - your client will automatically re-register
+
+**How to prevent it from happening:**
+
+The OAuth Proxy uses ephemeral (in-memory) storage by default. When your server restarts, all registrations and tokens are lost.
+
+Configure persistent storage to prevent this:
+
+```python
+from key_value.aio.adapters.sqlite import SqliteStore
+
+auth = OAuthProxy(
+    # ... your OAuth config ...
+    client_storage=SqliteStore("oauth_clients.db"),
+    jwt_signing_key=os.getenv("JWT_SIGNING_KEY"),
+    token_encryption_key=os.getenv("TOKEN_ENCRYPTION_KEY"),
+)
+```
+
+**For detailed troubleshooting:**
+
+See the [OAuth Proxy Troubleshooting section](/servers/auth/oauth-proxy#troubleshooting-authentication-errors) for:
+- Complete list of error messages and what they mean
+- Step-by-step fixes for each error
+- Persistent storage configuration examples
+- Explanation of why clients can't auto-detect these errors
+
+</Accordion>
+
+</AccordionGroup>
