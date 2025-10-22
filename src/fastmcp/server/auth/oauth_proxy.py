@@ -68,9 +68,10 @@ from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.ui import (
     BUTTON_STYLES,
     DETAIL_BOX_STYLES,
+    DETAILS_STYLES,
     INFO_BOX_STYLES,
+    REDIRECT_SECTION_STYLES,
     TOOLTIP_STYLES,
-    create_detail_box,
     create_logo,
     create_page,
     create_secure_html_response,
@@ -233,16 +234,13 @@ def create_consent_html(
     txn_id: str,
     csrf_token: str,
     client_name: str | None = None,
-    title: str = "Authorization Consent",
+    title: str = "Application Access Request",
     server_name: str | None = None,
     server_icon_url: str | None = None,
     server_website_url: str | None = None,
+    client_website_url: str | None = None,
 ) -> str:
     """Create a styled HTML consent page for OAuth authorization requests."""
-    # Format scopes for display
-    scopes_display = ", ".join(scopes) if scopes else "None"
-
-    # Build warning box with client name if available
     import html as html_module
 
     client_display = html_module.escape(client_name or client_id)
@@ -251,29 +249,58 @@ def create_consent_html(
     # Make server name a hyperlink if website URL is available
     if server_website_url:
         website_url_escaped = html_module.escape(server_website_url)
-        server_display = f'<a href="{website_url_escaped}" target="_blank" rel="noopener noreferrer">{server_name_escaped}</a>'
+        server_display = f'<a href="{website_url_escaped}" target="_blank" rel="noopener noreferrer" class="server-name-link">{server_name_escaped}</a>'
     else:
         server_display = server_name_escaped
 
-    warning_box = f"""
-        <div class="warning-box">
-            <p><strong>{client_display}</strong> is requesting access to <strong>{server_display}</strong>.</p>
-            <p>Review the details below before approving.</p>
+    # Build intro box with call-to-action
+    intro_box = f"""
+        <div class="info-box">
+            <p>The application <strong>{client_display}</strong> wants to access the MCP server <strong>{server_display}</strong>. Please ensure you recognize the callback address below.</p>
         </div>
     """
 
-    # Build detail box with client information
-    detail_rows = []
-    if client_name:
-        detail_rows.append(("Client Name", client_name))
-    detail_rows.extend(
+    # Build redirect URI section (yellow box, centered)
+    redirect_uri_escaped = html_module.escape(redirect_uri)
+    redirect_section = f"""
+        <div class="redirect-section">
+            <span class="label">Credentials will be sent to:</span>
+            <div class="value">{redirect_uri_escaped}</div>
+        </div>
+    """
+
+    # Build advanced details with collapsible section
+    detail_rows = [
+        ("Application Name", html_module.escape(client_name or client_id)),
+        ("Application Website", html_module.escape(client_website_url or "N/A")),
+        ("Application ID", client_id),
+        ("Redirect URI", redirect_uri_escaped),
+        (
+            "Requested Scopes",
+            ", ".join(html_module.escape(s) for s in scopes) if scopes else "None",
+        ),
+    ]
+
+    detail_rows_html = "\n".join(
         [
-            ("Client ID", client_id),
-            ("Redirect URI", redirect_uri),
-            ("Requested Scopes", scopes_display),
+            f"""
+        <div class="detail-row">
+            <div class="detail-label">{label}:</div>
+            <div class="detail-value">{value}</div>
+        </div>
+        """
+            for label, value in detail_rows
         ]
     )
-    detail_box = create_detail_box(detail_rows)
+
+    advanced_details = f"""
+        <details>
+            <summary>Advanced Details</summary>
+            <div class="detail-box">
+                {detail_rows_html}
+            </div>
+        </details>
+    """
 
     # Build form with buttons
     form = f"""
@@ -281,13 +308,13 @@ def create_consent_html(
             <input type="hidden" name="txn_id" value="{txn_id}" />
             <input type="hidden" name="csrf_token" value="{csrf_token}" />
             <div class="button-group">
-                <button type="submit" name="action" value="approve" class="btn-approve">Approve</button>
+                <button type="submit" name="action" value="approve" class="btn-approve">Allow Access</button>
                 <button type="submit" name="action" value="deny" class="btn-deny">Deny</button>
             </div>
         </form>
     """
 
-    # Build help link with tooltip
+    # Build help link with tooltip (identical to current implementation)
     help_link = """
         <div class="help-link-container">
             <span class="help-link">
@@ -312,9 +339,10 @@ def create_consent_html(
     content = f"""
         <div class="container">
             {create_logo(icon_url=server_icon_url, alt_text=server_name or "FastMCP")}
-            <h1>Authorization Consent</h1>
-            {warning_box}
-            {detail_box}
+            <h1>Application Access Request</h1>
+            {intro_box}
+            {redirect_section}
+            {advanced_details}
             {form}
         </div>
         {help_link}
@@ -322,7 +350,12 @@ def create_consent_html(
 
     # Additional styles needed for this page
     additional_styles = (
-        INFO_BOX_STYLES + DETAIL_BOX_STYLES + BUTTON_STYLES + TOOLTIP_STYLES
+        INFO_BOX_STYLES
+        + REDIRECT_SECTION_STYLES
+        + DETAILS_STYLES
+        + DETAIL_BOX_STYLES
+        + BUTTON_STYLES
+        + TOOLTIP_STYLES
     )
 
     # Need to allow form-action for form submission
@@ -529,6 +562,8 @@ class OAuthProxy(OAuthProvider):
         jwt_signing_key: str | bytes | None = None,
         # Token encryption key (optional, ephemeral if not provided)
         token_encryption_key: str | bytes | None = None,
+        # Consent screen configuration
+        require_authorization_consent: bool = True,
     ):
         """Initialize the OAuth proxy provider.
 
@@ -569,6 +604,10 @@ class OAuthProxy(OAuthProvider):
             token_encryption_key: Optional secret for encrypting upstream tokens at rest (accepts any string or bytes).
                 Default: ephemeral (random salt at startup, won't survive restart).
                 Production: provide explicit key from environment variable.
+            require_authorization_consent: Whether to require user consent before authorizing clients (default True).
+                When True, users see a consent screen before being redirected to the upstream IdP.
+                When False, authorization proceeds directly without user confirmation.
+                SECURITY WARNING: Only disable for local development or testing environments.
         """
         # Always enable DCR since we implement it locally for MCP clients
         client_registration_options = ClientRegistrationOptions(
@@ -621,6 +660,14 @@ class OAuthProxy(OAuthProvider):
 
         # Token endpoint authentication
         self._token_endpoint_auth_method = token_endpoint_auth_method
+
+        # Consent screen configuration
+        self._require_authorization_consent = require_authorization_consent
+        if not require_authorization_consent:
+            logger.warning(
+                "Authorization consent screen disabled - only use for local development or testing. "
+                "In production, this screen protects against confused deputy attacks."
+            )
 
         # Extra parameters for authorization and token endpoints
         self._extra_authorize_params = extra_authorize_params or {}
@@ -882,6 +929,9 @@ class OAuthProxy(OAuthProvider):
         1. Store transaction with client details and PKCE (if forwarding)
         2. Return local /consent URL; browser visits consent first
         3. Consent handler redirects to upstream IdP if approved/already approved
+
+        If consent is disabled (require_authorization_consent=False), skip the consent screen
+        and redirect directly to the upstream IdP.
         """
         # Generate transaction ID for this authorization request
         txn_id = secrets.token_urlsafe(32)
@@ -897,22 +947,36 @@ class OAuthProxy(OAuthProvider):
             )
 
         # Store transaction data for IdP callback processing
+        transaction = OAuthTransaction(
+            txn_id=txn_id,
+            client_id=client.client_id,
+            client_redirect_uri=str(params.redirect_uri),
+            client_state=params.state or "",
+            code_challenge=params.code_challenge,
+            code_challenge_method=getattr(params, "code_challenge_method", "S256"),
+            scopes=params.scopes or [],
+            created_at=time.time(),
+            resource=getattr(params, "resource", None),
+            proxy_code_verifier=proxy_code_verifier,
+        )
         await self._transaction_store.put(
             key=txn_id,
-            value=OAuthTransaction(
-                txn_id=txn_id,
-                client_id=client.client_id,
-                client_redirect_uri=str(params.redirect_uri),
-                client_state=params.state or "",
-                code_challenge=params.code_challenge,
-                code_challenge_method=getattr(params, "code_challenge_method", "S256"),
-                scopes=params.scopes or [],
-                created_at=time.time(),
-                resource=getattr(params, "resource", None),
-                proxy_code_verifier=proxy_code_verifier,
-            ),
+            value=transaction,
             ttl=15 * 60,  # Auto-expire after 15 minutes
         )
+
+        # If consent is disabled, skip consent screen and go directly to upstream IdP
+        if not self._require_authorization_consent:
+            upstream_url = self._build_upstream_authorize_url(
+                txn_id, transaction.model_dump()
+            )
+            logger.debug(
+                "Starting OAuth transaction %s for client %s, redirecting directly to upstream IdP (consent disabled, PKCE forwarding: %s)",
+                txn_id,
+                client.client_id,
+                "enabled" if proxy_code_challenge else "disabled",
+            )
+            return upstream_url
 
         consent_url = f"{str(self.base_url).rstrip('/')}/consent?txn_id={txn_id}"
 
