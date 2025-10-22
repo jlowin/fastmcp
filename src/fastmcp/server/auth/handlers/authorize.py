@@ -310,9 +310,9 @@ class AuthorizationHandler(SDKAuthorizationHandler):
             error_dict["registration_endpoint"] = registration_endpoint
             error_dict["authorization_server_metadata"] = discovery_endpoint
 
-            from mcp.server.auth.json_response import PydanticJSONResponse
+            from starlette.responses import JSONResponse
 
-            response = PydanticJSONResponse(
+            response = JSONResponse(
                 status_code=400,
                 content=error_dict,
                 headers={"Cache-Control": "no-store"},
