@@ -75,7 +75,7 @@ Returns structured data only, which the widget renders:
 
 ```python
 @app.ui.openai.widget(
-    identifier="pizza-map",
+    name="pizza-map",
     template_uri="ui://widget/pizza-map.html",
     html=PIZZAZ_HTML,
     invoking="Hand-tossing a map",
@@ -91,7 +91,7 @@ Returns both narrative text and structured data:
 
 ```python
 @app.ui.openai.widget(
-    identifier="pizza-tracker",
+    name="pizza-tracker",
     template_uri="ui://widget/pizza-tracker.html",
     html=PIZZAZ_HTML,
     invoking="Tracking your pizza",
@@ -109,7 +109,7 @@ Returns text only, no structured data:
 
 ```python
 @app.ui.openai.widget(
-    identifier="pizza-status",
+    name="pizza-status",
     template_uri="ui://widget/pizza-status.html",
     html=PIZZAZ_HTML,
 )
