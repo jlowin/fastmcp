@@ -446,6 +446,10 @@
   },
   "redirects": [
     {
+      "destination": "/getting-started/welcome",
+      "source": "/docs"
+    },
+    {
       "destination": "/servers/proxy",
       "source": "/patterns/proxy"
     },
