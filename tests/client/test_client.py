@@ -968,26 +968,52 @@ class TestAuth:
             Client(transport=StdioTransport("echo", ["hello"]), auth="oauth")
 
     def test_oauth_literal_sets_up_oauth_shttp(self):
-        client = Client(
-            transport=StreamableHttpTransport("http://localhost:8000"), auth="oauth"
-        )
+        # Expect warning about in-memory token storage
+        with pytest.warns(
+            UserWarning,
+            match="Using in-memory token storage is not recommended for production use",
+        ):
+            client = Client(
+                transport=StreamableHttpTransport("http://localhost:8000"), auth="oauth"
+            )
         assert isinstance(client.transport, StreamableHttpTransport)
         assert isinstance(client.transport.auth, OAuthClientProvider)
 
     def test_oauth_literal_pass_direct_to_transport(self):
-        client = Client(
-            transport=StreamableHttpTransport("http://localhost:8000", auth="oauth"),
-        )
+        # Expect warning about in-memory token storage
+        with pytest.warns(
+            UserWarning,
+            match="Using in-memory token storage is not recommended for production use",
+        ):
+            client = Client(
+                transport=StreamableHttpTransport(
+                    "http://localhost:8000", auth="oauth"
+                ),
+            )
         assert isinstance(client.transport, StreamableHttpTransport)
         assert isinstance(client.transport.auth, OAuthClientProvider)
 
     def test_oauth_literal_sets_up_oauth_sse(self):
-        client = Client(transport=SSETransport("http://localhost:8000"), auth="oauth")
+        # Expect warning about in-memory token storage
+        with pytest.warns(
+            UserWarning,
+            match="Using in-memory token storage is not recommended for production use",
+        ):
+            client = Client(
+                transport=SSETransport("http://localhost:8000"), auth="oauth"
+            )
         assert isinstance(client.transport, SSETransport)
         assert isinstance(client.transport.auth, OAuthClientProvider)
 
     def test_oauth_literal_pass_direct_to_transport_sse(self):
-        client = Client(transport=SSETransport("http://localhost:8000", auth="oauth"))
+        # Expect warning about in-memory token storage
+        with pytest.warns(
+            UserWarning,
+            match="Using in-memory token storage is not recommended for production use",
+        ):
+            client = Client(
+                transport=SSETransport("http://localhost:8000", auth="oauth")
+            )
         assert isinstance(client.transport, SSETransport)
         assert isinstance(client.transport.auth, OAuthClientProvider)
 
