@@ -5,6 +5,7 @@ from logging import Logger
 from typing import Annotated, Any
 
 import mcp.types
+from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.types import Prompt
 from pydantic import AnyUrl
 from typing_extensions import override
@@ -105,11 +106,9 @@ list_resources_tool = Tool.from_function(
 async def read_resource(
     context: Context,
     uri: Annotated[AnyUrl | str, "The URI of the resource to read."],
-) -> list[mcp.types.TextResourceContents | mcp.types.BlobResourceContents]:
+) -> list[ReadResourceContents]:
     """Read a resource available on the server."""
-
-    async with Client[FastMCPTransport](context.fastmcp) as client:
-        return await client.read_resource(uri=uri)
+    return await context.read_resource(uri=uri)
 
 
 read_resource_tool = Tool.from_function(

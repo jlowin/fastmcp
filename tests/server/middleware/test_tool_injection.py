@@ -31,8 +31,8 @@ def divide_fn(a: int, b: int) -> float:
     return a / b
 
 
-multiply_tool = Tool.from_function(fn=multiply_fn, name="multiply")
-divide_tool = Tool.from_function(fn=divide_fn, name="divide")
+multiply_tool = Tool.from_function(fn=multiply_fn, name="multiply", tags={"math"})
+divide_tool = Tool.from_function(fn=divide_fn, name="divide", tags={"math"})
 
 
 class TestToolInjectionMiddleware:
@@ -239,6 +239,19 @@ class TestToolInjectionMiddleware:
         # Should use the injected tool (multiply behavior)
         assert result.structured_content is not None
         assert result.structured_content["result"] == 15
+
+    async def test_injected_tool_bypass_filtering(self, base_server: FastMCP):
+        """Test that injected tools bypass filtering."""
+        middleware: ToolInjectionMiddleware = ToolInjectionMiddleware(
+            tools=[multiply_tool]
+        )
+        base_server.add_middleware(middleware)
+        base_server.exclude_tags = {"math"}
+
+        async with Client[FastMCPTransport](base_server) as client:
+            tools: list[MCPTool] = await client.list_tools()
+            tool_names: list[str] = [tool.name for tool in tools]
+            assert "multiply" in tool_names
 
     async def test_empty_tool_injection(self, base_server: FastMCP):
         """Test that middleware with no tools doesn't affect behavior."""
