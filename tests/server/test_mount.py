@@ -972,6 +972,45 @@ class TestAsProxyKwarg:
         assert lifespan_check.count("start") >= 2
 
 
+class TestToolNamePrefixing:
+    """Test that tool names are prefixed when mounted."""
+
+    async def test_tool_name_prefixing(self):
+        """Test that tool names (not just keys) are prefixed when mounted with a prefix."""
+        # Create a sub-app with a tool
+        sub_app = FastMCP("SubApp")
+
+        @sub_app.tool
+        def my_tool() -> str:
+            return "Tool result"
+
+        # Create main app and mount sub-app with prefix
+        main_app = FastMCP("MainApp")
+        main_app.mount(sub_app, "prefix")
+
+        # Get tools from main app
+        tools = await main_app.get_tools()
+
+        # Should have prefixed key
+        assert "prefix_my_tool" in tools
+
+        # The tool name should also be prefixed
+        tool = tools["prefix_my_tool"]
+        assert tool.name == "prefix_my_tool"
+        assert tool.key == "prefix_my_tool"
+
+        # Test via client to ensure both discovery and calling work
+        async with Client(main_app) as client:
+            # List tools should show prefixed name
+            tool_list = await client.list_tools()
+            tool_names = [t.name for t in tool_list]
+            assert "prefix_my_tool" in tool_names
+
+            # Calling with the prefixed name should work
+            result = await client.call_tool("prefix_my_tool", {})
+            assert result.data == "Tool result"
+
+
 class TestResourceNamePrefixing:
     """Test that resource and resource template names get prefixed when mounted."""
 
