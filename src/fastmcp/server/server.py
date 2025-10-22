@@ -464,7 +464,12 @@ class FastMCP(Generic[LifespanResultT]):
                 child_tools = await mounted.server.get_tools()
                 for key, tool in child_tools.items():
                     new_key = f"{mounted.prefix}_{key}" if mounted.prefix else key
-                    all_tools[new_key] = tool.model_copy(key=new_key)
+                    all_tools[new_key] = tool.model_copy(
+                        key=new_key,
+                        update={"name": f"{mounted.prefix}_{tool.name}"}
+                        if mounted.prefix
+                        else {},
+                    )
             except Exception as e:
                 logger.warning(
                     f"Failed to get tools from mounted server {mounted.server.name!r}: {e}"
@@ -722,7 +727,9 @@ class FastMCP(Generic[LifespanResultT]):
                     key = tool.key
                     if mounted.prefix:
                         key = f"{mounted.prefix}_{tool.key}"
-                        tool = tool.model_copy(key=key)
+                        tool = tool.model_copy(
+                            key=key, update={"name": f"{mounted.prefix}_{tool.name}"}
+                        )
                     # Later mounted servers override earlier ones
                     all_tools[key] = tool
             except Exception as e:
