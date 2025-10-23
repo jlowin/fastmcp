@@ -7,7 +7,14 @@ import json
 import re
 import secrets
 import warnings
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import (
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Collection,
+    Mapping,
+    Sequence,
+)
 from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
 from functools import partial
@@ -141,16 +148,16 @@ class FastMCP(Generic[LifespanResultT]):
         website_url: str | None = None,
         icons: list[mcp.types.Icon] | None = None,
         auth: AuthProvider | None | NotSetT = NotSet,
-        middleware: list[Middleware] | None = None,
+        middleware: Sequence[Middleware] | None = None,
         lifespan: LifespanCallable | None = None,
         dependencies: list[str] | None = None,
         resource_prefix_format: Literal["protocol", "path"] | None = None,
         mask_error_details: bool | None = None,
-        tools: list[Tool | Callable[..., Any]] | None = None,
-        tool_transformations: dict[str, ToolTransformConfig] | None = None,
+        tools: Sequence[Tool | Callable[..., Any]] | None = None,
+        tool_transformations: Mapping[str, ToolTransformConfig] | None = None,
         tool_serializer: Callable[[Any], str] | None = None,
-        include_tags: set[str] | None = None,
-        exclude_tags: set[str] | None = None,
+        include_tags: Collection[str] | None = None,
+        exclude_tags: Collection[str] | None = None,
         include_fastmcp_meta: bool | None = None,
         on_duplicate_tools: DuplicateBehavior | None = None,
         on_duplicate_resources: DuplicateBehavior | None = None,
@@ -232,7 +239,7 @@ class FastMCP(Generic[LifespanResultT]):
             else fastmcp.settings.strict_input_validation
         )
 
-        self.middleware = middleware or []
+        self.middleware = list(middleware) if middleware else []
 
         # Set up MCP protocol handlers
         self._setup_handlers()
