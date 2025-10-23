@@ -65,23 +65,20 @@ def create_unregistered_client_html(
     # Main error message
     error_box = f"""
         <div class="info-box error">
-            <p>The client ID <code>{client_id_escaped}</code> is not registered with this server.</p>
+            <p>The client ID <code>{client_id_escaped}</code> was not found in the server's client registry.</p>
         </div>
     """
 
     # What to do - yellow warning box
     warning_box = """
         <div class="info-box warning">
-            <p><strong>Your application is waiting for authorization to complete</strong></p>
             <p>Your MCP client opened this page to complete OAuth authorization,
-            but cannot proceed because its client ID is not registered with the server.</p>
-            <p><strong>What to do:</strong></p>
+            but the server did not recognize its client ID. To fix this, try:</p>
             <ul>
                 <li>Close this browser window</li>
                 <li>Clear authentication tokens in your MCP client (or restart it)</li>
-                <li>Try connecting again</li>
+                <li>Try connecting again - your client should automatically re-register</li>
             </ul>
-            <p><em>This usually happens when the server restarts and loses ephemeral client registrations.</em></p>
         </div>
     """
 
@@ -97,12 +94,6 @@ def create_unregistered_client_html(
                     In browser-delegated OAuth flows (like VS Code or Claude Desktop), your
                     application cannot detect this error automatically - it's waiting for a
                     callback that will never arrive. You must manually clear auth tokens and reconnect.
-                    <br><br>
-                    This commonly occurs when the server restarts and loses ephemeral client
-                    registrations. Configure persistent storage in production to prevent this.
-                    <br><br>
-                    <a href="https://gofastmcp.com/faq"
-                    target="_blank" class="tooltip-link">See the FAQ for troubleshooting →</a>
                 </span>
             </span>
         </div>
@@ -297,10 +288,9 @@ class AuthorizationHandler(SDKAuthorizationHandler):
                 error="invalid_request",
                 error_description=(
                     f"Client ID '{client_id}' is not registered with this server. "
-                    f"The server returned HTTP 400 because the client must register before authorization. "
-                    f"Compatible MCP clients should automatically re-register by sending a POST request to "
-                    f"the registration_endpoint and retry the authorization request. "
-                    f"If you're seeing this repeatedly, try clearing cached authentication tokens."
+                    f"MCP clients should automatically re-register by sending a POST request to "
+                    f"the registration_endpoint and retry authorization. "
+                    f"If this persists, clear cached authentication tokens and reconnect."
                 ),
                 state=state,
             )
@@ -324,9 +314,9 @@ class AuthorizationHandler(SDKAuthorizationHandler):
         )
 
         logger.info(
-            "Enhanced error response for unregistered client_id=%s (accept=%s)",
+            "Unregistered client_id=%s, returned %s error response",
             client_id,
-            "html" if "text/html" in accept else "json",
+            "HTML" if "text/html" in accept else "JSON",
         )
 
         return response

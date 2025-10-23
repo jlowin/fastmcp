@@ -12,6 +12,8 @@ To run:
 
 import os
 
+from key_value.aio.stores.memory import MemoryStore
+
 from fastmcp import FastMCP
 from fastmcp.server.auth.providers.github import GitHubProvider
 
@@ -19,6 +21,7 @@ auth = GitHubProvider(
     client_id=os.getenv("FASTMCP_SERVER_AUTH_GITHUB_CLIENT_ID") or "",
     client_secret=os.getenv("FASTMCP_SERVER_AUTH_GITHUB_CLIENT_SECRET") or "",
     base_url="http://localhost:8000",
+    client_storage=MemoryStore(),
     # redirect_path="/auth/callback",  # Default path - change if using a different callback URL
 )
 

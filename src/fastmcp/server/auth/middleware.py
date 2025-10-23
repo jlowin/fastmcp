@@ -49,11 +49,8 @@ class RequireAuthMiddleware(SDKRequireAuthMiddleware):
             # This is the "Authentication required" error
             enhanced_description = (
                 "Authentication failed. The provided bearer token is invalid, expired, or no longer recognized by the server. "
-                "Common causes: (1) Server restarted and lost ephemeral client registrations, making existing tokens invalid, "
-                "(2) Token has expired, (3) Token was revoked. "
-                "To resolve: Re-authenticate by initiating a new OAuth flow. If you're seeing this repeatedly, "
-                "check that your MCP client supports automatic re-registration when it receives a 400 error "
-                "from the /authorize endpoint, or try clearing cached authentication tokens manually."
+                "To resolve: clear authentication tokens in your MCP client and reconnect. "
+                "Your client should automatically re-register and obtain new tokens."
             )
         elif error == "insufficient_scope":
             # Scope error - already has good detail from SDK
@@ -93,7 +90,7 @@ class RequireAuthMiddleware(SDKRequireAuthMiddleware):
         )
 
         logger.info(
-            "Enhanced auth error response: %s (status=%d)",
+            "Auth error returned: %s (status=%d)",
             error,
             status_code,
         )
