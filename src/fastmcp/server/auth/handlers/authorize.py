@@ -73,7 +73,7 @@ def create_unregistered_client_html(
     warning_box = """
         <div class="info-box warning">
             <p>Your MCP client opened this page to complete OAuth authorization,
-            but the server did not recognize its client ID. To fix this, try:</p>
+            but the server did not recognize its client ID. To fix this:</p>
             <ul>
                 <li>Close this browser window</li>
                 <li>Clear authentication tokens in your MCP client (or restart it)</li>
@@ -88,12 +88,14 @@ def create_unregistered_client_html(
             <span class="help-link">
                 Why am I seeing this?
                 <span class="tooltip">
-                    OAuth 2.0 requires clients to register before authorization. This server
-                    returned a 400 error because the provided client ID was not found.
+                    OAuth 2.0 requires clients to register before authorization.
+                    This server returned a 400 error because the provided client
+                    ID was not found.
                     <br><br>
-                    In browser-delegated OAuth flows (like VS Code or Claude Desktop), your
-                    application cannot detect this error automatically - it's waiting for a
-                    callback that will never arrive. You must manually clear auth tokens and reconnect.
+                    In browser-delegated OAuth flows, your application cannot
+                    detect this error automatically; it's waiting for a
+                    callback that will never arrive. You must manually clear
+                    auth tokens and reconnect.
                 </span>
             </span>
         </div>
