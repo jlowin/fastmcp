@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.10"
 resolution-markers = [
     "python_full_version >= '3.11'",
@@ -1405,15 +1405,15 @@ wheels = [
 
 [[package]]
 name = "py-key-value-aio"
-version = "0.2.6"
+version = "0.2.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "beartype" },
     { name = "py-key-value-shared" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/72/a6/2ff5e11aa38f5c5433b30e65e4aa8e0b82f82041a735ae7e5036b160d260/py_key_value_aio-0.2.6.tar.gz", hash = "sha256:bb6cc2249c7d5f334365829487009d1ee97b1a8c16d201ab7dc94ad872fd52a7", size = 29975, upload-time = "2025-10-21T16:32:41.403Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/00/18/fe9006a977e1e99a0bfb63ea3cac73d236b58aa36217a06c1e433859650d/py_key_value_aio-0.2.7.tar.gz", hash = "sha256:818c521957caa5ed848fe3c012d5b7c9c9d1346c53bdaf1ed403f6165721d408", size = 30936, upload-time = "2025-10-23T13:10:14.772Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c9/0a/b5902e788a015d7a2fb55de59d4ef7b390d00929934c3c7224ec546a4199/py_key_value_aio-0.2.6-py3-none-any.whl", hash = "sha256:676e5be6f2818e6c51ad54f07b75aaded1aa5f6c3b2b94cfa623c19cbaa77d9e", size = 63359, upload-time = "2025-10-21T16:32:40.202Z" },
+    { url = "https://files.pythonhosted.org/packages/41/53/b61a70ae89cd33d6bdee443cbce244666575db2841bb8cf2614e89d038fd/py_key_value_aio-0.2.7-py3-none-any.whl", hash = "sha256:7041554cc5d793a039257c708e61f0d2d1207b44941c131d485a9c1fd3c51623", size = 65799, upload-time = "2025-10-23T13:10:13.816Z" },
 ]
 
 [package.optional-dependencies]
@@ -1430,15 +1430,15 @@ memory = [
 
 [[package]]
 name = "py-key-value-shared"
-version = "0.2.6"
+version = "0.2.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "beartype" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c6/05/0dca4cb7f1674133f13c37a9976d5834887ca922449bd56f58c1578e5bbe/py_key_value_shared-0.2.6.tar.gz", hash = "sha256:6e807af74a289bc5ee0372b1695dc2f3953ade35bdacf8dca59a7bbf80aac52e", size = 8080, upload-time = "2025-10-21T16:31:35.527Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/46/a1/7aff8155e841c6daf87bf86699298c6cd291767926b1976d5fdd49c563b6/py_key_value_shared-0.2.7.tar.gz", hash = "sha256:1139d457c423599530f4addbfe97c3fdc3dcb426243a3000f4cdeac911eb331f", size = 8156, upload-time = "2025-10-23T13:10:10.773Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/11/bc/6149a9d9180d28cf99e81d71cacdf8988effb84c6f8da8abf66a94a10748/py_key_value_shared-0.2.6-py3-none-any.whl", hash = "sha256:f115316f2612733b47f8da70c2b463af8d3c7d031619f452cac0dc95cda42f89", size = 14179, upload-time = "2025-10-21T16:31:34.405Z" },
+    { url = "https://files.pythonhosted.org/packages/11/96/9449f2fb57b4f0e3125031317c67d17438334dffe19a4f3e457153517b81/py_key_value_shared-0.2.7-py3-none-any.whl", hash = "sha256:595240b07d98809896f2bcb0e4436c39cbd750289e5e1adc23dca42a5801b556", size = 14529, upload-time = "2025-10-23T13:10:09.689Z" },
 ]
 
 [[package]]

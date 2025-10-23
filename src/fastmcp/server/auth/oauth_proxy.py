@@ -22,15 +22,11 @@ import base64
 import hashlib
 import hmac
 import json
-from typing_extensions import Self
-from key_value.aio.stores.keyring.store import KeyringStore
-from key_value.aio.adapters.pydantic.adapter import PydanticAdapter
-from pathlib import Path
-from key_value.aio.stores.disk.store import DiskStore
 import platform
 import secrets
 import time
 from base64 import urlsafe_b64encode
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
 from urllib.parse import urlencode, urlparse
 
@@ -40,8 +36,9 @@ from authlib.integrations.httpx_client import AsyncOAuth2Client
 from key_value.aio.adapters.pydantic import PydanticAdapter
 from key_value.aio.protocols import AsyncKeyValue
 from key_value.aio.stores.disk import DiskStore
-from key_value.aio.stores.memory import MemoryStore
 from key_value.aio.stores.keyring import KeyringStore
+from key_value.aio.stores.memory import MemoryStore
+from key_value.aio.wrappers.encryption import EncryptionWrapper
 from mcp.server.auth.handlers.token import TokenErrorResponse, TokenSuccessResponse
 from mcp.server.auth.handlers.token import TokenHandler as _SDKTokenHandler
 from mcp.server.auth.json_response import PydanticJSONResponse
@@ -63,18 +60,17 @@ from pydantic import AnyHttpUrl, AnyUrl, BaseModel, Field, SecretStr
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse
 from starlette.routing import Route
+from typing_extensions import Self
 
 from fastmcp import settings
 from fastmcp.server.auth.auth import OAuthProvider, TokenVerifier
 from fastmcp.server.auth.handlers.authorize import AuthorizationHandler
 from fastmcp.server.auth.jwt_issuer import (
     JWTIssuer,
-    TokenEncryption,
 )
 from fastmcp.server.auth.redirect_validation import (
     validate_redirect_uri,
 )
-from fastmcp.utilities.key_management import get_or_generate_keyring_key
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.ui import (
     BUTTON_STYLES,
@@ -158,8 +154,8 @@ class UpstreamTokenSet(BaseModel):
     """
 
     upstream_token_id: str  # Unique ID for this token set
-    access_token: bytes  # Encrypted upstream access token
-    refresh_token: bytes | None  # Encrypted upstream refresh token
+    access_token: str  # Upstream access token
+    refresh_token: str | None  # Upstream refresh token
     refresh_token_expires_at: (
         float | None
     )  # Unix timestamp when refresh token expires (if known)
@@ -188,18 +184,19 @@ class Secret(BaseModel):
 
     @classmethod
     def generate(cls) -> Self:
-        key_bytes = secrets.token_bytes(32)
-        key_b64 = base64.b64encode(key_bytes).decode()
+        key_bytes: bytes = secrets.token_urlsafe(nbytes=32).encode()
+        key_b64: str = base64.b64encode(s=key_bytes).decode()
         return cls(value=key_b64)
 
-    def derive_key(self, salt: str, info: bytes) -> bytes:
+    def derive_key(self, salt: str, info: bytes) -> str:
         from fastmcp.server.auth.jwt_issuer import derive_key_from_secret
 
-        return derive_key_from_secret(
+        key_bytes: bytes = derive_key_from_secret(
             secret=self.value,
             salt=salt,
             info=info,
         )
+        return base64.b64encode(s=key_bytes).decode()
 
 
 class ProxyDCRClient(OAuthClientInformationFull):
@@ -809,7 +806,6 @@ class OAuthProxy(OAuthProvider):
         # self._custom_jwt_key = jwt_signing_key
         # self._custom_encryption_key = token_encryption_key
         self._jwt_issuer: JWTIssuer | None = None
-        self._token_encryption: TokenEncryption | None = None
         self._jwt_initialized = False
 
         # Local state for token bookkeeping only (no client caching)
@@ -933,10 +929,16 @@ class OAuthProxy(OAuthProvider):
         self._encryption_secret: Secret = encryption_secret
 
         # Storage for upstream tokens (encrypted at rest)
+        encryption_wrapper = EncryptionWrapper(
+            key_value=self._client_storage,
+            encryption_key=encryption_secret.derive_key(
+                salt="fastmcp-token-encryption-v1", info=b"Fernet"
+            ),
+        )
         self._upstream_token_store: PydanticAdapter[UpstreamTokenSet] = PydanticAdapter[
             UpstreamTokenSet
         ](
-            key_value=self._client_storage,
+            key_value=encryption_wrapper,
             pydantic_model=UpstreamTokenSet,
             default_collection="mcp-upstream-tokens",
             raise_on_validation_error=True,
@@ -1144,7 +1146,6 @@ class OAuthProxy(OAuthProvider):
         # Ensure JWT issuer is initialized
         await self._ensure_jwt_initialized()
         assert self._jwt_issuer is not None
-        assert self._token_encryption is not None
 
         # Look up stored code data
         code_model = await self._code_store.get(key=authorization_code.code)
@@ -1196,8 +1197,8 @@ class OAuthProxy(OAuthProvider):
         # Encrypt and store upstream tokens
         upstream_token_set = UpstreamTokenSet(
             upstream_token_id=upstream_token_id,
-            access_token=self._token_encryption.encrypt(idp_tokens["access_token"]),
-            refresh_token=self._token_encryption.encrypt(idp_tokens["refresh_token"])
+            access_token=idp_tokens["access_token"],
+            refresh_token=idp_tokens["refresh_token"]
             if idp_tokens.get("refresh_token")
             else None,
             refresh_token_expires_at=refresh_token_expires_at,
@@ -1322,7 +1323,6 @@ class OAuthProxy(OAuthProvider):
         # Ensure JWT issuer is initialized
         await self._ensure_jwt_initialized()
         assert self._jwt_issuer is not None
-        assert self._token_encryption is not None
 
         # Verify FastMCP refresh token
         try:
@@ -1352,10 +1352,6 @@ class OAuthProxy(OAuthProvider):
             logger.error("No upstream refresh token available")
             raise TokenError("invalid_grant", "Refresh not supported for this token")
 
-        upstream_refresh_token = self._token_encryption.decrypt(
-            upstream_token_set.refresh_token
-        )
-
         # Refresh upstream token using authlib
         oauth_client = AsyncOAuth2Client(
             client_id=self._upstream_client_id,
@@ -1368,7 +1364,7 @@ class OAuthProxy(OAuthProvider):
             logger.debug("Refreshing upstream token (jti=%s)", refresh_jti[:8])
             token_response: dict[str, Any] = await oauth_client.refresh_token(  # type: ignore[misc]
                 url=self._upstream_token_endpoint,
-                refresh_token=upstream_refresh_token,
+                refresh_token=upstream_token_set.refresh_token,
                 scope=" ".join(scopes) if scopes else None,
             )
             logger.debug("Successfully refreshed upstream token")
@@ -1380,18 +1376,14 @@ class OAuthProxy(OAuthProvider):
         new_expires_in = int(
             token_response.get("expires_in", DEFAULT_ACCESS_TOKEN_EXPIRY_SECONDS)
         )
-        upstream_token_set.access_token = self._token_encryption.encrypt(
-            token_response["access_token"]
-        )
+        upstream_token_set.access_token = token_response["access_token"]
         upstream_token_set.expires_at = time.time() + new_expires_in
 
         # Handle upstream refresh token rotation and expiry
         new_refresh_expires_in = None
         if new_upstream_refresh := token_response.get("refresh_token"):
-            if new_upstream_refresh != upstream_refresh_token:
-                upstream_token_set.refresh_token = self._token_encryption.encrypt(
-                    new_upstream_refresh
-                )
+            if new_upstream_refresh != upstream_token_set.refresh_token:
+                upstream_token_set.refresh_token = new_upstream_refresh
                 logger.debug("Upstream refresh token rotated")
 
             # Update refresh token expiry if provided
@@ -1533,7 +1525,6 @@ class OAuthProxy(OAuthProvider):
         # Ensure JWT issuer and encryption are initialized
         await self._ensure_jwt_initialized()
         assert self._jwt_issuer is not None
-        assert self._token_encryption is not None
 
         try:
             # 1. Verify FastMCP JWT signature and claims
@@ -1555,14 +1546,11 @@ class OAuthProxy(OAuthProvider):
                 )
                 return None
 
-            # 3. Decrypt upstream token
-            upstream_token = self._token_encryption.decrypt(
+            # 3. Validate with upstream provider (delegated to TokenVerifier)
+            # This calls the real token validator (GitHub API, JWKS, etc.)
+            validated = await self._token_validator.verify_token(
                 upstream_token_set.access_token
             )
-
-            # 4. Validate with upstream provider (delegated to TokenVerifier)
-            # This calls the real token validator (GitHub API, JWKS, etc.)
-            validated = await self._token_validator.verify_token(upstream_token)
 
             if not validated:
                 logger.debug("Upstream token validation failed")
