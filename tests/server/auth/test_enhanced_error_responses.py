@@ -68,7 +68,7 @@ class TestEnhancedAuthorizationHandler:
             html = response.text
             assert "Client Not Registered" in html
             assert "unregistered-client-id" in html
-            assert "What to do:" in html
+            assert "To fix this" in html
             assert "Close this browser window" in html
             assert "Clear authentication tokens" in html
 
@@ -224,9 +224,9 @@ class TestEnhancedRequireAuthMiddleware:
             # Check enhanced error message
             data = response.json()
             assert data["error"] == "invalid_token"
-            # Should have enhanced description mentioning common causes
-            assert "ephemeral" in data["error_description"]
-            assert "Server restarted" in data["error_description"]
+            # Should have enhanced description with resolution steps
+            assert "clear authentication tokens" in data["error_description"]
+            assert "automatically re-register" in data["error_description"]
 
     def test_invalid_token_www_authenticate_header_format(self, jwt_verifier):
         """Test that WWW-Authenticate header format matches SDK."""
