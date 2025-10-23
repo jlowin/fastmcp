@@ -227,6 +227,40 @@ class TestImage:
         with pytest.raises(ValueError, match="No image data available"):
             img.to_image_content()
 
+    def test_to_data_uri(self, tmp_path):
+        """Test conversion to data URI."""
+        img_path = tmp_path / "test.png"
+        test_data = b"fake image data"
+        img_path.write_bytes(test_data)
+
+        img = Image(path=img_path)
+        data_uri = img.to_data_uri()
+
+        expected_data_uri = (
+            f"data:image/png;base64,{base64.b64encode(test_data).decode()}"
+        )
+        assert data_uri == expected_data_uri
+
+    def test_path_to_data_uri(self, tmp_path):
+        """Test static method path_to_data_uri."""
+        img_path = tmp_path / "test.png"
+        test_data = b"fake image data"
+        img_path.write_bytes(test_data)
+
+        data_uri = Image.path_to_data_uri(img_path)
+
+        expected_data_uri = (
+            f"data:image/png;base64,{base64.b64encode(test_data).decode()}"
+        )
+        assert data_uri == expected_data_uri
+
+    def test_path_to_data_uri_invalid_path(self):
+        """Test static method path_to_data_uri with invalid path."""
+        invalid_path = Path("non_existent_file.png")
+
+        with pytest.raises(FileNotFoundError):
+            Image.path_to_data_uri(invalid_path)
+
 
 class TestAudio:
     def test_audio_initialization_with_path(self):
