@@ -184,9 +184,8 @@ class Secret(BaseModel):
 
     @classmethod
     def generate(cls) -> Self:
-        key_bytes: bytes = secrets.token_urlsafe(nbytes=32).encode()
-        key_b64: str = base64.b64encode(s=key_bytes).decode()
-        return cls(value=key_b64)
+        str_b64: str = secrets.token_urlsafe(nbytes=32)
+        return cls(value=str_b64)
 
     def derive_key(self, salt: str, info: bytes) -> bytes:
         from fastmcp.server.auth.jwt_issuer import derive_key_from_secret
@@ -807,8 +806,6 @@ class OAuthProxy(OAuthProvider):
             Secret(value=token_encryption_key) if token_encryption_key else None
         )
 
-        # self._custom_jwt_key = jwt_signing_key
-        # self._custom_encryption_key = token_encryption_key
         self._jwt_issuer: JWTIssuer | None = None
         self._jwt_initialized = False
 
