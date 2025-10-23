@@ -429,9 +429,13 @@ class Context:
             ]
         elif isinstance(messages, Sequence):
             sampling_messages = [
-                SamplingMessage(content=TextContent(text=m, type="text"), role="user")
-                if isinstance(m, str)
-                else m
+                (
+                    SamplingMessage(
+                        content=TextContent(text=m, type="text"), role="user"
+                    )
+                    if isinstance(m, str)
+                    else m
+                )
                 for m in messages
             ]
 
