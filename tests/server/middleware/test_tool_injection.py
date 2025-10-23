@@ -489,19 +489,10 @@ class TestResourceToolMiddleware:
             [
                 TextContent(
                     type="text",
-                    text='[{"uri":"file://config.txt/","mimeType":"text/plain","_meta":null,"text":"debug=true"}]',
+                    text='[{"content":"debug=true","mime_type":"text/plain"}]',
                 )
             ]
         )
         assert result.structured_content == snapshot(
-            {
-                "result": [
-                    {
-                        "uri": "file://config.txt/",
-                        "mimeType": "text/plain",
-                        "_meta": None,
-                        "text": "debug=true",
-                    }
-                ]
-            }
+            {"result": [{"content": "debug=true", "mime_type": "text/plain"}]}
         )
