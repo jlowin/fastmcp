@@ -22,6 +22,11 @@ import base64
 import hashlib
 import hmac
 import json
+from typing_extensions import Self
+from key_value.aio.stores.keyring.store import KeyringStore
+from key_value.aio.adapters.pydantic.adapter import PydanticAdapter
+from pathlib import Path
+from key_value.aio.stores.disk.store import DiskStore
 import platform
 import secrets
 import time
@@ -36,6 +41,7 @@ from key_value.aio.adapters.pydantic import PydanticAdapter
 from key_value.aio.protocols import AsyncKeyValue
 from key_value.aio.stores.disk import DiskStore
 from key_value.aio.stores.memory import MemoryStore
+from key_value.aio.stores.keyring import KeyringStore
 from mcp.server.auth.handlers.token import TokenErrorResponse, TokenSuccessResponse
 from mcp.server.auth.handlers.token import TokenHandler as _SDKTokenHandler
 from mcp.server.auth.json_response import PydanticJSONResponse
@@ -175,6 +181,25 @@ class JTIMapping(BaseModel):
     jti: str  # JWT ID from FastMCP-issued token
     upstream_token_id: str  # References UpstreamTokenSet
     created_at: float  # Unix timestamp
+
+
+class Secret(BaseModel):
+    value: str | bytes
+
+    @classmethod
+    def generate(cls) -> Self:
+        key_bytes = secrets.token_bytes(32)
+        key_b64 = base64.b64encode(key_bytes).decode()
+        return cls(value=key_b64)
+
+    def derive_key(self, salt: str, info: bytes) -> bytes:
+        from fastmcp.server.auth.jwt_issuer import derive_key_from_secret
+
+        return derive_key_from_secret(
+            secret=self.value,
+            salt=salt,
+            info=info,
+        )
 
 
 class ProxyDCRClient(OAuthClientInformationFull):
@@ -684,12 +709,16 @@ class OAuthProxy(OAuthProvider):
         # Default storage: match persistence to key availability
         # On Mac/Windows: DiskStore + keyring keys = full persistence
         # On Linux: MemoryStore + ephemeral keys = consistent (nothing persists)
+        self._client_storage: AsyncKeyValue
+        self._key_storage: AsyncKeyValue = MemoryStore()
+        self._auto_selected_storage: bool
+
         if client_storage is None:
             if platform.system() != "Linux":
                 # Keyring available: use persistent storage
-                default_storage_path = settings.home / "oauth-proxy"
-                default_storage_path.mkdir(parents=True, exist_ok=True)
-                self._client_storage = DiskStore(directory=str(default_storage_path))
+                default_storage_path: Path = settings.home / "oauth-proxy"
+                self._key_storage = KeyringStore()
+                self._client_storage = DiskStore(directory=default_storage_path)
                 logger.debug(
                     "Using disk storage for OAuth state: %s", default_storage_path
                 )
@@ -698,8 +727,8 @@ class OAuthProxy(OAuthProvider):
                 self._client_storage = MemoryStore()
                 logger.debug(
                     "Using in-memory storage on Linux (keyring unavailable). "
-                    "For persistent tokens, provide explicit jwt_signing_key, "
-                    "token_encryption_key, and client_storage."
+                    + "For persistent tokens, provide explicit jwt_signing_key, "
+                    + "token_encryption_key, and client_storage."
                 )
             self._auto_selected_storage = True
         else:
@@ -714,8 +743,8 @@ class OAuthProxy(OAuthProvider):
         ):
             logger.warning(
                 "Using in-memory storage on a platform with keyring support. "
-                "OAuth state will be lost on restart. Consider using default storage "
-                "or providing explicit jwt_signing_key and token_encryption_key with persistent storage."
+                + "OAuth state will be lost on restart. Consider using default storage "
+                + "or providing explicit jwt_signing_key and token_encryption_key with persistent storage."
             )
 
         # Cache HTTPS check to avoid repeated logging
@@ -725,7 +754,16 @@ class OAuthProxy(OAuthProvider):
                 "Using non-secure cookies for development; deploy with HTTPS for production."
             )
 
-        self._client_store = PydanticAdapter[ProxyDCRClient](
+        self._secret_store: PydanticAdapter[Secret] = PydanticAdapter[Secret](
+            key_value=self._key_storage,
+            pydantic_model=Secret,
+            default_collection="mcp-oauth-proxy-secrets",
+            raise_on_validation_error=True,
+        )
+
+        self._client_store: PydanticAdapter[ProxyDCRClient] = PydanticAdapter[
+            ProxyDCRClient
+        ](
             key_value=self._client_storage,
             pydantic_model=ProxyDCRClient,
             default_collection="mcp-oauth-proxy-clients",
@@ -734,30 +772,26 @@ class OAuthProxy(OAuthProvider):
 
         # OAuth transaction storage for IdP callback forwarding
         # Reuse client_storage with different collections for state management
-        self._transaction_store = PydanticAdapter[OAuthTransaction](
+        self._transaction_store: PydanticAdapter[OAuthTransaction] = PydanticAdapter[
+            OAuthTransaction
+        ](
             key_value=self._client_storage,
             pydantic_model=OAuthTransaction,
             default_collection="mcp-oauth-transactions",
             raise_on_validation_error=True,
         )
 
-        self._code_store = PydanticAdapter[ClientCode](
+        self._code_store: PydanticAdapter[ClientCode] = PydanticAdapter[ClientCode](
             key_value=self._client_storage,
             pydantic_model=ClientCode,
             default_collection="mcp-authorization-codes",
             raise_on_validation_error=True,
         )
 
-        # Storage for upstream tokens (encrypted at rest)
-        self._upstream_token_store = PydanticAdapter[UpstreamTokenSet](
-            key_value=self._client_storage,
-            pydantic_model=UpstreamTokenSet,
-            default_collection="mcp-upstream-tokens",
-            raise_on_validation_error=True,
-        )
-
         # Storage for JTI mappings (FastMCP token -> upstream token)
-        self._jti_mapping_store = PydanticAdapter[JTIMapping](
+        self._jti_mapping_store: PydanticAdapter[JTIMapping] = PydanticAdapter[
+            JTIMapping
+        ](
             key_value=self._client_storage,
             pydantic_model=JTIMapping,
             default_collection="mcp-jti-mappings",
@@ -765,8 +799,15 @@ class OAuthProxy(OAuthProvider):
         )
 
         # JWT issuer and encryption (initialized lazily on first use)
-        self._custom_jwt_key = jwt_signing_key
-        self._custom_encryption_key = token_encryption_key
+        self._custom_jwt_key: Secret | None = (
+            Secret(value=jwt_signing_key) if jwt_signing_key else None
+        )
+        self._custom_encryption_key: Secret | None = (
+            Secret(value=token_encryption_key) if token_encryption_key else None
+        )
+
+        # self._custom_jwt_key = jwt_signing_key
+        # self._custom_encryption_key = token_encryption_key
         self._jwt_issuer: JWTIssuer | None = None
         self._token_encryption: TokenEncryption | None = None
         self._jwt_initialized = False
@@ -821,49 +862,31 @@ class OAuthProxy(OAuthProvider):
         if self._jwt_initialized:
             return
 
-        # Derive or use custom JWT signing key
-        from fastmcp.server.auth.jwt_issuer import derive_key_from_secret
+        jwt_secret: Secret
 
         if self._custom_jwt_key:
-            jwt_key = derive_key_from_secret(
-                secret=self._custom_jwt_key,
-                salt="fastmcp-jwt-signing-v1",
-                info=b"HS256",
-            )
+            jwt_secret = self._custom_jwt_key
             logger.debug("Using user-provided JWT signing key")
         else:
-            keyring_key = get_or_generate_keyring_key(
-                "jwt-signing", self._upstream_client_id
-            )
-            if keyring_key:
-                jwt_key = derive_key_from_secret(
-                    secret=keyring_key,
-                    salt="fastmcp-jwt-signing-v1",
-                    info=b"HS256",
-                )
-            else:
-                server_salt = secrets.token_urlsafe(32)
-                upstream_secret = self._upstream_client_secret.get_secret_value()
-                jwt_key = derive_key_from_secret(
-                    secret=upstream_secret,
-                    salt=f"fastmcp-jwt-signing-v1-{server_salt}",
-                    info=b"HS256",
-                )
+            if not (keyring_secret := await self._secret_store.get(key="jwt-signing")):
+                keyring_secret = Secret.generate()
+                await self._secret_store.put(key="jwt-signing", value=keyring_secret)
 
+            if isinstance(self._key_storage, MemoryStore):
                 if platform.system() == "Linux":
                     logger.warning(
                         "Keyring unavailable on Linux - using ephemeral keys. "
-                        "Storage persists at %s but tokens will become unreadable after restart. "
-                        "For persistent tokens, provide explicit jwt_signing_key and token_encryption_key.",
-                        self._client_storage
-                        if hasattr(self, "_client_storage")
-                        else "disk",
+                        + "Storage persists at %s but tokens will become unreadable after restart. "
+                        + "For persistent tokens, provide explicit jwt_signing_key and token_encryption_key.",
+                        self._client_storage,
                     )
                 else:
                     logger.warning(
                         "Keyring unavailable - using ephemeral keys. "
-                        "For production, provide explicit jwt_signing_key and token_encryption_key."
+                        + "For production, provide explicit jwt_signing_key and token_encryption_key."
                     )
+
+            jwt_secret = keyring_secret
 
         # Initialize JWT issuer
         issuer = str(self.base_url)
@@ -871,39 +894,54 @@ class OAuthProxy(OAuthProvider):
         self._jwt_issuer = JWTIssuer(
             issuer=issuer,
             audience=audience,
-            signing_key=jwt_key,
+            signing_key=jwt_secret.derive_key(
+                salt="fastmcp-jwt-signing-v1", info=b"HS256"
+            ),
         )
 
+        encryption_secret: Secret
+
         if self._custom_encryption_key:
-            encryption_key = derive_key_from_secret(
-                secret=self._custom_encryption_key,
-                salt="fastmcp-token-encryption-v1",
-                info=b"Fernet",
-            )
-            encryption_key = base64.urlsafe_b64encode(encryption_key)
+            encryption_secret = self._custom_encryption_key
             logger.debug("Using user-provided token encryption key")
         else:
-            encryption_keyring_key = get_or_generate_keyring_key(
-                "token-encryption", self._upstream_client_id
+            encryption_keyring_key: Secret | None = await self._secret_store.get(
+                key="token-encryption"
             )
-            if encryption_keyring_key:
-                key_material = derive_key_from_secret(
-                    secret=encryption_keyring_key,
-                    salt="fastmcp-token-encryption-v1",
-                    info=b"Fernet",
+            if not encryption_keyring_key:
+                encryption_keyring_key = Secret.generate()
+                await self._secret_store.put(
+                    key="token-encryption", value=encryption_keyring_key
                 )
-                encryption_key = base64.urlsafe_b64encode(key_material)
-            else:
-                server_salt = secrets.token_urlsafe(32)
-                upstream_secret = self._upstream_client_secret.get_secret_value()
-                key_material = derive_key_from_secret(
-                    secret=upstream_secret,
-                    salt=f"fastmcp-token-encryption-v1-{server_salt}",
-                    info=b"Fernet",
-                )
-                encryption_key = base64.urlsafe_b64encode(key_material)
 
-        self._token_encryption = TokenEncryption(encryption_key)
+            if isinstance(self._key_storage, MemoryStore):
+                if platform.system() == "Linux":
+                    logger.warning(
+                        "Keyring unavailable on Linux - using ephemeral keys. "
+                        + "Storage persists at %s but tokens will become unreadable after restart. "
+                        + "For persistent tokens, provide explicit jwt_signing_key and token_encryption_key.",
+                        self._client_storage,
+                    )
+                else:
+                    logger.warning(
+                        "Keyring unavailable - using ephemeral keys. "
+                        + "For production, provide explicit jwt_signing_key and token_encryption_key."
+                    )
+
+            encryption_secret = encryption_keyring_key
+
+        self._encryption_secret: Secret = encryption_secret
+
+        # Storage for upstream tokens (encrypted at rest)
+        self._upstream_token_store: PydanticAdapter[UpstreamTokenSet] = PydanticAdapter[
+            UpstreamTokenSet
+        ](
+            key_value=self._client_storage,
+            pydantic_model=UpstreamTokenSet,
+            default_collection="mcp-upstream-tokens",
+            raise_on_validation_error=True,
+        )
+
         self._jwt_initialized = True
 
     # -------------------------------------------------------------------------

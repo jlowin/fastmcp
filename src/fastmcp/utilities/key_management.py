@@ -17,6 +17,7 @@ from fastmcp.utilities.logging import get_logger
 logger = get_logger(__name__)
 
 
+
 def get_or_generate_keyring_key(key_type: str, namespace: str) -> str | None:
     """Get or generate a key from the system keyring.
 
