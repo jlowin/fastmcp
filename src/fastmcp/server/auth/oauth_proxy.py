@@ -188,7 +188,7 @@ class Secret(BaseModel):
         key_b64: str = base64.b64encode(s=key_bytes).decode()
         return cls(value=key_b64)
 
-    def derive_key(self, salt: str, info: bytes) -> str:
+    def derive_key(self, salt: str, info: bytes) -> bytes:
         from fastmcp.server.auth.jwt_issuer import derive_key_from_secret
 
         key_bytes: bytes = derive_key_from_secret(
@@ -196,6 +196,10 @@ class Secret(BaseModel):
             salt=salt,
             info=info,
         )
+        return key_bytes
+
+    def derive_key_b64(self, salt: str, info: bytes) -> str:
+        key_bytes: bytes = self.derive_key(salt=salt, info=info)
         return base64.b64encode(s=key_bytes).decode()
 
 
@@ -931,7 +935,7 @@ class OAuthProxy(OAuthProvider):
         # Storage for upstream tokens (encrypted at rest)
         encryption_wrapper = EncryptionWrapper(
             key_value=self._client_storage,
-            encryption_key=encryption_secret.derive_key(
+            encryption_key=encryption_secret.derive_key_b64(
                 salt="fastmcp-token-encryption-v1", info=b"Fernet"
             ),
         )
