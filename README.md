@@ -156,7 +156,7 @@ from fastmcp import FastMCP
 ______________________________________________________________________________
 ## Google Colab: Installation
 
- -- Prerequistes:
+ -- Prerequisites:
 
 !pip install "mcp[cli]"
 from mcp.server.fastmcp import FastMCP
