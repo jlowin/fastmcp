@@ -36,7 +36,6 @@ from key_value.aio.adapters.pydantic import PydanticAdapter
 from key_value.aio.protocols import AsyncKeyValue
 from key_value.aio.stores.disk import DiskStore
 from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
-from key_value.aio.wrappers.encryption.fernet import _generate_encryption_key
 from mcp.server.auth.handlers.token import TokenErrorResponse, TokenSuccessResponse
 from mcp.server.auth.handlers.token import TokenHandler as _SDKTokenHandler
 from mcp.server.auth.json_response import PydanticJSONResponse
@@ -65,6 +64,7 @@ from fastmcp.server.auth.auth import OAuthProvider, TokenVerifier
 from fastmcp.server.auth.handlers.authorize import AuthorizationHandler
 from fastmcp.server.auth.jwt_issuer import (
     JWTIssuer,
+    derive_jwt_key,
 )
 from fastmcp.server.auth.redirect_validation import (
     validate_redirect_uri,
@@ -681,20 +681,20 @@ class OAuthProxy(OAuthProvider):
         self._extra_token_params: dict[str, str] = extra_token_params or {}
 
         if jwt_signing_key is None:
-            jwt_signing_key = _generate_encryption_key(
-                source_material=upstream_client_secret,
-                salt="fastmcp-jwt",
+            jwt_signing_key = derive_jwt_key(
+                high_entropy_material=upstream_client_secret,
+                salt="fastmcp-jwt-signing-key",
             )
 
         if isinstance(jwt_signing_key, str):
             if len(jwt_signing_key) < 12:
                 logger.warning(
                     "jwt_signing_key is less than 12 characters; it is recommended to use a longer. "
-                    + "source material for the key derivation."
+                    + "string for the key derivation."
                 )
-            jwt_signing_key = _generate_encryption_key(
-                source_material=jwt_signing_key,
-                salt="fastmcp-jwt",
+            jwt_signing_key = derive_jwt_key(
+                low_entropy_material=jwt_signing_key,
+                salt="fastmcp-jwt-signing-key",
             )
 
         self._jwt_issuer: JWTIssuer = JWTIssuer(
@@ -705,11 +705,13 @@ class OAuthProxy(OAuthProvider):
 
         # If the user does not provide a store, we will provide an encrypted disk store
         if client_storage is None:
-            fernet: Fernet = Fernet(key=jwt_signing_key)
-
+            storage_encryption_key = derive_jwt_key(
+                high_entropy_material=jwt_signing_key.decode(),
+                salt="fastmcp-storage-encryption-key",
+            )
             client_storage = FernetEncryptionWrapper(
                 key_value=DiskStore(directory=settings.home / "oauth-proxy"),
-                fernet=fernet,
+                fernet=Fernet(key=storage_encryption_key),
             )
 
         self._client_storage: AsyncKeyValue = client_storage

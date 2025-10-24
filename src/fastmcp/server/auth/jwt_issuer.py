@@ -7,13 +7,16 @@ This maintains proper OAuth 2.0 token audience boundaries.
 
 from __future__ import annotations
 
+import base64
 import time
-from typing import Any
+from typing import Any, overload
 
 from authlib.jose import JsonWebToken
 from authlib.jose.errors import JoseError
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 from fastmcp.utilities.logging import get_logger
 
@@ -22,31 +25,44 @@ logger = get_logger(__name__)
 KDF_ITERATIONS = 1000000
 
 
-def derive_jwt_key(source_material: str, salt: str) -> bytes:
-    """Derive JWT signing key from upstream client secret and server salt.
+@overload
+def derive_jwt_key(*, high_entropy_material: str, salt: str) -> bytes:
+    """Derive JWT signing key from a high-entropy key material and server salt."""
 
-    Uses PBKDF2 (RFC 8018) to derive a cryptographically secure signing key from
-    the a string secret combined with a salt.
 
-    Args:
-        source_material: A string to use as the source material for the key derivation
-        salt: A salt to use for the key derivation
+@overload
+def derive_jwt_key(*, low_entropy_material: str, salt: str) -> bytes:
+    """Derive JWT signing key from a low-entropy key material and server salt."""
 
-    Returns:
-        A 32-byte key suitable for use as a JWT signing key
-    """
-    import base64
 
-    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+def derive_jwt_key(
+    *,
+    high_entropy_material: str | None = None,
+    low_entropy_material: str | None = None,
+    salt: str,
+) -> bytes:
+    if high_entropy_material is not None:
+        derived_key = HKDF(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=salt.encode(),
+            info=b"Fernet",
+        ).derive(key_material=high_entropy_material.encode())
 
-    pbkdf2 = PBKDF2HMAC(
-        algorithm=hashes.SHA256(),
-        length=32,
-        salt=salt.encode(),
-        iterations=KDF_ITERATIONS,
-    ).derive(key_material=source_material.encode())
+        return base64.urlsafe_b64encode(derived_key)
+    elif low_entropy_material is not None:
+        pbkdf2 = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=salt.encode(),
+            iterations=KDF_ITERATIONS,
+        ).derive(key_material=low_entropy_material.encode())
 
-    return base64.urlsafe_b64encode(pbkdf2)
+        return base64.urlsafe_b64encode(pbkdf2)
+    else:
+        raise ValueError(
+            "Either high_entropy_material or low_entropy_material must be provided"
+        )
 
 
 class JWTIssuer:

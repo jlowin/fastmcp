@@ -17,7 +17,15 @@ class TestKeyDerivation:
 
     def test_derive_jwt_key_produces_32_bytes(self):
         """Test that JWT key derivation produces 32-byte key."""
-        key = derive_jwt_key("test-secret", "test-salt")
+        key = derive_jwt_key(high_entropy_material="test-secret", salt="test-salt")
+        assert len(key) == 44
+        assert isinstance(key, bytes)
+
+        # base64 decode and make sure its 32 bytes
+        key_bytes = base64.urlsafe_b64decode(key)
+        assert len(key_bytes) == 32
+
+        key = derive_jwt_key(low_entropy_material="test-secret", salt="test-salt")
         assert len(key) == 44
         assert isinstance(key, bytes)
 
@@ -27,20 +35,32 @@ class TestKeyDerivation:
 
     def test_derive_jwt_key_with_different_secrets_produces_different_keys(self):
         """Test that different secrets produce different keys."""
-        key1 = derive_jwt_key("secret1", "salt")
-        key2 = derive_jwt_key("secret2", "salt")
+        key1 = derive_jwt_key(high_entropy_material="secret1", salt="salt")
+        key2 = derive_jwt_key(high_entropy_material="secret2", salt="salt")
+        assert key1 != key2
+
+        key1 = derive_jwt_key(low_entropy_material="secret1", salt="salt")
+        key2 = derive_jwt_key(low_entropy_material="secret2", salt="salt")
         assert key1 != key2
 
     def test_derive_jwt_key_with_different_salts_produces_different_keys(self):
         """Test that different salts produce different keys."""
-        key1 = derive_jwt_key("secret", "salt1")
-        key2 = derive_jwt_key("secret", "salt2")
+        key1 = derive_jwt_key(high_entropy_material="secret", salt="salt1")
+        key2 = derive_jwt_key(high_entropy_material="secret", salt="salt2")
+        assert key1 != key2
+
+        key1 = derive_jwt_key(low_entropy_material="secret", salt="salt1")
+        key2 = derive_jwt_key(low_entropy_material="secret", salt="salt2")
         assert key1 != key2
 
     def test_derive_jwt_key_is_deterministic(self):
         """Test that same inputs always produce same key."""
-        key1 = derive_jwt_key("secret", "salt")
-        key2 = derive_jwt_key("secret", "salt")
+        key1 = derive_jwt_key(high_entropy_material="secret", salt="salt")
+        key2 = derive_jwt_key(high_entropy_material="secret", salt="salt")
+        assert key1 == key2
+
+        key1 = derive_jwt_key(low_entropy_material="secret", salt="salt")
+        key2 = derive_jwt_key(low_entropy_material="secret", salt="salt")
         assert key1 == key2
 
 
@@ -50,7 +70,9 @@ class TestJWTIssuer:
     @pytest.fixture
     def issuer(self):
         """Create a JWT issuer for testing."""
-        signing_key = derive_jwt_key("test-secret", "test-salt")
+        signing_key = derive_jwt_key(
+            low_entropy_material="test-secret", salt="test-salt"
+        )
         return JWTIssuer(
             issuer="https://test-server.com",
             audience="https://test-server.com/mcp",
@@ -127,7 +149,9 @@ class TestJWTIssuer:
         )
 
         # Try to verify with different issuer (different key)
-        other_key = derive_jwt_key("different-secret", "different-salt")
+        other_key = derive_jwt_key(
+            low_entropy_material="different-secret", salt="different-salt"
+        )
         other_issuer = JWTIssuer(
             issuer="https://test-server.com",
             audience="https://test-server.com/mcp",
