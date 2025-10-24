@@ -41,6 +41,12 @@ def derive_jwt_key(
     low_entropy_material: str | None = None,
     salt: str,
 ) -> bytes:
+    """Derive JWT signing key from a high-entropy or low-entropy key material and server salt."""
+    if high_entropy_material is not None and low_entropy_material is not None:
+        raise ValueError(
+            "Either high_entropy_material or low_entropy_material must be provided, but not both"
+        )
+
     if high_entropy_material is not None:
         derived_key = HKDF(
             algorithm=hashes.SHA256(),
@@ -50,7 +56,8 @@ def derive_jwt_key(
         ).derive(key_material=high_entropy_material.encode())
 
         return base64.urlsafe_b64encode(derived_key)
-    elif low_entropy_material is not None:
+
+    if low_entropy_material is not None:
         pbkdf2 = PBKDF2HMAC(
             algorithm=hashes.SHA256(),
             length=32,
@@ -59,10 +66,10 @@ def derive_jwt_key(
         ).derive(key_material=low_entropy_material.encode())
 
         return base64.urlsafe_b64encode(pbkdf2)
-    else:
-        raise ValueError(
-            "Either high_entropy_material or low_entropy_material must be provided"
-        )
+
+    raise ValueError(
+        "Either high_entropy_material or low_entropy_material must be provided"
+    )
 
 
 class JWTIssuer:
