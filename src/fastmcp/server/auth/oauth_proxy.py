@@ -25,7 +25,7 @@ import json
 import secrets
 import time
 from base64 import urlsafe_b64encode
-from typing import TYPE_CHECKING, Any, Final, override
+from typing import TYPE_CHECKING, Any, Final
 from urllib.parse import urlencode, urlparse
 
 import httpx
@@ -58,6 +58,7 @@ from pydantic import AnyHttpUrl, AnyUrl, BaseModel, Field, SecretStr
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse
 from starlette.routing import Route
+from typing_extensions import override
 
 from fastmcp import settings
 from fastmcp.server.auth.auth import OAuthProvider, TokenVerifier
