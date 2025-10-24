@@ -41,7 +41,7 @@ async def test_list_tools(main_mcp_client: Client[FastMCPTransport]):
 Simply run `pytest --inline-snapshot=fix,create` to fill in the `snapshot()` with actual data.
 
 <Tip>
-For values that change you can leverage the [dirty-equals](https://github.com/samuelcolvin/dirty-equals) library to assert that the value is close to the expected value.
+For values that change you can leverage the [dirty-equals](https://github.com/samuelcolvin/dirty-equals) library to perform flexible equality assertions on dynamic or non-deterministic values.
 </Tip>
 
 Using the pytest `parametrize` decorator, you can easily test your tools with a wide variety of inputs.
