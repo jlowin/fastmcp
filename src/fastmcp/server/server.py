@@ -236,8 +236,12 @@ class FastMCP(Generic[LifespanResultT]):
                     tool = Tool.from_function(tool, serializer=self._tool_serializer)
                 self.add_tool(tool)
 
-        self.include_tags: set[str] | None = set(include_tags) if include_tags else None
-        self.exclude_tags: set[str] | None = set(exclude_tags) if exclude_tags else None
+        self.include_tags: set[str] | None = (
+            set(include_tags) if include_tags is not None else None
+        )
+        self.exclude_tags: set[str] | None = (
+            set(exclude_tags) if exclude_tags is not None else None
+        )
 
         self.strict_input_validation: bool = (
             strict_input_validation
