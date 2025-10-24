@@ -52,8 +52,6 @@ from my_project.main import mcp
 
 from fastmcp.client import Client
 from fastmcp.client.transports import FastMCPTransport
-from fastmcp.server.server import FastMCP
-
 @pytest.fixture
 async def main_mcp_client():
     async with Client(mcp) as client:
