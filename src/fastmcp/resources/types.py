@@ -138,7 +138,7 @@ class DirectoryResource(Resource):
 
         pattern = self.pattern or "*"
 
-        glob_fn = self._async_path.glob if self.recursive else self._async_path.glob
+        glob_fn = self._async_path.rglob if self.recursive else self._async_path.glob
         try:
             return [Path(p) async for p in glob_fn(pattern) if await p.is_file()]
         except Exception as e:
