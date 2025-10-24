@@ -23,7 +23,7 @@ class TestAzureProvider:
             client_secret="azure_secret_123",
             tenant_id="87654321-4321-4321-4321-210987654321",
             base_url="https://myserver.com",
-            required_scopes=["User.Read", "Mail.Read"],
+            required_scopes=["read", "write"],
             jwt_signing_key="test-secret",
         )
 
@@ -39,8 +39,8 @@ class TestAzureProvider:
     @pytest.mark.parametrize(
         "scopes_env",
         [
-            "User.Read,Calendar.Read",
-            '["User.Read", "Calendar.Read"]',
+            "read,write",
+            '["read", "write"]',
         ],
     )
     def test_init_with_env_vars(self, scopes_env):
@@ -61,9 +61,10 @@ class TestAzureProvider:
             assert provider._upstream_client_id == "env-client-id"
             assert provider._upstream_client_secret.get_secret_value() == "env-secret"
             assert str(provider.base_url) == "https://envserver.com/"
+            # Scopes should be prefixed with identifier_uri in token validator
             assert provider._token_validator.required_scopes == [
-                "User.Read",
-                "Calendar.Read",
+                "api://env-client-id/read",
+                "api://env-client-id/write",
             ]
             # Check tenant is in the endpoints
             parsed_auth = urlparse(provider._upstream_authorization_endpoint)
@@ -101,7 +102,7 @@ class TestAzureProvider:
             client_id="test_client",
             client_secret="test_secret",
             tenant_id="test-tenant",
-            required_scopes=["User.Read"],
+            required_scopes=["read"],
             jwt_signing_key="test-secret",
         )
 
@@ -117,7 +118,7 @@ class TestAzureProvider:
             client_secret="test_secret",
             tenant_id="my-tenant-id",
             base_url="https://myserver.com",
-            required_scopes=["User.Read"],
+            required_scopes=["read"],
             jwt_signing_key="test_secret",
         )
 
@@ -141,7 +142,7 @@ class TestAzureProvider:
             client_id="test_client",
             client_secret="test_secret",
             tenant_id="organizations",
-            required_scopes=["User.Read"],
+            required_scopes=["read"],
             jwt_signing_key="test-secret",
         )
         parsed = urlparse(provider1._upstream_authorization_endpoint)
@@ -152,31 +153,35 @@ class TestAzureProvider:
             client_id="test_client",
             client_secret="test_secret",
             tenant_id="consumers",
-            required_scopes=["User.Read"],
+            required_scopes=["read"],
             jwt_signing_key="test-secret",
         )
         parsed = urlparse(provider2._upstream_authorization_endpoint)
         assert "/consumers/" in parsed.path
 
     def test_azure_specific_scopes(self):
-        """Test handling of Azure-specific scope formats."""
-        # Just test that the provider accepts Azure-specific scopes without error
+        """Test handling of custom API scope formats."""
+        # Test that the provider accepts custom API scopes without error
         provider = AzureProvider(
             client_id="test_client",
             client_secret="test_secret",
             tenant_id="test-tenant",
             required_scopes=[
-                "User.Read",
-                "Mail.Read",
-                "Calendar.ReadWrite",
-                "openid",
-                "profile",
+                "read",
+                "write",
+                "admin",
             ],
             jwt_signing_key="test-secret",
         )
 
         # Provider should initialize successfully with these scopes
         assert provider is not None
+        # Scopes should be prefixed in token validator
+        assert provider._token_validator.required_scopes == [
+            "api://test_client/read",
+            "api://test_client/write",
+            "api://test_client/admin",
+        ]
 
     def test_init_does_not_require_api_client_id_anymore(self):
         """API client ID is no longer required; audience is client_id."""
@@ -184,7 +189,7 @@ class TestAzureProvider:
             client_id="test_client",
             client_secret="test_secret",
             tenant_id="test-tenant",
-            required_scopes=["User.Read"],
+            required_scopes=["read"],
             jwt_signing_key="test-secret",
         )
         assert provider is not None
@@ -209,10 +214,12 @@ class TestAzureProvider:
         )
         assert verifier.issuer == "https://login.microsoftonline.com/my-tenant/v2.0"
         assert verifier.audience == "test_client"
+        # Scopes should be prefixed with identifier_uri
+        assert verifier.required_scopes == ["api://my-api/.default"]
 
     @pytest.mark.asyncio
-    async def test_authorize_filters_resource_and_prefixes_scopes_with_audience(self):
-        """authorize() should drop resource and prefix non-openid scopes with audience."""
+    async def test_authorize_filters_resource_and_accepts_prefixed_scopes(self):
+        """authorize() should drop resource parameter and accept prefixed scopes from clients."""
         provider = AzureProvider(
             client_id="test_client",
             client_secret="test_secret",
@@ -240,7 +247,10 @@ class TestAzureProvider:
         params = AuthorizationParams(
             redirect_uri=AnyUrl("http://localhost:12345/callback"),
             redirect_uri_provided_explicitly=True,
-            scopes=["read", "profile"],
+            scopes=[
+                "api://my-api/read",
+                "api://my-api/profile",
+            ],  # Client sends prefixed scopes from PRM
             state="abc",
             code_challenge="xyz",
             resource="https://should.be.ignored",
@@ -263,8 +273,8 @@ class TestAzureProvider:
         assert transaction.resource is None
 
     @pytest.mark.asyncio
-    async def test_authorize_appends_unprefixed_additional_scopes(self):
-        """authorize() should append additional_authorize_scopes without prefixing them."""
+    async def test_authorize_appends_additional_scopes(self):
+        """authorize() should append additional_authorize_scopes to the authorization request."""
         provider = AzureProvider(
             client_id="test_client",
             client_secret="test_secret",
@@ -293,7 +303,7 @@ class TestAzureProvider:
         params = AuthorizationParams(
             redirect_uri=AnyUrl("http://localhost:12345/callback"),
             redirect_uri_provided_explicitly=True,
-            scopes=["read"],
+            scopes=["api://my-api/read"],  # Client sends prefixed scopes from PRM
             state="abc",
             code_challenge="xyz",
         )
