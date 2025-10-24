@@ -1,5 +1,6 @@
 """Unit tests for JWT issuer and token encryption."""
 
+import base64
 import time
 
 import pytest
@@ -17,8 +18,12 @@ class TestKeyDerivation:
     def test_derive_jwt_key_produces_32_bytes(self):
         """Test that JWT key derivation produces 32-byte key."""
         key = derive_jwt_key("test-secret", "test-salt")
-        assert len(key) == 32
+        assert len(key) == 44
         assert isinstance(key, bytes)
+
+        # base64 decode and make sure its 32 bytes
+        key_bytes = base64.urlsafe_b64decode(key)
+        assert len(key_bytes) == 32
 
     def test_derive_jwt_key_with_different_secrets_produces_different_keys(self):
         """Test that different secrets produce different keys."""

@@ -14,32 +14,39 @@ from authlib.jose import JsonWebToken
 from authlib.jose.errors import JoseError
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 from fastmcp.utilities.logging import get_logger
 
 logger = get_logger(__name__)
 
+KDF_ITERATIONS = 1000000
 
-def derive_jwt_key(from_secret: str, server_salt: str) -> bytes:
+
+def derive_jwt_key(source_material: str, salt: str) -> bytes:
     """Derive JWT signing key from upstream client secret and server salt.
 
-    Uses HKDF (RFC 5869) to derive a cryptographically secure signing key from
-    the upstream OAuth client secret combined with a server-specific salt.
+    Uses PBKDF2 (RFC 8018) to derive a cryptographically secure signing key from
+    the a string secret combined with a salt.
 
     Args:
-        from_secret: The OAuth client secret from upstream provider
-        server_salt: Random salt unique to this server instance
+        source_material: A string to use as the source material for the key derivation
+        salt: A salt to use for the key derivation
 
     Returns:
-        32-byte key suitable for HS256 JWT signing
+        A 32-byte key suitable for use as a JWT signing key
     """
-    return HKDF(
+    import base64
+
+    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+
+    pbkdf2 = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
         length=32,
-        salt=f"fastmcp-jwt-signing-v1-{server_salt}".encode(),
-        info=b"HS256",
-    ).derive(from_secret.encode())
+        salt=salt.encode(),
+        iterations=KDF_ITERATIONS,
+    ).derive(key_material=source_material.encode())
+
+    return base64.urlsafe_b64encode(pbkdf2)
 
 
 class JWTIssuer:

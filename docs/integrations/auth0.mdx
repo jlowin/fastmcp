@@ -153,7 +153,7 @@ When you run the client for the first time:
 
 <VersionBadge version="2.13.0" />
 
-For production deployments with persistent token management across server restarts, configure `jwt_signing_key`, `token_encryption_key`, and `client_storage`:
+For production deployments with persistent token management across server restarts, configure `jwt_signing_key`, and `client_storage`:
 
 ```python server.py
 import os
@@ -171,7 +171,6 @@ auth_provider = Auth0Provider(
 
     # Production token management
     jwt_signing_key=os.environ["JWT_SIGNING_KEY"],           # Secret for signing JWT tokens
-    token_encryption_key=os.environ["TOKEN_ENCRYPTION_KEY"], # Secret for encrypting tokens at rest
     client_storage=RedisStore(                               # Persistent storage for client registrations
         host=os.environ["REDIS_HOST"],
         port=int(os.environ["REDIS_PORT"])
@@ -182,7 +181,7 @@ mcp = FastMCP(name="Production Auth0 App", auth=auth_provider)
 ```
 
 <Note>
-All three parameters (`jwt_signing_key`, `token_encryption_key`, and `client_storage`) work together to ensure tokens and client registrations survive server restarts. Store secrets in environment variables and use a persistent storage backend like Redis or PostgreSQL for distributed deployments.
+Parameters (`jwt_signing_key` and `client_storage`) work together to ensure tokens and client registrations survive server restarts. Store secrets in environment variables and use a persistent storage backend like Redis for distributed deployments.
 
 For complete details on these parameters, see the [OAuth Proxy documentation](/servers/auth/oauth-proxy#configuration-parameters).
 </Note>

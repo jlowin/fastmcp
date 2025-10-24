@@ -139,20 +139,7 @@ Set this if your provider requires a specific authentication method and the defa
   - **Linux**: Ephemeral (random salt at startup). Tokens become invalid on server restart, triggering client re-authentication.
 
   **For production:**
-  Provide an explicit secret (e.g., from environment variable) to use a fixed key instead of the auto-generated one. Works with `token_encryption_key` and `client_storage` to ensure tokens survive restarts - all three parameters are required for production deployments.
-</ParamField>
-
-<ParamField body="token_encryption_key" type="str | bytes | None">
-
-<VersionBadge version="2.13.0" />
-  Secret used to encrypt upstream tokens at rest in `client_storage`. Accepts any string or bytes - will be derived into a proper 32-byte cryptographic key using HKDF.
-
-  **Default behavior (`None`):**
-  - **Mac/Windows**: FastMCP will generate a key and store it in the system's keyring. Keys are automatically derived from server attributes, so this approach, while convenient, is **only** suitable for development and local testing. For production, you must provide an explicit secret.
-  - **Linux**: Ephemeral (random salt at startup). Like `jwt_signing_key`, this is ephemeral, though without a valid JWT signing key, encrypted tokens are useless anyway (JWT validation fails first).
-
-  **For production:**
-  Provide an explicit secret distinct from `jwt_signing_key`. Works with `jwt_signing_key` and persistent `client_storage` - all three are required for production deployments.
+  Provide an explicit secret (e.g., from environment variable) to use a fixed key instead of the auto-generated one.
 </ParamField>
 
 <ParamField body="client_storage" type="AsyncKeyValue | None">

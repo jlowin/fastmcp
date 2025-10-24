@@ -153,10 +153,12 @@ class AWSCognitoProvider(OIDCProxy):
             required_scopes: Required Cognito scopes (defaults to ["openid"])
             allowed_client_redirect_uris: List of allowed redirect URI patterns for MCP clients.
                 If None (default), all URIs are allowed. If empty list, no URIs are allowed.
-            client_storage: An AsyncKeyValue-compatible store for client registrations, registrations are stored in memory if not provided
+            client_storage: Storage backend for OAuth state (client registrations, encrypted tokens).
+                If None, a DiskStore will be created in the data directory (derived from `platformdirs`). The
+                disk store will be encrypted using a key derived from the JWT Signing Key.
             jwt_signing_key: Secret for signing FastMCP JWT tokens (any string or bytes). If bytes are provided,
                 they will be used as is. If a string is provided, it will be derived into a 32-byte key. If not
-                provided, an error will be raised.
+                provided, the upstream client secret will be used to derive a 32-byte key using PBKDF2.
             require_authorization_consent: Whether to require user consent before authorizing clients (default True).
                 When True, users see a consent screen before being redirected to AWS Cognito.
                 When False, authorization proceeds directly without user confirmation.

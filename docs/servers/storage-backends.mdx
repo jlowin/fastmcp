@@ -118,7 +118,6 @@ auth = GitHubProvider(
     client_secret=os.environ["GITHUB_CLIENT_SECRET"],
     base_url="https://your-server.com",
     jwt_signing_key=os.environ["JWT_SIGNING_KEY"],
-    token_encryption_key=os.environ["TOKEN_ENCRYPTION_KEY"],
     client_storage=RedisStore(host="redis.example.com", port=6379)
 )
 ```
@@ -183,13 +182,12 @@ auth = GitHubProvider(
     base_url="https://your-server.com",
     # Explicit token encryption and signing keys (required for production)
     jwt_signing_key=os.environ["JWT_SIGNING_KEY"],
-    token_encryption_key=os.environ["TOKEN_ENCRYPTION_KEY"],
     # Persistent distributed storage (required for production)
     client_storage=RedisStore(host="redis.example.com", port=6379)
 )
 ```
 
-All three parameters (both keys and storage) are required for production. See [OAuth Token Security](/deployment/http#oauth-token-security) and [Key and Storage Management](/servers/auth/oauth-proxy#key-and-storage-management) for complete setup details.
+Both parameters (both keys and storage) are required for production. See [OAuth Token Security](/deployment/http#oauth-token-security) and [Key and Storage Management](/servers/auth/oauth-proxy#key-and-storage-management) for complete setup details.
 
 ### Response Caching Middleware
 
