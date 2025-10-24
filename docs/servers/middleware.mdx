@@ -89,10 +89,12 @@ Note that the MCP SDK may perform additional operations like listing tools for c
 This hierarchy allows you to target your middleware logic with the right level of specificity. Use `on_message` for broad concerns like logging, `on_request` for authentication, and `on_call_tool` for tool-specific logic like performance monitoring.
 
 ### Available Hooks
+<VersionBadge version="2.9.0" />
 
 - `on_message`: Called for all MCP messages (requests and notifications)
 - `on_request`: Called specifically for MCP requests (that expect responses)
 - `on_notification`: Called specifically for MCP notifications (fire-and-forget)
+
 - `on_call_tool`: Called when tools are being executed
 - `on_read_resource`: Called when resources are being read
 - `on_get_prompt`: Called when prompts are being retrieved
@@ -100,6 +102,11 @@ This hierarchy allows you to target your middleware logic with the right level o
 - `on_list_resources`: Called when listing available resources
 - `on_list_resource_templates`: Called when listing resource templates
 - `on_list_prompts`: Called when listing available prompts
+<VersionBadge version="2.13.0" />
+- `on_initialize`: Called when a client connects and initializes the session (returns `None`) 
+<Note>
+The `on_initialize` hook receives the client's initialization request but **returns `None`** rather than a result. The initialization response is handled internally by the MCP protocol and cannot be modified by middleware. This hook is useful for client detection, logging connections, or initializing session state, but not for modifying the initialization handshake itself.
+</Note>
 
 ## Component Access in Middleware
 
@@ -441,6 +448,79 @@ mcp.add_middleware(DetailedTimingMiddleware())
 ```
 
 The built-in versions include custom logger support, proper formatting, and **DetailedTimingMiddleware** provides operation-specific hooks like `on_call_tool` and `on_read_resource` for granular timing.
+
+### Caching Middleware
+
+Caching middleware is essential for improving performance and reducing server load. FastMCP provides caching middleware at `fastmcp.server.middleware.caching`.
+
+Here's how to use the full version:
+
+```python
+from fastmcp.server.middleware.caching import ResponseCachingMiddleware
+
+mcp.add_middleware(ResponseCachingMiddleware())
+```
+
+Out of the box, it caches call/list tool, resources, and prompts to an in-memory cache with TTL-based expiration. Cache entries expire based on their TTL; there is no event-based cache invalidation. List calls are stored under global keys—when sharing a storage backend across multiple servers, consider namespacing collections to prevent conflicts. See [Storage Backends](/servers/storage-backends) for advanced configuration options.
+
+Each method can be configured individually, for example, caching list tools for 30 seconds, limiting caching to specific tools, and disabling caching for resource reads:
+
+```python
+from fastmcp.server.middleware.caching import ResponseCachingMiddleware, CallToolSettings, ListToolsSettings, ReadResourceSettings
+
+mcp.add_middleware(ResponseCachingMiddleware(
+    list_tools_settings=ListToolsSettings(
+        ttl=30,
+    ),
+    call_tool_settings=CallToolSettings(
+        included_tools=["tool1"],
+    ),
+    read_resource_settings=ReadResourceSettings(
+        enabled=False
+    )
+))
+```
+
+#### Storage Backends
+
+By default, caching uses in-memory storage, which is fast but doesn't persist across restarts. For production or persistent caching across server restarts, configure a different storage backend. See [Storage Backends](/servers/storage-backends) for complete options including disk, Redis, DynamoDB, and custom implementations.
+
+Disk-based caching example:
+
+```python
+from fastmcp.server.middleware.caching import ResponseCachingMiddleware
+from key_value.aio.stores.disk import DiskStore
+
+mcp.add_middleware(ResponseCachingMiddleware(
+    cache_storage=DiskStore(directory="cache"),
+))
+```
+
+Redis for distributed deployments:
+
+```python
+from fastmcp.server.middleware.caching import ResponseCachingMiddleware
+from key_value.aio.stores.redis import RedisStore
+
+mcp.add_middleware(ResponseCachingMiddleware(
+    cache_storage=RedisStore(host="redis.example.com", port=6379),
+))
+```
+
+#### Cache Statistics
+
+The caching middleware collects operation statistics (hits, misses, etc.) through the underlying storage layer. Access statistics from the middleware instance:
+
+```python
+from fastmcp.server.middleware.caching import ResponseCachingMiddleware
+
+middleware = ResponseCachingMiddleware()
+mcp.add_middleware(middleware)
+
+# Later, retrieve statistics
+stats = middleware.statistics()
+print(f"Total cache operations: {stats}")
+```
 
 ### Logging Middleware
 

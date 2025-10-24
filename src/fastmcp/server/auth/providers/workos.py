@@ -11,6 +11,7 @@ Choose based on your WorkOS setup and authentication requirements.
 from __future__ import annotations
 
 import httpx
+from key_value.aio.protocols import AsyncKeyValue
 from pydantic import AnyHttpUrl, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from starlette.responses import JSONResponse
@@ -19,9 +20,9 @@ from starlette.routing import Route
 from fastmcp.server.auth import AccessToken, RemoteAuthProvider, TokenVerifier
 from fastmcp.server.auth.oauth_proxy import OAuthProxy
 from fastmcp.server.auth.providers.jwt import JWTVerifier
+from fastmcp.settings import ENV_FILE
 from fastmcp.utilities.auth import parse_scopes
 from fastmcp.utilities.logging import get_logger
-from fastmcp.utilities.storage import KVStorage
 from fastmcp.utilities.types import NotSet, NotSetT
 
 logger = get_logger(__name__)
@@ -32,7 +33,7 @@ class WorkOSProviderSettings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="FASTMCP_SERVER_AUTH_WORKOS_",
-        env_file=".env",
+        env_file=ENV_FILE,
         extra="ignore",
     )
 
@@ -40,6 +41,7 @@ class WorkOSProviderSettings(BaseSettings):
     client_secret: SecretStr | None = None
     authkit_domain: str | None = None  # e.g., "https://your-app.authkit.app"
     base_url: AnyHttpUrl | str | None = None
+    issuer_url: AnyHttpUrl | str | None = None
     redirect_path: str | None = None
     required_scopes: list[str] | None = None
     timeout_seconds: int | None = None
@@ -164,11 +166,15 @@ class WorkOSProvider(OAuthProxy):
         client_secret: str | NotSetT = NotSet,
         authkit_domain: str | NotSetT = NotSet,
         base_url: AnyHttpUrl | str | NotSetT = NotSet,
+        issuer_url: AnyHttpUrl | str | NotSetT = NotSet,
         redirect_path: str | NotSetT = NotSet,
         required_scopes: list[str] | None | NotSetT = NotSet,
         timeout_seconds: int | NotSetT = NotSet,
         allowed_client_redirect_uris: list[str] | NotSetT = NotSet,
-        client_storage: KVStorage | None = None,
+        client_storage: AsyncKeyValue | None = None,
+        jwt_signing_key: str | bytes | None = None,
+        token_encryption_key: str | bytes | None = None,
+        require_authorization_consent: bool = True,
     ):
         """Initialize WorkOS OAuth provider.
 
@@ -176,14 +182,25 @@ class WorkOSProvider(OAuthProxy):
             client_id: WorkOS client ID
             client_secret: WorkOS client secret
             authkit_domain: Your WorkOS AuthKit domain (e.g., "https://your-app.authkit.app")
-            base_url: Public URL of your FastMCP server (for OAuth callbacks)
+            base_url: Public URL where OAuth endpoints will be accessible (includes any mount path)
+            issuer_url: Issuer URL for OAuth metadata (defaults to base_url). Use root-level URL
+                to avoid 404s during discovery when mounting under a path.
             redirect_path: Redirect path configured in WorkOS (defaults to "/auth/callback")
             required_scopes: Required OAuth scopes (no default)
             timeout_seconds: HTTP request timeout for WorkOS API calls
             allowed_client_redirect_uris: List of allowed redirect URI patterns for MCP clients.
                 If None (default), all URIs are allowed. If empty list, no URIs are allowed.
-            client_storage: Storage implementation for OAuth client registrations.
-                Defaults to file-based storage if not specified.
+            client_storage: An AsyncKeyValue-compatible store for client registrations, registrations are stored in memory if not provided
+            jwt_signing_key: Secret for signing FastMCP JWT tokens (any string or bytes).
+                None (default): Auto-managed via system keyring (Mac/Windows) or ephemeral (Linux).
+                Explicit value: For production deployments. Recommended to store in environment variable.
+            token_encryption_key: Secret for encrypting upstream tokens at rest (any string or bytes).
+                None (default): Auto-managed via system keyring (Mac/Windows) or ephemeral (Linux).
+                Explicit value: For production deployments. Recommended to store in environment variable.
+            require_authorization_consent: Whether to require user consent before authorizing clients (default True).
+                When True, users see a consent screen before being redirected to WorkOS.
+                When False, authorization proceeds directly without user confirmation.
+                SECURITY WARNING: Only disable for local development or testing environments.
         """
 
         settings = WorkOSProviderSettings.model_validate(
@@ -194,6 +211,7 @@ class WorkOSProvider(OAuthProxy):
                     "client_secret": client_secret,
                     "authkit_domain": authkit_domain,
                     "base_url": base_url,
+                    "issuer_url": issuer_url,
                     "redirect_path": redirect_path,
                     "required_scopes": required_scopes,
                     "timeout_seconds": timeout_seconds,
@@ -247,12 +265,16 @@ class WorkOSProvider(OAuthProxy):
             token_verifier=token_verifier,
             base_url=settings.base_url,
             redirect_path=settings.redirect_path,
-            issuer_url=settings.base_url,
+            issuer_url=settings.issuer_url
+            or settings.base_url,  # Default to base_url if not specified
             allowed_client_redirect_uris=allowed_client_redirect_uris_final,
             client_storage=client_storage,
+            jwt_signing_key=jwt_signing_key,
+            token_encryption_key=token_encryption_key,
+            require_authorization_consent=require_authorization_consent,
         )
 
-        logger.info(
+        logger.debug(
             "Initialized WorkOS OAuth provider for client %s with AuthKit domain %s",
             settings.client_id,
             authkit_domain_final,
@@ -262,7 +284,7 @@ class WorkOSProvider(OAuthProxy):
 class AuthKitProviderSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="FASTMCP_SERVER_AUTH_AUTHKITPROVIDER_",
-        env_file=".env",
+        env_file=ENV_FILE,
         extra="ignore",
     )
 
