@@ -605,8 +605,8 @@ class OAuthProxy(OAuthProvider):
                 Default (Linux): MemoryStore (ephemeral keys make persistence pointless).
                 Custom: Pass DiskStore/RedisStore instance or override location via FASTMCP_HOME.
             jwt_signing_key: Secret for signing FastMCP JWT tokens (any string or bytes). If bytes are provided,
-                they will be used as is. If a string is provided, it will be derived into a 32-byte key using HKDF.
-                If not provided, an error will be raised.
+                they will be used as is. If a string is provided, it will be derived into a 32-byte key. If not
+                provided, an error will be raised.
             require_authorization_consent: Whether to require user consent before authorizing clients (default True).
                 When True, users see a consent screen before being redirected to the upstream IdP.
                 When False, authorization proceeds directly without user confirmation.

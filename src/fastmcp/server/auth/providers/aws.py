@@ -154,9 +154,9 @@ class AWSCognitoProvider(OIDCProxy):
             allowed_client_redirect_uris: List of allowed redirect URI patterns for MCP clients.
                 If None (default), all URIs are allowed. If empty list, no URIs are allowed.
             client_storage: An AsyncKeyValue-compatible store for client registrations, registrations are stored in memory if not provided
-            jwt_signing_key: Secret for signing FastMCP JWT tokens (any string or bytes).
-                None (default): Auto-managed via system keyring (Mac/Windows) or ephemeral (Linux).
-                Explicit value: For production deployments. Recommended to store in environment variable.
+            jwt_signing_key: Secret for signing FastMCP JWT tokens (any string or bytes). If bytes are provided,
+                they will be used as is. If a string is provided, it will be derived into a 32-byte key. If not
+                provided, an error will be raised.
             require_authorization_consent: Whether to require user consent before authorizing clients (default True).
                 When True, users see a consent screen before being redirected to AWS Cognito.
                 When False, authorization proceeds directly without user confirmation.
