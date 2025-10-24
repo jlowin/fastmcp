@@ -148,7 +148,8 @@ class UpstreamTokenSet(BaseModel):
     """Stored upstream OAuth tokens from identity provider.
 
     These tokens are obtained from the upstream provider (Google, GitHub, etc.)
-    and are stored encrypted at rest. They are never exposed to MCP clients.
+    and stored in plaintext within this model. Encryption is handled transparently
+    at the storage layer via FernetEncryptionWrapper. Tokens are never exposed to MCP clients.
     """
 
     upstream_token_id: str  # Unique ID for this token set
@@ -600,12 +601,12 @@ class OAuthProxy(OAuthProvider):
                 Example: {"audience": "https://api.example.com"}
             extra_token_params: Additional parameters to forward to the upstream token endpoint.
                 Useful for provider-specific parameters during token exchange.
-            client_storage: Storage backend for OAuth state (client registrations, encrypted tokens).
-                If None, a DiskStore will be created in the data directory (derived from `platformdirs`). The
-                disk store will be encrypted using a key derived from the JWT Signing Key.
-            jwt_signing_key: Secret for signing FastMCP JWT tokens (any string or bytes). If bytes are provided,
-                they will be used as is. If a string is provided, it will be derived into a 32-byte key. If not
-                provided, the upstream client secret will be used to derive a 32-byte key using PBKDF2.
+            client_storage: Storage backend for OAuth state (client registrations, tokens).
+                If None, an encrypted DiskStore will be created in the data directory.
+            jwt_signing_key: Secret for signing FastMCP JWT tokens (any string or bytes).
+                If bytes are provided, they will be used as-is.
+                If a string is provided, it will be derived into a 32-byte key using PBKDF2 (1.2M iterations).
+                If not provided, it will be derived from the upstream client secret using HKDF.
             require_authorization_consent: Whether to require user consent before authorizing clients (default True).
                 When True, users see a consent screen before being redirected to the upstream IdP.
                 When False, authorization proceeds directly without user confirmation.

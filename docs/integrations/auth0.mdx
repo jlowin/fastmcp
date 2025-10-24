@@ -160,8 +160,10 @@ import os
 from fastmcp import FastMCP
 from fastmcp.server.auth.providers.auth0 import Auth0Provider
 from key_value.aio.stores.redis import RedisStore
+from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
+from cryptography.fernet import Fernet
 
-# Production setup with persistent token storage
+# Production setup with encrypted persistent token storage
 auth_provider = Auth0Provider(
     config_url="https://.../.well-known/openid-configuration",
     client_id="tv2ObNgaZAWWhhycr7Bz1LU2mxlnsmsB",
@@ -170,10 +172,13 @@ auth_provider = Auth0Provider(
     base_url="https://your-production-domain.com",
 
     # Production token management
-    jwt_signing_key=os.environ["JWT_SIGNING_KEY"],           # Secret for signing JWT tokens
-    client_storage=RedisStore(                               # Persistent storage for client registrations
-        host=os.environ["REDIS_HOST"],
-        port=int(os.environ["REDIS_PORT"])
+    jwt_signing_key=os.environ["JWT_SIGNING_KEY"],
+    client_storage=FernetEncryptionWrapper(
+        key_value=RedisStore(
+            host=os.environ["REDIS_HOST"],
+            port=int(os.environ["REDIS_PORT"])
+        ),
+        fernet=Fernet(os.environ["STORAGE_ENCRYPTION_KEY"])
     )
 )
 
@@ -181,7 +186,7 @@ mcp = FastMCP(name="Production Auth0 App", auth=auth_provider)
 ```
 
 <Note>
-Parameters (`jwt_signing_key` and `client_storage`) work together to ensure tokens and client registrations survive server restarts. Store secrets in environment variables and use a persistent storage backend like Redis for distributed deployments.
+Parameters (`jwt_signing_key` and `client_storage`) work together to ensure tokens and client registrations survive server restarts. **Wrap your storage in `FernetEncryptionWrapper` to encrypt sensitive OAuth tokens at rest** - without it, tokens are stored in plaintext. Store secrets in environment variables and use a persistent storage backend like Redis for distributed deployments.
 
 For complete details on these parameters, see the [OAuth Proxy documentation](/servers/auth/oauth-proxy#configuration-parameters).
 </Note>

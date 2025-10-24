@@ -13,7 +13,6 @@ from typing import Any, overload
 
 from authlib.jose import JsonWebToken
 from authlib.jose.errors import JoseError
-from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
@@ -235,40 +234,3 @@ class JWTIssuer:
         except JoseError as e:
             logger.debug("Token validation failed: %s", e)
             raise
-
-
-class TokenEncryption:
-    """Handles encryption/decryption of upstream OAuth tokens at rest."""
-
-    def __init__(self, encryption_key: bytes):
-        """Initialize token encryption.
-
-        Args:
-            encryption_key: Fernet encryption key (32 bytes, base64url-encoded)
-        """
-        self._fernet = Fernet(encryption_key)
-
-    def encrypt(self, token: str) -> bytes:
-        """Encrypt a token for storage.
-
-        Args:
-            token: Plain text token
-
-        Returns:
-            Encrypted token bytes
-        """
-        return self._fernet.encrypt(token.encode())
-
-    def decrypt(self, encrypted_token: bytes) -> str:
-        """Decrypt a token from storage.
-
-        Args:
-            encrypted_token: Encrypted token bytes
-
-        Returns:
-            Plain text token
-
-        Raises:
-            cryptography.fernet.InvalidToken: If token is corrupted or key is wrong
-        """
-        return self._fernet.decrypt(encrypted_token).decode()
