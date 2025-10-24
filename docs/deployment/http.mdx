@@ -566,7 +566,7 @@ Production requires explicit key management to ensure tokens survive restarts an
 
 Add two parameters to your auth provider:
 
-```python {4-11}
+```python {8-12}
 from key_value.aio.stores.redis import RedisStore
 from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
 from cryptography.fernet import Fernet
@@ -576,7 +576,7 @@ auth = GitHubProvider(
     client_secret=os.environ["GITHUB_CLIENT_SECRET"],
     jwt_signing_key=os.environ["JWT_SIGNING_KEY"],
     client_storage=FernetEncryptionWrapper(
-        key_value=RedisStore(host="redis.example.com", ...),
+        key_value=RedisStore(host="redis.example.com", port=6379),
         fernet=Fernet(os.environ["STORAGE_ENCRYPTION_KEY"])
     ),
     base_url="https://your-server.com"  # use HTTPS
