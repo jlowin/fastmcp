@@ -115,6 +115,7 @@ class TestAzureProvider:
             tenant_id="my-tenant-id",
             base_url="https://myserver.com",
             required_scopes=["User.Read"],
+            jwt_signing_key="test_secret",
         )
 
         # Check that endpoints use the correct Azure OAuth2 v2.0 endpoints with tenant

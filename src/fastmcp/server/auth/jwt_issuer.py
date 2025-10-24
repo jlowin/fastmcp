@@ -22,14 +22,14 @@ from fastmcp.utilities.logging import get_logger
 logger = get_logger(__name__)
 
 
-def derive_jwt_key(upstream_secret: str, server_salt: str) -> bytes:
+def derive_jwt_key(from_secret: str, server_salt: str) -> bytes:
     """Derive JWT signing key from upstream client secret and server salt.
 
     Uses HKDF (RFC 5869) to derive a cryptographically secure signing key from
     the upstream OAuth client secret combined with a server-specific salt.
 
     Args:
-        upstream_secret: The OAuth client secret from upstream provider
+        from_secret: The OAuth client secret from upstream provider
         server_salt: Random salt unique to this server instance
 
     Returns:
@@ -40,17 +40,17 @@ def derive_jwt_key(upstream_secret: str, server_salt: str) -> bytes:
         length=32,
         salt=f"fastmcp-jwt-signing-v1-{server_salt}".encode(),
         info=b"HS256",
-    ).derive(upstream_secret.encode())
+    ).derive(from_secret.encode())
 
 
-def derive_encryption_key(upstream_secret: str) -> bytes:
+def derive_encryption_key(from_secret: str, salt: str) -> bytes:
     """Derive Fernet encryption key from upstream client secret.
 
     Uses HKDF to derive a cryptographically secure encryption key for
     encrypting upstream tokens at rest.
 
     Args:
-        upstream_secret: The OAuth client secret from upstream provider
+        from_secret: The secret to derive the encryption key from
 
     Returns:
         32-byte Fernet key (base64url-encoded)
@@ -58,9 +58,9 @@ def derive_encryption_key(upstream_secret: str) -> bytes:
     key_material = HKDF(
         algorithm=hashes.SHA256(),
         length=32,
-        salt=b"fastmcp-token-encryption-v1",
+        salt=salt.encode(),
         info=b"Fernet",
-    ).derive(upstream_secret.encode())
+    ).derive(from_secret.encode())
     return base64.urlsafe_b64encode(key_material)
 
 
@@ -84,7 +84,7 @@ def derive_key_from_secret(secret: str | bytes, salt: str, info: bytes) -> bytes
         length=32,
         salt=salt.encode(),
         info=info,
-    ).derive(secret_bytes)
+    ).derive(key_material=secret_bytes)
 
 
 class JWTIssuer:

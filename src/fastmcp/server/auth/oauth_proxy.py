@@ -22,12 +22,10 @@ import base64
 import hashlib
 import hmac
 import json
-import platform
 import secrets
 import time
 from base64 import urlsafe_b64encode
-from pathlib import Path
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Any, Final, override
 from urllib.parse import urlencode, urlparse
 
 import httpx
@@ -36,8 +34,6 @@ from authlib.integrations.httpx_client import AsyncOAuth2Client
 from key_value.aio.adapters.pydantic import PydanticAdapter
 from key_value.aio.protocols import AsyncKeyValue
 from key_value.aio.stores.disk import DiskStore
-from key_value.aio.stores.keyring import KeyringStore
-from key_value.aio.stores.memory import MemoryStore
 from key_value.aio.wrappers.encryption import EncryptionWrapper
 from mcp.server.auth.handlers.token import TokenErrorResponse, TokenSuccessResponse
 from mcp.server.auth.handlers.token import TokenHandler as _SDKTokenHandler
@@ -67,6 +63,8 @@ from fastmcp.server.auth.auth import OAuthProvider, TokenVerifier
 from fastmcp.server.auth.handlers.authorize import AuthorizationHandler
 from fastmcp.server.auth.jwt_issuer import (
     JWTIssuer,
+    derive_encryption_key,
+    derive_key_from_secret,
 )
 from fastmcp.server.auth.redirect_validation import (
     validate_redirect_uri,
@@ -180,18 +178,23 @@ class JTIMapping(BaseModel):
 
 
 class Secret(BaseModel):
-    value: str | bytes
+    value: SecretStr
+
+    @classmethod
+    def from_str_or_bytes(cls, value: str | bytes) -> Self:
+        if isinstance(value, str):
+            return cls(value=SecretStr(secret_value=value))
+        return cls(value=SecretStr(secret_value=value.decode()))
 
     @classmethod
     def generate(cls) -> Self:
-        str_b64: str = secrets.token_urlsafe(nbytes=32)
-        return cls(value=str_b64)
+        return cls.from_str_or_bytes(secrets.token_urlsafe(nbytes=32))
 
     def derive_key(self, salt: str, info: bytes) -> bytes:
         from fastmcp.server.auth.jwt_issuer import derive_key_from_secret
 
         key_bytes: bytes = derive_key_from_secret(
-            secret=self.value,
+            secret=self.value.get_secret_value(),
             salt=salt,
             info=info,
         )
@@ -588,10 +591,8 @@ class OAuthProxy(OAuthProvider):
         extra_token_params: dict[str, str] | None = None,
         # Client storage
         client_storage: AsyncKeyValue | None = None,
-        # JWT signing key (optional, ephemeral if not provided)
+        # JWT signing key
         jwt_signing_key: str | bytes | None = None,
-        # Token encryption key (optional, ephemeral if not provided)
-        token_encryption_key: str | bytes | None = None,
         # Consent screen configuration
         require_authorization_consent: bool = True,
     ):
@@ -631,17 +632,20 @@ class OAuthProxy(OAuthProvider):
                 Default (Mac/Windows): DiskStore at $FASTMCP_HOME/oauth-proxy (~/.fastmcp/oauth-proxy).
                 Default (Linux): MemoryStore (ephemeral keys make persistence pointless).
                 Custom: Pass DiskStore/RedisStore instance or override location via FASTMCP_HOME.
-            jwt_signing_key: Secret for signing FastMCP JWT tokens (any string or bytes).
-                None (default): Auto-managed via system keyring (Mac/Windows) or ephemeral (Linux).
-                Explicit value: For production deployments. Recommended to store in environment variable.
-            token_encryption_key: Secret for encrypting upstream tokens at rest (any string or bytes).
-                None (default): Auto-managed via system keyring (Mac/Windows) or ephemeral (Linux).
-                Explicit value: For production deployments. Recommended to store in environment variable.
+            jwt_signing_key: Secret for signing FastMCP JWT tokens (any string or bytes). If bytes are provided,
+                they will be used as is. If a string is provided, it will be derived into a 32-byte key using HKDF.
+                If not provided, an error will be raised.
             require_authorization_consent: Whether to require user consent before authorizing clients (default True).
                 When True, users see a consent screen before being redirected to the upstream IdP.
                 When False, authorization proceeds directly without user confirmation.
                 SECURITY WARNING: Only disable for local development or testing environments.
         """
+
+        if jwt_signing_key is None:
+            raise ValueError(
+                "jwt_signing_key is a required parameter of OAuthProxy as of FastMCP 2.13.0"
+            )
+
         # Always enable DCR since we implement it locally for MCP clients
         client_registration_options = ClientRegistrationOptions(
             enabled=True,
@@ -663,12 +667,14 @@ class OAuthProxy(OAuthProvider):
         )
 
         # Store upstream configuration
-        self._upstream_authorization_endpoint = upstream_authorization_endpoint
-        self._upstream_token_endpoint = upstream_token_endpoint
-        self._upstream_client_id = upstream_client_id
-        self._upstream_client_secret = SecretStr(upstream_client_secret)
-        self._upstream_revocation_endpoint = upstream_revocation_endpoint
-        self._default_scope_str = " ".join(self.required_scopes or [])
+        self._upstream_authorization_endpoint: str = upstream_authorization_endpoint
+        self._upstream_token_endpoint: str = upstream_token_endpoint
+        self._upstream_client_id: str = upstream_client_id
+        self._upstream_client_secret: SecretStr = SecretStr(
+            secret_value=upstream_client_secret
+        )
+        self._upstream_revocation_endpoint: str | None = upstream_revocation_endpoint
+        self._default_scope_str: str = " ".join(self.required_scopes or [])
 
         # Store redirect configuration
         if not redirect_path:
@@ -684,80 +690,72 @@ class OAuthProxy(OAuthProvider):
         ):
             logger.warning(
                 "allowed_client_redirect_uris is empty list; no redirect URIs will be accepted. "
-                "This will block all OAuth clients."
+                + "This will block all OAuth clients."
             )
-        self._allowed_client_redirect_uris = allowed_client_redirect_uris
+        self._allowed_client_redirect_uris: list[str] | None = (
+            allowed_client_redirect_uris
+        )
 
         # PKCE configuration
-        self._forward_pkce = forward_pkce
+        self._forward_pkce: bool = forward_pkce
 
         # Token endpoint authentication
-        self._token_endpoint_auth_method = token_endpoint_auth_method
+        self._token_endpoint_auth_method: str | None = token_endpoint_auth_method
 
         # Consent screen configuration
-        self._require_authorization_consent = require_authorization_consent
+        self._require_authorization_consent: bool = require_authorization_consent
         if not require_authorization_consent:
             logger.warning(
                 "Authorization consent screen disabled - only use for local development or testing. "
-                "In production, this screen protects against confused deputy attacks."
+                + "In production, this screen protects against confused deputy attacks."
             )
 
         # Extra parameters for authorization and token endpoints
-        self._extra_authorize_params = extra_authorize_params or {}
-        self._extra_token_params = extra_token_params or {}
+        self._extra_authorize_params: dict[str, str] = extra_authorize_params or {}
+        self._extra_token_params: dict[str, str] = extra_token_params or {}
 
-        # Default storage: match persistence to key availability
-        # On Mac/Windows: DiskStore + keyring keys = full persistence
-        # On Linux: MemoryStore + ephemeral keys = consistent (nothing persists)
-        self._client_storage: AsyncKeyValue
-        self._key_storage: AsyncKeyValue = MemoryStore()
-        self._auto_selected_storage: bool
+        jwt_signing_key_bytes = (
+            jwt_signing_key
+            if isinstance(jwt_signing_key, bytes)
+            else derive_key_from_secret(
+                secret=jwt_signing_key,
+                salt="fastmcp-jwt",
+                info=b"HS256",
+            )
+        )
 
+        self._jwt_issuer: JWTIssuer = JWTIssuer(
+            issuer=str(self.base_url),
+            audience=f"{str(self.base_url).rstrip('/')}/mcp",
+            signing_key=jwt_signing_key_bytes,
+        )
+
+        # If the user does not provide a store, we will provide an encrypted disk store
         if client_storage is None:
-            if platform.system() != "Linux":
-                # Keyring available: use persistent storage
-                default_storage_path: Path = settings.home / "oauth-proxy"
-                self._key_storage = KeyringStore()
-                self._client_storage = DiskStore(directory=default_storage_path)
-                logger.debug(
-                    "Using disk storage for OAuth state: %s", default_storage_path
-                )
-            else:
-                # Keyring unavailable: use memory storage (ephemeral keys make disk pointless)
-                self._client_storage = MemoryStore()
-                logger.debug(
-                    "Using in-memory storage on Linux (keyring unavailable). "
-                    + "For persistent tokens, provide explicit jwt_signing_key, "
-                    + "token_encryption_key, and client_storage."
-                )
-            self._auto_selected_storage = True
-        else:
-            self._client_storage = client_storage
-            self._auto_selected_storage = False
-
-        # Warn if explicitly using MemoryStore when keyring is available
-        if (
-            isinstance(self._client_storage, MemoryStore)
-            and not self._auto_selected_storage
-            and platform.system() != "Linux"
-        ):
-            logger.warning(
-                "Using in-memory storage on a platform with keyring support. "
-                + "OAuth state will be lost on restart. Consider using default storage "
-                + "or providing explicit jwt_signing_key and token_encryption_key with persistent storage."
+            disk_encryption_key = derive_encryption_key(
+                from_secret=jwt_signing_key,
+                salt="fastmcp-disk-encryption",
+            )
+            client_storage = EncryptionWrapper(
+                key_value=DiskStore(directory=settings.home / "oauth-proxy"),
+                encryption_key=disk_encryption_key,
             )
 
+        self._client_storage: AsyncKeyValue = client_storage
+
         # Cache HTTPS check to avoid repeated logging
-        self._is_https = str(self.base_url).startswith("https://")
+        self._is_https: bool = str(self.base_url).startswith("https://")
         if not self._is_https:
             logger.warning(
                 "Using non-secure cookies for development; deploy with HTTPS for production."
             )
 
-        self._secret_store: PydanticAdapter[Secret] = PydanticAdapter[Secret](
-            key_value=self._key_storage,
-            pydantic_model=Secret,
-            default_collection="mcp-oauth-proxy-secrets",
+        self._upstream_token_store: PydanticAdapter[UpstreamTokenSet] = PydanticAdapter[
+            UpstreamTokenSet
+        ](
+            key_value=self._client_storage,
+            pydantic_model=UpstreamTokenSet,
+            default_collection="mcp-upstream-tokens",
             raise_on_validation_error=True,
         )
 
@@ -798,17 +796,6 @@ class OAuthProxy(OAuthProvider):
             raise_on_validation_error=True,
         )
 
-        # JWT issuer and encryption (initialized lazily on first use)
-        self._custom_jwt_key: Secret | None = (
-            Secret(value=jwt_signing_key) if jwt_signing_key else None
-        )
-        self._custom_encryption_key: Secret | None = (
-            Secret(value=token_encryption_key) if token_encryption_key else None
-        )
-
-        self._jwt_issuer: JWTIssuer | None = None
-        self._jwt_initialized = False
-
         # Local state for token bookkeeping only (no client caching)
         self._access_tokens: dict[str, AccessToken] = {}
         self._refresh_tokens: dict[str, RefreshToken] = {}
@@ -818,7 +805,7 @@ class OAuthProxy(OAuthProvider):
         self._refresh_to_access: dict[str, str] = {}
 
         # Use the provided token validator
-        self._token_validator = token_verifier
+        self._token_validator: TokenVerifier = token_verifier
 
         logger.debug(
             "Initialized OAuth proxy provider with upstream server %s",
@@ -845,112 +832,10 @@ class OAuthProxy(OAuthProvider):
         return code_verifier, code_challenge
 
     # -------------------------------------------------------------------------
-    # JWT Token Factory Initialization
-    # -------------------------------------------------------------------------
-
-    async def _ensure_jwt_initialized(self) -> None:
-        """Initialize JWT issuer and token encryption (lazy initialization).
-
-        Key derivation strategy:
-        - Explicit key (production): User-provided via parameters
-        - Keyring key (local/dev): Auto-managed via system keyring
-        - Ephemeral key (fallback): Random salt at startup when keyring unavailable
-        """
-        if self._jwt_initialized:
-            return
-
-        jwt_secret: Secret
-
-        if self._custom_jwt_key:
-            jwt_secret = self._custom_jwt_key
-            logger.debug("Using user-provided JWT signing key")
-        else:
-            if not (keyring_secret := await self._secret_store.get(key="jwt-signing")):
-                keyring_secret = Secret.generate()
-                await self._secret_store.put(key="jwt-signing", value=keyring_secret)
-
-            if isinstance(self._key_storage, MemoryStore):
-                if platform.system() == "Linux":
-                    logger.warning(
-                        "Keyring unavailable on Linux - using ephemeral keys. "
-                        + "Storage persists at %s but tokens will become unreadable after restart. "
-                        + "For persistent tokens, provide explicit jwt_signing_key and token_encryption_key.",
-                        self._client_storage,
-                    )
-                else:
-                    logger.warning(
-                        "Keyring unavailable - using ephemeral keys. "
-                        + "For production, provide explicit jwt_signing_key and token_encryption_key."
-                    )
-
-            jwt_secret = keyring_secret
-
-        # Initialize JWT issuer
-        issuer = str(self.base_url)
-        audience = f"{str(self.base_url).rstrip('/')}/mcp"
-        self._jwt_issuer = JWTIssuer(
-            issuer=issuer,
-            audience=audience,
-            signing_key=jwt_secret.derive_key(
-                salt="fastmcp-jwt-signing-v1", info=b"HS256"
-            ),
-        )
-
-        encryption_secret: Secret
-
-        if self._custom_encryption_key:
-            encryption_secret = self._custom_encryption_key
-            logger.debug("Using user-provided token encryption key")
-        else:
-            encryption_keyring_key: Secret | None = await self._secret_store.get(
-                key="token-encryption"
-            )
-            if not encryption_keyring_key:
-                encryption_keyring_key = Secret.generate()
-                await self._secret_store.put(
-                    key="token-encryption", value=encryption_keyring_key
-                )
-
-            if isinstance(self._key_storage, MemoryStore):
-                if platform.system() == "Linux":
-                    logger.warning(
-                        "Keyring unavailable on Linux - using ephemeral keys. "
-                        + "Storage persists at %s but tokens will become unreadable after restart. "
-                        + "For persistent tokens, provide explicit jwt_signing_key and token_encryption_key.",
-                        self._client_storage,
-                    )
-                else:
-                    logger.warning(
-                        "Keyring unavailable - using ephemeral keys. "
-                        + "For production, provide explicit jwt_signing_key and token_encryption_key."
-                    )
-
-            encryption_secret = encryption_keyring_key
-
-        self._encryption_secret: Secret = encryption_secret
-
-        # Storage for upstream tokens (encrypted at rest)
-        encryption_wrapper = EncryptionWrapper(
-            key_value=self._client_storage,
-            encryption_key=encryption_secret.derive_key_b64(
-                salt="fastmcp-token-encryption-v1", info=b"Fernet"
-            ),
-        )
-        self._upstream_token_store: PydanticAdapter[UpstreamTokenSet] = PydanticAdapter[
-            UpstreamTokenSet
-        ](
-            key_value=encryption_wrapper,
-            pydantic_model=UpstreamTokenSet,
-            default_collection="mcp-upstream-tokens",
-            raise_on_validation_error=True,
-        )
-
-        self._jwt_initialized = True
-
-    # -------------------------------------------------------------------------
     # Client Registration (Local Implementation)
     # -------------------------------------------------------------------------
 
+    @override
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
         """Get client information by ID. This is generally the random ID
         provided to the DCR client during registration, not the upstream client ID.
@@ -966,6 +851,7 @@ class OAuthProxy(OAuthProvider):
 
         return client
 
+    @override
     async def register_client(self, client_info: OAuthClientInformationFull) -> None:
         """Register a client locally
 
@@ -1012,6 +898,7 @@ class OAuthProxy(OAuthProvider):
     # Authorization Flow (Proxy to Upstream)
     # -------------------------------------------------------------------------
 
+    @override
     async def authorize(
         self,
         client: OAuthClientInformationFull,
@@ -1086,6 +973,7 @@ class OAuthProxy(OAuthProvider):
     # Authorization Code Handling
     # -------------------------------------------------------------------------
 
+    @override
     async def load_authorization_code(
         self,
         client: OAuthClientInformationFull,
@@ -1105,7 +993,7 @@ class OAuthProxy(OAuthProvider):
         # Check if code expired
         if time.time() > code_model.expires_at:
             logger.debug("Authorization code expired: %s", authorization_code)
-            await self._code_store.delete(key=authorization_code)
+            _ = await self._code_store.delete(key=authorization_code)
             return None
 
         # Verify client ID matches
@@ -1121,13 +1009,14 @@ class OAuthProxy(OAuthProvider):
         return AuthorizationCode(
             code=authorization_code,
             client_id=client.client_id,
-            redirect_uri=code_model.redirect_uri,
+            redirect_uri=AnyUrl(url=code_model.redirect_uri),
             redirect_uri_provided_explicitly=True,
             scopes=code_model.scopes,
             expires_at=code_model.expires_at,
             code_challenge=code_model.code_challenge or "",
         )
 
+    @override
     async def exchange_authorization_code(
         self,
         client: OAuthClientInformationFull,
@@ -1144,10 +1033,6 @@ class OAuthProxy(OAuthProvider):
 
         PKCE validation is handled by the MCP framework before this method is called.
         """
-        # Ensure JWT issuer is initialized
-        await self._ensure_jwt_initialized()
-        assert self._jwt_issuer is not None
-
         # Look up stored code data
         code_model = await self._code_store.get(key=authorization_code.code)
         if not code_model:
@@ -1321,10 +1206,6 @@ class OAuthProxy(OAuthProvider):
         5. Issue new FastMCP access token
         6. Keep same FastMCP refresh token (unless upstream rotates)
         """
-        # Ensure JWT issuer is initialized
-        await self._ensure_jwt_initialized()
-        assert self._jwt_issuer is not None
-
         # Verify FastMCP refresh token
         try:
             refresh_payload = self._jwt_issuer.verify_token(refresh_token.token)
@@ -1523,10 +1404,6 @@ class OAuthProxy(OAuthProvider):
         The FastMCP JWT is a reference token - all authorization data comes
         from validating the upstream token via the TokenVerifier.
         """
-        # Ensure JWT issuer and encryption are initialized
-        await self._ensure_jwt_initialized()
-        assert self._jwt_issuer is not None
-
         try:
             # 1. Verify FastMCP JWT signature and claims
             payload = self._jwt_issuer.verify_token(token)

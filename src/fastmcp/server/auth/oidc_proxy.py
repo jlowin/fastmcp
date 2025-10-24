@@ -217,7 +217,6 @@ class OIDCProxy(OAuthProxy):
         client_storage: AsyncKeyValue | None = None,
         # JWT and encryption keys
         jwt_signing_key: str | bytes | None = None,
-        token_encryption_key: str | bytes | None = None,
         # Token validation configuration
         token_endpoint_auth_method: str | None = None,
         # Consent screen configuration
@@ -245,9 +244,6 @@ class OIDCProxy(OAuthProxy):
                 These are for MCP clients performing loopback redirects, NOT for the upstream OAuth app.
             client_storage: An AsyncKeyValue-compatible store for client registrations, registrations are stored in memory if not provided
             jwt_signing_key: Secret for signing FastMCP JWT tokens (any string or bytes).
-                None (default): Auto-managed via system keyring (Mac/Windows) or ephemeral (Linux).
-                Explicit value: For production deployments. Recommended to store in environment variable.
-            token_encryption_key: Secret for encrypting upstream tokens at rest (any string or bytes).
                 None (default): Auto-managed via system keyring (Mac/Windows) or ephemeral (Linux).
                 Explicit value: For production deployments. Recommended to store in environment variable.
             token_endpoint_auth_method: Token endpoint authentication method for upstream server.
@@ -311,7 +307,6 @@ class OIDCProxy(OAuthProxy):
             "allowed_client_redirect_uris": allowed_client_redirect_uris,
             "client_storage": client_storage,
             "jwt_signing_key": jwt_signing_key,
-            "token_encryption_key": token_encryption_key,
             "token_endpoint_auth_method": token_endpoint_auth_method,
             "require_authorization_consent": require_authorization_consent,
         }
