@@ -130,7 +130,7 @@ class AzureProvider(OAuthProxy):
             client_id: Azure application (client) ID from your App registration
             client_secret: Azure client secret from your App registration
             tenant_id: Azure tenant ID (specific tenant GUID, "organizations", or "consumers")
-            identifier_uri: Application ID URI for your custom API (defaults to api://{client_id}).
+            identifier_uri: Optional Application ID URI for your custom API (defaults to api://{client_id}).
                 This URI is automatically prefixed to all required_scopes during initialization.
                 Example: identifier_uri="api://my-api" + required_scopes=["read"]
                 → tokens validated for "api://my-api/read"
