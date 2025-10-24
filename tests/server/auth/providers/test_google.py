@@ -86,6 +86,7 @@ class TestGoogleProvider:
             client_id="123456789.apps.googleusercontent.com",
             client_secret="GOCSPX-test123",
             base_url="https://myserver.com",
+            jwt_signing_key="test-secret",
         )
 
         # Check that endpoints use Google's OAuth2 endpoints

@@ -141,6 +141,7 @@ class TestWorkOSProvider:
             client_secret="test_secret",
             authkit_domain="https://test.authkit.app",
             base_url="https://myserver.com",
+            jwt_signing_key="test-secret",
         )
 
         # Check that endpoints use the authkit domain
