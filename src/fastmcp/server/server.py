@@ -64,7 +64,6 @@ from fastmcp.server.http import (
 )
 from fastmcp.server.low_level import LowLevelServer
 from fastmcp.server.middleware import Middleware, MiddlewareContext
-from fastmcp.server.sampling.handler import ServerSamplingHandler
 from fastmcp.settings import Settings
 from fastmcp.tools.tool import FunctionTool, Tool, ToolResult
 from fastmcp.tools.tool_manager import ToolManager
@@ -246,7 +245,7 @@ class FastMCP(Generic[LifespanResultT]):
             else fastmcp.settings.strict_input_validation
         )
 
-        self.middleware: list[Middleware] = list(middleware) if middleware else []
+        self.middleware: list[Middleware] = list(middleware or [])
 
         # Set up MCP protocol handlers
         self._setup_handlers()
