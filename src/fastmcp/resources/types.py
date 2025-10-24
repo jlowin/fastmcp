@@ -9,6 +9,7 @@ import anyio
 import anyio.to_thread
 import httpx
 import pydantic.json
+from anyio import Path as AsyncPath
 from pydantic import Field, ValidationInfo
 
 from fastmcp.exceptions import ResourceError
@@ -119,33 +120,41 @@ class DirectoryResource(Resource):
             raise ValueError("Path must be absolute")
         return path
 
-    def list_files(self) -> list[Path]:
+    async def list_files(self) -> list[Path]:
         """List files in the directory."""
-        if not self.path.exists():
+        async_path = AsyncPath(self.path)
+
+        if not await async_path.exists():
             raise FileNotFoundError(f"Directory not found: {self.path}")
-        if not self.path.is_dir():
+        if not await async_path.is_dir():
             raise NotADirectoryError(f"Not a directory: {self.path}")
 
         try:
             if self.pattern:
-                return (
-                    list(self.path.glob(self.pattern))
-                    if not self.recursive
-                    else list(self.path.rglob(self.pattern))
-                )
-            return (
-                list(self.path.glob("*"))
-                if not self.recursive
-                else list(self.path.rglob("*"))
-            )
+                if self.recursive:
+                    files = [Path(p) async for p in async_path.rglob(self.pattern)]
+                else:
+                    files = [Path(p) async for p in async_path.glob(self.pattern)]
+            else:
+                if self.recursive:
+                    files = [Path(p) async for p in async_path.rglob("*")]
+                else:
+                    files = [Path(p) async for p in async_path.glob("*")]
+            return files
         except Exception as e:
             raise ResourceError(f"Error listing directory {self.path}: {e}")
 
     async def read(self) -> str:  # Always returns JSON string
         """Read the directory listing."""
         try:
-            files = await anyio.to_thread.run_sync(self.list_files)
-            file_list = [str(f.relative_to(self.path)) for f in files if f.is_file()]
+            files = await self.list_files()
+            # Filter to only files (not directories) asynchronously
+            file_list = []
+            for f in files:
+                async_file = AsyncPath(f)
+                if await async_file.is_file():
+                    file_list.append(str(f.relative_to(self.path)))
             return json.dumps({"files": file_list}, indent=2)
-        except Exception:
-            raise ResourceError(f"Error reading directory {self.path}")
+        except Exception as e:
+            logger.exception("Error reading directory %s", self.path)
+            raise ResourceError(f"Error reading directory {self.path}") from e
