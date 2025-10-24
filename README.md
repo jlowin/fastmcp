@@ -150,6 +150,21 @@ The central object representing your MCP application. It holds your tools, resou
 
 ```python
 from fastmcp import FastMCP
+______________________________________________________________________________
+## Google Colab: Installation
+
+ -- Prerequistes:
+
+!pip install "mcp[cli]"
+from mcp.server.fastmcp import FastMCP
+
+mcp = FastMCP("Chabot")
+
+@mcp.tool()
+def search(query: str) -> list:
+    # Your search logic here
+    return ["Result 1", "Result 2"]
+____________________________________________________
 
 # Create a server instance
 mcp = FastMCP(name="MyAssistantServer")
