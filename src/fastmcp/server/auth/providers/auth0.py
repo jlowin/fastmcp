@@ -52,6 +52,7 @@ class Auth0ProviderSettings(BaseSettings):
     redirect_path: str | None = None
     required_scopes: list[str] | None = None
     allowed_client_redirect_uris: list[str] | None = None
+    jwt_signing_key: str | None = None
 
     @field_validator("required_scopes", mode="before")
     @classmethod
@@ -96,7 +97,7 @@ class Auth0Provider(OIDCProxy):
         redirect_path: str | NotSetT = NotSet,
         allowed_client_redirect_uris: list[str] | NotSetT = NotSet,
         client_storage: AsyncKeyValue | None = None,
-        jwt_signing_key: str | bytes | None = None,
+        jwt_signing_key: str | bytes | NotSetT = NotSet,
         require_authorization_consent: bool = True,
     ) -> None:
         """Initialize Auth0 OAuth provider.
@@ -135,6 +136,7 @@ class Auth0Provider(OIDCProxy):
                     "required_scopes": required_scopes,
                     "redirect_path": redirect_path,
                     "allowed_client_redirect_uris": allowed_client_redirect_uris,
+                    "jwt_signing_key": jwt_signing_key,
                 }.items()
                 if v is not NotSet
             }
@@ -167,22 +169,20 @@ class Auth0Provider(OIDCProxy):
 
         auth0_required_scopes = settings.required_scopes or ["openid"]
 
-        init_kwargs = {
-            "config_url": settings.config_url,
-            "client_id": settings.client_id,
-            "client_secret": settings.client_secret.get_secret_value(),
-            "audience": settings.audience,
-            "base_url": settings.base_url,
-            "issuer_url": settings.issuer_url,
-            "redirect_path": settings.redirect_path,
-            "required_scopes": auth0_required_scopes,
-            "allowed_client_redirect_uris": settings.allowed_client_redirect_uris,
-            "client_storage": client_storage,
-            "jwt_signing_key": jwt_signing_key,
-            "require_authorization_consent": require_authorization_consent,
-        }
-
-        super().__init__(**init_kwargs)
+        super().__init__(
+            config_url=settings.config_url,
+            client_id=settings.client_id,
+            client_secret=settings.client_secret.get_secret_value(),
+            audience=settings.audience,
+            base_url=settings.base_url,
+            issuer_url=settings.issuer_url,
+            redirect_path=settings.redirect_path,
+            required_scopes=auth0_required_scopes,
+            allowed_client_redirect_uris=settings.allowed_client_redirect_uris,
+            client_storage=client_storage,
+            jwt_signing_key=settings.jwt_signing_key,
+            require_authorization_consent=require_authorization_consent,
+        )
 
         logger.debug(
             "Initialized Auth0 OAuth provider for client %s with scopes: %s",

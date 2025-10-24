@@ -24,6 +24,7 @@ class TestAzureProvider:
             tenant_id="87654321-4321-4321-4321-210987654321",
             base_url="https://myserver.com",
             required_scopes=["User.Read", "Mail.Read"],
+            jwt_signing_key="test-secret",
         )
 
         assert provider._upstream_client_id == "12345678-1234-1234-1234-123456789012"
@@ -52,6 +53,7 @@ class TestAzureProvider:
                 "FASTMCP_SERVER_AUTH_AZURE_TENANT_ID": "env-tenant-id",
                 "FASTMCP_SERVER_AUTH_AZURE_BASE_URL": "https://envserver.com",
                 "FASTMCP_SERVER_AUTH_AZURE_REQUIRED_SCOPES": scopes_env,
+                "FASTMCP_SERVER_AUTH_AZURE_JWT_SIGNING_KEY": "test-secret",
             },
         ):
             provider = AzureProvider()
@@ -100,6 +102,7 @@ class TestAzureProvider:
             client_secret="test_secret",
             tenant_id="test-tenant",
             required_scopes=["User.Read"],
+            jwt_signing_key="test-secret",
         )
 
         # Check defaults
@@ -139,6 +142,7 @@ class TestAzureProvider:
             client_secret="test_secret",
             tenant_id="organizations",
             required_scopes=["User.Read"],
+            jwt_signing_key="test-secret",
         )
         parsed = urlparse(provider1._upstream_authorization_endpoint)
         assert "/organizations/" in parsed.path
@@ -149,6 +153,7 @@ class TestAzureProvider:
             client_secret="test_secret",
             tenant_id="consumers",
             required_scopes=["User.Read"],
+            jwt_signing_key="test-secret",
         )
         parsed = urlparse(provider2._upstream_authorization_endpoint)
         assert "/consumers/" in parsed.path
@@ -167,6 +172,7 @@ class TestAzureProvider:
                 "openid",
                 "profile",
             ],
+            jwt_signing_key="test-secret",
         )
 
         # Provider should initialize successfully with these scopes
@@ -179,6 +185,7 @@ class TestAzureProvider:
             client_secret="test_secret",
             tenant_id="test-tenant",
             required_scopes=["User.Read"],
+            jwt_signing_key="test-secret",
         )
         assert provider is not None
 
@@ -190,6 +197,7 @@ class TestAzureProvider:
             tenant_id="my-tenant",
             identifier_uri="api://my-api",
             required_scopes=[".default"],
+            jwt_signing_key="test-secret",
         )
 
         assert provider._token_validator is not None
@@ -212,6 +220,7 @@ class TestAzureProvider:
             identifier_uri="api://my-api",
             required_scopes=["read", "write"],
             base_url="https://srv.example",
+            jwt_signing_key="test-secret",
         )
 
         await provider.register_client(
@@ -264,6 +273,7 @@ class TestAzureProvider:
             required_scopes=["read"],
             base_url="https://srv.example",
             additional_authorize_scopes=["Mail.Read", "User.Read"],
+            jwt_signing_key="test-secret",
         )
 
         await provider.register_client(

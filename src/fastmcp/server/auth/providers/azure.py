@@ -45,6 +45,7 @@ class AzureProviderSettings(BaseSettings):
     required_scopes: list[str] | None = None
     additional_authorize_scopes: list[str] | None = None
     allowed_client_redirect_uris: list[str] | None = None
+    jwt_signing_key: str | None = None
 
     @field_validator("required_scopes", mode="before")
     @classmethod
@@ -109,7 +110,7 @@ class AzureProvider(OAuthProxy):
         additional_authorize_scopes: list[str] | None | NotSetT = NotSet,
         allowed_client_redirect_uris: list[str] | NotSetT = NotSet,
         client_storage: AsyncKeyValue | None = None,
-        jwt_signing_key: str | bytes | None = None,
+        jwt_signing_key: str | bytes | NotSetT = NotSet,
         require_authorization_consent: bool = True,
     ) -> None:
         """Initialize Azure OAuth provider.
@@ -155,6 +156,7 @@ class AzureProvider(OAuthProxy):
                     "required_scopes": required_scopes,
                     "additional_authorize_scopes": additional_authorize_scopes,
                     "allowed_client_redirect_uris": allowed_client_redirect_uris,
+                    "jwt_signing_key": jwt_signing_key,
                 }.items()
                 if v is not NotSet
             }
@@ -225,7 +227,7 @@ class AzureProvider(OAuthProxy):
             or settings.base_url,  # Default to base_url if not specified
             allowed_client_redirect_uris=settings.allowed_client_redirect_uris,
             client_storage=client_storage,
-            jwt_signing_key=jwt_signing_key,
+            jwt_signing_key=settings.jwt_signing_key,
             require_authorization_consent=require_authorization_consent,
         )
 

@@ -7,7 +7,6 @@ This maintains proper OAuth 2.0 token audience boundaries.
 
 from __future__ import annotations
 
-import base64
 import time
 from typing import Any
 
@@ -43,48 +42,48 @@ def derive_jwt_key(from_secret: str, server_salt: str) -> bytes:
     ).derive(from_secret.encode())
 
 
-def derive_encryption_key(from_secret: str, salt: str) -> bytes:
-    """Derive Fernet encryption key from upstream client secret.
+# def derive_encryption_key(from_secret: str, salt: str) -> bytes:
+#     """Derive Fernet encryption key from upstream client secret.
 
-    Uses HKDF to derive a cryptographically secure encryption key for
-    encrypting upstream tokens at rest.
+#     Uses HKDF to derive a cryptographically secure encryption key for
+#     encrypting upstream tokens at rest.
 
-    Args:
-        from_secret: The secret to derive the encryption key from
+#     Args:
+#         from_secret: The secret to derive the encryption key from
 
-    Returns:
-        32-byte Fernet key (base64url-encoded)
-    """
-    key_material = HKDF(
-        algorithm=hashes.SHA256(),
-        length=32,
-        salt=salt.encode(),
-        info=b"Fernet",
-    ).derive(from_secret.encode())
-    return base64.urlsafe_b64encode(key_material)
+#     Returns:
+#         32-byte Fernet key (base64url-encoded)
+#     """
+#     key_material = HKDF(
+#         algorithm=hashes.SHA256(),
+#         length=32,
+#         salt=salt.encode(),
+#         info=b"Fernet",
+#     ).derive(from_secret.encode())
+#     return base64.urlsafe_b64encode(key_material)
 
 
-def derive_key_from_secret(secret: str | bytes, salt: str, info: bytes) -> bytes:
-    """Derive 32-byte key from user-provided secret (string or bytes).
+# def derive_key_from_secret(secret: str | bytes, salt: str, info: bytes) -> bytes:
+#     """Derive 32-byte key from user-provided secret (string or bytes).
 
-    Accepts any length input and derives a proper cryptographic key.
-    Uses HKDF to stretch weak inputs into strong keys.
+#     Accepts any length input and derives a proper cryptographic key.
+#     Uses HKDF to stretch weak inputs into strong keys.
 
-    Args:
-        secret: User-provided secret (any string or bytes)
-        salt: Application-specific salt string
-        info: Key purpose identifier
+#     Args:
+#         secret: User-provided secret (any string or bytes)
+#         salt: Application-specific salt string
+#         info: Key purpose identifier
 
-    Returns:
-        32-byte key suitable for HS256 JWT signing or Fernet encryption
-    """
-    secret_bytes = secret.encode() if isinstance(secret, str) else secret
-    return HKDF(
-        algorithm=hashes.SHA256(),
-        length=32,
-        salt=salt.encode(),
-        info=info,
-    ).derive(key_material=secret_bytes)
+#     Returns:
+#         32-byte key suitable for HS256 JWT signing or Fernet encryption
+#     """
+#     secret_bytes = secret.encode() if isinstance(secret, str) else secret
+#     return HKDF(
+#         algorithm=hashes.SHA256(),
+#         length=32,
+#         salt=salt.encode(),
+#         info=info,
+#     ).derive(key_material=secret_bytes)
 
 
 class JWTIssuer:

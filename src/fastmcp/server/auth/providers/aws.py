@@ -57,6 +57,7 @@ class AWSCognitoProviderSettings(BaseSettings):
     redirect_path: str | None = None
     required_scopes: list[str] | None = None
     allowed_client_redirect_uris: list[str] | None = None
+    jwt_signing_key: str | None = None
 
     @field_validator("required_scopes", mode="before")
     @classmethod
@@ -135,7 +136,7 @@ class AWSCognitoProvider(OIDCProxy):
         required_scopes: list[str] | NotSetT = NotSet,
         allowed_client_redirect_uris: list[str] | NotSetT = NotSet,
         client_storage: AsyncKeyValue | None = None,
-        jwt_signing_key: str | bytes | None = None,
+        jwt_signing_key: str | bytes | NotSetT = NotSet,
         require_authorization_consent: bool = True,
     ):
         """Initialize AWS Cognito OAuth provider.
@@ -175,6 +176,7 @@ class AWSCognitoProvider(OIDCProxy):
                     "redirect_path": redirect_path,
                     "required_scopes": required_scopes,
                     "allowed_client_redirect_uris": allowed_client_redirect_uris,
+                    "jwt_signing_key": jwt_signing_key,
                 }.items()
                 if v is not NotSet
             }
@@ -224,7 +226,7 @@ class AWSCognitoProvider(OIDCProxy):
             redirect_path=redirect_path_final,
             allowed_client_redirect_uris=allowed_client_redirect_uris_final,
             client_storage=client_storage,
-            jwt_signing_key=jwt_signing_key,
+            jwt_signing_key=settings.jwt_signing_key,
             require_authorization_consent=require_authorization_consent,
         )
 

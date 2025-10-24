@@ -31,10 +31,12 @@ from urllib.parse import urlencode, urlparse
 import httpx
 from authlib.common.security import generate_token
 from authlib.integrations.httpx_client import AsyncOAuth2Client
+from cryptography.fernet import Fernet
 from key_value.aio.adapters.pydantic import PydanticAdapter
 from key_value.aio.protocols import AsyncKeyValue
 from key_value.aio.stores.disk import DiskStore
-from key_value.aio.wrappers.encryption import EncryptionWrapper
+from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
+from key_value.aio.wrappers.encryption.fernet import _generate_encryption_key
 from mcp.server.auth.handlers.token import TokenErrorResponse, TokenSuccessResponse
 from mcp.server.auth.handlers.token import TokenHandler as _SDKTokenHandler
 from mcp.server.auth.json_response import PydanticJSONResponse
@@ -56,15 +58,12 @@ from pydantic import AnyHttpUrl, AnyUrl, BaseModel, Field, SecretStr
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse
 from starlette.routing import Route
-from typing_extensions import Self
 
 from fastmcp import settings
 from fastmcp.server.auth.auth import OAuthProvider, TokenVerifier
 from fastmcp.server.auth.handlers.authorize import AuthorizationHandler
 from fastmcp.server.auth.jwt_issuer import (
     JWTIssuer,
-    derive_encryption_key,
-    derive_key_from_secret,
 )
 from fastmcp.server.auth.redirect_validation import (
     validate_redirect_uri,
@@ -175,34 +174,6 @@ class JTIMapping(BaseModel):
     jti: str  # JWT ID from FastMCP-issued token
     upstream_token_id: str  # References UpstreamTokenSet
     created_at: float  # Unix timestamp
-
-
-class Secret(BaseModel):
-    value: SecretStr
-
-    @classmethod
-    def from_str_or_bytes(cls, value: str | bytes) -> Self:
-        if isinstance(value, str):
-            return cls(value=SecretStr(secret_value=value))
-        return cls(value=SecretStr(secret_value=value.decode()))
-
-    @classmethod
-    def generate(cls) -> Self:
-        return cls.from_str_or_bytes(secrets.token_urlsafe(nbytes=32))
-
-    def derive_key(self, salt: str, info: bytes) -> bytes:
-        from fastmcp.server.auth.jwt_issuer import derive_key_from_secret
-
-        key_bytes: bytes = derive_key_from_secret(
-            secret=self.value.get_secret_value(),
-            salt=salt,
-            info=info,
-        )
-        return key_bytes
-
-    def derive_key_b64(self, salt: str, info: bytes) -> str:
-        key_bytes: bytes = self.derive_key(salt=salt, info=info)
-        return base64.b64encode(s=key_bytes).decode()
 
 
 class ProxyDCRClient(OAuthClientInformationFull):
@@ -714,31 +685,25 @@ class OAuthProxy(OAuthProvider):
         self._extra_authorize_params: dict[str, str] = extra_authorize_params or {}
         self._extra_token_params: dict[str, str] = extra_token_params or {}
 
-        jwt_signing_key_bytes = (
-            jwt_signing_key
-            if isinstance(jwt_signing_key, bytes)
-            else derive_key_from_secret(
-                secret=jwt_signing_key,
+        if isinstance(jwt_signing_key, str):
+            jwt_signing_key = _generate_encryption_key(
+                source_material=jwt_signing_key,
                 salt="fastmcp-jwt",
-                info=b"HS256",
             )
-        )
 
         self._jwt_issuer: JWTIssuer = JWTIssuer(
             issuer=str(self.base_url),
             audience=f"{str(self.base_url).rstrip('/')}/mcp",
-            signing_key=jwt_signing_key_bytes,
+            signing_key=jwt_signing_key,
         )
 
         # If the user does not provide a store, we will provide an encrypted disk store
         if client_storage is None:
-            disk_encryption_key = derive_encryption_key(
-                from_secret=jwt_signing_key,
-                salt="fastmcp-disk-encryption",
-            )
-            client_storage = EncryptionWrapper(
+            fernet: Fernet = Fernet(key=jwt_signing_key)
+
+            client_storage = FernetEncryptionWrapper(
                 key_value=DiskStore(directory=settings.home / "oauth-proxy"),
-                encryption_key=disk_encryption_key,
+                fernet=fernet,
             )
 
         self._client_storage: AsyncKeyValue = client_storage

@@ -46,6 +46,7 @@ class WorkOSProviderSettings(BaseSettings):
     required_scopes: list[str] | None = None
     timeout_seconds: int | None = None
     allowed_client_redirect_uris: list[str] | None = None
+    jwt_signing_key: str | None = None
 
     @field_validator("required_scopes", mode="before")
     @classmethod
@@ -172,7 +173,7 @@ class WorkOSProvider(OAuthProxy):
         timeout_seconds: int | NotSetT = NotSet,
         allowed_client_redirect_uris: list[str] | NotSetT = NotSet,
         client_storage: AsyncKeyValue | None = None,
-        jwt_signing_key: str | bytes | None = None,
+        jwt_signing_key: str | bytes | NotSetT = NotSet,
         require_authorization_consent: bool = True,
     ):
         """Initialize WorkOS OAuth provider.
@@ -212,6 +213,7 @@ class WorkOSProvider(OAuthProxy):
                     "required_scopes": required_scopes,
                     "timeout_seconds": timeout_seconds,
                     "allowed_client_redirect_uris": allowed_client_redirect_uris,
+                    "jwt_signing_key": jwt_signing_key,
                 }.items()
                 if v is not NotSet
             }
@@ -265,7 +267,7 @@ class WorkOSProvider(OAuthProxy):
             or settings.base_url,  # Default to base_url if not specified
             allowed_client_redirect_uris=allowed_client_redirect_uris_final,
             client_storage=client_storage,
-            jwt_signing_key=jwt_signing_key,
+            jwt_signing_key=settings.jwt_signing_key,
             require_authorization_consent=require_authorization_consent,
         )
 
