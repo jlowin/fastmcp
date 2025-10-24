@@ -5,9 +5,9 @@ description: How to test your FastMCP server.
 icon: vial
 ---
 
-You can use the FastMCP Client to test your MCP servers. This is especially useful when building your own MCP Servers and enables a tight development loop by allowing you to avoid using a separate tool like MCP Inspector during development.
+The best way to ensure a reliable and maintainable FastMCP Server is to test it! The FastMCP Client combined with Pytest provides a simple and powerful way to test your FastMCP servers. 
 
-Using Pytest Fixtures, you can wrap your FastMCP Server in a Client instance that makes interacting with your server fast and easy:
+Using Pytest Fixtures, you can wrap your FastMCP Server in a Client instance that makes interacting with your server fast and easy. This is especially useful when building your own MCP Servers and enables a tight development loop by allowing you to avoid using a separate tool like MCP Inspector during development:
 
 ```python
 import pytest
@@ -27,7 +27,7 @@ async def test_list_tools(main_mcp_client: Client[FastMCPTransport]):
     assert len(list_tools) == 5
 ```
 
-We recommend the [inline_snapshot library](https://github.com/15r10nk/inline-snapshot) for asserting complex data structures coming from your MCP Server.
+We recommend the [inline-snapshot library](https://github.com/15r10nk/inline-snapshot) for asserting complex data structures coming from your MCP Server. This library allows you to write tests that are easy to read and understand, and are also easy to update when the data structure changes. 
 
 ```python
 from inline_snapshot import snapshot
@@ -39,6 +39,10 @@ async def test_list_tools(main_mcp_client: Client[FastMCPTransport]):
 ```
 
 Simply run `pytest --inline-snapshot=fix,create` to fill in the `snapshot()` with actual data.
+
+<Tip>
+For values that change you can leverage the [dirty-equals](https://github.com/samuelcolvin/dirty-equals) library to assert that the value is close to the expected value.
+</Tip>
 
 Using the pytest `parametrize` decorator, you can easily test your tools with a wide variety of inputs.
 
