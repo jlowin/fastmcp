@@ -5,12 +5,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import anyio
-import anyio.to_thread
 import httpx
 import pydantic.json
 from anyio import Path as AsyncPath
 from pydantic import Field, ValidationInfo
+from typing_extensions import override
 
 from fastmcp.exceptions import ResourceError
 from fastmcp.resources.resource import Resource
@@ -55,6 +54,10 @@ class FileResource(Resource):
         description="MIME type of the resource content",
     )
 
+    @property
+    def _async_path(self) -> AsyncPath:
+        return AsyncPath(self.path)
+
     @pydantic.field_validator("path")
     @classmethod
     def validate_absolute_path(cls, path: Path) -> Path:
@@ -72,12 +75,13 @@ class FileResource(Resource):
         mime_type = info.data.get("mime_type", "text/plain")
         return not mime_type.startswith("text/")
 
+    @override
     async def read(self) -> str | bytes:
         """Read the file content."""
         try:
             if self.is_binary:
-                return await anyio.to_thread.run_sync(self.path.read_bytes)
-            return await anyio.to_thread.run_sync(self.path.read_text)
+                return await self._async_path.read_bytes()
+            return await self._async_path.read_text()
         except Exception as e:
             raise ResourceError(f"Error reading file {self.path}") from e
 
@@ -90,11 +94,12 @@ class HttpResource(Resource):
         default="application/json", description="MIME type of the resource content"
     )
 
+    @override
     async def read(self) -> str | bytes:
         """Read the HTTP content."""
         async with httpx.AsyncClient() as client:
             response = await client.get(self.url)
-            response.raise_for_status()
+            _ = response.raise_for_status()
             return response.text
 
 
@@ -112,6 +117,10 @@ class DirectoryResource(Resource):
         default="application/json", description="MIME type of the resource content"
     )
 
+    @property
+    def _async_path(self) -> AsyncPath:
+        return AsyncPath(self.path)
+
     @pydantic.field_validator("path")
     @classmethod
     def validate_absolute_path(cls, path: Path) -> Path:
@@ -122,39 +131,27 @@ class DirectoryResource(Resource):
 
     async def list_files(self) -> list[Path]:
         """List files in the directory."""
-        async_path = AsyncPath(self.path)
-
-        if not await async_path.exists():
+        if not await self._async_path.exists():
             raise FileNotFoundError(f"Directory not found: {self.path}")
-        if not await async_path.is_dir():
+        if not await self._async_path.is_dir():
             raise NotADirectoryError(f"Not a directory: {self.path}")
 
-        try:
-            if self.pattern:
-                if self.recursive:
-                    files = [Path(p) async for p in async_path.rglob(self.pattern)]
-                else:
-                    files = [Path(p) async for p in async_path.glob(self.pattern)]
-            else:
-                if self.recursive:
-                    files = [Path(p) async for p in async_path.rglob("*")]
-                else:
-                    files = [Path(p) async for p in async_path.glob("*")]
-            return files
-        except Exception as e:
-            raise ResourceError(f"Error listing directory {self.path}: {e}")
+        pattern = self.pattern or "*"
 
+        glob_fn = self._async_path.glob if self.recursive else self._async_path.glob
+        try:
+            return [Path(p) async for p in glob_fn(pattern) if await p.is_file()]
+        except Exception as e:
+            raise ResourceError(f"Error listing directory {self.path}") from e
+
+    @override
     async def read(self) -> str:  # Always returns JSON string
         """Read the directory listing."""
         try:
-            files = await self.list_files()
-            # Filter to only files (not directories) asynchronously
-            file_list = []
-            for f in files:
-                async_file = AsyncPath(f)
-                if await async_file.is_file():
-                    file_list.append(str(f.relative_to(self.path)))
+            files: list[Path] = await self.list_files()
+
+            file_list = [str(f.relative_to(self.path)) for f in files]
+
             return json.dumps({"files": file_list}, indent=2)
         except Exception as e:
-            logger.exception("Error reading directory %s", self.path)
             raise ResourceError(f"Error reading directory {self.path}") from e
