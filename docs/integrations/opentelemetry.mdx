@@ -1,0 +1,517 @@
+---
+title: OpenTelemetry Integration
+description: Instrument your FastMCP server with OpenTelemetry for distributed tracing and observability
+icon: chart-line
+---
+
+import { VersionBadge } from "/snippets/version-badge.mdx"
+
+OpenTelemetry provides comprehensive observability for your FastMCP servers through distributed tracing, logging, and metrics. FastMCP's existing logging infrastructure and middleware system integrate seamlessly with OpenTelemetry without requiring any changes to FastMCP itself.
+
+## Why OpenTelemetry?
+
+OpenTelemetry is the industry-standard observability framework that provides:
+
+- **Distributed Tracing**: Track MCP operations across your system with spans
+- **Structured Logging**: Export FastMCP logs to observability backends
+- **Metrics Collection**: Monitor performance and usage patterns
+- **Vendor Agnostic**: Works with Jaeger, Zipkin, Grafana, Datadog, and more
+- **Production Ready**: Battle-tested with stable APIs for tracing and metrics
+
+## Prerequisites
+
+Install OpenTelemetry packages for Python:
+
+```bash
+pip install opentelemetry-api opentelemetry-sdk
+```
+
+For production deployments with OTLP export:
+
+```bash
+pip install opentelemetry-exporter-otlp-proto-grpc
+```
+
+<Note>
+OpenTelemetry supports Python 3.9 and higher. Tracing and metrics are stable, while logging is in active development.
+</Note>
+
+## Logging Integration
+
+FastMCP uses Python's standard `logging` module, which OpenTelemetry can instrument directly using `LoggingHandler`. This sends your FastMCP logs to any OpenTelemetry-compatible backend.
+
+### Basic Setup
+
+```python
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
+from opentelemetry._logs import set_logger_provider
+from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
+from opentelemetry.sdk._logs.export import BatchLogRecordProcessor, ConsoleLogExporter
+
+from fastmcp import FastMCP
+from fastmcp.utilities.logging import get_logger
+
+# Configure OpenTelemetry
+resource = Resource(attributes={
+    "service.name": "my-fastmcp-server",
+    "service.version": "1.0.0",
+})
+
+# Set up tracing
+trace_provider = TracerProvider(resource=resource)
+trace_provider.add_span_processor(BatchSpanProcessor(ConsoleSpanExporter()))
+trace.set_tracer_provider(trace_provider)
+
+# Set up logging
+logger_provider = LoggerProvider(resource=resource)
+logger_provider.add_log_record_processor(BatchLogRecordProcessor(ConsoleLogExporter()))
+set_logger_provider(logger_provider)
+
+# Attach OpenTelemetry to FastMCP's logger
+fastmcp_logger = get_logger("my_server")
+fastmcp_logger.addHandler(LoggingHandler(logger_provider=logger_provider))
+
+# Create your FastMCP server
+mcp = FastMCP("My Server")
+
+@mcp.tool()
+def greet(name: str) -> str:
+    """Greet someone by name."""
+    fastmcp_logger.info(f"Greeting {name}")
+    return f"Hello, {name}!"
+```
+
+### Production OTLP Export
+
+For production environments, replace console exporters with OTLP exporters:
+
+```python
+from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter
+
+# Configure OTLP endpoint (e.g., Grafana, Jaeger, or any OTLP collector)
+otlp_endpoint = "http://localhost:4317"
+
+# Tracing
+trace_provider = TracerProvider(resource=resource)
+trace_provider.add_span_processor(
+    BatchSpanProcessor(OTLPSpanExporter(endpoint=otlp_endpoint))
+)
+trace.set_tracer_provider(trace_provider)
+
+# Logging
+logger_provider = LoggerProvider(resource=resource)
+logger_provider.add_log_record_processor(
+    BatchLogRecordProcessor(OTLPLogExporter(endpoint=otlp_endpoint))
+)
+set_logger_provider(logger_provider)
+```
+
+### Structured Logging with OpenTelemetry
+
+FastMCP's `StructuredLoggingMiddleware` outputs JSON logs that OpenTelemetry collectors can parse and enrich:
+
+```python
+from fastmcp import FastMCP
+from fastmcp.server.middleware.logging import StructuredLoggingMiddleware
+
+mcp = FastMCP("Structured Server")
+
+# Add structured logging middleware
+mcp.add_middleware(StructuredLoggingMiddleware(
+    include_payloads=True,
+    max_payload_length=1000
+))
+
+# OpenTelemetry will capture these structured logs
+```
+
+The structured logs include metadata like request timestamps, method names, token estimates, and payload sizes - perfect for observability platforms.
+
+## Spans via Middleware
+
+FastMCP's middleware system provides the perfect foundation for creating OpenTelemetry spans that track MCP operations.
+
+### Basic Tracing Middleware
+
+Create a middleware that emits spans for all MCP requests:
+
+```python
+from opentelemetry import trace
+from opentelemetry.trace import Status, StatusCode
+from fastmcp.server.middleware import Middleware, MiddlewareContext
+
+class OpenTelemetryMiddleware(Middleware):
+    """Middleware that creates OpenTelemetry spans for MCP operations."""
+
+    def __init__(self, tracer_name: str = "fastmcp"):
+        self.tracer = trace.get_tracer(tracer_name)
+
+    async def on_request(self, context: MiddlewareContext, call_next):
+        """Create a span for each MCP request."""
+        with self.tracer.start_as_current_span(
+            f"mcp.{context.method}",
+            attributes={
+                "mcp.method": context.method,
+                "mcp.source": context.source,
+                "mcp.type": context.type,
+            }
+        ) as span:
+            try:
+                result = await call_next(context)
+                span.set_status(Status(StatusCode.OK))
+                return result
+            except Exception as e:
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+                span.record_exception(e)
+                raise
+
+# Add to your server
+mcp.add_middleware(OpenTelemetryMiddleware())
+```
+
+### Tool-Specific Spans
+
+For more granular tracing, create spans specifically for tool executions:
+
+```python
+from opentelemetry import trace
+from opentelemetry.trace import Status, StatusCode
+from fastmcp.server.middleware import Middleware, MiddlewareContext
+
+class ToolTracingMiddleware(Middleware):
+    """Create detailed spans for tool executions."""
+
+    def __init__(self, tracer_name: str = "fastmcp.tools"):
+        self.tracer = trace.get_tracer(tracer_name)
+
+    async def on_call_tool(self, context: MiddlewareContext, call_next):
+        """Create a span for each tool call with detailed attributes."""
+        tool_name = context.message.name
+
+        with self.tracer.start_as_current_span(
+            f"tool.{tool_name}",
+            attributes={
+                "mcp.tool.name": tool_name,
+                "mcp.tool.arguments": str(context.message.arguments),
+            }
+        ) as span:
+            try:
+                result = await call_next(context)
+
+                # Add result metadata to span
+                span.set_attribute("mcp.tool.success", True)
+                if hasattr(result, 'content'):
+                    span.set_attribute("mcp.tool.content_length", len(str(result.content)))
+
+                span.set_status(Status(StatusCode.OK))
+                return result
+
+            except Exception as e:
+                span.set_attribute("mcp.tool.success", False)
+                span.set_attribute("mcp.tool.error", str(e))
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+                span.record_exception(e)
+                raise
+
+mcp.add_middleware(ToolTracingMiddleware())
+```
+
+### Comprehensive Observability Middleware
+
+For production systems, create a middleware that handles all MCP operation types:
+
+```python
+from opentelemetry import trace
+from opentelemetry.trace import Status, StatusCode
+from fastmcp.server.middleware import Middleware, MiddlewareContext
+
+class ComprehensiveTracingMiddleware(Middleware):
+    """Complete tracing for tools, resources, and prompts."""
+
+    def __init__(self, tracer_name: str = "fastmcp"):
+        self.tracer = trace.get_tracer(tracer_name)
+
+    async def on_call_tool(self, context: MiddlewareContext, call_next):
+        """Trace tool executions."""
+        return await self._trace_operation(
+            "tool.call",
+            {"tool.name": context.message.name},
+            context,
+            call_next
+        )
+
+    async def on_read_resource(self, context: MiddlewareContext, call_next):
+        """Trace resource reads."""
+        return await self._trace_operation(
+            "resource.read",
+            {"resource.uri": context.message.uri},
+            context,
+            call_next
+        )
+
+    async def on_get_prompt(self, context: MiddlewareContext, call_next):
+        """Trace prompt retrievals."""
+        return await self._trace_operation(
+            "prompt.get",
+            {"prompt.name": context.message.name},
+            context,
+            call_next
+        )
+
+    async def _trace_operation(
+        self,
+        operation_name: str,
+        attributes: dict,
+        context: MiddlewareContext,
+        call_next
+    ):
+        """Helper to create spans with consistent attributes."""
+        with self.tracer.start_as_current_span(
+            operation_name,
+            attributes={
+                "mcp.method": context.method,
+                "mcp.source": context.source,
+                **attributes,
+            }
+        ) as span:
+            try:
+                result = await call_next(context)
+                span.set_status(Status(StatusCode.OK))
+                return result
+            except Exception as e:
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+                span.record_exception(e)
+                raise
+
+mcp.add_middleware(ComprehensiveTracingMiddleware())
+```
+
+## Complete Example
+
+Here's a production-ready example combining logging and tracing:
+
+```python
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
+from opentelemetry._logs import set_logger_provider
+from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
+from opentelemetry.sdk._logs.export import BatchLogRecordProcessor, ConsoleLogExporter
+
+from fastmcp import FastMCP
+from fastmcp.utilities.logging import get_logger
+from fastmcp.server.middleware import Middleware, MiddlewareContext
+from opentelemetry.trace import Status, StatusCode
+
+# Configure OpenTelemetry
+resource = Resource(attributes={
+    "service.name": "weather-mcp-server",
+    "service.version": "1.0.0",
+    "deployment.environment": "production",
+})
+
+# Tracing setup
+trace_provider = TracerProvider(resource=resource)
+trace_provider.add_span_processor(BatchSpanProcessor(ConsoleSpanExporter()))
+trace.set_tracer_provider(trace_provider)
+
+# Logging setup
+logger_provider = LoggerProvider(resource=resource)
+logger_provider.add_log_record_processor(BatchLogRecordProcessor(ConsoleLogExporter()))
+set_logger_provider(logger_provider)
+
+# Middleware for tracing
+class TracingMiddleware(Middleware):
+    def __init__(self):
+        self.tracer = trace.get_tracer("weather-server")
+
+    async def on_call_tool(self, context: MiddlewareContext, call_next):
+        with self.tracer.start_as_current_span(
+            f"tool.{context.message.name}",
+            attributes={"tool.name": context.message.name}
+        ) as span:
+            try:
+                result = await call_next(context)
+                span.set_status(Status(StatusCode.OK))
+                return result
+            except Exception as e:
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+                span.record_exception(e)
+                raise
+
+# Create FastMCP server
+mcp = FastMCP("Weather Server")
+
+# Attach OpenTelemetry to FastMCP logger
+logger = get_logger("weather")
+logger.addHandler(LoggingHandler(logger_provider=logger_provider))
+
+# Add tracing middleware
+mcp.add_middleware(TracingMiddleware())
+
+@mcp.tool()
+def get_weather(city: str) -> dict:
+    """Get weather for a city."""
+    logger.info(f"Fetching weather for {city}")
+    return {"city": city, "temp": 72, "condition": "sunny"}
+
+if __name__ == "__main__":
+    mcp.run()
+```
+
+## Exporting to Observability Backends
+
+### Console Exporter (Development)
+
+The console exporter is perfect for local development and testing:
+
+```python
+from opentelemetry.sdk.trace.export import ConsoleSpanExporter
+from opentelemetry.sdk._logs.export import ConsoleLogExporter
+
+# Already shown in examples above
+trace_provider.add_span_processor(BatchSpanProcessor(ConsoleSpanExporter()))
+logger_provider.add_log_record_processor(BatchLogRecordProcessor(ConsoleLogExporter()))
+```
+
+### OTLP Exporter (Production)
+
+OTLP (OpenTelemetry Protocol) works with most modern observability platforms:
+
+```python
+from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter
+
+# Configure for your backend
+otlp_endpoint = "http://your-collector:4317"
+
+trace_provider.add_span_processor(
+    BatchSpanProcessor(OTLPSpanExporter(endpoint=otlp_endpoint))
+)
+logger_provider.add_log_record_processor(
+    BatchLogRecordProcessor(OTLPLogExporter(endpoint=otlp_endpoint))
+)
+```
+
+Supported backends include:
+- **Grafana** with Tempo and Loki
+- **Jaeger** for distributed tracing
+- **Zipkin** for trace visualization
+- **Datadog**, **New Relic**, **Honeycomb** (commercial platforms)
+- **Self-hosted** OpenTelemetry Collector
+
+### Environment Variables
+
+OpenTelemetry exporters can be configured via environment variables:
+
+```bash
+export OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:4317"
+export OTEL_SERVICE_NAME="my-fastmcp-server"
+export OTEL_RESOURCE_ATTRIBUTES="deployment.environment=production"
+```
+
+Then in your code:
+
+```python
+# OpenTelemetry will automatically use environment variables
+trace_provider = TracerProvider()
+trace_provider.add_span_processor(
+    BatchSpanProcessor(OTLPSpanExporter())  # Uses OTEL_EXPORTER_OTLP_ENDPOINT
+)
+```
+
+## Best Practices
+
+### When to Use Logging vs Spans
+
+- **Logging**: Discrete events, errors, diagnostic messages
+- **Spans**: Operations with duration, distributed tracing across services
+
+For FastMCP servers:
+- Use **spans** for tool calls, resource reads, prompt executions
+- Use **logging** for validation errors, configuration issues, business logic events
+
+### Performance Considerations
+
+OpenTelemetry is designed for production, but follow these guidelines:
+
+1. **Use BatchProcessors**: Always use `BatchSpanProcessor` and `BatchLogRecordProcessor` rather than synchronous exporters
+2. **Sampling**: For high-volume servers, configure sampling to reduce overhead:
+
+```python
+from opentelemetry.sdk.trace.sampling import TraceIdRatioBased
+
+# Sample 10% of traces
+trace_provider = TracerProvider(
+    resource=resource,
+    sampler=TraceIdRatioBased(0.1)
+)
+```
+
+3. **Attribute Limits**: Avoid adding large payloads as span attributes. Use `max_payload_length` in middleware:
+
+```python
+# Good - limit attribute size
+span.set_attribute("tool.arguments", str(args)[:500])
+
+# Bad - unbounded attribute size
+span.set_attribute("tool.arguments", str(args))  # Could be huge!
+```
+
+### Security: Avoiding Sensitive Data
+
+Never log sensitive information in traces or logs:
+
+```python
+async def on_call_tool(self, context: MiddlewareContext, call_next):
+    tool_name = context.message.name
+
+    # Redact sensitive arguments
+    safe_args = {
+        k: v if k not in ["password", "api_key", "token"] else "***REDACTED***"
+        for k, v in context.message.arguments.items()
+    }
+
+    with self.tracer.start_as_current_span(
+        f"tool.{tool_name}",
+        attributes={"tool.arguments": str(safe_args)}
+    ) as span:
+        return await call_next(context)
+```
+
+### Integration with FastMCP Middleware
+
+OpenTelemetry middleware works seamlessly with FastMCP's built-in middleware:
+
+```python
+from fastmcp.server.middleware.timing import TimingMiddleware
+from fastmcp.server.middleware.logging import LoggingMiddleware
+
+# Order matters: error handling first, then tracing, then logging
+mcp.add_middleware(ErrorHandlingMiddleware())
+mcp.add_middleware(OpenTelemetryMiddleware())  # Your custom middleware
+mcp.add_middleware(TimingMiddleware())          # Built-in timing
+mcp.add_middleware(LoggingMiddleware())         # Built-in logging
+```
+
+The execution order ensures:
+1. Errors are handled consistently
+2. OpenTelemetry captures complete request lifecycle
+3. Timing data is included in spans
+4. Everything is logged with proper context
+
+## Additional Resources
+
+- [OpenTelemetry Python Documentation](https://opentelemetry.io/docs/languages/python/)
+- [FastMCP Middleware Guide](/servers/middleware)
+- [FastMCP Logging Guide](/servers/logging)
+- [OpenTelemetry Semantic Conventions](https://opentelemetry.io/docs/specs/semconv/)
+
+<Tip>
+For examples and sample code, see [`examples/opentelemetry_example.py`](https://github.com/jlowin/fastmcp/tree/main/examples/opentelemetry_example.py) in the FastMCP repository.
+</Tip>
