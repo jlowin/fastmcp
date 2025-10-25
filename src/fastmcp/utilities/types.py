@@ -190,11 +190,16 @@ class Image:
         if path is not None and data is not None:
             raise ValueError("Only one of path or data can be provided")
 
-        self.path = Path(os.path.expandvars(str(path))).expanduser() if path else None
+        self.path = self._get_expanded_path(path)
         self.data = data
         self._format = format
         self._mime_type = self._get_mime_type()
         self.annotations = annotations
+
+    @staticmethod
+    def _get_expanded_path(path: str | Path | None) -> Path | None:
+        """Expand environment variables and user home in path."""
+        return Path(os.path.expandvars(str(path))).expanduser() if path else None
 
     def _get_mime_type(self) -> str:
         """Get MIME type from format or guess from file extension."""
@@ -212,12 +217,8 @@ class Image:
             }.get(suffix, "application/octet-stream")
         return "image/png"  # default for raw binary data
 
-    def to_image_content(
-        self,
-        mime_type: str | None = None,
-        annotations: Annotations | None = None,
-    ) -> mcp.types.ImageContent:
-        """Convert to MCP ImageContent."""
+    def _get_data(self) -> str:
+        """Get raw image data as base64-encoded string."""
         if self.path:
             with open(self.path, "rb") as f:
                 data = base64.b64encode(f.read()).decode()
@@ -225,6 +226,15 @@ class Image:
             data = base64.b64encode(self.data).decode()
         else:
             raise ValueError("No image data available")
+        return data
+
+    def to_image_content(
+        self,
+        mime_type: str | None = None,
+        annotations: Annotations | None = None,
+    ) -> mcp.types.ImageContent:
+        """Convert to MCP ImageContent."""
+        data = self._get_data()
 
         return mcp.types.ImageContent(
             type="image",
@@ -232,6 +242,21 @@ class Image:
             mimeType=mime_type or self._mime_type,
             annotations=annotations or self.annotations,
         )
+
+    def to_data_uri(self, mime_type: str | None = None) -> str:
+        """Get image as a data URI."""
+        data = self._get_data()
+        return f"data:{mime_type or self._mime_type};base64,{data}"
+
+    @classmethod
+    def path_to_data_uri(cls, path: str | Path, mime_type: str | None = None) -> str:
+        """Convert a file path to a data URI."""
+        expanded_path = cls._get_expanded_path(path)
+        if not expanded_path or not expanded_path.exists():
+            raise FileNotFoundError(f"Path does not exist: {path}")
+        mime_type = mime_type or mimetypes.guess_type(str(expanded_path))[0]
+        b64_data = base64.b64encode(expanded_path.read_bytes()).decode()
+        return f"data:{mime_type};base64,{b64_data}"
 
 
 class Audio:
