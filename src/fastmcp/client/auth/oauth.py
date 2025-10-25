@@ -192,9 +192,9 @@ class OAuth(OAuthClientProvider):
             from warnings import warn
 
             warn(
-                stacklevel=2,
                 message="Using in-memory token storage is not recommended for production use -- "
                 + "tokens will be lost on server restart.",
+                stacklevel=2,
             )
 
         self.token_storage_adapter: TokenStorageAdapter = TokenStorageAdapter(

@@ -147,7 +147,9 @@ def temporary_log_level(
         yield
 
 
-_level_to_no: dict[Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] | None, int | None] = {
+_level_to_no: dict[
+    Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] | None, int | None
+] = {
     "DEBUG": logging.DEBUG,
     "INFO": logging.INFO,
     "WARNING": logging.WARNING,

@@ -150,7 +150,7 @@ class MemoryNode(BaseModel):
         self.importance += other.importance
         self.access_count += other.access_count
         self.embedding = [
-            (a + b) / 2 for a, b in zip(self.embedding, other.embedding, strict=False)
+            (a + b) / 2 for a, b in zip(self.embedding, other.embedding, strict=True)
         ]
         self.summary = await do_ai(
             self.content, "Summarize the following text concisely.", str, deps
