@@ -121,7 +121,7 @@ def create_oauth_callback_server(
         Configured uvicorn Server instance (not yet running)
     """
 
-    async def callback_handler(request: Request):  # noqa: RUF029
+    async def callback_handler(request: Request):
         """Handle OAuth callback requests with proper HTML responses."""
         query_params = dict(request.query_params)
         callback_response = CallbackResponse.from_dict(query_params)

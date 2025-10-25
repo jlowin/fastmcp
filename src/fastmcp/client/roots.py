@@ -46,7 +46,7 @@ def _create_roots_callback_from_roots(
 ) -> ListRootsFnT:
     roots = convert_roots_list(roots)
 
-    async def _roots_callback(  # noqa: RUF029
+    async def _roots_callback(
         context: RequestContext[ClientSession, LifespanContextT],
     ) -> mcp.types.ListRootsResult:
         return mcp.types.ListRootsResult(roots=roots)

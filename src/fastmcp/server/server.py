@@ -109,7 +109,7 @@ LifespanCallable = Callable[
 
 
 @asynccontextmanager
-async def default_lifespan(server: FastMCP[LifespanResultT]) -> AsyncIterator[Any]:  # noqa: RUF029
+async def default_lifespan(server: FastMCP[LifespanResultT]) -> AsyncIterator[Any]:
     """Default lifespan context manager that does nothing.
 
     Args:
@@ -127,7 +127,7 @@ def _lifespan_proxy(
     [LowLevelServer[LifespanResultT]], AbstractAsyncContextManager[LifespanResultT]
 ]:
     @asynccontextmanager
-    async def wrap(  # noqa: RUF029
+    async def wrap(
         low_level_server: LowLevelServer[LifespanResultT],
     ) -> AsyncIterator[LifespanResultT]:
         if fastmcp_server._lifespan is default_lifespan:

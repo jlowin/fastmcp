@@ -371,7 +371,9 @@ class FunctionPrompt(Prompt):
                             )
                         )
                 except Exception as e:
-                    raise PromptError("Could not convert prompt result to message.") from e
+                    raise PromptError(
+                        "Could not convert prompt result to message."
+                    ) from e
 
             return messages
         except Exception as e:

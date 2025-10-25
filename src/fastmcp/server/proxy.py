@@ -198,7 +198,9 @@ class ProxyResourceManager(ResourceManager, ProxyManagerMixin):
                 elif isinstance(result[0], BlobResourceContents):
                     return result[0].blob
                 else:
-                    raise ResourceError(f"Unsupported content type: {type(result[0])}") from None
+                    raise ResourceError(
+                        f"Unsupported content type: {type(result[0])}"
+                    ) from None
 
 
 class ProxyPromptManager(PromptManager, ProxyManagerMixin):
