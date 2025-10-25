@@ -342,7 +342,7 @@ class Context:
             session_id = str(uuid4())
 
         # Save the session id to the session attributes
-        setattr(session, "_fastmcp_id", session_id)
+        session._fastmcp_id = session_id
         return session_id
 
     @property
@@ -595,13 +595,11 @@ class Context:
                 choice_literal = Literal[tuple(response_type)]  # type: ignore
                 response_type = ScalarElicitationType[choice_literal]  # type: ignore
             # if the user provided a primitive scalar, wrap it in an object schema
-            elif response_type in {bool, int, float, str}:
-                response_type = ScalarElicitationType[response_type]  # type: ignore
-            # if the user provided a Literal type, wrap it in an object schema
-            elif get_origin(response_type) is Literal:
-                response_type = ScalarElicitationType[response_type]  # type: ignore
-            # if the user provided an Enum type, wrap it in an object schema
-            elif isinstance(response_type, type) and issubclass(response_type, Enum):
+            elif (
+                response_type in {bool, int, float, str}
+                or get_origin(response_type) is Literal
+                or (isinstance(response_type, type) and issubclass(response_type, Enum))
+            ):
                 response_type = ScalarElicitationType[response_type]  # type: ignore
 
             response_type = cast(type[T], response_type)

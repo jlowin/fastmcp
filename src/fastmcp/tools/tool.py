@@ -446,9 +446,8 @@ class ParsedFunction:
             # we ensure that no output schema is automatically generated.
             clean_output_type = replace_type(
                 output_type,
-                {
-                    t: _UnserializableType
-                    for t in (
+                dict.fromkeys(
+                    (
                         Image,
                         Audio,
                         File,
@@ -458,8 +457,9 @@ class ParsedFunction:
                         mcp.types.AudioContent,
                         mcp.types.ResourceLink,
                         mcp.types.EmbeddedResource,
-                    )
-                },
+                    ),
+                    _UnserializableType,
+                ),
             )
 
             try:

@@ -150,7 +150,7 @@ class OpenAPITool(Tool):
 
         except httpx.RequestError as e:
             # Handle request errors (connection, timeout, etc.)
-            raise ValueError(f"Request error: {str(e)}")
+            raise ValueError(f"Request error: {e!s}")
 
 
 class OpenAPIResource(Resource):
@@ -280,7 +280,7 @@ class OpenAPIResource(Resource):
 
         except httpx.RequestError as e:
             # Handle request errors (connection, timeout, etc.)
-            raise ValueError(f"Request error: {str(e)}")
+            raise ValueError(f"Request error: {e!s}")
 
 
 class OpenAPIResourceTemplate(ResourceTemplate):
@@ -342,7 +342,7 @@ class OpenAPIResourceTemplate(ResourceTemplate):
 
 # Export public symbols
 __all__ = [
-    "OpenAPITool",
     "OpenAPIResource",
     "OpenAPIResourceTemplate",
+    "OpenAPITool",
 ]

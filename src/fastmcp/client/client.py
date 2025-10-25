@@ -61,15 +61,15 @@ from .transports import (
 
 __all__ = [
     "Client",
-    "SessionKwargs",
-    "RootsHandler",
-    "RootsList",
+    "ClientSamplingHandler",
+    "ElicitationHandler",
     "LogHandler",
     "MessageHandler",
-    "ClientSamplingHandler",
-    "SamplingHandler",
-    "ElicitationHandler",
     "ProgressHandler",
+    "RootsHandler",
+    "RootsList",
+    "SamplingHandler",
+    "SessionKwargs",
 ]
 
 logger = get_logger(__name__)

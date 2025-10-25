@@ -61,7 +61,7 @@ from pydantic import (
 )
 from typing_extensions import NotRequired, TypedDict
 
-__all__ = ["json_schema_to_type", "JSONSchema"]
+__all__ = ["JSONSchema", "json_schema_to_type"]
 
 
 FORMAT_TYPES: dict[str, Any] = {
@@ -578,7 +578,7 @@ def _create_dataclass(
             return _merge_defaults(data, original_schema)
         return data
 
-    setattr(cls, "_apply_defaults", _apply_defaults)
+    cls._apply_defaults = _apply_defaults
 
     # Store completed class
     _classes[cache_key] = cls

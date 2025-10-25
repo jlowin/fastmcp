@@ -46,16 +46,16 @@ ClientTransportT = TypeVar("ClientTransportT", bound="ClientTransport")
 
 __all__ = [
     "ClientTransport",
-    "SSETransport",
-    "StreamableHttpTransport",
-    "StdioTransport",
-    "PythonStdioTransport",
     "FastMCPStdioTransport",
-    "NodeStdioTransport",
-    "UvxStdioTransport",
-    "UvStdioTransport",
-    "NpxStdioTransport",
     "FastMCPTransport",
+    "NodeStdioTransport",
+    "NpxStdioTransport",
+    "PythonStdioTransport",
+    "SSETransport",
+    "StdioTransport",
+    "StreamableHttpTransport",
+    "UvStdioTransport",
+    "UvxStdioTransport",
     "infer_transport",
 ]
 
@@ -111,7 +111,6 @@ class ClientTransport(abc.ABC):
 
     async def close(self):
         """Close the transport."""
-        pass
 
     def _set_auth(self, auth: httpx.Auth | Literal["oauth"] | str | None):
         if auth is not None:
@@ -207,7 +206,7 @@ class SSETransport(ClientTransport):
         # instead we simply leave the kwarg out if it's not provided
         if self.sse_read_timeout is not None:
             client_kwargs["sse_read_timeout"] = self.sse_read_timeout.total_seconds()
-        if session_kwargs.get("read_timeout_seconds", None) is not None:
+        if session_kwargs.get("read_timeout_seconds") is not None:
             read_timeout_seconds = cast(
                 datetime.timedelta, session_kwargs.get("read_timeout_seconds")
             )
@@ -277,7 +276,7 @@ class StreamableHttpTransport(ClientTransport):
         # instead we simply leave the kwarg out if it's not provided
         if self.sse_read_timeout is not None:
             client_kwargs["sse_read_timeout"] = self.sse_read_timeout
-        if session_kwargs.get("read_timeout_seconds", None) is not None:
+        if session_kwargs.get("read_timeout_seconds") is not None:
             client_kwargs["timeout"] = session_kwargs.get("read_timeout_seconds")
 
         if self.httpx_client_factory is not None:

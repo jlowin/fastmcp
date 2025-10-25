@@ -290,10 +290,7 @@ class FunctionPrompt(Prompt):
                 if (
                     param.annotation == inspect.Parameter.empty
                     or param.annotation is str
-                ):
-                    converted_kwargs[param_name] = param_value
-                # If argument is not a string, pass as-is (already properly typed)
-                elif not isinstance(param_value, str):
+                ) or not isinstance(param_value, str):
                     converted_kwargs[param_name] = param_value
                 else:
                     # Try to convert string argument using type adapter

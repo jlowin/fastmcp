@@ -36,8 +36,6 @@ logger = get_logger(__name__)
 class ClientNotFoundError(Exception):
     """Raised when OAuth client credentials are not found on the server."""
 
-    pass
-
 
 async def check_if_auth_required(
     mcp_url: str, httpx_kwargs: dict[str, Any] | None = None

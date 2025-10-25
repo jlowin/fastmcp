@@ -649,7 +649,6 @@ class StatefulProxyClient(ProxyClient[ClientTransportT]):
         The stateful proxy client will be forced disconnected when the session is exited.
         So we do nothing here.
         """
-        pass
 
     async def clear(self):
         """

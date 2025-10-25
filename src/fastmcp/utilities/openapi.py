@@ -175,16 +175,16 @@ class HTTPRoute(FastMCPBaseModel):
 # Export public symbols
 __all__ = [
     "HTTPRoute",
+    "HttpMethod",
+    "JsonSchema",
     "ParameterInfo",
+    "ParameterLocation",
     "RequestBodyInfo",
     "ResponseInfo",
-    "HttpMethod",
-    "ParameterLocation",
-    "JsonSchema",
-    "parse_openapi_to_http_routes",
+    "_handle_nullable_fields",
     "extract_output_schema_from_responses",
     "format_deep_object_parameter",
-    "_handle_nullable_fields",
+    "parse_openapi_to_http_routes",
 ]
 
 # Type variables for generic parser
@@ -321,7 +321,7 @@ class OpenAPIParser(
                         else:
                             # Special handling for components
                             if part == "components" and hasattr(target, "components"):
-                                target = getattr(target, "components")
+                                target = target.components
                             elif hasattr(target, part):  # Fallback check
                                 target = getattr(target, part, None)
                             else:
