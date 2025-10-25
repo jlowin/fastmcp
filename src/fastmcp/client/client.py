@@ -831,6 +831,7 @@ class Client(Generic[ClientTransportT]):
         arguments: dict[str, Any],
         progress_handler: ProgressHandler | None = None,
         timeout: datetime.timedelta | float | int | None = None,
+        meta: dict[str, Any] | None = None,
     ) -> mcp.types.CallToolResult:
         """Send a tools/call request and return the complete MCP protocol result.
 
@@ -859,6 +860,7 @@ class Client(Generic[ClientTransportT]):
             arguments=arguments,
             read_timeout_seconds=timeout,
             progress_callback=progress_handler or self._progress_handler,
+            meta=meta,
         )
         return result
 
@@ -869,6 +871,7 @@ class Client(Generic[ClientTransportT]):
         timeout: datetime.timedelta | float | int | None = None,
         progress_handler: ProgressHandler | None = None,
         raise_on_error: bool = True,
+        meta: dict[str, Any] | None = None,
     ) -> CallToolResult:
         """Call a tool on the server.
 
@@ -898,6 +901,7 @@ class Client(Generic[ClientTransportT]):
             arguments=arguments or {},
             timeout=timeout,
             progress_handler=progress_handler,
+            meta=meta,
         )
         data = None
         if result.isError and raise_on_error:
