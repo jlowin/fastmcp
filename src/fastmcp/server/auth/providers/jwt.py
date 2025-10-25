@@ -150,7 +150,7 @@ class JWTVerifierSettings(BaseSettings):
 
     public_key: str | None = None
     jwks_uri: str | None = None
-    issuer: str | None = None
+    issuer: str | list[str] | None = None
     algorithm: str | None = None
     audience: str | list[str] | None = None
     required_scopes: list[str] | None = None
@@ -186,7 +186,7 @@ class JWTVerifier(TokenVerifier):
         *,
         public_key: str | None | NotSetT = NotSet,
         jwks_uri: str | None | NotSetT = NotSet,
-        issuer: str | None | NotSetT = NotSet,
+        issuer: str | list[str] | None | NotSetT = NotSet,
         audience: str | list[str] | None | NotSetT = NotSet,
         algorithm: str | None | NotSetT = NotSet,
         required_scopes: list[str] | None | NotSetT = NotSet,
@@ -401,7 +401,18 @@ class JWTVerifier(TokenVerifier):
             # Validate issuer - note we use issuer instead of issuer_url here because
             # issuer is optional, allowing users to make this check optional
             if self.issuer:
-                if claims.get("iss") != self.issuer:
+                iss = claims.get("iss")
+
+                # Handle different combinations of issuer types
+                issuer_valid = False
+                if isinstance(self.issuer, list):
+                    # self.issuer is a list - check if token issuer matches any expected issuer
+                    issuer_valid = iss in self.issuer
+                else:
+                    # self.issuer is a string - check for equality
+                    issuer_valid = iss == self.issuer
+
+                if not issuer_valid:
                     self.logger.debug(
                         "Token validation failed: issuer mismatch for client %s",
                         client_id,
