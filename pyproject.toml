@@ -18,6 +18,7 @@ dependencies = [
     "openapi-core>=0.19.5",
     "py-key-value-aio[disk,keyring,memory]>=0.2.6,<0.3.0",
     "websockets>=15.0.1",
+    "beartype>=0.22.2,<0.22.3",
 ]
 
 requires-python = ">=3.10"
