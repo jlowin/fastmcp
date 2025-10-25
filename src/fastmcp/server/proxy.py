@@ -198,7 +198,7 @@ class ProxyResourceManager(ResourceManager, ProxyManagerMixin):
                 elif isinstance(result[0], BlobResourceContents):
                     return result[0].blob
                 else:
-                    raise ResourceError(f"Unsupported content type: {type(result[0])}")
+                    raise ResourceError(f"Unsupported content type: {type(result[0])}") from None
 
 
 class ProxyPromptManager(PromptManager, ProxyManagerMixin):
@@ -558,7 +558,7 @@ class ProxyClient(Client[ClientTransportT]):
             kwargs["log_handler"] = ProxyClient.default_log_handler
         if "progress_handler" not in kwargs:
             kwargs["progress_handler"] = ProxyClient.default_progress_handler
-        super().__init__(**kwargs | dict(transport=transport))
+        super().__init__(**kwargs | {"transport": transport})
 
     @classmethod
     async def default_sampling_handler(
@@ -572,7 +572,7 @@ class ProxyClient(Client[ClientTransportT]):
         """
         ctx = get_context()
         content = await ctx.sample(
-            [msg for msg in messages],
+            list(messages),
             system_prompt=params.systemPrompt,
             temperature=params.temperature,
             max_tokens=params.maxTokens,

@@ -368,7 +368,7 @@ def _schema_to_type(
                 return types[0]
         else:
             if has_null:
-                return Union[tuple(types + [type(None)])]  # type: ignore # noqa: UP007
+                return Union[(*types, type(None))]  # type: ignore
             else:
                 return Union[tuple(types)]  # type: ignore # noqa: UP007
 
@@ -389,7 +389,7 @@ def _schema_to_type(
             if len(types) == 1:
                 return types[0] | None  # type: ignore
             else:
-                return Union[tuple(types + [type(None)])]  # type: ignore # noqa: UP007
+                return Union[(*types, type(None))]  # type: ignore
         return Union[tuple(types)]  # type: ignore # noqa: UP007
 
     return _get_from_type_handler(schema, schemas)(schema)

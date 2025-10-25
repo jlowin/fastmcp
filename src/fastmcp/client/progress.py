@@ -9,7 +9,7 @@ logger = get_logger(__name__)
 ProgressHandler: TypeAlias = ProgressFnT
 
 
-async def default_progress_handler(
+async def default_progress_handler(  # noqa: RUF029
     progress: float, total: float | None, message: str | None
 ) -> None:
     """Default handler for progress notifications.

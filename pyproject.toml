@@ -137,10 +137,10 @@ unknown-argument = "ignore"     # 61 errors
 call-non-callable = "ignore" # 7 errors
 
 [tool.ruff.lint]
-fixable = ["ALL"]
 ignore = [
     "COM812",
     "PLR0913", # Too many arguments, MCP Servers have a lot of arguments, OKAY?!
+    "SIM102", # Dont require combining if statements
 ]
 extend-select = [
     "B", # flake8-bugbear: Catches actual bugs like mutable default arguments
@@ -157,7 +157,7 @@ extend-select = [
 "__init__.py" = ["F401", "I001", "RUF013"]
 # allow imports not at the top of the file
 "src/fastmcp/__init__.py" = ["E402"]
-"**/tests/*.py" = [
+"!src/*.py" = [ # Only enforce extended ruff rules for code in src/
     "B", # flake8-bugbear
     "C4", # flake8-comprehensions
     "PIE", # flake8-pie

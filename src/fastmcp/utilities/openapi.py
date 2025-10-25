@@ -1178,10 +1178,10 @@ def _add_null_to_type(schema: dict[str, Any]) -> None:
         elif isinstance(current_type, list):
             # Add null to array if not already present
             if "null" not in current_type:
-                schema["type"] = current_type + ["null"]
+                schema["type"] = [*current_type, "null"]
     elif "oneOf" in schema:
         # Convert oneOf to anyOf with null type
-        schema["anyOf"] = schema.pop("oneOf") + [{"type": "null"}]
+        schema["anyOf"] = [*schema.pop("oneOf"), {"type": "null"}]
     elif "anyOf" in schema:
         # Add null type to anyOf if not already present
         if not any(item.get("type") == "null" for item in schema["anyOf"]):
@@ -1233,7 +1233,7 @@ def _handle_nullable_fields(schema: dict[str, Any] | Any) -> dict[str, Any] | An
 
     # Handle properties nullable fields
     if has_property_nullable_field and "properties" in result:
-        for prop_name, prop_schema in result["properties"].items():
+        for _prop_name, prop_schema in result["properties"].items():
             if isinstance(prop_schema, dict) and "nullable" in prop_schema:
                 nullable_value = prop_schema.pop("nullable")
                 if nullable_value and (

@@ -19,7 +19,7 @@ from typing import Annotated, Any, Self
 import asyncpg
 import numpy as np
 from openai import AsyncOpenAI
-from pgvector.asyncpg import register_vector  # Import register_vector
+from pgvector.asyncpg import register_vector
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 
@@ -283,9 +283,9 @@ async def display_memory_tree(deps: Deps) -> str:
 
 @mcp.tool
 async def remember(
-    contents: list[str] = Field(
-        description="List of observations or memories to store"
-    ),
+    contents: Annotated[
+        list[str], Field(description="List of observations or memories to store")
+    ],
 ):
     deps = Deps(openai=AsyncOpenAI(), pool=await get_db_pool())
     try:

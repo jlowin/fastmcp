@@ -14,7 +14,7 @@ LogMessage: TypeAlias = LoggingMessageNotificationParams
 LogHandler: TypeAlias = Callable[[LogMessage], Awaitable[None]]
 
 
-async def default_log_handler(message: LogMessage) -> None:
+async def default_log_handler(message: LogMessage) -> None:  # noqa: RUF029
     """Default handler that properly routes server log messages to appropriate log levels."""
     # data can be any JSON-serializable type, not just a dict
     data = message.data

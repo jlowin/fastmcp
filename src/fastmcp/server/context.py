@@ -188,8 +188,8 @@ class Context:
         """
         try:
             return request_ctx.get()
-        except LookupError:
-            raise ValueError("Context is not available outside of a request")
+        except LookupError as e:
+            raise ValueError("Context is not available outside of a request") from e
 
     async def report_progress(
         self, progress: float, total: float | None = None, message: str | None = None

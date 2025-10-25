@@ -554,9 +554,7 @@ class OpenAPIParser(
                 if "$ref" in obj and isinstance(obj["$ref"], str):
                     ref = obj["$ref"]
                     # Handle both converted and unconverted refs
-                    if ref.startswith("#/$defs/") or ref.startswith(
-                        "#/components/schemas/"
-                    ):
+                    if ref.startswith(("#/$defs/", "#/components/schemas/")):
                         schema_name = ref.split("/")[-1]
                     else:
                         return

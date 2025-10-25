@@ -120,7 +120,7 @@ class ErrorHandlingMiddleware(Middleware):
 
             # Transform and re-raise
             transformed_error = self._transform_error(error)
-            raise transformed_error
+            raise transformed_error from error
 
     def get_error_stats(self) -> dict[str, int]:
         """Get error statistics for monitoring."""

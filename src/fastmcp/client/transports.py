@@ -6,6 +6,7 @@ import os
 import shutil
 import sys
 import warnings
+from abc import abstractmethod
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any, Literal, TextIO, TypeVar, cast, overload
@@ -109,7 +110,7 @@ class ClientTransport(abc.ABC):
         # Basic representation for subclasses
         return f"<{self.__class__.__name__}>"
 
-    async def close(self):
+    async def close(self):  # noqa: B027
         """Close the transport."""
 
     def _set_auth(self, auth: httpx.Auth | Literal["oauth"] | str | None):
@@ -140,10 +141,10 @@ class WSTransport(ClientTransport):
     ) -> AsyncIterator[ClientSession]:
         try:
             from mcp.client.websocket import websocket_client
-        except ImportError:
+        except ImportError as e:
             raise ImportError(
                 "The websocket transport is not available. Please install fastmcp[websockets] or install the websockets package manually."
-            )
+            ) from e
 
         async with websocket_client(self.url) as transport:
             read_stream, write_stream = transport
@@ -450,8 +451,7 @@ async def _stdio_transport_connect_task(
                 if log_file is None:
                     log_file_handle = sys.stderr
                 elif isinstance(log_file, Path):
-                    log_file_handle = open(log_file, "a")
-                    stack.callback(log_file_handle.close)
+                    log_file_handle = stack.enter_context(log_file.open("a"))
                 else:
                     # Must be TextIO - use it directly
                     log_file_handle = log_file
@@ -851,26 +851,28 @@ class FastMCPTransport(ClientTransport):
             server_read, server_write = server_streams
 
             # Create a cancel scope for the server task
-            async with anyio.create_task_group() as tg:
-                async with _enter_server_lifespan(server=self.server):
-                    tg.start_soon(
-                        lambda: self.server._mcp_server.run(
-                            server_read,
-                            server_write,
-                            self.server._mcp_server.create_initialization_options(),
-                            raise_exceptions=self.raise_exceptions,
-                        )
+            async with (
+                anyio.create_task_group() as tg,
+                _enter_server_lifespan(server=self.server),
+            ):
+                tg.start_soon(
+                    lambda: self.server._mcp_server.run(
+                        server_read,
+                        server_write,
+                        self.server._mcp_server.create_initialization_options(),
+                        raise_exceptions=self.raise_exceptions,
                     )
+                )
 
-                    try:
-                        async with ClientSession(
-                            read_stream=client_read,
-                            write_stream=client_write,
-                            **session_kwargs,
-                        ) as client_session:
-                            yield client_session
-                    finally:
-                        tg.cancel_scope.cancel()
+                try:
+                    async with ClientSession(
+                        read_stream=client_read,
+                        write_stream=client_write,
+                        **session_kwargs,
+                    ) as client_session:
+                        yield client_session
+                finally:
+                    tg.cancel_scope.cancel()
 
     def __repr__(self) -> str:
         return f"<FastMCPTransport(server='{self.server.name}')>"
@@ -951,7 +953,7 @@ class MCPConfigTransport(ClientTransport):
 
         # if there's exactly one server, create a client for that server
         elif len(self.config.mcpServers) == 1:
-            self.transport = list(self.config.mcpServers.values())[0].to_transport()
+            self.transport = next(iter(self.config.mcpServers.values())).to_transport()
             self._underlying_transports.append(self.transport)
 
         # otherwise create a composite client
