@@ -1,0 +1,187 @@
+---
+title: Continue 🤝 FastMCP
+sidebarTitle: Continue
+description: Install and use FastMCP servers in Continue
+icon: message-code
+---
+
+import { VersionBadge } from "/snippets/version-badge.mdx"
+import { LocalFocusTip } from "/snippets/local-focus.mdx"
+
+<LocalFocusTip />
+
+Continue is an open-source AI code assistant that supports MCP servers, allowing you to extend Continue's agent with custom tools, resources, and prompts from your FastMCP servers.
+
+<Info>
+For detailed information about Continue's MCP implementation and configuration options, see the [Continue MCP documentation](https://docs.continue.dev/customize/deep-dives/mcp).
+</Info>
+
+## Requirements
+
+This integration uses STDIO transport to run your FastMCP server locally. Continue MCP servers work in agent mode and are configured using YAML block files in the `~/.continue/mcpServers` directory.
+
+## Create a Server
+
+The examples in this guide will use the following simple dice-rolling server, saved as `server.py`.
+
+```python server.py
+import random
+from fastmcp import FastMCP
+
+mcp = FastMCP(name="Dice Roller")
+
+@mcp.tool
+def roll_dice(n_dice: int) -> list[int]:
+    """Roll `n_dice` 6-sided dice and return the results."""
+    return [random.randint(1, 6) for _ in range(n_dice)]
+
+if __name__ == "__main__":
+    mcp.run()
+```
+
+## Install the Server
+
+### FastMCP CLI
+
+The easiest way to install a FastMCP server in Continue is using the `fastmcp install continue` command. This automatically handles the configuration and dependency management.
+
+```bash
+fastmcp install continue server.py
+```
+
+The install command supports the same `file.py:object` notation as the `run` command. If no object is specified, it will automatically look for a FastMCP server object named `mcp`, `server`, or `app` in your file:
+
+```bash
+# These are equivalent if your server object is named 'mcp'
+fastmcp install continue server.py
+fastmcp install continue server.py:mcp
+
+# Use explicit object name if your server has a different name
+fastmcp install continue server.py:my_custom_server
+```
+
+The command creates a YAML block file in `~/.continue/mcpServers/` named after your server (e.g., `my-server.yaml`). After installation, restart Continue to load the new server.
+
+#### Dependencies
+
+FastMCP offers multiple ways to manage dependencies for your Continue servers:
+
+**Individual packages**: Use the `--with` flag to specify packages your server needs. You can use this flag multiple times:
+
+```bash
+fastmcp install continue server.py --with pandas --with requests
+```
+
+**Requirements file**: For projects with a `requirements.txt` file, use `--with-requirements` to install all dependencies at once:
+
+```bash
+fastmcp install continue server.py --with-requirements requirements.txt
+```
+
+**Editable packages**: When developing local packages, use `--with-editable` to install them in editable mode:
+
+```bash
+fastmcp install continue server.py --with-editable ./my-local-package
+```
+
+You can also use a `fastmcp.json` configuration file:
+
+```json fastmcp.json
+{
+  "$schema": "https://gofastmcp.com/public/schemas/fastmcp.json/v1.json",
+  "source": {
+    "path": "server.py",
+    "entrypoint": "mcp"
+  },
+  "environment": {
+    "dependencies": ["pandas", "requests"]
+  }
+}
+```
+
+Then install it:
+
+```bash
+fastmcp install continue fastmcp.json
+```
+
+#### Python Version and Project Configuration
+
+Control your server's Python environment with these options:
+
+**Python version**: Use `--python` to specify which Python version your server should use. This is essential when your server requires specific Python features:
+
+```bash
+fastmcp install continue server.py --python 3.11
+```
+
+**Project directory**: Use `--project` to run your server within a specific project context. This ensures `uv` discovers all project configuration files and uses the correct virtual environment:
+
+```bash
+fastmcp install continue server.py --project /path/to/my-project
+```
+
+#### Environment Variables
+
+<Warning>
+Continue runs servers in a completely isolated environment with no access to your shell environment or locally installed applications. You must explicitly pass any environment variables your server needs.
+</Warning>
+
+If your server needs environment variables (like API keys), you must include them:
+
+```bash
+fastmcp install continue server.py --name "Weather Server" \
+  --env API_KEY=your-api-key \
+  --env DEBUG=true
+```
+
+Or load them from a `.env` file:
+
+```bash
+fastmcp install continue server.py --name "Weather Server" --env-file .env
+```
+
+<Warning>
+**`uv` must be installed and available in your system PATH**. Continue runs in its own isolated environment and needs `uv` to manage dependencies.
+</Warning>
+
+## Using the Server
+
+Once your server is installed and Continue is restarted, you can start using your FastMCP server with Continue's AI agent.
+
+<Note>
+MCP servers only work in **agent mode** in Continue. Make sure to switch to agent mode before testing your server.
+</Note>
+
+Try asking Continue something like:
+
+> "Roll some dice for me"
+
+Continue will automatically detect your `roll_dice` tool and use it to fulfill your request.
+
+The AI assistant can now access all the tools, resources, and prompts you've defined in your FastMCP server.
+
+## Manual Configuration
+
+For manual configuration or advanced use cases, you can create YAML block files directly in `~/.continue/mcpServers/`. Continue uses a composable block schema where each file contains an `mcpServers` array:
+
+```yaml dice-roller.yaml
+name: dice-roller
+version: 0.0.1
+schema: v1
+mcpServers:
+  - name: dice-roller
+    type: stdio
+    command: uv
+    args:
+      - run
+      - --with
+      - fastmcp
+      - fastmcp
+      - run
+      - path/to/your/server.py
+    env:  # Optional
+      API_KEY: your-api-key
+```
+
+For detailed information about Continue's YAML block schema, configuration options, and remote server setup, see the [Continue MCP documentation](https://docs.continue.dev/customize/deep-dives/mcp).

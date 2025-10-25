@@ -218,6 +218,7 @@
                   "integrations/chatgpt",
                   "integrations/claude-code",
                   "integrations/claude-desktop",
+                  "integrations/continue",
                   "integrations/cursor",
                   "integrations/gemini-cli",
                   "integrations/mcp-json-configuration"

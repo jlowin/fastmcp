@@ -9,7 +9,7 @@ import { VersionBadge } from "/snippets/version-badge.mdx"
 
 <VersionBadge version="2.10.3" />
 
-FastMCP can generate standard MCP JSON configuration files that work with any MCP-compatible client including Claude Desktop, VS Code, Cursor, and other applications that support the Model Context Protocol.
+FastMCP can generate standard MCP JSON configuration files that work with any MCP-compatible client including Claude Desktop, Continue, VS Code, Cursor, and other applications that support the Model Context Protocol.
 
 ## MCP JSON Configuration Standard
 
@@ -71,6 +71,7 @@ An object containing environment variables to set when launching the server. All
 This format is widely adopted across the MCP ecosystem:
 
 - **Claude Desktop**: Uses `~/.claude/claude_desktop_config.json`
+- **Continue**: Uses `~/.continue/mcpServers/*.yaml` (YAML format with JSON content)
 - **Cursor**: Uses `~/.cursor/mcp.json`
 - **VS Code**: Uses workspace `.vscode/mcp.json`
 - **Other clients**: Many MCP-compatible applications follow this standard
@@ -78,7 +79,12 @@ This format is widely adopted across the MCP ecosystem:
 ## Overview
 
 <Note>
-**For the best experience, use FastMCP's first-class integrations:** [`fastmcp install claude-code`](/integrations/claude-code), [`fastmcp install claude-desktop`](/integrations/claude-desktop), or [`fastmcp install cursor`](/integrations/cursor). Use MCP JSON generation for advanced use cases and unsupported clients.
+  **For the best experience, use FastMCP's first-class integrations:** [`fastmcp
+  install claude-code`](/integrations/claude-code), [`fastmcp install
+  claude-desktop`](/integrations/claude-desktop), [`fastmcp install
+  continue`](/integrations/continue), or [`fastmcp install
+  cursor`](/integrations/cursor). Use MCP JSON generation for advanced use cases
+  and unsupported clients.
 </Note>
 
 The `fastmcp install mcp-json` command generates configuration in the standard `mcpServers` format used across the MCP ecosystem. This is useful when:
