@@ -446,7 +446,7 @@ class ParsedFunction:
             # we ensure that no output schema is automatically generated.
             clean_output_type = replace_type(
                 output_type,
-                dict.fromkeys(
+                dict.fromkeys(  # type: ignore[arg-type]
                     (
                         Image,
                         Audio,

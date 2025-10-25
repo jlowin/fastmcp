@@ -578,7 +578,7 @@ def _create_dataclass(
             return _merge_defaults(data, original_schema)
         return data
 
-    cls._apply_defaults = _apply_defaults
+    cls._apply_defaults = _apply_defaults  # type: ignore[attr-defined]
 
     # Store completed class
     _classes[cache_key] = cls
