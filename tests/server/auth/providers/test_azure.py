@@ -74,27 +74,63 @@ class TestAzureProvider:
 
     def test_init_missing_client_id_raises_error(self):
         """Test that missing client_id raises ValueError."""
-        with pytest.raises(ValueError, match="client_id is required"):
-            AzureProvider(
-                client_secret="test_secret",
-                tenant_id="test-tenant",
-            )
+        # Clear environment variables to ensure we're testing the parameter validation
+        with patch.dict(os.environ, {}, clear=True):
+            with pytest.raises(ValueError, match="client_id is required"):
+                AzureProvider(
+                    client_secret="test_secret",
+                    tenant_id="test-tenant",
+                    required_scopes=["read"],
+                )
 
     def test_init_missing_client_secret_raises_error(self):
         """Test that missing client_secret raises ValueError."""
-        with pytest.raises(ValueError, match="client_secret is required"):
-            AzureProvider(
-                client_id="test_client",
-                tenant_id="test-tenant",
-            )
+        # Clear environment variables to ensure we're testing the parameter validation
+        with patch.dict(os.environ, {}, clear=True):
+            with pytest.raises(ValueError, match="client_secret is required"):
+                AzureProvider(
+                    client_id="test_client",
+                    tenant_id="test-tenant",
+                    required_scopes=["read"],
+                )
 
     def test_init_missing_tenant_id_raises_error(self):
         """Test that missing tenant_id raises ValueError."""
-        with pytest.raises(ValueError, match="tenant_id is required"):
-            AzureProvider(
-                client_id="test_client",
-                client_secret="test_secret",
-            )
+        # Clear environment variables to ensure we're testing the parameter validation
+        with patch.dict(os.environ, {}, clear=True):
+            with pytest.raises(ValueError, match="tenant_id is required"):
+                AzureProvider(
+                    client_id="test_client",
+                    client_secret="test_secret",
+                    required_scopes=["read"],
+                )
+
+    def test_init_missing_required_scopes_raises_error(self):
+        """Test that missing required_scopes raises ValueError."""
+        # Clear environment variables to ensure we're testing the parameter validation
+        with patch.dict(os.environ, {}, clear=True):
+            with pytest.raises(
+                ValueError, match="required_scopes must include at least one scope"
+            ):
+                AzureProvider(
+                    client_id="test_client",
+                    client_secret="test_secret",
+                    tenant_id="test-tenant",
+                )
+
+    def test_init_empty_required_scopes_raises_error(self):
+        """Test that empty required_scopes raises ValueError."""
+        # Clear environment variables to ensure we're testing the parameter validation
+        with patch.dict(os.environ, {}, clear=True):
+            with pytest.raises(
+                ValueError, match="required_scopes must include at least one scope"
+            ):
+                AzureProvider(
+                    client_id="test_client",
+                    client_secret="test_secret",
+                    tenant_id="test-tenant",
+                    required_scopes=[],
+                )
 
     def test_init_defaults(self):
         """Test that default values are applied correctly."""

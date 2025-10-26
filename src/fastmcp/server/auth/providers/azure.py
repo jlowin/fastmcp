@@ -202,8 +202,15 @@ class AzureProvider(OAuthProxy):
             )
             raise ValueError(msg)
 
+        # Validate required_scopes has at least one scope
         if not settings.required_scopes:
-            raise ValueError("required_scopes is required")
+            msg = (
+                "required_scopes must include at least one scope - set via parameter or "
+                "FASTMCP_SERVER_AUTH_AZURE_REQUIRED_SCOPES. Azure's OAuth API requires "
+                "the 'scope' parameter in authorization requests. Use the unprefixed scope "
+                "names from your Azure App registration (e.g., ['read', 'write'])"
+            )
+            raise ValueError(msg)
 
         # Apply defaults
         self.identifier_uri = settings.identifier_uri or f"api://{settings.client_id}"
