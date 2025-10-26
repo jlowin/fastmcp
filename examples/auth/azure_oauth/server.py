@@ -25,6 +25,7 @@ auth = AzureProvider(
     tenant_id=os.getenv("FASTMCP_SERVER_AUTH_AZURE_TENANT_ID")
     or "",  # Required for single-tenant apps - get from Azure Portal
     base_url="http://localhost:8000",
+    required_scopes=["read"],
     # required_scopes is automatically loaded from FASTMCP_SERVER_AUTH_AZURE_REQUIRED_SCOPES
     # At least one scope is required - use unprefixed scope names from your Azure App (e.g., ["read", "write"])
     # redirect_path="/auth/callback",  # Default path - change if using a different callback URL
