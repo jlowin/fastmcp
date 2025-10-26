@@ -1,7 +1,5 @@
+import warnings
 from typing import Any
-
-from mcp.types import CallToolResult
-from pydantic import BaseModel, Field
 
 from fastmcp import FastMCP
 from fastmcp.client import Client
@@ -12,45 +10,30 @@ from fastmcp.contrib.mcp_mixin.mcp_mixin import (
     mcp_tool,
 )
 
-
-class CallToolRequest(BaseModel):
-    """A class to represent a request to call a tool with specific arguments."""
-
-    tool: str = Field(description="The name of the tool to call.")
-    arguments: dict[str, Any] = Field(
-        description="A dictionary containing the arguments for the tool call."
-    )
-
-
-class CallToolRequestResult(CallToolResult):
-    """
-    A class to represent the result of a bulk tool call.
-    It extends CallToolResult to include information about the requested tool call.
-    """
-
-    tool: str = Field(description="The name of the tool that was called.")
-    arguments: dict[str, Any] = Field(
-        description="The arguments used for the tool call."
-    )
-
-    @classmethod
-    def from_call_tool_result(
-        cls, result: CallToolResult, tool: str, arguments: dict[str, Any]
-    ) -> "CallToolRequestResult":
-        """
-        Create a CallToolRequestResult from a CallToolResult.
-        """
-        return cls(
-            tool=tool,
-            arguments=arguments,
-            isError=result.isError,
-            content=result.content,
-        )
+# Re-export types from the new location for backward compatibility
+from fastmcp.server.middleware.bulk_tool_caller_types import (
+    CallToolRequest,
+    CallToolRequestResult,
+)
 
 
 class BulkToolCaller(MCPMixin):
-    """
-    A class to provide a "bulk tool call" tool for a FastMCP server
+    """A class to provide a "bulk tool call" tool for a FastMCP server.
+
+    .. deprecated:: 2.1.0
+        Use :class:`~fastmcp.server.middleware.BulkToolCallerMiddleware` instead.
+        This class is maintained for backward compatibility but will be removed
+        in a future version.
+
+        Old usage::
+
+            bulk_tool_caller = BulkToolCaller()
+            bulk_tool_caller.register_tools(mcp)
+
+        New usage::
+
+            from fastmcp.server.middleware import BulkToolCallerMiddleware
+            mcp = FastMCP(middleware=[BulkToolCallerMiddleware()])
     """
 
     def register_tools(
@@ -59,9 +42,19 @@ class BulkToolCaller(MCPMixin):
         prefix: str | None = None,
         separator: str = _DEFAULT_SEPARATOR_TOOL,
     ) -> None:
+        """Register the tools provided by this class with the given MCP server.
+
+        .. deprecated:: 2.1.0
+            Use :class:`~fastmcp.server.middleware.BulkToolCallerMiddleware` instead.
         """
-        Register the tools provided by this class with the given MCP server.
-        """
+        warnings.warn(
+            "BulkToolCaller is deprecated and will be removed in a future version. "
+            "Use BulkToolCallerMiddleware instead: "
+            "FastMCP(middleware=[BulkToolCallerMiddleware()])",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
         self.connection = FastMCPTransport(mcp_server)
 
         super().register_tools(mcp_server=mcp_server)
