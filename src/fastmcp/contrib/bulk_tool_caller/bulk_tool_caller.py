@@ -118,9 +118,6 @@ class BulkToolCaller(MCPMixin):
         async with Client(self.connection) as client:
             result = await client.call_tool_mcp(name=tool, arguments=arguments)
 
-            return CallToolRequestResult(
-                tool=tool,
-                arguments=arguments,
-                isError=result.isError,
-                content=result.content,
+            return CallToolRequestResult.from_call_tool_result(
+                result, tool=tool, arguments=arguments
             )

@@ -29,7 +29,11 @@ def server_with_tools():
 
     @mcp.tool
     async def no_return_tool(arg1: str) -> None:
-        """A simple tool that returns nothing."""
+        """A simple tool that returns nothing.
+
+        Returns:
+            None: This tool does not return any value.
+        """
 
     @mcp.tool
     def add(a: int, b: int) -> int:
@@ -78,7 +82,7 @@ class TestBulkToolCallerMiddleware:
                             "_meta": None,
                         }
                     ],
-                    "structuredContent": None,
+                    "structuredContent": {"result": "value1"},
                     "isError": False,
                     "tool": "echo_tool",
                     "arguments": {"arg1": "value1"},
@@ -110,7 +114,7 @@ class TestBulkToolCallerMiddleware:
                             "_meta": None,
                         }
                     ],
-                    "structuredContent": None,
+                    "structuredContent": {"result": "value1"},
                     "isError": False,
                     "tool": "echo_tool",
                     "arguments": {"arg1": "value1"},
@@ -125,7 +129,7 @@ class TestBulkToolCallerMiddleware:
                             "_meta": None,
                         }
                     ],
-                    "structuredContent": None,
+                    "structuredContent": {"result": "value2"},
                     "isError": False,
                     "tool": "echo_tool",
                     "arguments": {"arg1": "value2"},
@@ -197,7 +201,7 @@ class TestBulkToolCallerMiddleware:
                             "_meta": None,
                         }
                     ],
-                    "structuredContent": None,
+                    "structuredContent": {"result": "value1"},
                     "isError": False,
                     "tool": "echo_tool",
                     "arguments": {"arg1": "value1"},

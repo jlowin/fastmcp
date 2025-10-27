@@ -36,4 +36,6 @@ class CallToolRequestResult(CallToolResult):
             arguments=arguments,
             isError=result.isError,
             content=result.content,
+            _meta=getattr(result, "_meta", None),
+            structuredContent=getattr(result, "structuredContent", None),
         )

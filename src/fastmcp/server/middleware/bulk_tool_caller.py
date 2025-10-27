@@ -2,7 +2,7 @@
 
 from typing import Annotated
 
-from mcp.types import CallToolResult, TextContent
+from mcp.types import TextContent
 
 from fastmcp.server.context import Context
 from fastmcp.server.middleware.bulk_tool_caller_types import (
@@ -46,16 +46,15 @@ async def call_tools_bulk(
                 key=tool_call.tool, arguments=tool_call.arguments
             )
 
-            # Convert ToolResult to CallToolResult
-            # Don't set isError - it defaults to None for successful calls
-            call_tool_result = CallToolResult(
-                content=tool_result.content,
-            )
-
-            # Convert to CallToolRequestResult
+            # Convert ToolResult to CallToolRequestResult, preserving all fields
+            # Note: ToolResult doesn't have isError - it's only on CallToolResult
+            # For successful calls, we don't set isError (defaults to None)
             results.append(
-                CallToolRequestResult.from_call_tool_result(
-                    call_tool_result, tool_call.tool, tool_call.arguments
+                CallToolRequestResult(
+                    tool=tool_call.tool,
+                    arguments=tool_call.arguments,
+                    content=tool_result.content,
+                    structuredContent=tool_result.structured_content,
                 )
             )
         except Exception as e:
@@ -111,16 +110,15 @@ async def call_tool_bulk(
                 key=tool, arguments=args
             )
 
-            # Convert ToolResult to CallToolResult
-            # Don't set isError - it defaults to None for successful calls
-            call_tool_result = CallToolResult(
-                content=tool_result.content,
-            )
-
-            # Convert to CallToolRequestResult
+            # Convert ToolResult to CallToolRequestResult, preserving all fields
+            # Note: ToolResult doesn't have isError - it's only on CallToolResult
+            # For successful calls, we don't set isError (defaults to None)
             results.append(
-                CallToolRequestResult.from_call_tool_result(
-                    call_tool_result, tool, args
+                CallToolRequestResult(
+                    tool=tool,
+                    arguments=args,
+                    content=tool_result.content,
+                    structuredContent=tool_result.structured_content,
                 )
             )
         except Exception as e:
