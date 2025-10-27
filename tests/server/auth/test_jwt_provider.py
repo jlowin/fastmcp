@@ -763,43 +763,28 @@ class TestBearerToken:
         access_token3 = await provider.load_access_token(token3)
         assert access_token3 is None
 
+    @pytest.mark.parametrize(
+        ("iss", "expected"),
+        [
+            ("https://test.example.com", True),
+            ("https://other-issuer.example.com", True),
+            ("https://wrong-issuer.example.com", False),
+        ],
+    )
     async def test_provider_with_multiple_expected_issuers(
-        self, rsa_key_pair: RSAKeyPair
+        self, rsa_key_pair: RSAKeyPair, iss: str, expected: bool
     ):
-        """Test provider configured with multiple expected issuers."""
+        """Provider accepts any issuer from the configured list."""
         provider = JWTVerifier(
             public_key=rsa_key_pair.public_key,
             issuer=["https://test.example.com", "https://other-issuer.example.com"],
             audience="https://api.example.com",
         )
-
-        # Token with issuer that matches the first expected issuer
-        token1 = rsa_key_pair.create_token(
-            subject="test-user",
-            issuer="https://test.example.com",
-            audience="https://api.example.com",
+        token = rsa_key_pair.create_token(
+            subject="test-user", issuer=iss, audience="https://api.example.com"
         )
-        access_token1 = await provider.load_access_token(token1)
-        assert access_token1 is not None
-
-        # Token with issuer that matches the second expected issuer
-        token2 = rsa_key_pair.create_token(
-            subject="test-user",
-            issuer="https://other-issuer.example.com",
-            audience="https://api.example.com",
-        )
-        access_token2 = await provider.load_access_token(token2)
-        assert access_token2 is not None
-
-        # Token with issuer that doesn't match any expected
-        token3 = rsa_key_pair.create_token(
-            subject="test-user",
-            issuer="https://wrong-issuer.example.com",
-            audience="https://api.example.com",
-        )
-        access_token3 = await provider.load_access_token(token3)
-        assert access_token3 is None
-
+        access_token = await provider.load_access_token(token)
+        assert (access_token is not None) is expected
     async def test_scope_extraction_string(
         self, rsa_key_pair: RSAKeyPair, bearer_provider: JWTVerifier
     ):
