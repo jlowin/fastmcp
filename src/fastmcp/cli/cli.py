@@ -78,7 +78,7 @@ def with_argv(args: list[str] | None):
         original = sys.argv[:]
         try:
             # Preserve the script name (sys.argv[0]) and replace the rest
-            sys.argv = [sys.argv[0]] + args
+            sys.argv = [sys.argv[0], *args]
             yield
         finally:
             sys.argv = original
@@ -277,7 +277,7 @@ async def dev(
 
         # Run the MCP Inspector command
         process = subprocess.run(
-            [npx_cmd, inspector_cmd] + uv_cmd,
+            [npx_cmd, inspector_cmd, *uv_cmd],
             check=True,
             env=env,
         )
@@ -772,6 +772,7 @@ async def inspect(
                 "server_spec": server_spec,
                 "error": str(e),
             },
+            exc_info=True,
         )
         console.print(f"[bold red]✗[/bold red] Failed to inspect server: {e}")
         sys.exit(1)
