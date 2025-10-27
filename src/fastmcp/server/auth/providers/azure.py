@@ -6,7 +6,7 @@ using the OAuth Proxy pattern for non-DCR OAuth flows.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from key_value.aio.protocols import AsyncKeyValue
 from pydantic import SecretStr, field_validator
@@ -45,6 +45,7 @@ class AzureProviderSettings(BaseSettings):
     required_scopes: list[str] | None = None
     additional_authorize_scopes: list[str] | None = None
     allowed_client_redirect_uris: list[str] | None = None
+    jwt_signing_key: str | None = None
 
     @field_validator("required_scopes", mode="before")
     @classmethod
@@ -64,18 +65,28 @@ class AzureProvider(OAuthProxy):
     OAuth Proxy pattern. It supports both organizational accounts and personal
     Microsoft accounts depending on the tenant configuration.
 
+    Scope Handling:
+    - required_scopes: Provide unprefixed scope names (e.g., ["read", "write"])
+      → Automatically prefixed with identifier_uri during initialization
+      → Validated on all tokens and advertised to MCP clients
+    - additional_authorize_scopes: Provide full format (e.g., ["User.Read"])
+      → NOT prefixed, NOT validated, NOT advertised to clients
+      → Used to request Microsoft Graph or other upstream API permissions
+
     Features:
     - OAuth proxy to Azure/Microsoft identity platform
     - JWT validation using tenant issuer and JWKS
     - Supports tenant configurations: specific tenant ID, "organizations", or "consumers"
+    - Custom API scopes and Microsoft Graph scopes in a single provider
 
     Setup:
     1. Create an App registration in Azure Portal
     2. Configure Web platform redirect URI: http://localhost:8000/auth/callback (or your custom path)
-    3. Add an Application ID URI. Either use the default (api://{client_id}) or set a custom one.
-    4. Add a custom scope.
-    5. Create a client secret.
-    6. Get Application (client) ID, Directory (tenant) ID, and client secret
+    3. Add an Application ID URI under "Expose an API" (defaults to api://{client_id})
+    4. Add custom scopes (e.g., "read", "write") under "Expose an API"
+    5. Set access token version to 2 in the App manifest: "requestedAccessTokenVersion": 2
+    6. Create a client secret
+    7. Get Application (client) ID, Directory (tenant) ID, and client secret
 
     Example:
         ```python
@@ -86,7 +97,8 @@ class AzureProvider(OAuthProxy):
             client_id="your-client-id",
             client_secret="your-client-secret",
             tenant_id="your-tenant-id",
-            required_scopes=["your-scope"],
+            required_scopes=["read", "write"],  # Unprefixed scope names
+            additional_authorize_scopes=["User.Read", "Mail.Read"],  # Optional Graph scopes
             base_url="http://localhost:8000",
             # identifier_uri defaults to api://{client_id}
         )
@@ -101,37 +113,53 @@ class AzureProvider(OAuthProxy):
         client_id: str | NotSetT = NotSet,
         client_secret: str | NotSetT = NotSet,
         tenant_id: str | NotSetT = NotSet,
-        identifier_uri: str | None | NotSetT = NotSet,
+        identifier_uri: str | NotSetT | None = NotSet,
         base_url: str | NotSetT = NotSet,
         issuer_url: str | NotSetT = NotSet,
         redirect_path: str | NotSetT = NotSet,
-        required_scopes: list[str] | None | NotSetT = NotSet,
-        additional_authorize_scopes: list[str] | None | NotSetT = NotSet,
+        required_scopes: list[str] | NotSetT | None = NotSet,
+        additional_authorize_scopes: list[str] | NotSetT | None = NotSet,
         allowed_client_redirect_uris: list[str] | NotSetT = NotSet,
         client_storage: AsyncKeyValue | None = None,
+        jwt_signing_key: str | bytes | NotSetT = NotSet,
         require_authorization_consent: bool = True,
     ) -> None:
         """Initialize Azure OAuth provider.
 
         Args:
-            client_id: Azure application (client) ID
-            client_secret: Azure client secret
-            tenant_id: Azure tenant ID (your specific tenant ID, "organizations", or "consumers")
-            identifier_uri: Optional Application ID URI for your API. (defaults to api://{client_id})
-                Used only to prefix scopes in authorization requests. Tokens are always validated
-                against your app's client ID.
+            client_id: Azure application (client) ID from your App registration
+            client_secret: Azure client secret from your App registration
+            tenant_id: Azure tenant ID (specific tenant GUID, "organizations", or "consumers")
+            identifier_uri: Optional Application ID URI for your custom API (defaults to api://{client_id}).
+                This URI is automatically prefixed to all required_scopes during initialization.
+                Example: identifier_uri="api://my-api" + required_scopes=["read"]
+                → tokens validated for "api://my-api/read"
             base_url: Public URL where OAuth endpoints will be accessible (includes any mount path)
             issuer_url: Issuer URL for OAuth metadata (defaults to base_url). Use root-level URL
                 to avoid 404s during discovery when mounting under a path.
-            redirect_path: Redirect path configured in Azure (defaults to "/auth/callback")
-            required_scopes: Required scopes. These are validated on tokens and used as defaults
-                when the client does not request specific scopes.
-            additional_authorize_scopes: Additional scopes to include in the authorization request
-                without prefixing. Use this to request upstream scopes such as Microsoft Graph
-                permissions. These are not used for token validation.
+            redirect_path: Redirect path configured in Azure App registration (defaults to "/auth/callback")
+            required_scopes: Custom API scope names WITHOUT prefix (e.g., ["read", "write"]).
+                - Automatically prefixed with identifier_uri during initialization
+                - Validated on all tokens
+                - Advertised in Protected Resource Metadata
+                - Must match scope names defined in Azure Portal under "Expose an API"
+                Example: ["read", "write"] → validates tokens containing ["api://xxx/read", "api://xxx/write"]
+            additional_authorize_scopes: Microsoft Graph or other upstream scopes in full format.
+                - NOT prefixed with identifier_uri
+                - NOT validated on tokens
+                - NOT advertised to MCP clients
+                - Used to request additional permissions from Azure (e.g., Graph API access)
+                Example: ["User.Read", "Mail.Read", "offline_access"]
+                These scopes allow your FastMCP server to call Microsoft Graph APIs using the
+                upstream Azure token, but MCP clients are unaware of them.
             allowed_client_redirect_uris: List of allowed redirect URI patterns for MCP clients.
                 If None (default), all URIs are allowed. If empty list, no URIs are allowed.
-            client_storage: An AsyncKeyValue-compatible store for client registrations, registrations are stored in memory if not provided
+            client_storage: Storage backend for OAuth state (client registrations, encrypted tokens).
+                If None, a DiskStore will be created in the data directory (derived from `platformdirs`). The
+                disk store will be encrypted using a key derived from the JWT Signing Key.
+            jwt_signing_key: Secret for signing FastMCP JWT tokens (any string or bytes). If bytes are provided,
+                they will be used as is. If a string is provided, it will be derived into a 32-byte key. If not
+                provided, the upstream client secret will be used to derive a 32-byte key using PBKDF2.
             require_authorization_consent: Whether to require user consent before authorizing clients (default True).
                 When True, users see a consent screen before being redirected to Azure.
                 When False, authorization proceeds directly without user confirmation.
@@ -151,6 +179,7 @@ class AzureProvider(OAuthProxy):
                     "required_scopes": required_scopes,
                     "additional_authorize_scopes": additional_authorize_scopes,
                     "allowed_client_redirect_uris": allowed_client_redirect_uris,
+                    "jwt_signing_key": jwt_signing_key,
                 }.items()
                 if v is not NotSet
             }
@@ -173,8 +202,15 @@ class AzureProvider(OAuthProxy):
             )
             raise ValueError(msg)
 
+        # Validate required_scopes has at least one scope
         if not settings.required_scopes:
-            raise ValueError("required_scopes is required")
+            msg = (
+                "required_scopes must include at least one scope - set via parameter or "
+                "FASTMCP_SERVER_AUTH_AZURE_REQUIRED_SCOPES. Azure's OAuth API requires "
+                "the 'scope' parameter in authorization requests. Use the unprefixed scope "
+                "names from your Azure App registration (e.g., ['read', 'write'])"
+            )
+            raise ValueError(msg)
 
         # Apply defaults
         self.identifier_uri = settings.identifier_uri or f"api://{settings.client_id}"
@@ -187,12 +223,13 @@ class AzureProvider(OAuthProxy):
             f"https://login.microsoftonline.com/{tenant_id_final}/discovery/v2.0/keys"
         )
 
+        # Azure returns unprefixed scopes in JWT tokens, so validate against unprefixed scopes
         token_verifier = JWTVerifier(
             jwks_uri=jwks_uri,
             issuer=issuer,
             audience=settings.client_id,
             algorithm="RS256",
-            required_scopes=settings.required_scopes,
+            required_scopes=settings.required_scopes,  # Unprefixed scopes for validation
         )
 
         # Extract secret string from SecretStr
@@ -221,6 +258,7 @@ class AzureProvider(OAuthProxy):
             or settings.base_url,  # Default to base_url if not specified
             allowed_client_redirect_uris=settings.allowed_client_redirect_uris,
             client_storage=client_storage,
+            jwt_signing_key=settings.jwt_signing_key,
             require_authorization_consent=require_authorization_consent,
         )
 
@@ -262,23 +300,40 @@ class AzureProvider(OAuthProxy):
                         "Filtering out 'resource' parameter '%s' for Azure AD v2.0 (use scopes instead)",
                         original_resource,
                     )
-        original_scopes = params_to_use.scopes or self.required_scopes
-        prefixed_scopes = (
-            self._add_prefix_to_scopes(original_scopes)
-            if self.identifier_uri
-            else original_scopes
-        )
-
-        final_scopes = list(prefixed_scopes)
-        if self.additional_authorize_scopes:
-            final_scopes.extend(self.additional_authorize_scopes)
-
-        modified_params = params_to_use.model_copy(update={"scopes": final_scopes})
-
-        auth_url = await super().authorize(client, modified_params)
+        # Don't modify the scopes in params - they stay unprefixed for MCP clients
+        # We'll prefix them when building the Azure authorization URL (in _build_upstream_authorize_url)
+        auth_url = await super().authorize(client, params_to_use)
         separator = "&" if "?" in auth_url else "?"
         return f"{auth_url}{separator}prompt=select_account"
 
-    def _add_prefix_to_scopes(self, scopes: list[str]) -> list[str]:
-        """Add Application ID URI prefix for authorization request."""
-        return [f"{self.identifier_uri}/{scope}" for scope in scopes]
+    def _build_upstream_authorize_url(
+        self, txn_id: str, transaction: dict[str, Any]
+    ) -> str:
+        """Build Azure authorization URL with prefixed scopes.
+
+        Overrides parent to prefix scopes with identifier_uri before sending to Azure,
+        while keeping unprefixed scopes in the transaction for MCP clients.
+        """
+        # Get unprefixed scopes from transaction
+        unprefixed_scopes = transaction.get("scopes") or self.required_scopes or []
+
+        # Prefix scopes for Azure authorization request
+        prefixed_scopes = []
+        for scope in unprefixed_scopes:
+            if "://" in scope or "/" in scope:
+                # Already a full URI or path (e.g., "api://xxx/read" or "User.Read")
+                prefixed_scopes.append(scope)
+            else:
+                # Unprefixed scope name - prefix it with identifier_uri
+                prefixed_scopes.append(f"{self.identifier_uri}/{scope}")
+
+        # Add Microsoft Graph scopes (not validated, not prefixed)
+        if self.additional_authorize_scopes:
+            prefixed_scopes.extend(self.additional_authorize_scopes)
+
+        # Temporarily modify transaction dict for parent's URL building
+        modified_transaction = transaction.copy()
+        modified_transaction["scopes"] = prefixed_scopes
+
+        # Let parent build the URL with prefixed scopes
+        return super()._build_upstream_authorize_url(txn_id, modified_transaction)

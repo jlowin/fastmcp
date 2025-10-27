@@ -1608,6 +1608,7 @@ class TestSettingsFromEnvironment:
         os.environ["FASTMCP_SERVER_AUTH_AZURE_REDIRECT_PATH"] = "/auth/callback"
         os.environ["FASTMCP_SERVER_AUTH_AZURE_BASE_URL"] = "http://localhost:8000"
         os.environ["FASTMCP_SERVER_AUTH_AZURE_REQUIRED_SCOPES"] = "User.Read,email,profile"
+        os.environ["FASTMCP_SERVER_AUTH_AZURE_JWT_SIGNING_KEY"] = "test-secret"
 
         import fastmcp
         
@@ -1636,3 +1637,50 @@ class TestSettingsFromEnvironment:
         auth_class = settings.server_auth_class
 
         assert auth_class is AzureProvider
+
+
+class TestAbstractCollectionTypes:
+    """Test that FastMCP accepts abstract collection types from collections.abc."""
+
+    async def test_fastmcp_init_with_tuples(self):
+        """Test FastMCP accepts tuples for sequence parameters."""
+
+        def dummy_tool() -> str:
+            return "test"
+
+        # Test with tuples and other abstract types
+        mcp = FastMCP(
+            "test",
+            middleware=(),  # Empty tuple
+            tools=(Tool.from_function(dummy_tool),),  # Tuple of tools
+            include_tags={"tag1", "tag2"},  # Set
+            exclude_tags=frozenset({"tag3"}),  # Frozen set
+        )
+        assert mcp is not None
+        assert mcp.name == "test"
+        assert isinstance(mcp.middleware, list)  # Should be converted to list
+
+    async def test_fastmcp_init_with_readonly_mapping(self):
+        """Test FastMCP accepts read-only mappings."""
+        from types import MappingProxyType
+
+        # Test with read-only mapping
+        mcp = FastMCP(
+            "test2",
+            tool_transformations=MappingProxyType({}),  # Read-only mapping
+        )
+        assert mcp is not None
+
+    async def test_fastmcp_works_with_abstract_types(self):
+        """Test that abstract types work end-to-end with a client."""
+
+        def greet(name: str) -> str:
+            return f"Hello, {name}!"
+
+        # Create server with tuple of tools
+        mcp = FastMCP("test", tools=(Tool.from_function(greet),))
+
+        # Verify it works with a client
+        async with Client(mcp) as client:
+            result = await client.call_tool("greet", {"name": "World"})
+            assert result.content[0].text == "Hello, World!"  # type: ignore[attr-defined]

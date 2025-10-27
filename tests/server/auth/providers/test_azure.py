@@ -10,7 +10,6 @@ from mcp.shared.auth import OAuthClientInformationFull
 from pydantic import AnyUrl
 
 from fastmcp.server.auth.providers.azure import AzureProvider
-from fastmcp.server.auth.providers.jwt import JWTVerifier
 
 
 class TestAzureProvider:
@@ -23,7 +22,8 @@ class TestAzureProvider:
             client_secret="azure_secret_123",
             tenant_id="87654321-4321-4321-4321-210987654321",
             base_url="https://myserver.com",
-            required_scopes=["User.Read", "Mail.Read"],
+            required_scopes=["read", "write"],
+            jwt_signing_key="test-secret",
         )
 
         assert provider._upstream_client_id == "12345678-1234-1234-1234-123456789012"
@@ -38,8 +38,8 @@ class TestAzureProvider:
     @pytest.mark.parametrize(
         "scopes_env",
         [
-            "User.Read,Calendar.Read",
-            '["User.Read", "Calendar.Read"]',
+            "read,write",
+            '["read", "write"]',
         ],
     )
     def test_init_with_env_vars(self, scopes_env):
@@ -52,6 +52,7 @@ class TestAzureProvider:
                 "FASTMCP_SERVER_AUTH_AZURE_TENANT_ID": "env-tenant-id",
                 "FASTMCP_SERVER_AUTH_AZURE_BASE_URL": "https://envserver.com",
                 "FASTMCP_SERVER_AUTH_AZURE_REQUIRED_SCOPES": scopes_env,
+                "FASTMCP_SERVER_AUTH_AZURE_JWT_SIGNING_KEY": "test-secret",
             },
         ):
             provider = AzureProvider()
@@ -59,9 +60,11 @@ class TestAzureProvider:
             assert provider._upstream_client_id == "env-client-id"
             assert provider._upstream_client_secret.get_secret_value() == "env-secret"
             assert str(provider.base_url) == "https://envserver.com/"
+            # Scopes are stored unprefixed for token validation
+            # (Azure returns unprefixed scopes in JWT tokens)
             assert provider._token_validator.required_scopes == [
-                "User.Read",
-                "Calendar.Read",
+                "read",
+                "write",
             ]
             # Check tenant is in the endpoints
             parsed_auth = urlparse(provider._upstream_authorization_endpoint)
@@ -71,27 +74,63 @@ class TestAzureProvider:
 
     def test_init_missing_client_id_raises_error(self):
         """Test that missing client_id raises ValueError."""
-        with pytest.raises(ValueError, match="client_id is required"):
-            AzureProvider(
-                client_secret="test_secret",
-                tenant_id="test-tenant",
-            )
+        # Clear environment variables to ensure we're testing the parameter validation
+        with patch.dict(os.environ, {}, clear=True):
+            with pytest.raises(ValueError, match="client_id is required"):
+                AzureProvider(
+                    client_secret="test_secret",
+                    tenant_id="test-tenant",
+                    required_scopes=["read"],
+                )
 
     def test_init_missing_client_secret_raises_error(self):
         """Test that missing client_secret raises ValueError."""
-        with pytest.raises(ValueError, match="client_secret is required"):
-            AzureProvider(
-                client_id="test_client",
-                tenant_id="test-tenant",
-            )
+        # Clear environment variables to ensure we're testing the parameter validation
+        with patch.dict(os.environ, {}, clear=True):
+            with pytest.raises(ValueError, match="client_secret is required"):
+                AzureProvider(
+                    client_id="test_client",
+                    tenant_id="test-tenant",
+                    required_scopes=["read"],
+                )
 
     def test_init_missing_tenant_id_raises_error(self):
         """Test that missing tenant_id raises ValueError."""
-        with pytest.raises(ValueError, match="tenant_id is required"):
-            AzureProvider(
-                client_id="test_client",
-                client_secret="test_secret",
-            )
+        # Clear environment variables to ensure we're testing the parameter validation
+        with patch.dict(os.environ, {}, clear=True):
+            with pytest.raises(ValueError, match="tenant_id is required"):
+                AzureProvider(
+                    client_id="test_client",
+                    client_secret="test_secret",
+                    required_scopes=["read"],
+                )
+
+    def test_init_missing_required_scopes_raises_error(self):
+        """Test that missing required_scopes raises ValueError."""
+        # Clear environment variables to ensure we're testing the parameter validation
+        with patch.dict(os.environ, {}, clear=True):
+            with pytest.raises(
+                ValueError, match="required_scopes must include at least one scope"
+            ):
+                AzureProvider(
+                    client_id="test_client",
+                    client_secret="test_secret",
+                    tenant_id="test-tenant",
+                )
+
+    def test_init_empty_required_scopes_raises_error(self):
+        """Test that empty required_scopes raises ValueError."""
+        # Clear environment variables to ensure we're testing the parameter validation
+        with patch.dict(os.environ, {}, clear=True):
+            with pytest.raises(
+                ValueError, match="required_scopes must include at least one scope"
+            ):
+                AzureProvider(
+                    client_id="test_client",
+                    client_secret="test_secret",
+                    tenant_id="test-tenant",
+                    required_scopes=[],
+                )
 
     def test_init_defaults(self):
         """Test that default values are applied correctly."""
@@ -99,7 +138,8 @@ class TestAzureProvider:
             client_id="test_client",
             client_secret="test_secret",
             tenant_id="test-tenant",
-            required_scopes=["User.Read"],
+            required_scopes=["read"],
+            jwt_signing_key="test-secret",
         )
 
         # Check defaults
@@ -114,7 +154,8 @@ class TestAzureProvider:
             client_secret="test_secret",
             tenant_id="my-tenant-id",
             base_url="https://myserver.com",
-            required_scopes=["User.Read"],
+            required_scopes=["read"],
+            jwt_signing_key="test_secret",
         )
 
         # Check that endpoints use the correct Azure OAuth2 v2.0 endpoints with tenant
@@ -137,7 +178,8 @@ class TestAzureProvider:
             client_id="test_client",
             client_secret="test_secret",
             tenant_id="organizations",
-            required_scopes=["User.Read"],
+            required_scopes=["read"],
+            jwt_signing_key="test-secret",
         )
         parsed = urlparse(provider1._upstream_authorization_endpoint)
         assert "/organizations/" in parsed.path
@@ -147,29 +189,36 @@ class TestAzureProvider:
             client_id="test_client",
             client_secret="test_secret",
             tenant_id="consumers",
-            required_scopes=["User.Read"],
+            required_scopes=["read"],
+            jwt_signing_key="test-secret",
         )
         parsed = urlparse(provider2._upstream_authorization_endpoint)
         assert "/consumers/" in parsed.path
 
     def test_azure_specific_scopes(self):
-        """Test handling of Azure-specific scope formats."""
-        # Just test that the provider accepts Azure-specific scopes without error
+        """Test handling of custom API scope formats."""
+        # Test that the provider accepts custom API scopes without error
         provider = AzureProvider(
             client_id="test_client",
             client_secret="test_secret",
             tenant_id="test-tenant",
             required_scopes=[
-                "User.Read",
-                "Mail.Read",
-                "Calendar.ReadWrite",
-                "openid",
-                "profile",
+                "read",
+                "write",
+                "admin",
             ],
+            jwt_signing_key="test-secret",
         )
 
         # Provider should initialize successfully with these scopes
         assert provider is not None
+        # Scopes are stored unprefixed for token validation
+        # (Azure returns unprefixed scopes in JWT tokens)
+        assert provider._token_validator.required_scopes == [
+            "read",
+            "write",
+            "admin",
+        ]
 
     def test_init_does_not_require_api_client_id_anymore(self):
         """API client ID is no longer required; audience is client_id."""
@@ -177,18 +226,22 @@ class TestAzureProvider:
             client_id="test_client",
             client_secret="test_secret",
             tenant_id="test-tenant",
-            required_scopes=["User.Read"],
+            required_scopes=["read"],
+            jwt_signing_key="test-secret",
         )
         assert provider is not None
 
     def test_init_with_custom_audience_uses_jwt_verifier(self):
         """When audience is provided, JWTVerifier is configured with JWKS and issuer."""
+        from fastmcp.server.auth.providers.jwt import JWTVerifier
+
         provider = AzureProvider(
             client_id="test_client",
             client_secret="test_secret",
             tenant_id="my-tenant",
             identifier_uri="api://my-api",
             required_scopes=[".default"],
+            jwt_signing_key="test-secret",
         )
 
         assert provider._token_validator is not None
@@ -200,10 +253,12 @@ class TestAzureProvider:
         )
         assert verifier.issuer == "https://login.microsoftonline.com/my-tenant/v2.0"
         assert verifier.audience == "test_client"
+        # Scopes are stored unprefixed for token validation
+        # (Azure returns unprefixed scopes like ".default" in JWT tokens)
+        assert verifier.required_scopes == [".default"]
 
-    @pytest.mark.asyncio
-    async def test_authorize_filters_resource_and_prefixes_scopes_with_audience(self):
-        """authorize() should drop resource and prefix non-openid scopes with audience."""
+    async def test_authorize_filters_resource_and_stores_unprefixed_scopes(self):
+        """authorize() should drop resource parameter and store unprefixed scopes for MCP clients."""
         provider = AzureProvider(
             client_id="test_client",
             client_secret="test_secret",
@@ -211,6 +266,7 @@ class TestAzureProvider:
             identifier_uri="api://my-api",
             required_scopes=["read", "write"],
             base_url="https://srv.example",
+            jwt_signing_key="test-secret",
         )
 
         await provider.register_client(
@@ -230,7 +286,10 @@ class TestAzureProvider:
         params = AuthorizationParams(
             redirect_uri=AnyUrl("http://localhost:12345/callback"),
             redirect_uri_provided_explicitly=True,
-            scopes=["read", "profile"],
+            scopes=[
+                "read",
+                "profile",
+            ],  # Client sends unprefixed scopes (from PRM which advertises unprefixed)
             state="abc",
             code_challenge="xyz",
             resource="https://should.be.ignored",
@@ -244,17 +303,29 @@ class TestAzureProvider:
         assert "txn_id" in qs, "Should redirect to consent page with transaction ID"
         txn_id = qs["txn_id"][0]
 
-        # Verify transaction contains correct parameters (resource filtered, scopes prefixed)
+        # Verify transaction stores UNPREFIXED scopes for MCP clients
         transaction = await provider._transaction_store.get(key=txn_id)
         assert transaction is not None
-        assert "api://my-api/read" in transaction.scopes
-        assert "api://my-api/profile" in transaction.scopes
+        assert "read" in transaction.scopes
+        assert "profile" in transaction.scopes
         # Azure provider filters resource parameter (not stored in transaction)
         assert transaction.resource is None
 
-    @pytest.mark.asyncio
-    async def test_authorize_appends_unprefixed_additional_scopes(self):
-        """authorize() should append additional_authorize_scopes without prefixing them."""
+        # Verify the upstream Azure URL will have PREFIXED scopes
+        upstream_url = provider._build_upstream_authorize_url(
+            txn_id, transaction.model_dump()
+        )
+        assert (
+            "api%3A%2F%2Fmy-api%2Fread" in upstream_url
+            or "api://my-api/read" in upstream_url
+        )
+        assert (
+            "api%3A%2F%2Fmy-api%2Fprofile" in upstream_url
+            or "api://my-api/profile" in upstream_url
+        )
+
+    async def test_authorize_appends_additional_scopes(self):
+        """authorize() should append additional_authorize_scopes to the authorization request."""
         provider = AzureProvider(
             client_id="test_client",
             client_secret="test_secret",
@@ -263,6 +334,7 @@ class TestAzureProvider:
             required_scopes=["read"],
             base_url="https://srv.example",
             additional_authorize_scopes=["Mail.Read", "User.Read"],
+            jwt_signing_key="test-secret",
         )
 
         await provider.register_client(
@@ -282,7 +354,7 @@ class TestAzureProvider:
         params = AuthorizationParams(
             redirect_uri=AnyUrl("http://localhost:12345/callback"),
             redirect_uri_provided_explicitly=True,
-            scopes=["read"],
+            scopes=["read"],  # Client sends unprefixed scopes
             state="abc",
             code_challenge="xyz",
         )
@@ -295,9 +367,21 @@ class TestAzureProvider:
         assert "txn_id" in qs, "Should redirect to consent page with transaction ID"
         txn_id = qs["txn_id"][0]
 
-        # Verify transaction contains correct scopes (prefixed + unprefixed additional)
+        # Verify transaction stores ONLY MCP scopes (unprefixed)
+        # additional_authorize_scopes are NOT stored in transaction
         transaction = await provider._transaction_store.get(key=txn_id)
         assert transaction is not None
-        assert "api://my-api/read" in transaction.scopes
-        assert "Mail.Read" in transaction.scopes
-        assert "User.Read" in transaction.scopes
+        assert "read" in transaction.scopes
+        assert "Mail.Read" not in transaction.scopes  # Not in transaction
+        assert "User.Read" not in transaction.scopes  # Not in transaction
+
+        # Verify upstream URL includes both MCP scopes (prefixed) AND additional Graph scopes
+        upstream_url = provider._build_upstream_authorize_url(
+            txn_id, transaction.model_dump()
+        )
+        assert (
+            "api%3A%2F%2Fmy-api%2Fread" in upstream_url
+            or "api://my-api/read" in upstream_url
+        )
+        assert "Mail.Read" in upstream_url
+        assert "User.Read" in upstream_url
