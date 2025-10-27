@@ -194,7 +194,7 @@ class JWTVerifier(TokenVerifier):
     ):
         """
         Initialize a JWTVerifier configured to validate JWTs using either a static key or a JWKS endpoint.
-        
+
         Parameters:
             public_key (str | NotSetT | None): PEM-encoded public key for asymmetric algorithms or shared secret for symmetric algorithms.
             jwks_uri (str | NotSetT | None): URI to fetch a JSON Web Key Set; used when verifying tokens with remote JWKS.
@@ -203,7 +203,7 @@ class JWTVerifier(TokenVerifier):
             algorithm (str | NotSetT | None): JWT signing algorithm to accept (default: "RS256"). Supported: HS256/384/512, RS256/384/512, ES256/384/512, PS256/384/512.
             required_scopes (list[str] | NotSetT | None): Scopes that must be present in validated tokens.
             base_url (AnyHttpUrl | str | NotSetT | None): Base URL passed to the parent TokenVerifier.
-        
+
         Raises:
             ValueError: If neither or both of `public_key` and `jwks_uri` are provided, or if `algorithm` is unsupported.
         """
@@ -367,10 +367,10 @@ class JWTVerifier(TokenVerifier):
     async def load_access_token(self, token: str) -> AccessToken | None:
         """
         Validate a JWT bearer token and return an AccessToken when the token is valid.
-        
+
         Parameters:
             token (str): The JWT bearer token string to validate.
-        
+
         Returns:
             AccessToken | None: An AccessToken populated from token claims if the token is valid; `None` if the token is expired, has an invalid signature or format, fails issuer/audience/scope validation, or any other validation error occurs.
         """
