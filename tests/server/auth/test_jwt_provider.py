@@ -785,6 +785,7 @@ class TestBearerToken:
         )
         access_token = await provider.load_access_token(token)
         assert (access_token is not None) is expected
+
     async def test_scope_extraction_string(
         self, rsa_key_pair: RSAKeyPair, bearer_provider: JWTVerifier
     ):
