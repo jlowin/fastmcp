@@ -228,17 +228,24 @@ class TestImage:
         with pytest.raises(ValueError, match="No image data available"):
             img.to_image_content()
 
-    def test_to_data_uri(self, tmp_path):
+    @pytest.mark.parametrize(
+        "mime_type,fname,expected_mime",
+        [
+            (None, "test.png", "image/png"),
+            ("image/jpeg", "test.unknown", "image/jpeg"),
+        ],
+    )
+    def test_to_data_uri(self, tmp_path, mime_type, fname, expected_mime):
         """Test conversion to data URI."""
-        img_path = tmp_path / "test.png"
+        img_path = tmp_path / fname
         test_data = b"fake image data"
         img_path.write_bytes(test_data)
 
         img = Image(path=img_path)
-        data_uri = img.to_data_uri()
+        data_uri = img.to_data_uri(mime_type=mime_type)
 
         expected_data_uri = (
-            f"data:image/png;base64,{base64.b64encode(test_data).decode()}"
+            f"data:{expected_mime};base64,{base64.b64encode(test_data).decode()}"
         )
         assert data_uri == expected_data_uri
 
