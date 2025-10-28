@@ -1429,31 +1429,32 @@ class TestToolResultCasting:
             yield client
 
     async def test_only_unstructured_content(self, client):
-        result = await client.call_tool_mcp("test_tool", {"unstructured": "test data"})
+        result = await client.call_tool("test_tool", {"unstructured": "test data"})
 
         assert result.content[0].type == "text"
         assert result.content[0].text == "test data"
-        assert result.structuredContent is None
+        assert result.structured_content is None
         assert result.meta is None
 
     async def test_neither_unstructured_or_structured_content(self, client):
-        result = await client.call_tool_mcp("test_tool", {})
+        from fastmcp.exceptions import ToolError
 
-        assert result.isError is True
+        with pytest.raises(ToolError):
+            await client.call_tool("test_tool", {})
 
     async def test_structured_and_unstructured_content(self, client):
-        result = await client.call_tool_mcp(
+        result = await client.call_tool(
             "test_tool",
             {"unstructured": "test data", "structured": {"data_type": "test"}},
         )
 
         assert result.content[0].type == "text"
         assert result.content[0].text == "test data"
-        assert result.structuredContent == {"data_type": "test"}
+        assert result.structured_content == {"data_type": "test"}
         assert result.meta is None
 
     async def test_structured_unstructured_and_meta_content(self, client):
-        result = await client.call_tool_mcp(
+        result = await client.call_tool(
             "test_tool",
             {
                 "unstructured": "test data",
@@ -1464,7 +1465,7 @@ class TestToolResultCasting:
 
         assert result.content[0].type == "text"
         assert result.content[0].text == "test data"
-        assert result.structuredContent == {"data_type": "test"}
+        assert result.structured_content == {"data_type": "test"}
         assert result.meta == {"some": "metadata"}
 
 
