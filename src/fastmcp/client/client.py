@@ -279,6 +279,8 @@ class Client(Generic[ClientTransportT]):
 
         # Session context management - see class docstring for detailed explanation
         self._session_state = ClientSessionState()
+        # Cache for runtime feature detection
+        self._meta_supported: bool | None = None
 
     @property
     def session(self) -> ClientSession:
@@ -858,31 +860,28 @@ class Client(Generic[ClientTransportT]):
         if isinstance(timeout, int | float):
             timeout = datetime.timedelta(seconds=float(timeout))
 
-        # Check if meta parameter is supported, remove this once MCP >= 1.19 is required
-        sig = inspect.signature(self.session.call_tool)
-        meta_supported = "meta" in sig.parameters
+        # Check if meta parameter is supported (cached after first check)
+        if self._meta_supported is None:
+            sig = inspect.signature(self.session.call_tool)
+            self._meta_supported = "meta" in sig.parameters
 
-        # Include meta parameter if supported, warn user if they tried to use it but it's not supported
-        if meta_supported:
-            result = await self.session.call_tool(
-                name=name,
-                arguments=arguments,
-                read_timeout_seconds=timeout,
-                progress_callback=progress_handler or self._progress_handler,
-                meta=meta,
+        # Build call kwargs conditionally
+        call_kwargs: dict[str, Any] = {
+            "name": name,
+            "arguments": arguments,
+            "read_timeout_seconds": timeout,
+            "progress_callback": progress_handler or self._progress_handler,
+        }
+
+        if self._meta_supported:
+            call_kwargs["meta"] = meta
+        elif meta is not None:
+            logger.warning(
+                "The 'meta' parameter is not supported by your installed version of MCP. "
+                "Please update to MCP >= 1.19 to use this feature. Proceeding without meta."
             )
-        else:
-            if meta is not None:
-                logger.warning(
-                    "The 'meta' parameter is not supported by your installed version of MCP. "
-                    "Please update to MCP >= 1.19 to use this feature. Proceeding without meta."
-                )
-            result = await self.session.call_tool(
-                name=name,
-                arguments=arguments,
-                read_timeout_seconds=timeout,
-                progress_callback=progress_handler or self._progress_handler,
-            )
+
+        result = await self.session.call_tool(**call_kwargs)
         return result
 
     async def call_tool(
