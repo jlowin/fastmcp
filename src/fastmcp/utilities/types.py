@@ -207,6 +207,8 @@ class Image:
             return f"image/{self._format.lower()}"
 
         if self.path:
+            # Workaround for WEBP in Py3.10
+            mimetypes.add_type("image/webp", ".webp")
             resp = mimetypes.guess_type(self.path, strict=False)
             if resp and resp[0] is not None:
                 return resp[0]
