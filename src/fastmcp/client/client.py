@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import datetime
+import inspect
 import secrets
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, field
@@ -843,6 +844,7 @@ class Client(Generic[ClientTransportT]):
             arguments (dict[str, Any]): Arguments to pass to the tool.
             timeout (datetime.timedelta | float | int | None, optional): The timeout for the tool call. Defaults to None.
             progress_handler (ProgressHandler | None, optional): The progress handler to use for the tool call. Defaults to None.
+            meta (dict[str, Any] | None, optional): Additional metadata to send with the tool call.
 
         Returns:
             mcp.types.CallToolResult: The complete response object from the protocol,
@@ -855,13 +857,32 @@ class Client(Generic[ClientTransportT]):
 
         if isinstance(timeout, int | float):
             timeout = datetime.timedelta(seconds=float(timeout))
-        result = await self.session.call_tool(
-            name=name,
-            arguments=arguments,
-            read_timeout_seconds=timeout,
-            progress_callback=progress_handler or self._progress_handler,
-            meta=meta,
-        )
+
+        # Check if meta parameter is supported, remove this once MCP >= 1.19 is required
+        sig = inspect.signature(self.session.call_tool)
+        meta_supported = "meta" in sig.parameters
+
+        # Include meta parameter if supported, warn user if they tried to use it but it's not supported
+        if meta_supported:
+            result = await self.session.call_tool(
+                name=name,
+                arguments=arguments,
+                read_timeout_seconds=timeout,
+                progress_callback=progress_handler or self._progress_handler,
+                meta=meta,
+            )
+        else:
+            if meta is not None:
+                logger.warning(
+                    "The 'meta' parameter is not supported by your installed version of MCP. "
+                    "Please update to MCP >= 1.19 to use this feature. Proceeding without meta."
+                )
+            result = await self.session.call_tool(
+                name=name,
+                arguments=arguments,
+                read_timeout_seconds=timeout,
+                progress_callback=progress_handler or self._progress_handler,
+            )
         return result
 
     async def call_tool(
@@ -882,6 +903,8 @@ class Client(Generic[ClientTransportT]):
             arguments (dict[str, Any] | None, optional): Arguments to pass to the tool. Defaults to None.
             timeout (datetime.timedelta | float | int | None, optional): The timeout for the tool call. Defaults to None.
             progress_handler (ProgressHandler | None, optional): The progress handler to use for the tool call. Defaults to None.
+            raise_on_error (bool, optional): Whether to raise a ToolError if the tool call results in an error. Defaults to True.
+            meta (dict[str, Any] | None, optional): Additional metadata to send with the tool call.
 
         Returns:
             CallToolResult:
