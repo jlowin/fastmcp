@@ -5,6 +5,7 @@ from .auth import (
     AccessToken,
     AuthProvider,
 )
+from .providers.debug import DebugTokenVerifier
 from .providers.jwt import JWTVerifier, StaticTokenVerifier
 from .oauth_proxy import OAuthProxy
 
@@ -12,6 +13,7 @@ from .oauth_proxy import OAuthProxy
 __all__ = [
     "AccessToken",
     "AuthProvider",
+    "DebugTokenVerifier",
     "JWTVerifier",
     "OAuthProvider",
     "OAuthProxy",
