@@ -177,22 +177,23 @@ class TestImage:
         ):
             Image(path="test.png", data=b"test")
 
-    def test_get_mime_type_from_path(self, tmp_path):
+    @pytest.mark.parametrize(
+        "extension,mime_type",
+        [
+            (".png", "image/png"),
+            (".jpg", "image/jpeg"),
+            (".jpeg", "image/jpeg"),
+            (".gif", "image/gif"),
+            (".webp", "image/webp"),
+            (".unknown", "application/octet-stream"),
+        ],
+    )
+    def test_get_mime_type_from_path(self, tmp_path, extension, mime_type):
         """Test MIME type detection from file extension."""
-        extensions = {
-            ".png": "image/png",
-            ".jpg": "image/jpeg",
-            ".jpeg": "image/jpeg",
-            ".gif": "image/gif",
-            ".webp": "image/webp",
-            ".unknown": "application/octet-stream",
-        }
-
-        for ext, mime in extensions.items():
-            path = tmp_path / f"test{ext}"
-            path.write_bytes(b"fake image data")
-            img = Image(path=path)
-            assert img._mime_type == mime
+        path = tmp_path / f"test{extension}"
+        path.write_bytes(b"fake image data")
+        img = Image(path=path)
+        assert img._mime_type == mime_type
 
     def test_to_image_content(self, tmp_path, monkeypatch):
         """Test conversion to ImageContent."""
@@ -240,26 +241,6 @@ class TestImage:
             f"data:image/png;base64,{base64.b64encode(test_data).decode()}"
         )
         assert data_uri == expected_data_uri
-
-    def test_path_to_data_uri(self, tmp_path):
-        """Test static method path_to_data_uri."""
-        img_path = tmp_path / "test.png"
-        test_data = b"fake image data"
-        img_path.write_bytes(test_data)
-
-        data_uri = Image.path_to_data_uri(img_path)
-
-        expected_data_uri = (
-            f"data:image/png;base64,{base64.b64encode(test_data).decode()}"
-        )
-        assert data_uri == expected_data_uri
-
-    def test_path_to_data_uri_invalid_path(self):
-        """Test static method path_to_data_uri with invalid path."""
-        invalid_path = Path("non_existent_file.png")
-
-        with pytest.raises(FileNotFoundError):
-            Image.path_to_data_uri(invalid_path)
 
 
 class TestAudio:

@@ -207,14 +207,10 @@ class Image:
             return f"image/{self._format.lower()}"
 
         if self.path:
-            suffix = self.path.suffix.lower()
-            return {
-                ".png": "image/png",
-                ".jpg": "image/jpeg",
-                ".jpeg": "image/jpeg",
-                ".gif": "image/gif",
-                ".webp": "image/webp",
-            }.get(suffix, "application/octet-stream")
+            resp = mimetypes.guess_type(self.path, strict=False)
+            if resp and resp[0] is not None:
+                return resp[0]
+            return "application/octet-stream"
         return "image/png"  # default for raw binary data
 
     def _get_data(self) -> str:
@@ -247,16 +243,6 @@ class Image:
         """Get image as a data URI."""
         data = self._get_data()
         return f"data:{mime_type or self._mime_type};base64,{data}"
-
-    @classmethod
-    def path_to_data_uri(cls, path: str | Path, mime_type: str | None = None) -> str:
-        """Convert a file path to a data URI."""
-        expanded_path = cls._get_expanded_path(path)
-        if not expanded_path or not expanded_path.exists():
-            raise FileNotFoundError(f"Path does not exist: {path}")
-        mime_type = mime_type or mimetypes.guess_type(str(expanded_path))[0]
-        b64_data = base64.b64encode(expanded_path.read_bytes()).decode()
-        return f"data:{mime_type};base64,{b64_data}"
 
 
 class Audio:
