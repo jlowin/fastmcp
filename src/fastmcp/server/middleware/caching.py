@@ -242,6 +242,7 @@ class ResponseCachingMiddleware(Middleware):
         cachable_tools: list[Tool] = [
             Tool(
                 name=tool.name,
+                key=tool.key,
                 title=tool.title,
                 description=tool.description,
                 parameters=tool.parameters,
@@ -282,6 +283,7 @@ class ResponseCachingMiddleware(Middleware):
         cachable_resources: list[Resource] = [
             Resource(
                 name=resource.name,
+                key=resource.key,
                 title=resource.title,
                 description=resource.description,
                 tags=resource.tags,
@@ -322,6 +324,7 @@ class ResponseCachingMiddleware(Middleware):
         cachable_prompts: list[Prompt] = [
             Prompt(
                 name=prompt.name,
+                key=prompt.key,
                 title=prompt.title,
                 description=prompt.description,
                 tags=prompt.tags,

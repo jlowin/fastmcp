@@ -505,3 +505,79 @@ class TestResponseCachingMiddlewareIntegration:
                     ),
                 )
             )
+
+    async def test_mounted_server_prefixes_preserved(self):
+        """Test that caching preserves prefixes from mounted servers."""
+        # Create child servers with tools, resources, and prompts
+        child = FastMCP("child")
+        calculator = TrackingCalculator()
+        calculator.add_tools(fastmcp=child)
+        calculator.add_resources(fastmcp=child)
+        calculator.add_prompts(fastmcp=child)
+
+        # Create parent with caching middleware
+        parent = FastMCP("parent")
+        parent.add_middleware(ResponseCachingMiddleware())
+        await parent.import_server(child, prefix="child")
+
+        async with Client[FastMCPTransport](transport=parent) as client:
+            # First call - populates cache
+            tools1 = await client.list_tools()
+            tool_names1 = [tool.name for tool in tools1]
+
+            # Second call - from cache (this is where the bug would occur)
+            tools2 = await client.list_tools()
+            tool_names2 = [tool.name for tool in tools2]
+
+            # All tools should have the prefix in both calls
+            for name in tool_names1:
+                assert name.startswith("child_"), (
+                    f"Tool {name} missing prefix (first call)"
+                )
+            for name in tool_names2:
+                assert name.startswith("child_"), (
+                    f"Tool {name} missing prefix (cached call)"
+                )
+
+            # Both calls should return the same tools
+            assert tool_names1 == tool_names2
+
+            # Verify tool can be called with prefixed name
+            result = await client.call_tool("child_add", {"a": 5, "b": 3})
+            assert not result.is_error
+
+            # Test resources
+            resources1 = await client.list_resources()
+            resource_names1 = [resource.name for resource in resources1]
+
+            resources2 = await client.list_resources()
+            resource_names2 = [resource.name for resource in resources2]
+
+            for name in resource_names1:
+                assert name.startswith("child_"), (
+                    f"Resource {name} missing prefix (first call)"
+                )
+            for name in resource_names2:
+                assert name.startswith("child_"), (
+                    f"Resource {name} missing prefix (cached call)"
+                )
+
+            assert resource_names1 == resource_names2
+
+            # Test prompts
+            prompts1 = await client.list_prompts()
+            prompt_names1 = [prompt.name for prompt in prompts1]
+
+            prompts2 = await client.list_prompts()
+            prompt_names2 = [prompt.name for prompt in prompts2]
+
+            for name in prompt_names1:
+                assert name.startswith("child_"), (
+                    f"Prompt {name} missing prefix (first call)"
+                )
+            for name in prompt_names2:
+                assert name.startswith("child_"), (
+                    f"Prompt {name} missing prefix (cached call)"
+                )
+
+            assert prompt_names1 == prompt_names2
