@@ -365,7 +365,9 @@ def create_consent_html(
     )
 
     # Need to allow form-action for form submission
-    csp_policy = "default-src 'none'; style-src 'unsafe-inline'; img-src https:; base-uri 'none'; form-action *"
+    # Explicitly allow https: and http: schemes (not wildcard) to work with Chrome
+    # when redirect chains end in custom protocol schemes like cursor://
+    csp_policy = "default-src 'none'; style-src 'unsafe-inline'; img-src https:; base-uri 'none'; form-action https: http:"
 
     return create_page(
         content=content,
