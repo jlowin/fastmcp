@@ -31,9 +31,11 @@ from urllib.parse import urlencode, urlparse
 import httpx
 from authlib.common.security import generate_token
 from authlib.integrations.httpx_client import AsyncOAuth2Client
+from cryptography.fernet import Fernet
 from key_value.aio.adapters.pydantic import PydanticAdapter
 from key_value.aio.protocols import AsyncKeyValue
-from key_value.aio.stores.memory import MemoryStore
+from key_value.aio.stores.disk import DiskStore
+from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
 from mcp.server.auth.handlers.token import TokenErrorResponse, TokenSuccessResponse
 from mcp.server.auth.handlers.token import TokenHandler as _SDKTokenHandler
 from mcp.server.auth.json_response import PydanticJSONResponse
@@ -55,11 +57,14 @@ from pydantic import AnyHttpUrl, AnyUrl, BaseModel, Field, SecretStr
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse
 from starlette.routing import Route
+from typing_extensions import override
 
+from fastmcp import settings
 from fastmcp.server.auth.auth import OAuthProvider, TokenVerifier
+from fastmcp.server.auth.handlers.authorize import AuthorizationHandler
 from fastmcp.server.auth.jwt_issuer import (
     JWTIssuer,
-    TokenEncryption,
+    derive_jwt_key,
 )
 from fastmcp.server.auth.redirect_validation import (
     validate_redirect_uri,
@@ -143,12 +148,13 @@ class UpstreamTokenSet(BaseModel):
     """Stored upstream OAuth tokens from identity provider.
 
     These tokens are obtained from the upstream provider (Google, GitHub, etc.)
-    and are stored encrypted at rest. They are never exposed to MCP clients.
+    and stored in plaintext within this model. Encryption is handled transparently
+    at the storage layer via FernetEncryptionWrapper. Tokens are never exposed to MCP clients.
     """
 
     upstream_token_id: str  # Unique ID for this token set
-    access_token: bytes  # Encrypted upstream access token
-    refresh_token: bytes | None  # Encrypted upstream refresh token
+    access_token: str  # Upstream access token
+    refresh_token: str | None  # Upstream refresh token
     refresh_token_expires_at: (
         float | None
     )  # Unix timestamp when refresh token expires (if known)
@@ -359,11 +365,113 @@ def create_consent_html(
     )
 
     # Need to allow form-action for form submission
-    csp_policy = "default-src 'none'; style-src 'unsafe-inline'; img-src https:; base-uri 'none'; form-action *"
+    # Chrome requires explicit scheme declarations in CSP form-action when redirect chains
+    # end in custom protocol schemes (e.g., cursor://). Parse redirect_uri to include its scheme.
+    parsed_redirect = urlparse(redirect_uri)
+    redirect_scheme = parsed_redirect.scheme.lower()
+
+    # Build form-action directive with standard schemes plus custom protocol if present
+    form_action_schemes = ["https:", "http:"]
+    if redirect_scheme and redirect_scheme not in ("http", "https"):
+        # Custom protocol scheme (e.g., cursor:, vscode:, etc.)
+        form_action_schemes.append(f"{redirect_scheme}:")
+
+    form_action_directive = " ".join(form_action_schemes)
+    csp_policy = f"default-src 'none'; style-src 'unsafe-inline'; img-src https:; base-uri 'none'; form-action {form_action_directive}"
 
     return create_page(
         content=content,
         title=title,
+        additional_styles=additional_styles,
+        csp_policy=csp_policy,
+    )
+
+
+def create_error_html(
+    error_title: str,
+    error_message: str,
+    error_details: dict[str, str] | None = None,
+    server_name: str | None = None,
+    server_icon_url: str | None = None,
+) -> str:
+    """Create a styled HTML error page for OAuth errors.
+
+    Args:
+        error_title: The error title (e.g., "OAuth Error", "Authorization Failed")
+        error_message: The main error message to display
+        error_details: Optional dictionary of error details to show (e.g., {"Error Code": "invalid_client"})
+        server_name: Optional server name to display
+        server_icon_url: Optional URL to server icon/logo
+
+    Returns:
+        Complete HTML page as a string
+    """
+    import html as html_module
+
+    error_message_escaped = html_module.escape(error_message)
+
+    # Build error message box
+    error_box = f"""
+        <div class="info-box error">
+            <p>{error_message_escaped}</p>
+        </div>
+    """
+
+    # Build error details section if provided
+    details_section = ""
+    if error_details:
+        detail_rows_html = "\n".join(
+            [
+                f"""
+            <div class="detail-row">
+                <div class="detail-label">{html_module.escape(label)}:</div>
+                <div class="detail-value">{html_module.escape(value)}</div>
+            </div>
+            """
+                for label, value in error_details.items()
+            ]
+        )
+
+        details_section = f"""
+            <details>
+                <summary>Error Details</summary>
+                <div class="detail-box">
+                    {detail_rows_html}
+                </div>
+            </details>
+        """
+
+    # Build the page content
+    content = f"""
+        <div class="container">
+            {create_logo(icon_url=server_icon_url, alt_text=server_name or "FastMCP")}
+            <h1>{html_module.escape(error_title)}</h1>
+            {error_box}
+            {details_section}
+        </div>
+    """
+
+    # Additional styles needed for this page
+    # Override .info-box.error to use normal text color instead of red
+    additional_styles = (
+        INFO_BOX_STYLES
+        + DETAILS_STYLES
+        + DETAIL_BOX_STYLES
+        + """
+        .info-box.error {
+            color: #111827;
+        }
+        """
+    )
+
+    # Simple CSP policy for error pages (no forms needed)
+    csp_policy = (
+        "default-src 'none'; style-src 'unsafe-inline'; img-src https:; base-uri 'none'"
+    )
+
+    return create_page(
+        content=content,
+        title=error_title,
         additional_styles=additional_styles,
         csp_policy=csp_policy,
     )
@@ -558,10 +666,8 @@ class OAuthProxy(OAuthProvider):
         extra_token_params: dict[str, str] | None = None,
         # Client storage
         client_storage: AsyncKeyValue | None = None,
-        # JWT signing key (optional, ephemeral if not provided)
+        # JWT signing key
         jwt_signing_key: str | bytes | None = None,
-        # Token encryption key (optional, ephemeral if not provided)
-        token_encryption_key: str | bytes | None = None,
         # Consent screen configuration
         require_authorization_consent: bool = True,
     ):
@@ -597,18 +703,18 @@ class OAuthProxy(OAuthProvider):
                 Example: {"audience": "https://api.example.com"}
             extra_token_params: Additional parameters to forward to the upstream token endpoint.
                 Useful for provider-specific parameters during token exchange.
-            client_storage: An AsyncKeyValue-compatible store for client registrations, registrations are stored in memory if not provided
-            jwt_signing_key: Optional secret for signing FastMCP JWT tokens (accepts any string or bytes).
-                Default: ephemeral (random salt at startup, won't survive restart).
-                Production: provide explicit key from environment variable.
-            token_encryption_key: Optional secret for encrypting upstream tokens at rest (accepts any string or bytes).
-                Default: ephemeral (random salt at startup, won't survive restart).
-                Production: provide explicit key from environment variable.
+            client_storage: Storage backend for OAuth state (client registrations, tokens).
+                If None, an encrypted DiskStore will be created in the data directory.
+            jwt_signing_key: Secret for signing FastMCP JWT tokens (any string or bytes).
+                If bytes are provided, they will be used as-is.
+                If a string is provided, it will be derived into a 32-byte key using PBKDF2 (1.2M iterations).
+                If not provided, it will be derived from the upstream client secret using HKDF.
             require_authorization_consent: Whether to require user consent before authorizing clients (default True).
                 When True, users see a consent screen before being redirected to the upstream IdP.
                 When False, authorization proceeds directly without user confirmation.
                 SECURITY WARNING: Only disable for local development or testing environments.
         """
+
         # Always enable DCR since we implement it locally for MCP clients
         client_registration_options = ClientRegistrationOptions(
             enabled=True,
@@ -630,12 +736,14 @@ class OAuthProxy(OAuthProvider):
         )
 
         # Store upstream configuration
-        self._upstream_authorization_endpoint = upstream_authorization_endpoint
-        self._upstream_token_endpoint = upstream_token_endpoint
-        self._upstream_client_id = upstream_client_id
-        self._upstream_client_secret = SecretStr(upstream_client_secret)
-        self._upstream_revocation_endpoint = upstream_revocation_endpoint
-        self._default_scope_str = " ".join(self.required_scopes or [])
+        self._upstream_authorization_endpoint: str = upstream_authorization_endpoint
+        self._upstream_token_endpoint: str = upstream_token_endpoint
+        self._upstream_client_id: str = upstream_client_id
+        self._upstream_client_secret: SecretStr = SecretStr(
+            secret_value=upstream_client_secret
+        )
+        self._upstream_revocation_endpoint: str | None = upstream_revocation_endpoint
+        self._default_scope_str: str = " ".join(self.required_scopes or [])
 
         # Store redirect configuration
         if not redirect_path:
@@ -651,47 +759,85 @@ class OAuthProxy(OAuthProvider):
         ):
             logger.warning(
                 "allowed_client_redirect_uris is empty list; no redirect URIs will be accepted. "
-                "This will block all OAuth clients."
+                + "This will block all OAuth clients."
             )
-        self._allowed_client_redirect_uris = allowed_client_redirect_uris
+        self._allowed_client_redirect_uris: list[str] | None = (
+            allowed_client_redirect_uris
+        )
 
         # PKCE configuration
-        self._forward_pkce = forward_pkce
+        self._forward_pkce: bool = forward_pkce
 
         # Token endpoint authentication
-        self._token_endpoint_auth_method = token_endpoint_auth_method
+        self._token_endpoint_auth_method: str | None = token_endpoint_auth_method
 
         # Consent screen configuration
-        self._require_authorization_consent = require_authorization_consent
+        self._require_authorization_consent: bool = require_authorization_consent
         if not require_authorization_consent:
             logger.warning(
                 "Authorization consent screen disabled - only use for local development or testing. "
-                "In production, this screen protects against confused deputy attacks."
+                + "In production, this screen protects against confused deputy attacks."
             )
 
         # Extra parameters for authorization and token endpoints
-        self._extra_authorize_params = extra_authorize_params or {}
-        self._extra_token_params = extra_token_params or {}
+        self._extra_authorize_params: dict[str, str] = extra_authorize_params or {}
+        self._extra_token_params: dict[str, str] = extra_token_params or {}
 
-        self._client_storage: AsyncKeyValue = client_storage or MemoryStore()
-
-        # Warn if using MemoryStore in production
-        if isinstance(client_storage, MemoryStore):
-            logger.warning(
-                "Using in-memory storage - all OAuth state (clients, tokens) will be lost on restart. "
-                "Additionally, without explicit jwt_signing_key and token_encryption_key, "
-                "keys are ephemeral and tokens won't survive restart even with persistent storage. "
-                "For production, configure persistent storage AND explicit keys."
+        if jwt_signing_key is None:
+            jwt_signing_key = derive_jwt_key(
+                high_entropy_material=upstream_client_secret,
+                salt="fastmcp-jwt-signing-key",
             )
 
+        if isinstance(jwt_signing_key, str):
+            if len(jwt_signing_key) < 12:
+                logger.warning(
+                    "jwt_signing_key is less than 12 characters; it is recommended to use a longer. "
+                    + "string for the key derivation."
+                )
+            jwt_signing_key = derive_jwt_key(
+                low_entropy_material=jwt_signing_key,
+                salt="fastmcp-jwt-signing-key",
+            )
+
+        self._jwt_issuer: JWTIssuer = JWTIssuer(
+            issuer=str(self.base_url),
+            audience=f"{str(self.base_url).rstrip('/')}/mcp",
+            signing_key=jwt_signing_key,
+        )
+
+        # If the user does not provide a store, we will provide an encrypted disk store
+        if client_storage is None:
+            storage_encryption_key = derive_jwt_key(
+                high_entropy_material=jwt_signing_key.decode(),
+                salt="fastmcp-storage-encryption-key",
+            )
+            client_storage = FernetEncryptionWrapper(
+                key_value=DiskStore(directory=settings.home / "oauth-proxy"),
+                fernet=Fernet(key=storage_encryption_key),
+            )
+
+        self._client_storage: AsyncKeyValue = client_storage
+
         # Cache HTTPS check to avoid repeated logging
-        self._is_https = str(self.base_url).startswith("https://")
+        self._is_https: bool = str(self.base_url).startswith("https://")
         if not self._is_https:
             logger.warning(
                 "Using non-secure cookies for development; deploy with HTTPS for production."
             )
 
-        self._client_store = PydanticAdapter[ProxyDCRClient](
+        self._upstream_token_store: PydanticAdapter[UpstreamTokenSet] = PydanticAdapter[
+            UpstreamTokenSet
+        ](
+            key_value=self._client_storage,
+            pydantic_model=UpstreamTokenSet,
+            default_collection="mcp-upstream-tokens",
+            raise_on_validation_error=True,
+        )
+
+        self._client_store: PydanticAdapter[ProxyDCRClient] = PydanticAdapter[
+            ProxyDCRClient
+        ](
             key_value=self._client_storage,
             pydantic_model=ProxyDCRClient,
             default_collection="mcp-oauth-proxy-clients",
@@ -700,42 +846,31 @@ class OAuthProxy(OAuthProvider):
 
         # OAuth transaction storage for IdP callback forwarding
         # Reuse client_storage with different collections for state management
-        self._transaction_store = PydanticAdapter[OAuthTransaction](
+        self._transaction_store: PydanticAdapter[OAuthTransaction] = PydanticAdapter[
+            OAuthTransaction
+        ](
             key_value=self._client_storage,
             pydantic_model=OAuthTransaction,
             default_collection="mcp-oauth-transactions",
             raise_on_validation_error=True,
         )
 
-        self._code_store = PydanticAdapter[ClientCode](
+        self._code_store: PydanticAdapter[ClientCode] = PydanticAdapter[ClientCode](
             key_value=self._client_storage,
             pydantic_model=ClientCode,
             default_collection="mcp-authorization-codes",
             raise_on_validation_error=True,
         )
 
-        # Storage for upstream tokens (encrypted at rest)
-        self._upstream_token_store = PydanticAdapter[UpstreamTokenSet](
-            key_value=self._client_storage,
-            pydantic_model=UpstreamTokenSet,
-            default_collection="mcp-upstream-tokens",
-            raise_on_validation_error=True,
-        )
-
         # Storage for JTI mappings (FastMCP token -> upstream token)
-        self._jti_mapping_store = PydanticAdapter[JTIMapping](
+        self._jti_mapping_store: PydanticAdapter[JTIMapping] = PydanticAdapter[
+            JTIMapping
+        ](
             key_value=self._client_storage,
             pydantic_model=JTIMapping,
             default_collection="mcp-jti-mappings",
             raise_on_validation_error=True,
         )
-
-        # JWT issuer and encryption (initialized lazily on first use)
-        self._custom_jwt_key = jwt_signing_key
-        self._custom_encryption_key = token_encryption_key
-        self._jwt_issuer: JWTIssuer | None = None
-        self._token_encryption: TokenEncryption | None = None
-        self._jwt_initialized = False
 
         # Local state for token bookkeeping only (no client caching)
         self._access_tokens: dict[str, AccessToken] = {}
@@ -746,7 +881,7 @@ class OAuthProxy(OAuthProvider):
         self._refresh_to_access: dict[str, str] = {}
 
         # Use the provided token validator
-        self._token_validator = token_verifier
+        self._token_validator: TokenVerifier = token_verifier
 
         logger.debug(
             "Initialized OAuth proxy provider with upstream server %s",
@@ -773,90 +908,10 @@ class OAuthProxy(OAuthProvider):
         return code_verifier, code_challenge
 
     # -------------------------------------------------------------------------
-    # JWT Token Factory Initialization
-    # -------------------------------------------------------------------------
-
-    async def _ensure_jwt_initialized(self) -> None:
-        """Initialize JWT issuer and token encryption (lazy initialization).
-
-        Key derivation strategy:
-        - Default: Generate random salt at startup, derive ephemeral keys
-          → Keys change on restart, all tokens become invalid
-          → Perfect for development/testing where re-auth is acceptable
-
-        - Production: User provides explicit keys via parameters
-          → Keys stable across restarts when combined with persistent storage
-          → Tokens survive restart, seamless client reconnection
-        """
-        if self._jwt_initialized:
-            return
-
-        # Generate random salt for this server instance (NOT persisted)
-        server_salt = secrets.token_urlsafe(32)
-
-        # Derive or use custom JWT signing key
-        from fastmcp.server.auth.jwt_issuer import derive_key_from_secret
-
-        if self._custom_jwt_key:
-            jwt_key = derive_key_from_secret(
-                secret=self._custom_jwt_key,
-                salt="fastmcp-jwt-signing-v1",
-                info=b"HS256",
-            )
-            logger.info("Using explicit JWT signing key (will survive restarts)")
-        else:
-            # Ephemeral key from random salt + upstream secret
-            upstream_secret = self._upstream_client_secret.get_secret_value()
-            jwt_key = derive_key_from_secret(
-                secret=upstream_secret,
-                salt=f"fastmcp-jwt-signing-v1-{server_salt}",
-                info=b"HS256",
-            )
-            logger.info(
-                "Using ephemeral JWT signing key - tokens will NOT survive server restart. "
-                "For production, provide explicit jwt_signing_key parameter and use persistent storage."
-            )
-
-        # Initialize JWT issuer
-        issuer = str(self.base_url)
-        audience = f"{str(self.base_url).rstrip('/')}/mcp"
-        self._jwt_issuer = JWTIssuer(
-            issuer=issuer,
-            audience=audience,
-            signing_key=jwt_key,
-        )
-
-        # Derive or use custom encryption key
-        if self._custom_encryption_key:
-            encryption_key = derive_key_from_secret(
-                secret=self._custom_encryption_key,
-                salt="fastmcp-token-encryption-v1",
-                info=b"Fernet",
-            )
-            # Fernet needs base64url-encoded key
-            encryption_key = base64.urlsafe_b64encode(encryption_key)
-            logger.info("Using explicit token encryption key (will survive restarts)")
-        else:
-            # Ephemeral key from random salt + upstream secret
-            upstream_secret = self._upstream_client_secret.get_secret_value()
-            key_material = derive_key_from_secret(
-                secret=upstream_secret,
-                salt=f"fastmcp-token-encryption-v1-{server_salt}",
-                info=b"Fernet",
-            )
-            encryption_key = base64.urlsafe_b64encode(key_material)
-            logger.info(
-                "Using ephemeral token encryption key - encrypted tokens will NOT survive server restart. "
-                "For production, provide explicit token_encryption_key parameter and use persistent storage."
-            )
-
-        self._token_encryption = TokenEncryption(encryption_key)
-        self._jwt_initialized = True
-
-    # -------------------------------------------------------------------------
     # Client Registration (Local Implementation)
     # -------------------------------------------------------------------------
 
+    @override
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
         """Get client information by ID. This is generally the random ID
         provided to the DCR client during registration, not the upstream client ID.
@@ -872,6 +927,7 @@ class OAuthProxy(OAuthProvider):
 
         return client
 
+    @override
     async def register_client(self, client_info: OAuthClientInformationFull) -> None:
         """Register a client locally
 
@@ -918,6 +974,7 @@ class OAuthProxy(OAuthProvider):
     # Authorization Flow (Proxy to Upstream)
     # -------------------------------------------------------------------------
 
+    @override
     async def authorize(
         self,
         client: OAuthClientInformationFull,
@@ -992,6 +1049,7 @@ class OAuthProxy(OAuthProvider):
     # Authorization Code Handling
     # -------------------------------------------------------------------------
 
+    @override
     async def load_authorization_code(
         self,
         client: OAuthClientInformationFull,
@@ -1011,7 +1069,7 @@ class OAuthProxy(OAuthProvider):
         # Check if code expired
         if time.time() > code_model.expires_at:
             logger.debug("Authorization code expired: %s", authorization_code)
-            await self._code_store.delete(key=authorization_code)
+            _ = await self._code_store.delete(key=authorization_code)
             return None
 
         # Verify client ID matches
@@ -1027,13 +1085,14 @@ class OAuthProxy(OAuthProvider):
         return AuthorizationCode(
             code=authorization_code,
             client_id=client.client_id,
-            redirect_uri=code_model.redirect_uri,
+            redirect_uri=AnyUrl(url=code_model.redirect_uri),
             redirect_uri_provided_explicitly=True,
             scopes=code_model.scopes,
             expires_at=code_model.expires_at,
             code_challenge=code_model.code_challenge or "",
         )
 
+    @override
     async def exchange_authorization_code(
         self,
         client: OAuthClientInformationFull,
@@ -1050,11 +1109,6 @@ class OAuthProxy(OAuthProvider):
 
         PKCE validation is handled by the MCP framework before this method is called.
         """
-        # Ensure JWT issuer is initialized
-        await self._ensure_jwt_initialized()
-        assert self._jwt_issuer is not None
-        assert self._token_encryption is not None
-
         # Look up stored code data
         code_model = await self._code_store.get(key=authorization_code.code)
         if not code_model:
@@ -1105,8 +1159,8 @@ class OAuthProxy(OAuthProvider):
         # Encrypt and store upstream tokens
         upstream_token_set = UpstreamTokenSet(
             upstream_token_id=upstream_token_id,
-            access_token=self._token_encryption.encrypt(idp_tokens["access_token"]),
-            refresh_token=self._token_encryption.encrypt(idp_tokens["refresh_token"])
+            access_token=idp_tokens["access_token"],
+            refresh_token=idp_tokens["refresh_token"]
             if idp_tokens.get("refresh_token")
             else None,
             refresh_token_expires_at=refresh_token_expires_at,
@@ -1228,11 +1282,6 @@ class OAuthProxy(OAuthProvider):
         5. Issue new FastMCP access token
         6. Keep same FastMCP refresh token (unless upstream rotates)
         """
-        # Ensure JWT issuer is initialized
-        await self._ensure_jwt_initialized()
-        assert self._jwt_issuer is not None
-        assert self._token_encryption is not None
-
         # Verify FastMCP refresh token
         try:
             refresh_payload = self._jwt_issuer.verify_token(refresh_token.token)
@@ -1261,10 +1310,6 @@ class OAuthProxy(OAuthProvider):
             logger.error("No upstream refresh token available")
             raise TokenError("invalid_grant", "Refresh not supported for this token")
 
-        upstream_refresh_token = self._token_encryption.decrypt(
-            upstream_token_set.refresh_token
-        )
-
         # Refresh upstream token using authlib
         oauth_client = AsyncOAuth2Client(
             client_id=self._upstream_client_id,
@@ -1277,7 +1322,7 @@ class OAuthProxy(OAuthProvider):
             logger.debug("Refreshing upstream token (jti=%s)", refresh_jti[:8])
             token_response: dict[str, Any] = await oauth_client.refresh_token(  # type: ignore[misc]
                 url=self._upstream_token_endpoint,
-                refresh_token=upstream_refresh_token,
+                refresh_token=upstream_token_set.refresh_token,
                 scope=" ".join(scopes) if scopes else None,
             )
             logger.debug("Successfully refreshed upstream token")
@@ -1289,18 +1334,14 @@ class OAuthProxy(OAuthProvider):
         new_expires_in = int(
             token_response.get("expires_in", DEFAULT_ACCESS_TOKEN_EXPIRY_SECONDS)
         )
-        upstream_token_set.access_token = self._token_encryption.encrypt(
-            token_response["access_token"]
-        )
+        upstream_token_set.access_token = token_response["access_token"]
         upstream_token_set.expires_at = time.time() + new_expires_in
 
         # Handle upstream refresh token rotation and expiry
         new_refresh_expires_in = None
         if new_upstream_refresh := token_response.get("refresh_token"):
-            if new_upstream_refresh != upstream_refresh_token:
-                upstream_token_set.refresh_token = self._token_encryption.encrypt(
-                    new_upstream_refresh
-                )
+            if new_upstream_refresh != upstream_token_set.refresh_token:
+                upstream_token_set.refresh_token = new_upstream_refresh
                 logger.debug("Upstream refresh token rotated")
 
             # Update refresh token expiry if provided
@@ -1439,11 +1480,6 @@ class OAuthProxy(OAuthProvider):
         The FastMCP JWT is a reference token - all authorization data comes
         from validating the upstream token via the TokenVerifier.
         """
-        # Ensure JWT issuer and encryption are initialized
-        await self._ensure_jwt_initialized()
-        assert self._jwt_issuer is not None
-        assert self._token_encryption is not None
-
         try:
             # 1. Verify FastMCP JWT signature and claims
             payload = self._jwt_issuer.verify_token(token)
@@ -1464,14 +1500,11 @@ class OAuthProxy(OAuthProvider):
                 )
                 return None
 
-            # 3. Decrypt upstream token
-            upstream_token = self._token_encryption.decrypt(
+            # 3. Validate with upstream provider (delegated to TokenVerifier)
+            # This calls the real token validator (GitHub API, JWKS, etc.)
+            validated = await self._token_validator.verify_token(
                 upstream_token_set.access_token
             )
-
-            # 4. Validate with upstream provider (delegated to TokenVerifier)
-            # This calls the real token validator (GitHub API, JWKS, etc.)
-            validated = await self._token_validator.verify_token(upstream_token)
 
             if not validated:
                 logger.debug("Upstream token validation failed")
@@ -1538,10 +1571,11 @@ class OAuthProxy(OAuthProvider):
         self,
         mcp_path: str | None = None,
     ) -> list[Route]:
-        """Get OAuth routes with custom proxy token handler.
+        """Get OAuth routes with custom handlers for better error UX.
 
-        This method creates standard OAuth routes and replaces the token endpoint
-        with our proxy handler that forwards requests to the upstream OAuth server.
+        This method creates standard OAuth routes and replaces:
+        - /authorize endpoint: Enhanced error responses for unregistered clients
+        - /token endpoint: OAuth 2.1 compliant error codes
 
         Args:
             mcp_path: The path where the MCP endpoint is mounted (e.g., "/mcp")
@@ -1551,6 +1585,7 @@ class OAuthProxy(OAuthProvider):
         routes = super().get_routes(mcp_path)
         custom_routes = []
         token_route_found = False
+        authorize_route_found = False
 
         logger.debug(
             f"get_routes called - configuring OAuth routes in {len(routes)} routes"
@@ -1561,8 +1596,30 @@ class OAuthProxy(OAuthProvider):
                 f"Route {i}: {route} - path: {getattr(route, 'path', 'N/A')}, methods: {getattr(route, 'methods', 'N/A')}"
             )
 
-            # Replace the token endpoint with our custom handler that returns proper OAuth 2.1 error codes
+            # Replace the authorize endpoint with our enhanced handler for better error UX
             if (
+                isinstance(route, Route)
+                and route.path == "/authorize"
+                and route.methods is not None
+                and ("GET" in route.methods or "POST" in route.methods)
+            ):
+                authorize_route_found = True
+                # Replace with our enhanced authorization handler
+                authorize_handler = AuthorizationHandler(
+                    provider=self,
+                    base_url=self.base_url,
+                    server_name=None,  # Could be extended to pass server metadata
+                    server_icon_url=None,
+                )
+                custom_routes.append(
+                    Route(
+                        path="/authorize",
+                        endpoint=authorize_handler.handle,
+                        methods=["GET", "POST"],
+                    )
+                )
+            # Replace the token endpoint with our custom handler that returns proper OAuth 2.1 error codes
+            elif (
                 isinstance(route, Route)
                 and route.path == "/token"
                 and route.methods is not None
@@ -1606,7 +1663,7 @@ class OAuthProxy(OAuthProvider):
         )
 
         logger.debug(
-            f"✅ OAuth routes configured: token_endpoint={token_route_found}, total routes={len(custom_routes)} (includes OAuth callback + consent)"
+            f"✅ OAuth routes configured: authorize_endpoint={authorize_route_found}, token_endpoint={token_route_found}, total routes={len(custom_routes)} (includes OAuth callback + consent)"
         )
         return custom_routes
 
@@ -1614,7 +1671,9 @@ class OAuthProxy(OAuthProvider):
     # IdP Callback Forwarding
     # -------------------------------------------------------------------------
 
-    async def _handle_idp_callback(self, request: Request) -> RedirectResponse:
+    async def _handle_idp_callback(
+        self, request: Request
+    ) -> HTMLResponse | RedirectResponse:
         """Handle callback from upstream IdP and forward to client.
 
         This implements the DCR-compliant callback forwarding:
@@ -1629,32 +1688,37 @@ class OAuthProxy(OAuthProvider):
             error = request.query_params.get("error")
 
             if error:
+                error_description = request.query_params.get("error_description")
                 logger.error(
                     "IdP callback error: %s - %s",
                     error,
-                    request.query_params.get("error_description"),
+                    error_description,
                 )
-                # TODO: Forward error to client callback
-                return RedirectResponse(
-                    url=f"data:text/html,<h1>OAuth Error</h1><p>{error}: {request.query_params.get('error_description', 'Unknown error')}</p>",
-                    status_code=302,
+                # Show error page to user
+                html_content = create_error_html(
+                    error_title="OAuth Error",
+                    error_message=f"Authentication failed: {error_description or 'Unknown error'}",
+                    error_details={"Error Code": error} if error else None,
                 )
+                return HTMLResponse(content=html_content, status_code=400)
 
             if not idp_code or not txn_id:
                 logger.error("IdP callback missing code or transaction ID")
-                return RedirectResponse(
-                    url="data:text/html,<h1>OAuth Error</h1><p>Missing authorization code or transaction ID</p>",
-                    status_code=302,
+                html_content = create_error_html(
+                    error_title="OAuth Error",
+                    error_message="Missing authorization code or transaction ID from the identity provider.",
                 )
+                return HTMLResponse(content=html_content, status_code=400)
 
             # Look up transaction data
             transaction_model = await self._transaction_store.get(key=txn_id)
             if not transaction_model:
                 logger.error("IdP callback with invalid transaction ID: %s", txn_id)
-                return RedirectResponse(
-                    url="data:text/html,<h1>OAuth Error</h1><p>Invalid or expired transaction</p>",
-                    status_code=302,
+                html_content = create_error_html(
+                    error_title="OAuth Error",
+                    error_message="Invalid or expired authorization transaction. Please try authenticating again.",
                 )
+                return HTMLResponse(content=html_content, status_code=400)
             transaction = transaction_model.model_dump()
 
             # Exchange IdP code for tokens (server-side)
@@ -1708,11 +1772,11 @@ class OAuthProxy(OAuthProvider):
 
             except Exception as e:
                 logger.error("IdP token exchange failed: %s", e)
-                # TODO: Forward error to client callback
-                return RedirectResponse(
-                    url=f"data:text/html,<h1>OAuth Error</h1><p>Token exchange failed: {e}</p>",
-                    status_code=302,
+                html_content = create_error_html(
+                    error_title="OAuth Error",
+                    error_message=f"Token exchange with identity provider failed: {e}",
                 )
+                return HTMLResponse(content=html_content, status_code=500)
 
             # Generate our own authorization code for the client
             client_code = secrets.token_urlsafe(32)
@@ -1759,10 +1823,11 @@ class OAuthProxy(OAuthProvider):
 
         except Exception as e:
             logger.error("Error in IdP callback handler: %s", e, exc_info=True)
-            return RedirectResponse(
-                url="data:text/html,<h1>OAuth Error</h1><p>Internal server error during IdP callback</p>",
-                status_code=302,
+            html_content = create_error_html(
+                error_title="OAuth Error",
+                error_message="Internal server error during OAuth callback processing. Please try again.",
             )
+            return HTMLResponse(content=html_content, status_code=500)
 
     # -------------------------------------------------------------------------
     # Consent Interstitial

@@ -118,7 +118,6 @@ auth = GitHubProvider(
     client_secret=os.environ["GITHUB_CLIENT_SECRET"],
     base_url="https://your-server.com",
     jwt_signing_key=os.environ["JWT_SIGNING_KEY"],
-    token_encryption_key=os.environ["TOKEN_ENCRYPTION_KEY"],
     client_storage=RedisStore(host="redis.example.com", port=6379)
 )
 ```
@@ -142,16 +141,23 @@ The py-key-value-aio library includes additional implementations for various sto
 - **RocksDB** - Embedded high-performance key-value store
 - **Valkey** - Redis-compatible server
 
-For configuration details on these backends, consult the [py-key-value-aio documentation](https://github.com/strawgate/py-key-value-aio).
+For configuration details on these backends, consult the [py-key-value-aio documentation](https://github.com/strawgate/py-key-value).
 
 ## Use Cases in FastMCP
 
 ### Server-Side OAuth Token Storage
 
-The [OAuth Proxy](/servers/auth/oauth-proxy) and OAuth auth providers use storage for persisting OAuth client registrations and encrypted upstream tokens. By default, registrations are stored in memory:
+The [OAuth Proxy](/servers/auth/oauth-proxy) and OAuth auth providers use storage for persisting OAuth client registrations and upstream tokens. **By default, storage is automatically encrypted using `FernetEncryptionWrapper`.** When providing custom storage, wrap it in `FernetEncryptionWrapper` to encrypt sensitive OAuth tokens at rest.
+
+**Development (default behavior):**
+
+By default, FastMCP automatically manages keys and storage based on your platform:
+- **Mac/Windows**: Keys are auto-managed via system keyring, storage defaults to disk. Suitable **only** for development and local testing.
+- **Linux**: Keys are ephemeral, storage defaults to memory.
+
+No configuration needed:
 
 ```python
-# In-memory storage (default behavior - lost on restart)
 from fastmcp.server.auth.providers.github import GitHubProvider
 
 auth = GitHubProvider(
@@ -161,26 +167,32 @@ auth = GitHubProvider(
 )
 ```
 
-For production with token persistence across restarts, configure persistent storage and encryption keys:
+**Production:**
+
+For production deployments, configure explicit keys and persistent network-accessible storage with encryption:
 
 ```python
 import os
 from fastmcp.server.auth.providers.github import GitHubProvider
 from key_value.aio.stores.redis import RedisStore
+from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
+from cryptography.fernet import Fernet
 
 auth = GitHubProvider(
     client_id=os.environ["GITHUB_CLIENT_ID"],
     client_secret=os.environ["GITHUB_CLIENT_SECRET"],
     base_url="https://your-server.com",
-    # Token encryption and signing keys
+    # Explicit JWT signing key (required for production)
     jwt_signing_key=os.environ["JWT_SIGNING_KEY"],
-    token_encryption_key=os.environ["TOKEN_ENCRYPTION_KEY"],
-    # Persistent distributed storage
-    client_storage=RedisStore(host="redis.example.com", port=6379)
+    # Encrypted persistent storage (required for production)
+    client_storage=FernetEncryptionWrapper(
+        key_value=RedisStore(host="redis.example.com", port=6379),
+        fernet=Fernet(os.environ["STORAGE_ENCRYPTION_KEY"])
+    )
 )
 ```
 
-See [OAuth Token Security](/deployment/http#oauth-token-security) for complete production setup details.
+Both parameters are required for production. **Wrap your storage in `FernetEncryptionWrapper` to encrypt sensitive OAuth tokens at rest** - without it, tokens are stored in plaintext. See [OAuth Token Security](/deployment/http#oauth-token-security) and [Key and Storage Management](/servers/auth/oauth-proxy#key-and-storage-management) for complete setup details.
 
 ### Response Caching Middleware
 
@@ -253,7 +265,7 @@ This allows clients to reconnect without re-authenticating after restarts.
 
 ## More Resources
 
-- [py-key-value-aio GitHub](https://github.com/strawgate/py-key-value-aio) - Full library documentation
+- [py-key-value-aio GitHub](https://github.com/strawgate/py-key-value) - Full library documentation
 - [Response Caching Middleware](/servers/middleware#caching-middleware) - Using storage for caching
 - [OAuth Token Security](/deployment/http#oauth-token-security) - Production OAuth configuration
 - [HTTP Deployment](/deployment/http) - Complete deployment guide

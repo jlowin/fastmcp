@@ -7,11 +7,13 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from diskcache.core import tempfile
 from inline_snapshot import snapshot
+from key_value.aio.protocols import AsyncKeyValue
 from key_value.aio.stores.disk import MultiDiskStore
 from key_value.aio.stores.memory import MemoryStore
 from mcp.shared.auth import OAuthClientInformationFull
 from pydantic import AnyUrl
 
+from fastmcp.server.auth.auth import TokenVerifier
 from fastmcp.server.auth.oauth_proxy import OAuthProxy
 
 
@@ -39,7 +41,9 @@ class TestOAuthProxyStorage:
         """Create in-memory storage for testing."""
         return MemoryStore()
 
-    def create_proxy(self, jwt_verifier, storage=None) -> OAuthProxy:
+    def create_proxy(
+        self, jwt_verifier: TokenVerifier, storage: AsyncKeyValue | None = None
+    ) -> OAuthProxy:
         """Create an OAuth proxy with specified storage."""
         return OAuthProxy(
             upstream_authorization_endpoint="https://github.com/login/oauth/authorize",
@@ -50,12 +54,8 @@ class TestOAuthProxyStorage:
             base_url="https://myserver.com",
             redirect_path="/auth/callback",
             client_storage=storage,
+            jwt_signing_key="test-secret",
         )
-
-    async def test_default_storage_is_file_based(self, jwt_verifier):
-        """Test that proxy defaults to file-based storage."""
-        proxy = self.create_proxy(jwt_verifier, storage=None)
-        assert isinstance(proxy._client_storage, MemoryStore)
 
     async def test_register_and_get_client(self, jwt_verifier, temp_storage):
         """Test registering and retrieving a client."""
@@ -79,7 +79,7 @@ class TestOAuthProxyStorage:
         assert client.scope == "read write"
 
     async def test_client_persists_across_proxy_instances(
-        self, jwt_verifier, temp_storage
+        self, jwt_verifier: TokenVerifier, temp_storage: AsyncKeyValue
     ):
         """Test that clients persist when proxy is recreated."""
         # First proxy registers client
@@ -99,14 +99,16 @@ class TestOAuthProxyStorage:
         assert client.client_secret == "persistent-secret"
         assert client.scope == "openid profile"
 
-    async def test_nonexistent_client_returns_none(self, jwt_verifier, temp_storage):
+    async def test_nonexistent_client_returns_none(
+        self, jwt_verifier: TokenVerifier, temp_storage: AsyncKeyValue
+    ):
         """Test that requesting non-existent client returns None."""
         proxy = self.create_proxy(jwt_verifier, storage=temp_storage)
         client = await proxy.get_client("does-not-exist")
         assert client is None
 
     async def test_proxy_dcr_client_redirect_validation(
-        self, jwt_verifier, temp_storage
+        self, jwt_verifier: TokenVerifier, temp_storage: AsyncKeyValue
     ):
         """Test that ProxyDCRClient is created with redirect URI patterns."""
         proxy = OAuthProxy(
@@ -118,6 +120,7 @@ class TestOAuthProxyStorage:
             base_url="https://myserver.com",
             allowed_client_redirect_uris=["http://localhost:*"],
             client_storage=temp_storage,
+            jwt_signing_key="test-secret",
         )
 
         client_info = OAuthClientInformationFull(
