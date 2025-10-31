@@ -647,6 +647,31 @@ class TestQueryOnlyTemplates:
         content = await manager.read_resource("data://items?format=xml&limit=20")
         assert content == "Data in xml (limit: 20)"
 
+    async def test_has_resource_with_query_only_template(self):
+        """Test that has_resource() works with query-only templates.
+
+        Regression test for bug where empty parameter dict {} was treated as falsy,
+        causing has_resource() to return False for query-only templates when no
+        query string was provided.
+        """
+        manager = ResourceManager()
+
+        def get_config(format: str = "json") -> str:
+            return f"Config in {format} format"
+
+        template = ResourceTemplate.from_function(
+            fn=get_config,
+            uri_template="data://config{?format}",
+            name="config",
+        )
+        manager.add_template(template)
+
+        # Should find resource without query param (uses default)
+        assert await manager.has_resource("data://config")
+
+        # Should also find resource with query param
+        assert await manager.has_resource("data://config?format=xml")
+
 
 class TestResourceErrorHandling:
     """Test error handling in the ResourceManager."""
