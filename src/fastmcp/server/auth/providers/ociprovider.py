@@ -53,7 +53,7 @@ class OCIProviderSettings(BaseSettings):
     redirect_path: str | None = None
     required_scopes: list[str] | None = None
     allowed_client_redirect_uris: list[str] | None = None
-    jwt_signing_key: str | None = None
+    jwt_signing_key: str | bytes | None = None
 
     @field_validator("required_scopes", mode="before")
     @classmethod
