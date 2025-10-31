@@ -7,8 +7,10 @@ from mcp.types import TextContent, TextResourceContents
 
 from fastmcp import FastMCP
 from fastmcp.client import Client
-from fastmcp.dependencies import Depends
+from fastmcp.dependencies import CurrentContext, Depends
 from fastmcp.server.context import Context
+
+HUZZAH = "huzzah!"
 
 
 class Connection:
@@ -145,6 +147,37 @@ async def test_dependencies_excluded_from_schema(mcp: FastMCP):
     assert "age" in tool.inputSchema["properties"]
     assert "config" not in tool.inputSchema["properties"]
     assert len(tool.inputSchema["properties"]) == 2
+
+
+async def test_current_context_dependency(mcp: FastMCP):
+    """Test that CurrentContext dependency provides access to FastMCP Context."""
+
+    @mcp.tool()
+    def use_context(ctx: Context = CurrentContext()) -> str:
+        assert isinstance(ctx, Context)
+        return HUZZAH
+
+    async with Client(mcp) as client:
+        result = await client.call_tool("use_context", {})
+        assert HUZZAH in str(result)
+
+
+async def test_current_context_and_legacy_context_coexist(mcp: FastMCP):
+    """Test that CurrentContext dependency and legacy Context injection work together."""
+
+    @mcp.tool()
+    def use_both_contexts(
+        legacy_ctx: Context,
+        dep_ctx: Context = CurrentContext(),
+    ) -> str:
+        assert isinstance(legacy_ctx, Context)
+        assert isinstance(dep_ctx, Context)
+        assert legacy_ctx is dep_ctx
+        return HUZZAH
+
+    async with Client(mcp) as client:
+        result = await client.call_tool("use_both_contexts", {})
+        assert HUZZAH in str(result)
 
 
 async def test_backward_compat_context_still_works(mcp: FastMCP):
