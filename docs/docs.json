@@ -212,6 +212,13 @@
                 ]
               },
               {
+                "group": "Observability",
+                "icon": "chart-line",
+                "pages": [
+                  "integrations/opentelemetry"
+                ]
+              },
+              {
                 "group": "AI Assistants",
                 "icon": "robot",
                 "pages": [
