@@ -324,7 +324,6 @@ class FunctionPrompt(Prompt):
 
             async with resolve_dependencies(self.fn, kwargs) as resolved_kwargs:
                 result = self.fn(**resolved_kwargs)
-
                 if inspect.isawaitable(result):
                     result = await result
 

@@ -309,7 +309,6 @@ class FunctionTool(Tool):
         wrapper_fn = without_injected_parameters(self.fn)
         type_adapter = get_cached_typeadapter(wrapper_fn)
         result = type_adapter.validate_python(arguments)
-
         if inspect.isawaitable(result):
             result = await result
 
