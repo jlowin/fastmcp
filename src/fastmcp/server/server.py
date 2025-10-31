@@ -1692,8 +1692,6 @@ class FastMCP(Generic[LifespanResultT]):
             )
 
         def decorator(fn: AnyFunction) -> Resource | ResourceTemplate:
-            from fastmcp.server.context import Context
-
             if isinstance(fn, classmethod):  # type: ignore[reportUnnecessaryIsInstance]
                 raise ValueError(
                     inspect.cleandoc(
@@ -1708,12 +1706,11 @@ class FastMCP(Generic[LifespanResultT]):
 
             # Check if this should be a template
             has_uri_params = "{" in uri and "}" in uri
-            # check if the function has any parameters (other than injected context)
-            has_func_params = any(
-                p
-                for p in inspect.signature(fn).parameters.values()
-                if p.annotation is not Context
-            )
+            # Use wrapper to check for user-facing parameters
+            from fastmcp.server.dependencies import without_injected_parameters
+
+            wrapper_fn = without_injected_parameters(fn)
+            has_func_params = bool(inspect.signature(wrapper_fn).parameters)
 
             if has_uri_params or has_func_params:
                 template = ResourceTemplate.from_function(
