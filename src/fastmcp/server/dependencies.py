@@ -144,32 +144,38 @@ async def _resolve_fastmcp_dependencies(
         return
 
     # Initialize dependency cache and exit stack
-    _Depends.cache.set({})
-
-    async with AsyncExitStack() as stack:
-        _Depends.stack.set(stack)
-
-        resolved: dict[str, Any] = {}
-
-        for parameter, dependency in dependency_params.items():
-            # If argument was explicitly provided, use that instead
-            if parameter in arguments:
-                resolved[parameter] = arguments[parameter]
-                continue
-
-            # Resolve the dependency
+    cache_token = _Depends.cache.set({})
+    try:
+        async with AsyncExitStack() as stack:
+            stack_token = _Depends.stack.set(stack)
             try:
-                resolved[parameter] = await stack.enter_async_context(dependency)
-            except Exception as error:
-                fn_name = getattr(fn, "__name__", repr(fn))
-                raise RuntimeError(
-                    f"Failed to resolve dependency '{parameter}' for {fn_name}"
-                ) from error
+                resolved: dict[str, Any] = {}
 
-        # Merge resolved dependencies with provided arguments
-        final_arguments = {**arguments, **resolved}
+                for parameter, dependency in dependency_params.items():
+                    # If argument was explicitly provided, use that instead
+                    if parameter in arguments:
+                        resolved[parameter] = arguments[parameter]
+                        continue
 
-        yield final_arguments
+                    # Resolve the dependency
+                    try:
+                        resolved[parameter] = await stack.enter_async_context(
+                            dependency
+                        )
+                    except Exception as error:
+                        fn_name = getattr(fn, "__name__", repr(fn))
+                        raise RuntimeError(
+                            f"Failed to resolve dependency '{parameter}' for {fn_name}"
+                        ) from error
+
+                # Merge resolved dependencies with provided arguments
+                final_arguments = {**arguments, **resolved}
+
+                yield final_arguments
+            finally:
+                _Depends.stack.reset(stack_token)
+    finally:
+        _Depends.cache.reset(cache_token)
 
 
 @asynccontextmanager
