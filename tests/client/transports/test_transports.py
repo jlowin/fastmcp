@@ -13,4 +13,4 @@ async def test_oauth_uses_same_client_as_transport():
     client = Client(transport=transport)
 
     async with transport.auth.httpx_client_factory() as httpx_client:
-        assert httpx_client._transport._pool._ssl_context.verify_mode == ssl.VerifyMode.CERT_NONE
+        assert httpx_client._transport._pool._ssl_context.verify_mode == VerifyMode.CERT_NONE
