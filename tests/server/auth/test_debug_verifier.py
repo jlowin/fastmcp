@@ -1,5 +1,7 @@
 """Unit tests for DebugTokenVerifier."""
 
+import re
+
 from fastmcp.server.auth.providers.debug import DebugTokenVerifier
 
 
@@ -148,7 +150,6 @@ class TestDebugTokenVerifier:
 
     async def test_verify_token_pattern_matching(self):
         """Test using verifier with regex-like pattern matching."""
-        import re
 
         pattern = re.compile(r"^[A-Z]{3}-\d{4}-[a-z]{2}$")
 
