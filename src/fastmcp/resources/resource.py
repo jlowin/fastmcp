@@ -207,7 +207,6 @@ class FunctionResource(Resource):
 
         async with resolve_dependencies(self.fn, {}) as kwargs:
             result = self.fn(**kwargs)
-
             if inspect.isawaitable(result):
                 result = await result
 
