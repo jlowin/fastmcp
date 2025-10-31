@@ -1,6 +1,5 @@
 from ssl import VerifyMode
 
-from fastmcp.client import Client
 from fastmcp.client.transports import StreamableHttpTransport
 import httpx
 
@@ -10,7 +9,6 @@ async def test_oauth_uses_same_client_as_transport():
         httpx_client_factory=lambda *args, **kwargs: httpx.AsyncClient(verify=False, *args, **kwargs),
         auth="oauth",
     )
-    client = Client(transport=transport)
 
     async with transport.auth.httpx_client_factory() as httpx_client:
         assert httpx_client._transport._pool._ssl_context.verify_mode == VerifyMode.CERT_NONE
