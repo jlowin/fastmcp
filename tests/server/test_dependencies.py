@@ -5,8 +5,9 @@ from contextlib import asynccontextmanager, contextmanager
 import pytest
 from mcp.types import TextContent, TextResourceContents
 
-from fastmcp import Depends, FastMCP
+from fastmcp import FastMCP
 from fastmcp.client import Client
+from fastmcp.dependencies import Depends
 from fastmcp.server.context import Context
 
 

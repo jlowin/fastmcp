@@ -12,8 +12,6 @@ if settings.log_enabled:
         enable_rich_tracebacks=settings.enable_rich_tracebacks,
     )
 
-from docket import Depends
-
 from fastmcp.server.server import FastMCP
 from fastmcp.server.context import Context
 import fastmcp.server
@@ -52,7 +50,6 @@ def __getattr__(name: str):
 __all__ = [
     "Client",
     "Context",
-    "Depends",
     "FastMCP",
     "client",
     "settings",
