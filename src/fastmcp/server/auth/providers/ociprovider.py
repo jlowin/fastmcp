@@ -100,7 +100,7 @@ class OCIProvider(OIDCProxy):
         allowed_client_redirect_uris: list[str] | NotSetT = NotSet,
         client_storage: AsyncKeyValue | None = None,
         jwt_signing_key: str | bytes | NotSetT = NotSet,
-        require_authorization_consent: bool = False,
+        require_authorization_consent: bool = True,
     ) -> None:
         """Initialize OCI OIDC provider.
 
