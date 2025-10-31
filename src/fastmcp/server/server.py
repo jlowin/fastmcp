@@ -384,12 +384,65 @@ class FastMCP(Generic[LifespanResultT]):
             return list(self._mcp_server.icons)
 
     @asynccontextmanager
+    async def _docket_lifespan(
+        self, user_lifespan_result: LifespanResultT
+    ) -> AsyncIterator[LifespanResultT]:
+        """Manage Docket instance and Worker when experimental support is enabled.
+
+        Args:
+            user_lifespan_result: The result from the user's lifespan function
+
+        Yields:
+            User's lifespan result (Docket is managed via ContextVar, not lifespan result)
+        """
+        from fastmcp import settings
+        from fastmcp.server.dependencies import _current_docket, _current_worker
+
+        if not settings.experimental.enable_docket:
+            # Docket support not enabled, pass through user lifespan result
+            yield user_lifespan_result
+            return
+
+        # Import Docket components
+        from docket import Docket, Worker
+
+        # Create Docket instance with memory:// URL
+        async with Docket(url="memory://") as docket:
+            # Set Docket in ContextVar so CurrentDocket can access it
+            docket_token = _current_docket.set(docket)
+            try:
+                # Create and start Worker, then task group for run_forever()
+                async with (
+                    Worker(docket) as worker,
+                    anyio.create_task_group() as tg,
+                ):
+                    # Set Worker in ContextVar so CurrentWorker can access it
+                    worker_token = _current_worker.set(worker)
+                    try:
+                        # Start worker as background task
+                        tg.start_soon(worker.run_forever)
+
+                        try:
+                            yield user_lifespan_result
+                        finally:
+                            # Cancel task group when exiting (cancels worker)
+                            tg.cancel_scope.cancel()
+                    finally:
+                        _current_worker.reset(worker_token)
+            finally:
+                # Reset ContextVar
+                _current_docket.reset(docket_token)
+
+    @asynccontextmanager
     async def _lifespan_manager(self) -> AsyncIterator[None]:
         if self._lifespan_result_set:
             yield
             return
 
-        async with self._lifespan(self) as lifespan_result:
+        async with (
+            self._lifespan(self) as user_lifespan_result,
+            self._docket_lifespan(user_lifespan_result) as lifespan_result,
+        ):
             self._lifespan_result = lifespan_result
             self._lifespan_result_set = True
 

@@ -82,6 +82,19 @@ class ExperimentalSettings(BaseSettings):
         ),
     ] = False
 
+    enable_docket: Annotated[
+        bool,
+        Field(
+            description=inspect.cleandoc(
+                """
+                Enable experimental Docket support for background task execution.
+                When enabled, FastMCP will create a Docket instance with a Worker
+                to process background tasks.
+                """
+            ),
+        ),
+    ] = False
+
 
 class Settings(BaseSettings):
     """FastMCP settings."""
