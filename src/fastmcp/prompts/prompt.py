@@ -258,7 +258,10 @@ class FunctionPrompt(Prompt):
 
     def _convert_string_arguments(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         """Convert string arguments to expected types based on function signature."""
-        sig = inspect.signature(self.fn)
+        from fastmcp.server.dependencies import without_injected_parameters
+
+        wrapper_fn = without_injected_parameters(self.fn)
+        sig = inspect.signature(wrapper_fn)
         converted_kwargs = {}
 
         for param_name, param_value in kwargs.items():
