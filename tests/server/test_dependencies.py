@@ -597,3 +597,105 @@ async def test_external_user_cannot_override_dependency(mcp: FastMCP):
             await client.call_tool(
                 "check_permission", {"action": "read", "admin": "hacker"}
             )
+
+
+async def test_prompt_dependency_cannot_be_overridden_externally(mcp: FastMCP):
+    """Test that external callers cannot override prompt dependencies.
+
+    This is a security test - dependencies should NEVER be overridable from
+    outside the server, even for prompts which don't validate against strict schemas.
+    """
+
+    def get_secret() -> str:
+        return "real_secret"
+
+    @mcp.prompt()
+    async def secure_prompt(topic: str, secret: str = Depends(get_secret)) -> str:
+        return f"Topic: {topic}, Secret: {secret}"
+
+    async with Client(mcp) as client:
+        # Normal call - should use dependency
+        result = await client.get_prompt("secure_prompt", {"topic": "test"})
+        message = result.messages[0]
+        content = message.content
+        assert isinstance(content, TextContent)
+        assert "Secret: real_secret" in content.text
+
+        # Try to override dependency - should be ignored/rejected
+        result = await client.get_prompt(
+            "secure_prompt",
+            {"topic": "test", "secret": "HACKED"},  # Attempt override
+        )
+        message = result.messages[0]
+        content = message.content
+        assert isinstance(content, TextContent)
+        # Should still use real dependency, not hacked value
+        assert "Secret: real_secret" in content.text
+        assert "HACKED" not in content.text
+
+
+async def test_resource_dependency_cannot_be_overridden_externally(mcp: FastMCP):
+    """Test that external callers cannot override resource dependencies."""
+
+    def get_api_key() -> str:
+        return "real_api_key"
+
+    @mcp.resource("data://config")
+    async def get_config(api_key: str = Depends(get_api_key)) -> str:
+        return f"API Key: {api_key}"
+
+    async with Client(mcp) as client:
+        # Normal call
+        result = await client.read_resource("data://config")
+        content = result[0]
+        assert isinstance(content, TextResourceContents)
+        assert "API Key: real_api_key" in content.text
+
+        # Resources don't accept arguments from clients (static URI)
+        # so this scenario is less of a concern, but documenting it
+
+
+async def test_resource_template_dependency_cannot_be_overridden_externally(
+    mcp: FastMCP,
+):
+    """Test that external callers cannot override resource template dependencies.
+
+    Resource templates extract parameters from the URI path, so there's a risk
+    that a dependency parameter name could match a URI parameter.
+    """
+
+    def get_auth_token() -> str:
+        return "real_token"
+
+    @mcp.resource("user://{user_id}")
+    async def get_user(user_id: str, token: str = Depends(get_auth_token)) -> str:
+        return f"User: {user_id}, Token: {token}"
+
+    async with Client(mcp) as client:
+        # Normal call
+        result = await client.read_resource("user://123")
+        content = result[0]
+        assert isinstance(content, TextResourceContents)
+        assert "User: 123, Token: real_token" in content.text
+
+        # Try to inject token via URI (shouldn't be possible with this pattern)
+        # But if URI was user://{token}, it could extract it
+
+
+async def test_resource_template_uri_cannot_match_dependency_name(mcp: FastMCP):
+    """Test that URI parameters cannot have the same name as dependencies.
+
+    If a URI template tries to use a parameter name that's also a dependency,
+    the template creation should fail because the dependency is excluded from
+    the user-facing signature.
+    """
+
+    def get_token() -> str:
+        return "real_token"
+
+    # This should fail - {token} in URI but token is a dependency parameter
+    with pytest.raises(ValueError, match="URI parameters.*must be a subset"):
+
+        @mcp.resource("auth://{token}/validate")
+        async def validate(token: str = Depends(get_token)) -> str:
+            return f"Validating with: {token}"
