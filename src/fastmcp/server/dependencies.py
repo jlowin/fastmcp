@@ -186,20 +186,22 @@ async def resolve_dependencies(
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Resolve dependencies and inject Context for a FastMCP function.
 
-    User arguments are already validated before this is called (either by the
-    wrapper function's TypeAdapter, or for resources/prompts by their own logic).
+    This function:
+    1. Filters out any dependency parameter names from user arguments (security)
+    2. Resolves Docket dependencies
+    3. Injects Context if needed
+    4. Merges everything together
 
-    This function just:
-    1. Resolves Docket dependencies (if any)
-    2. Injects Context (if needed)
-    3. Merges everything together
+    The filtering prevents external callers from overriding injected parameters by
+    providing values for dependency parameter names. This is a security feature.
 
     Args:
         fn: The function to resolve dependencies for
-        arguments: The validated user arguments
+        arguments: User arguments (may contain keys that match dependency names,
+                  which will be filtered out)
 
     Yields:
-        Dictionary of user args + resolved dependencies + Context
+        Dictionary of filtered user args + resolved dependencies + Context
 
     Example:
         ```python
@@ -211,7 +213,13 @@ async def resolve_dependencies(
     """
     from fastmcp.server.context import Context
 
-    async with _resolve_fastmcp_dependencies(fn, arguments) as resolved_kwargs:
+    # Filter out dependency parameters from user arguments to prevent override
+    # This is a security measure - external callers should never be able to
+    # provide values for injected parameters
+    dependency_params = get_dependency_parameters(fn)
+    user_args = {k: v for k, v in arguments.items() if k not in dependency_params}
+
+    async with _resolve_fastmcp_dependencies(fn, user_args) as resolved_kwargs:
         # Inject Context if needed
         context_kwarg = _find_kwarg_by_type(fn, kwarg_type=Context)
         if context_kwarg and context_kwarg not in resolved_kwargs:
