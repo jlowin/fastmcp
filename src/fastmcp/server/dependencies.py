@@ -4,10 +4,11 @@ import contextlib
 import inspect
 from collections.abc import AsyncGenerator, Callable
 from contextlib import AsyncExitStack, asynccontextmanager
+from contextvars import ContextVar
 from functools import lru_cache
-from typing import TYPE_CHECKING, Any, get_type_hints
+from typing import TYPE_CHECKING, Any, cast, get_type_hints
 
-from docket.dependencies import _Depends, get_dependency_parameters
+from docket.dependencies import Dependency, _Depends, get_dependency_parameters
 from mcp.server.auth.middleware.auth_context import (
     get_access_token as _sdk_get_access_token,
 )
@@ -20,10 +21,20 @@ from fastmcp.server.auth import AccessToken
 from fastmcp.utilities.types import is_class_member_of_type
 
 if TYPE_CHECKING:
+    from docket import Docket
+    from docket.worker import Worker
+
     from fastmcp.server.context import Context
+
+# ContextVars for tracking Docket infrastructure
+_current_docket: ContextVar[Docket | None] = ContextVar("docket", default=None)  # type: ignore[assignment]
+_current_worker: ContextVar[Worker | None] = ContextVar("worker", default=None)  # type: ignore[assignment]
 
 __all__ = [
     "AccessToken",
+    "CurrentContext",
+    "CurrentDocket",
+    "CurrentWorker",
     "get_access_token",
     "get_context",
     "get_http_headers",
@@ -125,6 +136,9 @@ async def _resolve_fastmcp_dependencies(
     Sets up the minimal context needed for Docket's Depends() to work:
     - A cache for resolved dependencies
     - An AsyncExitStack for managing context manager lifetimes
+
+    The Docket instance (for CurrentDocket dependency) is managed separately
+    by the server's lifespan and made available via ContextVar.
 
     Note: This does NOT set up Docket's Execution context. If user code needs
     Docket-specific dependencies like TaskArgument(), TaskKey(), etc., those
@@ -233,6 +247,139 @@ def get_context() -> Context:
     if context is None:
         raise RuntimeError("No active context found.")
     return context
+
+
+class _CurrentContext(Dependency):
+    """Internal dependency class for CurrentContext."""
+
+    async def __aenter__(self) -> Context:
+        return get_context()
+
+
+def CurrentContext() -> Context:
+    """Get the current FastMCP Context instance.
+
+    This dependency provides access to the active FastMCP Context for the
+    current MCP operation (tool/resource/prompt call).
+
+    Returns:
+        A dependency that resolves to the active Context instance
+
+    Raises:
+        RuntimeError: If no active context found (during resolution)
+
+    Example:
+        ```python
+        from fastmcp.dependencies import CurrentContext
+
+        @mcp.tool()
+        async def log_progress(ctx: Context = CurrentContext()) -> str:
+            ctx.report_progress(50, 100, "Halfway done")
+            return "Working"
+        ```
+    """
+    return cast("Context", _CurrentContext())
+
+
+class _CurrentDocket(Dependency):
+    """Internal dependency class for CurrentDocket."""
+
+    async def __aenter__(self) -> Docket:
+        import fastmcp
+
+        # Check if experimental flag is enabled
+        if not fastmcp.settings.experimental.enable_docket:
+            raise RuntimeError(
+                "Docket support is not enabled. "
+                "Set FASTMCP_EXPERIMENTAL_ENABLE_DOCKET=true to enable experimental Docket support."
+            )
+
+        # Get Docket from ContextVar (set by _docket_lifespan)
+        docket = _current_docket.get()
+        if docket is None:
+            raise RuntimeError(
+                "No Docket instance found. This should not happen when "
+                "FASTMCP_EXPERIMENTAL_ENABLE_DOCKET is enabled."
+            )
+
+        return docket
+
+
+def CurrentDocket() -> Docket:
+    """Get the current Docket instance managed by FastMCP.
+
+    This dependency provides access to the Docket instance that FastMCP
+    automatically creates when experimental Docket support is enabled.
+
+    Requires:
+        - FASTMCP_EXPERIMENTAL_ENABLE_DOCKET=true
+
+    Returns:
+        A dependency that resolves to the active Docket instance
+
+    Raises:
+        RuntimeError: If experimental flag not enabled (during resolution)
+
+    Example:
+        ```python
+        from fastmcp.dependencies import CurrentDocket
+
+        @mcp.tool()
+        async def schedule_task(docket: Docket = CurrentDocket()) -> str:
+            await docket.add(some_function)(arg1, arg2)
+            return "Scheduled"
+        ```
+    """
+    return cast("Docket", _CurrentDocket())
+
+
+class _CurrentWorker(Dependency):
+    """Internal dependency class for CurrentWorker."""
+
+    async def __aenter__(self) -> Worker:
+        import fastmcp
+
+        if not fastmcp.settings.experimental.enable_docket:
+            raise RuntimeError(
+                "Docket support is not enabled. "
+                "Set FASTMCP_EXPERIMENTAL_ENABLE_DOCKET=true to enable experimental Docket support."
+            )
+
+        worker = _current_worker.get()
+        if worker is None:
+            raise RuntimeError(
+                "No Worker instance found. This should not happen when "
+                "FASTMCP_EXPERIMENTAL_ENABLE_DOCKET is enabled."
+            )
+
+        return worker
+
+
+def CurrentWorker() -> Worker:
+    """Get the current Docket Worker instance managed by FastMCP.
+
+    This dependency provides access to the Worker instance that FastMCP
+    automatically creates when experimental Docket support is enabled.
+
+    Requires:
+        - FASTMCP_EXPERIMENTAL_ENABLE_DOCKET=true
+
+    Returns:
+        A dependency that resolves to the active Worker instance
+
+    Raises:
+        RuntimeError: If experimental flag not enabled (during resolution)
+
+    Example:
+        ```python
+        from fastmcp.dependencies import CurrentWorker
+
+        @mcp.tool()
+        async def check_worker_status(worker: Worker = CurrentWorker()) -> str:
+            return f"Worker: {worker.name}"
+        ```
+    """
+    return cast("Worker", _CurrentWorker())
 
 
 def get_http_request() -> Request:
