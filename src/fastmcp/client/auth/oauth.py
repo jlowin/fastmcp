@@ -47,7 +47,7 @@ async def check_if_auth_required(
     Returns:
         True if auth appears to be required, False otherwise
     """
-    async with httpx.AsyncClient(**(httpx_kwargs or {})) as client:
+    async with self.httpx_client_factory(**(httpx_kwargs or {})) as client:
         try:
             # Try a simple request to the endpoint
             response = await client.get(mcp_url, timeout=5.0)
