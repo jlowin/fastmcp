@@ -22,7 +22,6 @@ from typing_extensions import Self
 from fastmcp.server.dependencies import get_context
 from fastmcp.utilities.components import FastMCPComponent
 from fastmcp.utilities.types import (
-    find_kwarg_by_type,
     get_fn_name,
 )
 
@@ -204,16 +203,13 @@ class FunctionResource(Resource):
 
     async def read(self) -> str | bytes:
         """Read the resource by calling the wrapped function."""
-        from fastmcp.server.context import Context
+        from fastmcp.server.dependencies import resolve_dependencies
 
-        kwargs = {}
-        context_kwarg = find_kwarg_by_type(self.fn, kwarg_type=Context)
-        if context_kwarg is not None:
-            kwargs[context_kwarg] = get_context()
+        async with resolve_dependencies(self.fn, {}) as kwargs:
+            result = self.fn(**kwargs)
 
-        result = self.fn(**kwargs)
-        if inspect.isawaitable(result):
-            result = await result
+            if inspect.isawaitable(result):
+                result = await result
 
         if isinstance(result, Resource):
             return await result.read()

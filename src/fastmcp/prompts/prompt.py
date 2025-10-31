@@ -14,13 +14,12 @@ from mcp.types import PromptArgument as MCPPromptArgument
 from pydantic import Field, TypeAdapter
 
 from fastmcp.exceptions import PromptError
-from fastmcp.server.dependencies import get_context
+from fastmcp.server.dependencies import get_context, without_injected_parameters
 from fastmcp.utilities.components import FastMCPComponent
 from fastmcp.utilities.json_schema import compress_schema
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.types import (
     FastMCPBaseModel,
-    find_kwarg_by_type,
     get_cached_typeadapter,
 )
 
@@ -178,7 +177,6 @@ class FunctionPrompt(Prompt):
         - A dict (converted to a message)
         - A sequence of any of the above
         """
-        from fastmcp.server.context import Context
 
         func_name = name or getattr(fn, "__name__", None) or fn.__class__.__name__
 
@@ -201,15 +199,10 @@ class FunctionPrompt(Prompt):
         if isinstance(fn, staticmethod):
             fn = fn.__func__
 
-        type_adapter = get_cached_typeadapter(fn)
+        wrapper_fn = without_injected_parameters(fn)
+        type_adapter = get_cached_typeadapter(wrapper_fn)
         parameters = type_adapter.json_schema()
-
-        # Auto-detect context parameter if not provided
-
-        context_kwarg = find_kwarg_by_type(fn, kwarg_type=Context)
-        prune_params = [context_kwarg] if context_kwarg else None
-
-        parameters = compress_schema(parameters, prune_params=prune_params)
+        parameters = compress_schema(parameters, prune_titles=True)
 
         # Convert parameters to PromptArguments
         arguments: list[PromptArgument] = []
@@ -224,7 +217,6 @@ class FunctionPrompt(Prompt):
                     if (
                         sig_param.annotation != inspect.Parameter.empty
                         and sig_param.annotation is not str
-                        and param_name != context_kwarg
                     ):
                         # Get the JSON schema for this specific parameter type
                         try:
@@ -266,22 +258,12 @@ class FunctionPrompt(Prompt):
 
     def _convert_string_arguments(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         """Convert string arguments to expected types based on function signature."""
-        from fastmcp.server.context import Context
-
         sig = inspect.signature(self.fn)
         converted_kwargs = {}
-
-        # Find context parameter name if any
-        context_param_name = find_kwarg_by_type(self.fn, kwarg_type=Context)
 
         for param_name, param_value in kwargs.items():
             if param_name in sig.parameters:
                 param = sig.parameters[param_name]
-
-                # Skip Context parameters - they're handled separately
-                if param_name == context_param_name:
-                    converted_kwargs[param_name] = param_value
-                    continue
 
                 # If parameter has no annotation or annotation is str, pass as-is
                 if (
@@ -320,7 +302,7 @@ class FunctionPrompt(Prompt):
         arguments: dict[str, Any] | None = None,
     ) -> list[PromptMessage]:
         """Render the prompt with arguments."""
-        from fastmcp.server.context import Context
+        from fastmcp.server.dependencies import resolve_dependencies
 
         # Validate required arguments
         if self.arguments:
@@ -331,19 +313,17 @@ class FunctionPrompt(Prompt):
                 raise ValueError(f"Missing required arguments: {missing}")
 
         try:
-            # Prepare arguments with context
+            # Prepare arguments
             kwargs = arguments.copy() if arguments else {}
-            context_kwarg = find_kwarg_by_type(self.fn, kwarg_type=Context)
-            if context_kwarg and context_kwarg not in kwargs:
-                kwargs[context_kwarg] = get_context()
 
-            # Convert string arguments to expected types when needed
+            # Convert string arguments to expected types BEFORE validation
             kwargs = self._convert_string_arguments(kwargs)
 
-            # Call function and check if result is a coroutine
-            result = self.fn(**kwargs)
-            if inspect.isawaitable(result):
-                result = await result
+            async with resolve_dependencies(self.fn, kwargs) as resolved_kwargs:
+                result = self.fn(**resolved_kwargs)
+
+                if inspect.isawaitable(result):
+                    result = await result
 
             # Validate messages
             if not isinstance(result, list | tuple):
