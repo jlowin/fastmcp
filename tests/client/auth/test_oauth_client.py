@@ -52,10 +52,15 @@ def client_unauthorized(streamable_http_server: str) -> Client:
 @pytest.fixture
 def client_with_headless_oauth(streamable_http_server: str) -> Client:
     """Client with headless OAuth that bypasses browser interaction."""
-    return Client(
-        transport=StreamableHttpTransport(streamable_http_server),
-        auth=HeadlessOAuth(mcp_url=streamable_http_server),
-    )
+    # Expect warning about in-memory token storage
+    with pytest.warns(
+        UserWarning,
+        match="Using in-memory token storage is not recommended for production use",
+    ):
+        return Client(
+            transport=StreamableHttpTransport(streamable_http_server),
+            auth=HeadlessOAuth(mcp_url=streamable_http_server),
+        )
 
 
 async def test_unauthorized(client_unauthorized: Client):

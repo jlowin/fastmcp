@@ -97,7 +97,12 @@ async def nested_sse_server():
     from fastmcp.utilities.http import find_available_port
 
     server = create_test_server()
-    sse_app = server.sse_app(path="/mcp/sse/", message_path="/mcp/messages")
+    # Expect deprecation warning for sse_app method
+    with pytest.warns(
+        DeprecationWarning,
+        match="The sse_app method is deprecated .* Use http_app as a modern .* alternative",
+    ):
+        sse_app = server.sse_app(path="/mcp/sse/", message_path="/mcp/messages")
 
     # Nest the app under multiple mounts to test URL resolution
     inner = Starlette(routes=[Mount("/nest-inner", app=sse_app)])

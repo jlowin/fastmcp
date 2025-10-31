@@ -461,7 +461,12 @@ async def test_remote_config_with_oauth_literal():
             }
         }
     }
-    client = Client(config)
+    # Expect warning about in-memory token storage
+    with pytest.warns(
+        UserWarning,
+        match="Using in-memory token storage is not recommended for production use",
+    ):
+        client = Client(config)
     assert isinstance(client.transport.transport, StreamableHttpTransport)
     assert isinstance(client.transport.transport.auth, OAuthClientProvider)
 
