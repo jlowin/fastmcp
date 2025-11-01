@@ -156,7 +156,6 @@ class FastMCP(Generic[LifespanResultT]):
         auth: AuthProvider | NotSetT | None = NotSet,
         middleware: Sequence[Middleware] | None = None,
         lifespan: LifespanCallable | None = None,
-        resource_prefix_format: Literal["protocol", "path"] | None = None,
         mask_error_details: bool | None = None,
         tools: Sequence[Tool | Callable[..., Any]] | None = None,
         tool_transformations: Mapping[str, ToolTransformConfig] | None = None,
@@ -185,10 +184,6 @@ class FastMCP(Generic[LifespanResultT]):
         sampling_handler: ServerSamplingHandler[LifespanResultT] | None = None,
         sampling_handler_behavior: Literal["always", "fallback"] | None = None,
     ):
-        self.resource_prefix_format: Literal["protocol", "path"] = (
-            resource_prefix_format or fastmcp.settings.resource_prefix_format
-        )
-
         self._additional_http_routes: list[BaseRoute] = []
         self._mounted_servers: list[MountedServer] = []
         self._tool_manager: ToolManager = ToolManager(
@@ -495,9 +490,7 @@ class FastMCP(Generic[LifespanResultT]):
                 child_resources = await mounted.server.get_resources()
                 for key, resource in child_resources.items():
                     new_key = (
-                        add_resource_prefix(
-                            key, mounted.prefix, mounted.resource_prefix_format
-                        )
+                        add_resource_prefix(key, mounted.prefix)
                         if mounted.prefix
                         else key
                     )
@@ -534,9 +527,7 @@ class FastMCP(Generic[LifespanResultT]):
                 child_templates = await mounted.server.get_resource_templates()
                 for key, template in child_templates.items():
                     new_key = (
-                        add_resource_prefix(
-                            key, mounted.prefix, mounted.resource_prefix_format
-                        )
+                        add_resource_prefix(key, mounted.prefix)
                         if mounted.prefix
                         else key
                     )
@@ -814,11 +805,7 @@ class FastMCP(Generic[LifespanResultT]):
 
                     key = resource.key
                     if mounted.prefix:
-                        key = add_resource_prefix(
-                            resource.key,
-                            mounted.prefix,
-                            mounted.resource_prefix_format,
-                        )
+                        key = add_resource_prefix(resource.key, mounted.prefix)
                         resource = resource.model_copy(
                             key=key,
                             update={"name": f"{mounted.prefix}_{resource.name}"},
@@ -910,11 +897,7 @@ class FastMCP(Generic[LifespanResultT]):
 
                     key = template.key
                     if mounted.prefix:
-                        key = add_resource_prefix(
-                            template.key,
-                            mounted.prefix,
-                            mounted.resource_prefix_format,
-                        )
+                        key = add_resource_prefix(template.key, mounted.prefix)
                         template = template.model_copy(
                             key=key,
                             update={"name": f"{mounted.prefix}_{template.name}"},
@@ -1170,13 +1153,9 @@ class FastMCP(Generic[LifespanResultT]):
         for mounted in reversed(self._mounted_servers):
             key = uri_str
             if mounted.prefix:
-                if not has_resource_prefix(
-                    key, mounted.prefix, mounted.resource_prefix_format
-                ):
+                if not has_resource_prefix(key, mounted.prefix):
                     continue
-                key = remove_resource_prefix(
-                    key, mounted.prefix, mounted.resource_prefix_format
-                )
+                key = remove_resource_prefix(key, mounted.prefix)
 
             try:
                 # First, get the resource to check if parent's filter allows it
@@ -2197,7 +2176,6 @@ class FastMCP(Generic[LifespanResultT]):
         mounted_server = MountedServer(
             prefix=prefix,
             server=server,
-            resource_prefix_format=self.resource_prefix_format,
         )
         self._mounted_servers.append(mounted_server)
 
@@ -2298,9 +2276,7 @@ class FastMCP(Generic[LifespanResultT]):
         # Import resources and templates from the server
         for key, resource in (await server.get_resources()).items():
             if prefix:
-                resource_key = add_resource_prefix(
-                    key, prefix, self.resource_prefix_format
-                )
+                resource_key = add_resource_prefix(key, prefix)
                 resource = resource.model_copy(
                     update={"name": f"{prefix}_{resource.name}"}, key=resource_key
                 )
@@ -2308,9 +2284,7 @@ class FastMCP(Generic[LifespanResultT]):
 
         for key, template in (await server.get_resource_templates()).items():
             if prefix:
-                template_key = add_resource_prefix(
-                    key, prefix, self.resource_prefix_format
-                )
+                template_key = add_resource_prefix(key, prefix)
                 template = template.model_copy(
                     update={"name": f"{prefix}_{template.name}"}, key=template_key
                 )
@@ -2572,13 +2546,10 @@ class FastMCP(Generic[LifespanResultT]):
 class MountedServer:
     prefix: str | None
     server: FastMCP[Any]
-    resource_prefix_format: Literal["protocol", "path"] | None = None
 
 
-def add_resource_prefix(
-    uri: str, prefix: str, prefix_format: Literal["protocol", "path"] | None = None
-) -> str:
-    """Add a prefix to a resource URI.
+def add_resource_prefix(uri: str, prefix: str) -> str:
+    """Add a prefix to a resource URI using path formatting (resource://prefix/path).
 
     Args:
         uri: The original resource URI
@@ -2588,15 +2559,9 @@ def add_resource_prefix(
         The resource URI with the prefix added
 
     Examples:
-        With new style:
         ```python
         add_resource_prefix("resource://path/to/resource", "prefix")
         "resource://prefix/path/to/resource"
-        ```
-        With legacy style:
-        ```python
-        add_resource_prefix("resource://path/to/resource", "prefix")
-        "prefix+resource://path/to/resource"
         ```
         With absolute path:
         ```python
@@ -2610,52 +2575,32 @@ def add_resource_prefix(
     if not prefix:
         return uri
 
-    # Get the server settings to check for legacy format preference
+    # Split the URI into protocol and path
+    match = URI_PATTERN.match(uri)
+    if not match:
+        raise ValueError(
+            f"Invalid URI format: {uri}. Expected protocol://path format."
+        )
 
-    if prefix_format is None:
-        prefix_format = fastmcp.settings.resource_prefix_format
+    protocol, path = match.groups()
 
-    if prefix_format == "protocol":
-        # Legacy style: prefix+protocol://path
-        return f"{prefix}+{uri}"
-    elif prefix_format == "path":
-        # New style: protocol://prefix/path
-        # Split the URI into protocol and path
-        match = URI_PATTERN.match(uri)
-        if not match:
-            raise ValueError(
-                f"Invalid URI format: {uri}. Expected protocol://path format."
-            )
-
-        protocol, path = match.groups()
-
-        # Add the prefix to the path
-        return f"{protocol}{prefix}/{path}"
-    else:
-        raise ValueError(f"Invalid prefix format: {prefix_format}")
+    # Add the prefix to the path
+    return f"{protocol}{prefix}/{path}"
 
 
-def remove_resource_prefix(
-    uri: str, prefix: str, prefix_format: Literal["protocol", "path"] | None = None
-) -> str:
+def remove_resource_prefix(uri: str, prefix: str) -> str:
     """Remove a prefix from a resource URI.
 
     Args:
         uri: The resource URI with a prefix
         prefix: The prefix to remove
-        prefix_format: The format of the prefix to remove
+
     Returns:
         The resource URI with the prefix removed
 
     Examples:
-        With new style:
         ```python
         remove_resource_prefix("resource://prefix/path/to/resource", "prefix")
-        "resource://path/to/resource"
-        ```
-        With legacy style:
-        ```python
-        remove_resource_prefix("prefix+resource://path/to/resource", "prefix")
         "resource://path/to/resource"
         ```
         With absolute path:
@@ -2670,41 +2615,26 @@ def remove_resource_prefix(
     if not prefix:
         return uri
 
-    if prefix_format is None:
-        prefix_format = fastmcp.settings.resource_prefix_format
+    # Split the URI into protocol and path
+    match = URI_PATTERN.match(uri)
+    if not match:
+        raise ValueError(
+            f"Invalid URI format: {uri}. Expected protocol://path format."
+        )
 
-    if prefix_format == "protocol":
-        # Legacy style: prefix+protocol://path
-        legacy_prefix = f"{prefix}+"
-        if uri.startswith(legacy_prefix):
-            return uri[len(legacy_prefix) :]
+    protocol, path = match.groups()
+
+    # Check if the path starts with the prefix followed by a /
+    prefix_pattern = f"^{re.escape(prefix)}/(.*?)$"
+    path_match = re.match(prefix_pattern, path)
+    if not path_match:
         return uri
-    elif prefix_format == "path":
-        # New style: protocol://prefix/path
-        # Split the URI into protocol and path
-        match = URI_PATTERN.match(uri)
-        if not match:
-            raise ValueError(
-                f"Invalid URI format: {uri}. Expected protocol://path format."
-            )
 
-        protocol, path = match.groups()
-
-        # Check if the path starts with the prefix followed by a /
-        prefix_pattern = f"^{re.escape(prefix)}/(.*?)$"
-        path_match = re.match(prefix_pattern, path)
-        if not path_match:
-            return uri
-
-        # Return the URI without the prefix
-        return f"{protocol}{path_match.group(1)}"
-    else:
-        raise ValueError(f"Invalid prefix format: {prefix_format}")
+    # Return the URI without the prefix
+    return f"{protocol}{path_match.group(1)}"
 
 
-def has_resource_prefix(
-    uri: str, prefix: str, prefix_format: Literal["protocol", "path"] | None = None
-) -> bool:
+def has_resource_prefix(uri: str, prefix: str) -> bool:
     """Check if a resource URI has a specific prefix.
 
     Args:
@@ -2715,14 +2645,8 @@ def has_resource_prefix(
         True if the URI has the specified prefix, False otherwise
 
     Examples:
-        With new style:
         ```python
         has_resource_prefix("resource://prefix/path/to/resource", "prefix")
-        True
-        ```
-        With legacy style:
-        ```python
-        has_resource_prefix("prefix+resource://path/to/resource", "prefix")
         True
         ```
         With other path:
@@ -2737,28 +2661,15 @@ def has_resource_prefix(
     if not prefix:
         return False
 
-    # Get the server settings to check for legacy format preference
+    # Split the URI into protocol and path
+    match = URI_PATTERN.match(uri)
+    if not match:
+        raise ValueError(
+            f"Invalid URI format: {uri}. Expected protocol://path format."
+        )
 
-    if prefix_format is None:
-        prefix_format = fastmcp.settings.resource_prefix_format
+    _, path = match.groups()
 
-    if prefix_format == "protocol":
-        # Legacy style: prefix+protocol://path
-        legacy_prefix = f"{prefix}+"
-        return uri.startswith(legacy_prefix)
-    elif prefix_format == "path":
-        # New style: protocol://prefix/path
-        # Split the URI into protocol and path
-        match = URI_PATTERN.match(uri)
-        if not match:
-            raise ValueError(
-                f"Invalid URI format: {uri}. Expected protocol://path format."
-            )
-
-        _, path = match.groups()
-
-        # Check if the path starts with the prefix followed by a /
-        prefix_pattern = f"^{re.escape(prefix)}/"
-        return bool(re.match(prefix_pattern, path))
-    else:
-        raise ValueError(f"Invalid prefix format: {prefix_format}")
+    # Check if the path starts with the prefix followed by a /
+    prefix_pattern = f"^{re.escape(prefix)}/"
+    return bool(re.match(prefix_pattern, path))
