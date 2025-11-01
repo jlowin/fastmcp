@@ -1,5 +1,4 @@
 import warnings
-from unittest.mock import AsyncMock, patch
 
 import pytest
 from starlette.applications import Starlette
