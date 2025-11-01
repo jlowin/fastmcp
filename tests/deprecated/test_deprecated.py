@@ -3,7 +3,7 @@ import warnings
 import pytest
 from starlette.applications import Starlette
 
-from fastmcp import Client, FastMCP
+from fastmcp import FastMCP
 from fastmcp.utilities.tests import temporary_settings
 
 # reset deprecation warnings for this module
