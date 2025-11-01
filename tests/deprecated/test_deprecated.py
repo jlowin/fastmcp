@@ -46,10 +46,3 @@ def test_http_app_with_sse_transport():
             w for w in recorded_warnings if issubclass(w.category, DeprecationWarning)
         ]
         assert len(deprecation_warnings) == 0
-
-
-def test_from_client_deprecation_warning():
-    """Test that FastMCP.from_client raises a deprecation warning."""
-    server = FastMCP("TestServer")
-    with pytest.warns(DeprecationWarning, match="from_client"):
-        FastMCP.from_client(Client(server))
