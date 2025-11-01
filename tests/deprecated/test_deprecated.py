@@ -42,17 +42,6 @@ def test_sse_app_deprecation_warning():
         assert isinstance(app, Starlette)
 
 
-def test_streamable_http_app_deprecation_warning():
-    """Test that streamable_http_app raises a deprecation warning."""
-    server = FastMCP("TestServer")
-
-    with pytest.warns(
-        DeprecationWarning, match="The streamable_http_app method is deprecated"
-    ):
-        app = server.streamable_http_app()
-        assert isinstance(app, Starlette)
-
-
 async def test_run_sse_async_deprecation_warning():
     """Test that run_sse_async raises a deprecation warning."""
     server = FastMCP("TestServer")

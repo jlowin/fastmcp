@@ -2112,27 +2112,6 @@ class FastMCP(Generic[LifespanResultT]):
             middleware=middleware,
         )
 
-    def streamable_http_app(
-        self,
-        path: str | None = None,
-        middleware: list[ASGIMiddleware] | None = None,
-    ) -> StarletteWithLifespan:
-        """
-        Create a Starlette app for the StreamableHTTP server.
-
-        Args:
-            path: The path to the StreamableHTTP endpoint
-            middleware: A list of middleware to apply to the app
-        """
-        # Deprecated since 2.3.2
-        if fastmcp.settings.deprecation_warnings:
-            warnings.warn(
-                "The streamable_http_app method is deprecated (as of 2.3.2). Use http_app() instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-        return self.http_app(path=path, middleware=middleware)
-
     def http_app(
         self,
         path: str | None = None,
