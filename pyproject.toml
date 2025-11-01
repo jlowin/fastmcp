@@ -16,6 +16,7 @@ dependencies = [
     "pydantic[email]>=2.11.7",
     "pyperclip>=1.9.0",
     "py-key-value-aio[disk,keyring,memory]>=0.2.8,<0.3.0",
+    "uvicorn>=0.35",
     "websockets>=15.0.1",
     "jsonschema-path>=0.3.4",
 ]
@@ -102,6 +103,11 @@ fallback-version = "0.0.0"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 # filterwarnings = ["error::DeprecationWarning"]
+filterwarnings = [
+    # Suppress OAuth in-memory token storage warnings in tests
+    # Tests intentionally use ephemeral storage; this warning is for end users
+    "ignore:Using in-memory token storage:UserWarning",
+]
 timeout = 5
 env = [
     "FASTMCP_TEST_MODE=1",
