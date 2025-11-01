@@ -57,7 +57,7 @@ Convert the FastMCP tool to an MCP tool.
 #### `from_function` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/tools/tool.py#L167" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 ```python
-from_function(fn: Callable[..., Any], name: str | None = None, title: str | None = None, description: str | None = None, icons: list[Icon] | None = None, tags: set[str] | None = None, annotations: ToolAnnotations | None = None, exclude_args: list[str] | None = None, output_schema: dict[str, Any] | None | NotSetT | Literal[False] = NotSet, serializer: ToolResultSerializerType | None = None, meta: dict[str, Any] | None = None, enabled: bool | None = None) -> FunctionTool
+from_function(fn: Callable[..., Any], name: str | None = None, title: str | None = None, description: str | None = None, icons: list[Icon] | None = None, tags: set[str] | None = None, annotations: ToolAnnotations | None = None, exclude_args: list[str] | None = None, output_schema: dict[str, Any] | Literal[False] | NotSetT | None = NotSet, serializer: ToolResultSerializerType | None = None, meta: dict[str, Any] | None = None, enabled: bool | None = None) -> FunctionTool
 ```
 
 Create a Tool from a function.
@@ -91,7 +91,7 @@ from_tool(cls, tool: Tool) -> TransformedTool
 #### `from_function` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/tools/tool.py#L248" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 ```python
-from_function(cls, fn: Callable[..., Any], name: str | None = None, title: str | None = None, description: str | None = None, icons: list[Icon] | None = None, tags: set[str] | None = None, annotations: ToolAnnotations | None = None, exclude_args: list[str] | None = None, output_schema: dict[str, Any] | None | NotSetT | Literal[False] = NotSet, serializer: ToolResultSerializerType | None = None, meta: dict[str, Any] | None = None, enabled: bool | None = None) -> FunctionTool
+from_function(cls, fn: Callable[..., Any], name: str | None = None, title: str | None = None, description: str | None = None, icons: list[Icon] | None = None, tags: set[str] | None = None, annotations: ToolAnnotations | None = None, exclude_args: list[str] | None = None, output_schema: dict[str, Any] | Literal[False] | NotSetT | None = NotSet, serializer: ToolResultSerializerType | None = None, meta: dict[str, Any] | None = None, enabled: bool | None = None) -> FunctionTool
 ```
 
 Create a Tool from a function.
