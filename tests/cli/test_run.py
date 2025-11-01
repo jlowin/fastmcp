@@ -377,7 +377,7 @@ async def async_echo(text: str) -> str:
             run_mock.assert_called_once()
 
     async def test_run_v1_server_sse(self, tmp_path):
-        """Test that v1 server uses async sse method."""
+        """Test that v1 server uses async http method with sse transport."""
         from unittest.mock import AsyncMock, patch
 
         from mcp.server.fastmcp import FastMCP as FastMCP1x
@@ -402,9 +402,9 @@ async def async_echo(text: str) -> str:
     return f"async: {text}"
 """)
 
-        # Mock the async run method
+        # Mock the async run method (create=True since v1 server doesn't have this method)
         with patch.object(
-            FastMCP1x, "run_http_async", new_callable=AsyncMock
+            FastMCP1x, "run_http_async", new_callable=AsyncMock, create=True
         ) as run_mock:
             await run_command(str(test_file), transport="sse")
             run_mock.assert_called_once_with(transport="sse")
