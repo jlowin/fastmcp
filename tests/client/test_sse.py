@@ -99,9 +99,7 @@ async def nested_sse_server():
 
     server = create_test_server()
     sse_app = create_sse_app(
-        server=server,
-        sse_path="/mcp/sse/",
-        message_path="/mcp/messages",
+        server=server, message_path="/mcp/messages", sse_path="/mcp/sse/"
     )
 
     # Nest the app under multiple mounts to test URL resolution

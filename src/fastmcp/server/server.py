@@ -2151,31 +2151,6 @@ class FastMCP(Generic[LifespanResultT]):
                 middleware=middleware,
             )
 
-    async def run_streamable_http_async(
-        self,
-        host: str | None = None,
-        port: int | None = None,
-        log_level: str | None = None,
-        path: str | None = None,
-        uvicorn_config: dict[str, Any] | None = None,
-    ) -> None:
-        # Deprecated since 2.3.2
-        if fastmcp.settings.deprecation_warnings:
-            warnings.warn(
-                "The run_streamable_http_async method is deprecated (as of 2.3.2). "
-                "Use run_http_async instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-        await self.run_http_async(
-            transport="http",
-            host=host,
-            port=port,
-            log_level=log_level,
-            path=path,
-            uvicorn_config=uvicorn_config,
-        )
-
     def mount(
         self,
         server: FastMCP[LifespanResultT],
