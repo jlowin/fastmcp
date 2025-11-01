@@ -33,15 +33,6 @@ class TestDeprecationWarningsSetting:
                 mcp.settings
 
 
-def test_sse_app_deprecation_warning():
-    """Test that sse_app raises a deprecation warning."""
-    server = FastMCP("TestServer")
-
-    with pytest.warns(DeprecationWarning, match="The sse_app method is deprecated"):
-        app = server.sse_app()
-        assert isinstance(app, Starlette)
-
-
 def test_streamable_http_app_deprecation_warning():
     """Test that streamable_http_app raises a deprecation warning."""
     server = FastMCP("TestServer")

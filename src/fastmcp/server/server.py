@@ -2081,37 +2081,6 @@ class FastMCP(Generic[LifespanResultT]):
             uvicorn_config=uvicorn_config,
         )
 
-    def sse_app(
-        self,
-        path: str | None = None,
-        message_path: str | None = None,
-        middleware: list[ASGIMiddleware] | None = None,
-    ) -> StarletteWithLifespan:
-        """
-        Create a Starlette app for the SSE server.
-
-        Args:
-            path: The path to the SSE endpoint
-            message_path: The path to the message endpoint
-            middleware: A list of middleware to apply to the app
-        """
-        # Deprecated since 2.3.2
-        if fastmcp.settings.deprecation_warnings:
-            warnings.warn(
-                "The sse_app method is deprecated (as of 2.3.2). Use http_app as a modern (non-SSE) "
-                "alternative, or call `fastmcp.server.http.create_sse_app` directly.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-        return create_sse_app(
-            server=self,
-            message_path=message_path or self._deprecated_settings.message_path,
-            sse_path=path or self._deprecated_settings.sse_path,
-            auth=self.auth,
-            debug=self._deprecated_settings.debug,
-            middleware=middleware,
-        )
-
     def streamable_http_app(
         self,
         path: str | None = None,
