@@ -155,19 +155,6 @@ class Settings(BaseSettings):
         ),
     ] = True
 
-    resource_prefix_format: Annotated[
-        Literal["protocol", "path"],
-        Field(
-            description=inspect.cleandoc(
-                """
-                When perfixing a resource URI, either use path formatting (resource://prefix/path)
-                or protocol formatting (prefix+resource://path). Protocol formatting was the default in FastMCP < 2.4;
-                path formatting is current default.
-                """
-            ),
-        ),
-    ] = "path"
-
     client_init_timeout: Annotated[
         float | None,
         Field(
