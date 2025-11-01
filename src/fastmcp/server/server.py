@@ -2578,9 +2578,7 @@ def add_resource_prefix(uri: str, prefix: str) -> str:
     # Split the URI into protocol and path
     match = URI_PATTERN.match(uri)
     if not match:
-        raise ValueError(
-            f"Invalid URI format: {uri}. Expected protocol://path format."
-        )
+        raise ValueError(f"Invalid URI format: {uri}. Expected protocol://path format.")
 
     protocol, path = match.groups()
 
@@ -2618,9 +2616,7 @@ def remove_resource_prefix(uri: str, prefix: str) -> str:
     # Split the URI into protocol and path
     match = URI_PATTERN.match(uri)
     if not match:
-        raise ValueError(
-            f"Invalid URI format: {uri}. Expected protocol://path format."
-        )
+        raise ValueError(f"Invalid URI format: {uri}. Expected protocol://path format.")
 
     protocol, path = match.groups()
 
@@ -2664,9 +2660,7 @@ def has_resource_prefix(uri: str, prefix: str) -> bool:
     # Split the URI into protocol and path
     match = URI_PATTERN.match(uri)
     if not match:
-        raise ValueError(
-            f"Invalid URI format: {uri}. Expected protocol://path format."
-        )
+        raise ValueError(f"Invalid URI format: {uri}. Expected protocol://path format.")
 
     _, path = match.groups()
 
