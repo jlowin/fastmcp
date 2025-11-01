@@ -109,10 +109,10 @@ uv run prek run --all-files
 
 This runs three critical tools:
 - **Ruff**: Linting and formatting
-- **ty**: Static type checking  
-- **Pytest**: Core test suite
+- **Prettier**: Code formatting
+- **ty**: Static type checking
 
-CI will reject PRs that fail these checks. Always run them locally first.
+Pytest runs separately as a distinct workflow step after prek checks pass. CI will reject PRs that fail these checks. Always run them locally first.
 
 ### Testing
 
