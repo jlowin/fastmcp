@@ -222,4 +222,4 @@ async def run_v1_server_async(
         case "http" | "streamable-http" | None:
             await server.run_streamable_http_async()
         case "sse":
-            await server.run_sse_async()
+            await server.run_sse_async()  # type: ignore[attr-defined]

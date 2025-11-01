@@ -53,23 +53,6 @@ def test_streamable_http_app_deprecation_warning():
         assert isinstance(app, Starlette)
 
 
-async def test_run_sse_async_deprecation_warning():
-    """Test that run_sse_async raises a deprecation warning."""
-    server = FastMCP("TestServer")
-
-    # Use patch to avoid actually running the server
-    with patch.object(server, "run_http_async", new_callable=AsyncMock) as mock_run:
-        with pytest.warns(
-            DeprecationWarning, match="The run_sse_async method is deprecated"
-        ):
-            await server.run_sse_async()
-
-        # Verify the mock was called with the right transport
-        mock_run.assert_called_once()
-        call_kwargs = mock_run.call_args.kwargs
-        assert call_kwargs.get("transport") == "sse"
-
-
 async def test_run_streamable_http_async_deprecation_warning():
     """Test that run_streamable_http_async raises a deprecation warning."""
     server = FastMCP("TestServer")

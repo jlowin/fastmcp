@@ -404,10 +404,10 @@ async def async_echo(text: str) -> str:
 
         # Mock the async run method
         with patch.object(
-            FastMCP1x, "run_sse_async", new_callable=AsyncMock
+            FastMCP1x, "run_http_async", new_callable=AsyncMock
         ) as run_mock:
             await run_command(str(test_file), transport="sse")
-            run_mock.assert_called_once()
+            run_mock.assert_called_once_with(transport="sse")
 
     async def test_run_v1_server_default_transport(self, tmp_path):
         """Test that v1 server uses streamable-http by default."""
