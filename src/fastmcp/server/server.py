@@ -2053,34 +2053,6 @@ class FastMCP(Generic[LifespanResultT]):
 
                 await server.serve()
 
-    async def run_sse_async(
-        self,
-        host: str | None = None,
-        port: int | None = None,
-        log_level: str | None = None,
-        path: str | None = None,
-        uvicorn_config: dict[str, Any] | None = None,
-    ) -> None:
-        """Run the server using SSE transport."""
-
-        # Deprecated since 2.3.2
-        if fastmcp.settings.deprecation_warnings:
-            warnings.warn(
-                "The run_sse_async method is deprecated (as of 2.3.2). Use run_http_async for a "
-                "modern (non-SSE) alternative, or create an SSE app with "
-                "`fastmcp.server.http.create_sse_app` and run it directly.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-        await self.run_http_async(
-            transport="sse",
-            host=host,
-            port=port,
-            log_level=log_level,
-            path=path,
-            uvicorn_config=uvicorn_config,
-        )
-
     def streamable_http_app(
         self,
         path: str | None = None,
