@@ -1531,44 +1531,6 @@ class FastMCP(Generic[LifespanResultT]):
 
         return template
 
-    def add_resource_fn(
-        self,
-        fn: AnyFunction,
-        uri: str,
-        name: str | None = None,
-        description: str | None = None,
-        mime_type: str | None = None,
-        tags: set[str] | None = None,
-    ) -> None:
-        """Add a resource or template to the server from a function.
-
-        If the URI contains parameters (e.g. "resource://{param}") or the function
-        has parameters, it will be registered as a template resource.
-
-        Args:
-            fn: The function to register as a resource
-            uri: The URI for the resource
-            name: Optional name for the resource
-            description: Optional description of the resource
-            mime_type: Optional MIME type for the resource
-            tags: Optional set of tags for categorizing the resource
-        """
-        # deprecated since 2.7.0
-        if fastmcp.settings.deprecation_warnings:
-            warnings.warn(
-                "The add_resource_fn method is deprecated. Use the resource decorator instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-        self._resource_manager.add_resource_or_template_from_fn(
-            fn=fn,
-            uri=uri,
-            name=name,
-            description=description,
-            mime_type=mime_type,
-            tags=tags,
-        )
-
     def resource(
         self,
         uri: str,
