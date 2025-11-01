@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 import contextlib
-from typing import TYPE_CHECKING
+import inspect
+from collections.abc import AsyncGenerator, Callable
+from contextlib import AsyncExitStack, asynccontextmanager
+from functools import lru_cache
+from typing import TYPE_CHECKING, Any, get_type_hints
 
+from docket.dependencies import _Depends, get_dependency_parameters
 from mcp.server.auth.middleware.auth_context import (
     get_access_token as _sdk_get_access_token,
 )
@@ -12,6 +17,7 @@ from mcp.server.auth.provider import (
 from starlette.requests import Request
 
 from fastmcp.server.auth import AccessToken
+from fastmcp.utilities.types import is_class_member_of_type
 
 if TYPE_CHECKING:
     from fastmcp.server.context import Context
@@ -22,10 +28,202 @@ __all__ = [
     "get_context",
     "get_http_headers",
     "get_http_request",
+    "resolve_dependencies",
+    "without_injected_parameters",
 ]
 
 
-# --- Context ---
+def _find_kwarg_by_type(fn: Callable, kwarg_type: type) -> str | None:
+    """Find the name of the kwarg that is of type kwarg_type.
+
+    This is the legacy dependency injection approach, used specifically for
+    injecting the Context object when a function parameter is typed as Context.
+
+    Includes union types that contain the kwarg_type, as well as Annotated types.
+    """
+
+    if inspect.ismethod(fn) and hasattr(fn, "__func__"):
+        fn = fn.__func__
+
+    try:
+        type_hints = get_type_hints(fn, include_extras=True)
+    except Exception:
+        type_hints = getattr(fn, "__annotations__", {})
+
+    sig = inspect.signature(fn)
+    for name, param in sig.parameters.items():
+        annotation = type_hints.get(name, param.annotation)
+        if is_class_member_of_type(annotation, kwarg_type):
+            return name
+    return None
+
+
+@lru_cache(maxsize=5000)
+def without_injected_parameters(fn: Callable[..., Any]) -> Callable[..., Any]:
+    """Create a wrapper function without injected parameters.
+
+    Returns a wrapper that excludes Context and Docket dependency parameters,
+    making it safe to use with Pydantic TypeAdapter for schema generation and
+    validation. The wrapper internally handles all dependency resolution and
+    Context injection when called.
+
+    Args:
+        fn: Original function with Context and/or dependencies
+
+    Returns:
+        Async wrapper function without injected parameters
+    """
+    from fastmcp.server.context import Context
+
+    # Identify parameters to exclude
+    context_kwarg = _find_kwarg_by_type(fn, Context)
+    dependency_params = get_dependency_parameters(fn)
+
+    exclude = set()
+    if context_kwarg:
+        exclude.add(context_kwarg)
+    if dependency_params:
+        exclude.update(dependency_params.keys())
+
+    if not exclude:
+        return fn
+
+    # Build new signature with only user parameters
+    sig = inspect.signature(fn)
+    user_params = [
+        param for name, param in sig.parameters.items() if name not in exclude
+    ]
+    new_sig = inspect.Signature(user_params)
+
+    # Create async wrapper that handles dependency resolution
+    async def wrapper(**user_kwargs: Any) -> Any:
+        async with resolve_dependencies(fn, user_kwargs) as resolved_kwargs:
+            result = fn(**resolved_kwargs)
+            if inspect.isawaitable(result):
+                result = await result
+            return result
+
+    # Set wrapper metadata (only parameter annotations, not return type)
+    wrapper.__signature__ = new_sig  # type: ignore
+    wrapper.__annotations__ = {
+        k: v
+        for k, v in getattr(fn, "__annotations__", {}).items()
+        if k not in exclude and k != "return"
+    }
+    wrapper.__name__ = getattr(fn, "__name__", "wrapper")
+    wrapper.__doc__ = getattr(fn, "__doc__", None)
+
+    return wrapper
+
+
+@asynccontextmanager
+async def _resolve_fastmcp_dependencies(
+    fn: Callable[..., Any], arguments: dict[str, Any]
+) -> AsyncGenerator[dict[str, Any], None]:
+    """Resolve Docket dependencies for a FastMCP function.
+
+    Sets up the minimal context needed for Docket's Depends() to work:
+    - A cache for resolved dependencies
+    - An AsyncExitStack for managing context manager lifetimes
+
+    Note: This does NOT set up Docket's Execution context. If user code needs
+    Docket-specific dependencies like TaskArgument(), TaskKey(), etc., those
+    will fail with clear errors about missing context.
+
+    Args:
+        fn: The function to resolve dependencies for
+        arguments: The arguments passed to the function
+
+    Yields:
+        Dictionary of resolved dependencies merged with provided arguments
+    """
+    dependency_params = get_dependency_parameters(fn)
+
+    if not dependency_params:
+        yield arguments
+        return
+
+    # Initialize dependency cache and exit stack
+    cache_token = _Depends.cache.set({})
+    try:
+        async with AsyncExitStack() as stack:
+            stack_token = _Depends.stack.set(stack)
+            try:
+                resolved: dict[str, Any] = {}
+
+                for parameter, dependency in dependency_params.items():
+                    # If argument was explicitly provided, use that instead
+                    if parameter in arguments:
+                        resolved[parameter] = arguments[parameter]
+                        continue
+
+                    # Resolve the dependency
+                    try:
+                        resolved[parameter] = await stack.enter_async_context(
+                            dependency
+                        )
+                    except Exception as error:
+                        fn_name = getattr(fn, "__name__", repr(fn))
+                        raise RuntimeError(
+                            f"Failed to resolve dependency '{parameter}' for {fn_name}"
+                        ) from error
+
+                # Merge resolved dependencies with provided arguments
+                final_arguments = {**arguments, **resolved}
+
+                yield final_arguments
+            finally:
+                _Depends.stack.reset(stack_token)
+    finally:
+        _Depends.cache.reset(cache_token)
+
+
+@asynccontextmanager
+async def resolve_dependencies(
+    fn: Callable[..., Any], arguments: dict[str, Any]
+) -> AsyncGenerator[dict[str, Any], None]:
+    """Resolve dependencies and inject Context for a FastMCP function.
+
+    This function:
+    1. Filters out any dependency parameter names from user arguments (security)
+    2. Resolves Docket dependencies
+    3. Injects Context if needed
+    4. Merges everything together
+
+    The filtering prevents external callers from overriding injected parameters by
+    providing values for dependency parameter names. This is a security feature.
+
+    Args:
+        fn: The function to resolve dependencies for
+        arguments: User arguments (may contain keys that match dependency names,
+                  which will be filtered out)
+
+    Yields:
+        Dictionary of filtered user args + resolved dependencies + Context
+
+    Example:
+        ```python
+        async with resolve_dependencies(my_tool, {"name": "Alice"}) as kwargs:
+            result = my_tool(**kwargs)
+            if inspect.isawaitable(result):
+                result = await result
+        ```
+    """
+    from fastmcp.server.context import Context
+
+    # Filter out dependency parameters from user arguments to prevent override
+    # This is a security measure - external callers should never be able to
+    # provide values for injected parameters
+    dependency_params = get_dependency_parameters(fn)
+    user_args = {k: v for k, v in arguments.items() if k not in dependency_params}
+
+    async with _resolve_fastmcp_dependencies(fn, user_args) as resolved_kwargs:
+        # Inject Context if needed
+        context_kwarg = _find_kwarg_by_type(fn, kwarg_type=Context)
+        if context_kwarg and context_kwarg not in resolved_kwargs:
+            resolved_kwargs[context_kwarg] = get_context()
+
+        yield resolved_kwargs
 
 
 def get_context() -> Context:
@@ -35,9 +233,6 @@ def get_context() -> Context:
     if context is None:
         raise RuntimeError("No active context found.")
     return context
-
-
-# --- HTTP Request ---
 
 
 def get_http_request() -> Request:
@@ -96,9 +291,6 @@ def get_http_headers(include_all: bool = False) -> dict[str, str]:
         return headers
     except RuntimeError:
         return {}
-
-
-# --- Access Token ---
 
 
 def get_access_token() -> AccessToken | None:
