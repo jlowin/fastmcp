@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import inspect
-import json
 import re
 import secrets
 import warnings
@@ -157,7 +156,6 @@ class FastMCP(Generic[LifespanResultT]):
         auth: AuthProvider | NotSetT | None = NotSet,
         middleware: Sequence[Middleware] | None = None,
         lifespan: LifespanCallable | None = None,
-        dependencies: list[str] | None = None,
         resource_prefix_format: Literal["protocol", "path"] | None = None,
         mask_error_details: bool | None = None,
         tools: Sequence[Tool | Callable[..., Any]] | None = None,
@@ -257,24 +255,6 @@ class FastMCP(Generic[LifespanResultT]):
 
         # Set up MCP protocol handlers
         self._setup_handlers()
-
-        # Handle dependencies with deprecation warning
-        # TODO: Remove dependencies parameter (deprecated in v2.11.4)
-        if dependencies is not None:
-            import warnings
-
-            warnings.warn(
-                "The 'dependencies' parameter is deprecated as of FastMCP 2.11.4 and will be removed in a future version. "
-                "Please specify dependencies in a fastmcp.json configuration file instead:\n"
-                '{\n  "entrypoint": "your_server.py",\n  "environment": {\n    "dependencies": '
-                f"{json.dumps(dependencies)}\n  }}\n}}\n"
-                "See https://gofastmcp.com/docs/deployment/server-configuration for more information.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-        self.dependencies: list[str] = (
-            dependencies or fastmcp.settings.server_dependencies
-        )  # TODO: Remove (deprecated in v2.11.4)
 
         self.sampling_handler: ServerSamplingHandler[LifespanResultT] | None = (
             sampling_handler
@@ -2052,86 +2032,6 @@ class FastMCP(Generic[LifespanResultT]):
                 )
 
                 await server.serve()
-
-    async def run_sse_async(
-        self,
-        host: str | None = None,
-        port: int | None = None,
-        log_level: str | None = None,
-        path: str | None = None,
-        uvicorn_config: dict[str, Any] | None = None,
-    ) -> None:
-        """Run the server using SSE transport."""
-
-        # Deprecated since 2.3.2
-        if fastmcp.settings.deprecation_warnings:
-            warnings.warn(
-                "The run_sse_async method is deprecated (as of 2.3.2). Use run_http_async for a "
-                "modern (non-SSE) alternative, or create an SSE app with "
-                "`fastmcp.server.http.create_sse_app` and run it directly.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-        await self.run_http_async(
-            transport="sse",
-            host=host,
-            port=port,
-            log_level=log_level,
-            path=path,
-            uvicorn_config=uvicorn_config,
-        )
-
-    def sse_app(
-        self,
-        path: str | None = None,
-        message_path: str | None = None,
-        middleware: list[ASGIMiddleware] | None = None,
-    ) -> StarletteWithLifespan:
-        """
-        Create a Starlette app for the SSE server.
-
-        Args:
-            path: The path to the SSE endpoint
-            message_path: The path to the message endpoint
-            middleware: A list of middleware to apply to the app
-        """
-        # Deprecated since 2.3.2
-        if fastmcp.settings.deprecation_warnings:
-            warnings.warn(
-                "The sse_app method is deprecated (as of 2.3.2). Use http_app as a modern (non-SSE) "
-                "alternative, or call `fastmcp.server.http.create_sse_app` directly.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-        return create_sse_app(
-            server=self,
-            message_path=message_path or self._deprecated_settings.message_path,
-            sse_path=path or self._deprecated_settings.sse_path,
-            auth=self.auth,
-            debug=self._deprecated_settings.debug,
-            middleware=middleware,
-        )
-
-    def streamable_http_app(
-        self,
-        path: str | None = None,
-        middleware: list[ASGIMiddleware] | None = None,
-    ) -> StarletteWithLifespan:
-        """
-        Create a Starlette app for the StreamableHTTP server.
-
-        Args:
-            path: The path to the StreamableHTTP endpoint
-            middleware: A list of middleware to apply to the app
-        """
-        # Deprecated since 2.3.2
-        if fastmcp.settings.deprecation_warnings:
-            warnings.warn(
-                "The streamable_http_app method is deprecated (as of 2.3.2). Use http_app() instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-        return self.http_app(path=path, middleware=middleware)
 
     def http_app(
         self,
