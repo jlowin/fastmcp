@@ -178,7 +178,6 @@ class TestDeprecatedServerInitKwargs:
                 on_duplicate_tools="warn",
                 on_duplicate_resources="error",
                 on_duplicate_prompts="replace",
-                resource_prefix_format="path",
                 mask_error_details=True,
             )
 
