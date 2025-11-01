@@ -2483,23 +2483,6 @@ class FastMCP(Generic[LifespanResultT]):
 
         return FastMCPProxy(client_factory=client_factory, **settings)
 
-    @classmethod
-    def from_client(
-        cls, client: Client[ClientTransportT], **settings: Any
-    ) -> FastMCPProxy:
-        """
-        Create a FastMCP proxy server from a FastMCP client.
-        """
-        # Deprecated since 2.3.5
-        if fastmcp.settings.deprecation_warnings:
-            warnings.warn(
-                "FastMCP.from_client() is deprecated; use FastMCP.as_proxy() instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
-        return cls.as_proxy(client, **settings)
-
     def _should_enable_component(
         self,
         component: FastMCPComponent,
