@@ -41,7 +41,7 @@ FastMCP supports [MCP proxying](/servers/proxy), which allows you to mirror a lo
 
 You can also create proxies from configuration dictionaries that follow the MCPConfig schema, which is useful for quickly connecting to one or more remote servers. See the [Proxy Servers documentation](/servers/proxy#configuration-based-proxies) for details on configuration-based proxying. Note that MCPConfig follows an emerging standard and its format may evolve over time.
 
-Prefixing rules for tools, prompts, resources, and templates are identical across importing, mounting, and proxies. When prefixes are used, resource URIs are prefixed using path format (`resource://prefix/path/to/resource`).
+Prefixing rules for tools, prompts, resources, and templates are identical across importing, mounting, and proxies. When prefixes are used, resource URIs are prefixed using path format (since 2.4.0): `resource://prefix/path/to/resource`.
 
 ## Importing (Static Composition)
 
