@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.10"
 resolution-markers = [
     "python_full_version >= '3.11'",
@@ -639,22 +639,22 @@ dev = [
     { name = "fastmcp", extras = ["openai"] },
     { name = "inline-snapshot", extras = ["dirty-equals"], specifier = ">=0.27.2" },
     { name = "ipython", specifier = ">=8.12.3" },
-    { name = "pdbpp", specifier = ">=0.10.3" },
+    { name = "pdbpp", specifier = ">=0.11.7" },
     { name = "prek", specifier = ">=0.2.12" },
-    { name = "psutil" },
+    { name = "psutil", specifier = ">=7.0.0" },
     { name = "pyinstrument", specifier = ">=5.0.2" },
     { name = "pyperclip", specifier = ">=1.9.0" },
     { name = "pytest", specifier = ">=8.3.3" },
     { name = "pytest-asyncio", specifier = ">=1.2.0" },
     { name = "pytest-cov", specifier = ">=6.1.1" },
     { name = "pytest-env", specifier = ">=1.1.5" },
-    { name = "pytest-flakefinder" },
+    { name = "pytest-flakefinder", specifier = ">=1.1.0" },
     { name = "pytest-httpx", specifier = ">=0.35.0" },
     { name = "pytest-report", specifier = ">=0.2.1" },
     { name = "pytest-retry", specifier = ">=1.7.0" },
     { name = "pytest-timeout", specifier = ">=2.4.0" },
     { name = "pytest-xdist", specifier = ">=3.6.1" },
-    { name = "ruff" },
+    { name = "ruff", specifier = ">=0.12.8" },
     { name = "ty", specifier = ">=0.0.1a19" },
 ]
 
