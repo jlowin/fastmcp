@@ -7,15 +7,16 @@ dependencies = [
     "python-dotenv>=1.1.0",
     "exceptiongroup>=1.2.2",
     "httpx>=0.28.1",
-    "mcp>=1.17.0,<2.0.0",
+    "mcp>=1.19.0,<2.0.0",
     "openapi-pydantic>=0.5.1",
     "platformdirs>=4.0.0",
     "rich>=13.9.4",
     "cyclopts>=3.0.0",
-    "authlib>=1.5.2",
+    "authlib>=1.6.5",
     "pydantic[email]>=2.11.7",
     "pyperclip>=1.9.0",
     "py-key-value-aio[disk,keyring,memory]>=0.2.8,<0.3.0",
+    "uvicorn>=0.35",
     "websockets>=15.0.1",
     "jsonschema-path>=0.3.4",
 ]
@@ -56,7 +57,6 @@ dev = [
     "inline-snapshot[dirty-equals]>=0.27.2",
     "ipython>=8.12.3",
     "pdbpp>=0.11.7",
-    "pre-commit>=4.3.0",
     "psutil>=7.0.0",
     "pyinstrument>=5.0.2",
     "pyperclip>=1.9.0",
@@ -72,6 +72,7 @@ dev = [
     "pytest-xdist>=3.6.1",
     "ruff>=0.12.8",
     "ty>=0.0.1a19",
+    "prek>=0.2.12",
 ]
 
 [project.scripts]
@@ -102,6 +103,11 @@ fallback-version = "0.0.0"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 # filterwarnings = ["error::DeprecationWarning"]
+filterwarnings = [
+    # Suppress OAuth in-memory token storage warnings in tests
+    # Tests intentionally use ephemeral storage; this warning is for end users
+    "ignore:Using in-memory token storage:UserWarning",
+]
 timeout = 5
 env = [
     "FASTMCP_TEST_MODE=1",
