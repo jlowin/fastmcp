@@ -1,5 +1,6 @@
 """Integration tests for Keycloak OAuth provider."""
 
+import asyncio
 import os
 from unittest.mock import AsyncMock, Mock, patch
 from urllib.parse import parse_qs, urlparse
@@ -95,7 +96,9 @@ class TestKeycloakProviderIntegration:
             mcp_http_app = mcp.http_app()
 
             # Mock the actual HTTP client post method
-            with patch("httpx.AsyncClient.post") as mock_post:
+            with patch(
+                "fastmcp.server.auth.providers.keycloak.httpx.AsyncClient.post"
+            ) as mock_post:
                 # Mock Keycloak's response to client registration
                 mock_keycloak_response = Mock()
                 mock_keycloak_response.status_code = 201
@@ -288,7 +291,9 @@ class TestKeycloakProviderIntegration:
             mcp_http_app = mcp.http_app()
 
             # Mock concurrent Keycloak responses
-            with patch("httpx.AsyncClient") as mock_client_class:
+            with patch(
+                "fastmcp.server.auth.providers.keycloak.httpx.AsyncClient"
+            ) as mock_client_class:
                 mock_client = AsyncMock()
                 mock_client_class.return_value.__aenter__.return_value = mock_client
 
@@ -318,8 +323,6 @@ class TestKeycloakProviderIntegration:
                     transport=httpx.ASGITransport(app=mcp_http_app),
                     base_url=TEST_BASE_URL,
                 ) as client:
-                    import asyncio
-
                     registration_data = [
                         {
                             "redirect_uris": [f"http://localhost:800{i}/callback"],

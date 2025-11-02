@@ -17,13 +17,13 @@ Review the realm configuration file: [`keycloak/realm-fastmcp.json`](keycloak/re
 
 Choose one of the following options:
 
-**Option A: Local Keycloak Instance (Recommended for Testing)**
+#### Option A: Local Keycloak Instance (Recommended for Testing)
 
 See [keycloak/README.md](keycloak/README.md) for details.
 
-**Note:** The realm will be automatically imported on startup. 
+**Note:** The realm will be automatically imported on startup.
 
-**Option B: Existing Keycloak Instance**
+#### Option B: Existing Keycloak Instance
 
 Manually import the realm:
 - Log in to your Keycloak Admin Console

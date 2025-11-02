@@ -105,8 +105,8 @@ docker-compose logs -f keycloak
 2. **Realm not found**
    - Verify realm import: Check admin console at [http://localhost:8080/admin](http://localhost:8080/admin)
    - Check realm file exists:
-     - Linux/macOS: `ls keycloak/realm-fastmcp.json`
-     - Windows: `dir keycloak\realm-fastmcp.json`
+     - Linux/macOS: `ls realm-fastmcp.json`
+     - Windows: `dir realm-fastmcp.json`
 
 3. **Client registration failed**
    - Verify the request comes from a trusted host

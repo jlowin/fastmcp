@@ -24,16 +24,18 @@ configure_logging(level="INFO")
 
 load_dotenv(".env", override=True)
 
+realm_url = os.getenv(
+    "FASTMCP_SERVER_AUTH_KEYCLOAK_REALM_URL", "http://localhost:8080/realms/fastmcp"
+)
+base_url = os.getenv("FASTMCP_SERVER_AUTH_KEYCLOAK_BASE_URL", "http://localhost:8000")
+required_scopes = os.getenv(
+    "FASTMCP_SERVER_AUTH_KEYCLOAK_REQUIRED_SCOPES", "openid,profile"
+)
+
 auth = KeycloakAuthProvider(
-    realm_url=os.getenv(
-        "FASTMCP_SERVER_AUTH_KEYCLOAK_REALM_URL", "http://localhost:8080/realms/fastmcp"
-    ),
-    base_url=os.getenv(
-        "FASTMCP_SERVER_AUTH_KEYCLOAK_BASE_URL", "http://localhost:8000"
-    ),
-    required_scopes=os.getenv(
-        "FASTMCP_SERVER_AUTH_KEYCLOAK_REQUIRED_SCOPES", "openid,profile"
-    ).split(","),
+    realm_url=realm_url,
+    base_url=base_url,
+    required_scopes=required_scopes,
 )
 
 mcp = FastMCP("Keycloak OAuth Example Server", auth=auth)

@@ -262,12 +262,16 @@ class KeycloakAuthProvider(RemoteAuthProvider):
 
                 # Add the server's required scopes to the client registration data
                 if self.token_verifier.required_scopes:
+                    scopes = parse_scopes(registration_data.get("scope")) or []
+                    merged_scopes = scopes + [
+                        scope
+                        for scope in self.token_verifier.required_scopes
+                        if scope not in scopes
+                    ]
                     logger.info(
-                        f"Adding server-configured required scopes to client registration data: {self.token_verifier.required_scopes}"
+                        f"Merging server-configured required scopes with client-requested scopes: {merged_scopes}"
                     )
-                    registration_data["scope"] = " ".join(
-                        self.token_verifier.required_scopes
-                    )
+                    registration_data["scope"] = " ".join(merged_scopes)
                     # Update the body with modified client registration data
                     body = json.dumps(registration_data).encode("utf-8")
 
@@ -355,13 +359,20 @@ class KeycloakAuthProvider(RemoteAuthProvider):
 
                 # Add server-configured required scopes to the authorization request
                 query_params = dict(request.query_params)
-                if "scope" not in query_params and self.token_verifier.required_scopes:
-                    logger.info(
-                        f"Adding server-configured required scopes to authorization request: {self.token_verifier.required_scopes}"
-                    )
-                    query_params["scope"] = " ".join(
-                        self.token_verifier.required_scopes
-                    )
+                if self.token_verifier.required_scopes:
+                    existing_scopes = parse_scopes(query_params.get("scope")) or []
+                    missing_scopes = [
+                        scope
+                        for scope in self.token_verifier.required_scopes
+                        if scope not in existing_scopes
+                    ]
+                    if missing_scopes:
+                        logger.info(
+                            f"Adding server-configured required scopes to authorization request: {missing_scopes}"
+                        )
+                        query_params["scope"] = " ".join(
+                            existing_scopes + missing_scopes
+                        )
 
                 # Build authorization request URL for redirecting to Keycloak and including the (potentially modified) query string
                 authorization_url = str(self.oidc_config.authorization_endpoint)
