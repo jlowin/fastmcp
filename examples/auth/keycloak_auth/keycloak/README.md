@@ -25,11 +25,11 @@ This script will:
 
 The Docker setup automatically imports a preconfigured realm configured for dynamic client registration. The default settings are described below and can be adjusted or complemented as needed by editing the [`realm-fastmcp.json`](realm-fastmcp.json) file before starting Keycloak. If settings are changed after Keycloak has been started, restart Keycloak with
 
-```
+```bash
 docker-compose restart
 ```
 
-to apply the changes. 
+to apply the changes.
 
 ### Realm: `fastmcp`
 
@@ -127,4 +127,5 @@ docker-compose logs -f keycloak
      # Or clear all OAuth cache data
      FileTokenStorage.clear_all()
      ```
+
    - After clearing the cache, run your client again to automatically re-register with Keycloak

@@ -280,11 +280,19 @@ class KeycloakAuthProvider(RemoteAuthProvider):
                     logger.info(
                         f"Forwarding client registration to Keycloak: {self.oidc_config.registration_endpoint}"
                     )
+                    # Forward all headers except Host (to avoid routing issues)
+                    forward_headers = {
+                        key: value
+                        for key, value in request.headers.items()
+                        if key.lower() != "host"
+                    }
+                    # Ensure Content-Type is set correctly for our JSON body
+                    forward_headers["Content-Type"] = "application/json"
+
                     response = await client.post(
                         self.oidc_config.registration_endpoint,
                         content=body,
-                        # Set headers explicitly to avoid forwarding host/authorization that might conflict
-                        headers={"Content-Type": "application/json"},
+                        headers=forward_headers,
                     )
 
                     if response.status_code != 201:

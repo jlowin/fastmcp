@@ -51,6 +51,9 @@ def echo(message: str) -> str:
 async def get_access_token_claims() -> dict:
     """Get the authenticated user's access token claims."""
     token = get_access_token()
+    if token is None or token.claims is None:
+        raise RuntimeError("No valid access token found. Authentication required.")
+
     return {
         "sub": token.claims.get("sub"),
         "name": token.claims.get("name"),
