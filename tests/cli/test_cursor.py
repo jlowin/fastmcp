@@ -164,20 +164,22 @@ class TestOpenDeeplink:
         """Test handling of deeplink opening failure."""
         import subprocess
 
-        mock_run.side_effect = subprocess.CalledProcessError(1, ["open"])
+        with patch("sys.platform", "darwin"):
+            mock_run.side_effect = subprocess.CalledProcessError(1, ["open"])
 
-        result = open_deeplink("cursor://test")
+            result = open_deeplink("cursor://test")
 
-        assert result is False
+            assert result is False
 
     @patch("subprocess.run")
     def test_open_deeplink_command_not_found(self, mock_run):
         """Test handling when open command is not found."""
-        mock_run.side_effect = FileNotFoundError()
+        with patch("sys.platform", "darwin"):
+            mock_run.side_effect = FileNotFoundError()
 
-        result = open_deeplink("cursor://test")
+            result = open_deeplink("cursor://test")
 
-        assert result is False
+            assert result is False
 
     def test_open_deeplink_invalid_scheme(self):
         """Test that non-cursor:// URLs are rejected."""
