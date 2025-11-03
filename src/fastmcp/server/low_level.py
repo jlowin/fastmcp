@@ -72,7 +72,7 @@ class MiddlewareServerSession(ServerSession):
             ) as fastmcp_ctx:
                 # Create the middleware context.
                 mw_context = MiddlewareContext(
-                    message=responder.request.root.params,
+                    message=responder.request.root,
                     source="client",
                     type="request",
                     method="initialize",
