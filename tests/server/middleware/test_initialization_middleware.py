@@ -249,3 +249,40 @@ async def test_initialization_middleware_with_state_sharing():
         # This test shows the pattern, but actual cross-request state would need
         # external storage (Redis, DB, etc.)
         # The middleware.tool_state might be None if state doesn't persist
+
+
+async def test_session_id_available_in_on_initialize():
+    """Test that session_id is accessible in on_initialize.
+    """
+    server = FastMCP("TestServer")
+    
+    class SessionIdMiddleware(Middleware):
+        def __init__(self):
+            super().__init__()
+            self.session_id = None
+        
+        async def on_initialize(
+            self,
+            context: MiddlewareContext[mt.InitializeRequest],
+            call_next: CallNext[mt.InitializeRequest, None],
+        ) -> None:
+            # Access session_id
+            self.session_id = context.fastmcp_context.session_id
+            return await call_next(context)
+    
+    middleware = SessionIdMiddleware()
+    server.add_middleware(middleware)
+    
+    @server.tool
+    def test_tool() -> str:
+        return "test"
+    
+    async with Client(server) as client:
+        # Middleware should have captured session_id during initialization
+        assert middleware.session_id is not None, "session_id should be available in on_initialize"
+        assert isinstance(middleware.session_id, str), "session_id should be a string"
+        assert len(middleware.session_id) > 0, "session_id should not be empty"
+        
+        # Verify the tool still works
+        result = await client.call_tool("test_tool", {})
+        assert result.content[0].text == "test"  # type: ignore[attr-defined]
