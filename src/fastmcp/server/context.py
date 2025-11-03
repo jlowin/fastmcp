@@ -143,10 +143,19 @@ class Context:
     The context parameter name can be anything as long as it's annotated with Context.
     The context is optional - tools that don't need it can omit the parameter.
 
+    Args:
+        fastmcp: The FastMCP instance this context is associated with.
+        session: Optional ServerSession to use when request_context is not available.
+            This is used when creating a Context outside of a normal MCP request,
+            such as in on_initialize middleware where the request_context ContextVar
+            has not been set yet.
+
     """
 
-    def __init__(self, fastmcp: FastMCP):
+    def __init__(self, fastmcp: FastMCP, session: ServerSession | None = None):
         self._fastmcp: weakref.ref[FastMCP] = weakref.ref(fastmcp)
+        # The session can be manually set when creating a context outside of a mcp request
+        self._session: ServerSession | None = session
         self._tokens: list[Token] = []
         self._notification_queue: set[str] = set()  # Dedupe notifications
         self._state: dict[str, Any] = {}
@@ -322,8 +331,7 @@ class Context:
                 return f"Data stored for session {session_id}"
             ```
         """
-        request_ctx = self.request_context
-        session = request_ctx.session
+        session = self.session
 
         # Try to get the session ID from the session attributes
         session_id = getattr(session, "_fastmcp_id", None)
@@ -331,9 +339,15 @@ class Context:
             return session_id
 
         # Try to get the session ID from the http request headers
-        request = request_ctx.request
-        if request:
-            session_id = request.headers.get("mcp-session-id")
+        try:
+            request_ctx = self.request_context
+            request = request_ctx.request
+            if request:
+                session_id = request.headers.get("mcp-session-id")
+        except ValueError:
+            # request_context not available when Context is created outside
+            # of a normal MCP request (e.g., in on_initialize middleware)
+            pass
 
         # Generate a session ID if it doesn't exist.
         if session_id is None:
@@ -348,6 +362,11 @@ class Context:
     @property
     def session(self) -> ServerSession:
         """Access to the underlying session for advanced usage."""
+        # Try to get session from direct reference (for example on_initialize)
+        if self._session is not None:
+            return self._session
+        
+        # Otherwise get from request context (for normal requests)
         return self.request_context.session
 
     # Convenience methods for common log levels
