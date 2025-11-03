@@ -240,6 +240,7 @@ class Client(Generic[ClientTransportT]):
 
         self._progress_handler = progress_handler
 
+        # Convert timeout to timedelta if needed
         if isinstance(timeout, int | float):
             timeout = datetime.timedelta(seconds=float(timeout))
 
@@ -259,7 +260,7 @@ class Client(Generic[ClientTransportT]):
             "list_roots_callback": None,
             "logging_callback": create_log_callback(log_handler),
             "message_handler": message_handler,
-            "read_timeout_seconds": timeout,
+            "read_timeout_seconds": timeout,  # ty: ignore[invalid-argument-type]
             "client_info": client_info,
         }
 
@@ -852,12 +853,13 @@ class Client(Generic[ClientTransportT]):
         """
         logger.debug(f"[{self.name}] called call_tool: {name}")
 
+        # Convert timeout to timedelta if needed
         if isinstance(timeout, int | float):
             timeout = datetime.timedelta(seconds=float(timeout))
         result = await self.session.call_tool(
             name=name,
             arguments=arguments,
-            read_timeout_seconds=timeout,
+            read_timeout_seconds=timeout,  # ty: ignore[invalid-argument-type]
             progress_callback=progress_handler or self._progress_handler,
         )
         return result
@@ -928,6 +930,7 @@ class Client(Generic[ClientTransportT]):
         return CallToolResult(
             content=result.content,
             structured_content=result.structuredContent,
+            meta=result.meta,
             data=data,
             is_error=result.isError,
         )
@@ -945,5 +948,6 @@ class Client(Generic[ClientTransportT]):
 class CallToolResult:
     content: list[mcp.types.ContentBlock]
     structured_content: dict[str, Any] | None
+    meta: dict[str, Any] | None
     data: Any = None
     is_error: bool = False
