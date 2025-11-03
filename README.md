@@ -143,6 +143,8 @@ uv pip install fastmcp
 
 For full installation instructions, including verification, upgrading from the official MCPSDK, and developer setup, see the [**Installation Guide**](https://gofastmcp.com/getting-started/installation).
 
+**Dependency Licensing:** FastMCP depends on Cyclopts for CLI functionality. Cyclopts v4 includes docutils as a transitive dependency, which has complex licensing. FastMCP does not use any of the licensed code directly. However, if this is a concern for your organization, you can install Cyclopts v5 alpha (`pip install "cyclopts>=5.0.0a1"`) which removes this dependency, or wait for the stable v5 release.
+
 ## Core Concepts
 
 These are the building blocks for creating MCP servers and clients with FastMCP.
