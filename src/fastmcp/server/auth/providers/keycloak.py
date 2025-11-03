@@ -281,11 +281,13 @@ class KeycloakAuthProvider(RemoteAuthProvider):
                     logger.info(
                         f"Forwarding client registration to Keycloak: {self.oidc_config.registration_endpoint}"
                     )
-                    # Forward all headers except Host (to avoid routing issues)
+                    # Forward all headers except Host and hop-by-hop headers
+                    # Exclude Content-Length so httpx can recompute it for the modified body
                     forward_headers = {
                         key: value
                         for key, value in request.headers.items()
-                        if key.lower() != "host"
+                        if key.lower()
+                        not in {"host", "content-length", "transfer-encoding"}
                     }
                     # Ensure Content-Type is set correctly for our JSON body
                     forward_headers["Content-Type"] = "application/json"
@@ -382,9 +384,12 @@ class KeycloakAuthProvider(RemoteAuthProvider):
                 )
 
                 # Add server-configured required scopes to the authorization request
-                query_params = dict(request.query_params)
+                # Use multi_items() to preserve duplicate query parameters (e.g., multiple 'resource' per RFC 8707)
+                query_items = list(request.query_params.multi_items())
                 if self.token_verifier.required_scopes:
-                    existing_scopes = parse_scopes(query_params.get("scope")) or []
+                    existing_scopes = (
+                        parse_scopes(request.query_params.get("scope")) or []
+                    )
                     missing_scopes = [
                         scope
                         for scope in self.token_verifier.required_scopes
@@ -394,13 +399,14 @@ class KeycloakAuthProvider(RemoteAuthProvider):
                         logger.info(
                             f"Adding server-configured required scopes to authorization request: {missing_scopes}"
                         )
-                        query_params["scope"] = " ".join(
-                            existing_scopes + missing_scopes
-                        )
+                        scope_value = " ".join(existing_scopes + missing_scopes)
+                        # Remove existing scope parameter and add the updated one
+                        query_items = [(k, v) for k, v in query_items if k != "scope"]
+                        query_items.append(("scope", scope_value))
 
                 # Build authorization request URL for redirecting to Keycloak and including the (potentially modified) query string
                 authorization_url = str(self.oidc_config.authorization_endpoint)
-                query_string = urlencode(query_params)
+                query_string = urlencode(query_items)
                 if query_string:
                     authorization_url += f"?{query_string}"
 
