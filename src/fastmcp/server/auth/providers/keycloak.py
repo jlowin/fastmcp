@@ -148,6 +148,13 @@ class KeycloakAuthProvider(RemoteAuthProvider):
                 required_scopes=settings.required_scopes,
                 audience=None,  # Allow any audience for dynamic client registration
             )
+        elif settings.required_scopes is not None:
+            # Merge provider-level required scopes into custom verifier
+            existing_scopes = list(token_verifier.required_scopes or [])
+            for scope in settings.required_scopes:
+                if scope not in existing_scopes:
+                    existing_scopes.append(scope)
+            token_verifier.required_scopes = existing_scopes
 
         # Initialize RemoteAuthProvider with FastMCP as the authorization server proxy
         super().__init__(
