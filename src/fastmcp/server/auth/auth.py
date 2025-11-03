@@ -294,15 +294,11 @@ class OAuthProvider(
             required_scopes: Scopes that are required for all requests.
         """
 
-        # Convert URLs to proper types
-        if isinstance(base_url, str):
-            base_url = AnyHttpUrl(base_url)
-
         super().__init__(base_url=base_url, required_scopes=required_scopes)
-        self.base_url = base_url
+        assert isinstance(self.base_url, AnyHttpUrl)
 
         if issuer_url is None:
-            self.issuer_url = base_url
+            self.issuer_url = self.base_url
         elif isinstance(issuer_url, str):
             self.issuer_url = AnyHttpUrl(issuer_url)
         else:
@@ -349,8 +345,10 @@ class OAuthProvider(
 
         # Create standard OAuth authorization server routes
         # Pass base_url as issuer_url to ensure metadata declares endpoints where
-        # they're actually accessible (operational routes are mounted at base_url)
-        assert self.base_url is not None, "base_url is required"
+        # they're actually accessible (operational routes are mounted at
+        # base_url)
+        assert self.base_url is not None  # typing check
+
         oauth_routes = create_auth_routes(
             provider=self,
             issuer_url=self.base_url,
