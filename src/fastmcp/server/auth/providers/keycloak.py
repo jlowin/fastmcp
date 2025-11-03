@@ -141,8 +141,12 @@ class KeycloakAuthProvider(RemoteAuthProvider):
         # Create default JWT verifier if none provided
         if token_verifier is None:
             token_verifier = JWTVerifier(
-                jwks_uri=self.oidc_config.jwks_uri,
-                issuer=self.oidc_config.issuer,
+                jwks_uri=str(self.oidc_config.jwks_uri)
+                if self.oidc_config.jwks_uri
+                else None,
+                issuer=str(self.oidc_config.issuer)
+                if self.oidc_config.issuer
+                else None,
                 algorithm="RS256",
                 required_scopes=settings.required_scopes,
                 audience=None,  # Allow any audience for dynamic client registration
@@ -290,7 +294,7 @@ class KeycloakAuthProvider(RemoteAuthProvider):
                     forward_headers["Content-Type"] = "application/json"
 
                     response = await client.post(
-                        self.oidc_config.registration_endpoint,
+                        str(self.oidc_config.registration_endpoint),
                         content=body,
                         headers=forward_headers,
                     )
