@@ -270,14 +270,7 @@ async with client:
     tools = await client.list_tools()
 ```
 
-The `initialize()` method is idempotent - calling it multiple times returns the cached result from the first successful call. You can also use it to access initialization details with a shorter syntax:
-
-```python
-async with Client(mcp) as client:
-    # Access initialization result directly
-    result = await client.initialize()
-    print(f"Protocol version: {result.protocolVersion}")
-```
+The `initialize()` method is idempotent - calling it multiple times returns the cached result from the first successful call.
 
 ## Client Configuration
 
