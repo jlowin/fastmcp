@@ -23,10 +23,11 @@ from fastmcp.server.auth.providers.keycloak import KeycloakAuthProvider
 from fastmcp.server.dependencies import get_access_token
 from fastmcp.utilities.logging import configure_logging
 
+# Load environment overrides before configuring logging
+load_dotenv(".env", override=True)
+
 # Configure FastMCP logging to INFO
 configure_logging(level="INFO")
-
-load_dotenv(".env", override=True)
 
 realm_url = os.getenv(
     "FASTMCP_SERVER_AUTH_KEYCLOAK_REALM_URL", "http://localhost:8080/realms/fastmcp"
