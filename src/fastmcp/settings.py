@@ -89,7 +89,25 @@ class ExperimentalSettings(BaseSettings):
                 """
                 Enable experimental Docket support for background task execution.
                 When enabled, FastMCP will create a Docket instance with a Worker
-                to process background tasks.
+                available via dependency injection. This allows tools, prompts, and
+                resources to schedule background work using CurrentDocket().
+                """
+            ),
+        ),
+    ] = False
+
+    enable_tasks: Annotated[
+        bool,
+        Field(
+            description=inspect.cleandoc(
+                """
+                Enable MCP SEP-1686 task protocol support for background execution.
+
+                Server-side: Requires enable_docket=True (validated at server startup).
+                Advertises task capabilities and handles task/* protocol methods.
+
+                Client-side: Advertises task capability to servers. No Docket needed
+                on client side.
                 """
             ),
         ),

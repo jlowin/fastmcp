@@ -4,6 +4,8 @@ import asyncio
 import copy
 import datetime
 import secrets
+import time
+import uuid
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -35,6 +37,13 @@ from fastmcp.client.sampling import (
     ClientSamplingHandler,
     SamplingHandler,
     create_sampling_callback,
+)
+from fastmcp.client.tasks import (
+    CallToolResult,
+    PromptTask,
+    ResourceTask,
+    TaskStatusResponse,
+    ToolTask,
 )
 from fastmcp.exceptions import ToolError
 from fastmcp.mcp_config import MCPConfig
@@ -75,16 +84,6 @@ __all__ = [
 logger = get_logger(__name__)
 
 T = TypeVar("T", bound="ClientTransport")
-
-
-def _timeout_to_seconds(
-    timeout: datetime.timedelta | float | int | None,
-) -> float | None:
-    if timeout is None:
-        return None
-    if isinstance(timeout, datetime.timedelta):
-        return timeout.total_seconds()
-    return float(timeout)
 
 
 @dataclass
@@ -258,7 +257,13 @@ class Client(Generic[ClientTransportT]):
         # handle init handshake timeout
         if init_timeout is None:
             init_timeout = fastmcp.settings.client_init_timeout
-        self._init_timeout = _timeout_to_seconds(init_timeout)
+        if isinstance(init_timeout, datetime.timedelta):
+            init_timeout = init_timeout.total_seconds()
+        elif not init_timeout:
+            init_timeout = None
+        else:
+            init_timeout = float(init_timeout)
+        self._init_timeout = init_timeout
 
         self.auto_initialize = auto_initialize
 
@@ -286,6 +291,9 @@ class Client(Generic[ClientTransportT]):
 
         # Session context management - see class docstring for detailed explanation
         self._session_state = ClientSessionState()
+
+        # Track task IDs submitted by this client (for list_tasks support)
+        self._submitted_task_ids: set[str] = set()
 
     @property
     def session(self) -> ClientSession:
@@ -359,7 +367,7 @@ class Client(Generic[ClientTransportT]):
                 **self._session_kwargs
             ) as session:
                 self._session_state.session = session
-                # Initialize the session
+                # Initialize the session if auto_initialize is enabled
                 try:
                     if self.auto_initialize:
                         await self.initialize()
@@ -369,6 +377,88 @@ class Client(Generic[ClientTransportT]):
                 finally:
                     self._session_state.session = None
                     self._session_state.initialize_result = None
+
+    async def initialize(
+        self,
+        timeout: datetime.timedelta | float | int | None = None,
+    ) -> mcp.types.InitializeResult:
+        """Send an initialize request to the server.
+
+        This method performs the MCP initialization handshake with the server,
+        exchanging capabilities and server information. It is idempotent - calling
+        it multiple times returns the cached result from the first call.
+
+        The initialization happens automatically when entering the client context
+        manager unless `auto_initialize=False` was set during client construction.
+        Manual calls to this method are only needed when auto-initialization is disabled.
+
+        Args:
+            timeout: Optional timeout for the initialization request (seconds or timedelta).
+                If None, uses the client's init_timeout setting.
+
+        Returns:
+            InitializeResult: The server's initialization response containing server info,
+                capabilities, protocol version, and optional instructions.
+
+        Raises:
+            RuntimeError: If the client is not connected or initialization times out.
+
+        Example:
+            ```python
+            # With auto-initialization disabled
+            client = Client(server, auto_initialize=False)
+            async with client:
+                result = await client.initialize()
+                print(f"Server: {result.serverInfo.name}")
+                print(f"Instructions: {result.instructions}")
+            ```
+        """
+
+        if self.initialize_result is not None:
+            return self.initialize_result
+
+        if timeout is None:
+            timeout = self._init_timeout
+
+        # Convert timeout if needed
+        if isinstance(timeout, datetime.timedelta):
+            timeout = timeout.total_seconds()
+        elif timeout is not None:
+            timeout = float(timeout)
+
+        try:
+            with anyio.fail_after(timeout):
+                # Handle task capabilities if enabled
+                if fastmcp.settings.experimental.enable_tasks:
+                    try:
+                        from fastmcp.client._temporary_task_capability_shim import (
+                            task_capable_initialize,
+                        )
+
+                        # Call custom initialize with task capabilities
+                        self._session_state.initialize_result = (
+                            await task_capable_initialize(self.session)
+                        )
+                    except Exception as e:
+                        # If custom init fails, log and fall back to standard
+                        import logging
+
+                        logging.warning(
+                            f"Failed to initialize with task capabilities: {e}. "
+                            "Falling back to standard initialization."
+                        )
+                        self._session_state.initialize_result = (
+                            await self.session.initialize()
+                        )
+                else:
+                    # Standard initialization
+                    self._session_state.initialize_result = (
+                        await self.session.initialize()
+                    )
+
+                return self._session_state.initialize_result
+        except TimeoutError as e:
+            raise RuntimeError("Failed to initialize server session") from e
 
     async def __aenter__(self):
         return await self._connect()
@@ -493,55 +583,6 @@ class Client(Generic[ClientTransportT]):
 
     # --- MCP Client Methods ---
 
-    async def initialize(
-        self,
-        timeout: datetime.timedelta | float | int | None = None,
-    ) -> mcp.types.InitializeResult:
-        """Send an initialize request to the server.
-
-        This method performs the MCP initialization handshake with the server,
-        exchanging capabilities and server information. It is idempotent - calling
-        it multiple times returns the cached result from the first call.
-
-        The initialization happens automatically when entering the client context
-        manager unless `auto_initialize=False` was set during client construction.
-        Manual calls to this method are only needed when auto-initialization is disabled.
-
-        Args:
-            timeout: Optional timeout for the initialization request (seconds or timedelta).
-                If None, uses the client's init_timeout setting.
-
-        Returns:
-            InitializeResult: The server's initialization response containing server info,
-                capabilities, protocol version, and optional instructions.
-
-        Raises:
-            RuntimeError: If the client is not connected or initialization times out.
-
-        Example:
-            ```python
-            # With auto-initialization disabled
-            client = Client(server, auto_initialize=False)
-            async with client:
-                result = await client.initialize()
-                print(f"Server: {result.serverInfo.name}")
-                print(f"Instructions: {result.instructions}")
-            ```
-        """
-
-        if self.initialize_result is not None:
-            return self.initialize_result
-
-        if timeout is None:
-            timeout = self._init_timeout
-        try:
-            with anyio.fail_after(_timeout_to_seconds(timeout)):
-                initialize_result = await self.session.initialize()
-                self._session_state.initialize_result = initialize_result
-                return initialize_result
-        except TimeoutError as e:
-            raise RuntimeError("Failed to initialize server session") from e
-
     async def ping(self) -> bool:
         """Send a ping request."""
         result = await self.session.send_ping()
@@ -645,12 +686,13 @@ class Client(Generic[ClientTransportT]):
         return result.resourceTemplates
 
     async def read_resource_mcp(
-        self, uri: AnyUrl | str
+        self, uri: AnyUrl | str, meta: dict[str, Any] | None = None
     ) -> mcp.types.ReadResourceResult:
         """Send a resources/read request and return the complete MCP protocol result.
 
         Args:
             uri (AnyUrl | str): The URI of the resource to read. Can be a string or an AnyUrl object.
+            meta (dict[str, Any] | None, optional): Request metadata (e.g., for SEP-1686 tasks). Defaults to None.
 
         Returns:
             mcp.types.ReadResourceResult: The complete response object from the protocol,
@@ -663,7 +705,18 @@ class Client(Generic[ClientTransportT]):
 
         if isinstance(uri, str):
             uri = AnyUrl(uri)  # Ensure AnyUrl
-        result = await self.session.read_resource(uri)
+
+        # If meta provided, use send_request for SEP-1686 task support
+        if meta:
+            request = mcp.types.ReadResourceRequest(
+                params=mcp.types.ReadResourceRequestParams(uri=uri, _meta=meta)
+            )
+            result = await self.session.send_request(
+                request=request,  # type: ignore[arg-type]
+                result_type=mcp.types.ReadResourceResult,
+            )
+        else:
+            result = await self.session.read_resource(uri)
         return result
 
     async def read_resource(
@@ -690,6 +743,51 @@ class Client(Generic[ClientTransportT]):
                 ) from e
         result = await self.read_resource_mcp(uri)
         return result.contents
+
+    async def read_resource_as_task(
+        self,
+        uri: AnyUrl | str,
+        task_id: str | None = None,
+        keep_alive: int = 60000,
+    ) -> ResourceTask:
+        """Read a resource for background execution (SEP-1686).
+
+        Returns a ResourceTask object that handles both background and immediate execution.
+
+        Args:
+            uri: Resource URI to read
+            task_id: Optional client-provided task ID (auto-generated if not provided)
+            keep_alive: Time to keep results available in milliseconds (default 60s)
+
+        Returns:
+            ResourceTask: Future-like object for accessing task status and results
+        """
+        if task_id is None:
+            task_id = str(uuid.uuid4())
+
+        # Track this task ID for list_tasks()
+        self._submitted_task_ids.add(task_id)
+
+        # Read resource with task metadata
+        result = await self.read_resource_mcp(
+            uri=uri,
+            meta={
+                "modelcontextprotocol.io/task": {
+                    "taskId": task_id,
+                    "keepAlive": keep_alive,
+                }
+            },
+        )
+
+        # Check if server accepted background execution
+        if result.meta and "modelcontextprotocol.io/task" in result.meta:
+            # Background execution accepted
+            return ResourceTask(self, task_id, uri=str(uri), immediate_result=None)
+        else:
+            # Server declined background execution (graceful degradation)
+            return ResourceTask(
+                self, task_id, uri=str(uri), immediate_result=result.contents
+            )
 
     # async def subscribe_resource(self, uri: AnyUrl | str) -> None:
     #     """Send a resources/subscribe request."""
@@ -734,13 +832,17 @@ class Client(Generic[ClientTransportT]):
 
     # --- Prompt ---
     async def get_prompt_mcp(
-        self, name: str, arguments: dict[str, Any] | None = None
+        self,
+        name: str,
+        arguments: dict[str, Any] | None = None,
+        meta: dict[str, Any] | None = None,
     ) -> mcp.types.GetPromptResult:
         """Send a prompts/get request and return the complete MCP protocol result.
 
         Args:
             name (str): The name of the prompt to retrieve.
             arguments (dict[str, Any] | None, optional): Arguments to pass to the prompt. Defaults to None.
+            meta (dict[str, Any] | None, optional): Request metadata (e.g., for SEP-1686 tasks). Defaults to None.
 
         Returns:
             mcp.types.GetPromptResult: The complete response object from the protocol,
@@ -764,9 +866,21 @@ class Client(Generic[ClientTransportT]):
                         "utf-8"
                     )
 
-        result = await self.session.get_prompt(
-            name=name, arguments=serialized_arguments
-        )
+        # If meta provided, use send_request for SEP-1686 task support
+        if meta:
+            request = mcp.types.GetPromptRequest(
+                params=mcp.types.GetPromptRequestParams(
+                    name=name, arguments=serialized_arguments, _meta=meta
+                )
+            )
+            result = await self.session.send_request(
+                request=request,  # type: ignore[arg-type]
+                result_type=mcp.types.GetPromptResult,
+            )
+        else:
+            result = await self.session.get_prompt(
+                name=name, arguments=serialized_arguments
+            )
         return result
 
     async def get_prompt(
@@ -787,6 +901,52 @@ class Client(Generic[ClientTransportT]):
         """
         result = await self.get_prompt_mcp(name=name, arguments=arguments)
         return result
+
+    async def get_prompt_as_task(
+        self,
+        name: str,
+        arguments: dict[str, Any] | None = None,
+        task_id: str | None = None,
+        keep_alive: int = 60000,
+    ) -> PromptTask:
+        """Get a prompt for background execution (SEP-1686).
+
+        Returns a PromptTask object that handles both background and immediate execution.
+
+        Args:
+            name: Prompt name to get
+            arguments: Prompt arguments
+            task_id: Optional client-provided task ID (auto-generated if not provided)
+            keep_alive: Time to keep results available in milliseconds (default 60s)
+
+        Returns:
+            PromptTask: Future-like object for accessing task status and results
+        """
+        if task_id is None:
+            task_id = str(uuid.uuid4())
+
+        # Track this task ID for list_tasks()
+        self._submitted_task_ids.add(task_id)
+
+        # Call prompt with task metadata
+        result = await self.get_prompt_mcp(
+            name=name,
+            arguments=arguments or {},
+            meta={
+                "modelcontextprotocol.io/task": {
+                    "taskId": task_id,
+                    "keepAlive": keep_alive,
+                }
+            },
+        )
+
+        # Check if server accepted background execution
+        if result.meta and "modelcontextprotocol.io/task" in result.meta:
+            # Background execution accepted
+            return PromptTask(self, task_id, prompt_name=name, immediate_result=None)
+        else:
+            # Server declined background execution (graceful degradation)
+            return PromptTask(self, task_id, prompt_name=name, immediate_result=result)
 
     # --- Completion ---
 
@@ -910,59 +1070,43 @@ class Client(Generic[ClientTransportT]):
         if isinstance(timeout, int | float):
             timeout = datetime.timedelta(seconds=float(timeout))
 
-        result = await self.session.call_tool(
-            name=name,
-            arguments=arguments,
-            read_timeout_seconds=timeout,  # ty: ignore[invalid-argument-type]
-            progress_callback=progress_handler or self._progress_handler,
-            meta=meta,
-        )
+        # For task submissions, use send_request to bypass SDK validation
+        # Task acknowledgments don't have structured content, which would fail validation
+        if meta and "modelcontextprotocol.io/task" in meta:
+            request = mcp.types.CallToolRequest(
+                params=mcp.types.CallToolRequestParams(
+                    name=name, arguments=arguments, _meta=meta
+                )
+            )
+            result = await self.session.send_request(
+                request=request,  # type: ignore[arg-type]
+                result_type=mcp.types.CallToolResult,
+                request_read_timeout_seconds=timeout,  # type: ignore[arg-type]
+                progress_callback=progress_handler or self._progress_handler,
+            )
+        else:
+            result = await self.session.call_tool(
+                name=name,
+                arguments=arguments,
+                read_timeout_seconds=timeout,  # ty: ignore[invalid-argument-type]
+                progress_callback=progress_handler or self._progress_handler,
+                meta=meta,
+            )
         return result
 
-    async def call_tool(
-        self,
-        name: str,
-        arguments: dict[str, Any] | None = None,
-        timeout: datetime.timedelta | float | int | None = None,
-        progress_handler: ProgressHandler | None = None,
-        raise_on_error: bool = True,
-        meta: dict[str, Any] | None = None,
+    async def _parse_call_tool_result(
+        self, name: str, result: mcp.types.CallToolResult, raise_on_error: bool = False
     ) -> CallToolResult:
-        """Call a tool on the server.
-
-        Unlike call_tool_mcp, this method raises a ToolError if the tool call results in an error.
+        """Parse an mcp.types.CallToolResult into our CallToolResult dataclass.
 
         Args:
-            name (str): The name of the tool to call.
-            arguments (dict[str, Any] | None, optional): Arguments to pass to the tool. Defaults to None.
-            timeout (datetime.timedelta | float | int | None, optional): The timeout for the tool call. Defaults to None.
-            progress_handler (ProgressHandler | None, optional): The progress handler to use for the tool call. Defaults to None.
-            raise_on_error (bool, optional): Whether to raise a ToolError if the tool call results in an error. Defaults to True.
-            meta (dict[str, Any] | None, optional): Additional metadata to include with the request.
-                This is useful for passing contextual information (like user IDs, trace IDs, or preferences)
-                that shouldn't be tool arguments but may influence server-side processing. The server
-                can access this via `context.request_context.meta`. Defaults to None.
+            name: Tool name (for schema lookup)
+            result: Raw MCP protocol result
+            raise_on_error: Whether to raise ToolError on errors
 
         Returns:
-            CallToolResult:
-                The content returned by the tool. If the tool returns structured
-                outputs, they are returned as a dataclass (if an output schema
-                is available) or a dictionary; otherwise, a list of content
-                blocks is returned. Note: to receive both structured and
-                unstructured outputs, use call_tool_mcp instead and access the
-                raw result object.
-
-        Raises:
-            ToolError: If the tool call results in an error.
-            RuntimeError: If called while the client is not connected.
+            CallToolResult: Parsed result with structured data
         """
-        result = await self.call_tool_mcp(
-            name=name,
-            arguments=arguments or {},
-            timeout=timeout,
-            progress_handler=progress_handler,
-            meta=meta,
-        )
         data = None
         if result.isError and raise_on_error:
             msg = cast(mcp.types.TextContent, result.content[0]).text
@@ -997,6 +1141,329 @@ class Client(Generic[ClientTransportT]):
             is_error=result.isError,
         )
 
+    async def call_tool(
+        self,
+        name: str,
+        arguments: dict[str, Any] | None = None,
+        timeout: datetime.timedelta | float | int | None = None,
+        progress_handler: ProgressHandler | None = None,
+        raise_on_error: bool = True,
+        meta: dict[str, Any] | None = None,
+    ) -> CallToolResult:
+        """Call a tool on the server.
+
+        Unlike call_tool_mcp, this method raises a ToolError if the tool call results in an error.
+
+        Args:
+            name (str): The name of the tool to call.
+            arguments (dict[str, Any] | None, optional): Arguments to pass to the tool. Defaults to None.
+            timeout (datetime.timedelta | float | int | None, optional): The timeout for the tool call. Defaults to None.
+            progress_handler (ProgressHandler | None, optional): The progress handler to use for the tool call. Defaults to None.
+            raise_on_error (bool, optional): Whether to raise an exception if the tool call results in an error. Defaults to True.
+            meta (dict[str, Any] | None, optional): Additional metadata to include with the request.
+                This is useful for passing contextual information (like user IDs, trace IDs, or preferences)
+                that shouldn't be tool arguments but may influence server-side processing. The server
+                can access this via `context.request_context.meta`. Defaults to None.
+
+        Returns:
+            CallToolResult:
+                The content returned by the tool. If the tool returns structured
+                outputs, they are returned as a dataclass (if an output schema
+                is available) or a dictionary; otherwise, a list of content
+                blocks is returned. Note: to receive both structured and
+                unstructured outputs, use call_tool_mcp instead and access the
+                raw result object.
+
+        Raises:
+            ToolError: If the tool call results in an error.
+            RuntimeError: If called while the client is not connected.
+        """
+        result = await self.call_tool_mcp(
+            name=name,
+            arguments=arguments or {},
+            timeout=timeout,
+            progress_handler=progress_handler,
+            meta=meta,
+        )
+        return await self._parse_call_tool_result(
+            name, result, raise_on_error=raise_on_error
+        )
+
+    async def call_tool_as_task(
+        self,
+        name: str,
+        arguments: dict[str, Any] | None = None,
+        task_id: str | None = None,
+        keep_alive: int = 60000,
+    ) -> ToolTask:
+        """Call a tool for background execution (SEP-1686).
+
+        Returns a ToolTask object that handles both background and immediate execution.
+        If the server accepts background execution, ToolTask will poll for results.
+        If the server declines (graceful degradation), ToolTask wraps the immediate result.
+
+        Args:
+            name: Tool name to call
+            arguments: Tool arguments
+            task_id: Optional client-provided task ID (auto-generated if not provided)
+            keep_alive: Time to keep results available in milliseconds (default 60s)
+
+        Returns:
+            ToolTask: Future-like object for accessing task status and results
+        """
+        if task_id is None:
+            task_id = str(uuid.uuid4())
+
+        # Track this task ID for list_tasks()
+        self._submitted_task_ids.add(task_id)
+
+        # Call tool with task metadata
+        result = await self.call_tool_mcp(
+            name=name,
+            arguments=arguments or {},
+            meta={
+                "modelcontextprotocol.io/task": {
+                    "taskId": task_id,
+                    "keepAlive": keep_alive,
+                }
+            },
+        )
+
+        # Check if server accepted background execution
+        # If response includes task metadata, server accepted background mode
+        if result.meta and "modelcontextprotocol.io/task" in result.meta:
+            # Background execution accepted
+            return ToolTask(self, task_id, tool_name=name, immediate_result=None)
+        else:
+            # Server declined background execution (graceful degradation)
+            # Executed synchronously - wrap the immediate result
+            # Need to convert mcp.types.CallToolResult to our CallToolResult
+            parsed_result = await self._parse_call_tool_result(name, result)
+            return ToolTask(
+                self, task_id, tool_name=name, immediate_result=parsed_result
+            )
+
+    async def get_task_status(self, task_id: str) -> TaskStatusResponse:
+        """Query the status of a background task.
+
+        Sends a 'tasks/get' MCP protocol request over the existing transport.
+
+        Args:
+            task_id: The task ID returned from call_tool_as_task
+
+        Returns:
+            TaskStatusResponse: Status information including task_id, status, poll_frequency, etc.
+
+        Raises:
+            RuntimeError: If client not connected
+        """
+        from fastmcp.client.transports import FastMCPTransport
+
+        # TEMPORARY HACK: For FastMCPTransport, access shim directly
+        # This bypasses MCP SDK limitations until SEP-1686 is officially supported
+        if isinstance(self.transport, FastMCPTransport):
+            from fastmcp.server.tasks._temporary_mcp_shims import get_task_status_dict
+
+            status_dict = await get_task_status_dict(task_id)
+            if status_dict is None:
+                # Task not found - return unknown state per SEP-1686
+                return TaskStatusResponse(
+                    taskId=task_id,
+                    status="unknown",
+                    pollFrequency=1000,
+                )
+
+            # Add taskId to response
+            status_dict["taskId"] = task_id
+            return TaskStatusResponse.model_validate(status_dict)
+
+        # For other transports, we need the MCP SDK to support SEP-1686
+        # TODO: Implement when SDK adds support
+        raise NotImplementedError(
+            "Task status polling not yet implemented for non-memory transports. "
+            "SEP-1686 support pending in MCP SDK."
+        )
+
+    async def get_task_result(self, task_id: str) -> Any:
+        """Retrieve the raw result of a completed background task.
+
+        Sends a 'tasks/result' MCP protocol request over the existing transport.
+        Returns the raw result - callers should parse it appropriately.
+
+        Args:
+            task_id: The task ID returned from call_tool_as_task
+
+        Returns:
+            Any: The raw result (could be tool, prompt, or resource result)
+
+        Raises:
+            RuntimeError: If client not connected, task not found, or task failed
+        """
+        from fastmcp.client.transports import FastMCPTransport
+
+        # TEMPORARY HACK: For FastMCPTransport, call server's _tasks_result_mcp directly
+        # This gets the properly converted MCP result type
+        if isinstance(self.transport, FastMCPTransport):
+            server = self.transport.server
+
+            # Call server's result handler (does raw→MCP conversion)
+            try:
+                result = await server._tasks_result_mcp({"taskId": task_id})  # type: ignore[attr-defined]
+                return result
+            except Exception as e:
+                raise RuntimeError(f"Failed to get task result: {e}") from e
+
+        # For other transports, we need the MCP SDK to support SEP-1686
+        # TODO: Implement when SDK adds support
+        raise NotImplementedError(
+            "Task result retrieval not yet implemented for non-memory transports. "
+            "SEP-1686 support pending in MCP SDK."
+        )
+
+    async def list_tasks(
+        self,
+        cursor: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        """List background tasks submitted by this client.
+
+        Tracks tasks client-side to avoid server-side session filtering complexity.
+        Queries current status for each tracked task ID.
+
+        Args:
+            cursor: Optional pagination cursor (currently unused, for future compatibility)
+            limit: Maximum number of tasks to return (default 50)
+
+        Returns:
+            dict: Response with structure:
+                - tasks: List of task status dicts with taskId, status, etc.
+                - nextCursor: Optional cursor for next page (always None for now)
+        """
+        # Get status for all tracked task IDs
+        tasks = []
+        for task_id in list(self._submitted_task_ids)[:limit]:
+            try:
+                status = await self.get_task_status(task_id)
+                tasks.append(status.model_dump(by_alias=True))
+            except Exception:
+                # Task may have expired or been deleted, skip it
+                continue
+
+        return {"tasks": tasks, "nextCursor": None}
+
+    async def wait_for_task(
+        self,
+        task_id: str,
+        *,
+        state: str | None = None,
+        timeout: float = 300.0,
+        poll_interval: float = 0.05,
+    ) -> TaskStatusResponse:
+        """Wait for a task to reach a specific state or complete.
+
+        Polls task status at regular intervals until the desired state is reached
+        or a timeout occurs.
+
+        Args:
+            task_id: The task ID to wait for
+            state: Desired state ('submitted', 'working', 'completed', 'failed').
+                   If None, waits for any terminal state (completed/failed)
+            timeout: Maximum time to wait in seconds (default 300s/5min)
+            poll_interval: Time between status checks in seconds (default 50ms)
+
+        Returns:
+            TaskStatusResponse: Full task status including task_id, status, poll_frequency, etc.
+
+        Raises:
+            TimeoutError: If desired state not reached within timeout
+        """
+        start = time.time()
+        terminal_states = {"completed", "failed"}
+
+        while time.time() - start < timeout:
+            status = await self.get_task_status(task_id)
+            current_state = status.status
+
+            # Check if we've reached the desired state
+            if state is not None:
+                if current_state == state:
+                    return status
+            else:
+                # No specific state requested - wait for terminal state
+                if current_state in terminal_states:
+                    return status
+
+            await asyncio.sleep(poll_interval)
+
+        # Timeout reached
+        if state is not None:
+            raise TimeoutError(
+                f"Task {task_id} did not reach state '{state}' within {timeout}s"
+            )
+        else:
+            raise TimeoutError(f"Task {task_id} did not complete within {timeout}s")
+
+    async def cancel_task(self, task_id: str) -> None:
+        """Cancel a task, transitioning it to cancelled state.
+
+        Sends a notifications/cancelled to request cancellation. Task will
+        transition to cancelled state and halt execution.
+
+        Args:
+            task_id: The task ID to cancel
+
+        Raises:
+            RuntimeError: If task doesn't exist
+        """
+        from fastmcp.client.transports import FastMCPTransport
+
+        # TEMPORARY HACK: For FastMCPTransport, access shim directly
+        if isinstance(self.transport, FastMCPTransport):
+            from fastmcp.server.tasks._temporary_mcp_shims import cancel_task
+
+            cancelled = await cancel_task(task_id)
+            if not cancelled:
+                raise RuntimeError(f"Task {task_id} not found")
+            return
+
+        # For other transports, we need the MCP SDK to support SEP-1686
+        raise NotImplementedError(
+            "Task cancellation not yet implemented for non-memory transports. "
+            "SEP-1686 support pending in MCP SDK."
+        )
+
+    async def delete_task(self, task_id: str) -> None:
+        """Delete a task and all associated data from the server.
+
+        Sends a tasks/delete request to remove the task state, results, and metadata.
+        Deletion is discretionary - servers may reject requests.
+
+        Args:
+            task_id: The task ID to delete
+
+        Raises:
+            NotFoundError: If task doesn't exist
+            RuntimeError: If server refuses deletion
+        """
+        from fastmcp.client.transports import FastMCPTransport
+
+        # TEMPORARY HACK: For FastMCPTransport, access shim directly
+        # This bypasses MCP SDK limitations until SEP-1686 is officially supported
+        if isinstance(self.transport, FastMCPTransport):
+            from fastmcp.server.tasks._temporary_mcp_shims import delete_task
+
+            deleted = await delete_task(task_id)
+            if not deleted:
+                raise RuntimeError(f"Task {task_id} not found")
+            return
+
+        # For other transports, we need the MCP SDK to support SEP-1686
+        # TODO: Implement when SDK adds support
+        raise NotImplementedError(
+            "Task deletion not yet implemented for non-memory transports. "
+            "SEP-1686 support pending in MCP SDK."
+        )
+
     @classmethod
     def generate_name(cls, name: str | None = None) -> str:
         class_name = cls.__name__
@@ -1004,12 +1471,3 @@ class Client(Generic[ClientTransportT]):
             return f"{class_name}-{secrets.token_hex(2)}"
         else:
             return f"{class_name}-{name}-{secrets.token_hex(2)}"
-
-
-@dataclass
-class CallToolResult:
-    content: list[mcp.types.ContentBlock]
-    structured_content: dict[str, Any] | None
-    meta: dict[str, Any] | None
-    data: Any = None
-    is_error: bool = False

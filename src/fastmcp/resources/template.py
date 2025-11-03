@@ -5,7 +5,7 @@ from __future__ import annotations
 import inspect
 import re
 from collections.abc import Callable
-from typing import Any
+from typing import Annotated, Any
 from urllib.parse import parse_qs, unquote
 
 from mcp.types import Annotations, Icon
@@ -103,6 +103,12 @@ class ResourceTemplate(FastMCPComponent):
     annotations: Annotations | None = Field(
         default=None, description="Optional annotations about the resource's behavior"
     )
+    task: Annotated[
+        bool,
+        Field(
+            description="Whether this resource template supports background task execution (SEP-1686)"
+        ),
+    ] = False
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(uri_template={self.uri_template!r}, name={self.name!r}, description={self.description!r}, tags={self.tags})"
@@ -136,6 +142,7 @@ class ResourceTemplate(FastMCPComponent):
         enabled: bool | None = None,
         annotations: Annotations | None = None,
         meta: dict[str, Any] | None = None,
+        task: bool = False,
     ) -> FunctionResourceTemplate:
         return FunctionResourceTemplate.from_function(
             fn=fn,
@@ -149,6 +156,7 @@ class ResourceTemplate(FastMCPComponent):
             enabled=enabled,
             annotations=annotations,
             meta=meta,
+            task=task,
         )
 
     @field_validator("mime_type", mode="before")
@@ -185,6 +193,7 @@ class ResourceTemplate(FastMCPComponent):
             mime_type=self.mime_type,
             tags=self.tags,
             enabled=self.enabled,
+            task=self.task,
         )
 
     def to_mcp_template(
@@ -283,6 +292,7 @@ class FunctionResourceTemplate(ResourceTemplate):
         enabled: bool | None = None,
         annotations: Annotations | None = None,
         meta: dict[str, Any] | None = None,
+        task: bool = False,
     ) -> FunctionResourceTemplate:
         """Create a template from a function."""
 
@@ -381,4 +391,5 @@ class FunctionResourceTemplate(ResourceTemplate):
             enabled=enabled if enabled is not None else True,
             annotations=annotations,
             meta=meta,
+            task=task,
         )

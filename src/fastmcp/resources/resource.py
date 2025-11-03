@@ -47,6 +47,12 @@ class Resource(FastMCPComponent):
         Annotations | None,
         Field(description="Optional annotations about the resource's behavior"),
     ] = None
+    task: Annotated[
+        bool,
+        Field(
+            description="Whether this resource supports background task execution (SEP-1686)"
+        ),
+    ] = False
 
     def enable(self) -> None:
         super().enable()
@@ -77,6 +83,7 @@ class Resource(FastMCPComponent):
         enabled: bool | None = None,
         annotations: Annotations | None = None,
         meta: dict[str, Any] | None = None,
+        task: bool = False,
     ) -> FunctionResource:
         return FunctionResource.from_function(
             fn=fn,
@@ -90,6 +97,7 @@ class Resource(FastMCPComponent):
             enabled=enabled,
             annotations=annotations,
             meta=meta,
+            task=task,
         )
 
     @field_validator("mime_type", mode="before")
@@ -183,6 +191,7 @@ class FunctionResource(Resource):
         enabled: bool | None = None,
         annotations: Annotations | None = None,
         meta: dict[str, Any] | None = None,
+        task: bool = False,
     ) -> FunctionResource:
         """Create a FunctionResource from a function."""
         if isinstance(uri, str):
@@ -199,6 +208,7 @@ class FunctionResource(Resource):
             enabled=enabled if enabled is not None else True,
             annotations=annotations,
             meta=meta,
+            task=task,
         )
 
     async def read(self) -> str | bytes:
