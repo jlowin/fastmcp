@@ -140,13 +140,10 @@ class KeycloakAuthProvider(RemoteAuthProvider):
 
         # Create default JWT verifier if none provided
         if token_verifier is None:
+            # After discovery, jwks_uri and issuer are guaranteed non-None (defaults applied)
             token_verifier = JWTVerifier(
-                jwks_uri=str(self.oidc_config.jwks_uri)
-                if self.oidc_config.jwks_uri
-                else None,
-                issuer=str(self.oidc_config.issuer)
-                if self.oidc_config.issuer
-                else None,
+                jwks_uri=str(self.oidc_config.jwks_uri),
+                issuer=str(self.oidc_config.issuer),
                 algorithm="RS256",
                 required_scopes=settings.required_scopes,
                 audience=None,  # Allow any audience for dynamic client registration
@@ -164,7 +161,7 @@ class KeycloakAuthProvider(RemoteAuthProvider):
         # Fetch original OIDC configuration from Keycloak
         config_url = AnyHttpUrl(f"{self.realm_url}/.well-known/openid-configuration")
         config = OIDCConfiguration.get_oidc_configuration(
-            config_url, strict=False, timeout_seconds=None
+            config_url, strict=False, timeout_seconds=10
         )
 
         # Apply default values for fields that might be missing
@@ -280,7 +277,7 @@ class KeycloakAuthProvider(RemoteAuthProvider):
                     body = json.dumps(registration_data).encode("utf-8")
 
                 # Forward the registration request to Keycloak
-                async with httpx.AsyncClient() as client:
+                async with httpx.AsyncClient(timeout=10.0) as client:
                     logger.info(
                         f"Forwarding client registration to Keycloak: {self.oidc_config.registration_endpoint}"
                     )
@@ -300,12 +297,27 @@ class KeycloakAuthProvider(RemoteAuthProvider):
                     )
 
                     if response.status_code != 201:
-                        return JSONResponse(
-                            response.json()
+                        error_detail = {"error": "registration_failed"}
+                        try:
                             if response.headers.get("content-type", "").startswith(
                                 "application/json"
-                            )
-                            else {"error": "registration_failed"},
+                            ):
+                                error_detail = response.json()
+                            else:
+                                error_detail = {
+                                    "error": "registration_failed",
+                                    "error_description": response.text[:500]
+                                    if response.text
+                                    else f"HTTP {response.status_code}",
+                                }
+                        except Exception:
+                            error_detail = {
+                                "error": "registration_failed",
+                                "error_description": f"HTTP {response.status_code}",
+                            }
+
+                        return JSONResponse(
+                            error_detail,
                             status_code=response.status_code,
                         )
 
