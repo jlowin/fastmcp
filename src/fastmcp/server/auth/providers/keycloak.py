@@ -154,7 +154,14 @@ class KeycloakAuthProvider(RemoteAuthProvider):
             for scope in settings.required_scopes:
                 if scope not in existing_scopes:
                     existing_scopes.append(scope)
-            token_verifier.required_scopes = existing_scopes
+            # Try to set merged scopes, but handle immutable verifiers gracefully
+            try:
+                token_verifier.required_scopes = existing_scopes
+            except (AttributeError, TypeError) as e:
+                logger.warning(
+                    f"Cannot set required_scopes on custom verifier (immutable): {e}. "
+                    "Provider-level scope requirements may not be enforced."
+                )
 
         # Initialize RemoteAuthProvider with FastMCP as the authorization server proxy
         super().__init__(
@@ -305,18 +312,23 @@ class KeycloakAuthProvider(RemoteAuthProvider):
                         headers=forward_headers,
                     )
 
+                    # Read response body once and cache it to avoid double-decoding issues
+                    response_body = response.content
+
                     if response.status_code != 201:
                         error_detail = {"error": "registration_failed"}
                         try:
                             if response.headers.get("content-type", "").startswith(
                                 "application/json"
                             ):
-                                error_detail = response.json()
+                                error_detail = json.loads(response_body)
                             else:
                                 error_detail = {
                                     "error": "registration_failed",
-                                    "error_description": response.text[:500]
-                                    if response.text
+                                    "error_description": response_body.decode("utf-8")[
+                                        :500
+                                    ]
+                                    if response_body
                                     else f"HTTP {response.status_code}",
                                 }
                         except Exception:
@@ -334,7 +346,7 @@ class KeycloakAuthProvider(RemoteAuthProvider):
                     logger.info(
                         "Modifying 'token_endpoint_auth_method' and 'response_types' in client info for FastMCP compatibility"
                     )
-                    client_info = response.json()
+                    client_info = json.loads(response_body)
 
                     logger.debug(
                         f"Original client info from Keycloak: token_endpoint_auth_method={client_info.get('token_endpoint_auth_method')}, response_types={client_info.get('response_types')}, redirect_uris={client_info.get('redirect_uris')}"
@@ -413,7 +425,7 @@ class KeycloakAuthProvider(RemoteAuthProvider):
 
                 # Build authorization request URL for redirecting to Keycloak and including the (potentially modified) query string
                 authorization_url = str(self.oidc_config.authorization_endpoint)
-                query_string = urlencode(query_items)
+                query_string = urlencode(query_items, doseq=True)
                 if query_string:
                     authorization_url += f"?{query_string}"
 
