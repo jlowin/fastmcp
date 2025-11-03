@@ -19,17 +19,15 @@ class InitializationMiddleware(Middleware):
 
     async def on_initialize(
         self,
-        context: MiddlewareContext[mt.InitializeRequest],
-        call_next: CallNext[mt.InitializeRequest, None],
+        context: MiddlewareContext[mt.InitializeRequestParams],
+        call_next: CallNext[mt.InitializeRequestParams, None],
     ) -> None:
         """Capture initialization details and store session data."""
         self.initialized = True
 
         # Extract client info from the initialize params
-        if hasattr(context.message, "params") and hasattr(
-            context.message.params, "clientInfo"
-        ):
-            self.client_info = context.message.params.clientInfo
+        if hasattr(context.message, "clientInfo"):
+            self.client_info = context.message.clientInfo
 
         # Store data in the context state for cross-request access
         if context.fastmcp_context:
@@ -57,8 +55,8 @@ class ClientDetectionMiddleware(Middleware):
 
     async def on_initialize(
         self,
-        context: MiddlewareContext[mt.InitializeRequest],
-        call_next: CallNext[mt.InitializeRequest, None],
+        context: MiddlewareContext[mt.InitializeRequestParams],
+        call_next: CallNext[mt.InitializeRequestParams, None],
     ) -> None:
         """Detect test client during initialization."""
         self.initialization_called = True
@@ -103,8 +101,8 @@ async def test_simple_initialization_hook():
 
         async def on_initialize(
             self,
-            context: MiddlewareContext[mt.InitializeRequest],
-            call_next: CallNext[mt.InitializeRequest, None],
+            context: MiddlewareContext[mt.InitializeRequestParams],
+            call_next: CallNext[mt.InitializeRequestParams, None],
         ) -> None:
             self.called = True
             return await call_next(context)
@@ -202,8 +200,8 @@ async def test_initialization_middleware_with_state_sharing():
 
         async def on_initialize(
             self,
-            context: MiddlewareContext[mt.InitializeRequest],
-            call_next: CallNext[mt.InitializeRequest, None],
+            context: MiddlewareContext[mt.InitializeRequestParams],
+            call_next: CallNext[mt.InitializeRequestParams, None],
         ) -> None:
             # Store some state during initialization
             if context.fastmcp_context:
