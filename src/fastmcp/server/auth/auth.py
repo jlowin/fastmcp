@@ -348,9 +348,12 @@ class OAuthProvider(
         """
 
         # Create standard OAuth authorization server routes
+        # Pass base_url as issuer_url to ensure metadata declares endpoints where
+        # they're actually accessible (operational routes are mounted at base_url)
+        assert self.base_url is not None, "base_url is required"
         oauth_routes = create_auth_routes(
             provider=self,
-            issuer_url=self.issuer_url,
+            issuer_url=self.base_url,
             service_documentation_url=self.service_documentation_url,
             client_registration_options=self.client_registration_options,
             revocation_options=self.revocation_options,
