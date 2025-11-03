@@ -36,6 +36,7 @@ class KeycloakProviderSettings(BaseSettings):
     realm_url: AnyHttpUrl
     base_url: AnyHttpUrl
     required_scopes: list[str] | None = None
+    audience: str | list[str] | None = None
 
     @field_validator("required_scopes", mode="before")
     @classmethod
@@ -65,22 +66,30 @@ class KeycloakAuthProvider(RemoteAuthProvider):
     For detailed setup instructions, see:
     https://www.keycloak.org/securing-apps/client-registration
 
+    SECURITY NOTE:
+    By default, audience validation is disabled to support flexible Dynamic Client
+    Registration flows. For production deployments, it's strongly recommended to
+    configure the `audience` parameter to validate that tokens are intended for your
+    resource server. This prevents tokens issued for other services from being accepted.
+
     Examples:
         ```python
         from fastmcp import FastMCP
         from fastmcp.server.auth.providers.keycloak import KeycloakAuthProvider
 
-        # Method 1: Direct parameters
+        # Method 1: Direct parameters (with audience validation for production)
         keycloak_auth = KeycloakAuthProvider(
             realm_url="https://keycloak.example.com/realms/myrealm",
             base_url="https://your-fastmcp-server.com",
             required_scopes=["openid", "profile"],
+            audience="https://your-fastmcp-server.com",  # Recommended for production
         )
 
         # Method 2: Environment variables
         # Set: FASTMCP_SERVER_AUTH_KEYCLOAK_REALM_URL=https://keycloak.example.com/realms/myrealm
         # Set: FASTMCP_SERVER_AUTH_KEYCLOAK_BASE_URL=https://your-fastmcp-server.com
         # Set: FASTMCP_SERVER_AUTH_KEYCLOAK_REQUIRED_SCOPES=openid,profile
+        # Set: FASTMCP_SERVER_AUTH_KEYCLOAK_AUDIENCE=https://your-fastmcp-server.com
         keycloak_auth = KeycloakAuthProvider()
 
         # Method 3: Custom token verifier
@@ -110,6 +119,7 @@ class KeycloakAuthProvider(RemoteAuthProvider):
         realm_url: AnyHttpUrl | str | NotSetT = NotSet,
         base_url: AnyHttpUrl | str | NotSetT = NotSet,
         required_scopes: list[str] | None | NotSetT = NotSet,
+        audience: str | list[str] | None | NotSetT = NotSet,
         token_verifier: TokenVerifier | None = None,
     ):
         """Initialize Keycloak metadata provider.
@@ -118,6 +128,9 @@ class KeycloakAuthProvider(RemoteAuthProvider):
             realm_url: Your Keycloak realm URL (e.g., "https://keycloak.example.com/realms/myrealm")
             base_url: Public URL of this FastMCP server
             required_scopes: Optional list of scopes to require for all requests
+            audience: Optional audience(s) for JWT validation. If not specified and no custom
+                verifier is provided, audience validation is disabled. For production use,
+                it's recommended to set this to your resource server identifier or base_url.
             token_verifier: Optional token verifier. If None, creates JWT verifier for Keycloak
         """
         settings = KeycloakProviderSettings.model_validate(
@@ -127,6 +140,7 @@ class KeycloakAuthProvider(RemoteAuthProvider):
                     "realm_url": realm_url,
                     "base_url": base_url,
                     "required_scopes": required_scopes,
+                    "audience": audience,
                 }.items()
                 if v is not NotSet
             }
@@ -146,7 +160,7 @@ class KeycloakAuthProvider(RemoteAuthProvider):
                 issuer=str(self.oidc_config.issuer),
                 algorithm="RS256",
                 required_scopes=settings.required_scopes,
-                audience=None,  # Allow any audience for dynamic client registration
+                audience=settings.audience,  # Validate audience for security
             )
         elif settings.required_scopes is not None:
             # Merge provider-level required scopes into custom verifier

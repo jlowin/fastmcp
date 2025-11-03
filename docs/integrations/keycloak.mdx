@@ -110,6 +110,10 @@ If you prefer using Docker Compose instead, you may want to have a look at the [
 
 ### Step 2: FastMCP Configuration
 
+<Warning>
+**Security Best Practice**: Always configure the `audience` parameter in production environments. Without audience validation, your server will accept tokens issued for *any* audience, including tokens meant for completely different services. Set `audience` to your resource server identifier (typically your server's base URL) to ensure tokens are specifically intended for your server.
+</Warning>
+
 Create your FastMCP server file and use the KeycloakAuthProvider to handle all the OAuth integration automatically:
 
 ```python server.py
@@ -123,6 +127,7 @@ auth_provider = KeycloakAuthProvider(
     realm_url="http://localhost:8080/realms/fastmcp",  # Your Keycloak realm URL
     base_url="http://localhost:8000",                  # Your server's public URL
     required_scopes=["openid", "profile"],             # Required OAuth scopes
+    audience="http://localhost:8000",                  # Recommended: validate token audience
 )
 
 # Create FastMCP server with auth
@@ -229,6 +234,10 @@ Public URL of your FastMCP server (e.g., `https://your-server.com` or `http://lo
 <ParamField path="FASTMCP_SERVER_AUTH_KEYCLOAK_REQUIRED_SCOPES" default="None">
 Comma-, space-, or JSON-separated list of required OAuth scopes (e.g., `openid profile` or `["openid","profile","email"]`)
 </ParamField>
+
+<ParamField path="FASTMCP_SERVER_AUTH_KEYCLOAK_AUDIENCE" default="None">
+Audience(s) for JWT token validation. For production deployments, set this to your resource server identifier (typically your server's base URL) to ensure tokens are intended for your server. Without this, tokens issued for any audience will be accepted, which is a security risk.
+</ParamField>
 </Card>
 
 Example `.env` file:
@@ -240,6 +249,7 @@ FASTMCP_SERVER_AUTH=fastmcp.server.auth.providers.keycloak.KeycloakAuthProvider
 FASTMCP_SERVER_AUTH_KEYCLOAK_REALM_URL=http://localhost:8080/realms/fastmcp
 FASTMCP_SERVER_AUTH_KEYCLOAK_BASE_URL=https://your-server.com
 FASTMCP_SERVER_AUTH_KEYCLOAK_REQUIRED_SCOPES=openid,profile,email
+FASTMCP_SERVER_AUTH_KEYCLOAK_AUDIENCE=https://your-server.com  # Recommended for production
 ```
 
 With environment variables set, your server code simplifies to:

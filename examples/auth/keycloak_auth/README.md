@@ -38,6 +38,8 @@ Manually import the realm:
    ```bash
    export FASTMCP_SERVER_AUTH_KEYCLOAK_REALM_URL="http://localhost:8080/realms/fastmcp"
    export FASTMCP_SERVER_AUTH_KEYCLOAK_BASE_URL="http://localhost:8000"
+   # Optional: Set audience for token validation (defaults to base_url if not set)
+   # export FASTMCP_SERVER_AUTH_KEYCLOAK_AUDIENCE="http://localhost:8000"
    ```
 
 2. Run the server:
