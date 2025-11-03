@@ -365,7 +365,7 @@ class Context:
         # Try to get session from direct reference (for example on_initialize)
         if self._session is not None:
             return self._session
-        
+
         # Otherwise get from request context (for normal requests)
         return self.request_context.session
 
