@@ -28,6 +28,10 @@ from starlette.middleware import Middleware
 from starlette.middleware.authentication import AuthenticationMiddleware
 from starlette.routing import Route
 
+from fastmcp.utilities.logging import get_logger
+
+logger = get_logger(__name__)
+
 
 class AccessToken(_SDKAccessToken):
     """AccessToken that includes all JWT claims."""
@@ -302,6 +306,18 @@ class OAuthProvider(
             self.issuer_url = AnyHttpUrl(issuer_url)
         else:
             self.issuer_url = issuer_url
+
+        # Log if issuer_url and base_url differ (requires additional setup)
+        if (
+            self.base_url is not None
+            and self.issuer_url is not None
+            and str(self.base_url) != str(self.issuer_url)
+        ):
+            logger.info(
+                f"OAuth endpoints at {self.base_url}, issuer at {self.issuer_url}. "
+                f"Ensure well-known routes are accessible at root ({self.issuer_url}/.well-known/). "
+                f"See: https://gofastmcp.com/deployment/http#mounting-authenticated-servers"
+            )
 
         # Initialize OAuth Authorization Server Provider
         OAuthAuthorizationServerProvider.__init__(self)
