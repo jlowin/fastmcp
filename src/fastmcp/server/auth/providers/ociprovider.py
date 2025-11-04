@@ -14,6 +14,7 @@ Example:
     ```python
     from fastmcp import FastMCP
     from fastmcp.server.auth.providers.ociprovider import OCIProvider
+    from fastmcp.server.dependencies import get_access_token
     
     import oci
     from oci.auth.signers import TokenExchangeSigner
@@ -29,6 +30,10 @@ Example:
     _global_token_cache = {} #In memory cache for OCI session token signer
     
     def get_oci_signer() -> TokenExchangeSigner:
+    
+        authntoken = get_access_token()
+        tokenID = authntoken.claims.get("jti")
+        token = authntoken.token
     
         #Check if the signer exists for the token ID in memory cache
         cached_signer = _global_token_cache.get(tokenID)
