@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import copy
 import datetime
-import inspect
 import secrets
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, field
@@ -279,8 +278,6 @@ class Client(Generic[ClientTransportT]):
 
         # Session context management - see class docstring for detailed explanation
         self._session_state = ClientSessionState()
-        # Cache for runtime feature detection
-        self._meta_supported: bool | None = None
 
     @property
     def session(self) -> ClientSession:
@@ -860,28 +857,13 @@ class Client(Generic[ClientTransportT]):
         if isinstance(timeout, int | float):
             timeout = datetime.timedelta(seconds=float(timeout))
 
-        # Check if meta parameter is supported (cached after first check)
-        if self._meta_supported is None:
-            sig = inspect.signature(self.session.call_tool)
-            self._meta_supported = "meta" in sig.parameters
-
-        # Build call kwargs conditionally
-        call_kwargs: dict[str, Any] = {
-            "name": name,
-            "arguments": arguments,
-            "read_timeout_seconds": timeout,
-            "progress_callback": progress_handler or self._progress_handler,
-        }
-
-        if self._meta_supported:
-            call_kwargs["meta"] = meta
-        elif meta is not None:
-            logger.warning(
-                "The 'meta' parameter is not supported by your installed version of MCP. "
-                "Please update to MCP >= 1.19 to use this feature. Proceeding without meta."
-            )
-
-        result = await self.session.call_tool(**call_kwargs)
+        result = await self.session.call_tool(
+            name=name,
+            arguments=arguments,
+            read_timeout_seconds=timeout,
+            progress_callback=progress_handler or self._progress_handler,
+            meta=meta,
+        )
         return result
 
     async def call_tool(
