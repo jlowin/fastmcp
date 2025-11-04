@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from mcp.server.auth.middleware.auth_context import AuthContextMiddleware
 from mcp.server.auth.middleware.bearer_auth import BearerAuthBackend
@@ -295,7 +295,6 @@ class OAuthProvider(
         """
 
         super().__init__(base_url=base_url, required_scopes=required_scopes)
-        assert isinstance(self.base_url, AnyHttpUrl)
 
         if issuer_url is None:
             self.issuer_url = self.base_url
@@ -348,6 +347,9 @@ class OAuthProvider(
         # they're actually accessible (operational routes are mounted at
         # base_url)
         assert self.base_url is not None  # typing check
+        assert (
+            self.issuer_url is not None
+        )  # typing check (issuer_url defaults to base_url)
 
         oauth_routes = create_auth_routes(
             provider=self,
@@ -370,7 +372,7 @@ class OAuthProvider(
             )
             protected_routes = create_protected_resource_routes(
                 resource_url=resource_url,
-                authorization_servers=[self.issuer_url],
+                authorization_servers=[cast(AnyHttpUrl, self.issuer_url)],
                 scopes_supported=supported_scopes,
             )
             oauth_routes.extend(protected_routes)
