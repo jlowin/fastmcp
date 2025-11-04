@@ -143,6 +143,8 @@ uv pip install fastmcp
 
 For full installation instructions, including verification, upgrading from the official MCPSDK, and developer setup, see the [**Installation Guide**](https://gofastmcp.com/getting-started/installation).
 
+**Dependency Licensing:** FastMCP depends on Cyclopts for CLI functionality. Cyclopts v4 includes docutils as a transitive dependency, which has complex licensing that may trigger compliance reviews in some organizations. If this is a concern, you can install Cyclopts v5 alpha (`pip install "cyclopts>=5.0.0a1"`) which removes this dependency, or wait for the stable v5 release. See [this issue](https://github.com/BrianPugh/cyclopts/issues/672) for details.
+
 ## Core Concepts
 
 These are the building blocks for creating MCP servers and clients with FastMCP.
@@ -481,20 +483,20 @@ uv run pytest --cov=src --cov=examples --cov-report=html
 
 ### Static Checks
 
-FastMCP uses `pre-commit` for code formatting, linting, and type-checking. All PRs must pass these checks (they run automatically in CI).
+FastMCP uses `prek` for code formatting, linting, and type-checking. All PRs must pass these checks (they run automatically in CI).
 
 Install the hooks locally:
 
 ```bash
-uv run pre-commit install
+uv run prek install
 ```
 
 The hooks will now run automatically on `git commit`. You can also run them manually at any time:
 
 ```bash
-pre-commit run --all-files
+prek run --all-files
 # or via uv
-uv run pre-commit run --all-files
+uv run prek run --all-files
 ```
 
 ### Pull Requests
@@ -502,7 +504,7 @@ uv run pre-commit run --all-files
 1. Fork the repository on GitHub.
 2. Create a feature branch from `main`.
 3. Make your changes, including tests and documentation updates.
-4. Ensure tests and pre-commit hooks pass.
+4. Ensure tests and prek hooks pass.
 5. Commit your changes and push to your fork.
 6. Open a pull request against the `main` branch of `jlowin/fastmcp`.
 
