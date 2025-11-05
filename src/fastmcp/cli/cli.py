@@ -10,6 +10,7 @@ import sys
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Annotated, Literal
+from urllib.parse import urlparse
 
 import cyclopts
 import pyperclip
@@ -17,10 +18,17 @@ from rich.console import Console
 from rich.table import Table
 
 import fastmcp
+from fastmcp import Client
 from fastmcp.cli import run as run_module
 from fastmcp.cli.install import install_app
+from fastmcp.client.auth import OAuth
 from fastmcp.server.server import FastMCP
 from fastmcp.utilities.cli import is_already_in_uv_subprocess, load_and_merge_config
+from fastmcp.utilities.generate import (
+    generate_agents_md,
+    generate_tool_script,
+    to_snake_case,
+)
 from fastmcp.utilities.inspect import (
     InspectFormat,
     format_info,
@@ -864,6 +872,186 @@ async def prepare(
     except Exception as e:
         logger.error(f"Failed to prepare project: {e}")
         console.print(f"[bold red]✗[/bold red] Failed to prepare project: {e}")
+        sys.exit(1)
+
+
+def _infer_server_name(url: str) -> str:
+    """Infer a server name from a URL.
+
+    Args:
+        url: Server URL
+
+    Returns:
+        Server name suitable for use as a directory name
+    """
+    parsed = urlparse(url)
+    # Use hostname or last path component
+    if parsed.hostname:
+        # Remove common prefixes and suffixes
+        name = (
+            parsed.hostname.replace("www.", "").replace(".com", "").replace(".org", "")
+        )
+        # If there's a path, use the last component
+        if parsed.path and parsed.path != "/":
+            path_parts = [p for p in parsed.path.split("/") if p]
+            if path_parts:
+                name = path_parts[-1]
+    else:
+        # Fallback to using part of the URL
+        name = "mcp_server"
+
+    return to_snake_case(name)
+
+
+@app.command
+async def generate(
+    url: str,
+    *,
+    output: Annotated[
+        Path | None,
+        cyclopts.Parameter(
+            name=["--output", "-o"],
+            help="Output directory for generated scripts",
+        ),
+    ] = None,
+    auth: Annotated[
+        str | None,
+        cyclopts.Parameter(
+            "--auth",
+            help='Authentication: "oauth" for OAuth, "$VAR" for env var, or literal token',
+        ),
+    ] = None,
+    server_name: Annotated[
+        str | None,
+        cyclopts.Parameter(
+            "--server-name",
+            help="Override server name",
+        ),
+    ] = None,
+) -> None:
+    """Generate standalone Python scripts from MCP server tools.
+
+    Connects to an MCP server and generates a directory of Python scripts,
+    one per tool, that agents can discover and use progressively without
+    loading all tool definitions into context.
+
+    Examples:
+        # Basic usage (no auth)
+        fastmcp generate https://mcp.example.com/mcp
+
+        # With OAuth
+        fastmcp generate https://mcp.example.com/mcp --auth oauth
+
+        # With environment variable
+        export MY_API_TOKEN="secret"
+        fastmcp generate https://mcp.example.com/mcp --auth '$MY_API_TOKEN'
+
+        # With embedded token (hardcoded in scripts)
+        fastmcp generate https://mcp.example.com/mcp --auth "sk-secret-token"
+
+        # Custom output directory
+        fastmcp generate https://mcp.example.com/mcp --output ./my_tools
+
+    Args:
+        url: URL of the MCP server to connect to
+    """
+    logger.debug(
+        "Generating code from MCP server",
+        extra={
+            "url": url,
+            "output": str(output) if output else None,
+            "auth": bool(auth),
+        },
+    )
+
+    # Parse authentication and determine mode
+    auth_obj = None
+    auth_mode = "none"
+    auth_value = None
+
+    if auth:
+        if auth == "oauth":
+            # OAuth mode
+            auth_obj = OAuth(mcp_url=url)
+            auth_mode = "oauth"
+            logger.debug("Using OAuth authentication")
+        elif auth.startswith("$"):
+            # Environment variable mode
+            env_var_name = auth[1:]  # Strip the $
+            token = os.environ.get(env_var_name)
+            if not token:
+                console.print(
+                    f"[red]✗[/red] Environment variable {env_var_name} is not set"
+                )
+                sys.exit(1)
+            auth_obj = token
+            auth_mode = "env_var"
+            auth_value = env_var_name
+            logger.debug(f"Using token from environment variable: {env_var_name}")
+        else:
+            # Literal token mode
+            auth_obj = auth
+            auth_mode = "token"
+            auth_value = auth
+            logger.debug("Using embedded token authentication")
+
+    # Connect to server, list tools, and generate scripts
+    try:
+        console.print(f"[cyan]Connecting to[/cyan] {url} ...")
+        async with Client(url, auth=auth_obj) as client:
+            tools = await client.list_tools()
+
+            # Get server name and instructions from the server's initialization result
+            server_instructions = None
+            if server_name is None:
+                if client.initialize_result and client.initialize_result.serverInfo:
+                    server_name = to_snake_case(
+                        client.initialize_result.serverInfo.name
+                    )
+                else:
+                    server_name = _infer_server_name(url)
+
+            # Extract server instructions if available
+            if client.initialize_result and client.initialize_result.instructions:
+                server_instructions = client.initialize_result.instructions
+
+            if output is None:
+                output = Path(server_name)
+
+        if not tools:
+            console.print("[yellow]⚠[/yellow] No tools found on server")
+            return
+
+        console.print(f"[green]✓[/green] Found {len(tools)} tools")
+
+        # Generate tool scripts
+        output.mkdir(parents=True, exist_ok=True)
+        console.print(f"[cyan]Generating scripts in[/cyan] {output}/")
+
+        for tool in tools:
+            script = generate_tool_script(tool, url, auth_mode, auth_value)
+            filename = to_snake_case(tool.name) + ".py"
+            script_path = output / filename
+            script_path.write_text(script)
+            logger.debug(f"Generated script: {filename}")
+
+        # Generate metadata files
+        agents_md = generate_agents_md(
+            server_name, url, tools, auth_mode, auth_value, server_instructions
+        )
+        (output / "AGENTS.md").write_text(agents_md)
+
+        console.print(f"[green]✓[/green] Generated {len(tools)} tool scripts")
+
+    except Exception as e:
+        logger.exception(
+            "Failed to connect to MCP server or generate scripts",
+            extra={
+                "url": url,
+                "error": str(e),
+            },
+        )
+        console.print(f"[red]✗[/red] Failed: {e}")
         sys.exit(1)
 
 
