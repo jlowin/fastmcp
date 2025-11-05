@@ -311,7 +311,8 @@ async def test_task_path_return(binary_type_server):
         task = await client.call_tool_as_task("return_path")
         result = await task
         assert isinstance(result.data, str)
-        assert result.data == "/tmp/test.txt"
+        # Path uses platform-specific separators
+        assert "tmp" in result.data and "test.txt" in result.data
 
 
 async def test_task_datetime_return(binary_type_server):
