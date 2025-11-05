@@ -7,6 +7,7 @@ import inspect
 import json
 import re
 import secrets
+import uuid
 import warnings
 from collections.abc import (
     AsyncIterator,
@@ -429,8 +430,8 @@ class FastMCP(Generic[LifespanResultT]):
 
         server_token = _current_server.set(self)
         try:
-            # Create Docket instance with memory:// URL
-            async with Docket(url="memory://") as docket:
+            # Create Docket instance with unique memory:// URL per server
+            async with Docket(url=f"memory://{uuid.uuid4()}") as docket:
                 # Set Docket in ContextVar so CurrentDocket can access it
                 docket_token = _current_docket.set(docket)
                 try:

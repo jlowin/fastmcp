@@ -8,21 +8,6 @@ import pytest
 
 from fastmcp import FastMCP
 from fastmcp.client import Client
-from fastmcp.utilities.tests import temporary_settings
-
-
-@pytest.fixture(autouse=True)
-def enable_docket_and_tasks():
-    """Enable Docket and task protocol support for all client prompt task tests."""
-    with temporary_settings(
-        experimental__enable_docket=True,
-        experimental__enable_tasks=True,
-    ):
-        import fastmcp
-
-        assert fastmcp.settings.experimental.enable_docket
-        assert fastmcp.settings.experimental.enable_tasks
-        yield
 
 
 @pytest.fixture
