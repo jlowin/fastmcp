@@ -484,6 +484,59 @@ class TestOAuthProxyAuthorization:
         assert transaction.client_state == "client-state-123"
         assert transaction.scopes == ["read", "write"]
 
+    async def test_consent_submit_url_with_base_url_prefix(self, jwt_verifier):
+        """Test that consent submit URL is constructed correctly when base_url has a path prefix."""
+        from unittest.mock import Mock
+
+        from starlette.requests import Request
+
+        proxy = OAuthProxy(
+            upstream_authorization_endpoint="https://oauth.example.com/authorize",
+            upstream_token_endpoint="https://oauth.example.com/token",
+            upstream_client_id="test-client-id",
+            upstream_client_secret="test-client-secret",
+            token_verifier=jwt_verifier,
+            base_url="https://myserver.com/api/v1",
+            redirect_path="/auth/callback",
+            jwt_signing_key="test-secret",
+        )
+
+        client = OAuthClientInformationFull(
+            client_id="test-client",
+            client_secret="test-secret",
+            redirect_uris=[AnyUrl("http://localhost:54321/callback")],
+        )
+
+        await proxy.register_client(client)
+
+        params = AuthorizationParams(
+            redirect_uri=AnyUrl("http://localhost:54321/callback"),
+            redirect_uri_provided_explicitly=True,
+            state="client-state",
+            code_challenge="challenge-abc",
+            code_challenge_method="S256",
+            scopes=["read"],
+        )
+
+        redirect_url = await proxy.authorize(client, params)
+        query_params = parse_qs(urlparse(redirect_url).query)
+        txn_id = query_params["txn_id"][0]
+
+        mock_request = Mock(spec=Request)
+        mock_request.query_params = {"txn_id": txn_id}
+        mock_request.app = Mock()
+        mock_request.app.state = Mock()
+        mock_request.app.state.fastmcp_server = None
+        mock_request.cookies = {}
+
+        response = await proxy._show_consent_page(mock_request)
+
+        assert response.status_code == 200
+        response_body = response.body.decode("utf-8")
+
+        expected_submit_url = "https://myserver.com/api/v1/consent/submit"
+        assert f'action="{expected_submit_url}"' in response_body
+
 
 class TestOAuthProxyPKCE:
     """Tests for OAuth proxy PKCE forwarding."""

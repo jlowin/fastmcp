@@ -239,6 +239,7 @@ def create_consent_html(
     scopes: list[str],
     txn_id: str,
     csrf_token: str,
+    consent_submit_url: str,
     client_name: str | None = None,
     title: str = "Application Access Request",
     server_name: str | None = None,
@@ -310,7 +311,7 @@ def create_consent_html(
 
     # Build form with buttons
     form = f"""
-        <form id="consentForm" method="POST" action="/consent/submit">
+        <form id="consentForm" method="POST" action="{consent_submit_url}">
             <input type="hidden" name="txn_id" value="{txn_id}" />
             <input type="hidden" name="csrf_token" value="{csrf_token}" />
             <div class="button-group">
@@ -2046,6 +2047,7 @@ class OAuthProxy(OAuthProvider):
             server_website_url = None
 
         html = create_consent_html(
+            consent_submit_url=f"{str(self.base_url).rstrip('/')}/consent/submit",
             client_id=txn["client_id"],
             redirect_uri=txn["client_redirect_uri"],
             scopes=txn.get("scopes") or [],
