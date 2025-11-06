@@ -27,7 +27,7 @@ async def test_tasks_get_includes_related_task_metadata(metadata_server: FastMCP
     """tasks/get response includes modelcontextprotocol.io/related-task in _meta."""
     async with Client(metadata_server) as client:
         # Submit a task
-        task = await client.call_tool_as_task("test_tool", {"value": 5})
+        task = await client.call_tool("test_tool", {"value": 5}, task=True)
         task_id = task.task_id
 
         # Get status via direct protocol call
@@ -51,7 +51,7 @@ async def test_tasks_result_includes_related_task_metadata(metadata_server: Fast
     """tasks/result response includes modelcontextprotocol.io/related-task in _meta."""
     async with Client(metadata_server) as client:
         # Submit and complete a task
-        task = await client.call_tool_as_task("test_tool", {"value": 7})
+        task = await client.call_tool("test_tool", {"value": 7}, task=True)
         await task.wait(timeout=2.0)
         task_id = task.task_id
 
@@ -96,7 +96,7 @@ async def test_tasks_delete_includes_related_task_metadata(metadata_server: Fast
     """tasks/delete response includes modelcontextprotocol.io/related-task in _meta."""
     async with Client(metadata_server) as client:
         # Submit a task
-        task = await client.call_tool_as_task("test_tool", {"value": 9})
+        task = await client.call_tool("test_tool", {"value": 9}, task=True)
         task_id = task.task_id
 
         # Wait for completion

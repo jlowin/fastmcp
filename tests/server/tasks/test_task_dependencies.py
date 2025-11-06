@@ -74,7 +74,7 @@ async def dependency_server():
 async def test_background_tool_receives_docket_dependency(dependency_server):
     """Background tools can use CurrentDocket() and it resolves correctly."""
     async with Client(dependency_server) as client:
-        task = await client.call_tool_as_task("tool_with_docket_dependency", {})
+        task = await client.call_tool("tool_with_docket_dependency", {}, task=True)
 
         # Verify it's background
         assert not task.returned_immediately
@@ -95,7 +95,7 @@ async def test_background_tool_receives_server_dependency(dependency_server):
     dependency_server._injected_values.clear()
 
     async with Client(dependency_server) as client:
-        task = await client.call_tool_as_task("tool_with_server_dependency", {})
+        task = await client.call_tool("tool_with_server_dependency", {}, task=True)
 
         # Verify background execution
         assert not task.returned_immediately
@@ -115,8 +115,8 @@ async def test_background_tool_receives_custom_depends(dependency_server):
     dependency_server._injected_values.clear()
 
     async with Client(dependency_server) as client:
-        task = await client.call_tool_as_task(
-            "tool_with_custom_dependency", {"value": 5}
+        task = await client.call_tool(
+            "tool_with_custom_dependency", {"value": 5}, task=True
         )
 
         assert not task.returned_immediately
@@ -136,8 +136,8 @@ async def test_background_tool_with_multiple_dependencies(dependency_server):
     dependency_server._injected_values.clear()
 
     async with Client(dependency_server) as client:
-        task = await client.call_tool_as_task(
-            "tool_with_multiple_dependencies", {"name": "test"}
+        task = await client.call_tool(
+            "tool_with_multiple_dependencies", {"name": "test"}, task=True
         )
 
         assert not task.returned_immediately
@@ -163,8 +163,8 @@ async def test_background_prompt_receives_dependencies(dependency_server):
     dependency_server._injected_values.clear()
 
     async with Client(dependency_server) as client:
-        task = await client.get_prompt_as_task(
-            "prompt_with_server_dependency", {"topic": "AI"}
+        task = await client.get_prompt(
+            "prompt_with_server_dependency", {"topic": "AI"}, task=True
         )
 
         assert not task.returned_immediately
@@ -183,7 +183,7 @@ async def test_background_resource_receives_dependencies(dependency_server):
     dependency_server._injected_values.clear()
 
     async with Client(dependency_server) as client:
-        task = await client.read_resource_as_task("file://data.txt")
+        task = await client.read_resource("file://data.txt", task=True)
 
         assert not task.returned_immediately
 
@@ -235,7 +235,7 @@ async def test_dependency_context_managers_cleaned_up_in_background():
         return f"Used: {conn}"
 
     async with Client(mcp) as client:
-        task = await client.call_tool_as_task("use_connection", {"name": "test"})
+        task = await client.call_tool("use_connection", {"name": "test"}, task=True)
         result = await task
 
         # After task completes, cleanup should have been called
@@ -262,8 +262,8 @@ async def test_dependency_errors_propagate_to_task_failure():
         return f"Got: {dep}"
 
     async with Client(mcp) as client:
-        task = await client.call_tool_as_task(
-            "tool_with_failing_dep", {"value": "test"}
+        task = await client.call_tool(
+            "tool_with_failing_dep", {"value": "test"}, task=True
         )
 
         # Task should fail due to dependency error

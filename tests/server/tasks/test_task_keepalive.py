@@ -34,9 +34,10 @@ async def test_keepalive_returned_in_submitted_state(keepalive_server: FastMCP):
     """keepAlive is returned in tasks/get even when task is submitted/working."""
     async with Client(keepalive_server) as client:
         # Submit task with explicit keepAlive
-        task = await client.call_tool_as_task(
+        task = await client.call_tool(
             "slow_task",
             {},
+            task=True,
             keep_alive=30000,  # 30 seconds
         )
 
@@ -52,8 +53,8 @@ async def test_keepalive_returned_in_completed_state(keepalive_server: FastMCP):
     """keepAlive is returned in tasks/get after task completes."""
     async with Client(keepalive_server) as client:
         # Submit and complete task
-        task = await client.call_tool_as_task(
-            "quick_task", {"value": 5}, keep_alive=45000
+        task = await client.call_tool(
+            "quick_task", {"value": 5}, task=True, keep_alive=45000
         )
         await task.wait(timeout=2.0)
 
@@ -67,7 +68,7 @@ async def test_default_keepalive_when_not_specified(keepalive_server: FastMCP):
     """Default keepAlive is used when client doesn't specify."""
     async with Client(keepalive_server) as client:
         # Submit without explicit keepAlive
-        task = await client.call_tool_as_task("quick_task", {"value": 3})
+        task = await client.call_tool("quick_task", {"value": 3}, task=True)
         await task.wait(timeout=2.0)
 
         status = await task.status()
@@ -79,8 +80,8 @@ async def test_expired_task_returns_unknown(keepalive_server: FastMCP):
     """Tasks return unknown state after keepAlive expires."""
     async with Client(keepalive_server) as client:
         # Submit task with very short keepAlive (100ms)
-        task = await client.call_tool_as_task(
-            "quick_task", {"value": 7}, keep_alive=100
+        task = await client.call_tool(
+            "quick_task", {"value": 7}, task=True, keep_alive=100
         )
         await task.wait(timeout=2.0)
         task_id = task.task_id

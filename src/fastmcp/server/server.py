@@ -183,6 +183,7 @@ class FastMCP(Generic[LifespanResultT]):
         on_duplicate_resources: DuplicateBehavior | None = None,
         on_duplicate_prompts: DuplicateBehavior | None = None,
         strict_input_validation: bool | None = None,
+        tasks: bool | None = None,
         # ---
         # ---
         # --- The following arguments are DEPRECATED ---
@@ -202,6 +203,11 @@ class FastMCP(Generic[LifespanResultT]):
     ):
         self.resource_prefix_format: Literal["protocol", "path"] = (
             resource_prefix_format or fastmcp.settings.resource_prefix_format
+        )
+
+        # Resolve server default for background task support
+        self._support_tasks_by_default: bool = (
+            tasks if tasks is not None else fastmcp.settings.experimental.enable_tasks
         )
 
         self._additional_http_routes: list[BaseRoute] = []
@@ -2259,7 +2265,7 @@ class FastMCP(Generic[LifespanResultT]):
         exclude_args: list[str] | None = None,
         meta: dict[str, Any] | None = None,
         enabled: bool | None = None,
-        task: bool = False,
+        task: bool | None = None,
     ) -> FunctionTool: ...
 
     @overload
@@ -2277,7 +2283,7 @@ class FastMCP(Generic[LifespanResultT]):
         exclude_args: list[str] | None = None,
         meta: dict[str, Any] | None = None,
         enabled: bool | None = None,
-        task: bool = False,
+        task: bool | None = None,
     ) -> Callable[[AnyFunction], FunctionTool]: ...
 
     def tool(
@@ -2294,7 +2300,7 @@ class FastMCP(Generic[LifespanResultT]):
         exclude_args: list[str] | None = None,
         meta: dict[str, Any] | None = None,
         enabled: bool | None = None,
-        task: bool = False,
+        task: bool | None = None,
     ) -> Callable[[AnyFunction], FunctionTool] | FunctionTool:
         """Decorator to register a tool.
 
@@ -2366,6 +2372,11 @@ class FastMCP(Generic[LifespanResultT]):
             fn = name_or_fn
             tool_name = name  # Use keyword name if provided, otherwise None
 
+            # Resolve task parameter to concrete boolean
+            supports_task: bool = (
+                task if task is not None else self._support_tasks_by_default
+            )
+
             # Register the tool immediately and return the tool object
             tool = Tool.from_function(
                 fn,
@@ -2380,7 +2391,7 @@ class FastMCP(Generic[LifespanResultT]):
                 meta=meta,
                 serializer=self._tool_serializer,
                 enabled=enabled,
-                task=task,
+                task=supports_task,
             )
             self.add_tool(tool)
             return tool
@@ -2512,7 +2523,7 @@ class FastMCP(Generic[LifespanResultT]):
         enabled: bool | None = None,
         annotations: Annotations | dict[str, Any] | None = None,
         meta: dict[str, Any] | None = None,
-        task: bool = False,
+        task: bool | None = None,
     ) -> Callable[[AnyFunction], Resource | ResourceTemplate]:
         """Decorator to register a function as a resource.
 
@@ -2589,6 +2600,11 @@ class FastMCP(Generic[LifespanResultT]):
                     )
                 )
 
+            # Resolve task parameter to concrete boolean
+            supports_task: bool = (
+                task if task is not None else self._support_tasks_by_default
+            )
+
             # Check if this should be a template
             has_uri_params = "{" in uri and "}" in uri
             # Use wrapper to check for user-facing parameters
@@ -2610,7 +2626,7 @@ class FastMCP(Generic[LifespanResultT]):
                     enabled=enabled,
                     annotations=annotations,
                     meta=meta,
-                    task=task,
+                    task=supports_task,
                 )
                 self.add_template(template)
                 return template
@@ -2627,7 +2643,7 @@ class FastMCP(Generic[LifespanResultT]):
                     enabled=enabled,
                     annotations=annotations,
                     meta=meta,
-                    task=task,
+                    task=supports_task,
                 )
                 self.add_resource(resource)
                 return resource
@@ -2673,6 +2689,7 @@ class FastMCP(Generic[LifespanResultT]):
         tags: set[str] | None = None,
         enabled: bool | None = None,
         meta: dict[str, Any] | None = None,
+        task: bool | None = None,
     ) -> FunctionPrompt: ...
 
     @overload
@@ -2687,6 +2704,7 @@ class FastMCP(Generic[LifespanResultT]):
         tags: set[str] | None = None,
         enabled: bool | None = None,
         meta: dict[str, Any] | None = None,
+        task: bool | None = None,
     ) -> Callable[[AnyFunction], FunctionPrompt]: ...
 
     def prompt(
@@ -2700,7 +2718,7 @@ class FastMCP(Generic[LifespanResultT]):
         tags: set[str] | None = None,
         enabled: bool | None = None,
         meta: dict[str, Any] | None = None,
-        task: bool = False,
+        task: bool | None = None,
     ) -> Callable[[AnyFunction], FunctionPrompt] | FunctionPrompt:
         """Decorator to register a prompt.
 
@@ -2791,6 +2809,11 @@ class FastMCP(Generic[LifespanResultT]):
             fn = name_or_fn
             prompt_name = name  # Use keyword name if provided, otherwise None
 
+            # Resolve task parameter to concrete boolean
+            supports_task: bool = (
+                task if task is not None else self._support_tasks_by_default
+            )
+
             # Register the prompt immediately
             prompt = Prompt.from_function(
                 fn=fn,
@@ -2801,7 +2824,7 @@ class FastMCP(Generic[LifespanResultT]):
                 tags=tags,
                 enabled=enabled,
                 meta=meta,
-                task=task,
+                task=supports_task,
             )
             self.add_prompt(prompt)
 

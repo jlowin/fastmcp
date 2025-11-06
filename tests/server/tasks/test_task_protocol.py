@@ -45,7 +45,7 @@ async def test_tool_call_with_task_metadata_returns_immediately(task_enabled_ser
     """Tools with task metadata return immediately with ToolTask object."""
     async with Client(task_enabled_server) as client:
         # Call with task metadata
-        task = await client.call_tool_as_task("simple_tool", {"message": "test"})
+        task = await client.call_tool("simple_tool", {"message": "test"}, task=True)
 
         # Should return a ToolTask object immediately
         from fastmcp.client.client import ToolTask
@@ -59,9 +59,10 @@ async def test_task_metadata_includes_task_id_and_keep_alive(task_enabled_server
     """Task metadata properly includes taskId and keepAlive."""
     async with Client(task_enabled_server) as client:
         # Submit with specific task ID and keepAlive
-        task = await client.call_tool_as_task(
+        task = await client.call_tool(
             "simple_tool",
             {"message": "test"},
+            task=True,
             task_id="custom-task-123",
             keep_alive=30000,
         )
@@ -85,7 +86,7 @@ async def test_task_executes_in_background_via_docket(task_enabled_server):
 
     async with Client(task_enabled_server) as client:
         # Submit task
-        task = await client.call_tool_as_task("coordinated_tool")
+        task = await client.call_tool("coordinated_tool", task=True)
 
         # Should return immediately (not blocking)
         assert task
@@ -118,7 +119,7 @@ async def test_task_notification_sent_after_submission(task_enabled_server):
         return f"Processed: {message}"
 
     async with Client(task_enabled_server) as client:
-        task = await client.call_tool_as_task("background_tool", {"message": "test"})
+        task = await client.call_tool("background_tool", {"message": "test"}, task=True)
         assert task
 
         # Verify we can query the task
@@ -137,7 +138,7 @@ async def test_graceful_degradation_task_false_executes_immediately(
 
     async with Client(task_enabled_server) as client:
         # Try to call with task metadata - server should ignore and execute synchronously
-        task = await client.call_tool_as_task("sync_only_tool", {"message": "test"})
+        task = await client.call_tool("sync_only_tool", {"message": "test"}, task=True)
 
         # Task should wrap an immediate result (graceful degradation)
         # Can get result without waiting
@@ -157,7 +158,7 @@ async def test_failed_task_stores_error(task_enabled_server):
         raise ValueError("This tool always fails")
 
     async with Client(task_enabled_server) as client:
-        task = await client.call_tool_as_task("failing_task_tool")
+        task = await client.call_tool("failing_task_tool", task=True)
 
         # Wait for task to fail
         status = await task.wait(state="failed", timeout=2.0)

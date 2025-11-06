@@ -719,21 +719,53 @@ class Client(Generic[ClientTransportT]):
             result = await self.session.read_resource(uri)
         return result
 
+    @overload
     async def read_resource(
-        self, uri: AnyUrl | str
-    ) -> list[mcp.types.TextResourceContents | mcp.types.BlobResourceContents]:
+        self,
+        uri: AnyUrl | str,
+        *,
+        task: Literal[False] = False,
+    ) -> list[mcp.types.TextResourceContents | mcp.types.BlobResourceContents]: ...
+
+    @overload
+    async def read_resource(
+        self,
+        uri: AnyUrl | str,
+        *,
+        task: Literal[True],
+        task_id: str | None = None,
+        keep_alive: int = 60000,
+    ) -> ResourceTask: ...
+
+    async def read_resource(
+        self,
+        uri: AnyUrl | str,
+        *,
+        task: bool = False,
+        task_id: str | None = None,
+        keep_alive: int = 60000,
+    ) -> (
+        list[mcp.types.TextResourceContents | mcp.types.BlobResourceContents]
+        | ResourceTask
+    ):
         """Read the contents of a resource or resolved template.
 
         Args:
             uri (AnyUrl | str): The URI of the resource to read. Can be a string or an AnyUrl object.
+            task (bool): If True, execute as background task (SEP-1686). Defaults to False.
+            task_id (str | None): Optional client-provided task ID (auto-generated if not provided).
+            keep_alive (int): Time to keep results available in milliseconds (default 60s).
 
         Returns:
-            list[mcp.types.TextResourceContents | mcp.types.BlobResourceContents]: A list of content
-                objects, typically containing either text or binary data.
+            list[mcp.types.TextResourceContents | mcp.types.BlobResourceContents] | ResourceTask:
+                A list of content objects if task=False, or a ResourceTask object if task=True.
 
         Raises:
             RuntimeError: If called while the client is not connected.
         """
+        if task:
+            return await self._read_resource_as_task(uri, task_id, keep_alive)
+
         if isinstance(uri, str):
             try:
                 uri = AnyUrl(uri)  # Ensure AnyUrl
@@ -744,7 +776,7 @@ class Client(Generic[ClientTransportT]):
         result = await self.read_resource_mcp(uri)
         return result.contents
 
-    async def read_resource_as_task(
+    async def _read_resource_as_task(
         self,
         uri: AnyUrl | str,
         task_id: str | None = None,
@@ -883,26 +915,58 @@ class Client(Generic[ClientTransportT]):
             )
         return result
 
+    @overload
     async def get_prompt(
-        self, name: str, arguments: dict[str, Any] | None = None
-    ) -> mcp.types.GetPromptResult:
+        self,
+        name: str,
+        arguments: dict[str, Any] | None = None,
+        *,
+        task: Literal[False] = False,
+    ) -> mcp.types.GetPromptResult: ...
+
+    @overload
+    async def get_prompt(
+        self,
+        name: str,
+        arguments: dict[str, Any] | None = None,
+        *,
+        task: Literal[True],
+        task_id: str | None = None,
+        keep_alive: int = 60000,
+    ) -> PromptTask: ...
+
+    async def get_prompt(
+        self,
+        name: str,
+        arguments: dict[str, Any] | None = None,
+        *,
+        task: bool = False,
+        task_id: str | None = None,
+        keep_alive: int = 60000,
+    ) -> mcp.types.GetPromptResult | PromptTask:
         """Retrieve a rendered prompt message list from the server.
 
         Args:
             name (str): The name of the prompt to retrieve.
             arguments (dict[str, Any] | None, optional): Arguments to pass to the prompt. Defaults to None.
+            task (bool): If True, execute as background task (SEP-1686). Defaults to False.
+            task_id (str | None): Optional client-provided task ID (auto-generated if not provided).
+            keep_alive (int): Time to keep results available in milliseconds (default 60s).
 
         Returns:
-            mcp.types.GetPromptResult: The complete response object from the protocol,
-                containing the prompt messages and any additional metadata.
+            mcp.types.GetPromptResult | PromptTask: The complete response object if task=False,
+                or a PromptTask object if task=True.
 
         Raises:
             RuntimeError: If called while the client is not connected.
         """
+        if task:
+            return await self._get_prompt_as_task(name, arguments, task_id, keep_alive)
+
         result = await self.get_prompt_mcp(name=name, arguments=arguments)
         return result
 
-    async def get_prompt_as_task(
+    async def _get_prompt_as_task(
         self,
         name: str,
         arguments: dict[str, Any] | None = None,
@@ -1141,15 +1205,47 @@ class Client(Generic[ClientTransportT]):
             is_error=result.isError,
         )
 
+    @overload
     async def call_tool(
         self,
         name: str,
         arguments: dict[str, Any] | None = None,
+        *,
         timeout: datetime.timedelta | float | int | None = None,
         progress_handler: ProgressHandler | None = None,
         raise_on_error: bool = True,
         meta: dict[str, Any] | None = None,
-    ) -> CallToolResult:
+        task: Literal[False] = False,
+    ) -> CallToolResult: ...
+
+    @overload
+    async def call_tool(
+        self,
+        name: str,
+        arguments: dict[str, Any] | None = None,
+        *,
+        timeout: datetime.timedelta | float | int | None = None,
+        progress_handler: ProgressHandler | None = None,
+        raise_on_error: bool = True,
+        meta: dict[str, Any] | None = None,
+        task: Literal[True],
+        task_id: str | None = None,
+        keep_alive: int = 60000,
+    ) -> ToolTask: ...
+
+    async def call_tool(
+        self,
+        name: str,
+        arguments: dict[str, Any] | None = None,
+        *,
+        timeout: datetime.timedelta | float | int | None = None,
+        progress_handler: ProgressHandler | None = None,
+        raise_on_error: bool = True,
+        meta: dict[str, Any] | None = None,
+        task: bool = False,
+        task_id: str | None = None,
+        keep_alive: int = 60000,
+    ) -> CallToolResult | ToolTask:
         """Call a tool on the server.
 
         Unlike call_tool_mcp, this method raises a ToolError if the tool call results in an error.
@@ -1164,10 +1260,13 @@ class Client(Generic[ClientTransportT]):
                 This is useful for passing contextual information (like user IDs, trace IDs, or preferences)
                 that shouldn't be tool arguments but may influence server-side processing. The server
                 can access this via `context.request_context.meta`. Defaults to None.
+            task (bool): If True, execute as background task (SEP-1686). Defaults to False.
+            task_id (str | None): Optional client-provided task ID (auto-generated if not provided).
+            keep_alive (int): Time to keep results available in milliseconds (default 60s).
 
         Returns:
-            CallToolResult:
-                The content returned by the tool. If the tool returns structured
+            CallToolResult | ToolTask: The content returned by the tool if task=False,
+                or a ToolTask object if task=True. If the tool returns structured
                 outputs, they are returned as a dataclass (if an output schema
                 is available) or a dictionary; otherwise, a list of content
                 blocks is returned. Note: to receive both structured and
@@ -1178,6 +1277,9 @@ class Client(Generic[ClientTransportT]):
             ToolError: If the tool call results in an error.
             RuntimeError: If called while the client is not connected.
         """
+        if task:
+            return await self._call_tool_as_task(name, arguments, task_id, keep_alive)
+
         result = await self.call_tool_mcp(
             name=name,
             arguments=arguments or {},
@@ -1189,7 +1291,7 @@ class Client(Generic[ClientTransportT]):
             name, result, raise_on_error=raise_on_error
         )
 
-    async def call_tool_as_task(
+    async def _call_tool_as_task(
         self,
         name: str,
         arguments: dict[str, Any] | None = None,

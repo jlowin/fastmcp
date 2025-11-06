@@ -31,9 +31,9 @@ async def task_server():
 
 
 async def test_call_tool_as_task_returns_task_object(task_server):
-    """call_tool_as_task returns a ToolTask object."""
+    """call_tool with task=True returns a ToolTask object."""
     async with Client(task_server) as client:
-        task = await client.call_tool_as_task("echo", {"message": "hello"})
+        task = await client.call_tool("echo", {"message": "hello"}, task=True)
 
         from fastmcp.client.client import ToolTask
 
@@ -43,22 +43,23 @@ async def test_call_tool_as_task_returns_task_object(task_server):
 
 
 async def test_call_tool_as_task_with_custom_task_id(task_server):
-    """call_tool_as_task accepts custom task ID."""
+    """call_tool with task=True accepts custom task ID."""
     async with Client(task_server) as client:
         custom_id = "my-custom-task-123"
-        task = await client.call_tool_as_task(
-            "echo", {"message": "test"}, task_id=custom_id
+        task = await client.call_tool(
+            "echo", {"message": "test"}, task=True, task_id=custom_id
         )
 
         assert task.task_id == custom_id
 
 
 async def test_call_tool_as_task_with_custom_keep_alive(task_server):
-    """call_tool_as_task accepts custom keepAlive."""
+    """call_tool with task=True accepts custom keepAlive."""
     async with Client(task_server) as client:
-        task = await client.call_tool_as_task(
+        task = await client.call_tool(
             "echo",
             {"message": "test"},
+            task=True,
             keep_alive=120000,  # 2 minutes
         )
 
@@ -70,7 +71,7 @@ async def test_call_tool_as_task_with_custom_keep_alive(task_server):
 async def test_task_status_method_returns_status(task_server):
     """Task.status() returns TaskStatusResponse."""
     async with Client(task_server) as client:
-        task = await client.call_tool_as_task("echo", {"message": "test"})
+        task = await client.call_tool("echo", {"message": "test"}, task=True)
 
         status = await task.status()
 
@@ -81,7 +82,7 @@ async def test_task_status_method_returns_status(task_server):
 async def test_task_result_method_returns_tool_result(task_server):
     """Task.result() returns CallToolResult with tool data."""
     async with Client(task_server) as client:
-        task = await client.call_tool_as_task("multiply", {"a": 6, "b": 7})
+        task = await client.call_tool("multiply", {"a": 6, "b": 7}, task=True)
 
         # Verify task accepted for background execution
         assert not task.returned_immediately, "Task should execute in background"
@@ -106,8 +107,8 @@ async def test_end_to_end_task_flow(task_server):
 
     async with Client(task_server) as client:
         # Submit task
-        task = await client.call_tool_as_task(
-            "controlled_tool", {"message": "integration test"}
+        task = await client.call_tool(
+            "controlled_tool", {"message": "integration test"}, task=True
         )
 
         # Wait for execution to start
@@ -131,7 +132,7 @@ async def test_multiple_concurrent_tasks(task_server):
         # Submit multiple tasks
         tasks = []
         for i in range(5):
-            task = await client.call_tool_as_task("multiply", {"a": i, "b": 2})
+            task = await client.call_tool("multiply", {"a": i, "b": 2}, task=True)
             tasks.append((task, i * 2))
 
         # Wait for all to complete and verify results
@@ -144,8 +145,8 @@ async def test_task_id_auto_generation(task_server):
     """Task IDs are auto-generated if not provided."""
     async with Client(task_server) as client:
         # Submit without custom task ID
-        task_1 = await client.call_tool_as_task("echo", {"message": "first"})
-        task_2 = await client.call_tool_as_task("echo", {"message": "second"})
+        task_1 = await client.call_tool("echo", {"message": "first"}, task=True)
+        task_2 = await client.call_tool("echo", {"message": "second"}, task=True)
 
         # Should generate different IDs
         assert task_1.task_id != task_2.task_id
@@ -156,7 +157,7 @@ async def test_task_id_auto_generation(task_server):
 async def test_task_await_syntax(task_server):
     """Tasks can be awaited directly to get result."""
     async with Client(task_server) as client:
-        task = await client.call_tool_as_task("multiply", {"a": 7, "b": 6})
+        task = await client.call_tool("multiply", {"a": 7, "b": 6}, task=True)
 
         # Can await task directly (syntactic sugar for task.result())
         result = await task

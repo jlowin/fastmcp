@@ -40,7 +40,7 @@ async def test_tasks_get_endpoint_returns_status(endpoint_server):
     """POST /tasks/get returns task status."""
     async with Client(endpoint_server) as client:
         # Submit a task
-        task = await client.call_tool_as_task("quick_tool", {"value": 21})
+        task = await client.call_tool("quick_tool", {"value": 21}, task=True)
 
         # Check status immediately - should be submitted or working
         status = await task.status()
@@ -58,7 +58,7 @@ async def test_tasks_get_endpoint_returns_status(endpoint_server):
 async def test_tasks_get_endpoint_includes_poll_frequency(endpoint_server):
     """Task status includes pollFrequency hint."""
     async with Client(endpoint_server) as client:
-        task = await client.call_tool_as_task("quick_tool", {"value": 42})
+        task = await client.call_tool("quick_tool", {"value": 42}, task=True)
 
         status = await task.status()
         assert status.poll_frequency is not None
@@ -68,7 +68,7 @@ async def test_tasks_get_endpoint_includes_poll_frequency(endpoint_server):
 async def test_tasks_result_endpoint_returns_result_when_completed(endpoint_server):
     """POST /tasks/result returns the tool result when completed."""
     async with Client(endpoint_server) as client:
-        task = await client.call_tool_as_task("quick_tool", {"value": 21})
+        task = await client.call_tool("quick_tool", {"value": 21}, task=True)
 
         # Wait for completion and get result
         result = await task.result()
@@ -86,7 +86,7 @@ async def test_tasks_result_endpoint_errors_if_not_completed(endpoint_server):
         return "done"
 
     async with Client(endpoint_server) as client:
-        task = await client.call_tool_as_task("blocked_tool")
+        task = await client.call_tool("blocked_tool", task=True)
 
         # Try to get result immediately (task still running)
         with pytest.raises(Exception):  # Should raise or return error
@@ -107,7 +107,7 @@ async def test_tasks_result_endpoint_errors_if_task_not_found(endpoint_server):
 async def test_tasks_result_endpoint_returns_error_for_failed_task(endpoint_server):
     """POST /tasks/result returns error information for failed tasks."""
     async with Client(endpoint_server) as client:
-        task = await client.call_tool_as_task("error_tool")
+        task = await client.call_tool("error_tool", task=True)
 
         # Wait for task to fail
         await task.wait(state="failed", timeout=2.0)
@@ -129,8 +129,8 @@ async def test_tasks_list_endpoint_session_isolation(endpoint_server):
         # Submit multiple tasks
         tasks = []
         for i in range(3):
-            task = await client.call_tool_as_task(
-                "quick_tool", {"value": i}, task_id=f"list-task-{i}"
+            task = await client.call_tool(
+                "quick_tool", {"value": i}, task=True, task_id=f"list-task-{i}"
             )
             tasks.append(task)
 
@@ -150,7 +150,7 @@ async def test_tasks_delete_removes_task(endpoint_server):
     """tasks/delete removes task state and results."""
     async with Client(endpoint_server) as client:
         # Submit a task
-        task = await client.call_tool_as_task("quick_tool", {"value": 10})
+        task = await client.call_tool("quick_tool", {"value": 10}, task=True)
         task_id = task.task_id
 
         # Wait for completion
@@ -175,7 +175,7 @@ async def test_tasks_delete_on_running_task(endpoint_server):
     """tasks/delete cancels running tasks."""
     async with Client(endpoint_server) as client:
         # Submit the slow task
-        task = await client.call_tool_as_task("slow_tool", {})
+        task = await client.call_tool("slow_tool", {}, task=True)
 
         # Give it a moment to start
         await asyncio.sleep(0.1)
@@ -211,7 +211,7 @@ async def test_task_cancellation_workflow(endpoint_server):
     """Task can be cancelled, transitioning to cancelled state."""
     async with Client(endpoint_server) as client:
         # Submit slow task
-        task = await client.call_tool_as_task("slow_tool", {})
+        task = await client.call_tool("slow_tool", {}, task=True)
 
         # Give it a moment to start
         await asyncio.sleep(0.1)

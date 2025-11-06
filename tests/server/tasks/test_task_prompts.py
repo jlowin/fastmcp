@@ -42,7 +42,7 @@ async def test_prompt_with_task_metadata_returns_immediately(prompt_server):
     """Prompts with task metadata return immediately with PromptTask object."""
     async with Client(prompt_server) as client:
         # Call with task metadata
-        task = await client.get_prompt_as_task("background_prompt", {"topic": "AI"})
+        task = await client.get_prompt("background_prompt", {"topic": "AI"}, task=True)
 
         # Should return a PromptTask object immediately
         from fastmcp.client.client import PromptTask
@@ -55,8 +55,10 @@ async def test_prompt_with_task_metadata_returns_immediately(prompt_server):
 async def test_prompt_task_executes_in_background(prompt_server):
     """Prompt task executes via Docket in background."""
     async with Client(prompt_server) as client:
-        task = await client.get_prompt_as_task(
-            "background_prompt", {"topic": "Machine Learning", "depth": "comprehensive"}
+        task = await client.get_prompt(
+            "background_prompt",
+            {"topic": "Machine Learning", "depth": "comprehensive"},
+            task=True,
         )
 
         # Verify background execution
@@ -68,15 +70,15 @@ async def test_prompt_task_executes_in_background(prompt_server):
 
 
 async def test_graceful_degradation_prompt_without_task_flag(prompt_server):
-    """Prompts without task=True execute synchronously even with task metadata."""
+    """Prompts with task=False execute synchronously even with task metadata."""
 
-    @prompt_server.prompt()  # No task=True
+    @prompt_server.prompt(task=False)  # Explicitly disable task support
     async def sync_only_prompt(topic: str) -> str:
         return f"Sync prompt: {topic}"
 
     async with Client(prompt_server) as client:
         # Try to call with task metadata - should execute synchronously
-        task = await client.get_prompt_as_task("sync_only_prompt", {"topic": "test"})
+        task = await client.get_prompt("sync_only_prompt", {"topic": "test"}, task=True)
 
         # Should have executed immediately (graceful degradation)
         assert task.returned_immediately

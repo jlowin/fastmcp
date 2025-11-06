@@ -165,6 +165,24 @@ class Task(abc.ABC, Generic[TaskResultT]):
         self._task_id = task_id
         self._immediate_result = immediate_result
         self._is_immediate = immediate_result is not None
+        self._cached_result: TaskResultT | None = None
+
+    def _check_client_connected(self) -> None:
+        """Validate that client context is still active.
+
+        Raises:
+            RuntimeError: If accessed outside client context (unless immediate)
+        """
+        if self._is_immediate:
+            return  # Already resolved, no client needed
+
+        try:
+            _ = self._client.session
+        except RuntimeError as e:
+            raise RuntimeError(
+                "Cannot access task results outside client context. "
+                "Task futures must be used within 'async with client:' block."
+            ) from e
 
     @property
     def task_id(self) -> str:
@@ -187,6 +205,8 @@ class Task(abc.ABC, Generic[TaskResultT]):
         If server executed immediately, returns synthetic completed status.
         Otherwise queries the server for current status.
         """
+        self._check_client_connected()
+
         if self._is_immediate:
             # Return synthetic completed status
             return TaskStatusResponse(
@@ -221,6 +241,8 @@ class Task(abc.ABC, Generic[TaskResultT]):
         Returns:
             TaskStatusResponse: Final task status
         """
+        self._check_client_connected()
+
         if self._is_immediate:
             # Already done
             return await self.status()
@@ -240,6 +262,7 @@ class Task(abc.ABC, Generic[TaskResultT]):
         if self._is_immediate:
             # No server-side task to cancel
             return
+        self._check_client_connected()
         await self._client.cancel_task(self._task_id)
 
     async def delete(self) -> None:
@@ -254,6 +277,7 @@ class Task(abc.ABC, Generic[TaskResultT]):
         if self._is_immediate:
             # No server-side task to delete
             return
+        self._check_client_connected()
         await self._client.delete_task(self._task_id)
 
     def __await__(self):
@@ -312,36 +336,49 @@ class ToolTask(Task[CallToolResult]):
         Returns:
             CallToolResult: The parsed tool result (same as call_tool returns)
         """
+        # Check cache first
+        if self._cached_result is not None:
+            return self._cached_result
+
         if self._is_immediate:
             assert self._immediate_result is not None  # Type narrowing
-            return self._immediate_result
-
-        # Wait for completion
-        await self._client.wait_for_task(self._task_id)
-
-        # Get the raw result (could be ToolResult or CallToolResult)
-        raw_result = await self._client.get_task_result(self._task_id)
-
-        # If it's a ToolResult (from shim), convert to mcp.types.CallToolResult then parse
-        if hasattr(raw_result, "content") and hasattr(raw_result, "structured_content"):
-            # It's a ToolResult - convert to MCP type
-            mcp_result = mcp.types.CallToolResult(
-                content=raw_result.content,
-                structuredContent=raw_result.structured_content,  # type: ignore[arg-type]
-                _meta=raw_result.meta,
-            )
-            # Parse it the same way call_tool does (adds .data field)
-            return await self._client._parse_call_tool_result(
-                self._tool_name, mcp_result, raise_on_error=True
-            )
-        elif isinstance(raw_result, mcp.types.CallToolResult):
-            # Already a CallToolResult from MCP protocol - parse it
-            return await self._client._parse_call_tool_result(
-                self._tool_name, raw_result, raise_on_error=True
-            )
+            result = self._immediate_result
         else:
-            # Unknown type - just return it
-            return raw_result  # type: ignore[return-value]
+            # Check client connected
+            self._check_client_connected()
+
+            # Wait for completion
+            await self._client.wait_for_task(self._task_id)
+
+            # Get the raw result (could be ToolResult or CallToolResult)
+            raw_result = await self._client.get_task_result(self._task_id)
+
+            # If it's a ToolResult (from shim), convert to mcp.types.CallToolResult then parse
+            if hasattr(raw_result, "content") and hasattr(
+                raw_result, "structured_content"
+            ):
+                # It's a ToolResult - convert to MCP type
+                mcp_result = mcp.types.CallToolResult(
+                    content=raw_result.content,
+                    structuredContent=raw_result.structured_content,  # type: ignore[arg-type]
+                    _meta=raw_result.meta,
+                )
+                # Parse it the same way call_tool does (adds .data field)
+                result = await self._client._parse_call_tool_result(
+                    self._tool_name, mcp_result, raise_on_error=True
+                )
+            elif isinstance(raw_result, mcp.types.CallToolResult):
+                # Already a CallToolResult from MCP protocol - parse it
+                result = await self._client._parse_call_tool_result(
+                    self._tool_name, raw_result, raise_on_error=True
+                )
+            else:
+                # Unknown type - just return it
+                result = raw_result  # type: ignore[assignment]
+
+        # Cache before returning
+        self._cached_result = result
+        return result
 
 
 class PromptTask(Task[mcp.types.GetPromptResult]):
@@ -384,18 +421,29 @@ class PromptTask(Task[mcp.types.GetPromptResult]):
         Returns:
             GetPromptResult: The prompt result with messages and description
         """
+        # Check cache first
+        if self._cached_result is not None:
+            return self._cached_result
+
         if self._is_immediate:
             assert self._immediate_result is not None
-            return self._immediate_result
+            result = self._immediate_result
+        else:
+            # Check client connected
+            self._check_client_connected()
 
-        # Wait for completion
-        await self._client.wait_for_task(self._task_id)
+            # Wait for completion
+            await self._client.wait_for_task(self._task_id)
 
-        # Get the raw MCP result
-        mcp_result = await self._client.get_task_result(self._task_id)
+            # Get the raw MCP result
+            mcp_result = await self._client.get_task_result(self._task_id)
 
-        # Parse as GetPromptResult
-        return mcp.types.GetPromptResult.model_validate(mcp_result)
+            # Parse as GetPromptResult
+            result = mcp.types.GetPromptResult.model_validate(mcp_result)
+
+        # Cache before returning
+        self._cached_result = result
+        return result
 
 
 class ResourceTask(
@@ -445,37 +493,47 @@ class ResourceTask(
         Returns:
             list[ReadResourceContents]: The resource contents
         """
+        # Check cache first
+        if self._cached_result is not None:
+            return self._cached_result
+
         if self._is_immediate:
             assert self._immediate_result is not None
-            return self._immediate_result
-
-        # Wait for completion
-        await self._client.wait_for_task(self._task_id)
-
-        # Get the raw MCP result
-        mcp_result = await self._client.get_task_result(self._task_id)
-
-        # Parse as ReadResourceResult
-        # The result should be a dict with "contents" key
-        if isinstance(mcp_result, dict) and "contents" in mcp_result:
-            contents_data = mcp_result["contents"]
+            result = self._immediate_result
         else:
-            # Fallback - might be the list directly
-            contents_data = mcp_result
+            # Check client connected
+            self._check_client_connected()
 
-        # Parse each content item
-        # Determine type based on content
-        parsed_contents = []
-        for item in contents_data:
-            if isinstance(item, dict):
-                if "blob" in item:
-                    parsed_contents.append(
-                        mcp.types.BlobResourceContents.model_validate(item)
-                    )
-                else:
-                    parsed_contents.append(
-                        mcp.types.TextResourceContents.model_validate(item)
-                    )
+            # Wait for completion
+            await self._client.wait_for_task(self._task_id)
+
+            # Get the raw MCP result
+            mcp_result = await self._client.get_task_result(self._task_id)
+
+            # Parse as ReadResourceResult
+            # The result should be a dict with "contents" key
+            if isinstance(mcp_result, dict) and "contents" in mcp_result:
+                contents_data = mcp_result["contents"]
             else:
-                parsed_contents.append(item)
-        return parsed_contents
+                # Fallback - might be the list directly
+                contents_data = mcp_result
+
+            # Parse each content item
+            parsed_contents = []
+            for item in contents_data:
+                if isinstance(item, dict):
+                    if "blob" in item:
+                        parsed_contents.append(
+                            mcp.types.BlobResourceContents.model_validate(item)
+                        )
+                    else:
+                        parsed_contents.append(
+                            mcp.types.TextResourceContents.model_validate(item)
+                        )
+                else:
+                    parsed_contents.append(item)
+            result = parsed_contents
+
+        # Cache before returning
+        self._cached_result = result
+        return result

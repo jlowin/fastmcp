@@ -29,9 +29,9 @@ async def resource_server():
 
 
 async def test_read_resource_as_task_returns_resource_task(resource_server):
-    """read_resource_as_task returns a ResourceTask object."""
+    """read_resource with task=True returns a ResourceTask object."""
     async with Client(resource_server) as client:
-        task = await client.read_resource_as_task("file://document.txt")
+        task = await client.read_resource("file://document.txt", task=True)
 
         from fastmcp.client.client import ResourceTask
 
@@ -40,10 +40,10 @@ async def test_read_resource_as_task_returns_resource_task(resource_server):
 
 
 async def test_resource_task_with_custom_id(resource_server):
-    """read_resource_as_task accepts custom task ID."""
+    """read_resource with task=True accepts custom task ID."""
     async with Client(resource_server) as client:
-        task = await client.read_resource_as_task(
-            "file://document.txt", task_id="custom-resource-123"
+        task = await client.read_resource(
+            "file://document.txt", task=True, task_id="custom-resource-123"
         )
 
         assert task.task_id == "custom-resource-123"
@@ -52,7 +52,7 @@ async def test_resource_task_with_custom_id(resource_server):
 async def test_resource_task_result_returns_read_resource_result(resource_server):
     """ResourceTask.result() returns list of ReadResourceContents."""
     async with Client(resource_server) as client:
-        task = await client.read_resource_as_task("file://document.txt")
+        task = await client.read_resource("file://document.txt", task=True)
 
         # Verify background execution
         assert not task.returned_immediately
@@ -69,7 +69,7 @@ async def test_resource_task_result_returns_read_resource_result(resource_server
 async def test_resource_task_await_syntax(resource_server):
     """ResourceTask can be awaited directly."""
     async with Client(resource_server) as client:
-        task = await client.read_resource_as_task("file://document.txt")
+        task = await client.read_resource("file://document.txt", task=True)
 
         # Can await task directly
         result = await task
@@ -79,7 +79,7 @@ async def test_resource_task_await_syntax(resource_server):
 async def test_resource_template_task(resource_server):
     """Resource templates work with task support."""
     async with Client(resource_server) as client:
-        task = await client.read_resource_as_task("file://data/999.json")
+        task = await client.read_resource("file://data/999.json", task=True)
 
         # Verify background execution
         assert not task.returned_immediately
@@ -92,7 +92,7 @@ async def test_resource_template_task(resource_server):
 async def test_resource_task_status_and_wait(resource_server):
     """ResourceTask supports status() and wait() methods."""
     async with Client(resource_server) as client:
-        task = await client.read_resource_as_task("file://document.txt")
+        task = await client.read_resource("file://document.txt", task=True)
 
         # Check status
         status = await task.status()

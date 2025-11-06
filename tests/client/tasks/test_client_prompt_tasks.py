@@ -29,9 +29,9 @@ async def prompt_server():
 
 
 async def test_get_prompt_as_task_returns_prompt_task(prompt_server):
-    """get_prompt_as_task returns a PromptTask object."""
+    """get_prompt with task=True returns a PromptTask object."""
     async with Client(prompt_server) as client:
-        task = await client.get_prompt_as_task("analysis_prompt", {"topic": "AI"})
+        task = await client.get_prompt("analysis_prompt", {"topic": "AI"}, task=True)
 
         from fastmcp.client.client import PromptTask
 
@@ -40,10 +40,13 @@ async def test_get_prompt_as_task_returns_prompt_task(prompt_server):
 
 
 async def test_prompt_task_with_custom_id(prompt_server):
-    """get_prompt_as_task accepts custom task ID."""
+    """get_prompt with task=True accepts custom task ID."""
     async with Client(prompt_server) as client:
-        task = await client.get_prompt_as_task(
-            "creative_prompt", {"theme": "future"}, task_id="custom-prompt-123"
+        task = await client.get_prompt(
+            "creative_prompt",
+            {"theme": "future"},
+            task=True,
+            task_id="custom-prompt-123",
         )
 
         assert task.task_id == "custom-prompt-123"
@@ -52,8 +55,8 @@ async def test_prompt_task_with_custom_id(prompt_server):
 async def test_prompt_task_result_returns_get_prompt_result(prompt_server):
     """PromptTask.result() returns GetPromptResult."""
     async with Client(prompt_server) as client:
-        task = await client.get_prompt_as_task(
-            "analysis_prompt", {"topic": "Robotics", "style": "casual"}
+        task = await client.get_prompt(
+            "analysis_prompt", {"topic": "Robotics", "style": "casual"}, task=True
         )
 
         # Verify background execution
@@ -73,7 +76,7 @@ async def test_prompt_task_result_returns_get_prompt_result(prompt_server):
 async def test_prompt_task_await_syntax(prompt_server):
     """PromptTask can be awaited directly."""
     async with Client(prompt_server) as client:
-        task = await client.get_prompt_as_task("creative_prompt", {"theme": "ocean"})
+        task = await client.get_prompt("creative_prompt", {"theme": "ocean"}, task=True)
 
         # Can await task directly
         result = await task
@@ -83,7 +86,7 @@ async def test_prompt_task_await_syntax(prompt_server):
 async def test_prompt_task_status_and_wait(prompt_server):
     """PromptTask supports status() and wait() methods."""
     async with Client(prompt_server) as client:
-        task = await client.get_prompt_as_task("analysis_prompt", {"topic": "Space"})
+        task = await client.get_prompt("analysis_prompt", {"topic": "Space"}, task=True)
 
         # Check status
         status = await task.status()

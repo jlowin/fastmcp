@@ -47,7 +47,7 @@ async def test_resource_with_task_metadata_returns_immediately(resource_server):
     """Resources with task metadata return immediately with ResourceTask object."""
     async with Client(resource_server) as client:
         # Call with task metadata
-        task = await client.read_resource_as_task("file://large.txt")
+        task = await client.read_resource("file://large.txt", task=True)
 
         # Should return a ResourceTask object immediately
         from fastmcp.client.client import ResourceTask
@@ -60,7 +60,7 @@ async def test_resource_with_task_metadata_returns_immediately(resource_server):
 async def test_resource_task_executes_in_background(resource_server):
     """Resource task executes via Docket in background."""
     async with Client(resource_server) as client:
-        task = await client.read_resource_as_task("file://large.txt")
+        task = await client.read_resource("file://large.txt", task=True)
 
         # Verify background execution
         assert not task.returned_immediately
@@ -74,7 +74,7 @@ async def test_resource_task_executes_in_background(resource_server):
 async def test_resource_template_with_task(resource_server):
     """Resource templates with task=True execute in background."""
     async with Client(resource_server) as client:
-        task = await client.read_resource_as_task("file://user/123/data.json")
+        task = await client.read_resource("file://user/123/data.json", task=True)
 
         # Verify background execution
         assert not task.returned_immediately
@@ -85,15 +85,17 @@ async def test_resource_template_with_task(resource_server):
 
 
 async def test_graceful_degradation_resource_without_task_flag(resource_server):
-    """Resources without task=True execute synchronously even with task metadata."""
+    """Resources with task=False execute synchronously even with task metadata."""
 
-    @resource_server.resource("file://sync.txt")  # No task=True
+    @resource_server.resource(
+        "file://sync.txt", task=False
+    )  # Explicitly disable task support
     async def sync_only_resource() -> str:
         return "Sync content"
 
     async with Client(resource_server) as client:
         # Try to call with task metadata - should execute synchronously
-        task = await client.read_resource_as_task("file://sync.txt")
+        task = await client.read_resource("file://sync.txt", task=True)
 
         # Should have executed immediately (graceful degradation)
         assert task.returned_immediately

@@ -83,7 +83,7 @@ class Resource(FastMCPComponent):
         enabled: bool | None = None,
         annotations: Annotations | None = None,
         meta: dict[str, Any] | None = None,
-        task: bool = False,
+        task: bool | None = None,
     ) -> FunctionResource:
         return FunctionResource.from_function(
             fn=fn,
@@ -191,7 +191,7 @@ class FunctionResource(Resource):
         enabled: bool | None = None,
         annotations: Annotations | None = None,
         meta: dict[str, Any] | None = None,
-        task: bool = False,
+        task: bool | None = None,
     ) -> FunctionResource:
         """Create a FunctionResource from a function."""
         if isinstance(uri, str):
@@ -208,7 +208,7 @@ class FunctionResource(Resource):
             enabled=enabled if enabled is not None else True,
             annotations=annotations,
             meta=meta,
-            task=task,
+            task=task if task is not None else False,
         )
 
     async def read(self) -> str | bytes:

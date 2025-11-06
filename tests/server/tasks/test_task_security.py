@@ -28,11 +28,11 @@ async def test_same_session_can_access_all_its_tasks(task_server):
     """A single session can access all tasks it created."""
     async with Client(task_server) as client:
         # Submit multiple tasks
-        task1 = await client.call_tool_as_task(
-            "secret_tool", {"data": "first"}, task_id="task-1"
+        task1 = await client.call_tool(
+            "secret_tool", {"data": "first"}, task=True, task_id="task-1"
         )
-        task2 = await client.call_tool_as_task(
-            "secret_tool", {"data": "second"}, task_id="task-2"
+        task2 = await client.call_tool(
+            "secret_tool", {"data": "second"}, task=True, task_id="task-2"
         )
 
         # Wait for both to complete

@@ -80,7 +80,7 @@ async def return_type_server():
 async def test_task_string_return(return_type_server):
     """Task mode returns same string as immediate mode."""
     async with Client(return_type_server) as client:
-        task = await client.call_tool_as_task("return_string")
+        task = await client.call_tool("return_string", task=True)
         result = await task
         assert isinstance(result.data, str)
         assert result.data == "Hello, World!"
@@ -89,7 +89,7 @@ async def test_task_string_return(return_type_server):
 async def test_task_int_return(return_type_server):
     """Task mode returns same int as immediate mode."""
     async with Client(return_type_server) as client:
-        task = await client.call_tool_as_task("return_int")
+        task = await client.call_tool("return_int", task=True)
         result = await task
         assert isinstance(result.data, int)
         assert result.data == 42
@@ -98,7 +98,7 @@ async def test_task_int_return(return_type_server):
 async def test_task_float_return(return_type_server):
     """Task mode returns same float as immediate mode."""
     async with Client(return_type_server) as client:
-        task = await client.call_tool_as_task("return_float")
+        task = await client.call_tool("return_float", task=True)
         result = await task
         assert isinstance(result.data, float)
         assert result.data == 3.14159
@@ -107,7 +107,7 @@ async def test_task_float_return(return_type_server):
 async def test_task_bool_return(return_type_server):
     """Task mode returns same bool as immediate mode."""
     async with Client(return_type_server) as client:
-        task = await client.call_tool_as_task("return_bool")
+        task = await client.call_tool("return_bool", task=True)
         result = await task
         assert isinstance(result.data, bool)
         assert result.data is True
@@ -116,7 +116,7 @@ async def test_task_bool_return(return_type_server):
 async def test_task_dict_return(return_type_server):
     """Task mode returns same dict as immediate mode."""
     async with Client(return_type_server) as client:
-        task = await client.call_tool_as_task("return_dict")
+        task = await client.call_tool("return_dict", task=True)
         result = await task
         assert isinstance(result.data, dict)
         assert result.data == {"count": 100, "total": 500}
@@ -125,7 +125,7 @@ async def test_task_dict_return(return_type_server):
 async def test_task_list_return(return_type_server):
     """Task mode returns same list as immediate mode."""
     async with Client(return_type_server) as client:
-        task = await client.call_tool_as_task("return_list")
+        task = await client.call_tool("return_list", task=True)
         result = await task
         assert isinstance(result.data, list)
         assert result.data == ["apple", "banana", "cherry"]
@@ -134,7 +134,7 @@ async def test_task_list_return(return_type_server):
 async def test_task_model_return(return_type_server):
     """Task mode returns same BaseModel (as dict) as immediate mode."""
     async with Client(return_type_server) as client:
-        task = await client.call_tool_as_task("return_model")
+        task = await client.call_tool("return_model", task=True)
         result = await task
 
         # Client deserializes to dynamic class (type name lost with title pruning)
@@ -147,7 +147,7 @@ async def test_task_model_return(return_type_server):
 async def test_task_none_return(return_type_server):
     """Task mode handles None return like immediate mode."""
     async with Client(return_type_server) as client:
-        task = await client.call_tool_as_task("return_none")
+        task = await client.call_tool("return_none", task=True)
         result = await task
         assert result.data is None
 
@@ -160,7 +160,7 @@ async def test_task_vs_immediate_equivalence(return_type_server):
 
         for tool_name in tools_to_test:
             # Call as task
-            task = await client.call_tool_as_task(tool_name)
+            task = await client.call_tool(tool_name, task=True)
             task_result = await task
 
             # Call immediately (server should decline background execution when no task meta)
@@ -197,7 +197,7 @@ async def prompt_return_server():
 async def test_prompt_task_single_message(prompt_return_server):
     """Prompt task returns single message correctly."""
     async with Client(prompt_return_server) as client:
-        task = await client.get_prompt_as_task("single_message_prompt")
+        task = await client.get_prompt("single_message_prompt", task=True)
         result = await task
 
         assert len(result.messages) == 1
@@ -207,7 +207,7 @@ async def test_prompt_task_single_message(prompt_return_server):
 async def test_prompt_task_multiple_messages(prompt_return_server):
     """Prompt task returns multiple messages correctly."""
     async with Client(prompt_return_server) as client:
-        task = await client.get_prompt_as_task("multi_message_prompt")
+        task = await client.get_prompt("multi_message_prompt", task=True)
         result = await task
 
         assert len(result.messages) == 3
@@ -237,7 +237,7 @@ async def resource_return_server():
 async def test_resource_task_text_content(resource_return_server):
     """Resource task returns text content correctly."""
     async with Client(resource_return_server) as client:
-        task = await client.read_resource_as_task("text://simple")
+        task = await client.read_resource("text://simple", task=True)
         contents = await task
 
         assert len(contents) == 1
@@ -247,7 +247,7 @@ async def test_resource_task_text_content(resource_return_server):
 async def test_resource_task_json_content(resource_return_server):
     """Resource task returns structured content correctly."""
     async with Client(resource_return_server) as client:
-        task = await client.read_resource_as_task("data://json")
+        task = await client.read_resource("data://json", task=True)
         contents = await task
 
         # Content should be JSON serialized
@@ -290,7 +290,7 @@ async def binary_type_server():
 async def test_task_bytes_return(binary_type_server):
     """Task mode handles bytes return."""
     async with Client(binary_type_server) as client:
-        task = await client.call_tool_as_task("return_bytes")
+        task = await client.call_tool("return_bytes", task=True)
         result = await task
         assert isinstance(result.data, str)  # bytes serialized to base64 string
         assert "Hello bytes!" in result.data or "SGVsbG8gYnl0ZXMh" in result.data
@@ -299,7 +299,7 @@ async def test_task_bytes_return(binary_type_server):
 async def test_task_uuid_return(binary_type_server):
     """Task mode handles UUID return."""
     async with Client(binary_type_server) as client:
-        task = await client.call_tool_as_task("return_uuid")
+        task = await client.call_tool("return_uuid", task=True)
         result = await task
         assert isinstance(result.data, str)
         assert result.data == "12345678-1234-5678-1234-567812345678"
@@ -308,7 +308,7 @@ async def test_task_uuid_return(binary_type_server):
 async def test_task_path_return(binary_type_server):
     """Task mode handles Path return."""
     async with Client(binary_type_server) as client:
-        task = await client.call_tool_as_task("return_path")
+        task = await client.call_tool("return_path", task=True)
         result = await task
         assert isinstance(result.data, str)
         # Path uses platform-specific separators
@@ -318,7 +318,7 @@ async def test_task_path_return(binary_type_server):
 async def test_task_datetime_return(binary_type_server):
     """Task mode handles datetime return."""
     async with Client(binary_type_server) as client:
-        task = await client.call_tool_as_task("return_datetime")
+        task = await client.call_tool("return_datetime", task=True)
         result = await task
         assert isinstance(result.data, datetime)
         assert result.data == datetime(2025, 11, 5, 12, 30, 45)
@@ -356,7 +356,7 @@ async def collection_server():
 async def test_task_tuple_return(collection_server):
     """Task mode handles tuple return."""
     async with Client(collection_server) as client:
-        task = await client.call_tool_as_task("return_tuple")
+        task = await client.call_tool("return_tuple", task=True)
         result = await task
         assert isinstance(result.data, list)  # Tuples serialize as lists
         assert result.data == [42, "hello", True]
@@ -365,7 +365,7 @@ async def test_task_tuple_return(collection_server):
 async def test_task_set_return(collection_server):
     """Task mode handles set return."""
     async with Client(collection_server) as client:
-        task = await client.call_tool_as_task("return_set")
+        task = await client.call_tool("return_set", task=True)
         result = await task
         assert isinstance(result.data, set)
         assert result.data == {1, 2, 3}
@@ -374,7 +374,7 @@ async def test_task_set_return(collection_server):
 async def test_task_empty_list_return(collection_server):
     """Task mode handles empty list return."""
     async with Client(collection_server) as client:
-        task = await client.call_tool_as_task("return_empty_list")
+        task = await client.call_tool("return_empty_list", task=True)
         result = await task
         assert isinstance(result.data, list)
         assert result.data == []
@@ -383,7 +383,7 @@ async def test_task_empty_list_return(collection_server):
 async def test_task_empty_dict_return(collection_server):
     """Task mode handles empty dict return."""
     async with Client(collection_server) as client:
-        task = await client.call_tool_as_task("return_empty_dict")
+        task = await client.call_tool("return_empty_dict", task=True)
         result = await task
         # Empty structured content becomes None in data
         assert result.data is None
@@ -433,7 +433,7 @@ async def media_server(tmp_path):
 async def test_task_image_path_return(media_server):
     """Task mode handles Image with path."""
     async with Client(media_server) as client:
-        task = await client.call_tool_as_task("return_image_path")
+        task = await client.call_tool("return_image_path", task=True)
         result = await task
         # Image converts to ImageContent
         assert len(result.content) == 1
@@ -443,7 +443,7 @@ async def test_task_image_path_return(media_server):
 async def test_task_image_data_return(media_server):
     """Task mode handles Image with data."""
     async with Client(media_server) as client:
-        task = await client.call_tool_as_task("return_image_data")
+        task = await client.call_tool("return_image_data", task=True)
         result = await task
         assert len(result.content) == 1
         assert result.content[0].type == "image"
@@ -453,7 +453,7 @@ async def test_task_image_data_return(media_server):
 async def test_task_audio_return(media_server):
     """Task mode handles Audio return."""
     async with Client(media_server) as client:
-        task = await client.call_tool_as_task("return_audio")
+        task = await client.call_tool("return_audio", task=True)
         result = await task
         assert len(result.content) == 1
         # Audio may be returned as text or audio content depending on conversion
@@ -463,7 +463,7 @@ async def test_task_audio_return(media_server):
 async def test_task_file_return(media_server):
     """Task mode handles File return."""
     async with Client(media_server) as client:
-        task = await client.call_tool_as_task("return_file")
+        task = await client.call_tool("return_file", task=True)
         result = await task
         assert len(result.content) == 1
         assert result.content[0].type == "resource"
@@ -524,7 +524,7 @@ async def structured_type_server():
 async def test_task_typeddict_return(structured_type_server):
     """Task mode handles TypedDict return."""
     async with Client(structured_type_server) as client:
-        task = await client.call_tool_as_task("return_typeddict")
+        task = await client.call_tool("return_typeddict", task=True)
         result = await task
         # TypedDict deserializes to dynamic Root class
         assert result.data.name == "Bob"
@@ -534,7 +534,7 @@ async def test_task_typeddict_return(structured_type_server):
 async def test_task_dataclass_return(structured_type_server):
     """Task mode handles dataclass return."""
     async with Client(structured_type_server) as client:
-        task = await client.call_tool_as_task("return_dataclass")
+        task = await client.call_tool("return_dataclass", task=True)
         result = await task
         # Dataclass deserializes to dynamic Root class
         assert result.data.name == "Charlie"
@@ -544,7 +544,7 @@ async def test_task_dataclass_return(structured_type_server):
 async def test_task_union_str_return(structured_type_server):
     """Task mode handles union type (str branch)."""
     async with Client(structured_type_server) as client:
-        task = await client.call_tool_as_task("return_union")
+        task = await client.call_tool("return_union", task=True)
         result = await task
         assert isinstance(result.data, str)
         assert result.data == "string value"
@@ -553,7 +553,7 @@ async def test_task_union_str_return(structured_type_server):
 async def test_task_union_int_return(structured_type_server):
     """Task mode handles union type (int branch)."""
     async with Client(structured_type_server) as client:
-        task = await client.call_tool_as_task("return_union_int")
+        task = await client.call_tool("return_union_int", task=True)
         result = await task
         assert isinstance(result.data, int)
         assert result.data == 123
@@ -562,7 +562,7 @@ async def test_task_union_int_return(structured_type_server):
 async def test_task_optional_with_value(structured_type_server):
     """Task mode handles Optional[str] with value."""
     async with Client(structured_type_server) as client:
-        task = await client.call_tool_as_task("return_optional")
+        task = await client.call_tool("return_optional", task=True)
         result = await task
         assert isinstance(result.data, str)
         assert result.data == "has value"
@@ -571,7 +571,7 @@ async def test_task_optional_with_value(structured_type_server):
 async def test_task_optional_none(structured_type_server):
     """Task mode handles Optional[str] with None."""
     async with Client(structured_type_server) as client:
-        task = await client.call_tool_as_task("return_optional_none")
+        task = await client.call_tool("return_optional_none", task=True)
         result = await task
         assert result.data is None
 
@@ -645,7 +645,7 @@ async def mcp_content_server(tmp_path):
 async def test_task_text_content_return(mcp_content_server):
     """Task mode handles TextContent return."""
     async with Client(mcp_content_server) as client:
-        task = await client.call_tool_as_task("return_text_content")
+        task = await client.call_tool("return_text_content", task=True)
         result = await task
         assert len(result.content) == 1
         assert result.content[0].type == "text"
@@ -655,7 +655,7 @@ async def test_task_text_content_return(mcp_content_server):
 async def test_task_image_content_return(mcp_content_server):
     """Task mode handles ImageContent return."""
     async with Client(mcp_content_server) as client:
-        task = await client.call_tool_as_task("return_image_content")
+        task = await client.call_tool("return_image_content", task=True)
         result = await task
         assert len(result.content) == 1
         assert result.content[0].type == "image"
@@ -665,7 +665,7 @@ async def test_task_image_content_return(mcp_content_server):
 async def test_task_embedded_resource_return(mcp_content_server):
     """Task mode handles EmbeddedResource return."""
     async with Client(mcp_content_server) as client:
-        task = await client.call_tool_as_task("return_embedded_resource")
+        task = await client.call_tool("return_embedded_resource", task=True)
         result = await task
         assert len(result.content) == 1
         assert result.content[0].type == "resource"
@@ -674,7 +674,7 @@ async def test_task_embedded_resource_return(mcp_content_server):
 async def test_task_resource_link_return(mcp_content_server):
     """Task mode handles ResourceLink return."""
     async with Client(mcp_content_server) as client:
-        task = await client.call_tool_as_task("return_resource_link")
+        task = await client.call_tool("return_resource_link", task=True)
         result = await task
         assert len(result.content) == 1
         assert result.content[0].type == "resource_link"
@@ -684,7 +684,7 @@ async def test_task_resource_link_return(mcp_content_server):
 async def test_task_mixed_content_return(mcp_content_server):
     """Task mode handles mixed content list return."""
     async with Client(mcp_content_server) as client:
-        task = await client.call_tool_as_task("return_mixed_content")
+        task = await client.call_tool("return_mixed_content", task=True)
         result = await task
         assert len(result.content) == 3
         assert result.content[0].type == "text"

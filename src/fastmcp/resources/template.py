@@ -142,7 +142,7 @@ class ResourceTemplate(FastMCPComponent):
         enabled: bool | None = None,
         annotations: Annotations | None = None,
         meta: dict[str, Any] | None = None,
-        task: bool = False,
+        task: bool | None = None,
     ) -> FunctionResourceTemplate:
         return FunctionResourceTemplate.from_function(
             fn=fn,
@@ -292,7 +292,7 @@ class FunctionResourceTemplate(ResourceTemplate):
         enabled: bool | None = None,
         annotations: Annotations | None = None,
         meta: dict[str, Any] | None = None,
-        task: bool = False,
+        task: bool | None = None,
     ) -> FunctionResourceTemplate:
         """Create a template from a function."""
 
@@ -391,5 +391,5 @@ class FunctionResourceTemplate(ResourceTemplate):
             enabled=enabled if enabled is not None else True,
             annotations=annotations,
             meta=meta,
-            task=task,
+            task=task if task is not None else False,
         )
