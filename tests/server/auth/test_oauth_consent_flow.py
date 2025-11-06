@@ -238,7 +238,11 @@ class TestServerSideStorage:
                 test_client.cookies.set(k, v)
             approval_response = test_client.post(
                 "/consent",
-                data={"action": "approve", "txn": txn_id, "csrf_token": csrf_token},
+                data={
+                    "action": "approve",
+                    "txn_id": txn_id,
+                    "csrf_token": csrf_token if csrf_token else "",
+                },
                 follow_redirects=False,
             )
 
@@ -408,7 +412,7 @@ class TestCSRFProtection:
         with TestClient(app) as test_client:
             # Try to submit consent WITHOUT CSRF token
             response = test_client.post(
-                "/consent/submit",
+                "/consent",
                 data={"action": "approve", "txn_id": txn_id},
                 # No CSRF token!
                 follow_redirects=False,
@@ -567,7 +571,7 @@ class TestConsentSecurity:
             for k, v in consent.cookies.items():
                 c.cookies.set(k, v)
             r = c.post(
-                "/consent/submit",
+                "/consent",
                 data={"action": "deny", "txn_id": txn_id, "csrf_token": csrf},
                 follow_redirects=False,
             )
@@ -598,7 +602,7 @@ class TestConsentSecurity:
             for k, v in consent.cookies.items():
                 c.cookies.set(k, v)
             r = c.post(
-                "/consent/submit",
+                "/consent",
                 data={"action": "approve", "txn_id": txn_id, "csrf_token": csrf},
                 follow_redirects=False,
             )
@@ -640,8 +644,12 @@ class TestConsentSecurity:
             for k, v in consent.cookies.items():
                 c.cookies.set(k, v)
             r = c.post(
-                "/consent/submit",
-                data={"action": "approve", "txn_id": txn_id, "csrf_token": csrf},
+                "/consent",
+                data={
+                    "action": "approve",
+                    "txn_id": txn_id,
+                    "csrf_token": csrf if csrf else "",
+                },
                 follow_redirects=False,
             )
             # Extract approved cookie value

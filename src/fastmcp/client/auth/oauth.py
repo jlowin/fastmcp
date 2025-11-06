@@ -12,6 +12,7 @@ from key_value.aio.adapters.pydantic import PydanticAdapter
 from key_value.aio.protocols import AsyncKeyValue
 from key_value.aio.stores.memory import MemoryStore
 from mcp.client.auth import OAuthClientProvider, TokenStorage
+from mcp.shared._httpx_utils import McpHttpClientFactory
 from mcp.shared.auth import (
     OAuthClientInformationFull,
     OAuthClientMetadata,
@@ -147,6 +148,7 @@ class OAuth(OAuthClientProvider):
         token_storage: AsyncKeyValue | None = None,
         additional_client_metadata: dict[str, Any] | None = None,
         callback_port: int | None = None,
+        httpx_client_factory: McpHttpClientFactory | None = None,
     ):
         """
         Initialize OAuth client provider for an MCP server.
@@ -164,6 +166,7 @@ class OAuth(OAuthClientProvider):
         server_base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
 
         # Setup OAuth client
+        self.httpx_client_factory = httpx_client_factory or httpx.AsyncClient
         self.redirect_port = callback_port or find_available_port()
         redirect_uri = f"http://localhost:{self.redirect_port}/callback"
 
@@ -226,7 +229,7 @@ class OAuth(OAuthClientProvider):
     async def redirect_handler(self, authorization_url: str) -> None:
         """Open browser for authorization, with pre-flight check for invalid client."""
         # Pre-flight check to detect invalid client_id before opening browser
-        async with httpx.AsyncClient() as client:
+        async with self.httpx_client_factory() as client:
             response = await client.get(authorization_url, follow_redirects=False)
 
             # Check for client not found error (400 typically means bad client_id)
@@ -297,7 +300,8 @@ class OAuth(OAuthClientProvider):
             response = None
             while True:
                 try:
-                    yielded_request = await gen.asend(response)
+                    # First iteration sends None, subsequent iterations send response
+                    yielded_request = await gen.asend(response)  # ty: ignore[invalid-argument-type]
                     response = yield yielded_request
                 except StopAsyncIteration:
                     break
@@ -306,16 +310,16 @@ class OAuth(OAuthClientProvider):
             logger.debug(
                 "OAuth client not found on server, clearing cache and retrying..."
             )
-
             # Clear cached state and retry once
             self._initialized = False
             await self.token_storage_adapter.clear()
 
+            # Retry with fresh registration
             gen = super().async_auth_flow(request)
             response = None
             while True:
                 try:
-                    yielded_request = await gen.asend(response)
+                    yielded_request = await gen.asend(response)  # ty: ignore[invalid-argument-type]
                     response = yield yielded_request
                 except StopAsyncIteration:
                     break

@@ -309,10 +309,13 @@ def create_consent_html(
     """
 
     # Build form with buttons
+    # Use empty action to submit to current URL (/consent or /mcp/consent)
+    # The POST handler is registered at the same path as GET
     form = f"""
-        <form id="consentForm" method="POST" action="/consent/submit">
+        <form id="consentForm" method="POST" action="">
             <input type="hidden" name="txn_id" value="{txn_id}" />
             <input type="hidden" name="csrf_token" value="{csrf_token}" />
+            <input type="hidden" name="submit" value="true" />
             <div class="button-group">
                 <button type="submit" name="action" value="approve" class="btn-approve">Allow Access</button>
                 <button type="submit" name="action" value="deny" class="btn-deny">Deny</button>
@@ -1605,9 +1608,10 @@ class OAuthProxy(OAuthProvider):
             ):
                 authorize_route_found = True
                 # Replace with our enhanced authorization handler
+                # Note: self.base_url is guaranteed to be set in parent __init__
                 authorize_handler = AuthorizationHandler(
                     provider=self,
-                    base_url=self.base_url,
+                    base_url=self.base_url,  # ty: ignore[invalid-argument-type]
                     server_name=None,  # Could be extended to pass server metadata
                     server_icon_url=None,
                 )
@@ -1653,12 +1657,10 @@ class OAuthProxy(OAuthProvider):
         )
 
         # Add consent endpoints
-        custom_routes.append(
-            Route(path="/consent", endpoint=self._show_consent_page, methods=["GET"])
-        )
+        # Handle both GET (show page) and POST (submit) at /consent
         custom_routes.append(
             Route(
-                path="/consent/submit", endpoint=self._submit_consent, methods=["POST"]
+                path="/consent", endpoint=self._handle_consent, methods=["GET", "POST"]
             )
         )
 
@@ -1972,6 +1974,14 @@ class OAuthProxy(OAuthProvider):
 
         separator = "&" if "?" in self._upstream_authorization_endpoint else "?"
         return f"{self._upstream_authorization_endpoint}{separator}{urlencode(query_params)}"
+
+    async def _handle_consent(
+        self, request: Request
+    ) -> HTMLResponse | RedirectResponse:
+        """Handle consent page - dispatch to GET or POST handler based on method."""
+        if request.method == "POST":
+            return await self._submit_consent(request)
+        return await self._show_consent_page(request)
 
     async def _show_consent_page(
         self, request: Request
