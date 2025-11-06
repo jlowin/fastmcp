@@ -92,7 +92,7 @@ class TestDescopeProvider:
         """Test that JWT verifier is configured correctly."""
         config_url = "https://api.descope.com/v1/apps/agentic/P2abc123/M123/.well-known/openid-configuration"
         issuer_url = "https://api.descope.com/v1/apps/agentic/P2abc123/M123"
-        
+
         provider = DescopeProvider(
             config_url=config_url,
             base_url="https://myserver.com",
