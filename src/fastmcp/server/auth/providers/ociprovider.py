@@ -121,7 +121,7 @@ class OCIProvider(OIDCProxy):
 
         # Simple OCI OIDC protection
         auth = OCIProvider(
-             config_url="https://${IDCS_GUID}.identity.oraclecloud.com/.well-known/openid-configuration", #config URL is the OCI IAM Domain OIDC discovery URL.
+            config_url="https://${IDCS_GUID}.identity.oraclecloud.com/.well-known/openid-configuration", #config URL is the OCI IAM Domain OIDC discovery URL.
             client_id="oci-iamdomain-app-client-id", #This is same as the client ID configured for the OCI IAM Domain Integrated Application
             client_secret="idcscs1234-121s23*****", #This is same as the client secret configured for the OCI IAM Domain Integrated Application
             base_url="http://localhost:8000",

@@ -95,8 +95,9 @@ You will also need to update the client secret for the token exchange OAuth clie
 ```bash
 oci identity-domains identity-propagation-trust create \
 --schemas '["urn:ietf:params:scim:schemas:oracle:idcs:IdentityPropagationTrust"]' \
+--public-key-endpoint "https://${IAM_GUID}.identity.oraclecloud.com/admin/v1/SigningCert/jwk" \
 --name "For Token Exchange" --type "JWT" \
---issuer "https://identity.oraclecloud.com/" \
+--issuer "https://identity.oraclecloud.com/" --active true \
 --endpoint "https://${IAM_GUID}.identity.oraclecloud.com" \
 --subject-claim-name "sub" --allow-impersonation false \
 --subject-mapping-attribute "username" \
@@ -107,7 +108,7 @@ oci identity-domains identity-propagation-trust create \
 
 To exchange access token for OCI token and create a signer object, you need to add below code in MCP server. You can then use the signer object to create any OCI control plane client. 
 
-```
+```python
 _global_token_cache = {} #In memory cache for OCI session token signer
     
 def get_oci_signer() -> TokenExchangeSigner:
@@ -139,7 +140,7 @@ def get_oci_signer() -> TokenExchangeSigner:
 ## Running MCP server
 
 Once the setup is complete, to run the MCP server, run the below command.
-```
+```bash
 fastmcp run server.py:mcp --transport http --port 8000
 ```
 
@@ -149,7 +150,7 @@ python3 client.py
 ```
 
 MCP Client sample is as below.
-```python
+```python client.py
 from fastmcp import Client
 import asyncio
 
