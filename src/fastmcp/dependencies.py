@@ -7,6 +7,17 @@ functionality.
 
 from docket import Depends
 
-from fastmcp.server.dependencies import CurrentContext, CurrentDocket, CurrentWorker
+from fastmcp.server.dependencies import (
+    CurrentContext,
+    CurrentDocket,
+    CurrentFastMCP,
+    CurrentWorker,
+)
 
-__all__ = ["CurrentContext", "CurrentDocket", "CurrentWorker", "Depends"]
+__all__ = [
+    "CurrentContext",
+    "CurrentDocket",
+    "CurrentFastMCP",
+    "CurrentWorker",
+    "Depends",
+]

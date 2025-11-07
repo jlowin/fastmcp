@@ -72,33 +72,31 @@ async def test_current_worker_with_flag_enabled():
 
 async def test_worker_executes_background_tasks():
     """Verify that the Docket Worker is running and executes tasks."""
-    executed_tasks = []
+    task_completed = asyncio.Event()
     mcp = FastMCP("test-server")
 
     @mcp.tool()
     async def schedule_work(
         task_name: str,
         docket: Docket = CurrentDocket(),
-        worker: Worker = CurrentWorker(),
     ) -> str:
-        """Schedule a background task and wait for it to complete."""
+        """Schedule a background task."""
 
         async def background_task(name: str):
-            """Simple background task that records its execution."""
-            executed_tasks.append(name)
+            """Simple background task that signals completion."""
+            task_completed.set()
 
-        # Schedule the task
+        # Schedule the task (Worker running in background will execute it)
         await docket.add(background_task)(task_name)
-
-        # Run worker until it finishes all queued tasks
-        await worker.run_until_finished()
 
         return f"Scheduled {task_name}"
 
     async with Client(mcp) as client:
         result = await client.call_tool("schedule_work", {"task_name": "test-task"})
         assert "Scheduled test-task" in str(result)
-        assert "test-task" in executed_tasks
+
+        # Wait for background task to execute (max 2 seconds)
+        await asyncio.wait_for(task_completed.wait(), timeout=2.0)
 
 
 async def test_current_docket_in_resource():

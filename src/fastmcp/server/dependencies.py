@@ -27,20 +27,24 @@ if TYPE_CHECKING:
     from docket.worker import Worker
 
     from fastmcp.server.context import Context
+    from fastmcp.server.server import FastMCP
 
 # ContextVars for tracking Docket infrastructure
 _current_docket: ContextVar[Docket | None] = ContextVar("docket", default=None)  # type: ignore[assignment]
 _current_worker: ContextVar[Worker | None] = ContextVar("worker", default=None)  # type: ignore[assignment]
+_current_server: ContextVar[FastMCP | None] = ContextVar("server", default=None)  # type: ignore[assignment]
 
 __all__ = [
     "AccessToken",
     "CurrentContext",
     "CurrentDocket",
+    "CurrentFastMCP",
     "CurrentWorker",
     "get_access_token",
     "get_context",
     "get_http_headers",
     "get_http_request",
+    "get_server",
     "resolve_dependencies",
     "without_injected_parameters",
 ]
@@ -382,6 +386,57 @@ def CurrentWorker() -> Worker:
         ```
     """
     return cast("Worker", _CurrentWorker())
+
+
+class _CurrentFastMCP(Dependency):
+    """Internal dependency class for CurrentFastMCP."""
+
+    async def __aenter__(self):
+        server = _current_server.get()
+        if server is None:
+            raise RuntimeError("No FastMCP server instance in context")
+        return server
+
+
+def CurrentFastMCP():
+    """Get the current FastMCP server instance.
+
+    This dependency provides access to the active FastMCP server.
+
+    Returns:
+        A dependency that resolves to the active FastMCP server
+
+    Raises:
+        RuntimeError: If no server in context (during resolution)
+
+    Example:
+        ```python
+        from fastmcp.dependencies import CurrentFastMCP
+
+        @mcp.tool()
+        async def introspect(server: FastMCP = CurrentFastMCP()) -> str:
+            return f"Server: {server.name}"
+        ```
+    """
+    from fastmcp.server.server import FastMCP
+
+    return cast(FastMCP, _CurrentFastMCP())
+
+
+def get_server():
+    """Get the current FastMCP server instance directly.
+
+    Returns:
+        The active FastMCP server
+
+    Raises:
+        RuntimeError: If no server in context
+    """
+
+    server = _current_server.get()
+    if server is None:
+        raise RuntimeError("No FastMCP server instance in context")
+    return server
 
 
 def get_http_request() -> Request:

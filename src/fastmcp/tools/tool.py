@@ -128,6 +128,12 @@ class Tool(FastMCPComponent):
         ToolResultSerializerType | None,
         Field(description="Optional custom serializer for tool results"),
     ] = None
+    task: Annotated[
+        bool,
+        Field(
+            description="Whether this tool supports background task execution (SEP-1686)"
+        ),
+    ] = False
 
     def enable(self) -> None:
         super().enable()
@@ -186,6 +192,7 @@ class Tool(FastMCPComponent):
         serializer: ToolResultSerializerType | None = None,
         meta: dict[str, Any] | None = None,
         enabled: bool | None = None,
+        task: bool | None = None,
     ) -> FunctionTool:
         """Create a Tool from a function."""
         return FunctionTool.from_function(
@@ -201,6 +208,7 @@ class Tool(FastMCPComponent):
             serializer=serializer,
             meta=meta,
             enabled=enabled,
+            task=task,
         )
 
     async def run(self, arguments: dict[str, Any]) -> ToolResult:
@@ -268,6 +276,7 @@ class FunctionTool(Tool):
         serializer: ToolResultSerializerType | None = None,
         meta: dict[str, Any] | None = None,
         enabled: bool | None = None,
+        task: bool | None = None,
     ) -> FunctionTool:
         """Create a Tool from a function."""
 
@@ -312,6 +321,7 @@ class FunctionTool(Tool):
             serializer=serializer,
             meta=meta,
             enabled=enabled if enabled is not None else True,
+            task=task if task is not None else False,
         )
 
     async def run(self, arguments: dict[str, Any]) -> ToolResult:

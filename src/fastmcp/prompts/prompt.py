@@ -5,7 +5,7 @@ from __future__ import annotations as _annotations
 import inspect
 import json
 from collections.abc import Awaitable, Callable, Sequence
-from typing import Any
+from typing import Annotated, Any
 
 import pydantic_core
 from mcp.types import ContentBlock, Icon, PromptMessage, Role, TextContent
@@ -66,6 +66,12 @@ class Prompt(FastMCPComponent):
     arguments: list[PromptArgument] | None = Field(
         default=None, description="Arguments that can be passed to the prompt"
     )
+    task: Annotated[
+        bool,
+        Field(
+            description="Whether this prompt supports background task execution (SEP-1686)"
+        ),
+    ] = False
 
     def enable(self) -> None:
         super().enable()
@@ -120,6 +126,7 @@ class Prompt(FastMCPComponent):
         tags: set[str] | None = None,
         enabled: bool | None = None,
         meta: dict[str, Any] | None = None,
+        task: bool | None = None,
     ) -> FunctionPrompt:
         """Create a Prompt from a function.
 
@@ -138,6 +145,7 @@ class Prompt(FastMCPComponent):
             tags=tags,
             enabled=enabled,
             meta=meta,
+            task=task,
         )
 
     async def render(
@@ -168,6 +176,7 @@ class FunctionPrompt(Prompt):
         tags: set[str] | None = None,
         enabled: bool | None = None,
         meta: dict[str, Any] | None = None,
+        task: bool | None = None,
     ) -> FunctionPrompt:
         """Create a Prompt from a function.
 
@@ -254,6 +263,7 @@ class FunctionPrompt(Prompt):
             enabled=enabled if enabled is not None else True,
             fn=fn,
             meta=meta,
+            task=task if task is not None else False,
         )
 
     def _convert_string_arguments(self, kwargs: dict[str, Any]) -> dict[str, Any]:
