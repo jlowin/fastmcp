@@ -51,7 +51,7 @@ Example:
         logger.debug(f"Creating new signer for token ID: {tokenID}")
         signer = TokenExchangeSigner(
             jwt_or_func=token,
-            oci_domain_id=${IDCS_GUID},   #This is same as IDCS GUID configured for the OCI IAM Domain
+            oci_domain_id="${IDCS_GUID}",   #This is same as IDCS GUID configured for the OCI IAM Domain
             client_id="oci-iamdomain-app-client-id", #This is same as the client ID configured for the OCI IAM Domain Integrated Application
             client_secret="idcscs1234-121s23*****" #This is same as the client secret configured for the OCI IAM Domain Integrated Application
         )
