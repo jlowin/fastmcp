@@ -32,6 +32,8 @@ Example:
         base_url="http://localhost:8000",
     )
 
+    # NOTE: For production use, replace this with a thread-safe cache implementation
+    # such as threading.Lock-protected dict or a proper caching library
     _global_token_cache = {} #In memory cache for OCI session token signer
 
     def get_oci_signer() -> TokenExchangeSigner:
@@ -145,7 +147,7 @@ class OCIProvider(OIDCProxy):
         allowed_client_redirect_uris: list[str] | NotSetT = NotSet,
         client_storage: AsyncKeyValue | None = None,
         jwt_signing_key: str | bytes | NotSetT = NotSet,
-        require_authorization_consent: bool = False,
+        require_authorization_consent: bool = True,
     ) -> None:
         """Initialize OCI OIDC provider.
 
