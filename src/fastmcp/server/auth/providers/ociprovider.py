@@ -19,7 +19,7 @@ Example:
 
     import oci
     from oci.auth.signers import TokenExchangeSigner
-    
+
     logger = get_logger(__name__)
 
     # Simple OCI OIDC protection
