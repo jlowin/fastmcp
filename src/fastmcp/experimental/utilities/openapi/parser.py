@@ -653,9 +653,7 @@ class OpenAPIParser(
                     )
 
         return {
-            name: all_schemas[name]
-            for name in needed_schemas
-            if name in all_schemas
+            name: all_schemas[name] for name in needed_schemas if name in all_schemas
         }
 
     def parse(self) -> list[HTTPRoute]:
