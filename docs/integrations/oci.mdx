@@ -21,8 +21,8 @@ This guide shows you how to secure your FastMCP server using **OCI IAM OAuth**. 
 
 ### Step 1: Make sure client access is enabled for JWK's URL
 
-<steps>
-<step title: Navigate to OCI IAM Domain Settings>
+<Steps>
+<Step title: Navigate to OCI IAM Domain Settings>
 
     Login to OCI console (https://cloud.oracle.com for OCI commercial cloud).
     From "Identity & Security" menu, open Domains page.
@@ -30,39 +30,39 @@ This guide shows you how to secure your FastMCP server using **OCI IAM OAuth**. 
     Open Settings tab. 
     Click on "Edit Domain Settings" button.
 
-    ![Edit IAM Domain Settings](ocieditdomainsettingsbutton.png)
-</step>
+    ![Edit IAM Domain Settings](./images/oci/ocieditdomainsettingsbutton.png)
+</Step>
 
-<step title: Update Domain Setting>
+<Step title: Update Domain Setting>
 
     Enable "Configure client access" checkbox as show in the screenshot.
 
-    ![IAM Domain Settings](ocieditdomainsettings.png)
-</step>
-</steps>
+    ![IAM Domain Settings](./images/oci/ocieditdomainsettings.png)
+</Step>
+</Steps>
 
 ### Step 2: Create OAuth client for MCP server authentication
 
-Follow the steps as mentioned below to create an OAuth client.
+Follow the Steps as mentioned below to create an OAuth client.
 
-<steps>
-<step title: Navigate to OCI IAM Integrated Applications>
+<Steps>
+<Step title: Navigate to OCI IAM Integrated Applications>
 
     Login to OCI console (https://cloud.oracle.com for OCI commercial cloud).
     From "Identity & Security" menu, open Domains page.
     On the Domains list page, select the domain in which you want to create MCP server OAuth client. If you need help finding the list page for the domain, see [Listing Identity Domains.](https://docs.oracle.com/en-us/iaas/Content/Identity/domains/to-view-identity-domains.htm#view-identity-domains).
     On the details page, select Integrated applications. A list of applications in the domain is displayed.
-</step>
-<step title: Add an Integrated Application>
+</Step>
+<Step title: Add an Integrated Application>
 
     Select Add application.
     In the Add application window, select Confidential Application.
     Select Launch workflow.
     In the Add application details page, Enter name and description as shown below.
 
-    ![Add Confidential Integrated Application](ociaddapplication.png)
-</step>
-<step title: Update OAuth Configuration for an Integrated Application>
+    ![Add Confidential Integrated Application](./images/oci/ociaddapplication.png)
+</Step>
+<Step title: Update OAuth Configuration for an Integrated Application>
 
     Once the Integrated Application is created, Click on "OAuth configuration" tab.
     Click on "Edit OAuth configuration" button.
@@ -70,17 +70,17 @@ Follow the steps as mentioned below to create an OAuth client.
     Select "Authorization code" grant type. If you are planning to use the same OAuth client application for token exchange, select "Client credentials" grant type as well. In the sample, we will use the same client.
     For Authorization grant type, select redirect URL. This is, in most cases, will be MCP server URL followed by "/oauth/callback".
 
-    ![OAuth Configuration for an Integrated Application](ocioauthconfiguration.png)
-</step>
-<step title: Activate the Integrated Application>
+    ![OAuth Configuration for an Integrated Application](./images/oci/ocioauthconfiguration.png)
+</Step>
+<Step title: Activate the Integrated Application>
 
     Click on "Submit" button to update OAuth configuration for the client application. 
     **Note: You don't need to do any special configuration to support PKCE for the OAuth client.**
     Make sure to Activate the client application.
     Note down client ID and client secret for the application. Update .env file and replace IAM_CLIENT_ID and IAM_CLIENT_SECRET values. 
     IAM_DOMAIN in the env file is the Identity domain URL that you chose for the MCP server.
-</step>
-</steps>
+</Step>
+</Steps>
 
 This is all you need to implement MCP server authentication against OCI IAM. However, you may want to use an authenticated user token to invoke OCI control plane APIs and propagate identity to the OCI control plane instead of using a service user account. In that case, you need to implement token exchange.
 
