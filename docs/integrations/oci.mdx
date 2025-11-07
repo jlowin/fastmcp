@@ -2,7 +2,7 @@
 title: OCI IAM OAuth 🤝 FastMCP
 sidebarTitle: Oracle
 description: Secure your FastMCP server with OCI IAM OAuth
-icon: oracle
+icon: shield-check
 tag: NEW
 ---
 
@@ -19,63 +19,85 @@ This guide shows you how to secure your FastMCP server using **OCI IAM OAuth**. 
 1. An OCI cloud Account with access to create an Integrated Application in an Identity Domain.
 2. Your FastMCP server's URL (For dev environments, it is http://localhost:8000. For PROD environments, it could be https://mcp.${DOMAIN}.com)
 
-### Make sure client access is enabled for JWK's URL
+### Step 1: Make sure client access is enabled for JWK's URL
 
-1. Login to OCI console (https://cloud.oracle.com for OCI commercial cloud).
-2. From "Identity & Security" menu, open Domains page.
-3. On the Domains list page, select the domain that you are using for MCP Authentication.
-4. Open Settings tab. 
-5. Click on "Edit Domain Settings" button.
+<steps>
+<step title: Navigate to OCI IAM Domain Settings>
 
-![alt text](ocieditdomainsettingsbutton.png)
+    Login to OCI console (https://cloud.oracle.com for OCI commercial cloud).
+    From "Identity & Security" menu, open Domains page.
+    On the Domains list page, select the domain that you are using for MCP Authentication.
+    Open Settings tab. 
+    Click on "Edit Domain Settings" button.
 
-6. Enable "Configure client access" checkbox as show in the screenshot.
+    ![Edit IAM Domain Settings](ocieditdomainsettingsbutton.png)
+</step>
 
-![alt text](ocieditdomainsettings.png)
+<step title: Update Domain Setting>
 
-### Create OAuth client for MCP server authentication
+    Enable "Configure client access" checkbox as show in the screenshot.
+
+    ![IAM Domain Settings](ocieditdomainsettings.png)
+</step>
+</steps>
+
+### Step 2: Create OAuth client for MCP server authentication
+
 Follow the steps as mentioned below to create an OAuth client.
 
-1. Login to OCI console (https://cloud.oracle.com for OCI commercial cloud).
-2. From "Identity & Security" menu, open Domains page.
-3. On the Domains list page, select the domain in which you want to create MCP server OAuth client. If you need help finding the list page for the domain, see [Listing Identity Domains.](https://docs.oracle.com/en-us/iaas/Content/Identity/domains/to-view-identity-domains.htm#view-identity-domains).
-4. On the details page, select Integrated applications. A list of applications in the domain is displayed.
-5. Select Add application.
-6. In the Add application window, select Confidential Application.
-7. Select Launch workflow.
-8. In the Add application details page, Enter name and description as shown below.
+<steps>
+<step title: Navigate to OCI IAM Integrated Applications>
 
-![alt text](ociaddapplication.png)
+    Login to OCI console (https://cloud.oracle.com for OCI commercial cloud).
+    From "Identity & Security" menu, open Domains page.
+    On the Domains list page, select the domain in which you want to create MCP server OAuth client. If you need help finding the list page for the domain, see [Listing Identity Domains.](https://docs.oracle.com/en-us/iaas/Content/Identity/domains/to-view-identity-domains.htm#view-identity-domains).
+    On the details page, select Integrated applications. A list of applications in the domain is displayed.
+</step>
+<step title: Add an Integrated Application>
 
-9. Once the Integrated Application is created, Click on "OAuth configuration" tab.
-10. Click on "Edit OAuth configuration" button.
-11. Configure the application as OAuth client by selecting "Configure this application as a client now" radio button.
-12. Select "Authorization code" grant type. If you are planning to use the same OAuth client application for token exchange then select "Client credentials" grant type as well. In the sample, we will use the same client.
-13. For Authorization grant type, select redirect URL. This is, in most cases, will be MCP server URL followed by "/oauth/callback".
+    Select Add application.
+    In the Add application window, select Confidential Application.
+    Select Launch workflow.
+    In the Add application details page, Enter name and description as shown below.
 
-![alt text](ocioauthconfiguration.png)
+    ![Add Confidential Integrated Application](ociaddapplication.png)
+</step>
+<step title: Update OAuth Configuration for an Integrated Application>
 
-14. Click on "Submit" button to update OAuth configuration for the client application. 
-**Note: You don't need to do any special configuration to support PKCE for the OAuth client.**
-15. Make sure to Activate the client application.
-16. Note down client ID and client secret for the application. Update .env file and replace IAM_CLIENT_ID and IAM_CLIENT_SECRET values. 
-17. IAM_DOMAIN in the env file is the Identity domain URL that you chose for the MCP server.
+    Once the Integrated Application is created, Click on "OAuth configuration" tab.
+    Click on "Edit OAuth configuration" button.
+    Configure the application as OAuth client by selecting "Configure this application as a client now" radio button.
+    Select "Authorization code" grant type. If you are planning to use the same OAuth client application for token exchange, select "Client credentials" grant type as well. In the sample, we will use the same client.
+    For Authorization grant type, select redirect URL. This is, in most cases, will be MCP server URL followed by "/oauth/callback".
 
-This is all you need to implement MCP server authentication against OCI IAM. However, if you want to use authenticated user token to invoke OCI control plane APIs and propagate identity to the OCI control plane instead of using a service user account, then you need to implement token exchange.
+    ![OAuth Configuration for an Integrated Application](ocioauthconfiguration.png)
+</step>
+<step title: Activate the Integrated Applciation>
 
-### Token Exchange Setup
-Token exchange helps you exchange logged in user's OCI IAM token for OCI control plane session token aka. UPST. To learn more about token exchange, refer to my [Workload Identity Federation Blog.](https://www.ateam-oracle.com/post/workload-identity-federation)
+    Click on "Submit" button to update OAuth configuration for the client application. 
+    **Note: You don't need to do any special configuration to support PKCE for the OAuth client.**
+    Make sure to Activate the client application.
+    Note down client ID and client secret for the application. Update .env file and replace IAM_CLIENT_ID and IAM_CLIENT_SECRET values. 
+    IAM_DOMAIN in the env file is the Identity domain URL that you chose for the MCP server.
+</step>
+</steps>
 
-For token exchange, we need to configure Identity propagation trust. The blog above talks more about setting up the trust using REST APIs. However, you can use oci cli as well. Before you use the cli command below, make sure to create token exchange OAuth client. In most cases, you can use the same OAuth client that you created above. You will use client ID of the token exchange OAuth client in the cli command below and replace it for {IAM_TOKENEXCHANGE_CLIENT_ID}. 
+This is all you need to implement MCP server authentication against OCI IAM. However, you may want to use an authenticated user token to invoke OCI control plane APIs and propagate identity to the OCI control plane instead of using a service user account. In that case, you need to implement token exchange.
 
-You will also need to update client secret for the token exchange OAuth client in .env file. It is IAM_TOKENEXCHANGE_CLIENT_SECRET parameter. Update IAM_GUID and IAM_TOKENEXCHANGE_CLIENT_ID as well for the token exchange OAuth client in the .env file.
+### Step 3: Token Exchange Setup (Only if MCP server needs to talk to OCI Control Plane)
 
-```
+Token exchange helps you exchange a logged-in user's OCI IAM token for an OCI control plane session token, also known as UPST (User Principal Session Token). To learn more about token exchange, refer to my [Workload Identity Federation Blog](https://www.ateam-oracle.com/post/workload-identity-federation)
+
+For token exchange, we need to configure Identity propagation trust. The blog above discusses setting up the trust using REST APIs. However, you can also use OCI CLI. Before using the CLI command below, ensure that you have created a token exchange OAuth client. In most cases, you can use the same OAuth client that you created above. You will use the client ID of the token exchange OAuth client in the CLI command below and replace it with {IAM_TOKENEXCHANGE_CLIENT_ID}. 
+
+You will also need to update the client secret for the token exchange OAuth client in the .env file. It is the IAM_TOKENEXCHANGE_CLIENT_SECRET parameter. Update IAM_GUID and IAM_TOKENEXCHANGE_CLIENT_ID as well for the token exchange OAuth client in the .env file.
+
+```bash
 oci identity-domains identity-propagation-trust create \
 --schemas '["urn:ietf:params:scim:schemas:oracle:idcs:IdentityPropagationTrust"]' \
 --name "For Token Exchange" --type "JWT" \
 --issuer "https://identity.oraclecloud.com/" \
---endpoint "https://${IAM_GUID}}.identity.oraclecloud.com" \
+--endpoint "https://${IAM_GUID}.identity.oraclecloud.com" \
 --subject-claim-name "sub" --allow-impersonation false \
 --subject-mapping-attribute "username" \
 --subject-type "User" --client-claim-name "iss" \
@@ -147,8 +169,8 @@ if __name__ == "__main__":
 
 When you run the client for the first time:
 1. Your browser will open to OCI IAM's login page
-2. Sign in with your OCI account and grant the requested permissions
-3. After authorization, you'll be redirected back
+2. Sign in with your OCI account and grant the requested consent
+3. After authorization, you'll be redirected back to the redirect path
 4. The client receives the token and can make authenticated requests
 
 ## Production Configuration

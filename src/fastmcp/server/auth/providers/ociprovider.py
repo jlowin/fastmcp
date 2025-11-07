@@ -15,9 +15,12 @@ Example:
     from fastmcp import FastMCP
     from fastmcp.server.auth.providers.ociprovider import OCIProvider
     from fastmcp.server.dependencies import get_access_token
+    from fastmcp.utilities.logging import get_logger
 
     import oci
     from oci.auth.signers import TokenExchangeSigner
+    
+    logger = get_logger(__name__)
 
     # Simple OCI OIDC protection
     auth = OCIProvider(
