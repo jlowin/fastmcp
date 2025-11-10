@@ -22,7 +22,7 @@ This guide shows you how to secure your FastMCP server using **OCI IAM OAuth**. 
 ### Step 1: Make sure client access is enabled for JWK's URL
 
 <Steps>
-<Step title: Navigate to OCI IAM Domain Settings>
+<Step title="Navigate to OCI IAM Domain Settings">
 
     Login to OCI console (https://cloud.oracle.com for OCI commercial cloud).
     From "Identity & Security" menu, open Domains page.
@@ -33,9 +33,9 @@ This guide shows you how to secure your FastMCP server using **OCI IAM OAuth**. 
     ![Edit IAM Domain Settings](./images/oci/ocieditdomainsettingsbutton.png)
 </Step>
 
-<Step title: Update Domain Setting>
+<Step title="Update Domain Setting">
 
-    Enable "Configure client access" checkbox as show in the screenshot.
+    Enable "Configure client access" checkbox as shown in the screenshot.
 
     ![IAM Domain Settings](./images/oci/ocieditdomainsettings.png)
 </Step>
@@ -46,14 +46,15 @@ This guide shows you how to secure your FastMCP server using **OCI IAM OAuth**. 
 Follow the Steps as mentioned below to create an OAuth client.
 
 <Steps>
-<Step title: Navigate to OCI IAM Integrated Applications>
+<Step title="Navigate to OCI IAM Integrated Applications">
 
     Login to OCI console (https://cloud.oracle.com for OCI commercial cloud).
     From "Identity & Security" menu, open Domains page.
     On the Domains list page, select the domain in which you want to create MCP server OAuth client. If you need help finding the list page for the domain, see [Listing Identity Domains.](https://docs.oracle.com/en-us/iaas/Content/Identity/domains/to-view-identity-domains.htm#view-identity-domains).
     On the details page, select Integrated applications. A list of applications in the domain is displayed.
 </Step>
-<Step title: Add an Integrated Application>
+
+<Step title="Add an Integrated Application">
 
     Select Add application.
     In the Add application window, select Confidential Application.
@@ -62,17 +63,19 @@ Follow the Steps as mentioned below to create an OAuth client.
 
     ![Add Confidential Integrated Application](./images/oci/ociaddapplication.png)
 </Step>
-<Step title: Update OAuth Configuration for an Integrated Application>
+
+<Step title="Update OAuth Configuration for an Integrated Application">
 
     Once the Integrated Application is created, Click on "OAuth configuration" tab.
     Click on "Edit OAuth configuration" button.
     Configure the application as OAuth client by selecting "Configure this application as a client now" radio button.
     Select "Authorization code" grant type. If you are planning to use the same OAuth client application for token exchange, select "Client credentials" grant type as well. In the sample, we will use the same client.
-    For Authorization grant type, select redirect URL. This is, in most cases, will be MCP server URL followed by "/oauth/callback".
+    For Authorization grant type, select redirect URL. In most cases, this will be the MCP server URL followed by "/oauth/callback".
 
     ![OAuth Configuration for an Integrated Application](./images/oci/ocioauthconfiguration.png)
 </Step>
-<Step title: Activate the Integrated Application>
+
+<Step title="Activate the Integrated Application">
 
     Click on "Submit" button to update OAuth configuration for the client application. 
     **Note: You don't need to do any special configuration to support PKCE for the OAuth client.**
@@ -103,7 +106,7 @@ oci identity-domains identity-propagation-trust create \
 --subject-mapping-attribute "username" \
 --subject-type "User" --client-claim-name "iss" \
 --client-claim-values '["https://identity.oraclecloud.com/"]' \
---oauth-clients '["{IAM_TOKENEXCHANGE_CLIENT_ID}"]'
+--oauth-clients '["{IAM_CLIENT_ID}"]'
 ```
 
 To exchange access token for OCI token and create a signer object, you need to add below code in MCP server. You can then use the signer object to create any OCI control plane client. 
@@ -125,8 +128,8 @@ def get_oci_signer() -> TokenExchangeSigner:
     signer = TokenExchangeSigner(
         jwt_or_func=token,
         oci_domain_id=IAM_GUID,
-        client_id=IAM_TOKENEXCHANGE_CLIENT_ID,
-        client_secret=IAM_TOKENEXCHANGE_CLIENT_SECRET
+        client_id=IAM_CLIENT_ID,
+        client_secret=IAM_CLIENT_SECRET
     )
     logger.debug(f"Signer {signer} created for token ID: {tokenID}")
         
@@ -193,9 +196,9 @@ from cryptography.fernet import Fernet
 
 # Production setup with encrypted persistent token storage
 auth_provider = OCIProvider(
-    config_url="https://{IDCS_GUID}.identity.oraclecloud.com/.well-known/openid-configuration",
-    client_id="tv2ObNgaZAWWhhycr7Bz1LU2mxlnsmsB",
-    client_secret="idcscsvPYqbjemq...",
+    config_url=f"https://{IAM_DOMAIN}/.well-known/openid-configuration,
+    client_id=IAM_CLIENT_ID,
+    client_secret=IAM_CLIENT_SECRET",
     base_url="https://your-production-domain.com",
 
     # Production token management
@@ -242,7 +245,7 @@ These environment variables provide default values for the OCI IAM provider, whe
 
 <Card>
 <ParamField path="FASTMCP_SERVER_AUTH_OCI_CONFIG_URL" required>
-Your OCI Application Configuration URL (e.g., `https://{IDCS_GUID}.identity.oraclecloud.com/.well-known/openid-configuration`)
+Your OCI Application Configuration URL (e.g., `https://{IAM_GUID}.identity.oraclecloud.com/.well-known/openid-configuration`)
 </ParamField>
 
 <ParamField path="FASTMCP_SERVER_AUTH_OCI_CLIENT_ID" required>
@@ -269,7 +272,7 @@ Example `.env` file:
 FASTMCP_SERVER_AUTH=fastmcp.server.auth.providers.oci.OCIProvider
 
 # OCI IAM configuration and credentials
-FASTMCP_SERVER_AUTH_OCI_CONFIG_URL=https://{IDCS_GUID}.identity.oraclecloud.com/.well-known/openid-configuration
+FASTMCP_SERVER_AUTH_OCI_CONFIG_URL=https://{IAM_GUID}.identity.oraclecloud.com/.well-known/openid-configuration
 FASTMCP_SERVER_AUTH_OCI_CLIENT_ID=tv2ObNgaZAWWhhycr7Bz1LU2mxlnsmsB
 FASTMCP_SERVER_AUTH_OCI_CLIENT_SECRET=idcscsvPYqbjemq...
 FASTMCP_SERVER_AUTH_OCI_BASE_URL=https://your-server.com

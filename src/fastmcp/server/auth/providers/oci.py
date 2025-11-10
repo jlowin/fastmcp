@@ -13,7 +13,7 @@ You can use the signer object to create OCI service object.
 Example:
     ```python
     from fastmcp import FastMCP
-    from fastmcp.server.auth.providers.ociprovider import OCIProvider
+    from fastmcp.server.auth.providers.oci import OCIProvider
     from fastmcp.server.dependencies import get_access_token
     from fastmcp.utilities.logging import get_logger
 
@@ -24,9 +24,9 @@ Example:
 
     # Simple OCI OIDC protection
     auth = OCIProvider(
-        config_url="https://${IDCS_GUID}.identity.oraclecloud.com/.well-known/openid-configuration", #config URL is the OCI IAM Domain OIDC discovery URL.
-        client_id="oci-iamdomain-app-client-id", #This is same as the client ID configured for the OCI IAM Domain Integrated Application
-        client_secret="idcscs1234-121s23*****", #This is same as the client secret configured for the OCI IAM Domain Integrated Application
+        config_url=f"https://{IAM_DOMAIN}/.well-known/openid-configuration, #config URL is the OCI IAM Domain OIDC discovery URL.
+        client_id=IAM_CLIENT_ID, #This is same as the client ID configured for the OCI IAM Domain Integrated Application
+        client_secret=IAM_CLIENT_SECRET, #This is same as the client secret configured for the OCI IAM Domain Integrated Application
         required_scopes=["openid", "profile", "email"],
         redirect_path="/auth/callback",
         base_url="http://localhost:8000",
@@ -53,9 +53,9 @@ Example:
         logger.debug(f"Creating new signer for token ID: {tokenID}")
         signer = TokenExchangeSigner(
             jwt_or_func=token,
-            oci_domain_id="${IDCS_GUID}",   #This is same as IDCS GUID configured for the OCI IAM Domain
-            client_id="oci-iamdomain-app-client-id", #This is same as the client ID configured for the OCI IAM Domain Integrated Application
-            client_secret="idcscs1234-121s23*****" #This is same as the client secret configured for the OCI IAM Domain Integrated Application
+            oci_domain_id=IAM_DOMAIN.split(".")[0],   #This is same as IAM GUID configured for the OCI IAM Domain
+            client_id=IAM_CLIENT_ID, #This is same as the client ID configured for the OCI IAM Domain Integrated Application
+            client_secret=IAM_CLIENT_SECRET #This is same as the client secret configured for the OCI IAM Domain Integrated Application
         )
         logger.debug(f"Signer {signer} created for token ID: {tokenID}")
 
@@ -121,9 +121,9 @@ class OCIProvider(OIDCProxy):
 
         # Simple OCI OIDC protection
         auth = OCIProvider(
-            config_url="https://${IDCS_GUID}.identity.oraclecloud.com/.well-known/openid-configuration", #config URL is the OCI IAM Domain OIDC discovery URL.
-            client_id="oci-iamdomain-app-client-id", #This is same as the client ID configured for the OCI IAM Domain Integrated Application
-            client_secret="idcscs1234-121s23*****", #This is same as the client secret configured for the OCI IAM Domain Integrated Application
+            config_url=f"https://{IAM_DOMAIN}/.well-known/openid-configuration", #config URL is the OCI IAM Domain OIDC discovery URL.
+            client_id=IAM_CLIENT_ID, #This is same as the client ID configured for the OCI IAM Domain Integrated Application
+            client_secret=IAM_CLIENT_SECRET, #This is same as the client secret configured for the OCI IAM Domain Integrated Application
             base_url="http://localhost:8000",
             required_scopes=["openid", "profile", "email"],
             redirect_path="/auth/callback",
