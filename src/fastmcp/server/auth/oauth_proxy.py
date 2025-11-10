@@ -468,9 +468,7 @@ def create_error_html(
     )
 
     # Simple CSP policy for error pages (no forms needed)
-    csp_policy = (
-        "default-src 'none'; style-src 'unsafe-inline'; img-src https: data:; base-uri 'none'"
-    )
+    csp_policy = "default-src 'none'; style-src 'unsafe-inline'; img-src https: data:; base-uri 'none'"
 
     return create_page(
         content=content,
