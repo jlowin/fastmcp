@@ -117,7 +117,7 @@ class OCIProvider(OIDCProxy):
     Example:
         ```python
         from fastmcp import FastMCP
-        from fastmcp.server.auth.providers.ociprovider import OCIProvider
+        from fastmcp.server.auth.providers.oci import OCIProvider
 
         # Simple OCI OIDC protection
         auth = OCIProvider(
