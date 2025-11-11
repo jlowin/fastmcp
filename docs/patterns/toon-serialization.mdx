@@ -1,0 +1,210 @@
+# TOON Serialization Support
+
+FastMCP supports dual-format serialization using either JSON (default) or TOON for LLM-facing structured data.
+
+## Overview
+
+[TOON (Token-Oriented Object Notation)](https://github.com/toon-format/toon) is a compact, human-readable serialization format designed for passing structured data to Large Language Models with significantly reduced token usage (typically 30-60% fewer tokens than JSON).
+
+**TOON's sweet spot:** Uniform arrays of objects – multiple fields per row, same structure across items. It combines YAML's indentation-based structure with CSV's tabular format, optimized for token efficiency.
+
+FastMCP includes optional TOON support while maintaining full backward compatibility with standard MCP clients that expect JSON.
+
+### Key TOON Benefits
+
+- 💸 **Token-efficient:** 30-60% fewer tokens than JSON
+- 🤿 **LLM-friendly:** Explicit lengths and fields enable validation
+- 🍱 **Minimal syntax:** Removes redundant punctuation
+- 📐 **Indentation-based:** Uses whitespace instead of braces
+- 🧺 **Tabular arrays:** Declare keys once, stream data as rows
+
+## Installation
+
+TOON support is optional. To enable it, install the `toon_format` Python package:
+
+```bash
+pip install git+https://github.com/toon-format/toon-python.git
+```
+
+**Note:** The Python TOON implementation is currently in beta (v0.9.x). If unavailable, FastMCP gracefully falls back to JSON.
+
+## Configuration
+
+### Via Environment Variable
+
+Set the `MCP_FORMAT` environment variable:
+
+```bash
+export MCP_FORMAT=toon  # Enable TOON serialization
+export MCP_FORMAT=json  # Use JSON (default)
+```
+
+### Via FastMCP Settings
+
+Configure the serialization format in your FastMCP settings:
+
+```python
+from fastmcp import FastMCP, settings
+
+# Set format via settings
+settings.serialization_format = "toon"
+
+mcp = FastMCP("My Server")
+```
+
+### Via .env File
+
+Add to your `.env` file:
+
+```
+FASTMCP_SERIALIZATION_FORMAT=toon
+```
+
+## Usage
+
+### Direct Usage
+
+```python
+from fastmcp.utilities.serialization import serialize, deserialize
+
+# Serialize data
+data = {"key": "value", "number": 42}
+serialized = serialize(data)  # Uses configured format
+
+# Explicit format
+json_str = serialize(data, fmt="json")
+toon_str = serialize(data, fmt="toon")
+
+# Deserialize
+deserialized = deserialize(serialized)
+```
+
+### Checking TOON Availability
+
+```python
+from fastmcp.utilities.serialization import is_toon_available, get_active_format
+
+if is_toon_available():
+    print("TOON serialization is available")
+
+print(f"Active format: {get_active_format()}")
+```
+
+## Fallback Behavior
+
+If TOON format is requested but the `toon-format` package is not installed:
+- A warning will be logged
+- Serialization will automatically fall back to JSON
+- No errors will be raised
+
+This ensures your application continues to work even if TOON is not available.
+
+## Example Server with TOON
+
+```python
+from fastmcp import FastMCP
+
+# Enable TOON via environment or settings
+mcp = FastMCP("TOON Example Server")
+
+@mcp.tool
+def get_data() -> dict:
+    """Returns structured data."""
+    return {
+        "status": "success",
+        "data": {
+            "users": ["Alice", "Bob"],
+            "count": 2
+        }
+    }
+
+# Tool results will be serialized using configured format
+```
+
+## When to Use TOON
+
+TOON is **ideal** for:
+- ✅ **Uniform arrays of objects** with consistent structure
+- ✅ Multiple fields per row, same schema across items
+- ✅ Tabular data (like CSV but with nested support)
+- ✅ LLM input where token efficiency matters
+- ✅ Reducing costs in high-volume LLM applications
+
+TOON may be **less efficient** for:
+- ❌ Deeply nested structures with varying shapes
+- ❌ Non-uniform data (different fields per object)
+- ❌ Sparse data with many optional fields
+- ❌ LLM output generation (TOON is designed for input)
+
+For deeply nested or non-uniform data, JSON may actually be more efficient.
+
+### Example Comparison
+
+**JSON (98 tokens):**
+```json
+{
+  "users": [
+    { "id": 1, "name": "Alice", "role": "admin" },
+    { "id": 2, "name": "Bob", "role": "user" }
+  ]
+}
+```
+
+**TOON (48 tokens, ~51% reduction):**
+```
+users[2]{id,name,role}:
+  1,Alice,admin
+  2,Bob,user
+```
+
+## Backward Compatibility
+
+TOON support is designed to be completely backward compatible:
+- JSON remains the default format
+- No changes to existing APIs
+- MCP protocol compatibility is maintained
+- Can be toggled without code changes via environment variables
+
+## API Reference
+
+### `serialize(data, fmt=None)`
+Serialize Python data to string.
+- **data**: Python object to serialize
+- **fmt**: Format ('json' or 'toon'), defaults to configured format
+- **Returns**: Serialized string
+
+### `deserialize(data, fmt=None)`
+Deserialize string to Python object.
+- **data**: Serialized string
+- **fmt**: Format ('json' or 'toon'), defaults to configured format
+- **Returns**: Python object
+
+### `is_toon_available()`
+Check if TOON package is installed.
+- **Returns**: `True` if available, `False` otherwise
+
+### `get_active_format()`
+Get the currently active serialization format.
+- **Returns**: `'json'` or `'toon'`
+
+## Implementation Notes
+
+The TOON serialization support is implemented as a lightweight abstraction layer in `fastmcp/utilities/serialization.py`. It:
+- Adds minimal overhead when using JSON (default)
+- Gracefully handles missing TOON package
+- Can be extended to support additional formats in the future
+- Does not modify core MCP protocol handling
+
+**Current Status:** 
+- ✅ Infrastructure and API ready
+- ⚠️ Requires Python TOON implementation (reference is TypeScript/JS)
+- ✅ Falls back to JSON if TOON unavailable
+- ✅ Full test coverage for JSON path
+
+## Resources
+
+- **TOON Specification:** [github.com/toon-format/toon-spec](https://github.com/toon-format/toon-spec)
+- **Reference Implementation:** [github.com/toon-format/toon](https://github.com/toon-format/toon) (TypeScript/JS)
+- **Token Efficiency:** Typically 30-60% reduction vs JSON
+- **Best for:** Uniform arrays with consistent structure
+- **Version:** TOON Spec v2.0 (2025-11-10)

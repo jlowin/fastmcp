@@ -249,7 +249,8 @@
               "patterns/decorating-methods",
               "patterns/cli",
               "patterns/contrib",
-              "patterns/testing"
+              "patterns/testing",
+              "patterns/toon-serialization"
             ]
           },
           {

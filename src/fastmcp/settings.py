@@ -267,6 +267,35 @@ class Settings(BaseSettings):
         ),
     ] = False
 
+    serialization_format: Annotated[
+        Literal["json", "toon"],
+        Field(
+            description=inspect.cleandoc(
+                """
+                The serialization format to use for MCP protocol communication.
+                Supported formats:
+                - 'json' (default): Standard JSON serialization
+                - 'toon': TOON format for LLM-friendly natural syntax with 30-60% token reduction
+                
+                TOON (Token-Oriented Object Notation) is ideal for uniform arrays of objects.
+                For deeply nested or non-uniform data, JSON may be more efficient.
+                
+                Note: TOON requires a Python implementation (reference is TypeScript/JS).
+                If TOON is requested but not available, will fall back to JSON with a warning.
+                
+                Reference: https://github.com/toon-format/toon-spec
+                """
+            ),
+        ),
+    ] = "json"
+
+    @field_validator("serialization_format", mode="before")
+    @classmethod
+    def normalize_serialization_format(cls, v):
+        if isinstance(v, str):
+            return v.lower()
+        return v
+
     server_dependencies: list[str] = Field(
         default_factory=list,
         description="List of dependencies to install in the server environment",
