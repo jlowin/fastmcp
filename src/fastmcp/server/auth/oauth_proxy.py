@@ -1177,7 +1177,8 @@ class OAuthProxy(OAuthProvider):
         await self._upstream_token_store.put(
             key=upstream_token_id,
             value=upstream_token_set,
-            ttl=refresh_expires_in,  # Auto-expire when refresh token expires
+            ttl=refresh_expires_in
+            or expires_in,  # Auto-expire when refresh token, or access token expires
         )
         logger.debug("Stored encrypted upstream tokens (jti=%s)", access_jti[:8])
 
@@ -1373,7 +1374,12 @@ class OAuthProxy(OAuthProvider):
         await self._upstream_token_store.put(
             key=upstream_token_set.upstream_token_id,
             value=upstream_token_set,
-            ttl=new_refresh_expires_in,  # Auto-expire when refreshed access token expires
+            ttl=new_refresh_expires_in
+            or (
+                int(upstream_token_set.refresh_token_expires_at - time.time())
+                if upstream_token_set.refresh_token_expires_at
+                else 60 * 60 * 24 * 30  # Default to 30 days if unknown
+            ),  # Auto-expire when refresh token expires
         )
 
         # Issue new minimal FastMCP access token (just a reference via JTI)
