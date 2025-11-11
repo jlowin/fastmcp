@@ -34,10 +34,10 @@ class TestScalekitProvider:
         with patch.dict(
             os.environ,
             {
-                "FASTMCP_SERVER_AUTH_SCALEKITPROVIDER_ENVIRONMENT_URL": "https://env-scalekit.com",
-                "FASTMCP_SERVER_AUTH_SCALEKITPROVIDER_RESOURCE_ID": "res_456",
-                "FASTMCP_SERVER_AUTH_SCALEKITPROVIDER_BASE_URL": "https://envserver.com/mcp",
-                "FASTMCP_SERVER_AUTH_SCALEKITPROVIDER_REQUIRED_SCOPES": "read,write",
+                "FASTMCP_SERVER_AUTH_SCALEKIT_ENVIRONMENT_URL": "https://env-scalekit.com",
+                "FASTMCP_SERVER_AUTH_SCALEKIT_RESOURCE_ID": "res_456",
+                "FASTMCP_SERVER_AUTH_SCALEKIT_BASE_URL": "https://envserver.com/mcp",
+                "FASTMCP_SERVER_AUTH_SCALEKIT_REQUIRED_SCOPES": "read,write",
             },
         ):
             provider = ScalekitProvider()

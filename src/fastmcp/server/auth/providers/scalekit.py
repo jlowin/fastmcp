@@ -25,7 +25,7 @@ logger = get_logger(__name__)
 
 class ScalekitProviderSettings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_prefix="FASTMCP_SERVER_AUTH_SCALEKITPROVIDER_",
+        env_prefix="FASTMCP_SERVER_AUTH_SCALEKIT_",
         env_file=ENV_FILE,
         extra="ignore",
     )
@@ -118,24 +118,20 @@ class ScalekitProvider(RemoteAuthProvider):
         base_url_value = str(settings.base_url)
 
         logger.debug(
-            "Initializing ScalekitProvider",
-            extra={
-                "environment_url": self.environment_url,
-                "resource_id": self.resource_id,
-                "base_url": base_url_value,
-                "required_scopes": self.required_scopes,
-            },
+            "Initializing ScalekitProvider: environment_url=%s resource_id=%s base_url=%s required_scopes=%s",
+            self.environment_url,
+            self.resource_id,
+            base_url_value,
+            self.required_scopes,
         )
 
         # Create default JWT verifier if none provided
         if token_verifier is None:
             logger.debug(
-                "Creating default JWTVerifier for Scalekit",
-                extra={
-                    "jwks_uri": f"{self.environment_url}/keys",
-                    "issuer": self.environment_url,
-                    "required_scopes": self.required_scopes,
-                },
+                "Creating default JWTVerifier for Scalekit: jwks_uri=%s issuer=%s required_scopes=%s",
+                f"{self.environment_url}/keys",
+                self.environment_url,
+                self.required_scopes,
             )
             token_verifier = JWTVerifier(
                 jwks_uri=f"{self.environment_url}/keys",
@@ -171,11 +167,9 @@ class ScalekitProvider(RemoteAuthProvider):
         # Get the standard protected resource routes from RemoteAuthProvider
         routes = super().get_routes(mcp_path)
         logger.debug(
-            "Preparing Scalekit metadata routes",
-            extra={
-                "mcp_path": mcp_path,
-                "resource_id": self.resource_id,
-            },
+            "Preparing Scalekit metadata routes: mcp_path=%s resource_id=%s",
+            mcp_path,
+            self.resource_id,
         )
 
         async def oauth_authorization_server_metadata(request):
@@ -184,18 +178,12 @@ class ScalekitProvider(RemoteAuthProvider):
                 metadata_url = (
                     f"{self.environment_url}/.well-known/oauth-authorization-server/resources/{self.resource_id}"
                 )
-                logger.debug(
-                    "Fetching Scalekit OAuth metadata",
-                    extra={"metadata_url": metadata_url},
-                )
+                logger.debug("Fetching Scalekit OAuth metadata: metadata_url=%s", metadata_url)
                 async with httpx.AsyncClient() as client:
                     response = await client.get(metadata_url)
                     response.raise_for_status()
                     metadata = response.json()
-                    logger.debug(
-                        "Scalekit metadata fetched successfully",
-                        extra={"metadata_keys": list(metadata.keys())},
-                    )
+                    logger.debug("Scalekit metadata fetched successfully: metadata_keys=%s", list(metadata.keys()))
                     return JSONResponse(metadata)
             except Exception as e:
                 logger.error(f"Failed to fetch Scalekit metadata: {e}")
