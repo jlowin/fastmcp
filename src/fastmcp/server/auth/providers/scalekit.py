@@ -8,7 +8,7 @@ authentication for seamless MCP client authentication.
 from __future__ import annotations
 
 import httpx
-from pydantic import AnyHttpUrl
+from pydantic import AnyHttpUrl, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from starlette.responses import JSONResponse
 from starlette.routing import Route
@@ -16,6 +16,7 @@ from starlette.routing import Route
 from fastmcp.server.auth import RemoteAuthProvider, TokenVerifier
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 from fastmcp.settings import ENV_FILE
+from fastmcp.utilities.auth import parse_scopes
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.types import NotSet, NotSetT
 
@@ -30,9 +31,14 @@ class ScalekitProviderSettings(BaseSettings):
     )
 
     environment_url: AnyHttpUrl
-    client_id: str
     resource_id: str
-    mcp_url: AnyHttpUrl
+    base_url: AnyHttpUrl
+    required_scopes: list[str] | None = None
+
+    @field_validator("required_scopes", mode="before")
+    @classmethod
+    def _parse_scopes(cls, value: object):
+        return parse_scopes(value)
 
 
 class ScalekitProvider(RemoteAuthProvider):
@@ -53,9 +59,8 @@ class ScalekitProvider(RemoteAuthProvider):
 
     2. Environment Configuration:
        - Set SCALEKIT_ENVIRONMENT_URL (e.g., https://your-env.scalekit.com)
-       - Set SCALEKIT_CLIENT_ID from your OAuth application
        - Set SCALEKIT_RESOURCE_ID from your created resource
-       - Set MCP_URL to your FastMCP server's public URL
+       - Set BASE_URL to your FastMCP server's public URL
 
     For detailed setup instructions, see:
     https://docs.scalekit.com/mcp/overview/
@@ -67,9 +72,8 @@ class ScalekitProvider(RemoteAuthProvider):
         # Create Scalekit resource server provider
         scalekit_auth = ScalekitProvider(
             environment_url="https://your-env.scalekit.com",
-            client_id="sk_client_...",
             resource_id="sk_resource_...",
-            mcp_url="https://your-fastmcp-server.com",
+            base_url="https://your-fastmcp-server.com",
         )
 
         # Use with FastMCP
@@ -81,18 +85,18 @@ class ScalekitProvider(RemoteAuthProvider):
         self,
         *,
         environment_url: AnyHttpUrl | str | NotSetT = NotSet,
-        client_id: str | NotSetT = NotSet,
         resource_id: str | NotSetT = NotSet,
-        mcp_url: AnyHttpUrl | str | NotSetT = NotSet,
+        base_url: AnyHttpUrl | str | NotSetT = NotSet,
+        required_scopes: list[str] | NotSetT = NotSet,
         token_verifier: TokenVerifier | None = None,
     ):
         """Initialize Scalekit resource server provider.
 
         Args:
             environment_url: Your Scalekit environment URL (e.g., "https://your-env.scalekit.com")
-            client_id: Your Scalekit OAuth client ID
             resource_id: Your Scalekit resource ID
-            mcp_url: Public URL of this FastMCP server (used as audience)
+            base_url: Public URL of this FastMCP server
+            required_scopes: Optional list of scopes that must be present in tokens
             token_verifier: Optional token verifier. If None, creates JWT verifier for Scalekit
         """
         settings = ScalekitProviderSettings.model_validate(
@@ -100,27 +104,47 @@ class ScalekitProvider(RemoteAuthProvider):
                 k: v
                 for k, v in {
                     "environment_url": environment_url,
-                    "client_id": client_id,
                     "resource_id": resource_id,
-                    "mcp_url": mcp_url,
+                    "base_url": base_url,
+                    "required_scopes": required_scopes,
                 }.items()
                 if v is not NotSet
             }
         )
 
         self.environment_url = str(settings.environment_url).rstrip("/")
-        self.client_id = settings.client_id
         self.resource_id = settings.resource_id
-        self.mcp_url = str(settings.mcp_url)
+        self.required_scopes = settings.required_scopes or []
+        base_url_value = str(settings.base_url)
+
+        logger.debug(
+            "Initializing ScalekitProvider",
+            extra={
+                "environment_url": self.environment_url,
+                "resource_id": self.resource_id,
+                "base_url": base_url_value,
+                "required_scopes": self.required_scopes,
+            },
+        )
 
         # Create default JWT verifier if none provided
         if token_verifier is None:
+            logger.debug(
+                "Creating default JWTVerifier for Scalekit",
+                extra={
+                    "jwks_uri": f"{self.environment_url}/keys",
+                    "issuer": self.environment_url,
+                    "required_scopes": self.required_scopes,
+                },
+            )
             token_verifier = JWTVerifier(
                 jwks_uri=f"{self.environment_url}/keys",
                 issuer=self.environment_url,
                 algorithm="RS256",
-                audience=self.mcp_url,
+                required_scopes=self.required_scopes or None,
             )
+        else:
+            logger.debug("Using custom token verifier for ScalekitProvider")
 
         # Initialize RemoteAuthProvider with Scalekit as the authorization server
         super().__init__(
@@ -128,7 +152,7 @@ class ScalekitProvider(RemoteAuthProvider):
             authorization_servers=[
                 AnyHttpUrl(f"{self.environment_url}/resources/{self.resource_id}")
             ],
-            base_url=self.mcp_url,
+            base_url=base_url_value,
         )
 
     def get_routes(
@@ -146,16 +170,32 @@ class ScalekitProvider(RemoteAuthProvider):
         """
         # Get the standard protected resource routes from RemoteAuthProvider
         routes = super().get_routes(mcp_path)
+        logger.debug(
+            "Preparing Scalekit metadata routes",
+            extra={
+                "mcp_path": mcp_path,
+                "resource_id": self.resource_id,
+            },
+        )
 
         async def oauth_authorization_server_metadata(request):
             """Forward Scalekit OAuth authorization server metadata with FastMCP customizations."""
             try:
+                metadata_url = (
+                    f"{self.environment_url}/.well-known/oauth-authorization-server/resources/{self.resource_id}"
+                )
+                logger.debug(
+                    "Fetching Scalekit OAuth metadata",
+                    extra={"metadata_url": metadata_url},
+                )
                 async with httpx.AsyncClient() as client:
-                    response = await client.get(
-                        f"{self.environment_url}/.well-known/oauth-authorization-server/resources/{self.resource_id}"
-                    )
+                    response = await client.get(metadata_url)
                     response.raise_for_status()
                     metadata = response.json()
+                    logger.debug(
+                        "Scalekit metadata fetched successfully",
+                        extra={"metadata_keys": list(metadata.keys())},
+                    )
                     return JSONResponse(metadata)
             except Exception as e:
                 logger.error(f"Failed to fetch Scalekit metadata: {e}")
