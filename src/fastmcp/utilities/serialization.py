@@ -61,7 +61,7 @@ except ImportError:
     if MCP_FORMAT == "toon":
         warnings.warn(
             "MCP_FORMAT=toon requested but 'toon_format' package is not installed. "
-            "Falling back to JSON. Install with: pip install git+https://github.com/toon-format/toon-python.git",
+            "Falling back to JSON. Install with: pip install toon_format",
             UserWarning,
             stacklevel=2,
         )

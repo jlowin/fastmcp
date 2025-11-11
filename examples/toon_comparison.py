@@ -126,7 +126,7 @@ def main():
 
     if not is_toon_available():
         print("\n⚠️  TOON package not installed. Install with:")
-        print("   pip install git+https://github.com/toon-format/toon-python.git")
+        print("   pip install toon_format")
         print("\nShowing JSON-only output...")
         json_output = serialize(users_data, fmt="json")
         print(f"\nJSON Output:\n{json_output}")
