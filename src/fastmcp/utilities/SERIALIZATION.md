@@ -69,7 +69,7 @@ TOON support requires a Python implementation:
 ```bash
 # Note: Check https://github.com/toon-format for Python implementations
 # The reference implementation is TypeScript/JavaScript
-pip install toon-format  # if a Python package exists
+pip install toon_format  # Available on PyPI
 ```
 
 If no TOON package is available, the module gracefully falls back to JSON.
