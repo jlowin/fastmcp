@@ -65,9 +65,7 @@ def demo_toon_sweet_spot() -> dict:
     ]
 
     json_result = serialize(users_data, fmt="json")
-    toon_result = (
-        serialize(users_data, fmt="toon") if is_toon_available() else "N/A"
-    )
+    toon_result = serialize(users_data, fmt="toon") if is_toon_available() else "N/A"
 
     return {
         "description": "Uniform array with consistent structure - TOON's sweet spot",
@@ -77,7 +75,7 @@ def demo_toon_sweet_spot() -> dict:
         "toon": toon_result,
         "toon_length": len(toon_result) if toon_result != "N/A" else 0,
         "token_savings": (
-            f"{(1 - len(toon_result)/len(json_result)) * 100:.1f}%"
+            f"{(1 - len(toon_result) / len(json_result)) * 100:.1f}%"
             if toon_result != "N/A"
             else "N/A"
         ),

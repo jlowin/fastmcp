@@ -49,8 +49,8 @@ _toon_encode = None
 _toon_decode = None
 
 try:
-    from toon_format import decode as toon_decode
-    from toon_format import encode as toon_encode
+    from toon_format import decode as toon_decode  # type: ignore[import-untyped]
+    from toon_format import encode as toon_encode  # type: ignore[import-untyped]
 
     _toon_encode = toon_encode
     _toon_decode = toon_decode
