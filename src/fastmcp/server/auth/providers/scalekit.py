@@ -175,15 +175,18 @@ class ScalekitProvider(RemoteAuthProvider):
         async def oauth_authorization_server_metadata(request):
             """Forward Scalekit OAuth authorization server metadata with FastMCP customizations."""
             try:
-                metadata_url = (
-                    f"{self.environment_url}/.well-known/oauth-authorization-server/resources/{self.resource_id}"
+                metadata_url = f"{self.environment_url}/.well-known/oauth-authorization-server/resources/{self.resource_id}"
+                logger.debug(
+                    "Fetching Scalekit OAuth metadata: metadata_url=%s", metadata_url
                 )
-                logger.debug("Fetching Scalekit OAuth metadata: metadata_url=%s", metadata_url)
                 async with httpx.AsyncClient() as client:
                     response = await client.get(metadata_url)
                     response.raise_for_status()
                     metadata = response.json()
-                    logger.debug("Scalekit metadata fetched successfully: metadata_keys=%s", list(metadata.keys()))
+                    logger.debug(
+                        "Scalekit metadata fetched successfully: metadata_keys=%s",
+                        list(metadata.keys()),
+                    )
                     return JSONResponse(metadata)
             except Exception as e:
                 logger.error(f"Failed to fetch Scalekit metadata: {e}")
