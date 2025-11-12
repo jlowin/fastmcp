@@ -96,12 +96,12 @@ class ScalekitProvider(RemoteAuthProvider):
         self,
         *,
         environment_url: AnyHttpUrl | str | NotSetT = NotSet,
+        client_id: str | NotSetT = NotSet,
         resource_id: str | NotSetT = NotSet,
         base_url: AnyHttpUrl | str | NotSetT = NotSet,
         mcp_url: AnyHttpUrl | str | NotSetT = NotSet,
         required_scopes: list[str] | NotSetT = NotSet,
         token_verifier: TokenVerifier | None = None,
-        client_id: str | NotSetT = NotSet,
     ):
         """Initialize Scalekit resource server provider.
 
