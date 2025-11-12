@@ -34,10 +34,10 @@ class TestScalekitProvider:
         provider = ScalekitProvider(
             environment_url="https://legacy.scalekit.com",
             resource_id="sk_resource_legacy",
-            mcp_url="https://legacy-app.com/mcp/",
+            mcp_url="https://legacy-app.com/",
         )
 
-        assert str(provider.base_url) == "https://legacy-app.com/mcp/"
+        assert str(provider.base_url) == "https://legacy-app.com/"
 
     def test_init_prefers_base_url_over_mcp_url(self):
         """mcp_url should take precedence over base_url when both provided."""
@@ -75,12 +75,12 @@ class TestScalekitProvider:
             {
                 "FASTMCP_SERVER_AUTH_SCALEKITPROVIDER_ENVIRONMENT_URL": "https://env-scalekit.com",
                 "FASTMCP_SERVER_AUTH_SCALEKITPROVIDER_RESOURCE_ID": "res_456",
-                "FASTMCP_SERVER_AUTH_SCALEKITPROVIDER_MCP_URL": "https://legacy-env.com/mcp",
+                "FASTMCP_SERVER_AUTH_SCALEKITPROVIDER_MCP_URL": "https://legacy-env.com/",
             },
         ):
             provider = ScalekitProvider()
 
-        assert str(provider.base_url) == "https://legacy-env.com/mcp"
+        assert str(provider.base_url) == "https://legacy-env.com/"
 
     def test_environment_variable_loading(self):
         """Test that environment variables are loaded correctly."""
