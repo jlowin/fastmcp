@@ -29,6 +29,27 @@ class TestScalekitProvider:
         assert str(provider.base_url) == "https://myserver.com/"
         assert provider.required_scopes == ["read"]
 
+    def test_init_with_mcp_url_only(self):
+        """Allow legacy mcp_url parameter as base_url."""
+        provider = ScalekitProvider(
+            environment_url="https://legacy.scalekit.com",
+            resource_id="sk_resource_legacy",
+            mcp_url="https://legacy-app.com/mcp/",
+        )
+
+        assert str(provider.base_url) == "https://legacy-app.com/mcp/"
+
+    def test_init_prefers_mcp_url_over_base_url(self):
+        """mcp_url should take precedence over base_url when both provided."""
+        provider = ScalekitProvider(
+            environment_url="https://my-env.scalekit.com",
+            resource_id="sk_resource_456",
+            base_url="https://unused-base.com/",
+            mcp_url="https://preferred-base.com/mcp/",
+        )
+
+        assert str(provider.base_url) == "https://preferred-base.com/mcp/"
+
     def test_init_with_env_vars(self):
         """Test ScalekitProvider initialization from environment variables."""
         with patch.dict(
@@ -47,6 +68,20 @@ class TestScalekitProvider:
             assert str(provider.base_url) == "https://envserver.com/mcp"
             assert provider.required_scopes == ["read", "write"]
 
+    def test_init_with_legacy_env_var(self):
+        """FASTMCP_SERVER_AUTH_SCALEKITPROVIDER_MCP_URL should still be supported."""
+        with patch.dict(
+            os.environ,
+            {
+                "FASTMCP_SERVER_AUTH_SCALEKITPROVIDER_ENVIRONMENT_URL": "https://env-scalekit.com",
+                "FASTMCP_SERVER_AUTH_SCALEKITPROVIDER_RESOURCE_ID": "res_456",
+                "FASTMCP_SERVER_AUTH_SCALEKITPROVIDER_MCP_URL": "https://legacy-env.com/mcp",
+            },
+        ):
+            provider = ScalekitProvider()
+
+        assert str(provider.base_url) == "https://legacy-env.com/mcp"
+
     def test_environment_variable_loading(self):
         """Test that environment variables are loaded correctly."""
         provider = ScalekitProvider(
@@ -58,6 +93,17 @@ class TestScalekitProvider:
         assert provider.environment_url == "https://test-env.scalekit.com"
         assert provider.resource_id == "sk_resource_test_456"
         assert str(provider.base_url) == "http://test-server.com/"
+
+    def test_accepts_client_id_argument(self):
+        """client_id parameter should be accepted but ignored."""
+        provider = ScalekitProvider(
+            environment_url="https://my-env.scalekit.com",
+            resource_id="sk_resource_456",
+            base_url="https://myserver.com/",
+            client_id="client_123",
+        )
+
+        assert str(provider.base_url) == "https://myserver.com/"
 
     def test_url_trailing_slash_handling(self):
         """Test that URLs handle trailing slashes correctly."""

@@ -34,7 +34,7 @@ In your FastMCP project's `.env`:
 ```sh
 SCALEKIT_ENVIRONMENT_URL=<YOUR_APP_ENVIRONMENT_URL>
 SCALEKIT_RESOURCE_ID=<YOUR_APP_RESOURCE_ID> # res_926EXAMPLE5878
-BASE_URL=http://localhost:8000/mcp
+BASE_URL=http://localhost:8000/
 # Optional: additional scopes tokens must have
 # SCALEKIT_REQUIRED_SCOPES=read,write
 ```
@@ -45,6 +45,8 @@ BASE_URL=http://localhost:8000/mcp
 ### Step 2: Add auth to FastMCP server
 
 Create your FastMCP server file and use the ScalekitProvider to handle all the OAuth integration automatically:
+
+> **Warning:** The legacy `mcp_url` and `client_id` parameters are deprecated and will be removed in a future release. Use `base_url` and remove `client_id` from your configuration.
 
 ```python server.py
 from fastmcp import FastMCP
@@ -111,8 +113,10 @@ Your Scalekit resource server ID from the Resources section
 </ParamField>
 
 <ParamField path="FASTMCP_SERVER_AUTH_SCALEKITPROVIDER_BASE_URL" required>
-Public URL of your FastMCP server (e.g., `https://your-server.com` or `http://localhost:8000/mcp` for development)
+Public URL of your FastMCP server (e.g., `https://your-server.com` or `http://localhost:8000/` for development)
 </ParamField>
+
+Legacy `FASTMCP_SERVER_AUTH_SCALEKITPROVIDER_MCP_URL` is still recognized for backward compatibility but will be removed soon—rename it to `...BASE_URL`.
 
 <ParamField path="FASTMCP_SERVER_AUTH_SCALEKITPROVIDER_REQUIRED_SCOPES" default="[]">
 Comma-, space-, or JSON-separated list of scopes that tokens must include to access your server
@@ -128,8 +132,9 @@ FASTMCP_SERVER_AUTH=fastmcp.server.auth.providers.scalekit.ScalekitProvider
 # Scalekit configuration
 FASTMCP_SERVER_AUTH_SCALEKITPROVIDER_ENVIRONMENT_URL=https://your-env.scalekit.com
 FASTMCP_SERVER_AUTH_SCALEKITPROVIDER_RESOURCE_ID=res_456
-FASTMCP_SERVER_AUTH_SCALEKITPROVIDER_BASE_URL=https://your-server.com/mcp
+FASTMCP_SERVER_AUTH_SCALEKITPROVIDER_BASE_URL=https://your-server.com/
 # FASTMCP_SERVER_AUTH_SCALEKITPROVIDER_REQUIRED_SCOPES=read,write
+# FASTMCP_SERVER_AUTH_SCALEKITPROVIDER_MCP_URL=https://your-server.com/  # Deprecated
 ```
 
 With environment variables set, your server code simplifies to:
