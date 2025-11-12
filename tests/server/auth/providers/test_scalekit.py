@@ -39,16 +39,16 @@ class TestScalekitProvider:
 
         assert str(provider.base_url) == "https://legacy-app.com/mcp/"
 
-    def test_init_prefers_mcp_url_over_base_url(self):
+    def test_init_prefers_base_url_over_mcp_url(self):
         """mcp_url should take precedence over base_url when both provided."""
         provider = ScalekitProvider(
             environment_url="https://my-env.scalekit.com",
             resource_id="sk_resource_456",
-            base_url="https://unused-base.com/",
-            mcp_url="https://preferred-base.com/mcp/",
+            base_url="https://preferred-base.com/",
+            mcp_url="https://unused-base.com/",
         )
 
-        assert str(provider.base_url) == "https://preferred-base.com/mcp/"
+        assert str(provider.base_url) == "https://preferred-base.com/"
 
     def test_init_with_env_vars(self):
         """Test ScalekitProvider initialization from environment variables."""

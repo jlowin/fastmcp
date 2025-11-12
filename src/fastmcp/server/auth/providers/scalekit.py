@@ -43,7 +43,7 @@ class ScalekitProviderSettings(BaseSettings):
 
     @model_validator(mode="after")
     def _resolve_base_url(self):
-        resolved = self.mcp_url or self.base_url
+        resolved = self.base_url or self.mcp_url
         if resolved is None:
             msg = "Either base_url or mcp_url must be provided for ScalekitProvider"
             raise ValueError(msg)
