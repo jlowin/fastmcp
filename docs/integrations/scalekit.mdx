@@ -8,7 +8,7 @@ tag: NEW
 
 import { VersionBadge } from "/snippets/version-badge.mdx"
 
-<VersionBadge version="2.13.0.3" />
+<VersionBadge version="2.13.0" />
 
 Install auth stack to your FastMCP server with [Scalekit](https://scalekit.com) using the [Remote OAuth](/servers/auth/remote-oauth) pattern: Scalekit handles user authentication, and the MCP server validates issued tokens.
 
@@ -16,7 +16,7 @@ Install auth stack to your FastMCP server with [Scalekit](https://scalekit.com) 
 
 Before you begin
 
-1. Get a [Scalekit account](https://app.scalekit.com/) and grab your **Environment URL** plus the **Resource ID** you plan to protect from _Dashboard > Developers > Settings_.
+1. Get a [Scalekit account](https://app.scalekit.com/) and grab your **Environment URL** from _Dashboard > Settings_ .
 2. Have your FastMCP server's base URL ready (can be localhost for development, e.g., `http://localhost:8000/mcp`)
 
 ### Step 1: Configure MCP server in Scalekit environment
@@ -46,7 +46,7 @@ BASE_URL=http://localhost:8000/
 
 Create your FastMCP server file and use the ScalekitProvider to handle all the OAuth integration automatically:
 
-> **Warning:** The legacy `mcp_url` and `client_id` parameters are deprecated and will be removed in a future release. Use `base_url` and remove `client_id` from your configuration.
+> **Warning:** The legacy `mcp_url` and `client_id` parameters are deprecated and will be removed in a future release. Use `base_url` instead of `mcp_url` and remove `client_id` from your configuration.
 
 ```python server.py
 from fastmcp import FastMCP
@@ -109,14 +109,14 @@ Your Scalekit environment URL from the Admin Portal (e.g., `https://your-env.sca
 </ParamField>
 
 <ParamField path="FASTMCP_SERVER_AUTH_SCALEKITPROVIDER_RESOURCE_ID" required>
-Your Scalekit resource server ID from the Resources section
+Your Scalekit resource server ID from the MCP Servers section
 </ParamField>
 
 <ParamField path="FASTMCP_SERVER_AUTH_SCALEKITPROVIDER_BASE_URL" required>
 Public URL of your FastMCP server (e.g., `https://your-server.com` or `http://localhost:8000/` for development)
 </ParamField>
 
-Legacy `FASTMCP_SERVER_AUTH_SCALEKITPROVIDER_MCP_URL` is still recognized for backward compatibility but will be removed soon—rename it to `...BASE_URL`.
+Legacy `FASTMCP_SERVER_AUTH_SCALEKITPROVIDER_MCP_URL` is still recognized for backward compatibility but will be removed soon-rename it to `...BASE_URL`.
 
 <ParamField path="FASTMCP_SERVER_AUTH_SCALEKITPROVIDER_REQUIRED_SCOPES" default="[]">
 Comma-, space-, or JSON-separated list of scopes that tokens must include to access your server
