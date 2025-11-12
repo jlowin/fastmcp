@@ -18,6 +18,141 @@ DO NOT WRITE TESTS FOR THIS FILE - these are temporary hacks.
 """
 
 import asyncio
+from typing import Any, Literal, Union, get_args
+
+from mcp import types as mcp_types
+from mcp.types import Request, RequestParams
+from pydantic import BaseModel
+
+
+class TasksGetParams(RequestParams):
+    """Parameters for tasks/get request."""
+
+    taskId: str
+
+
+class TasksGetRequest(Request[TasksGetParams, Literal["tasks/get"]]):
+    """Request type for tasks/get method."""
+
+    method: Literal["tasks/get"] = "tasks/get"
+    params: TasksGetParams
+
+
+class TasksResultParams(RequestParams):
+    """Parameters for tasks/result request."""
+
+    taskId: str
+
+
+class TasksResultRequest(Request[TasksResultParams, Literal["tasks/result"]]):
+    """Request type for tasks/result method."""
+
+    method: Literal["tasks/result"] = "tasks/result"
+    params: TasksResultParams
+
+
+class TasksDeleteParams(RequestParams):
+    """Parameters for tasks/delete request."""
+
+    taskId: str
+
+
+class TasksDeleteRequest(Request[TasksDeleteParams, Literal["tasks/delete"]]):
+    """Request type for tasks/delete method."""
+
+    method: Literal["tasks/delete"] = "tasks/delete"
+    params: TasksDeleteParams
+
+
+# TODO SEP-1686: Remove these response types when SDK officially supports them
+class TasksResponse(BaseModel):
+    """Generic response wrapper for task protocol methods.
+
+    SEP-1686 task responses are dicts that can represent CallToolResult,
+    GetPromptResult, or ReadResourceResult. This wrapper just passes
+    through the raw dict.
+    """
+
+    model_config = {"extra": "allow"}
+
+    @classmethod
+    def model_validate(cls, obj: Any) -> Any:
+        """Parse response dict back into appropriate MCP type.
+
+        The server sends MCP result objects (CallToolResult, GetPromptResult,
+        ReadResourceResult) serialized as dicts. We parse them back for the client.
+        """
+        if not isinstance(obj, dict):
+            return obj
+
+        # Try to detect and parse the result type based on structure
+        import mcp.types
+
+        # Check for tool result (has 'content' field)
+        if "content" in obj:
+            try:
+                return mcp.types.CallToolResult.model_validate(obj)
+            except Exception:
+                pass
+
+        # Check for prompt result (has 'messages' field)
+        if "messages" in obj:
+            try:
+                return mcp.types.GetPromptResult.model_validate(obj)
+            except Exception:
+                pass
+
+        # Check for resource result (has 'contents' field)
+        if "contents" in obj:
+            try:
+                return mcp.types.ReadResourceResult.model_validate(obj)
+            except Exception:
+                pass
+
+        # Fall back to returning dict as-is
+        return obj
+
+
+# TODO SEP-1686: Remove this monkey-patch when SDK officially supports task methods
+# Extend ClientRequest and ServerRequest unions to include SEP-1686 task methods
+# This allows both client and server validation to pass
+
+# Patch ClientRequest (used by client to send requests)
+client_root_field = mcp_types.ClientRequest.model_fields["root"]
+client_original_union = client_root_field.annotation
+client_original_types = get_args(client_original_union)
+
+# Build new union (Python 3.10 compatible - can't use Union[*types] syntax)
+client_new_union = Union[
+    (
+        *client_original_types,
+        TasksGetRequest,
+        TasksResultRequest,
+        TasksDeleteRequest,
+    )
+]
+
+client_root_field.annotation = client_new_union
+mcp_types.ClientRequest.model_rebuild(force=True)
+
+# Patch ServerRequest (used by server to validate incoming requests)
+server_root_field = mcp_types.ServerRequest.model_fields["root"]
+server_original_union = server_root_field.annotation
+server_original_types = get_args(server_original_union)
+
+# Build new union (Python 3.10 compatible - can't use Union[*types] syntax)
+server_new_union = Union[
+    (
+        *server_original_types,
+        TasksGetRequest,
+        TasksResultRequest,
+        TasksDeleteRequest,
+    )
+]
+
+server_root_field.annotation = server_new_union
+mcp_types.ServerRequest.model_rebuild(force=True)
+
 
 # HACK: Task ID mapping for FastMCPTransport
 # Maps client-provided task IDs → full task keys (with type and component embedded)

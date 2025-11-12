@@ -79,6 +79,8 @@ from fastmcp.server.http import (
 )
 from fastmcp.server.low_level import LowLevelServer
 from fastmcp.server.middleware import Middleware, MiddlewareContext
+
+# TODO SEP-1686: Import triggers monkey-patch of ClientRequest union for task methods
 from fastmcp.server.tasks._temporary_mcp_shims import (
     _cancelled_tasks,
     resolve_task_id,
@@ -577,6 +579,8 @@ class FastMCP(Generic[LifespanResultT]):
         # Register custom read_resource handler that supports SEP-1686 tasks
         self._setup_read_resource_handler()
         self._mcp_server.get_prompt()(self._get_prompt_mcp)
+        # Register custom SEP-1686 task protocol handlers
+        self._setup_task_protocol_handlers()
 
     def _setup_read_resource_handler(self) -> None:
         """
@@ -624,6 +628,50 @@ class FastMCP(Generic[LifespanResultT]):
 
         # Register directly, bypassing the decorator
         self._mcp_server.request_handlers[mcp.types.ReadResourceRequest] = handler
+
+    def _setup_task_protocol_handlers(self) -> None:
+        """
+        Register custom SEP-1686 task protocol handlers.
+
+        TODO SEP-1686: Remove this method when MCP SDK officially supports task protocol.
+        These handlers are registered directly because the SDK doesn't yet support
+        the tasks/get, tasks/result, and tasks/delete methods.
+        """
+        from fastmcp.server.tasks._temporary_mcp_shims import (
+            TasksDeleteRequest,
+            TasksGetRequest,
+            TasksResultRequest,
+        )
+
+        # Wrapper to adapt our dict-based handlers to MCP ServerResult format
+        async def tasks_get_handler(
+            req: TasksGetRequest,
+        ) -> mcp.types.ServerResult:
+            # Convert params to dict for our handler
+            params_dict = req.params.model_dump(by_alias=True, exclude_none=True)
+            result = await self._tasks_get_mcp(params_dict)
+            return mcp.types.ServerResult(root=result)  # type: ignore[arg-type]
+
+        async def tasks_result_handler(
+            req: TasksResultRequest,
+        ) -> mcp.types.ServerResult:
+            # Convert params to dict for our handler
+            params_dict = req.params.model_dump(by_alias=True, exclude_none=True)
+            result = await self._tasks_result_mcp(params_dict)
+            return mcp.types.ServerResult(root=result)  # type: ignore[arg-type]
+
+        async def tasks_delete_handler(
+            req: TasksDeleteRequest,
+        ) -> mcp.types.ServerResult:
+            # Convert params to dict for our handler
+            params_dict = req.params.model_dump(by_alias=True, exclude_none=True)
+            result = await self._tasks_delete_mcp(params_dict)
+            return mcp.types.ServerResult(root=result)  # type: ignore[arg-type]
+
+        # Register handlers directly
+        self._mcp_server.request_handlers[TasksGetRequest] = tasks_get_handler
+        self._mcp_server.request_handlers[TasksResultRequest] = tasks_result_handler
+        self._mcp_server.request_handlers[TasksDeleteRequest] = tasks_delete_handler
 
     async def _apply_middleware(
         self,

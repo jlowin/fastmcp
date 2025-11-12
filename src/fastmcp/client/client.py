@@ -48,6 +48,10 @@ from fastmcp.client.tasks import (
 from fastmcp.exceptions import ToolError
 from fastmcp.mcp_config import MCPConfig
 from fastmcp.server import FastMCP
+
+# TODO SEP-1686: Import to trigger monkey-patch of ClientRequest union
+# This must happen before any code tries to send tasks/get, tasks/result, tasks/delete
+from fastmcp.server.tasks import _temporary_mcp_shims  # noqa: F401
 from fastmcp.utilities.exceptions import get_catch_handlers
 from fastmcp.utilities.json_schema_type import json_schema_to_type
 from fastmcp.utilities.logging import get_logger
@@ -1432,23 +1436,18 @@ class Client(Generic[ClientTransportT]):
         Raises:
             RuntimeError: If client not connected
         """
-        from fastmcp.client.transports import FastMCPTransport
+        # TODO SEP-1686: Use TasksGetRequest (monkey-patched into ClientRequest union)
+        from fastmcp.server.tasks._temporary_mcp_shims import (
+            TasksGetParams,
+            TasksGetRequest,
+            TasksResponse,
+        )
 
-        # TEMPORARY HACK: For FastMCPTransport, bypass protocol and call server directly
-        # MCP SDK validates both client AND server side, rejecting custom methods
-        # TODO SEP-1686: Remove when SDK officially supports tasks/get
-        if isinstance(self.transport, FastMCPTransport):
-            import fastmcp.server.context
-
-            server = self.transport.server
-
-            # Call server handler within server context
-            async with fastmcp.server.context.Context(fastmcp=server):  # type: ignore[arg-type]
-                result = await server._tasks_get_mcp({"taskId": task_id})  # type: ignore[attr-defined]
-            return TaskStatusResponse.model_validate(result)
-
-        # For network transports, use custom request sender
-        result = await self._send_custom_request("tasks/get", {"taskId": task_id})
+        request = TasksGetRequest(params=TasksGetParams(taskId=task_id))
+        result = await self.session.send_request(
+            request=request,  # type: ignore[arg-type]
+            result_type=TasksResponse,  # type: ignore[arg-type]
+        )
         return TaskStatusResponse.model_validate(result)
 
     async def get_task_result(self, task_id: str) -> Any:
@@ -1466,22 +1465,18 @@ class Client(Generic[ClientTransportT]):
         Raises:
             RuntimeError: If client not connected, task not found, or task failed
         """
-        from fastmcp.client.transports import FastMCPTransport
+        # TODO SEP-1686: Use TasksResultRequest (monkey-patched into ClientRequest union)
+        from fastmcp.server.tasks._temporary_mcp_shims import (
+            TasksResponse,
+            TasksResultParams,
+            TasksResultRequest,
+        )
 
-        # TEMPORARY HACK: For FastMCPTransport, bypass protocol and call server directly
-        # MCP SDK validates both client AND server side, rejecting custom methods
-        # TODO SEP-1686: Remove when SDK officially supports tasks/result
-        if isinstance(self.transport, FastMCPTransport):
-            import fastmcp.server.context
-
-            server = self.transport.server
-
-            # Call server handler within server context
-            async with fastmcp.server.context.Context(fastmcp=server):  # type: ignore[arg-type]
-                return await server._tasks_result_mcp({"taskId": task_id})  # type: ignore[attr-defined]
-
-        # For network transports, use custom request sender
-        return await self._send_custom_request("tasks/result", {"taskId": task_id})
+        request = TasksResultRequest(params=TasksResultParams(taskId=task_id))
+        return await self.session.send_request(
+            request=request,  # type: ignore[arg-type]
+            result_type=TasksResponse,  # type: ignore[arg-type]
+        )
 
     async def list_tasks(
         self,
@@ -1580,7 +1575,9 @@ class Client(Generic[ClientTransportT]):
         """
         from fastmcp.client.transports import FastMCPTransport
 
-        # TEMPORARY HACK: For FastMCPTransport, cancel directly via Docket
+        # TEMPORARY HACK: SEP-1686 uses notifications/cancelled (not a request/response)
+        # For FastMCPTransport, cancel directly via Docket
+        # TODO SEP-1686: Implement notifications/cancelled when SDK supports it
         if isinstance(self.transport, FastMCPTransport):
             from fastmcp.server.tasks._temporary_mcp_shims import (
                 _cancelled_tasks,
@@ -1610,7 +1607,7 @@ class Client(Generic[ClientTransportT]):
 
             return
 
-        # For other transports, protocol not yet implemented
+        # For network transports, protocol not yet implemented
         raise NotImplementedError(
             "Task cancellation not yet implemented for non-memory transports. "
             "SEP-1686 support pending in MCP SDK."
@@ -1629,23 +1626,18 @@ class Client(Generic[ClientTransportT]):
             NotFoundError: If task doesn't exist
             RuntimeError: If server refuses deletion
         """
-        from fastmcp.client.transports import FastMCPTransport
+        # TODO SEP-1686: Use TasksDeleteRequest (monkey-patched into ClientRequest union)
+        from fastmcp.server.tasks._temporary_mcp_shims import (
+            TasksDeleteParams,
+            TasksDeleteRequest,
+            TasksResponse,
+        )
 
-        # TEMPORARY HACK: For FastMCPTransport, bypass protocol and call server directly
-        # MCP SDK validates both client AND server side, rejecting custom methods
-        # TODO SEP-1686: Remove when SDK officially supports tasks/delete
-        if isinstance(self.transport, FastMCPTransport):
-            import fastmcp.server.context
-
-            server = self.transport.server
-
-            # Call server handler within server context
-            async with fastmcp.server.context.Context(fastmcp=server):  # type: ignore[arg-type]
-                await server._tasks_delete_mcp({"taskId": task_id})  # type: ignore[attr-defined]
-            return
-
-        # For network transports, use custom request sender
-        await self._send_custom_request("tasks/delete", {"taskId": task_id})
+        request = TasksDeleteRequest(params=TasksDeleteParams(taskId=task_id))
+        await self.session.send_request(
+            request=request,  # type: ignore[arg-type]
+            result_type=TasksResponse,  # type: ignore[arg-type]
+        )
 
     @classmethod
     def generate_name(cls, name: str | None = None) -> str:

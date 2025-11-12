@@ -84,35 +84,7 @@ class MiddlewareServerSession(ServerSession):
                     mw_context, call_original_handler
                 )
 
-        # Handle SEP-1686 task methods
-        elif hasattr(request, "method"):
-            method = getattr(request, "method", None)
-
-            if method == "tasks/get":
-                async with fastmcp.server.context.Context(fastmcp=self.fastmcp):
-                    result = await self.fastmcp._tasks_get_mcp(request.params or {})  # type: ignore[arg-type]
-                    await responder.respond(result)  # type: ignore[arg-type]
-                    return
-
-            elif method == "tasks/result":
-                async with fastmcp.server.context.Context(fastmcp=self.fastmcp):
-                    result = await self.fastmcp._tasks_result_mcp(request.params or {})  # type: ignore[arg-type]
-                    await responder.respond(result)  # type: ignore[arg-type]
-                    return
-
-            elif method == "tasks/list":
-                async with fastmcp.server.context.Context(fastmcp=self.fastmcp):
-                    result = await self.fastmcp._tasks_list_mcp(request.params or {})  # type: ignore[arg-type]
-                    await responder.respond(result)  # type: ignore[arg-type]
-                    return
-
-            elif method == "tasks/delete":
-                async with fastmcp.server.context.Context(fastmcp=self.fastmcp):
-                    result = await self.fastmcp._tasks_delete_mcp(request.params or {})  # type: ignore[arg-type]
-                    await responder.respond(result)  # type: ignore[arg-type]
-                    return
-
-        # Fall through to default handling
+        # Fall through to default handling (task methods now handled via registered handlers)
         return await super()._received_request(responder)
 
 
