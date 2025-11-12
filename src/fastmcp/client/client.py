@@ -1295,79 +1295,6 @@ class Client(Generic[ClientTransportT]):
             name, result, raise_on_error=raise_on_error
         )
 
-    async def _send_custom_request(
-        self, method: str, params: dict[str, Any]
-    ) -> dict[str, Any]:
-        """Send custom JSON-RPC request bypassing MCP SDK validation.
-
-        TODO SEP-1686: Remove this method when MCP SDK officially supports
-        SEP-1686 task protocol methods in the ClientRequest union.
-
-        Used for SEP-1686 methods (tasks/get, tasks/result, tasks/delete) which
-        aren't yet in the MCP SDK's ClientRequest union. Bypasses validation by
-        manually constructing JSONRPCRequest and managing response streams.
-
-        Args:
-            method: JSON-RPC method name
-            params: Request parameters
-
-        Returns:
-            Response result as dict
-
-        Raises:
-            McpError: If server returns an error
-        """
-        import anyio
-        from mcp.shared.exceptions import McpError
-        from mcp.shared.message import SessionMessage
-        from mcp.types import (
-            JSONRPCError,
-            JSONRPCMessage,
-            JSONRPCRequest,
-            JSONRPCResponse,
-        )
-
-        # Generate request ID
-        request_id = self.session._request_id  # type: ignore[attr-defined]
-        self.session._request_id = request_id + 1  # type: ignore[attr-defined]
-
-        # Create response stream
-        response_stream, response_stream_reader = anyio.create_memory_object_stream[
-            JSONRPCResponse | JSONRPCError
-        ](1)
-        self.session._response_streams[request_id] = response_stream  # type: ignore[attr-defined]
-
-        try:
-            # Construct raw JSONRPCRequest (bypasses ClientRequest validation)
-            jsonrpc_request = JSONRPCRequest(
-                jsonrpc="2.0", id=request_id, method=method, params=params
-            )
-
-            # Send via write stream
-            await self.session._write_stream.send(  # type: ignore[attr-defined]
-                SessionMessage(message=JSONRPCMessage(jsonrpc_request))
-            )
-
-            # Wait for response with timeout
-            timeout = (
-                self.session._session_read_timeout_seconds.total_seconds()  # type: ignore[attr-defined]
-                if self.session._session_read_timeout_seconds  # type: ignore[attr-defined]
-                else 10.0
-            )
-
-            with anyio.fail_after(timeout):
-                response_or_error = await response_stream_reader.receive()
-
-            if isinstance(response_or_error, JSONRPCError):
-                raise McpError(response_or_error.error)
-
-            return response_or_error.result  # type: ignore[return-value]
-
-        finally:
-            self.session._response_streams.pop(request_id, None)  # type: ignore[attr-defined]
-            await response_stream.aclose()
-            await response_stream_reader.aclose()
-
     async def _call_tool_as_task(
         self,
         name: str,
@@ -1483,21 +1410,44 @@ class Client(Generic[ClientTransportT]):
         cursor: str | None = None,
         limit: int = 50,
     ) -> dict[str, Any]:
-        """List background tasks submitted by this client.
+        """List background tasks.
 
-        Tracks tasks client-side to avoid server-side session filtering complexity.
-        Queries current status for each tracked task ID.
+        Sends a 'tasks/list' MCP protocol request to the server. If the server
+        returns an empty list (indicating client-side tracking), falls back to
+        querying status for locally tracked task IDs.
 
         Args:
-            cursor: Optional pagination cursor (currently unused, for future compatibility)
+            cursor: Optional pagination cursor
             limit: Maximum number of tasks to return (default 50)
 
         Returns:
             dict: Response with structure:
                 - tasks: List of task status dicts with taskId, status, etc.
-                - nextCursor: Optional cursor for next page (always None for now)
+                - nextCursor: Optional cursor for next page
+
+        Raises:
+            RuntimeError: If client not connected
         """
-        # Get status for all tracked task IDs
+        # TODO SEP-1686: Use TasksListRequest (monkey-patched into ClientRequest union)
+        from fastmcp.server.tasks._temporary_mcp_shims import (
+            TasksListParams,
+            TasksListRequest,
+            TasksResponse,
+        )
+
+        # Send protocol request
+        params = TasksListParams(cursor=cursor, limit=limit)
+        request = TasksListRequest(params=params)
+        server_response = await self.session.send_request(
+            request=request,  # type: ignore[arg-type]
+            result_type=TasksResponse,  # type: ignore[arg-type]
+        )
+
+        # If server returned tasks, use those
+        if isinstance(server_response, dict) and server_response.get("tasks"):
+            return server_response
+
+        # Server returned empty - fall back to client-side tracking
         tasks = []
         for task_id in list(self._submitted_task_ids)[:limit]:
             try:

@@ -64,6 +64,20 @@ class TasksDeleteRequest(Request[TasksDeleteParams, Literal["tasks/delete"]]):
     params: TasksDeleteParams
 
 
+class TasksListParams(RequestParams):
+    """Parameters for tasks/list request."""
+
+    cursor: str | None = None
+    limit: int | None = None
+
+
+class TasksListRequest(Request[TasksListParams, Literal["tasks/list"]]):
+    """Request type for tasks/list method."""
+
+    method: Literal["tasks/list"] = "tasks/list"
+    params: TasksListParams
+
+
 # TODO SEP-1686: Remove these response types when SDK officially supports them
 class TasksResponse(BaseModel):
     """Generic response wrapper for task protocol methods.
@@ -129,6 +143,7 @@ client_new_union = Union[
         TasksGetRequest,
         TasksResultRequest,
         TasksDeleteRequest,
+        TasksListRequest,
     )
 ]
 
@@ -147,6 +162,7 @@ server_new_union = Union[
         TasksGetRequest,
         TasksResultRequest,
         TasksDeleteRequest,
+        TasksListRequest,
     )
 ]
 

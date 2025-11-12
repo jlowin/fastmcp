@@ -640,6 +640,7 @@ class FastMCP(Generic[LifespanResultT]):
         from fastmcp.server.tasks._temporary_mcp_shims import (
             TasksDeleteRequest,
             TasksGetRequest,
+            TasksListRequest,
             TasksResultRequest,
         )
 
@@ -668,10 +669,19 @@ class FastMCP(Generic[LifespanResultT]):
             result = await self._tasks_delete_mcp(params_dict)
             return mcp.types.ServerResult(root=result)  # type: ignore[arg-type]
 
+        async def tasks_list_handler(
+            req: TasksListRequest,
+        ) -> mcp.types.ServerResult:
+            # Convert params to dict for our handler
+            params_dict = req.params.model_dump(by_alias=True, exclude_none=True)
+            result = await self._tasks_list_mcp(params_dict)
+            return mcp.types.ServerResult(root=result)  # type: ignore[arg-type]
+
         # Register handlers directly
         self._mcp_server.request_handlers[TasksGetRequest] = tasks_get_handler
         self._mcp_server.request_handlers[TasksResultRequest] = tasks_result_handler
         self._mcp_server.request_handlers[TasksDeleteRequest] = tasks_delete_handler
+        self._mcp_server.request_handlers[TasksListRequest] = tasks_list_handler
 
     async def _apply_middleware(
         self,
