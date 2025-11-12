@@ -25,7 +25,7 @@ logger = get_logger(__name__)
 
 class ScalekitProviderSettings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_prefix="FASTMCP_SERVER_AUTH_SCALEKIT_",
+        env_prefix="FASTMCP_SERVER_AUTH_SCALEKITPROVIDER_",
         env_file=ENV_FILE,
         extra="ignore",
     )
