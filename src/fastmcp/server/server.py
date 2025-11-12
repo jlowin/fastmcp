@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import inspect
 import json
@@ -21,8 +22,10 @@ from contextlib import (
     AbstractAsyncContextManager,
     AsyncExitStack,
     asynccontextmanager,
+    suppress,
 )
 from dataclasses import dataclass
+from datetime import timedelta
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Generic, Literal, cast, overload
@@ -32,6 +35,7 @@ import httpx
 import mcp.types
 import pydantic_core
 import uvicorn
+from docket.execution import ExecutionState
 from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.lowlevel.server import LifespanResultT, NotificationOptions
 from mcp.server.stdio import stdio_server
@@ -75,11 +79,15 @@ from fastmcp.server.http import (
 )
 from fastmcp.server.low_level import LowLevelServer
 from fastmcp.server.middleware import Middleware, MiddlewareContext
-from fastmcp.server.tasks._temporary_docket_shims import (
-    get_result,
-    get_state,
+from fastmcp.server.tasks._temporary_mcp_shims import (
+    _cancelled_tasks,
+    resolve_task_id,
+    set_state,
 )
-from fastmcp.server.tasks._temporary_mcp_shims import set_state
+from fastmcp.server.tasks._temporary_mcp_shims import (
+    _lock as mcp_lock,
+)
+from fastmcp.server.tasks.keys import build_task_key
 from fastmcp.settings import Settings
 from fastmcp.tools.tool import FunctionTool, Tool, ToolResult
 from fastmcp.tools.tool_manager import ToolManager
@@ -88,6 +96,15 @@ from fastmcp.utilities.cli import log_server_banner
 from fastmcp.utilities.components import FastMCPComponent
 from fastmcp.utilities.logging import get_logger, temporary_log_level
 from fastmcp.utilities.types import NotSet, NotSetT
+
+# Map Docket execution states to MCP task status strings
+DOCKET_TO_MCP_STATE: dict[ExecutionState, str] = {
+    ExecutionState.SCHEDULED: "submitted",
+    ExecutionState.QUEUED: "submitted",
+    ExecutionState.RUNNING: "working",
+    ExecutionState.COMPLETED: "completed",
+    ExecutionState.FAILED: "failed",
+}
 
 if TYPE_CHECKING:
     from fastmcp.client import Client
@@ -209,6 +226,9 @@ class FastMCP(Generic[LifespanResultT]):
         self._support_tasks_by_default: bool = (
             tasks if tasks is not None else fastmcp.settings.experimental.enable_tasks
         )
+
+        # Docket instance (set during lifespan for cross-task access)
+        self._docket = None
 
         self._additional_http_routes: list[BaseRoute] = []
         self._mounted_servers: list[MountedServer] = []
@@ -438,6 +458,8 @@ class FastMCP(Generic[LifespanResultT]):
         try:
             # Create Docket instance with unique memory:// URL per server
             async with Docket(url=f"memory://{uuid.uuid4()}") as docket:
+                # Store on server instance for cross-task access (FastMCPTransport)
+                self._docket = docket
                 # Set Docket in ContextVar so CurrentDocket can access it
                 docket_token = _current_docket.set(docket)
                 try:
@@ -462,6 +484,8 @@ class FastMCP(Generic[LifespanResultT]):
                 finally:
                     # Reset ContextVar
                     _current_docket.reset(docket_token)
+                    # Clear instance attribute
+                    self._docket = None
         finally:
             # Reset server ContextVar
             _current_server.reset(server_token)
@@ -1334,10 +1358,6 @@ class FastMCP(Generic[LifespanResultT]):
             CallToolResult: Task stub with task metadata in _meta
         """
         from fastmcp.server.dependencies import _current_docket, get_context
-        from fastmcp.server.tasks._temporary_docket_shims import (
-            wrap_function_for_result_storage,
-        )
-        from fastmcp.server.tasks.keys import build_task_key
 
         # Extract task parameters
         client_task_id = task_meta["taskId"]
@@ -1362,18 +1382,13 @@ class FastMCP(Generic[LifespanResultT]):
         # Get the tool to access user's function
         tool = await self.get_tool(tool_name)
 
-        # Wrap user's function (cached per function, uses TaskKey() at runtime)
-        wrapped_fn = wrap_function_for_result_storage(tool.fn)  # type: ignore[attr-defined]
-
-        # Set initial state and register mapping (store keep_alive for wrapper to use)
+        # Set initial state and register mapping
         await set_state(
             task_key, "submitted", keep_alive=keep_alive, client_task_id=client_task_id
         )
 
         # Send notifications/tasks/created per SEP-1686 (mandatory)
         # Send BEFORE queuing to avoid race where task completes before notification
-        from contextlib import suppress
-
         notification = mcp.types.JSONRPCNotification(
             jsonrpc="2.0",
             method="notifications/tasks/created",
@@ -1390,8 +1405,11 @@ class FastMCP(Generic[LifespanResultT]):
             # Don't let notification failures break task creation
             await ctx.session.send_notification(notification)  # type: ignore[arg-type]
 
-        # Queue wrapped function to Docket
-        await docket.add(wrapped_fn, key=task_key)(**arguments)
+        # Queue function to Docket (result storage via execution_ttl)
+        await docket.add(
+            tool.fn,  # type: ignore[attr-defined]
+            key=task_key,
+        )(**arguments)
 
         # Return task stub
         return mcp.types.CallToolResult(
@@ -1423,10 +1441,6 @@ class FastMCP(Generic[LifespanResultT]):
             GetPromptResult: Task stub with task metadata in _meta
         """
         from fastmcp.server.dependencies import _current_docket, get_context
-        from fastmcp.server.tasks._temporary_docket_shims import (
-            wrap_function_for_result_storage,
-        )
-        from fastmcp.server.tasks.keys import build_task_key
 
         # Extract task parameters
         client_task_id = task_meta["taskId"]
@@ -1451,18 +1465,13 @@ class FastMCP(Generic[LifespanResultT]):
         # Get the prompt
         prompt = await self.get_prompt(prompt_name)
 
-        # Wrap user's function (cached per function, uses TaskKey() at runtime)
-        wrapped_fn = wrap_function_for_result_storage(prompt.fn)  # type: ignore[attr-defined]
-
-        # Set initial state and register mapping (store keep_alive for wrapper to use)
+        # Set initial state and register mapping
         await set_state(
             task_key, "submitted", keep_alive=keep_alive, client_task_id=client_task_id
         )
 
         # Send notifications/tasks/created per SEP-1686 (mandatory)
         # Send BEFORE queuing to avoid race where task completes before notification
-        from contextlib import suppress
-
         notification = mcp.types.JSONRPCNotification(
             jsonrpc="2.0",
             method="notifications/tasks/created",
@@ -1476,8 +1485,11 @@ class FastMCP(Generic[LifespanResultT]):
         with suppress(Exception):
             await ctx.session.send_notification(notification)  # type: ignore[arg-type]
 
-        # Queue user's wrapped function to Docket
-        await docket.add(wrapped_fn, key=task_key)(**(arguments or {}))
+        # Queue function to Docket (result storage via execution_ttl)
+        await docket.add(
+            prompt.fn,  # type: ignore[attr-defined]
+            key=task_key,
+        )(**(arguments or {}))
 
         # Return task stub
         return mcp.types.GetPromptResult(
@@ -1500,7 +1512,6 @@ class FastMCP(Generic[LifespanResultT]):
         Returns:
             dict: Task status response
         """
-        from fastmcp.server.tasks._temporary_mcp_shims import resolve_task_id
 
         client_task_id = params.get("taskId")
         if not client_task_id:
@@ -1511,6 +1522,8 @@ class FastMCP(Generic[LifespanResultT]):
             )
 
         # Resolve to full task key via mapping (for FastMCPTransport)
+        from fastmcp.server.tasks._temporary_mcp_shims import _cancelled_tasks
+
         task_key = await resolve_task_id(client_task_id)
         if task_key is None:
             # Task not found - return unknown state per SEP-1686
@@ -1525,10 +1538,34 @@ class FastMCP(Generic[LifespanResultT]):
                 },
             }
 
-        # Get state
-        state = await get_state(task_key)
-        if state is None:
-            # Task exists in mapping but no state - unknown
+        # Check if task was cancelled (Docket doesn't have CANCELLED state)
+        async with mcp_lock:
+            if task_key in _cancelled_tasks:
+                return {
+                    "taskId": client_task_id,
+                    "status": "cancelled",
+                    "keepAlive": 60000,  # Default value
+                    "pollFrequency": 1000,
+                    "_meta": {
+                        "modelcontextprotocol.io/related-task": {
+                            "taskId": client_task_id,
+                        }
+                    },
+                }
+
+        # Get execution from Docket (use instance attribute for cross-task access)
+        docket = self._docket
+        if docket is None:
+            raise McpError(
+                ErrorData(
+                    code=INTERNAL_ERROR,
+                    message="Background tasks require Docket",
+                )
+            )
+
+        execution = await docket.get_execution(task_key)
+        if execution is None:
+            # Task exists in mapping but no execution - unknown
             return {
                 "taskId": client_task_id,
                 "status": "unknown",
@@ -1540,22 +1577,17 @@ class FastMCP(Generic[LifespanResultT]):
                 },
             }
 
-        # Get keepAlive from storage (MUST return in all responses per spec)
-        from fastmcp.server.tasks._temporary_docket_shims import (
-            _lock as docket_lock,
-        )
-        from fastmcp.server.tasks._temporary_docket_shims import (
-            _task_keep_alive,
-        )
+        # Sync state from Redis
+        await execution.sync()
 
-        async with docket_lock:
-            keep_alive_value = _task_keep_alive.get(task_key, 60000)
+        # Map Docket state to MCP state
+        mcp_state = DOCKET_TO_MCP_STATE.get(execution.state, "unknown")
 
-        # Build response
+        # Build response (use default keepAlive since we don't track per-task values)
         response = {
             "taskId": client_task_id,
-            "status": state,
-            "keepAlive": keep_alive_value,  # Always include per spec
+            "status": mcp_state,
+            "keepAlive": 60000,  # Default value
             "pollFrequency": 1000,
             "_meta": {
                 "modelcontextprotocol.io/related-task": {
@@ -1565,9 +1597,11 @@ class FastMCP(Generic[LifespanResultT]):
         }
 
         # Add error info if failed
-        result_record = await get_result(task_key)
-        if result_record and result_record.error:
-            response["error"] = str(result_record.error)
+        if execution.state == ExecutionState.FAILED:
+            try:
+                await execution.get_result(timeout=timedelta(seconds=0))
+            except Exception as error:
+                response["error"] = str(error)
 
         return response
 
@@ -1604,33 +1638,45 @@ class FastMCP(Generic[LifespanResultT]):
                 )
             )
 
-        # Get result
-        result_record = await get_result(task_key)
-        if result_record is None:
-            # Check if task exists but not completed
-            state = await get_state(task_key)
-            if state is None:
-                raise McpError(
-                    ErrorData(
-                        code=INVALID_PARAMS,
-                        message=f"Invalid taskId: {client_task_id} not found",
-                    )
+        # Get execution from Docket (use instance attribute for cross-task access)
+        docket = self._docket
+        if docket is None:
+            raise McpError(
+                ErrorData(
+                    code=INTERNAL_ERROR,
+                    message="Background tasks require Docket",
                 )
-            else:
-                raise McpError(
-                    ErrorData(
-                        code=INVALID_PARAMS,
-                        message=f"Task not completed yet (current state: {state})",
-                    )
-                )
+            )
 
-        # Handle errors
-        if result_record.error:
-            # All task types return error in same format
+        execution = await docket.get_execution(task_key)
+        if execution is None:
+            raise McpError(
+                ErrorData(
+                    code=INVALID_PARAMS,
+                    message=f"Invalid taskId: {client_task_id} not found",
+                )
+            )
+
+        # Sync state from Redis
+        await execution.sync()
+
+        # Check if completed
+        if execution.state not in (ExecutionState.COMPLETED, ExecutionState.FAILED):
+            mcp_state = DOCKET_TO_MCP_STATE.get(execution.state, "unknown")
+            raise McpError(
+                ErrorData(
+                    code=INVALID_PARAMS,
+                    message=f"Task not completed yet (current state: {mcp_state})",
+                )
+            )
+
+        # Get result from Docket
+        try:
+            raw_value = await execution.get_result(timeout=timedelta(seconds=0))
+        except Exception as error:
+            # Task failed - return error result
             return mcp.types.CallToolResult(
-                content=[
-                    mcp.types.TextContent(type="text", text=str(result_record.error))
-                ],
+                content=[mcp.types.TextContent(type="text", text=str(error))],
                 isError=True,
                 _meta={
                     "modelcontextprotocol.io/related-task": {
@@ -1642,7 +1688,6 @@ class FastMCP(Generic[LifespanResultT]):
         # Parse task key to get type and component info
         key_parts = parse_task_key(task_key)
         task_type = key_parts["task_type"]
-        raw_value = result_record.value
 
         # Convert based on task type (pass client_task_id for metadata)
         if task_type == "tool":
@@ -1874,8 +1919,6 @@ class FastMCP(Generic[LifespanResultT]):
         Returns:
             dict: Empty response with related-task metadata
         """
-        from fastmcp.server.tasks._temporary_mcp_shims import delete_task
-
         client_task_id = params.get("taskId")
         if not client_task_id:
             raise McpError(
@@ -1884,15 +1927,44 @@ class FastMCP(Generic[LifespanResultT]):
                 )
             )
 
-        # Delete task and all associated data
-        deleted = await delete_task(client_task_id)
-        if not deleted:
+        # Resolve task ID and delete
+        from fastmcp.server.tasks._temporary_mcp_shims import _task_id_mapping
+
+        task_key = await resolve_task_id(client_task_id)
+        if task_key is None:
             raise McpError(
                 ErrorData(
                     code=INVALID_PARAMS,
                     message=f"Invalid taskId: {client_task_id} not found",
                 )
             )
+
+        docket = self._docket
+        if docket is None:
+            raise McpError(
+                ErrorData(
+                    code=INTERNAL_ERROR,
+                    message="Background tasks require Docket",
+                )
+            )
+
+        # Check if task exists
+        execution = await docket.get_execution(task_key)
+        if execution is None:
+            raise McpError(
+                ErrorData(
+                    code=INVALID_PARAMS,
+                    message=f"Invalid taskId: {client_task_id} not found",
+                )
+            )
+
+        # Cancel via Docket (Docket handles cleanup via TTL)
+        await docket.cancel(task_key)
+
+        # Remove from task ID mapping and cancelled tracking
+        async with mcp_lock:
+            _task_id_mapping.pop(client_task_id, None)
+            _cancelled_tasks.discard(task_key)
 
         # Return empty response with related-task metadata
         return {
@@ -1937,13 +2009,6 @@ class FastMCP(Generic[LifespanResultT]):
                                 _current_docket,
                                 get_context,
                             )
-                            from fastmcp.server.tasks._temporary_docket_shims import (
-                                wrap_function_for_result_storage,
-                            )
-                            from fastmcp.server.tasks._temporary_mcp_shims import (
-                                set_state,
-                            )
-                            from fastmcp.server.tasks.keys import build_task_key
 
                             # Extract task parameters
                             client_task_id = task_meta["taskId"]
@@ -1967,10 +2032,7 @@ class FastMCP(Generic[LifespanResultT]):
                                 session_id, client_task_id, "resource", str(uri)
                             )
 
-                            # Wrap user's function (cached per function, uses TaskKey() at runtime)
-                            wrapped_fn = wrap_function_for_result_storage(resource.fn)  # type: ignore[attr-defined]
-
-                            # Set initial state and register mapping (store keep_alive for wrapper)
+                            # Set initial state and register mapping
                             await set_state(
                                 task_key,
                                 "submitted",
@@ -1995,8 +2057,11 @@ class FastMCP(Generic[LifespanResultT]):
                             with suppress(Exception):
                                 await ctx.session.send_notification(notification)  # type: ignore[arg-type]
 
-                            # Queue user's wrapped function to Docket (no arguments for resources)
-                            await docket.add(wrapped_fn, key=task_key)()
+                            # Queue function to Docket (result storage via execution_ttl)
+                            await docket.add(
+                                resource.fn,  # type: ignore[attr-defined]
+                                key=task_key,
+                            )()
 
                             # Return task stub
                             return mcp.types.ServerResult(
@@ -2377,6 +2442,16 @@ class FastMCP(Generic[LifespanResultT]):
                 task if task is not None else self._support_tasks_by_default
             )
 
+            # Disable task support for sync functions (Docket requires async)
+            if supports_task and not asyncio.iscoroutinefunction(fn):
+                if task is True:
+                    # User explicitly requested task=True for sync function
+                    logger.warning(
+                        f"Tool '{tool_name or fn.__name__}' has task=True but is synchronous. "
+                        "Background task support requires async functions. Disabling task support."
+                    )
+                supports_task = False
+
             # Register the tool immediately and return the tool object
             tool = Tool.from_function(
                 fn,
@@ -2605,6 +2680,16 @@ class FastMCP(Generic[LifespanResultT]):
                 task if task is not None else self._support_tasks_by_default
             )
 
+            # Disable task support for sync functions (Docket requires async)
+            if supports_task and not asyncio.iscoroutinefunction(fn):
+                if task is True:
+                    # User explicitly requested task=True for sync function
+                    logger.warning(
+                        f"Resource '{uri}' has task=True but is synchronous. "
+                        "Background task support requires async functions. Disabling task support."
+                    )
+                supports_task = False
+
             # Check if this should be a template
             has_uri_params = "{" in uri and "}" in uri
             # Use wrapper to check for user-facing parameters
@@ -2813,6 +2898,16 @@ class FastMCP(Generic[LifespanResultT]):
             supports_task: bool = (
                 task if task is not None else self._support_tasks_by_default
             )
+
+            # Disable task support for sync functions (Docket requires async)
+            if supports_task and not asyncio.iscoroutinefunction(fn):
+                if task is True:
+                    # User explicitly requested task=True for sync function
+                    logger.warning(
+                        f"Prompt '{prompt_name or fn.__name__}' has task=True but is synchronous. "
+                        "Background task support requires async functions. Disabling task support."
+                    )
+                supports_task = False
 
             # Register the prompt immediately
             prompt = Prompt.from_function(

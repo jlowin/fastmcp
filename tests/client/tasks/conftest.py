@@ -14,13 +14,8 @@ async def enable_docket_and_tasks():
     ):
         yield
 
-        # Clean up global task storage after each test
-        from fastmcp.server.tasks import _temporary_docket_shims, _temporary_mcp_shims
+        # Clean up MCP shim storage after each test
+        from fastmcp.server.tasks import _temporary_mcp_shims
 
-        _temporary_docket_shims._task_states.clear()
-        _temporary_docket_shims._task_results.clear()
-        _temporary_docket_shims._task_keep_alive.clear()
         _temporary_mcp_shims._task_id_mapping.clear()
-
-        # Clear function wrapper cache
-        _temporary_docket_shims.wrap_function_for_result_storage.cache_clear()
+        _temporary_mcp_shims._cancelled_tasks.clear()

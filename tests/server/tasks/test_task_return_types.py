@@ -178,12 +178,12 @@ async def prompt_return_server():
     mcp = FastMCP("prompt-return-test")
 
     @mcp.prompt(task=True)
-    def single_message_prompt() -> str:
+    async def single_message_prompt() -> str:
         """Return a single string message."""
         return "Single message content"
 
     @mcp.prompt(task=True)
-    def multi_message_prompt() -> list[str]:
+    async def multi_message_prompt() -> list[str]:
         """Return multiple messages."""
         return [
             "First message",

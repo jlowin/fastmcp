@@ -1291,6 +1291,79 @@ class Client(Generic[ClientTransportT]):
             name, result, raise_on_error=raise_on_error
         )
 
+    async def _send_custom_request(
+        self, method: str, params: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Send custom JSON-RPC request bypassing MCP SDK validation.
+
+        TODO SEP-1686: Remove this method when MCP SDK officially supports
+        SEP-1686 task protocol methods in the ClientRequest union.
+
+        Used for SEP-1686 methods (tasks/get, tasks/result, tasks/delete) which
+        aren't yet in the MCP SDK's ClientRequest union. Bypasses validation by
+        manually constructing JSONRPCRequest and managing response streams.
+
+        Args:
+            method: JSON-RPC method name
+            params: Request parameters
+
+        Returns:
+            Response result as dict
+
+        Raises:
+            McpError: If server returns an error
+        """
+        import anyio
+        from mcp.shared.exceptions import McpError
+        from mcp.shared.message import SessionMessage
+        from mcp.types import (
+            JSONRPCError,
+            JSONRPCMessage,
+            JSONRPCRequest,
+            JSONRPCResponse,
+        )
+
+        # Generate request ID
+        request_id = self.session._request_id  # type: ignore[attr-defined]
+        self.session._request_id = request_id + 1  # type: ignore[attr-defined]
+
+        # Create response stream
+        response_stream, response_stream_reader = anyio.create_memory_object_stream[
+            JSONRPCResponse | JSONRPCError
+        ](1)
+        self.session._response_streams[request_id] = response_stream  # type: ignore[attr-defined]
+
+        try:
+            # Construct raw JSONRPCRequest (bypasses ClientRequest validation)
+            jsonrpc_request = JSONRPCRequest(
+                jsonrpc="2.0", id=request_id, method=method, params=params
+            )
+
+            # Send via write stream
+            await self.session._write_stream.send(  # type: ignore[attr-defined]
+                SessionMessage(message=JSONRPCMessage(jsonrpc_request))
+            )
+
+            # Wait for response with timeout
+            timeout = (
+                self.session._session_read_timeout_seconds.total_seconds()  # type: ignore[attr-defined]
+                if self.session._session_read_timeout_seconds  # type: ignore[attr-defined]
+                else 10.0
+            )
+
+            with anyio.fail_after(timeout):
+                response_or_error = await response_stream_reader.receive()
+
+            if isinstance(response_or_error, JSONRPCError):
+                raise McpError(response_or_error.error)
+
+            return response_or_error.result  # type: ignore[return-value]
+
+        finally:
+            self.session._response_streams.pop(request_id, None)  # type: ignore[attr-defined]
+            await response_stream.aclose()
+            await response_stream_reader.aclose()
+
     async def _call_tool_as_task(
         self,
         name: str,
@@ -1361,30 +1434,22 @@ class Client(Generic[ClientTransportT]):
         """
         from fastmcp.client.transports import FastMCPTransport
 
-        # TEMPORARY HACK: For FastMCPTransport, access shim directly
-        # This bypasses MCP SDK limitations until SEP-1686 is officially supported
+        # TEMPORARY HACK: For FastMCPTransport, bypass protocol and call server directly
+        # MCP SDK validates both client AND server side, rejecting custom methods
+        # TODO SEP-1686: Remove when SDK officially supports tasks/get
         if isinstance(self.transport, FastMCPTransport):
-            from fastmcp.server.tasks._temporary_mcp_shims import get_task_status_dict
+            import fastmcp.server.context
 
-            status_dict = await get_task_status_dict(task_id)
-            if status_dict is None:
-                # Task not found - return unknown state per SEP-1686
-                return TaskStatusResponse(
-                    taskId=task_id,
-                    status="unknown",
-                    pollFrequency=1000,
-                )
+            server = self.transport.server
 
-            # Add taskId to response
-            status_dict["taskId"] = task_id
-            return TaskStatusResponse.model_validate(status_dict)
+            # Call server handler within server context
+            async with fastmcp.server.context.Context(fastmcp=server):  # type: ignore[arg-type]
+                result = await server._tasks_get_mcp({"taskId": task_id})  # type: ignore[attr-defined]
+            return TaskStatusResponse.model_validate(result)
 
-        # For other transports, we need the MCP SDK to support SEP-1686
-        # TODO: Implement when SDK adds support
-        raise NotImplementedError(
-            "Task status polling not yet implemented for non-memory transports. "
-            "SEP-1686 support pending in MCP SDK."
-        )
+        # For network transports, use custom request sender
+        result = await self._send_custom_request("tasks/get", {"taskId": task_id})
+        return TaskStatusResponse.model_validate(result)
 
     async def get_task_result(self, task_id: str) -> Any:
         """Retrieve the raw result of a completed background task.
@@ -1403,24 +1468,20 @@ class Client(Generic[ClientTransportT]):
         """
         from fastmcp.client.transports import FastMCPTransport
 
-        # TEMPORARY HACK: For FastMCPTransport, call server's _tasks_result_mcp directly
-        # This gets the properly converted MCP result type
+        # TEMPORARY HACK: For FastMCPTransport, bypass protocol and call server directly
+        # MCP SDK validates both client AND server side, rejecting custom methods
+        # TODO SEP-1686: Remove when SDK officially supports tasks/result
         if isinstance(self.transport, FastMCPTransport):
+            import fastmcp.server.context
+
             server = self.transport.server
 
-            # Call server's result handler (does raw→MCP conversion)
-            try:
-                result = await server._tasks_result_mcp({"taskId": task_id})  # type: ignore[attr-defined]
-                return result
-            except Exception as e:
-                raise RuntimeError(f"Failed to get task result: {e}") from e
+            # Call server handler within server context
+            async with fastmcp.server.context.Context(fastmcp=server):  # type: ignore[arg-type]
+                return await server._tasks_result_mcp({"taskId": task_id})  # type: ignore[attr-defined]
 
-        # For other transports, we need the MCP SDK to support SEP-1686
-        # TODO: Implement when SDK adds support
-        raise NotImplementedError(
-            "Task result retrieval not yet implemented for non-memory transports. "
-            "SEP-1686 support pending in MCP SDK."
-        )
+        # For network transports, use custom request sender
+        return await self._send_custom_request("tasks/result", {"taskId": task_id})
 
     async def list_tasks(
         self,
@@ -1519,16 +1580,37 @@ class Client(Generic[ClientTransportT]):
         """
         from fastmcp.client.transports import FastMCPTransport
 
-        # TEMPORARY HACK: For FastMCPTransport, access shim directly
+        # TEMPORARY HACK: For FastMCPTransport, cancel directly via Docket
         if isinstance(self.transport, FastMCPTransport):
-            from fastmcp.server.tasks._temporary_mcp_shims import cancel_task
+            from fastmcp.server.tasks._temporary_mcp_shims import (
+                _cancelled_tasks,
+                _lock,
+                resolve_task_id,
+            )
 
-            cancelled = await cancel_task(task_id)
-            if not cancelled:
+            server = self.transport.server
+            docket = getattr(server, "_docket", None)
+
+            # Resolve task key
+            task_key = await resolve_task_id(task_id)
+            if task_key is None or docket is None:
                 raise RuntimeError(f"Task {task_id} not found")
+
+            # Check if task exists
+            execution = await docket.get_execution(task_key)
+            if execution is None:
+                raise RuntimeError(f"Task {task_id} not found")
+
+            # Cancel via Docket
+            await docket.cancel(task_key)
+
+            # Mark as cancelled (Docket doesn't have CANCELLED state)
+            async with _lock:
+                _cancelled_tasks.add(task_key)
+
             return
 
-        # For other transports, we need the MCP SDK to support SEP-1686
+        # For other transports, protocol not yet implemented
         raise NotImplementedError(
             "Task cancellation not yet implemented for non-memory transports. "
             "SEP-1686 support pending in MCP SDK."
@@ -1549,22 +1631,21 @@ class Client(Generic[ClientTransportT]):
         """
         from fastmcp.client.transports import FastMCPTransport
 
-        # TEMPORARY HACK: For FastMCPTransport, access shim directly
-        # This bypasses MCP SDK limitations until SEP-1686 is officially supported
+        # TEMPORARY HACK: For FastMCPTransport, bypass protocol and call server directly
+        # MCP SDK validates both client AND server side, rejecting custom methods
+        # TODO SEP-1686: Remove when SDK officially supports tasks/delete
         if isinstance(self.transport, FastMCPTransport):
-            from fastmcp.server.tasks._temporary_mcp_shims import delete_task
+            import fastmcp.server.context
 
-            deleted = await delete_task(task_id)
-            if not deleted:
-                raise RuntimeError(f"Task {task_id} not found")
+            server = self.transport.server
+
+            # Call server handler within server context
+            async with fastmcp.server.context.Context(fastmcp=server):  # type: ignore[arg-type]
+                await server._tasks_delete_mcp({"taskId": task_id})  # type: ignore[attr-defined]
             return
 
-        # For other transports, we need the MCP SDK to support SEP-1686
-        # TODO: Implement when SDK adds support
-        raise NotImplementedError(
-            "Task deletion not yet implemented for non-memory transports. "
-            "SEP-1686 support pending in MCP SDK."
-        )
+        # For network transports, use custom request sender
+        await self._send_custom_request("tasks/delete", {"taskId": task_id})
 
     @classmethod
     def generate_name(cls, name: str | None = None) -> str:

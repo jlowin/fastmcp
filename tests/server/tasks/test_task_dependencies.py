@@ -243,11 +243,6 @@ async def test_dependency_context_managers_cleaned_up_in_background():
         assert "Used: connection" in result.data
 
 
-@pytest.mark.skip(
-    reason="Cannot intercept Worker dependency resolution errors with current shim setup. "
-    "Will be testable when Docket natively supports execution state/result APIs "
-    "(https://github.com/chrisguidry/docket/issues/167, #166)"
-)
 async def test_dependency_errors_propagate_to_task_failure():
     """If dependency resolution fails, the background task should fail."""
     mcp = FastMCP("error-test")
@@ -261,13 +256,15 @@ async def test_dependency_errors_propagate_to_task_failure():
     ) -> str:
         return f"Got: {dep}"
 
+    from fastmcp.exceptions import ToolError
+
     async with Client(mcp) as client:
         task = await client.call_tool(
             "tool_with_failing_dep", {"value": "test"}, task=True
         )
 
         # Task should fail due to dependency error
-        with pytest.raises(RuntimeError, match="Task failed"):
+        with pytest.raises(ToolError, match="Failed to resolve dependencies"):
             await task.result()
 
         # Verify it reached failed state
