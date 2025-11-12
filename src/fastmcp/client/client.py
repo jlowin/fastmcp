@@ -1511,57 +1511,34 @@ class Client(Generic[ClientTransportT]):
         else:
             raise TimeoutError(f"Task {task_id} did not complete within {timeout}s")
 
-    async def cancel_task(self, task_id: str) -> None:
+    async def cancel_task(self, task_id: str) -> TaskStatusResponse:
         """Cancel a task, transitioning it to cancelled state.
 
-        Sends a notifications/cancelled to request cancellation. Task will
-        transition to cancelled state and halt execution.
+        Sends a 'tasks/cancel' MCP protocol request. Task will halt execution
+        and transition to cancelled state.
 
         Args:
             task_id: The task ID to cancel
 
+        Returns:
+            TaskStatusResponse: The task status showing cancelled state
+
         Raises:
             RuntimeError: If task doesn't exist
         """
-        from fastmcp.client.transports import FastMCPTransport
-
-        # TEMPORARY HACK: SEP-1686 uses notifications/cancelled (not a request/response)
-        # For FastMCPTransport, cancel directly via Docket
-        # TODO SEP-1686: Implement notifications/cancelled when SDK supports it
-        if isinstance(self.transport, FastMCPTransport):
-            from fastmcp.server.tasks._temporary_mcp_shims import (
-                _cancelled_tasks,
-                _lock,
-                resolve_task_id,
-            )
-
-            server = self.transport.server
-            docket = getattr(server, "_docket", None)
-
-            # Resolve task key
-            task_key = await resolve_task_id(task_id)
-            if task_key is None or docket is None:
-                raise RuntimeError(f"Task {task_id} not found")
-
-            # Check if task exists
-            execution = await docket.get_execution(task_key)
-            if execution is None:
-                raise RuntimeError(f"Task {task_id} not found")
-
-            # Cancel via Docket
-            await docket.cancel(task_key)
-
-            # Mark as cancelled (Docket doesn't have CANCELLED state)
-            async with _lock:
-                _cancelled_tasks.add(task_key)
-
-            return
-
-        # For network transports, protocol not yet implemented
-        raise NotImplementedError(
-            "Task cancellation not yet implemented for non-memory transports. "
-            "SEP-1686 support pending in MCP SDK."
+        # TODO SEP-1686: Use TasksCancelRequest (monkey-patched into ClientRequest union)
+        from fastmcp.server.tasks._temporary_mcp_shims import (
+            TasksCancelParams,
+            TasksCancelRequest,
+            TasksResponse,
         )
+
+        request = TasksCancelRequest(params=TasksCancelParams(taskId=task_id))
+        result = await self.session.send_request(
+            request=request,  # type: ignore[arg-type]
+            result_type=TasksResponse,  # type: ignore[arg-type]
+        )
+        return TaskStatusResponse.model_validate(result)
 
     async def delete_task(self, task_id: str) -> None:
         """Delete a task and all associated data from the server.

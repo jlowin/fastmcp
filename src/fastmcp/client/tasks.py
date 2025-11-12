@@ -253,8 +253,8 @@ class Task(abc.ABC, Generic[TaskResultT]):
     async def cancel(self) -> None:
         """Cancel this task, transitioning it to cancelled state.
 
-        Requests cancellation via notifications/cancelled. The server will attempt
-        to halt execution and move the task to cancelled state.
+        Sends a tasks/cancel protocol request. The server will attempt to halt
+        execution and move the task to cancelled state.
 
         Note: If server executed immediately (graceful degradation), this is a no-op
         as there's no server-side task to cancel.

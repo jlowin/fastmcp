@@ -78,6 +78,19 @@ class TasksListRequest(Request[TasksListParams, Literal["tasks/list"]]):
     params: TasksListParams
 
 
+class TasksCancelParams(RequestParams):
+    """Parameters for tasks/cancel request."""
+
+    taskId: str
+
+
+class TasksCancelRequest(Request[TasksCancelParams, Literal["tasks/cancel"]]):
+    """Request type for tasks/cancel method."""
+
+    method: Literal["tasks/cancel"] = "tasks/cancel"
+    params: TasksCancelParams
+
+
 # TODO SEP-1686: Remove these response types when SDK officially supports them
 class TasksResponse(BaseModel):
     """Generic response wrapper for task protocol methods.
@@ -144,6 +157,7 @@ client_new_union = Union[
         TasksResultRequest,
         TasksDeleteRequest,
         TasksListRequest,
+        TasksCancelRequest,
     )
 ]
 
@@ -163,6 +177,7 @@ server_new_union = Union[
         TasksResultRequest,
         TasksDeleteRequest,
         TasksListRequest,
+        TasksCancelRequest,
     )
 ]
 

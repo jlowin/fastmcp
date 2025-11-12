@@ -638,6 +638,7 @@ class FastMCP(Generic[LifespanResultT]):
         the tasks/get, tasks/result, and tasks/delete methods.
         """
         from fastmcp.server.tasks._temporary_mcp_shims import (
+            TasksCancelRequest,
             TasksDeleteRequest,
             TasksGetRequest,
             TasksListRequest,
@@ -677,11 +678,20 @@ class FastMCP(Generic[LifespanResultT]):
             result = await self._tasks_list_mcp(params_dict)
             return mcp.types.ServerResult(root=result)  # type: ignore[arg-type]
 
+        async def tasks_cancel_handler(
+            req: TasksCancelRequest,
+        ) -> mcp.types.ServerResult:
+            # Convert params to dict for our handler
+            params_dict = req.params.model_dump(by_alias=True, exclude_none=True)
+            result = await self._tasks_cancel_mcp(params_dict)
+            return mcp.types.ServerResult(root=result)  # type: ignore[arg-type]
+
         # Register handlers directly
         self._mcp_server.request_handlers[TasksGetRequest] = tasks_get_handler
         self._mcp_server.request_handlers[TasksResultRequest] = tasks_result_handler
         self._mcp_server.request_handlers[TasksDeleteRequest] = tasks_delete_handler
         self._mcp_server.request_handlers[TasksListRequest] = tasks_list_handler
+        self._mcp_server.request_handlers[TasksCancelRequest] = tasks_cancel_handler
 
     async def _apply_middleware(
         self,
@@ -1965,6 +1975,75 @@ class FastMCP(Generic[LifespanResultT]):
         # Return empty list - client tracks tasks locally
         # Note: tasks/list is not task-specific, so _meta doesn't have taskId
         return {"tasks": [], "nextCursor": None, "_meta": {}}
+
+    async def _tasks_cancel_mcp(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Handle MCP 'tasks/cancel' request (SEP-1686).
+
+        Cancels a running task, transitioning it to cancelled state.
+
+        Args:
+            params: Request params containing taskId
+
+        Returns:
+            dict: Task status response showing cancelled state
+        """
+        client_task_id = params.get("taskId")
+        if not client_task_id:
+            raise McpError(
+                ErrorData(
+                    code=INVALID_PARAMS, message="Missing required parameter: taskId"
+                )
+            )
+
+        # Resolve to full task key via mapping
+        from fastmcp.server.tasks._temporary_mcp_shims import _cancelled_tasks
+
+        task_key = await resolve_task_id(client_task_id)
+        if task_key is None:
+            raise McpError(
+                ErrorData(
+                    code=INVALID_PARAMS,
+                    message=f"Invalid taskId: {client_task_id} not found",
+                )
+            )
+
+        docket = self._docket
+        if docket is None:
+            raise McpError(
+                ErrorData(
+                    code=INTERNAL_ERROR,
+                    message="Background tasks require Docket",
+                )
+            )
+
+        # Check if task exists
+        execution = await docket.get_execution(task_key)
+        if execution is None:
+            raise McpError(
+                ErrorData(
+                    code=INVALID_PARAMS,
+                    message=f"Invalid taskId: {client_task_id} not found",
+                )
+            )
+
+        # Cancel via Docket
+        await docket.cancel(task_key)
+
+        # Mark as cancelled (Docket doesn't have CANCELLED state)
+        async with mcp_lock:
+            _cancelled_tasks.add(task_key)
+
+        # Return task status with cancelled state
+        return {
+            "taskId": client_task_id,
+            "status": "cancelled",
+            "pollFrequency": 1000,
+            "_meta": {
+                "modelcontextprotocol.io/related-task": {
+                    "taskId": client_task_id,
+                }
+            },
+        }
 
     async def _tasks_delete_mcp(self, params: dict[str, Any]) -> dict[str, Any]:
         """Handle MCP 'tasks/delete' request (SEP-1686).
