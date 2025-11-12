@@ -9,8 +9,8 @@ Demonstrates FastMCP server protection with Scalekit OAuth.
 **Create a Scalekit Account**:
 
 - Go to [Scalekit Dashboard](https://app.scalekit.com/)
-- Navigate to **Developers** → **Settings**
-- Copy your Environment URL and any resource identifiers you'll need later
+- Copy your Environment URL from **Developers** → **Settings**
+- Copy Resource ID (res_xxx) from **Developers** → **MCP Servers**
 
 **Register Your MCP Server**:
 
@@ -24,7 +24,7 @@ Create a `.env` file:
 # Required Scalekit credentials
 SCALEKIT_ENVIRONMENT_URL=<YOUR_APP_ENVIRONMENT_URL>
 SCALEKIT_RESOURCE_ID=<YOUR_APP_RESOURCE_ID> # res_926EXAMPLE5878
-BASE_URL=http://localhost:8000/mcp
+BASE_URL=http://localhost:8000/
 # Optional: additional scopes tokens must include (comma-separated)
 # SCALEKIT_REQUIRED_SCOPES=read,write
 ```
