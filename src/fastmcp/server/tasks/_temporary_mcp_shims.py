@@ -17,7 +17,6 @@ These shims will be removed when:
 DO NOT WRITE TESTS FOR THIS FILE - these are temporary hacks.
 """
 
-import asyncio
 from typing import Any, Literal, Union, get_args
 
 from mcp import types as mcp_types
@@ -183,47 +182,3 @@ server_new_union = Union[
 
 server_root_field.annotation = server_new_union
 mcp_types.ServerRequest.model_rebuild(force=True)
-
-
-# HACK: Task ID mapping for FastMCPTransport
-# Maps client-provided task IDs → full task keys (with type and component embedded)
-# Needed because MCP SDK's custom protocol handlers don't receive session context
-_task_id_mapping: dict[str, str] = {}
-
-_lock = asyncio.Lock()
-
-
-async def set_state(
-    task_key: str,
-    state: str,
-    keep_alive: int | None = None,
-    client_task_id: str | None = None,
-) -> None:
-    """Set task state and optionally register task ID mapping.
-
-    Registers MCP SDK task ID mapping.
-
-    Args:
-        task_key: Full task key (with type and component embedded)
-        state: Task state (submitted, working, completed, failed) - unused, for compatibility
-        keep_alive: Optional keep_alive (unused, accepted for compatibility)
-        client_task_id: Optional client task ID to register in mapping (MCP SDK hack)
-    """
-    async with _lock:
-        if client_task_id:
-            _task_id_mapping[client_task_id] = task_key
-
-
-async def resolve_task_id(client_task_id: str) -> str | None:
-    """Resolve client task ID to full task key (HACK for FastMCPTransport).
-
-    TODO: Remove when MCP SDK provides request context to custom protocol methods
-
-    Args:
-        client_task_id: Client-provided task ID
-
-    Returns:
-        Full task key or None if not found
-    """
-    async with _lock:
-        return _task_id_mapping.get(client_task_id)

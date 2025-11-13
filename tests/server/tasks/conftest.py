@@ -23,8 +23,3 @@ async def enable_docket_and_tasks():
         )
 
         yield
-
-        # Clean up MCP shim storage to prevent test pollution
-        from fastmcp.server.tasks import _temporary_mcp_shims
-
-        _temporary_mcp_shims._task_id_mapping.clear()
