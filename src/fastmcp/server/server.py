@@ -79,15 +79,14 @@ from fastmcp.server.http import (
 )
 from fastmcp.server.low_level import LowLevelServer
 from fastmcp.server.middleware import Middleware, MiddlewareContext
+from fastmcp.server.tasks._temporary_mcp_shims import (
+    _lock as mcp_lock,
+)
 
 # TODO SEP-1686: Import triggers monkey-patch of ClientRequest union for task methods
 from fastmcp.server.tasks._temporary_mcp_shims import (
-    _cancelled_tasks,
     resolve_task_id,
     set_state,
-)
-from fastmcp.server.tasks._temporary_mcp_shims import (
-    _lock as mcp_lock,
 )
 from fastmcp.server.tasks.keys import build_task_key
 from fastmcp.settings import Settings
@@ -106,6 +105,7 @@ DOCKET_TO_MCP_STATE: dict[ExecutionState, str] = {
     ExecutionState.RUNNING: "working",
     ExecutionState.COMPLETED: "completed",
     ExecutionState.FAILED: "failed",
+    ExecutionState.CANCELLED: "cancelled",
 }
 
 if TYPE_CHECKING:
@@ -1590,8 +1590,6 @@ class FastMCP(Generic[LifespanResultT]):
             )
 
         # Resolve to full task key via mapping (for FastMCPTransport)
-        from fastmcp.server.tasks._temporary_mcp_shims import _cancelled_tasks
-
         task_key = await resolve_task_id(client_task_id)
         if task_key is None:
             # Task not found - return unknown state per SEP-1686
@@ -1605,21 +1603,6 @@ class FastMCP(Generic[LifespanResultT]):
                     }
                 },
             }
-
-        # Check if task was cancelled (Docket doesn't have CANCELLED state)
-        async with mcp_lock:
-            if task_key in _cancelled_tasks:
-                return {
-                    "taskId": client_task_id,
-                    "status": "cancelled",
-                    "keepAlive": 60000,  # Default value
-                    "pollFrequency": 1000,
-                    "_meta": {
-                        "modelcontextprotocol.io/related-task": {
-                            "taskId": client_task_id,
-                        }
-                    },
-                }
 
         # Get execution from Docket (use instance attribute for cross-task access)
         docket = self._docket
@@ -1996,8 +1979,6 @@ class FastMCP(Generic[LifespanResultT]):
             )
 
         # Resolve to full task key via mapping
-        from fastmcp.server.tasks._temporary_mcp_shims import _cancelled_tasks
-
         task_key = await resolve_task_id(client_task_id)
         if task_key is None:
             raise McpError(
@@ -2026,12 +2007,8 @@ class FastMCP(Generic[LifespanResultT]):
                 )
             )
 
-        # Cancel via Docket
+        # Cancel via Docket (now sets CANCELLED state natively)
         await docket.cancel(task_key)
-
-        # Mark as cancelled (Docket doesn't have CANCELLED state)
-        async with mcp_lock:
-            _cancelled_tasks.add(task_key)
 
         # Return task status with cancelled state
         return {
@@ -2098,10 +2075,9 @@ class FastMCP(Generic[LifespanResultT]):
         # Cancel via Docket (Docket handles cleanup via TTL)
         await docket.cancel(task_key)
 
-        # Remove from task ID mapping and cancelled tracking
+        # Remove from task ID mapping
         async with mcp_lock:
             _task_id_mapping.pop(client_task_id, None)
-            _cancelled_tasks.discard(task_key)
 
         # Return empty response with related-task metadata
         return {

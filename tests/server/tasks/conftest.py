@@ -28,4 +28,3 @@ async def enable_docket_and_tasks():
         from fastmcp.server.tasks import _temporary_mcp_shims
 
         _temporary_mcp_shims._task_id_mapping.clear()
-        _temporary_mcp_shims._cancelled_tasks.clear()

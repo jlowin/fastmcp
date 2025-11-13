@@ -190,11 +190,6 @@ mcp_types.ServerRequest.model_rebuild(force=True)
 # Needed because MCP SDK's custom protocol handlers don't receive session context
 _task_id_mapping: dict[str, str] = {}
 
-# HACK: Cancelled task tracking
-# Set of task keys that have been cancelled
-# Needed because Docket doesn't have a CANCELLED state (SEP-1686 requires it)
-_cancelled_tasks: set[str] = set()
-
 _lock = asyncio.Lock()
 
 
