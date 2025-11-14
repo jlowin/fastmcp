@@ -24,9 +24,9 @@ Example:
 
     # Simple OCI OIDC protection
     auth = OCIProvider(
-        config_url=f"https://{IAM_DOMAIN}/.well-known/openid-configuration", #config URL is the OCI IAM Domain OIDC discovery URL.
-        client_id=IAM_CLIENT_ID, #This is same as the client ID configured for the OCI IAM Domain Integrated Application
-        client_secret=IAM_CLIENT_SECRET, #This is same as the client secret configured for the OCI IAM Domain Integrated Application
+        config_url=FASTMCP_SERVER_AUTH_OCI_CONFIG_URL, #config URL is the OCI IAM Domain OIDC discovery URL.
+        client_id=FASTMCP_SERVER_AUTH_OCI_CLIENT_ID, #This is same as the client ID configured for the OCI IAM Domain Integrated Application
+        client_secret=FASTMCP_SERVER_AUTH_OCI_CLIENT_SECRET, #This is same as the client secret configured for the OCI IAM Domain Integrated Application
         required_scopes=["openid", "profile", "email"],
         redirect_path="/auth/callback",
         base_url="http://localhost:8000",
@@ -53,9 +53,9 @@ Example:
         logger.debug(f"Creating new signer for token ID: {tokenID}")
         signer = TokenExchangeSigner(
             jwt_or_func=token,
-            oci_domain_id=IAM_DOMAIN.split(".")[0],   #This is same as IAM GUID configured for the OCI IAM Domain
-            client_id=IAM_CLIENT_ID, #This is same as the client ID configured for the OCI IAM Domain Integrated Application
-            client_secret=IAM_CLIENT_SECRET #This is same as the client secret configured for the OCI IAM Domain Integrated Application
+            oci_domain_id=FASTMCP_SERVER_AUTH_OCI_IAM_GUID.split(".")[0],   #This is same as IAM GUID configured for the OCI IAM Domain
+            client_id=FASTMCP_SERVER_AUTH_OCI_CLIENT_ID, #This is same as the client ID configured for the OCI IAM Domain Integrated Application
+            client_secret=FASTMCP_SERVER_AUTH_OCI_CLIENT_SECRET #This is same as the client secret configured for the OCI IAM Domain Integrated Application
         )
         logger.debug(f"Signer {signer} created for token ID: {tokenID}")
 
@@ -121,9 +121,9 @@ class OCIProvider(OIDCProxy):
 
         # Simple OCI OIDC protection
         auth = OCIProvider(
-            config_url=f"https://{IAM_DOMAIN}/.well-known/openid-configuration", #config URL is the OCI IAM Domain OIDC discovery URL.
-            client_id=IAM_CLIENT_ID, #This is same as the client ID configured for the OCI IAM Domain Integrated Application
-            client_secret=IAM_CLIENT_SECRET, #This is same as the client secret configured for the OCI IAM Domain Integrated Application
+            config_url=FASTMCP_SERVER_AUTH_OCI_CONFIG_URL, #config URL is the OCI IAM Domain OIDC discovery URL.
+            client_id=FASTMCP_SERVER_AUTH_OCI_CLIENT_ID, #This is same as the client ID configured for the OCI IAM Domain Integrated Application
+            client_secret=FASTMCP_SERVER_AUTH_OCI_CLIENT_SECRET, #This is same as the client secret configured for the OCI IAM Domain Integrated Application
             base_url="http://localhost:8000",
             required_scopes=["openid", "profile", "email"],
             redirect_path="/auth/callback",
