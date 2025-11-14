@@ -91,9 +91,9 @@ This is all you need to implement MCP server authentication against OCI IAM. How
 
 Token exchange helps you exchange a logged-in user's OCI IAM token for an OCI control plane session token, also known as UPST (User Principal Session Token). To learn more about token exchange, refer to my [Workload Identity Federation Blog](https://www.ateam-oracle.com/post/workload-identity-federation)
 
-For token exchange, we need to configure Identity propagation trust. The blog above discusses setting up the trust using REST APIs. However, you can also use OCI CLI. Before using the CLI command below, ensure that you have created a token exchange OAuth client. In most cases, you can use the same OAuth client that you created above. You will use the client ID of the token exchange OAuth client in the CLI command below and replace it with {IAM_TOKENEXCHANGE_CLIENT_ID}. 
+For token exchange, we need to configure Identity propagation trust. The blog above discusses setting up the trust using REST APIs. However, you can also use OCI CLI. Before using the CLI command below, ensure that you have created a token exchange OAuth client. In most cases, you can use the same OAuth client that you created above. You will use the client ID of the token exchange OAuth client in the CLI command below and replace it with {IAM_CLIENT_ID}. 
 
-You will also need to update the client secret for the token exchange OAuth client in the .env file. It is the IAM_TOKENEXCHANGE_CLIENT_SECRET parameter. Update IAM_GUID and IAM_TOKENEXCHANGE_CLIENT_ID as well for the token exchange OAuth client in the .env file.
+You will also need to update the client secret for the token exchange OAuth client in the .env file. It is the IAM_CLIENT_SECRET parameter. Update IAM_GUID and IAM_CLIENT_ID as well for the token exchange OAuth client in the .env file.
 
 ```bash
 oci identity-domains identity-propagation-trust create \
