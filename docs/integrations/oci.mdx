@@ -112,9 +112,26 @@ oci identity-domains identity-propagation-trust create \
 To exchange access token for OCI token and create a signer object, you need to add below code in MCP server. You can then use the signer object to create any OCI control plane client. 
 
 ```python
+
+from fastmcp.server.dependencies import get_access_token
+from fastmcp.utilities.logging import get_logger
+from oci.auth.signers import TokenExchangeSigner
+import os
+
+logger = get_logger(__name__)
+
+# Load configuration from environment
+FASTMCP_SERVER_AUTH_OCI_IAM_GUID = os.environ["FASTMCP_SERVER_AUTH_OCI_IAM_GUID"]
+FASTMCP_SERVER_AUTH_OCI_CLIENT_ID = os.environ["FASTMCP_SERVER_AUTH_OCI_CLIENT_ID"]
+FASTMCP_SERVER_AUTH_OCI_CLIENT_SECRET = os.environ["FASTMCP_SERVER_AUTH_OCI_CLIENT_SECRET"]
+
 _global_token_cache = {} #In memory cache for OCI session token signer
     
 def get_oci_signer() -> TokenExchangeSigner:
+
+    authntoken = get_access_token()
+    tokenID = authntoken.claims.get("jti")
+    token = authntoken.token
     
     #Check if the signer exists for the token ID in memory cache
     cached_signer = _global_token_cache.get(tokenID)
@@ -127,8 +144,8 @@ def get_oci_signer() -> TokenExchangeSigner:
     logger.debug(f"Creating new signer for token ID: {tokenID}")
     signer = TokenExchangeSigner(
         jwt_or_func=token,
-        oci_domain_id=FASTMCP_SERVER_AUTH_OCI_IAM_GUID,
-        client_id=FASTMCP_SERVER_AUTH_OCI_CLIENT_ID,
+        oci_domain_id=FASTMCP_SERVER_AUTH_OCI_IAM_GUID
+        client_id=FASTMCP_SERVER_AUTH_OCI_CLIENT_ID
         client_secret=FASTMCP_SERVER_AUTH_OCI_CLIENT_SECRET
     )
     logger.debug(f"Signer {signer} created for token ID: {tokenID}")
@@ -194,11 +211,16 @@ from key_value.aio.stores.redis import RedisStore
 from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
 from cryptography.fernet import Fernet
 
+# Load configuration from environment
+FASTMCP_SERVER_AUTH_OCI_CONFIG_URL = os.environ["FASTMCP_SERVER_AUTH_OCI_CONFIG_URL"]
+FASTMCP_SERVER_AUTH_OCI_CLIENT_ID = os.environ["FASTMCP_SERVER_AUTH_OCI_CLIENT_ID"]
+FASTMCP_SERVER_AUTH_OCI_CLIENT_SECRET = os.environ["FASTMCP_SERVER_AUTH_OCI_CLIENT_SECRET"]
+
 # Production setup with encrypted persistent token storage
 auth_provider = OCIProvider(
-    config_url=FASTMCP_SERVER_AUTH_OCI_CONFIG_URL,
-    client_id=FASTMCP_SERVER_AUTH_OCI_CLIENT_ID,
-    client_secret=FASTMCP_SERVER_AUTH_OCI_CLIENT_SECRET,
+    config_url="http://idcs-acsasdasc....identity.oraclecloud.com/.well-known/openid-configuration",
+    client_id="acsadsasccasdas........",
+    client_secret="idcsssasaweacew.....",
     base_url="https://your-production-domain.com",
 
     # Production token management
@@ -287,6 +309,7 @@ With environment variables set, your server code simplifies to:
 
 ```python server.py
 from fastmcp import FastMCP
+from fastmcp.server.dependencies import get_access_token
 
 # Authentication is automatically configured from environment
 mcp = FastMCP(name="OCI Secured App")
