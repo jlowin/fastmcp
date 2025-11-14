@@ -196,7 +196,7 @@ from cryptography.fernet import Fernet
 
 # Production setup with encrypted persistent token storage
 auth_provider = OCIProvider(
-    config_url=f"https://{IAM_DOMAIN}/.well-known/openid-configuration,
+    config_url=f"https://{IAM_DOMAIN}/.well-known/openid-configuration",
     client_id=IAM_CLIENT_ID,
     client_secret=IAM_CLIENT_SECRET",
     base_url="https://your-production-domain.com",

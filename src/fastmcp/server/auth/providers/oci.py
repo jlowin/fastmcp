@@ -24,7 +24,7 @@ Example:
 
     # Simple OCI OIDC protection
     auth = OCIProvider(
-        config_url=f"https://{IAM_DOMAIN}/.well-known/openid-configuration, #config URL is the OCI IAM Domain OIDC discovery URL.
+        config_url=f"https://{IAM_DOMAIN}/.well-known/openid-configuration", #config URL is the OCI IAM Domain OIDC discovery URL.
         client_id=IAM_CLIENT_ID, #This is same as the client ID configured for the OCI IAM Domain Integrated Application
         client_secret=IAM_CLIENT_SECRET, #This is same as the client secret configured for the OCI IAM Domain Integrated Application
         required_scopes=["openid", "profile", "email"],
