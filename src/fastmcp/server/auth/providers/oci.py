@@ -108,7 +108,7 @@ class OCIProviderSettings(BaseSettings):
     redirect_path: str | None = None
     required_scopes: list[str] | None = None
     allowed_client_redirect_uris: list[str] | None = None
-    jwt_signing_key: str | None = None
+    jwt_signing_key: str | bytes | None = None
 
     @field_validator("required_scopes", mode="before")
     @classmethod
@@ -170,24 +170,24 @@ class OCIProvider(OIDCProxy):
             redirect_path: Redirect path configured in OCI IAM Domain Integrated Application. The default is "/auth/callback".
             allowed_client_redirect_uris: List of allowed redirect URI patterns for MCP clients.
         """
-        settings = OCIProviderSettings.model_validate(
-            {
-                k: v
-                for k, v in {
-                    "config_url": config_url,
-                    "client_id": client_id,
-                    "client_secret": client_secret,
-                    "audience": audience,
-                    "base_url": base_url,
-                    "issuer_url": issuer_url,
-                    "required_scopes": required_scopes,
-                    "redirect_path": redirect_path,
-                    "allowed_client_redirect_uris": allowed_client_redirect_uris,
-                    "jwt_signing_key": jwt_signing_key,
-                }.items()
-                if v is not NotSet
-            }
-        )
+
+        overrides = {
+            k: v
+            for k, v in {
+                "config_url": config_url,
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "audience": audience,
+                "base_url": base_url,
+                "issuer_url": issuer_url,
+                "required_scopes": required_scopes,
+                "redirect_path": redirect_path,
+                "allowed_client_redirect_uris": allowed_client_redirect_uris,
+                "jwt_signing_key": jwt_signing_key,
+            }.items()
+            if v is not NotSet
+        }
+        settings = OCIProviderSettings(**overrides)
 
         if not settings.config_url:
             raise ValueError(

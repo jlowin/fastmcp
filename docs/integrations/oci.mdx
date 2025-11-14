@@ -30,14 +30,18 @@ This guide shows you how to secure your FastMCP server using **OCI IAM OAuth**. 
     Open Settings tab. 
     Click on "Edit Domain Settings" button.
 
-    ![Edit IAM Domain Settings](./images/oci/ocieditdomainsettingsbutton.png)
+    <Frame>
+        <img src="/images/oci/ocieditdomainsettingsbutton.png" alt="OCI console showing the Edit Domain Settings button in the IAM Domain settings page" />
+    </Frame>
 </Step>
 
 <Step title="Update Domain Setting">
 
     Enable "Configure client access" checkbox as shown in the screenshot.
 
-    ![IAM Domain Settings](./images/oci/ocieditdomainsettings.png)
+    <Frame>
+        <img src="./images/oci/ocieditdomainsettings.png" alt="OCI IAM Domain Settings" />
+    </Frame>
 </Step>
 </Steps>
 
@@ -61,7 +65,9 @@ Follow the Steps as mentioned below to create an OAuth client.
     Select Launch workflow.
     In the Add application details page, Enter name and description as shown below.
 
-    ![Add Confidential Integrated Application](./images/oci/ociaddapplication.png)
+    <Frame>
+        <img src="./images/oci/ociaddapplication.png" alt="Adding a Confidential Integrated Application in OCI IAM Domain" />
+    </Frame>
 </Step>
 
 <Step title="Update OAuth Configuration for an Integrated Application">
@@ -72,7 +78,9 @@ Follow the Steps as mentioned below to create an OAuth client.
     Select "Authorization code" grant type. If you are planning to use the same OAuth client application for token exchange, select "Client credentials" grant type as well. In the sample, we will use the same client.
     For Authorization grant type, select redirect URL. In most cases, this will be the MCP server URL followed by "/oauth/callback".
 
-    ![OAuth Configuration for an Integrated Application](./images/oci/ocioauthconfiguration.png)
+    <Frame>
+        <img src="./images/oci/ocioauthconfiguration.png" alt="OAuth Configuration for an Integrated Application in OCI IAM Domain" />
+    </Frame>
 </Step>
 
 <Step title="Activate the Integrated Application">
@@ -144,9 +152,9 @@ def get_oci_signer() -> TokenExchangeSigner:
     logger.debug(f"Creating new signer for token ID: {tokenID}")
     signer = TokenExchangeSigner(
         jwt_or_func=token,
-        oci_domain_id=FASTMCP_SERVER_AUTH_OCI_IAM_GUID
-        client_id=FASTMCP_SERVER_AUTH_OCI_CLIENT_ID
-        client_secret=FASTMCP_SERVER_AUTH_OCI_CLIENT_SECRET
+        oci_domain_id=FASTMCP_SERVER_AUTH_OCI_IAM_GUID.split(".")[0],
+        client_id=FASTMCP_SERVER_AUTH_OCI_CLIENT_ID,
+        client_secret=FASTMCP_SERVER_AUTH_OCI_CLIENT_SECRET,
     )
     logger.debug(f"Signer {signer} created for token ID: {tokenID}")
         
@@ -218,9 +226,9 @@ FASTMCP_SERVER_AUTH_OCI_CLIENT_SECRET = os.environ["FASTMCP_SERVER_AUTH_OCI_CLIE
 
 # Production setup with encrypted persistent token storage
 auth_provider = OCIProvider(
-    config_url="http://idcs-acsasdasc....identity.oraclecloud.com/.well-known/openid-configuration",
-    client_id="acsadsasccasdas........",
-    client_secret="idcsssasaweacew.....",
+    config_url=FASTMCP_SERVER_AUTH_OCI_CONFIG_URL,
+    client_id=FASTMCP_SERVER_AUTH_OCI_CLIENT_ID,
+    client_secret=FASTMCP_SERVER_AUTH_AUTH0_CLIENT_SECRET,
     base_url="https://your-production-domain.com",
 
     # Production token management
@@ -279,7 +287,7 @@ Your OCI Application Client ID (e.g., `tv2ObNgaZAWWhhycr7Bz1LU2mxlnsmsB`)
 </ParamField>
 
 <ParamField path="FASTMCP_SERVER_AUTH_OCI_CLIENT_SECRET" required>
-Your OCI Application Client Secret (e.g., `vPYqbjemq...`)
+Your OCI Application Client Secret (e.g., `idcsssvPYqbjemq...`)
 </ParamField>
 
 <ParamField path="FASTMCP_SERVER_AUTH_OCI_BASE_URL" required>
@@ -300,8 +308,8 @@ FASTMCP_SERVER_AUTH=fastmcp.server.auth.providers.oci.OCIProvider
 # OCI IAM configuration and credentials
 FASTMCP_SERVER_AUTH_OCI_IAM_GUID=idcs-asaacasd1111.....
 FASTMCP_SERVER_AUTH_OCI_CONFIG_URL=https://{FASTMCP_SERVER_AUTH_OCI_IAM_GUID}.identity.oraclecloud.com/.well-known/openid-configuration
-FASTMCP_SERVER_AUTH_OCI_CLIENT_ID=tv2ObNgaZAWWhhycr7Bz1LU2mxlnsmsB
-FASTMCP_SERVER_AUTH_OCI_CLIENT_SECRET=idcscsvPYqbjemq...
+FASTMCP_SERVER_AUTH_OCI_CLIENT_ID=<your-client-id>
+FASTMCP_SERVER_AUTH_OCI_CLIENT_SECRET=<your-client-id>
 FASTMCP_SERVER_AUTH_OCI_BASE_URL=https://your-server.com
 ```
 
