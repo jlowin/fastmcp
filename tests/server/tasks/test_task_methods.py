@@ -1,7 +1,7 @@
 """
-Tests for HTTP polling endpoints.
+Tests for task protocol methods.
 
-Tests the /tasks/get, /tasks/result, and /tasks/list endpoints.
+Tests the tasks/get, tasks/result, and tasks/list JSON-RPC protocol methods.
 """
 
 import asyncio
@@ -189,10 +189,12 @@ async def test_tasks_delete_on_running_task(endpoint_server):
 
 
 async def test_delete_nonexistent_task_raises_error(endpoint_server):
-    """Deleting a non-existent task raises RuntimeError."""
+    """Deleting a non-existent task raises McpError."""
+    from mcp.shared.exceptions import McpError
+
     async with Client(endpoint_server) as client:
         # Try to delete non-existent task
-        with pytest.raises(RuntimeError, match="not found"):
+        with pytest.raises(McpError, match="not found"):
             await client.delete_task("nonexistent-task-id")
 
 

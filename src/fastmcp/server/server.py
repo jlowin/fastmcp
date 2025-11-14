@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import base64
+import asyncio
 import inspect
 import json
 import re
@@ -30,20 +30,15 @@ from typing import TYPE_CHECKING, Any, Generic, Literal, cast, overload
 import anyio
 import httpx
 import mcp.types
-import pydantic_core
 import uvicorn
 from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.lowlevel.server import LifespanResultT, NotificationOptions
 from mcp.server.stdio import stdio_server
-from mcp.shared.exceptions import McpError
 from mcp.types import (
-    INTERNAL_ERROR,
-    INVALID_PARAMS,
     Annotations,
     AnyFunction,
     CallToolRequestParams,
     ContentBlock,
-    ErrorData,
     GetPromptResult,
     ToolAnnotations,
 )
@@ -59,6 +54,9 @@ from starlette.routing import BaseRoute, Route
 
 import fastmcp
 import fastmcp.server
+
+# TODO SEP-1686: Import triggers monkey-patch of ClientRequest union for task methods
+import fastmcp.server.tasks._temporary_mcp_shims
 from fastmcp.exceptions import DisabledError, NotFoundError
 from fastmcp.mcp_config import MCPConfig
 from fastmcp.prompts import Prompt
@@ -75,11 +73,12 @@ from fastmcp.server.http import (
 )
 from fastmcp.server.low_level import LowLevelServer
 from fastmcp.server.middleware import Middleware, MiddlewareContext
-from fastmcp.server.tasks._temporary_docket_shims import (
-    get_result,
-    get_state,
+from fastmcp.server.tasks.handlers import (
+    handle_prompt_as_task,
+    handle_resource_as_task,
+    handle_tool_as_task,
 )
-from fastmcp.server.tasks._temporary_mcp_shims import set_state
+from fastmcp.server.tasks.protocol import setup_task_protocol_handlers
 from fastmcp.settings import Settings
 from fastmcp.tools.tool import FunctionTool, Tool, ToolResult
 from fastmcp.tools.tool_manager import ToolManager
@@ -209,6 +208,9 @@ class FastMCP(Generic[LifespanResultT]):
         self._support_tasks_by_default: bool = (
             tasks if tasks is not None else fastmcp.settings.experimental.enable_tasks
         )
+
+        # Docket instance (set during lifespan for cross-task access)
+        self._docket = None
 
         self._additional_http_routes: list[BaseRoute] = []
         self._mounted_servers: list[MountedServer] = []
@@ -438,6 +440,8 @@ class FastMCP(Generic[LifespanResultT]):
         try:
             # Create Docket instance with unique memory:// URL per server
             async with Docket(url=f"memory://{uuid.uuid4()}") as docket:
+                # Store on server instance for cross-task access (FastMCPTransport)
+                self._docket = docket
                 # Set Docket in ContextVar so CurrentDocket can access it
                 docket_token = _current_docket.set(docket)
                 try:
@@ -462,6 +466,8 @@ class FastMCP(Generic[LifespanResultT]):
                 finally:
                     # Reset ContextVar
                     _current_docket.reset(docket_token)
+                    # Clear instance attribute
+                    self._docket = None
         finally:
             # Reset server ContextVar
             _current_server.reset(server_token)
@@ -553,6 +559,8 @@ class FastMCP(Generic[LifespanResultT]):
         # Register custom read_resource handler that supports SEP-1686 tasks
         self._setup_read_resource_handler()
         self._mcp_server.get_prompt()(self._get_prompt_mcp)
+        # Register custom SEP-1686 task protocol handlers
+        self._setup_task_protocol_handlers()
 
     def _setup_read_resource_handler(self) -> None:
         """
@@ -600,6 +608,10 @@ class FastMCP(Generic[LifespanResultT]):
 
         # Register directly, bypassing the decorator
         self._mcp_server.request_handlers[mcp.types.ReadResourceRequest] = handler
+
+    def _setup_task_protocol_handlers(self) -> None:
+        """Register custom SEP-1686 task protocol handlers."""
+        setup_task_protocol_handlers(self)
 
     async def _apply_middleware(
         self,
@@ -1231,8 +1243,8 @@ class FastMCP(Generic[LifespanResultT]):
                     tool = self._tool_manager._tools.get(key)
                     if tool and tool.task:
                         # Route to background execution
-                        return await self._handle_tool_as_task(
-                            key, arguments, task_meta
+                        return await handle_tool_as_task(
+                            self, key, arguments, task_meta
                         )
                     else:
                         # Graceful degradation per SEP-1686 spec:
@@ -1314,595 +1326,6 @@ class FastMCP(Generic[LifespanResultT]):
 
         raise NotFoundError(f"Unknown tool: {tool_name!r}")
 
-    async def _handle_tool_as_task(
-        self,
-        tool_name: str,
-        arguments: dict[str, Any],
-        task_meta: dict[str, Any],
-    ) -> mcp.types.CallToolResult:
-        """Handle tool execution as background task (SEP-1686).
-
-        Queues the user's actual function to Docket (preserving signature for DI),
-        stores raw return values, converts to MCP types on retrieval.
-
-        Args:
-            tool_name: Name of the tool to execute
-            arguments: Tool arguments
-            task_meta: Task metadata from request (contains taskId, keepAlive)
-
-        Returns:
-            CallToolResult: Task stub with task metadata in _meta
-        """
-        from fastmcp.server.dependencies import _current_docket, get_context
-        from fastmcp.server.tasks._temporary_docket_shims import (
-            wrap_function_for_result_storage,
-        )
-        from fastmcp.server.tasks.keys import build_task_key
-
-        # Extract task parameters
-        client_task_id = task_meta["taskId"]
-        keep_alive = task_meta.get("keepAlive", 60000)
-
-        # Get session ID and Docket
-        ctx = get_context()
-        session_id = ctx.session_id
-
-        docket = _current_docket.get()
-        if docket is None:
-            raise McpError(
-                ErrorData(
-                    code=INTERNAL_ERROR,
-                    message="Background tasks require Docket. Set FASTMCP_EXPERIMENTAL_ENABLE_DOCKET=true",
-                )
-            )
-
-        # Build full task key with embedded metadata
-        task_key = build_task_key(session_id, client_task_id, "tool", tool_name)
-
-        # Get the tool to access user's function
-        tool = await self.get_tool(tool_name)
-
-        # Wrap user's function (cached per function, uses TaskKey() at runtime)
-        wrapped_fn = wrap_function_for_result_storage(tool.fn)  # type: ignore[attr-defined]
-
-        # Set initial state and register mapping (store keep_alive for wrapper to use)
-        await set_state(
-            task_key, "submitted", keep_alive=keep_alive, client_task_id=client_task_id
-        )
-
-        # Send notifications/tasks/created per SEP-1686 (mandatory)
-        # Send BEFORE queuing to avoid race where task completes before notification
-        from contextlib import suppress
-
-        notification = mcp.types.JSONRPCNotification(
-            jsonrpc="2.0",
-            method="notifications/tasks/created",
-            params={},  # Empty params per spec
-            _meta={  # taskId in _meta per spec
-                "modelcontextprotocol.io/related-task": {
-                    "taskId": client_task_id,
-                }
-            },
-        )
-
-        ctx = get_context()
-        with suppress(Exception):
-            # Don't let notification failures break task creation
-            await ctx.session.send_notification(notification)  # type: ignore[arg-type]
-
-        # Queue wrapped function to Docket
-        await docket.add(wrapped_fn, key=task_key)(**arguments)
-
-        # Return task stub
-        return mcp.types.CallToolResult(
-            content=[],
-            _meta={
-                "modelcontextprotocol.io/task": {
-                    "taskId": client_task_id,
-                    "status": "submitted",
-                }
-            },
-        )
-
-    async def _handle_prompt_as_task(
-        self,
-        prompt_name: str,
-        arguments: dict[str, Any] | None,
-        task_meta: dict[str, Any],
-    ) -> mcp.types.GetPromptResult:
-        """Handle prompt execution as background task (SEP-1686).
-
-        Queues the user's actual function to Docket (preserving signature for DI).
-
-        Args:
-            prompt_name: Name of the prompt to execute
-            arguments: Prompt arguments
-            task_meta: Task metadata from request (contains taskId, keepAlive)
-
-        Returns:
-            GetPromptResult: Task stub with task metadata in _meta
-        """
-        from fastmcp.server.dependencies import _current_docket, get_context
-        from fastmcp.server.tasks._temporary_docket_shims import (
-            wrap_function_for_result_storage,
-        )
-        from fastmcp.server.tasks.keys import build_task_key
-
-        # Extract task parameters
-        client_task_id = task_meta["taskId"]
-        keep_alive = task_meta.get("keepAlive", 60000)
-
-        # Get session ID and Docket
-        ctx = get_context()
-        session_id = ctx.session_id
-
-        docket = _current_docket.get()
-        if docket is None:
-            raise McpError(
-                ErrorData(
-                    code=INTERNAL_ERROR,
-                    message="Background tasks require Docket. Set FASTMCP_EXPERIMENTAL_ENABLE_DOCKET=true",
-                )
-            )
-
-        # Build full task key with embedded metadata
-        task_key = build_task_key(session_id, client_task_id, "prompt", prompt_name)
-
-        # Get the prompt
-        prompt = await self.get_prompt(prompt_name)
-
-        # Wrap user's function (cached per function, uses TaskKey() at runtime)
-        wrapped_fn = wrap_function_for_result_storage(prompt.fn)  # type: ignore[attr-defined]
-
-        # Set initial state and register mapping (store keep_alive for wrapper to use)
-        await set_state(
-            task_key, "submitted", keep_alive=keep_alive, client_task_id=client_task_id
-        )
-
-        # Send notifications/tasks/created per SEP-1686 (mandatory)
-        # Send BEFORE queuing to avoid race where task completes before notification
-        from contextlib import suppress
-
-        notification = mcp.types.JSONRPCNotification(
-            jsonrpc="2.0",
-            method="notifications/tasks/created",
-            params={},
-            _meta={
-                "modelcontextprotocol.io/related-task": {
-                    "taskId": client_task_id,
-                }
-            },
-        )
-        with suppress(Exception):
-            await ctx.session.send_notification(notification)  # type: ignore[arg-type]
-
-        # Queue user's wrapped function to Docket
-        await docket.add(wrapped_fn, key=task_key)(**(arguments or {}))
-
-        # Return task stub
-        return mcp.types.GetPromptResult(
-            description="",
-            messages=[],
-            _meta={
-                "modelcontextprotocol.io/task": {
-                    "taskId": client_task_id,
-                    "status": "submitted",
-                }
-            },
-        )
-
-    async def _tasks_get_mcp(self, params: dict[str, Any]) -> dict[str, Any]:
-        """Handle MCP 'tasks/get' request (SEP-1686).
-
-        Args:
-            params: Request params containing taskId
-
-        Returns:
-            dict: Task status response
-        """
-        from fastmcp.server.tasks._temporary_mcp_shims import resolve_task_id
-
-        client_task_id = params.get("taskId")
-        if not client_task_id:
-            raise McpError(
-                ErrorData(
-                    code=INVALID_PARAMS, message="Missing required parameter: taskId"
-                )
-            )
-
-        # Resolve to full task key via mapping (for FastMCPTransport)
-        task_key = await resolve_task_id(client_task_id)
-        if task_key is None:
-            # Task not found - return unknown state per SEP-1686
-            return {
-                "taskId": client_task_id,
-                "status": "unknown",
-                "pollFrequency": 1000,
-                "_meta": {
-                    "modelcontextprotocol.io/related-task": {
-                        "taskId": client_task_id,
-                    }
-                },
-            }
-
-        # Get state
-        state = await get_state(task_key)
-        if state is None:
-            # Task exists in mapping but no state - unknown
-            return {
-                "taskId": client_task_id,
-                "status": "unknown",
-                "pollFrequency": 1000,
-                "_meta": {
-                    "modelcontextprotocol.io/related-task": {
-                        "taskId": client_task_id,
-                    }
-                },
-            }
-
-        # Get keepAlive from storage (MUST return in all responses per spec)
-        from fastmcp.server.tasks._temporary_docket_shims import (
-            _lock as docket_lock,
-        )
-        from fastmcp.server.tasks._temporary_docket_shims import (
-            _task_keep_alive,
-        )
-
-        async with docket_lock:
-            keep_alive_value = _task_keep_alive.get(task_key, 60000)
-
-        # Build response
-        response = {
-            "taskId": client_task_id,
-            "status": state,
-            "keepAlive": keep_alive_value,  # Always include per spec
-            "pollFrequency": 1000,
-            "_meta": {
-                "modelcontextprotocol.io/related-task": {
-                    "taskId": client_task_id,
-                }
-            },
-        }
-
-        # Add error info if failed
-        result_record = await get_result(task_key)
-        if result_record and result_record.error:
-            response["error"] = str(result_record.error)
-
-        return response
-
-    async def _tasks_result_mcp(self, params: dict[str, Any]) -> Any:
-        """Handle MCP 'tasks/result' request (SEP-1686).
-
-        Converts raw task return values to MCP types based on task type.
-
-        Args:
-            params: Request params containing taskId
-
-        Returns:
-            MCP result (CallToolResult, GetPromptResult, or ReadResourceResult)
-        """
-        from fastmcp.server.tasks.keys import parse_task_key
-
-        client_task_id = params.get("taskId")
-        if not client_task_id:
-            raise McpError(
-                ErrorData(
-                    code=INVALID_PARAMS, message="Missing required parameter: taskId"
-                )
-            )
-
-        # Resolve to full task key via mapping (for FastMCPTransport)
-        from fastmcp.server.tasks._temporary_mcp_shims import resolve_task_id
-
-        task_key = await resolve_task_id(client_task_id)
-        if task_key is None:
-            raise McpError(
-                ErrorData(
-                    code=INVALID_PARAMS,
-                    message=f"Invalid taskId: {client_task_id} not found",
-                )
-            )
-
-        # Get result
-        result_record = await get_result(task_key)
-        if result_record is None:
-            # Check if task exists but not completed
-            state = await get_state(task_key)
-            if state is None:
-                raise McpError(
-                    ErrorData(
-                        code=INVALID_PARAMS,
-                        message=f"Invalid taskId: {client_task_id} not found",
-                    )
-                )
-            else:
-                raise McpError(
-                    ErrorData(
-                        code=INVALID_PARAMS,
-                        message=f"Task not completed yet (current state: {state})",
-                    )
-                )
-
-        # Handle errors
-        if result_record.error:
-            # All task types return error in same format
-            return mcp.types.CallToolResult(
-                content=[
-                    mcp.types.TextContent(type="text", text=str(result_record.error))
-                ],
-                isError=True,
-                _meta={
-                    "modelcontextprotocol.io/related-task": {
-                        "taskId": client_task_id,
-                    }
-                },
-            )
-
-        # Parse task key to get type and component info
-        key_parts = parse_task_key(task_key)
-        task_type = key_parts["task_type"]
-        raw_value = result_record.value
-
-        # Convert based on task type (pass client_task_id for metadata)
-        if task_type == "tool":
-            return await self._convert_raw_tool_result(
-                raw_value, key_parts["component_identifier"], client_task_id
-            )
-        elif task_type == "prompt":
-            return await self._convert_raw_prompt_result(
-                raw_value, key_parts["component_identifier"], client_task_id
-            )
-        elif task_type == "resource":
-            return await self._convert_raw_resource_result(
-                raw_value, key_parts["component_identifier"], client_task_id
-            )
-        else:
-            raise McpError(
-                ErrorData(
-                    code=INTERNAL_ERROR,
-                    message=f"Internal error: Unknown task type: {task_type}",
-                )
-            )
-
-    async def _convert_raw_tool_result(
-        self, raw_value: Any, tool_name: str, client_task_id: str
-    ) -> mcp.types.CallToolResult:
-        """Convert raw tool return value to MCP CallToolResult.
-
-        Replicates the serialization logic from tool.run() to properly handle
-        output_schema, structured content, etc.
-
-        Args:
-            raw_value: The raw return value from user's tool function
-            tool_name: Name of the tool (to get output_schema and serializer)
-            client_task_id: Client task ID for related-task metadata
-
-        Returns:
-            CallToolResult with properly formatted content and structured content
-        """
-        from fastmcp.tools.tool import _convert_to_content
-
-        # Get the tool to access its configuration
-        tool = await self.get_tool(tool_name)
-
-        # Build related-task metadata
-        related_task_meta = {
-            "modelcontextprotocol.io/related-task": {
-                "taskId": client_task_id,
-            }
-        }
-
-        # If raw value is already ToolResult, use it directly
-        if isinstance(raw_value, ToolResult):
-            mcp_result = raw_value.to_mcp_result()
-            if isinstance(mcp_result, mcp.types.CallToolResult):
-                # Add metadata
-                mcp_result._meta = related_task_meta
-                return mcp_result
-            elif isinstance(mcp_result, tuple):
-                content, structured_content = mcp_result
-                return mcp.types.CallToolResult(
-                    content=content,
-                    structuredContent=structured_content,
-                    _meta=related_task_meta,
-                )
-            else:
-                return mcp.types.CallToolResult(
-                    content=mcp_result, _meta=related_task_meta
-                )
-
-        # Convert raw value to content blocks
-        unstructured_result = _convert_to_content(raw_value, serializer=tool.serializer)
-
-        # Handle structured content creation (same logic as tool.run())
-        structured_content = None
-
-        if tool.output_schema is None:
-            # Try to serialize as dict for structured content
-            try:
-                sc = pydantic_core.to_jsonable_python(raw_value)
-                if isinstance(sc, dict):
-                    structured_content = sc
-            except pydantic_core.PydanticSerializationError:
-                pass
-        else:
-            # Has output_schema - convert to JSON-able types
-            jsonable_value = pydantic_core.to_jsonable_python(raw_value)
-            wrap_result = tool.output_schema.get("x-fastmcp-wrap-result")
-            structured_content = (
-                {"result": jsonable_value} if wrap_result else jsonable_value
-            )
-
-        return mcp.types.CallToolResult(
-            content=unstructured_result,
-            structuredContent=structured_content,
-            _meta=related_task_meta,
-        )
-
-    async def _convert_raw_prompt_result(
-        self, raw_value: Any, prompt_name: str, client_task_id: str
-    ) -> mcp.types.GetPromptResult:
-        """Convert raw prompt return value to MCP GetPromptResult.
-
-        The user function returns raw values (strings, dicts, lists) that need
-        to be converted to PromptMessage objects.
-
-        Args:
-            raw_value: The raw return value from user's prompt function
-            prompt_name: Name of the prompt
-            client_task_id: Client task ID for related-task metadata
-
-        Returns:
-            GetPromptResult with properly formatted messages
-        """
-        from fastmcp.prompts.prompt import PromptMessage
-
-        # Get the prompt for metadata
-        prompt = await self.get_prompt(prompt_name)
-
-        # Normalize to list
-        if not isinstance(raw_value, list | tuple):
-            raw_value = [raw_value]
-
-        # Convert to PromptMessages
-        messages: list[mcp.types.PromptMessage] = []
-        for msg in raw_value:
-            if isinstance(msg, PromptMessage):
-                messages.append(msg.to_mcp())
-            elif isinstance(msg, str):
-                messages.append(
-                    mcp.types.PromptMessage(
-                        role="user",
-                        content=mcp.types.TextContent(type="text", text=msg),
-                    )
-                )
-            elif isinstance(msg, dict):
-                messages.append(mcp.types.PromptMessage.model_validate(msg))
-            else:
-                raise ValueError(f"Invalid message type: {type(msg)}")
-
-        return mcp.types.GetPromptResult(
-            description=prompt.description or "",
-            messages=messages,
-            _meta={
-                "modelcontextprotocol.io/related-task": {
-                    "taskId": client_task_id,
-                }
-            },
-        )
-
-    async def _convert_raw_resource_result(
-        self, raw_value: Any, uri: str, client_task_id: str
-    ) -> dict[str, Any]:
-        """Convert raw resource return value to MCP resource contents dict.
-
-        Args:
-            raw_value: The raw return value from user's resource function (str or bytes)
-            uri: Resource URI (for the contents response)
-            client_task_id: Client task ID for related-task metadata
-
-        Returns:
-            Dict with 'contents' key containing list of resource contents
-        """
-        # Build related-task metadata
-        related_task_meta = {
-            "modelcontextprotocol.io/related-task": {
-                "taskId": client_task_id,
-            }
-        }
-
-        # Resources return str or bytes directly
-        if isinstance(raw_value, str):
-            return {
-                "contents": [
-                    {
-                        "uri": uri,
-                        "text": raw_value,
-                        "mimeType": "text/plain",
-                    }
-                ],
-                "_meta": related_task_meta,
-            }
-        elif isinstance(raw_value, bytes):
-            return {
-                "contents": [
-                    {
-                        "uri": uri,
-                        "blob": base64.b64encode(raw_value).decode(),
-                        "mimeType": "application/octet-stream",
-                    }
-                ],
-                "_meta": related_task_meta,
-            }
-        else:
-            # Fallback: convert to JSON string
-            return {
-                "contents": [
-                    {
-                        "uri": uri,
-                        "text": json.dumps(raw_value),
-                        "mimeType": "application/json",
-                    }
-                ],
-                "_meta": related_task_meta,
-            }
-
-    async def _tasks_list_mcp(self, params: dict[str, Any]) -> dict[str, Any]:
-        """Handle MCP 'tasks/list' request (SEP-1686).
-
-        Note: With client-side tracking, this returns minimal info.
-
-        Args:
-            params: Request params (cursor, limit)
-
-        Returns:
-            dict: Response with tasks list and pagination
-        """
-        # Return empty list - client tracks tasks locally
-        # Note: tasks/list is not task-specific, so _meta doesn't have taskId
-        return {"tasks": [], "nextCursor": None, "_meta": {}}
-
-    async def _tasks_delete_mcp(self, params: dict[str, Any]) -> dict[str, Any]:
-        """Handle MCP 'tasks/delete' request (SEP-1686).
-
-        Deletion is discretionary - we allow deletion of any task.
-
-        Args:
-            params: Request params containing taskId
-
-        Returns:
-            dict: Empty response with related-task metadata
-        """
-        from fastmcp.server.tasks._temporary_mcp_shims import delete_task
-
-        client_task_id = params.get("taskId")
-        if not client_task_id:
-            raise McpError(
-                ErrorData(
-                    code=INVALID_PARAMS, message="Missing required parameter: taskId"
-                )
-            )
-
-        # Delete task and all associated data
-        deleted = await delete_task(client_task_id)
-        if not deleted:
-            raise McpError(
-                ErrorData(
-                    code=INVALID_PARAMS,
-                    message=f"Invalid taskId: {client_task_id} not found",
-                )
-            )
-
-        # Return empty response with related-task metadata
-        return {
-            "_meta": {
-                "modelcontextprotocol.io/related-task": {
-                    "taskId": client_task_id,
-                }
-            }
-        }
-
     async def _read_resource_mcp(
         self, uri: AnyUrl | str
     ) -> list[ReadResourceContents] | mcp.types.ServerResult:
@@ -1933,82 +1356,8 @@ class FastMCP(Generic[LifespanResultT]):
                     try:
                         resource = await self._resource_manager.get_resource(uri)
                         if resource and resource.task:
-                            from fastmcp.server.dependencies import (
-                                _current_docket,
-                                get_context,
-                            )
-                            from fastmcp.server.tasks._temporary_docket_shims import (
-                                wrap_function_for_result_storage,
-                            )
-                            from fastmcp.server.tasks._temporary_mcp_shims import (
-                                set_state,
-                            )
-                            from fastmcp.server.tasks.keys import build_task_key
-
-                            # Extract task parameters
-                            client_task_id = task_meta["taskId"]
-                            keep_alive = task_meta.get("keepAlive", 60000)
-
-                            # Get session ID and Docket
-                            ctx = get_context()
-                            session_id = ctx.session_id
-
-                            docket = _current_docket.get()
-                            if docket is None:
-                                raise McpError(
-                                    ErrorData(
-                                        code=INTERNAL_ERROR,
-                                        message="Background tasks require Docket",
-                                    )
-                                )
-
-                            # Build full task key with embedded metadata (use original URI)
-                            task_key = build_task_key(
-                                session_id, client_task_id, "resource", str(uri)
-                            )
-
-                            # Wrap user's function (cached per function, uses TaskKey() at runtime)
-                            wrapped_fn = wrap_function_for_result_storage(resource.fn)  # type: ignore[attr-defined]
-
-                            # Set initial state and register mapping (store keep_alive for wrapper)
-                            await set_state(
-                                task_key,
-                                "submitted",
-                                keep_alive=keep_alive,
-                                client_task_id=client_task_id,
-                            )
-
-                            # Send notifications/tasks/created per SEP-1686 (mandatory)
-                            # Send BEFORE queuing to avoid race where task completes before notification
-                            from contextlib import suppress
-
-                            notification = mcp.types.JSONRPCNotification(
-                                jsonrpc="2.0",
-                                method="notifications/tasks/created",
-                                params={},
-                                _meta={
-                                    "modelcontextprotocol.io/related-task": {
-                                        "taskId": client_task_id,
-                                    }
-                                },
-                            )
-                            with suppress(Exception):
-                                await ctx.session.send_notification(notification)  # type: ignore[arg-type]
-
-                            # Queue user's wrapped function to Docket (no arguments for resources)
-                            await docket.add(wrapped_fn, key=task_key)()
-
-                            # Return task stub
-                            return mcp.types.ServerResult(
-                                mcp.types.ReadResourceResult(
-                                    contents=[],
-                                    _meta={
-                                        "modelcontextprotocol.io/task": {
-                                            "taskId": client_task_id,
-                                            "status": "submitted",
-                                        }
-                                    },
-                                )
+                            return await handle_resource_as_task(
+                                self, str(uri), resource, task_meta
                             )
                     except NotFoundError:
                         # Resource not found - will fail in normal path
@@ -2127,8 +1476,8 @@ class FastMCP(Generic[LifespanResultT]):
                 if task_meta and self.settings.experimental.enable_tasks:
                     prompt = self._prompt_manager._prompts.get(name)
                     if prompt and prompt.task:
-                        return await self._handle_prompt_as_task(
-                            name, arguments, task_meta
+                        return await handle_prompt_as_task(
+                            self, name, arguments, task_meta
                         )
 
                 return await self._get_prompt_middleware(name, arguments)
@@ -2377,6 +1726,16 @@ class FastMCP(Generic[LifespanResultT]):
                 task if task is not None else self._support_tasks_by_default
             )
 
+            # Disable task support for sync functions (Docket requires async)
+            if supports_task and not asyncio.iscoroutinefunction(fn):
+                if task is True:
+                    # User explicitly requested task=True for sync function
+                    logger.warning(
+                        f"Tool '{tool_name or fn.__name__}' has task=True but is synchronous. "
+                        "Background task support requires async functions. Disabling task support."
+                    )
+                supports_task = False
+
             # Register the tool immediately and return the tool object
             tool = Tool.from_function(
                 fn,
@@ -2605,6 +1964,16 @@ class FastMCP(Generic[LifespanResultT]):
                 task if task is not None else self._support_tasks_by_default
             )
 
+            # Disable task support for sync functions (Docket requires async)
+            if supports_task and not asyncio.iscoroutinefunction(fn):
+                if task is True:
+                    # User explicitly requested task=True for sync function
+                    logger.warning(
+                        f"Resource '{uri}' has task=True but is synchronous. "
+                        "Background task support requires async functions. Disabling task support."
+                    )
+                supports_task = False
+
             # Check if this should be a template
             has_uri_params = "{" in uri and "}" in uri
             # Use wrapper to check for user-facing parameters
@@ -2813,6 +2182,16 @@ class FastMCP(Generic[LifespanResultT]):
             supports_task: bool = (
                 task if task is not None else self._support_tasks_by_default
             )
+
+            # Disable task support for sync functions (Docket requires async)
+            if supports_task and not asyncio.iscoroutinefunction(fn):
+                if task is True:
+                    # User explicitly requested task=True for sync function
+                    logger.warning(
+                        f"Prompt '{prompt_name or fn.__name__}' has task=True but is synchronous. "
+                        "Background task support requires async functions. Disabling task support."
+                    )
+                supports_task = False
 
             # Register the prompt immediately
             prompt = Prompt.from_function(

@@ -14,8 +14,6 @@ This shim will be removed when:
 DO NOT WRITE TESTS FOR THIS FILE - it's a temporary hack that will be deleted.
 """
 
-from typing import TYPE_CHECKING
-
 import mcp.types
 from mcp.client.session import (
     SUPPORTED_PROTOCOL_VERSIONS,
@@ -24,9 +22,6 @@ from mcp.client.session import (
     _default_list_roots_callback,
     _default_sampling_callback,
 )
-
-if TYPE_CHECKING:
-    pass
 
 
 class TaskCapableClientSession(ClientSession):

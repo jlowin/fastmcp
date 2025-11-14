@@ -660,7 +660,7 @@ requires-dist = [
     { name = "platformdirs", specifier = ">=4.0.0" },
     { name = "py-key-value-aio", extras = ["disk", "keyring", "memory"], specifier = ">=0.2.8,<0.3.0" },
     { name = "pydantic", extras = ["email"], specifier = ">=2.11.7" },
-    { name = "pydocket", specifier = ">=0.12.0" },
+    { name = "pydocket", specifier = ">=0.13.2" },
     { name = "pyperclip", specifier = ">=1.9.0" },
     { name = "python-dotenv", specifier = ">=1.1.0" },
     { name = "rich", specifier = ">=13.9.4" },
@@ -1450,6 +1450,9 @@ keyring = [
 memory = [
     { name = "cachetools" },
 ]
+redis = [
+    { name = "redis" },
+]
 
 [[package]]
 name = "py-key-value-shared"
@@ -1596,14 +1599,16 @@ wheels = [
 
 [[package]]
 name = "pydocket"
-version = "0.12.0"
+version = "0.13.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cloudpickle" },
     { name = "exceptiongroup", marker = "python_full_version < '3.11'" },
+    { name = "fakeredis", extra = ["lua"] },
     { name = "opentelemetry-api" },
     { name = "opentelemetry-exporter-prometheus" },
     { name = "prometheus-client" },
+    { name = "py-key-value-aio", extra = ["memory", "redis"] },
     { name = "python-json-logger" },
     { name = "redis" },
     { name = "rich" },
@@ -1611,9 +1616,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "uuid7" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/64/41/aee71551254a839bf7f9644137958b2cfbbed98cf1e3f17c04d8dd5845c5/pydocket-0.12.0.tar.gz", hash = "sha256:80379bdb2a02548d95e08adc2c63572bc4bdebfd2bc9db6691684a1edc3f2524", size = 214182, upload-time = "2025-10-28T14:14:43.448Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/3c/2e/9c78f3e2e95fcc822e5f01eba1e7538defd247c69748340ba34321bd5977/pydocket-0.13.2.tar.gz", hash = "sha256:f97ba39289a5623bccab2d200111e9c93cda374462aa0b5e169293e1d8128870", size = 258619, upload-time = "2025-11-13T15:18:28.294Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/91/f9/f9ac0452f0e33a45ff78fe1c4dfc896778519ecd7e70946d0b6aed7898b0/pydocket-0.12.0-py3-none-any.whl", hash = "sha256:d4bc481ad9cbb229c30f114d403477c6f8527f3e71480121c5bd8e154130c590", size = 40863, upload-time = "2025-10-28T14:14:42.301Z" },
+    { url = "https://files.pythonhosted.org/packages/5c/96/f79bddbcaa0e038829e30045187cbb2139cb5faac7265b91d5bc381c2290/pydocket-0.13.2-py3-none-any.whl", hash = "sha256:970ebb4a9cd5aabafcca5f606863ff2cb8bf0f557bb15dcf6876043b9df31d7a", size = 53034, upload-time = "2025-11-13T15:18:26.701Z" },
 ]
 
 [[package]]

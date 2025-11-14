@@ -48,6 +48,10 @@ from fastmcp.client.tasks import (
 from fastmcp.exceptions import ToolError
 from fastmcp.mcp_config import MCPConfig
 from fastmcp.server import FastMCP
+
+# TODO SEP-1686: Import to trigger monkey-patch of ClientRequest union
+# This must happen before any code tries to send tasks/get, tasks/result, tasks/delete
+from fastmcp.server.tasks import _temporary_mcp_shims  # noqa: F401
 from fastmcp.utilities.exceptions import get_catch_handlers
 from fastmcp.utilities.json_schema_type import json_schema_to_type
 from fastmcp.utilities.logging import get_logger
@@ -1359,32 +1363,19 @@ class Client(Generic[ClientTransportT]):
         Raises:
             RuntimeError: If client not connected
         """
-        from fastmcp.client.transports import FastMCPTransport
-
-        # TEMPORARY HACK: For FastMCPTransport, access shim directly
-        # This bypasses MCP SDK limitations until SEP-1686 is officially supported
-        if isinstance(self.transport, FastMCPTransport):
-            from fastmcp.server.tasks._temporary_mcp_shims import get_task_status_dict
-
-            status_dict = await get_task_status_dict(task_id)
-            if status_dict is None:
-                # Task not found - return unknown state per SEP-1686
-                return TaskStatusResponse(
-                    taskId=task_id,
-                    status="unknown",
-                    pollFrequency=1000,
-                )
-
-            # Add taskId to response
-            status_dict["taskId"] = task_id
-            return TaskStatusResponse.model_validate(status_dict)
-
-        # For other transports, we need the MCP SDK to support SEP-1686
-        # TODO: Implement when SDK adds support
-        raise NotImplementedError(
-            "Task status polling not yet implemented for non-memory transports. "
-            "SEP-1686 support pending in MCP SDK."
+        # TODO SEP-1686: Use TasksGetRequest (monkey-patched into ClientRequest union)
+        from fastmcp.server.tasks._temporary_mcp_shims import (
+            TasksGetParams,
+            TasksGetRequest,
+            TasksResponse,
         )
+
+        request = TasksGetRequest(params=TasksGetParams(taskId=task_id))
+        result = await self.session.send_request(
+            request=request,  # type: ignore[arg-type]
+            result_type=TasksResponse,  # type: ignore[arg-type]
+        )
+        return TaskStatusResponse.model_validate(result)
 
     async def get_task_result(self, task_id: str) -> Any:
         """Retrieve the raw result of a completed background task.
@@ -1401,25 +1392,17 @@ class Client(Generic[ClientTransportT]):
         Raises:
             RuntimeError: If client not connected, task not found, or task failed
         """
-        from fastmcp.client.transports import FastMCPTransport
+        # TODO SEP-1686: Use TasksResultRequest (monkey-patched into ClientRequest union)
+        from fastmcp.server.tasks._temporary_mcp_shims import (
+            TasksResponse,
+            TasksResultParams,
+            TasksResultRequest,
+        )
 
-        # TEMPORARY HACK: For FastMCPTransport, call server's _tasks_result_mcp directly
-        # This gets the properly converted MCP result type
-        if isinstance(self.transport, FastMCPTransport):
-            server = self.transport.server
-
-            # Call server's result handler (does raw→MCP conversion)
-            try:
-                result = await server._tasks_result_mcp({"taskId": task_id})  # type: ignore[attr-defined]
-                return result
-            except Exception as e:
-                raise RuntimeError(f"Failed to get task result: {e}") from e
-
-        # For other transports, we need the MCP SDK to support SEP-1686
-        # TODO: Implement when SDK adds support
-        raise NotImplementedError(
-            "Task result retrieval not yet implemented for non-memory transports. "
-            "SEP-1686 support pending in MCP SDK."
+        request = TasksResultRequest(params=TasksResultParams(taskId=task_id))
+        return await self.session.send_request(
+            request=request,  # type: ignore[arg-type]
+            result_type=TasksResponse,  # type: ignore[arg-type]
         )
 
     async def list_tasks(
@@ -1427,21 +1410,44 @@ class Client(Generic[ClientTransportT]):
         cursor: str | None = None,
         limit: int = 50,
     ) -> dict[str, Any]:
-        """List background tasks submitted by this client.
+        """List background tasks.
 
-        Tracks tasks client-side to avoid server-side session filtering complexity.
-        Queries current status for each tracked task ID.
+        Sends a 'tasks/list' MCP protocol request to the server. If the server
+        returns an empty list (indicating client-side tracking), falls back to
+        querying status for locally tracked task IDs.
 
         Args:
-            cursor: Optional pagination cursor (currently unused, for future compatibility)
+            cursor: Optional pagination cursor
             limit: Maximum number of tasks to return (default 50)
 
         Returns:
             dict: Response with structure:
                 - tasks: List of task status dicts with taskId, status, etc.
-                - nextCursor: Optional cursor for next page (always None for now)
+                - nextCursor: Optional cursor for next page
+
+        Raises:
+            RuntimeError: If client not connected
         """
-        # Get status for all tracked task IDs
+        # TODO SEP-1686: Use TasksListRequest (monkey-patched into ClientRequest union)
+        from fastmcp.server.tasks._temporary_mcp_shims import (
+            TasksListParams,
+            TasksListRequest,
+            TasksResponse,
+        )
+
+        # Send protocol request
+        params = TasksListParams(cursor=cursor, limit=limit)
+        request = TasksListRequest(params=params)
+        server_response = await self.session.send_request(
+            request=request,  # type: ignore[arg-type]
+            result_type=TasksResponse,  # type: ignore[arg-type]
+        )
+
+        # If server returned tasks, use those
+        if isinstance(server_response, dict) and server_response.get("tasks"):
+            return server_response
+
+        # Server returned empty - fall back to client-side tracking
         tasks = []
         for task_id in list(self._submitted_task_ids)[:limit]:
             try:
@@ -1505,34 +1511,34 @@ class Client(Generic[ClientTransportT]):
         else:
             raise TimeoutError(f"Task {task_id} did not complete within {timeout}s")
 
-    async def cancel_task(self, task_id: str) -> None:
+    async def cancel_task(self, task_id: str) -> TaskStatusResponse:
         """Cancel a task, transitioning it to cancelled state.
 
-        Sends a notifications/cancelled to request cancellation. Task will
-        transition to cancelled state and halt execution.
+        Sends a 'tasks/cancel' MCP protocol request. Task will halt execution
+        and transition to cancelled state.
 
         Args:
             task_id: The task ID to cancel
 
+        Returns:
+            TaskStatusResponse: The task status showing cancelled state
+
         Raises:
             RuntimeError: If task doesn't exist
         """
-        from fastmcp.client.transports import FastMCPTransport
-
-        # TEMPORARY HACK: For FastMCPTransport, access shim directly
-        if isinstance(self.transport, FastMCPTransport):
-            from fastmcp.server.tasks._temporary_mcp_shims import cancel_task
-
-            cancelled = await cancel_task(task_id)
-            if not cancelled:
-                raise RuntimeError(f"Task {task_id} not found")
-            return
-
-        # For other transports, we need the MCP SDK to support SEP-1686
-        raise NotImplementedError(
-            "Task cancellation not yet implemented for non-memory transports. "
-            "SEP-1686 support pending in MCP SDK."
+        # TODO SEP-1686: Use TasksCancelRequest (monkey-patched into ClientRequest union)
+        from fastmcp.server.tasks._temporary_mcp_shims import (
+            TasksCancelParams,
+            TasksCancelRequest,
+            TasksResponse,
         )
+
+        request = TasksCancelRequest(params=TasksCancelParams(taskId=task_id))
+        result = await self.session.send_request(
+            request=request,  # type: ignore[arg-type]
+            result_type=TasksResponse,  # type: ignore[arg-type]
+        )
+        return TaskStatusResponse.model_validate(result)
 
     async def delete_task(self, task_id: str) -> None:
         """Delete a task and all associated data from the server.
@@ -1547,23 +1553,17 @@ class Client(Generic[ClientTransportT]):
             NotFoundError: If task doesn't exist
             RuntimeError: If server refuses deletion
         """
-        from fastmcp.client.transports import FastMCPTransport
+        # TODO SEP-1686: Use TasksDeleteRequest (monkey-patched into ClientRequest union)
+        from fastmcp.server.tasks._temporary_mcp_shims import (
+            TasksDeleteParams,
+            TasksDeleteRequest,
+            TasksResponse,
+        )
 
-        # TEMPORARY HACK: For FastMCPTransport, access shim directly
-        # This bypasses MCP SDK limitations until SEP-1686 is officially supported
-        if isinstance(self.transport, FastMCPTransport):
-            from fastmcp.server.tasks._temporary_mcp_shims import delete_task
-
-            deleted = await delete_task(task_id)
-            if not deleted:
-                raise RuntimeError(f"Task {task_id} not found")
-            return
-
-        # For other transports, we need the MCP SDK to support SEP-1686
-        # TODO: Implement when SDK adds support
-        raise NotImplementedError(
-            "Task deletion not yet implemented for non-memory transports. "
-            "SEP-1686 support pending in MCP SDK."
+        request = TasksDeleteRequest(params=TasksDeleteParams(taskId=task_id))
+        await self.session.send_request(
+            request=request,  # type: ignore[arg-type]
+            result_type=TasksResponse,  # type: ignore[arg-type]
         )
 
     @classmethod

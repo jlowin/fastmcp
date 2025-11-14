@@ -253,8 +253,8 @@ class Task(abc.ABC, Generic[TaskResultT]):
     async def cancel(self) -> None:
         """Cancel this task, transitioning it to cancelled state.
 
-        Requests cancellation via notifications/cancelled. The server will attempt
-        to halt execution and move the task to cancelled state.
+        Sends a tasks/cancel protocol request. The server will attempt to halt
+        execution and move the task to cancelled state.
 
         Note: If server executed immediately (graceful degradation), this is a no-op
         as there's no server-side task to cancel.
@@ -510,29 +510,29 @@ class ResourceTask(
             # Get the raw MCP result
             mcp_result = await self._client.get_task_result(self._task_id)
 
-            # Parse as ReadResourceResult
-            # The result should be a dict with "contents" key
-            if isinstance(mcp_result, dict) and "contents" in mcp_result:
-                contents_data = mcp_result["contents"]
+            # Parse as ReadResourceResult or extract contents
+            if isinstance(mcp_result, mcp.types.ReadResourceResult):
+                # Already parsed by TasksResponse - extract contents
+                result = list(mcp_result.contents)
+            elif isinstance(mcp_result, dict) and "contents" in mcp_result:
+                # Dict format - parse each content item
+                parsed_contents = []
+                for item in mcp_result["contents"]:
+                    if isinstance(item, dict):
+                        if "blob" in item:
+                            parsed_contents.append(
+                                mcp.types.BlobResourceContents.model_validate(item)
+                            )
+                        else:
+                            parsed_contents.append(
+                                mcp.types.TextResourceContents.model_validate(item)
+                            )
+                    else:
+                        parsed_contents.append(item)
+                result = parsed_contents
             else:
                 # Fallback - might be the list directly
-                contents_data = mcp_result
-
-            # Parse each content item
-            parsed_contents = []
-            for item in contents_data:
-                if isinstance(item, dict):
-                    if "blob" in item:
-                        parsed_contents.append(
-                            mcp.types.BlobResourceContents.model_validate(item)
-                        )
-                    else:
-                        parsed_contents.append(
-                            mcp.types.TextResourceContents.model_validate(item)
-                        )
-                else:
-                    parsed_contents.append(item)
-            result = parsed_contents
+                result = mcp_result if isinstance(mcp_result, list) else [mcp_result]
 
         # Cache before returning
         self._cached_result = result
