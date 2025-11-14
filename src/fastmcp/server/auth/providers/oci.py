@@ -16,9 +16,9 @@ Example:
     from fastmcp.server.auth.providers.oci import OCIProvider
     from fastmcp.server.dependencies import get_access_token
     from fastmcp.utilities.logging import get_logger
-    
+
     import os
-    
+
     # Load configuration from environment
     FASTMCP_SERVER_AUTH_OCI_CONFIG_URL = os.environ["FASTMCP_SERVER_AUTH_OCI_CONFIG_URL"]
     FASTMCP_SERVER_AUTH_OCI_CLIENT_ID = os.environ["FASTMCP_SERVER_AUTH_OCI_CLIENT_ID"]
