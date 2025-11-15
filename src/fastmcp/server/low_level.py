@@ -49,16 +49,17 @@ class MiddlewareServerSession(ServerSession):
         responder: RequestResponder[mcp.types.ClientRequest, mcp.types.ServerResult],
     ):
         """
-        Override the _received_request method to route initialization requests
+        Override the _received_request method to route special requests
         through FastMCP middleware.
 
-        These are not handled by routes that FastMCP typically overrides and
-        require special handling.
+        Handles initialization requests and SEP-1686 task methods.
         """
         import fastmcp.server.context
         from fastmcp.server.middleware.middleware import MiddlewareContext
 
-        if isinstance(responder.request.root, mcp.types.InitializeRequest):
+        request = responder.request.root
+
+        if isinstance(request, mcp.types.InitializeRequest):
 
             async def call_original_handler(
                 ctx: MiddlewareContext,
@@ -82,8 +83,9 @@ class MiddlewareServerSession(ServerSession):
                 return await self.fastmcp._apply_middleware(
                     mw_context, call_original_handler
                 )
-        else:
-            return await super()._received_request(responder)
+
+        # Fall through to default handling (task methods now handled via registered handlers)
+        return await super()._received_request(responder)
 
 
 class LowLevelServer(_Server[LifespanResultT, RequestT]):
