@@ -380,7 +380,7 @@ def create_consent_html(
         form_action_schemes.append(f"{redirect_scheme}:")
 
     form_action_directive = " ".join(form_action_schemes)
-    csp_policy = f"default-src 'none'; style-src 'unsafe-inline'; img-src https:; base-uri 'none'; form-action {form_action_directive}"
+    csp_policy = f"default-src 'none'; style-src 'unsafe-inline'; img-src https: data:; base-uri 'none'; form-action {form_action_directive}"
 
     return create_page(
         content=content,
@@ -468,9 +468,7 @@ def create_error_html(
     )
 
     # Simple CSP policy for error pages (no forms needed)
-    csp_policy = (
-        "default-src 'none'; style-src 'unsafe-inline'; img-src https:; base-uri 'none'"
-    )
+    csp_policy = "default-src 'none'; style-src 'unsafe-inline'; img-src https: data:; base-uri 'none'"
 
     return create_page(
         content=content,
@@ -1177,7 +1175,8 @@ class OAuthProxy(OAuthProvider):
         await self._upstream_token_store.put(
             key=upstream_token_id,
             value=upstream_token_set,
-            ttl=expires_in,  # Auto-expire when access token expires
+            ttl=refresh_expires_in
+            or expires_in,  # Auto-expire when refresh token, or access token expires
         )
         logger.debug("Stored encrypted upstream tokens (jti=%s)", access_jti[:8])
 
@@ -1327,6 +1326,7 @@ class OAuthProxy(OAuthProvider):
                 url=self._upstream_token_endpoint,
                 refresh_token=upstream_token_set.refresh_token,
                 scope=" ".join(scopes) if scopes else None,
+                **self._extra_token_params,
             )
             logger.debug("Successfully refreshed upstream token")
         except Exception as e:
@@ -1373,7 +1373,12 @@ class OAuthProxy(OAuthProvider):
         await self._upstream_token_store.put(
             key=upstream_token_set.upstream_token_id,
             value=upstream_token_set,
-            ttl=new_expires_in,  # Auto-expire when refreshed access token expires
+            ttl=new_refresh_expires_in
+            or (
+                int(upstream_token_set.refresh_token_expires_at - time.time())
+                if upstream_token_set.refresh_token_expires_at
+                else 60 * 60 * 24 * 30  # Default to 30 days if unknown
+            ),  # Auto-expire when refresh token expires
         )
 
         # Issue new minimal FastMCP access token (just a reference via JTI)
