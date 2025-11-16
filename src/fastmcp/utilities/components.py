@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from typing import Annotated, Any, TypedDict
 
 from mcp.types import Icon
-from pydantic import BeforeValidator, Field, PrivateAttr, model_serializer
+from pydantic import BeforeValidator, Field, PrivateAttr
 from typing_extensions import Self, TypeVar
 
 import fastmcp
@@ -118,47 +118,6 @@ class FastMCPComponent(FastMCPBaseModel):
         if key is not None:
             copy._key = key
         return copy
-
-    @model_serializer(mode="wrap")
-    def _serialize_model(self, serializer: Any, info: Any) -> dict[str, Any]:
-        """Custom serializer to include the key field."""
-        data = serializer(self)
-        # Include _key in serialization if it's set
-        if self._key is not None:
-            data["key"] = self._key
-        return data
-
-    @classmethod
-    def model_validate(
-        cls,
-        obj: Any,
-        *,
-        strict: bool | None = None,
-        from_attributes: bool | None = None,
-        context: dict[str, Any] | None = None,
-    ) -> Self:
-        """Validate and create a model instance, handling the key attribute."""
-        if isinstance(obj, dict):
-            # Extract key from dict if present (don't mutate original dict)
-            key = obj.get("key")
-            if key is not None:
-                # Create a copy without the key field
-                obj = {k: v for k, v in obj.items() if k != "key"}
-            instance = super().model_validate(
-                obj,
-                strict=strict,
-                from_attributes=from_attributes,
-                context=context,
-            )
-            if key is not None:
-                instance._key = key
-            return instance
-        return super().model_validate(
-            obj,
-            strict=strict,
-            from_attributes=from_attributes,
-            context=context,
-        )
 
     def __eq__(self, other: object) -> bool:
         if type(self) is not type(other):
