@@ -203,7 +203,7 @@ class DiscordProvider(OAuthProxy):
 
         auth = DiscordProvider(
             client_id="123456789",
-            client_secret="GOCSPX-abc123...",
+            client_secret="discord-client-secret-abc123...",
             base_url="https://my-server.com"
         )
 
@@ -235,10 +235,10 @@ class DiscordProvider(OAuthProxy):
             issuer_url: Issuer URL for OAuth metadata (defaults to base_url). Use root-level URL
                 to avoid 404s during discovery when mounting under a path.
             redirect_path: Redirect path configured in Discord OAuth app (defaults to "/auth/callback")
-            required_scopes: Required Discord scopes (defaults to ["openid"]). Common scopes include:
-                - "openid" for OpenID Connect (default)
+            required_scopes: Required Discord scopes (defaults to ["identify"]). Common scopes include:
+                - "identify" for profile info (default)
                 - "email" for email access
-                - "identify" for profile info
+                - "guilds" for server membership info
             timeout_seconds: HTTP request timeout for Discord API calls
             allowed_client_redirect_uris: List of allowed redirect URI patterns for MCP clients.
                 If None (default), all URIs are allowed. If empty list, no URIs are allowed.
