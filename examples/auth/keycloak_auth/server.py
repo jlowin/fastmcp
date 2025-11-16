@@ -8,7 +8,7 @@ Required environment variables:
 
 Optional environment variables:
 - FASTMCP_SERVER_AUTH_KEYCLOAK_REQUIRED_SCOPES: Required OAuth scopes (default: "openid,profile")
-- FASTMCP_SERVER_AUTH_KEYCLOAK_AUDIENCE: Audience for JWT validation (default: base_url)
+- FASTMCP_SERVER_AUTH_KEYCLOAK_AUDIENCE: Audience for JWT validation (default: None for development)
 
 To run:
     python server.py
@@ -36,13 +36,15 @@ base_url = os.getenv("FASTMCP_SERVER_AUTH_KEYCLOAK_BASE_URL", "http://localhost:
 required_scopes = os.getenv(
     "FASTMCP_SERVER_AUTH_KEYCLOAK_REQUIRED_SCOPES", "openid,profile"
 )
-audience = os.getenv("FASTMCP_SERVER_AUTH_KEYCLOAK_AUDIENCE", base_url)
+# Note: Audience validation is disabled by default for this development example.
+# For production, configure Keycloak audience mappers and set FASTMCP_SERVER_AUTH_KEYCLOAK_AUDIENCE
+audience = os.getenv("FASTMCP_SERVER_AUTH_KEYCLOAK_AUDIENCE")
 
 auth = KeycloakAuthProvider(
     realm_url=realm_url,
     base_url=base_url,
     required_scopes=required_scopes,
-    audience=audience,  # Validate token audience for security
+    audience=audience,  # None by default for development
 )
 
 mcp = FastMCP("Keycloak OAuth Example Server", auth=auth)

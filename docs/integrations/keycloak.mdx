@@ -111,7 +111,9 @@ If you prefer using Docker Compose instead, you may want to have a look at the [
 ### Step 2: FastMCP Configuration
 
 <Warning>
-**Security Best Practice**: Always configure the `audience` parameter in production environments. Without audience validation, your server will accept tokens issued for *any* audience, including tokens meant for completely different services. Set `audience` to your resource server identifier (typically your server's base URL) to ensure tokens are specifically intended for your server.
+**Security Best Practice**: For production environments, always configure the `audience` parameter. Without audience validation, your server will accept tokens issued for *any* audience, including tokens meant for completely different services.
+
+**Important**: Keycloak doesn't include the `aud` claim in tokens by default. For the example below to work out-of-the-box, audience validation is disabled. For production, configure Keycloak audience mappers and set `audience` to your resource server identifier (typically your server's base URL) to ensure tokens are specifically intended for your server.
 </Warning>
 
 Create your FastMCP server file and use the KeycloakAuthProvider to handle all the OAuth integration automatically:
@@ -127,7 +129,7 @@ auth_provider = KeycloakAuthProvider(
     realm_url="http://localhost:8080/realms/fastmcp",  # Your Keycloak realm URL
     base_url="http://localhost:8000",                  # Your server's public URL
     required_scopes=["openid", "profile"],             # Required OAuth scopes
-    audience="http://localhost:8000",                  # Recommended: validate token audience
+    # audience="http://localhost:8000",                # For production: configure Keycloak audience mappers first
 )
 
 # Create FastMCP server with auth
