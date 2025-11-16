@@ -13,9 +13,33 @@ if ! docker info > /dev/null 2>&1; then
     exit 1
 fi
 
-# Start Keycloak using docker-compose
-echo "🐳 Starting Keycloak with docker-compose..."
-docker-compose up -d
+# Detect Docker Compose command (v1 or v2)
+# Use a function wrapper to handle multi-word commands properly
+if command -v docker-compose >/dev/null 2>&1; then
+    docker_compose() { docker-compose "$@"; }
+    DOCKER_COMPOSE_DISPLAY="docker-compose"
+    echo "🐳 Using Docker Compose v1"
+elif docker help compose >/dev/null 2>&1; then
+    docker_compose() { command docker compose "$@"; }
+    DOCKER_COMPOSE_DISPLAY="docker compose"
+    echo "🐳 Using Docker Compose v2"
+else
+    echo "❌ Docker Compose is not installed."
+    echo ""
+    echo "To install Docker Compose v2 (recommended), run:"
+    echo "  mkdir -p ~/.docker/cli-plugins && \\"
+    echo "  curl -sSL https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64 -o ~/.docker/cli-plugins/docker-compose && \\"
+    echo "  chmod +x ~/.docker/cli-plugins/docker-compose"
+    echo ""
+    echo "Or to install Docker Compose v1, run:"
+    echo "  sudo curl -sSL \"https://github.com/docker/compose/releases/latest/download/docker-compose-\$(uname -s)-\$(uname -m)\" -o /usr/local/bin/docker-compose && \\"
+    echo "  sudo chmod +x /usr/local/bin/docker-compose"
+    exit 1
+fi
+
+# Start Keycloak using detected docker-compose command
+echo "🐳 Starting Keycloak..."
+docker_compose up -d
 
 # Wait for Keycloak to become ready
 echo "⏳ Waiting for Keycloak to become ready..."
@@ -59,5 +83,5 @@ echo "  Password: password123"
 echo ""
 echo "Useful commands:"
 echo "  • Check Keycloak logs: docker logs -f keycloak-fastmcp"
-echo "  • Stop Keycloak: docker-compose down"
-echo "  • Restart Keycloak: docker-compose restart"
+echo "  • Stop Keycloak: $DOCKER_COMPOSE_DISPLAY down"
+echo "  • Restart Keycloak: $DOCKER_COMPOSE_DISPLAY restart"
