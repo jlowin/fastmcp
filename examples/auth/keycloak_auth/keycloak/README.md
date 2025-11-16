@@ -114,18 +114,6 @@ docker-compose logs -f keycloak
    - Review client registration policies in the admin console
 
 4. **"Client not found" error after Keycloak restart**
-   - This happens because FastMCP uses Dynamic Client Registration (DCR) and the client ID that was cached locally no longer exists on the Keycloak server after restart
-   - **Solution**: Clear the local OAuth cache to force re-registration:
-
-     ```python
-     from fastmcp.client.auth.oauth import FileTokenStorage
-
-     # Clear OAuth cache for your specific MCP server
-     storage = FileTokenStorage("http://localhost:8000/mcp/")
-     storage.clear()
-
-     # Or clear all OAuth cache data
-     FileTokenStorage.clear_all()
-     ```
-
-   - After clearing the cache, run your client again to automatically re-register with Keycloak
+   - This can happen when Keycloak is restarted and the previously registered OAuth client no longer exists
+   - **No action needed**: The FastMCP OAuth client automatically detects this condition and re-registers with Keycloak
+   - Simply run your client again and it will automatically handle the re-registration process

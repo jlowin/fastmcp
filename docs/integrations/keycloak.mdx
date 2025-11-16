@@ -181,28 +181,13 @@ When you run the client for the first time:
 The client caches tokens locally, so you won't need to re-authenticate for subsequent runs unless the token expires or you explicitly clear the cache.
 </Info>
 
-### Troubleshooting: "Client not found" Error
+### Automatic Client Re-registration
 
-<Warning>
-If you restart Keycloak or change the realm configuration, you may end up seeing Keycloak showing a "Client not found" error instead of the login screen when running your client. This happens because FastMCP uses Dynamic Client Registration (DCR) and the client ID that was cached locally no longer exists on the Keycloak server.
+<Info>
+If you restart Keycloak or change the realm configuration, your FastMCP client will automatically detect if the cached OAuth client credentials are no longer valid and will re-register with Keycloak automatically. You don't need to manually clear any caches - just run your client again and it will handle the re-registration process seamlessly.
 
-**Keycloak error**: "We are sorry... Client not found."
-
-**Solution**: Clear the local OAuth cache to force re-registration with Keycloak:
-
-```python
-from fastmcp.client.auth.oauth import FileTokenStorage
-
-# Clear OAuth cache for your specific MCP server
-storage = FileTokenStorage("http://localhost:8000/mcp/")  # Use your MCP server URL
-storage.clear()
-
-# Or clear all OAuth cache data for all MCP servers
-FileTokenStorage.clear_all()
-```
-
-After clearing the cache, run your client again. It will automatically re-register with Keycloak and obtain new credentials.
-</Warning>
+This automatic retry mechanism ensures a smooth developer experience when working with Dynamic Client Registration (DCR).
+</Info>
 
 ## Environment Variables
 
