@@ -5,7 +5,7 @@ Implements MCP task protocol methods: tasks/get, tasks/result, tasks/list, tasks
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
 import mcp.types
@@ -24,9 +24,10 @@ if TYPE_CHECKING:
     from fastmcp.server.server import FastMCP
 
 # Map Docket execution states to MCP task status strings
+# Per SEP-1686 final spec (line 381): tasks MUST begin in "working" status
 DOCKET_TO_MCP_STATE: dict[ExecutionState, str] = {
-    ExecutionState.SCHEDULED: "submitted",
-    ExecutionState.QUEUED: "submitted",
+    ExecutionState.SCHEDULED: "working",  # Initial state per spec
+    ExecutionState.QUEUED: "working",  # Initial state per spec
     ExecutionState.RUNNING: "working",
     ExecutionState.COMPLETED: "completed",
     ExecutionState.FAILED: "failed",
@@ -68,19 +69,26 @@ async def tasks_get_handler(server: FastMCP, params: dict[str, Any]) -> dict[str
                 )
             )
 
-        # Look up full task key from Redis
+        # Look up full task key and creation timestamp from Redis
         redis_key = f"fastmcp:task:{session_id}:{client_task_id}"
+        created_at_key = f"fastmcp:task:{session_id}:{client_task_id}:created_at"
         async with docket.redis() as redis:
             task_key_bytes = await redis.get(redis_key)
+            created_at_bytes = await redis.get(created_at_key)
 
         task_key = None if task_key_bytes is None else task_key_bytes.decode("utf-8")
+        created_at = (
+            None if created_at_bytes is None else created_at_bytes.decode("utf-8")
+        )
 
         if task_key is None:
             # Task not found - return unknown state per SEP-1686
+            # Use synthetic timestamp since task never existed or was deleted
             return {
                 "taskId": client_task_id,
                 "status": "unknown",
-                "pollFrequency": 1000,
+                "createdAt": created_at or datetime.now(timezone.utc).isoformat(),
+                "pollInterval": 1000,
                 "_meta": {
                     "modelcontextprotocol.io/related-task": {
                         "taskId": client_task_id,
@@ -91,10 +99,12 @@ async def tasks_get_handler(server: FastMCP, params: dict[str, Any]) -> dict[str
         execution = await docket.get_execution(task_key)
         if execution is None:
             # Task key exists but no execution - unknown
+            # Use stored timestamp if available, otherwise synthetic
             return {
                 "taskId": client_task_id,
                 "status": "unknown",
-                "pollFrequency": 1000,
+                "createdAt": created_at or datetime.now(timezone.utc).isoformat(),
+                "pollInterval": 1000,
                 "_meta": {
                     "modelcontextprotocol.io/related-task": {
                         "taskId": client_task_id,
@@ -108,12 +118,14 @@ async def tasks_get_handler(server: FastMCP, params: dict[str, Any]) -> dict[str
         # Map Docket state to MCP state
         mcp_state = DOCKET_TO_MCP_STATE.get(execution.state, "unknown")
 
-        # Build response (use default keepAlive since we don't track per-task values)
+        # Build response (use default ttl since we don't track per-task values)
+        # createdAt is REQUIRED per SEP-1686 final spec (line 430)
         response = {
             "taskId": client_task_id,
             "status": mcp_state,
-            "keepAlive": 60000,  # Default value
-            "pollFrequency": 1000,
+            "createdAt": created_at,  # Required ISO 8601 timestamp
+            "ttl": 60000,  # Default value in milliseconds
+            "pollInterval": 1000,
             "_meta": {
                 "modelcontextprotocol.io/related-task": {
                     "taskId": client_task_id,
@@ -299,12 +311,17 @@ async def tasks_cancel_handler(
                 )
             )
 
-        # Look up full task key from Redis
+        # Look up full task key and creation timestamp from Redis
         redis_key = f"fastmcp:task:{session_id}:{client_task_id}"
+        created_at_key = f"fastmcp:task:{session_id}:{client_task_id}:created_at"
         async with docket.redis() as redis:
             task_key_bytes = await redis.get(redis_key)
+            created_at_bytes = await redis.get(created_at_key)
 
         task_key = None if task_key_bytes is None else task_key_bytes.decode("utf-8")
+        created_at = (
+            None if created_at_bytes is None else created_at_bytes.decode("utf-8")
+        )
 
         if task_key is None:
             raise McpError(
@@ -328,10 +345,12 @@ async def tasks_cancel_handler(
         await docket.cancel(task_key)
 
         # Return task status with cancelled state
+        # createdAt is REQUIRED per SEP-1686 final spec (line 430)
         return {
             "taskId": client_task_id,
             "status": "cancelled",
-            "pollFrequency": 1000,
+            "createdAt": created_at or datetime.now(timezone.utc).isoformat(),
+            "pollInterval": 1000,
             "_meta": {
                 "modelcontextprotocol.io/related-task": {
                     "taskId": client_task_id,

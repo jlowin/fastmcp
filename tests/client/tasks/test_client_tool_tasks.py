@@ -41,15 +41,16 @@ async def test_call_tool_as_task_returns_tool_task(tool_task_server):
         assert len(task.task_id) > 0
 
 
-async def test_tool_task_with_custom_id(tool_task_server):
-    """call_tool with task=True accepts custom task ID."""
+async def test_tool_task_server_generated_id(tool_task_server):
+    """call_tool with task=True gets server-generated task ID."""
     async with Client(tool_task_server) as client:
-        custom_id = "my-custom-task-123"
-        task = await client.call_tool(
-            "echo", {"message": "test"}, task=True, task_id=custom_id
-        )
+        task = await client.call_tool("echo", {"message": "test"}, task=True)
 
-        assert task.task_id == custom_id
+        # Server should generate a UUID task ID
+        assert task.task_id is not None
+        assert isinstance(task.task_id, str)
+        # UUIDs have hyphens
+        assert "-" in task.task_id
 
 
 async def test_tool_task_result_returns_call_tool_result(tool_task_server):

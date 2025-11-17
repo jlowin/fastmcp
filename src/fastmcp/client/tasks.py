@@ -2,6 +2,7 @@
 
 import abc
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar
 
 import mcp.types
@@ -33,8 +34,9 @@ class TasksGetResult(BaseModel):
     status: Literal[
         "submitted", "working", "completed", "failed", "cancelled", "unknown"
     ]
-    keepAlive: int | None = None
-    pollFrequency: int | None = None
+    createdAt: str
+    ttl: int | None = None
+    pollInterval: int | None = None
     error: str | None = None
 
 
@@ -122,10 +124,13 @@ class TaskStatusResponse(pydantic.BaseModel):
     ]
     """Current task state."""
 
-    keep_alive: int | None = pydantic.Field(default=None, alias="keepAlive")
+    created_at: str = pydantic.Field(alias="createdAt")
+    """ISO 8601 timestamp when the task was created."""
+
+    ttl: int | None = pydantic.Field(default=None, alias="ttl")
     """Actual retention duration in milliseconds after completion, None for unlimited."""
 
-    poll_frequency: int | None = pydantic.Field(default=None, alias="pollFrequency")
+    poll_interval: int | None = pydantic.Field(default=None, alias="pollInterval")
     """Suggested polling interval in milliseconds."""
 
     error: str | None = None
@@ -212,8 +217,9 @@ class Task(abc.ABC, Generic[TaskResultT]):
             return TaskStatusResponse(
                 taskId=self._task_id,  # Use alias field name
                 status="completed",
-                keepAlive=None,
-                pollFrequency=1000,  # Include poll frequency even for immediate results
+                createdAt=datetime.now(timezone.utc).isoformat(),  # Synthetic timestamp
+                ttl=None,
+                pollInterval=1000,  # Include poll interval even for immediate results
             )
         return await self._client.get_task_status(self._task_id)
 

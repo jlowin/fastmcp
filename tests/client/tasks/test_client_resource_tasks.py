@@ -39,14 +39,16 @@ async def test_read_resource_as_task_returns_resource_task(resource_server):
         assert isinstance(task.task_id, str)
 
 
-async def test_resource_task_with_custom_id(resource_server):
-    """read_resource with task=True accepts custom task ID."""
+async def test_resource_task_server_generated_id(resource_server):
+    """read_resource with task=True gets server-generated task ID."""
     async with Client(resource_server) as client:
-        task = await client.read_resource(
-            "file://document.txt", task=True, task_id="custom-resource-123"
-        )
+        task = await client.read_resource("file://document.txt", task=True)
 
-        assert task.task_id == "custom-resource-123"
+        # Server should generate a UUID task ID
+        assert task.task_id is not None
+        assert isinstance(task.task_id, str)
+        # UUIDs have hyphens
+        assert "-" in task.task_id
 
 
 async def test_resource_task_result_returns_read_resource_result(resource_server):

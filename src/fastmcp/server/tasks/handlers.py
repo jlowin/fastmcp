@@ -5,7 +5,9 @@ Handles queuing tool/prompt/resource executions to Docket as background tasks.
 
 from __future__ import annotations
 
+import uuid
 from contextlib import suppress
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 import mcp.types
@@ -37,13 +39,18 @@ async def handle_tool_as_task(
         server: FastMCP server instance
         tool_name: Name of the tool to execute
         arguments: Tool arguments
-        task_meta: Task metadata from request (contains taskId, keepAlive)
+        task_meta: Task metadata from request (contains ttl)
 
     Returns:
         CallToolResult: Task stub with task metadata in _meta
     """
-    # Extract task parameters
-    client_task_id = task_meta["taskId"]
+    # Generate server-side task ID per SEP-1686 final spec (line 375-377)
+    # Server MUST generate task IDs, clients no longer provide them
+    server_task_id = str(uuid.uuid4())
+
+    # Record creation timestamp per SEP-1686 final spec (line 430)
+    # Format as ISO 8601 / RFC 3339 timestamp
+    created_at = datetime.now(timezone.utc).isoformat()
 
     # Get session ID and Docket
     ctx = get_context()
@@ -59,18 +66,20 @@ async def handle_tool_as_task(
         )
 
     # Build full task key with embedded metadata
-    task_key = build_task_key(session_id, client_task_id, "tool", tool_name)
+    task_key = build_task_key(session_id, server_task_id, "tool", tool_name)
 
     # Get the tool to access user's function
     tool = await server.get_tool(tool_name)
 
-    # Store task key mapping in Redis for protocol handlers to look up
-    redis_key = f"fastmcp:task:{session_id}:{client_task_id}"
+    # Store task key mapping and creation timestamp in Redis for protocol handlers
+    redis_key = f"fastmcp:task:{session_id}:{server_task_id}"
+    created_at_key = f"fastmcp:task:{session_id}:{server_task_id}:created_at"
     ttl_seconds = int(
         docket.execution_ttl.total_seconds() + TASK_MAPPING_TTL_BUFFER_SECONDS
     )
     async with docket.redis() as redis:
         await redis.set(redis_key, task_key, ex=ttl_seconds)
+        await redis.set(created_at_key, created_at, ex=ttl_seconds)
 
     # Send notifications/tasks/created per SEP-1686 (mandatory)
     # Send BEFORE queuing to avoid race where task completes before notification
@@ -80,7 +89,7 @@ async def handle_tool_as_task(
         params={},  # Empty params per spec
         _meta={  # taskId in _meta per spec
             "modelcontextprotocol.io/related-task": {
-                "taskId": client_task_id,
+                "taskId": server_task_id,
             }
         },
     )
@@ -97,12 +106,13 @@ async def handle_tool_as_task(
     )(**arguments)
 
     # Return task stub
+    # Tasks MUST begin in "working" status per SEP-1686 final spec (line 381)
     return mcp.types.CallToolResult(
         content=[],
         _meta={
             "modelcontextprotocol.io/task": {
-                "taskId": client_task_id,
-                "status": "submitted",
+                "taskId": server_task_id,
+                "status": "working",
             }
         },
     )
@@ -122,13 +132,18 @@ async def handle_prompt_as_task(
         server: FastMCP server instance
         prompt_name: Name of the prompt to execute
         arguments: Prompt arguments
-        task_meta: Task metadata from request (contains taskId, keepAlive)
+        task_meta: Task metadata from request (contains ttl)
 
     Returns:
         GetPromptResult: Task stub with task metadata in _meta
     """
-    # Extract task parameters
-    client_task_id = task_meta["taskId"]
+    # Generate server-side task ID per SEP-1686 final spec (line 375-377)
+    # Server MUST generate task IDs, clients no longer provide them
+    server_task_id = str(uuid.uuid4())
+
+    # Record creation timestamp per SEP-1686 final spec (line 430)
+    # Format as ISO 8601 / RFC 3339 timestamp
+    created_at = datetime.now(timezone.utc).isoformat()
 
     # Get session ID and Docket
     ctx = get_context()
@@ -144,18 +159,20 @@ async def handle_prompt_as_task(
         )
 
     # Build full task key with embedded metadata
-    task_key = build_task_key(session_id, client_task_id, "prompt", prompt_name)
+    task_key = build_task_key(session_id, server_task_id, "prompt", prompt_name)
 
     # Get the prompt
     prompt = await server.get_prompt(prompt_name)
 
-    # Store task key mapping in Redis for protocol handlers to look up
-    redis_key = f"fastmcp:task:{session_id}:{client_task_id}"
+    # Store task key mapping and creation timestamp in Redis for protocol handlers
+    redis_key = f"fastmcp:task:{session_id}:{server_task_id}"
+    created_at_key = f"fastmcp:task:{session_id}:{server_task_id}:created_at"
     ttl_seconds = int(
         docket.execution_ttl.total_seconds() + TASK_MAPPING_TTL_BUFFER_SECONDS
     )
     async with docket.redis() as redis:
         await redis.set(redis_key, task_key, ex=ttl_seconds)
+        await redis.set(created_at_key, created_at, ex=ttl_seconds)
 
     # Send notifications/tasks/created per SEP-1686 (mandatory)
     # Send BEFORE queuing to avoid race where task completes before notification
@@ -165,7 +182,7 @@ async def handle_prompt_as_task(
         params={},
         _meta={
             "modelcontextprotocol.io/related-task": {
-                "taskId": client_task_id,
+                "taskId": server_task_id,
             }
         },
     )
@@ -179,13 +196,14 @@ async def handle_prompt_as_task(
     )(**(arguments or {}))
 
     # Return task stub
+    # Tasks MUST begin in "working" status per SEP-1686 final spec (line 381)
     return mcp.types.GetPromptResult(
         description="",
         messages=[],
         _meta={
             "modelcontextprotocol.io/task": {
-                "taskId": client_task_id,
-                "status": "submitted",
+                "taskId": server_task_id,
+                "status": "working",
             }
         },
     )
@@ -205,13 +223,18 @@ async def handle_resource_as_task(
         server: FastMCP server instance
         uri: Resource URI
         resource: Resource or ResourceTemplate object
-        task_meta: Task metadata from request (contains taskId, keepAlive)
+        task_meta: Task metadata from request (contains ttl)
 
     Returns:
         ServerResult with ReadResourceResult stub
     """
-    # Extract task parameters
-    client_task_id = task_meta["taskId"]
+    # Generate server-side task ID per SEP-1686 final spec (line 375-377)
+    # Server MUST generate task IDs, clients no longer provide them
+    server_task_id = str(uuid.uuid4())
+
+    # Record creation timestamp per SEP-1686 final spec (line 430)
+    # Format as ISO 8601 / RFC 3339 timestamp
+    created_at = datetime.now(timezone.utc).isoformat()
 
     # Get session ID and Docket
     ctx = get_context()
@@ -227,15 +250,17 @@ async def handle_resource_as_task(
         )
 
     # Build full task key with embedded metadata (use original URI)
-    task_key = build_task_key(session_id, client_task_id, "resource", str(uri))
+    task_key = build_task_key(session_id, server_task_id, "resource", str(uri))
 
-    # Store task key mapping in Redis for protocol handlers to look up
-    redis_key = f"fastmcp:task:{session_id}:{client_task_id}"
+    # Store task key mapping and creation timestamp in Redis for protocol handlers
+    redis_key = f"fastmcp:task:{session_id}:{server_task_id}"
+    created_at_key = f"fastmcp:task:{session_id}:{server_task_id}:created_at"
     ttl_seconds = int(
         docket.execution_ttl.total_seconds() + TASK_MAPPING_TTL_BUFFER_SECONDS
     )
     async with docket.redis() as redis:
         await redis.set(redis_key, task_key, ex=ttl_seconds)
+        await redis.set(created_at_key, created_at, ex=ttl_seconds)
 
     # Send notifications/tasks/created per SEP-1686 (mandatory)
     # Send BEFORE queuing to avoid race where task completes before notification
@@ -245,7 +270,7 @@ async def handle_resource_as_task(
         params={},
         _meta={
             "modelcontextprotocol.io/related-task": {
-                "taskId": client_task_id,
+                "taskId": server_task_id,
             }
         },
     )
@@ -259,13 +284,14 @@ async def handle_resource_as_task(
     )()
 
     # Return task stub
+    # Tasks MUST begin in "working" status per SEP-1686 final spec (line 381)
     return mcp.types.ServerResult(
         mcp.types.ReadResourceResult(
             contents=[],
             _meta={
                 "modelcontextprotocol.io/task": {
-                    "taskId": client_task_id,
-                    "status": "submitted",
+                    "taskId": server_task_id,
+                    "status": "working",
                 }
             },
         )

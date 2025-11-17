@@ -738,7 +738,7 @@ class Client(Generic[ClientTransportT]):
         *,
         task: Literal[True],
         task_id: str | None = None,
-        keep_alive: int = 60000,
+        ttl: int = 60000,
     ) -> ResourceTask: ...
 
     async def read_resource(
@@ -747,7 +747,7 @@ class Client(Generic[ClientTransportT]):
         *,
         task: bool = False,
         task_id: str | None = None,
-        keep_alive: int = 60000,
+        ttl: int = 60000,
     ) -> (
         list[mcp.types.TextResourceContents | mcp.types.BlobResourceContents]
         | ResourceTask
@@ -758,7 +758,7 @@ class Client(Generic[ClientTransportT]):
             uri (AnyUrl | str): The URI of the resource to read. Can be a string or an AnyUrl object.
             task (bool): If True, execute as background task (SEP-1686). Defaults to False.
             task_id (str | None): Optional client-provided task ID (auto-generated if not provided).
-            keep_alive (int): Time to keep results available in milliseconds (default 60s).
+            ttl (int): Time to keep results available in milliseconds (default 60s).
 
         Returns:
             list[mcp.types.TextResourceContents | mcp.types.BlobResourceContents] | ResourceTask:
@@ -768,7 +768,7 @@ class Client(Generic[ClientTransportT]):
             RuntimeError: If called while the client is not connected.
         """
         if task:
-            return await self._read_resource_as_task(uri, task_id, keep_alive)
+            return await self._read_resource_as_task(uri, task_id, ttl)
 
         if isinstance(uri, str):
             try:
@@ -784,7 +784,7 @@ class Client(Generic[ClientTransportT]):
         self,
         uri: AnyUrl | str,
         task_id: str | None = None,
-        keep_alive: int = 60000,
+        ttl: int = 60000,
     ) -> ResourceTask:
         """Read a resource for background execution (SEP-1686).
 
@@ -792,37 +792,38 @@ class Client(Generic[ClientTransportT]):
 
         Args:
             uri: Resource URI to read
-            task_id: Optional client-provided task ID (auto-generated if not provided)
-            keep_alive: Time to keep results available in milliseconds (default 60s)
+            task_id: Optional client-provided task ID (ignored, for backward compatibility)
+            ttl: Time to keep results available in milliseconds (default 60s)
 
         Returns:
             ResourceTask: Future-like object for accessing task status and results
         """
-        if task_id is None:
-            task_id = str(uuid.uuid4())
-
-        # Track this task ID for list_tasks()
-        self._submitted_task_ids.add(task_id)
-
-        # Read resource with task metadata
+        # Per SEP-1686 final spec: client sends only ttl, server generates taskId
+        # Read resource with task metadata (no taskId sent)
         result = await self.read_resource_mcp(
             uri=uri,
             meta={
                 "modelcontextprotocol.io/task": {
-                    "taskId": task_id,
-                    "keepAlive": keep_alive,
+                    "ttl": ttl,
                 }
             },
         )
 
         # Check if server accepted background execution
         if result.meta and "modelcontextprotocol.io/task" in result.meta:
-            # Background execution accepted
-            return ResourceTask(self, task_id, uri=str(uri), immediate_result=None)
+            # Background execution accepted - extract server-generated taskId
+            server_task_id = result.meta["modelcontextprotocol.io/task"]["taskId"]
+            # Track this task ID for list_tasks()
+            self._submitted_task_ids.add(server_task_id)
+            return ResourceTask(
+                self, server_task_id, uri=str(uri), immediate_result=None
+            )
         else:
             # Server declined background execution (graceful degradation)
+            # Use a synthetic task ID for the immediate result
+            synthetic_task_id = task_id or str(uuid.uuid4())
             return ResourceTask(
-                self, task_id, uri=str(uri), immediate_result=result.contents
+                self, synthetic_task_id, uri=str(uri), immediate_result=result.contents
             )
 
     # async def subscribe_resource(self, uri: AnyUrl | str) -> None:
@@ -936,7 +937,7 @@ class Client(Generic[ClientTransportT]):
         *,
         task: Literal[True],
         task_id: str | None = None,
-        keep_alive: int = 60000,
+        ttl: int = 60000,
     ) -> PromptTask: ...
 
     async def get_prompt(
@@ -946,7 +947,7 @@ class Client(Generic[ClientTransportT]):
         *,
         task: bool = False,
         task_id: str | None = None,
-        keep_alive: int = 60000,
+        ttl: int = 60000,
     ) -> mcp.types.GetPromptResult | PromptTask:
         """Retrieve a rendered prompt message list from the server.
 
@@ -955,7 +956,7 @@ class Client(Generic[ClientTransportT]):
             arguments (dict[str, Any] | None, optional): Arguments to pass to the prompt. Defaults to None.
             task (bool): If True, execute as background task (SEP-1686). Defaults to False.
             task_id (str | None): Optional client-provided task ID (auto-generated if not provided).
-            keep_alive (int): Time to keep results available in milliseconds (default 60s).
+            ttl (int): Time to keep results available in milliseconds (default 60s).
 
         Returns:
             mcp.types.GetPromptResult | PromptTask: The complete response object if task=False,
@@ -965,7 +966,7 @@ class Client(Generic[ClientTransportT]):
             RuntimeError: If called while the client is not connected.
         """
         if task:
-            return await self._get_prompt_as_task(name, arguments, task_id, keep_alive)
+            return await self._get_prompt_as_task(name, arguments, task_id, ttl)
 
         result = await self.get_prompt_mcp(name=name, arguments=arguments)
         return result
@@ -975,7 +976,7 @@ class Client(Generic[ClientTransportT]):
         name: str,
         arguments: dict[str, Any] | None = None,
         task_id: str | None = None,
-        keep_alive: int = 60000,
+        ttl: int = 60000,
     ) -> PromptTask:
         """Get a prompt for background execution (SEP-1686).
 
@@ -984,37 +985,40 @@ class Client(Generic[ClientTransportT]):
         Args:
             name: Prompt name to get
             arguments: Prompt arguments
-            task_id: Optional client-provided task ID (auto-generated if not provided)
-            keep_alive: Time to keep results available in milliseconds (default 60s)
+            task_id: Optional client-provided task ID (ignored, for backward compatibility)
+            ttl: Time to keep results available in milliseconds (default 60s)
 
         Returns:
             PromptTask: Future-like object for accessing task status and results
         """
-        if task_id is None:
-            task_id = str(uuid.uuid4())
-
-        # Track this task ID for list_tasks()
-        self._submitted_task_ids.add(task_id)
-
-        # Call prompt with task metadata
+        # Per SEP-1686 final spec: client sends only ttl, server generates taskId
+        # Call prompt with task metadata (no taskId sent)
         result = await self.get_prompt_mcp(
             name=name,
             arguments=arguments or {},
             meta={
                 "modelcontextprotocol.io/task": {
-                    "taskId": task_id,
-                    "keepAlive": keep_alive,
+                    "ttl": ttl,
                 }
             },
         )
 
         # Check if server accepted background execution
         if result.meta and "modelcontextprotocol.io/task" in result.meta:
-            # Background execution accepted
-            return PromptTask(self, task_id, prompt_name=name, immediate_result=None)
+            # Background execution accepted - extract server-generated taskId
+            server_task_id = result.meta["modelcontextprotocol.io/task"]["taskId"]
+            # Track this task ID for list_tasks()
+            self._submitted_task_ids.add(server_task_id)
+            return PromptTask(
+                self, server_task_id, prompt_name=name, immediate_result=None
+            )
         else:
             # Server declined background execution (graceful degradation)
-            return PromptTask(self, task_id, prompt_name=name, immediate_result=result)
+            # Use a synthetic task ID for the immediate result
+            synthetic_task_id = task_id or str(uuid.uuid4())
+            return PromptTask(
+                self, synthetic_task_id, prompt_name=name, immediate_result=result
+            )
 
     # --- Completion ---
 
@@ -1234,7 +1238,7 @@ class Client(Generic[ClientTransportT]):
         meta: dict[str, Any] | None = None,
         task: Literal[True],
         task_id: str | None = None,
-        keep_alive: int = 60000,
+        ttl: int = 60000,
     ) -> ToolTask: ...
 
     async def call_tool(
@@ -1248,7 +1252,7 @@ class Client(Generic[ClientTransportT]):
         meta: dict[str, Any] | None = None,
         task: bool = False,
         task_id: str | None = None,
-        keep_alive: int = 60000,
+        ttl: int = 60000,
     ) -> CallToolResult | ToolTask:
         """Call a tool on the server.
 
@@ -1266,7 +1270,7 @@ class Client(Generic[ClientTransportT]):
                 can access this via `context.request_context.meta`. Defaults to None.
             task (bool): If True, execute as background task (SEP-1686). Defaults to False.
             task_id (str | None): Optional client-provided task ID (auto-generated if not provided).
-            keep_alive (int): Time to keep results available in milliseconds (default 60s).
+            ttl (int): Time to keep results available in milliseconds (default 60s).
 
         Returns:
             CallToolResult | ToolTask: The content returned by the tool if task=False,
@@ -1282,7 +1286,7 @@ class Client(Generic[ClientTransportT]):
             RuntimeError: If called while the client is not connected.
         """
         if task:
-            return await self._call_tool_as_task(name, arguments, task_id, keep_alive)
+            return await self._call_tool_as_task(name, arguments, task_id, ttl)
 
         result = await self.call_tool_mcp(
             name=name,
@@ -1300,7 +1304,7 @@ class Client(Generic[ClientTransportT]):
         name: str,
         arguments: dict[str, Any] | None = None,
         task_id: str | None = None,
-        keep_alive: int = 60000,
+        ttl: int = 60000,
     ) -> ToolTask:
         """Call a tool for background execution (SEP-1686).
 
@@ -1311,26 +1315,20 @@ class Client(Generic[ClientTransportT]):
         Args:
             name: Tool name to call
             arguments: Tool arguments
-            task_id: Optional client-provided task ID (auto-generated if not provided)
-            keep_alive: Time to keep results available in milliseconds (default 60s)
+            task_id: Optional client-provided task ID (ignored, for backward compatibility)
+            ttl: Time to keep results available in milliseconds (default 60s)
 
         Returns:
             ToolTask: Future-like object for accessing task status and results
         """
-        if task_id is None:
-            task_id = str(uuid.uuid4())
-
-        # Track this task ID for list_tasks()
-        self._submitted_task_ids.add(task_id)
-
-        # Call tool with task metadata
+        # Per SEP-1686 final spec: client sends only ttl, server generates taskId
+        # Call tool with task metadata (no taskId sent)
         result = await self.call_tool_mcp(
             name=name,
             arguments=arguments or {},
             meta={
                 "modelcontextprotocol.io/task": {
-                    "taskId": task_id,
-                    "keepAlive": keep_alive,
+                    "ttl": ttl,
                 }
             },
         )
@@ -1338,15 +1336,20 @@ class Client(Generic[ClientTransportT]):
         # Check if server accepted background execution
         # If response includes task metadata, server accepted background mode
         if result.meta and "modelcontextprotocol.io/task" in result.meta:
-            # Background execution accepted
-            return ToolTask(self, task_id, tool_name=name, immediate_result=None)
+            # Background execution accepted - extract server-generated taskId
+            server_task_id = result.meta["modelcontextprotocol.io/task"]["taskId"]
+            # Track this task ID for list_tasks()
+            self._submitted_task_ids.add(server_task_id)
+            return ToolTask(self, server_task_id, tool_name=name, immediate_result=None)
         else:
             # Server declined background execution (graceful degradation)
             # Executed synchronously - wrap the immediate result
             # Need to convert mcp.types.CallToolResult to our CallToolResult
             parsed_result = await self._parse_call_tool_result(name, result)
+            # Use a synthetic task ID for the immediate result
+            synthetic_task_id = task_id or str(uuid.uuid4())
             return ToolTask(
-                self, task_id, tool_name=name, immediate_result=parsed_result
+                self, synthetic_task_id, tool_name=name, immediate_result=parsed_result
             )
 
     async def get_task_status(self, task_id: str) -> TaskStatusResponse:
@@ -1358,7 +1361,7 @@ class Client(Generic[ClientTransportT]):
             task_id: The task ID returned from call_tool_as_task
 
         Returns:
-            TaskStatusResponse: Status information including task_id, status, poll_frequency, etc.
+            TaskStatusResponse: Status information including task_id, status, poll_interval, etc.
 
         Raises:
             RuntimeError: If client not connected
@@ -1480,7 +1483,7 @@ class Client(Generic[ClientTransportT]):
             poll_interval: Time between status checks in seconds (default 50ms)
 
         Returns:
-            TaskStatusResponse: Full task status including task_id, status, poll_frequency, etc.
+            TaskStatusResponse: Full task status including task_id, status, poll_interval, etc.
 
         Raises:
             TimeoutError: If desired state not reached within timeout
