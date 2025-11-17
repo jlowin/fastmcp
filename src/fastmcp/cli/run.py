@@ -223,7 +223,14 @@ def run_v1_server(
     port: int | None = None,
     transport: TransportType | None = None,
 ) -> None:
-    """Run a FastMCP 1.x server, detecting if we're in an async context."""
+    """Run a FastMCP 1.x server, detecting if we're in an async context.
+
+    Args:
+        server: FastMCP 1.x server instance
+        host: Host to bind to
+        port: Port to bind to
+        transport: Transport protocol to use
+    """
     import asyncio
     from functools import partial
 
