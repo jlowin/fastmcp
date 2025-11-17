@@ -17,6 +17,8 @@ To run:
 import os
 
 from dotenv import load_dotenv
+from starlette.middleware import Middleware
+from starlette.middleware.cors import CORSMiddleware
 
 from fastmcp import FastMCP
 from fastmcp.server.auth.providers.keycloak import KeycloakAuthProvider
@@ -75,7 +77,23 @@ async def get_access_token_claims() -> dict:
 
 if __name__ == "__main__":
     try:
-        mcp.run(transport="http", port=8000)
+        # Enable CORS for MCP Inspector and other browser-based clients
+        # See: https://gofastmcp.com/deployment/http#cors-for-browser-based-clients
+        cors_middleware = Middleware(
+            CORSMiddleware,
+            allow_origins=["*"],  # Allow all origins for development
+            allow_credentials=True,
+            allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+            allow_headers=[
+                "mcp-protocol-version",
+                "mcp-session-id",
+                "Authorization",
+                "Content-Type",
+            ],
+            expose_headers=["mcp-session-id"],  # Required for MCP Inspector
+        )
+
+        mcp.run(transport="http", port=8000, middleware=[cors_middleware])
     except KeyboardInterrupt:
         # Graceful shutdown, suppress noisy logs resulting from asyncio.run task cancellation propagation
         pass

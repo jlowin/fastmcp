@@ -4,6 +4,7 @@
   "enabled": true,
   "keycloakVersion": "26.3.5",
   "registrationAllowed": true,
+  "defaultOptionalClientScopes": ["offline_access"],
   "components": {
     "org.keycloak.services.clientregistration.policy.ClientRegistrationPolicy": [
       {
@@ -18,7 +19,8 @@
           "trusted-hosts": [
             "localhost",
             "172.17.0.1",
-            "172.18.0.1"
+            "172.18.0.1",
+            "github.com"
           ],
           "client-uris-must-match": [
             "true"
@@ -41,7 +43,8 @@
           "value": "password123",
           "temporary": false
         }
-      ]
+      ],
+      "realmRoles": ["offline_access"]
     }
   ],
   "clientPolicies": {
@@ -57,10 +60,7 @@
                 "openid",
                 "profile",
                 "email",
-                "roles",
-                "offline_access",
-                "web-origins",
-                "basic"
+                "offline_access"
               ]
             }
           }

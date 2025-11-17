@@ -23,13 +23,24 @@ This script will:
 
 ## Preconfigured Realm
 
-The Docker setup automatically imports a preconfigured realm configured for dynamic client registration. The default settings are described below and can be adjusted or complemented as needed by editing the [`realm-fastmcp.json`](realm-fastmcp.json) file before starting Keycloak. If settings are changed after Keycloak has been started, restart Keycloak with
+The Docker setup automatically imports a preconfigured realm configured for dynamic client registration. The default settings are described below and can be adjusted or complemented as needed by editing the [`realm-fastmcp.json`](realm-fastmcp.json) file before starting Keycloak.
+
+### Updating Realm Configuration
+
+If you modify the `realm-fastmcp.json` file after Keycloak has been started, you need to recreate the container to apply the changes:
 
 ```bash
-docker-compose restart
+docker compose down -v  # Stop and remove volumes
+docker compose up -d    # Start fresh with updated config
 ```
 
-to apply the changes.
+**Note**: The `-v` flag removes the volumes, which forces Keycloak to re-import the realm configuration. Without it, Keycloak will skip the import with "Realm already exists."
+
+**Expected Warning**: You may see this warning in the logs during realm import:
+```
+Failed to deserialize client policies in the realm fastmcp. Fallback to return empty profiles.
+```
+This is a harmless Keycloak parser issue with the JSON format and doesn't affect functionality. The realm and policies are imported correctly.
 
 ### Realm: `fastmcp`
 
@@ -37,8 +48,8 @@ The realm is configured with:
 
 - **Dynamic Client Registration** enabled for `http://localhost:8000/*`
 - **Registration Allowed**: Yes
-- **Allowed Client Scopes**: `openid`, `profile`, `email`, `roles`, `offline_access`, `web-origins`, `basic`
-- **Trusted Hosts**: `localhost`, `172.17.0.1`, `172.18.0.1`
+- **Allowed Client Scopes**: `openid`, `profile`, `email`, `offline_access`
+- **Trusted Hosts**: `localhost`, `172.17.0.1`, `172.18.0.1`, `github.com` (allows MCP Inspector and other GitHub-hosted clients)
 
 ### Test User
 
@@ -91,7 +102,7 @@ For production use, consider:
 ### View Keycloak Logs
 
 ```bash
-docker-compose logs -f keycloak
+docker compose logs -f keycloak
 ```
 
 ### Common Issues
@@ -115,5 +126,5 @@ docker-compose logs -f keycloak
 
 4. **"Client not found" error after Keycloak restart**
    - This can happen when Keycloak is restarted and the previously registered OAuth client no longer exists
-   - **No action needed**: The FastMCP OAuth client automatically detects this condition and re-registers with Keycloak
-   - Simply run your client again and it will automatically handle the re-registration process
+   - **Python client**: No action needed - the FastMCP client automatically detects this condition and re-registers with Keycloak. Simply run your client again and it will handle the re-registration process.
+   - **MCP Inspector**: Stop the Inspector with Ctrl+C in the terminal where you started it, then restart it with `npx -y @modelcontextprotocol/inspector` and reconnect to the server. This triggers a fresh OAuth flow and client registration.

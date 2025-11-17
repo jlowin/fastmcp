@@ -49,10 +49,41 @@ Manually import the realm:
    python server.py
    ```
 
-3. In another terminal, run the client:
+3. Test the server:
+
+   You have two options to test the OAuth-protected server:
+
+   **Option A: Using the Python Client (Programmatic)**
+
+   In another terminal, run the example client:
 
    ```bash
    python client.py
    ```
 
-The client will open your browser for Keycloak authentication.
+   The client will open your browser for Keycloak authentication, then demonstrate calling the protected tools.
+
+   **Option B: Using MCP Inspector (Interactive)**
+
+   The MCP Inspector provides an interactive web UI to explore and test your MCP server.
+
+   **Prerequisites**: Node.js must be installed on your system.
+
+   1. Launch the Inspector:
+      ```bash
+      npx -y @modelcontextprotocol/inspector
+      ```
+
+   2. In the Inspector UI (opens in your browser):
+      - Click "Add Server"
+      - Enter server URL: `http://localhost:8000/mcp`
+      - Select connection type: **"Direct"** (connects directly to the HTTP server)
+      - Click "Connect"
+      - The Inspector will automatically handle the OAuth flow and open Keycloak for authentication
+      - Once authenticated, you can interactively explore available tools and test them
+
+   The Inspector is particularly useful for:
+   - Exploring the server's capabilities without writing code
+   - Testing individual tools with custom inputs
+   - Debugging authentication and authorization issues
+   - Viewing request/response details
