@@ -69,7 +69,7 @@ The final SEP-1686 specification has **MAJOR breaking changes** from our prototy
 
 **Impact:** Change initial status from "submitted" to "working". May need to adjust Docket state mappings.
 
-### 5. Task Parameter Structure (BREAKING)
+### 5. Task Parameter Structure (BREAKING - CRITICAL)
 
 **Final Spec (line 143-148):**
 ```json
@@ -78,29 +78,40 @@ The final SEP-1686 specification has **MAJOR breaking changes** from our prototy
   "params": {
     "name": "get_weather",
     "arguments": {...},
-    "task": {
+    "task": {           ← Task is a PARAM, not in _meta!
       "ttl": 60000
     }
   }
 }
 ```
 
-**SDK Reference (`python-sdk/src/mcp/types.py:46-56`):**
+**SDK Current Approach (types.py:67-92):**
 ```python
-class TaskMetadata(BaseModel):
-    """Task creation metadata, used to ask that the server create a task."""
+class RequestParams(BaseModel):
+    class Meta(BaseModel):
+        task: TaskMetadata | None = Field(alias=TASK_META_KEY, default=None)
+        # TASK_META_KEY = "modelcontextprotocol.io/task"
 
-    taskId: str  # ← For CreateTaskResult only
-    keepAlive: int | None = None
+    meta: Meta | None = Field(alias="_meta", default=None)
 ```
 
-**CONFLICT**: The SDK `TaskMetadata` still has `taskId` and `keepAlive`, but the spec shows only `ttl` in request params!
+So SDK currently expects: `params: {name: "...", _meta: {"modelcontextprotocol.io/task": {...}}}`
+But spec shows: `params: {name: "...", task: {ttl: ...}}`
 
-**Our Implementation:**
-- Expects `task: {taskId: "...", keepAlive: ...}` structure
-- Extracts `client_task_id = task_meta["taskId"]` directly
+**Our Current Implementation:**
+- Client sends: `meta={"modelcontextprotocol.io/task": {ttl: ...}}`
+- Server extracts: `task_meta = request.params.meta.get("modelcontextprotocol.io/task")`
 
-**Impact:** Need NEW shim to translate between spec's `{ttl: ...}` request format and our internal structure. SDK types don't match spec yet.
+**MAJOR CHANGE NEEDED:**
+- Spec wants `task` as a top-level param alongside `name`, `arguments`
+- NOT nested in `_meta`
+- This affects ALL request types: CallToolRequest, GetPromptRequest, ReadResourceRequest
+
+**Impact:**
+- Need to modify how we extract task metadata from requests
+- May need to extend SDK's param types to include `task` field
+- Current approach via _meta is non-compliant with final spec
+- This is a Phase 2 priority change
 
 ---
 
@@ -498,22 +509,166 @@ response = {
 - **Next:** Implement Phase 1 changes (server-generated IDs, field renames, createdAt, initial status)
 
 ### Session 2: Phase 2 Protocol Compliance
-- Implement task parameter structure shim
-- Update capabilities structure
-- Fix related-task metadata rules
-- Run tests and fix failures from Phase 1 changes
 
-### Session 3: Phase 3 Polish
-- Create additional shims
+#### 2.1: Task Parameter Structure (BREAKING - HIGH PRIORITY)
+
+**Current State:**
+- Client sends: `call_tool_mcp(name="...", arguments={...}, meta={"modelcontextprotocol.io/task": {ttl: ...}})`
+- Server extracts: `task_meta = meta_dict.get("modelcontextprotocol.io/task")` (server.py:1227, 1350, 1472)
+
+**Final Spec Requirement:**
+- Client should send: `params: {name: "...", arguments: {...}, task: {ttl: 60000}}`
+- `task` is a sibling to `name` and `arguments`, NOT in `_meta`
+
+**SDK Draft Approach:**
+- Uses `_meta: {"modelcontextprotocol.io/task": {...}}` structure
+- Has `RequestParams.Meta` with aliased `task` field
+- This is NOT what the final spec shows!
+
+**Implementation Options:**
+
+**Option A: Extend SDK param types (cleanest)**
+- Extend `CallToolParams`, `GetPromptParams`, `ReadResourceParams` to include `task: TaskMetadata | None` field
+- Update server extraction to look for `request.params.task` instead of `request.params.meta`
+- Most spec-compliant but requires modifying SDK types
+
+**Option B: Shim layer (safest for now)**
+- Create shim that intercepts requests and moves `task` from params to _meta
+- Allows SDK to stay unchanged
+- Easy to remove when SDK updates
+
+**Recommendation:** Start with Option B shim, document clearly for future SDK alignment
+
+**Files to modify:**
+- Create new shim: `src/fastmcp/server/tasks/_task_param_shim.py`
+- Update extraction in `server.py:1227, 1350, 1472`
+- Update client send in `client.py:807, 999, 1324`
+
+#### 2.2: Related-Task Metadata Rules
+- Fix related-task metadata rules (exclude from tasks/get, tasks/cancel)
+- Update capabilities structure (nested format)
+- Run tests and fix failures from Phase 2 changes
+
+### Session 3: Reconcile Shim Types with SDK Draft
+- Review SDK types in `/home/chris/src/github.com/modelcontextprotocol/python-sdk` (feat/tasks branch)
+- Identify type name and structure differences
+- Update our shim types to match SDK naming conventions WHERE SDK matches spec
+- Keep our corrections where SDK diverges from spec (ttl, createdAt, initial status)
+- Ensure our shims will be easy to replace when SDK is finalized
+- Document all differences between SDK draft and final spec
+
+### Session 4: Phase 3 Polish
+- Create additional shims as needed
 - Update remaining tests
 - Add new test coverage
 - Documentation updates
 
-### Session 4: Validation and Cleanup
+### Session 5: Validation and Cleanup
 - Full test suite validation
-- Review all shims with heavy comments
+- Review all shims with heavy comments explaining SDK gaps
 - Final spec compliance check
 - Prepare for PR
+
+---
+
+## SDK Type Reconciliation Analysis
+
+### SDK Draft vs Final Spec Comparison
+
+**Critical Finding:** The SDK draft types (feat/tasks branch) are **NOT up to date** with the final specification. Our Phase 1 implementation is actually MORE spec-compliant than the SDK draft.
+
+#### SDK Types Still Using Old Field Names
+
+**TaskMetadata (SDK types.py:46-55):**
+```python
+class TaskMetadata(BaseModel):
+    taskId: str  # ← Spec says client shouldn't send this
+    keepAlive: int | None = None  # ← Spec says should be "ttl"
+```
+
+**Task / GetTaskResult (SDK types.py:585-615, 647-665):**
+```python
+class Task(BaseModel):
+    taskId: str
+    status: Literal[...]
+    keepAlive: int | None  # ← Should be "ttl"
+    pollInterval: int | None  # ✓ Correct
+    error: str | None
+    # ✗ Missing: createdAt (REQUIRED per spec line 430)
+```
+
+**Our Types (After Phase 1):**
+```python
+class TaskStatusResponse(pydantic.BaseModel):
+    task_id: str = pydantic.Field(alias="taskId")
+    status: Literal[...]
+    created_at: str = pydantic.Field(alias="createdAt")  # ✓ We have this
+    ttl: int | None = pydantic.Field(alias="ttl")  # ✓ Correct field name
+    poll_interval: int | None = pydantic.Field(alias="pollInterval")  # ✓ Correct
+    error: str | None = None
+```
+
+**Conclusion:** Our types are MORE correct than the SDK draft. We should keep our field names.
+
+#### SDK Has More Complete Type Coverage
+
+**New types in SDK we should consider adopting:**
+
+1. **Request/Response Types:**
+   - `GetTaskRequest` (SDK has it, we have `TasksGetRequest` - similar)
+   - `GetTaskResult` (SDK has it, we use dict responses)
+   - `GetTaskPayloadRequest` (we call it `TasksResultRequest`)
+   - `ListTasksRequest` (SDK has `ListTasksRequest`, we have `TasksListRequest`)
+   - `CancelTaskRequest` (we have `TasksCancelRequest`)
+   - `DeleteTaskRequest` (we have `TasksDeleteRequest`)
+
+2. **Capability Types:**
+   - `TasksOperationsCapability`
+   - `TaskToolsCapability` / `TaskPromptsCapability` / `TaskResourcesCapability`
+   - `ServerTasksRequestsCapability` / `ClientTasksRequestsCapability`
+   - `ServerTasksCapability` / `ClientTasksCapability`
+
+3. **Notification Types:**
+   - `TaskCreatedNotification` (we construct manually)
+   - `TaskCreatedNotificationParams`
+
+4. **Core Types:**
+   - `TaskMetadata` (for request params - though SDK version is wrong)
+   - `RelatedTaskMetadata` (for related-task in _meta)
+
+### Reconciliation Strategy
+
+**Phase: SDK Type Alignment (New Session 3)**
+
+1. **Adopt SDK naming conventions** where they exist:
+   - Rename `TasksGetRequest` → `GetTaskRequest` (match SDK)
+   - Rename `TasksResultRequest` → `GetTaskPayloadRequest` (match SDK)
+   - Keep our field name corrections (ttl, createdAt)
+
+2. **Add missing types from SDK:**
+   - `GetTaskResult` for tasks/get response (instead of dict)
+   - Capability types for proper structure
+   - Notification types
+
+3. **Document SDK divergences:**
+   - Add heavy comments explaining where SDK is wrong vs spec
+   - Note which fields we corrected (keepAlive → ttl, added createdAt)
+   - Track for future SDK updates
+
+4. **DO NOT adopt SDK's incorrect fields:**
+   - Keep `ttl` (not `keepAlive`)
+   - Keep `createdAt` (SDK is missing it)
+   - Keep `working` as initial status (SDK still has `submitted`)
+
+### Files to Review for Reconciliation
+
+**Our Shims:**
+- `src/fastmcp/server/tasks/_temporary_mcp_shims.py`
+- `src/fastmcp/client/tasks.py` (our protocol types)
+
+**SDK Reference:**
+- `/home/chris/src/github.com/modelcontextprotocol/python-sdk/src/mcp/types.py`
+- Lines 46-665 (all task-related types)
 
 ---
 
