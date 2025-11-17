@@ -412,7 +412,7 @@ class TestCSRFProtection:
         with TestClient(app) as test_client:
             # Try to submit consent WITHOUT CSRF token
             response = test_client.post(
-                "/consent/submit",
+                "/consent",
                 data={"action": "approve", "txn_id": txn_id},
                 # No CSRF token!
                 follow_redirects=False,
@@ -571,7 +571,7 @@ class TestConsentSecurity:
             for k, v in consent.cookies.items():
                 c.cookies.set(k, v)
             r = c.post(
-                "/consent/submit",
+                "/consent",
                 data={"action": "deny", "txn_id": txn_id, "csrf_token": csrf},
                 follow_redirects=False,
             )
@@ -602,7 +602,7 @@ class TestConsentSecurity:
             for k, v in consent.cookies.items():
                 c.cookies.set(k, v)
             r = c.post(
-                "/consent/submit",
+                "/consent",
                 data={"action": "approve", "txn_id": txn_id, "csrf_token": csrf},
                 follow_redirects=False,
             )
@@ -644,7 +644,7 @@ class TestConsentSecurity:
             for k, v in consent.cookies.items():
                 c.cookies.set(k, v)
             r = c.post(
-                "/consent/submit",
+                "/consent",
                 data={
                     "action": "approve",
                     "txn_id": txn_id,
@@ -691,6 +691,7 @@ class TestConsentPageServerIcon:
             upstream_client_secret="upstream-secret",
             token_verifier=verifier,
             base_url="https://proxy.example.com",
+            client_storage=MemoryStore(),
             jwt_signing_key="test-secret",
         )
 
@@ -763,6 +764,7 @@ class TestConsentPageServerIcon:
             upstream_client_secret="upstream-secret",
             token_verifier=verifier,
             base_url="https://proxy.example.com",
+            client_storage=MemoryStore(),
             jwt_signing_key="test-secret",
         )
 
@@ -830,6 +832,7 @@ class TestConsentPageServerIcon:
             upstream_client_secret="upstream-secret",
             token_verifier=verifier,
             base_url="https://proxy.example.com",
+            client_storage=MemoryStore(),
             jwt_signing_key="test-secret",
         )
 

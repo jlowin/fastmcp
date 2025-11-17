@@ -284,7 +284,7 @@ async def test_github_oauth_authorization_redirect(github_server: str):
 
         # Step 4: Approve consent
         approve_response = await http_client.post(
-            f"{base_url}/consent/submit",
+            f"{base_url}/consent",
             data={
                 "action": "approve",
                 "txn_id": txn_id,
@@ -360,6 +360,7 @@ async def test_github_oauth_unauthorized_access(github_server: str):
 
 async def test_github_oauth_with_mock(github_client_with_mock: Client):
     """Test complete GitHub OAuth flow with mocked callback."""
+
     async with github_client_with_mock:
         # Test that we can ping the server (requires successful OAuth)
         assert await github_client_with_mock.ping()
