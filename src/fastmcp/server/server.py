@@ -2264,11 +2264,16 @@ class FastMCP(Generic[LifespanResultT]):
                     # Build experimental capabilities
                     experimental_capabilities = {}
                     if fastmcp.settings.experimental.enable_tasks:
-                        # Declare SEP-1686 task support (enable_tasks requires enable_docket via validator)
+                        # Declare SEP-1686 task support per final spec (lines 49-63)
+                        # Nested structure: {list: {}, cancel: {}, requests: {tools: {call: {}}}}
                         experimental_capabilities["tasks"] = {
-                            "tools": True,
-                            "prompts": True,
-                            "resources": True,
+                            "list": {},
+                            "cancel": {},
+                            "requests": {
+                                "tools": {"call": {}},
+                                "prompts": {"get": {}},
+                                "resources": {"read": {}},
+                            },
                         }
 
                     await self._mcp_server.run(

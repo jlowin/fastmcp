@@ -84,32 +84,24 @@ async def tasks_get_handler(server: FastMCP, params: dict[str, Any]) -> dict[str
         if task_key is None:
             # Task not found - return unknown state per SEP-1686
             # Use synthetic timestamp since task never existed or was deleted
+            # Per spec lines 447-448: SHOULD NOT include related-task in tasks/get
             return {
                 "taskId": client_task_id,
                 "status": "unknown",
                 "createdAt": created_at or datetime.now(timezone.utc).isoformat(),
                 "pollInterval": 1000,
-                "_meta": {
-                    "modelcontextprotocol.io/related-task": {
-                        "taskId": client_task_id,
-                    }
-                },
             }
 
         execution = await docket.get_execution(task_key)
         if execution is None:
             # Task key exists but no execution - unknown
             # Use stored timestamp if available, otherwise synthetic
+            # Per spec lines 447-448: SHOULD NOT include related-task in tasks/get
             return {
                 "taskId": client_task_id,
                 "status": "unknown",
                 "createdAt": created_at or datetime.now(timezone.utc).isoformat(),
                 "pollInterval": 1000,
-                "_meta": {
-                    "modelcontextprotocol.io/related-task": {
-                        "taskId": client_task_id,
-                    }
-                },
             }
 
         # Sync state from Redis
@@ -120,17 +112,13 @@ async def tasks_get_handler(server: FastMCP, params: dict[str, Any]) -> dict[str
 
         # Build response (use default ttl since we don't track per-task values)
         # createdAt is REQUIRED per SEP-1686 final spec (line 430)
+        # Per spec lines 447-448: SHOULD NOT include related-task metadata in tasks/get
         response = {
             "taskId": client_task_id,
             "status": mcp_state,
             "createdAt": created_at,  # Required ISO 8601 timestamp
             "ttl": 60000,  # Default value in milliseconds
             "pollInterval": 1000,
-            "_meta": {
-                "modelcontextprotocol.io/related-task": {
-                    "taskId": client_task_id,
-                }
-            },
         }
 
         # Add error info if failed
@@ -346,16 +334,12 @@ async def tasks_cancel_handler(
 
         # Return task status with cancelled state
         # createdAt is REQUIRED per SEP-1686 final spec (line 430)
+        # Per spec lines 447-448: SHOULD NOT include related-task metadata in tasks/cancel
         return {
             "taskId": client_task_id,
             "status": "cancelled",
             "createdAt": created_at or datetime.now(timezone.utc).isoformat(),
             "pollInterval": 1000,
-            "_meta": {
-                "modelcontextprotocol.io/related-task": {
-                    "taskId": client_task_id,
-                }
-            },
         }
 
 
