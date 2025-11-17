@@ -502,13 +502,21 @@ response = {
 
 ## Session Breakdown Plan
 
-### Session 1: Foundation and Phase 1 (Current Session)
-- ✓ Create branch
-- ✓ Create this plan document
-- ✓ Commit plan
-- **Next:** Implement Phase 1 changes (server-generated IDs, field renames, createdAt, initial status)
+### Session 1: Foundation and Phase 1 ✅ COMPLETED
+- ✅ Create branch `sep-1686-final-spec`
+- ✅ Create this plan document
+- ✅ Commit plan (commit e1d2cb11)
+- ✅ **Implement Phase 1 changes** (commit 56e080e9)
+  - Server-generated task IDs (UUID v4)
+  - Field renames: `keepAlive` → `ttl`, `pollFrequency` → `pollInterval`
+  - Added required `createdAt` timestamp (ISO 8601 format)
+  - Changed initial status from "submitted" to "working"
+  - Updated Docket state mappings
+  - Fixed client/server incompatibility with task ID generation
+  - Updated all 147 task tests
+  - **Result:** All 3241 tests passing
 
-### Session 2: Phase 2 Protocol Compliance
+### Session 2: Phase 2 Protocol Compliance ✅ COMPLETED
 
 #### 2.1: Task Parameter Structure (BREAKING - HIGH PRIORITY)
 
@@ -544,30 +552,114 @@ response = {
 - Update extraction in `server.py:1227, 1350, 1472`
 - Update client send in `client.py:807, 999, 1324`
 
-#### 2.2: Related-Task Metadata Rules
-- Fix related-task metadata rules (exclude from tasks/get, tasks/cancel)
-- Update capabilities structure (nested format)
-- Run tests and fix failures from Phase 2 changes
+#### 2.2: Related-Task Metadata Rules ✅ COMPLETED (commit 4d1e69e1)
+- ✅ Removed related-task metadata from tasks/get responses (per spec lines 447-448)
+- ✅ Removed related-task metadata from tasks/cancel responses
+- ✅ Kept related-task metadata in tasks/result (required per spec)
+- ✅ Updated capabilities structure from flat to nested format:
+  ```python
+  experimental_capabilities["tasks"] = {
+      "list": {},
+      "cancel": {},
+      "requests": {
+          "tools": {"call": {}},
+          "prompts": {"get": {}},
+          "resources": {"read": {}},
+      },
+  }
+  ```
+- **Result:** All 3241 tests passing
 
-### Session 3: Reconcile Shim Types with SDK Draft
-- Review SDK types in `/home/chris/src/github.com/modelcontextprotocol/python-sdk` (feat/tasks branch)
-- Identify type name and structure differences
-- Update our shim types to match SDK naming conventions WHERE SDK matches spec
-- Keep our corrections where SDK diverges from spec (ttl, createdAt, initial status)
-- Ensure our shims will be easy to replace when SDK is finalized
-- Document all differences between SDK draft and final spec
+### Session 3: Reconcile Shim Types with SDK Draft ✅ COMPLETED
 
-### Session 4: Phase 3 Polish
-- Create additional shims as needed
-- Update remaining tests
-- Add new test coverage
-- Documentation updates
+**Phase 3: SDK Type Reconciliation** (commit 3c5a0c77)
+- ✅ Reviewed SDK types in `/home/chris/src/github.com/modelcontextprotocol/python-sdk` (feat/tasks branch)
+- ✅ Identified type name and structure differences
+- ✅ Renamed all shim types to match SDK naming conventions:
+  - `TasksGetRequest` → `GetTaskRequest`
+  - `TasksResultRequest` → `GetTaskPayloadRequest`
+  - `TasksListRequest` → `ListTasksRequest`
+  - `TasksCancelRequest` → `CancelTaskRequest` (SDK doesn't have yet)
+  - `TasksDeleteRequest` → `DeleteTaskRequest`
+- ✅ Added `GetTaskResult` and `ListTasksResult` response types
+- ✅ Added heavy documentation explaining SDK divergences:
+  - SDK uses `keepAlive` (wrong, spec requires `ttl`)
+  - SDK missing `createdAt` field (required per spec line 430)
+  - SDK allows "submitted" initial status (spec requires "working")
+- ✅ Kept our spec-compliant corrections
+- ✅ Updated protocol.py handlers to use new type names
+- ✅ Updated client.py to use new type names
+- ✅ Updated monkey-patch unions with new names
+- **Result:** All 3241 tests passing
 
-### Session 5: Validation and Cleanup
-- Full test suite validation
-- Review all shims with heavy comments explaining SDK gaps
-- Final spec compliance check
-- Prepare for PR
+**Phase 3.1: Strongly-Typed Protocol Handlers** (commit 8787a262)
+- ✅ Updated handlers to return proper typed results instead of dicts:
+  - `tasks_get_handler` → `GetTaskResult`
+  - `tasks_list_handler` → `ListTasksResult`
+  - `tasks_cancel_handler` → `GetTaskResult`
+  - `tasks_delete_handler` → `EmptyResult`
+- ✅ Wrappers serialize typed results to dicts at boundary for ServerResult compatibility
+- ✅ Type safety in handler layer, compatibility at transport layer
+- ✅ Follows SDK conventions while maintaining spec compliance
+- **Result:** All 3241 tests passing, 147 task tests passing
+
+### Session 4: Phase 2.1 Decision Point ⚠️ DEFERRED
+
+**Task Parameter Structure** (from Section 2.1 above) - BREAKING WIRE PROTOCOL CHANGE
+
+**The Issue:**
+- **Current implementation:** Client sends `_meta: {"modelcontextprotocol.io/task": {ttl: ...}}`
+- **Final spec requirement:** Client should send `params: {name: "...", task: {ttl: 60000}}` as sibling to name/arguments
+- **SDK draft approach:** Uses `_meta` structure (WRONG per final spec!)
+
+**Why Deferred:**
+1. Our current implementation WORKS and passes all 3241 tests
+2. SDK draft itself is using the _meta approach (non-compliant with final spec)
+3. This is a wire protocol change affecting client/server communication
+4. Unclear if we should follow broken SDK draft or correct final spec
+
+**Decision Options:**
+1. **Wait for SDK fix** - Let SDK update to match spec first, then follow (safest, maintains compatibility)
+2. **Follow spec now** - Implement spec-compliant version with shim for SDK (most correct, breaks SDK compatibility)
+3. **Hybrid approach** - Support both formats with detection/translation layer
+
+**Recommendation:** Wait for official SDK release that matches final spec, OR get clarification from MCP team on this discrepancy.
+
+### Session 5: Polish and Documentation (Lower Priority)
+
+**Potential additions:**
+- `input_required` status support (for elicitation flow, spec lines 411-427)
+- Additional edge case test coverage
+- Documentation updates for new task protocol
+- Performance testing with Docket task execution
+
+**Validation Status:**
+- ✅ All 3241 tests passing
+- ✅ All 147 task-specific tests passing
+- ✅ Zero regressions from Phase 1, 2, 3 changes
+- ✅ Heavy comments documenting SDK divergences
+- ✅ Spec compliance verified (except Phase 2.1 wire format issue)
+
+---
+
+## Current Status (End of Session 3)
+
+### ✅ Completed
+- **Phase 1:** Breaking changes (server-generated IDs, field renames, createdAt, working status)
+- **Phase 2:** Protocol compliance (related-task metadata, capabilities structure)
+- **Phase 3:** SDK type reconciliation with heavily documented divergences
+- **Phase 3.1:** Strongly-typed protocol handlers
+
+### ⚠️ Deferred (Now Priority)
+- **Phase 2.1:** Task parameter structure (`_meta` → `params.task`)
+
+### 📊 Test Status
+- All 3241 tests passing
+- All 147 task tests passing
+- Zero regressions
+
+### 🎯 Next Steps
+**Implement Phase 2.1** - Move from `_meta: {"modelcontextprotocol.io/task": ...}` to spec-compliant `params.task: {ttl: ...}` approach, favoring final spec over SDK draft.
 
 ---
 
