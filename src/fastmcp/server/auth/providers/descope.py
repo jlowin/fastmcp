@@ -136,7 +136,9 @@ class DescopeProvider(RemoteAuthProvider):
                 )
 
             # Extract descope_base_url (scheme + netloc)
-            self.descope_base_url = f"{parsed_url.scheme}://{parsed_url.netloc}".rstrip("/")
+            self.descope_base_url = f"{parsed_url.scheme}://{parsed_url.netloc}".rstrip(
+                "/"
+            )
         elif settings.project_id is not None and settings.descope_base_url is not None:
             # Old API: use project_id and descope_base_url
             self.project_id = settings.project_id
