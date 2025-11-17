@@ -15,79 +15,235 @@ These shims will be removed when:
 - Docket improves context-passing to workers
 
 DO NOT WRITE TESTS FOR THIS FILE - these are temporary hacks.
+
+═══════════════════════════════════════════════════════════════════════════════
+SDK TYPE RECONCILIATION (SEP-1686 Phase 3)
+═══════════════════════════════════════════════════════════════════════════════
+
+Type names below match MCP SDK draft implementation (feat/tasks branch) WHERE
+the SDK has defined types. However, SDK draft types contain ERRORS vs final spec:
+
+❌ SDK DIVERGENCES FROM FINAL SPEC (we correct these):
+   1. SDK uses `keepAlive` field - WRONG, spec requires `ttl` (line 430-432)
+   2. SDK MISSING `createdAt` field - WRONG, spec REQUIRES it (line 430)
+   3. SDK allows "submitted" initial status - WRONG, spec requires "working" (line 381)
+
+✅ OUR CORRECTIONS (spec-compliant):
+   - We use `ttl` field (not keepAlive)
+   - We include required `createdAt` timestamp
+   - We use "working" as initial task status
+   - We define CancelTaskRequest (SDK doesn't have it yet)
+
+These shim types will be easy to replace when SDK is updated to match final spec.
+
+SDK Reference: /home/chris/src/github.com/modelcontextprotocol/python-sdk
+               src/mcp/types.py lines 46-717 (feat/tasks branch)
+Spec Reference: SEP-1686 final specification
 """
 
 from typing import Any, Literal, Union, get_args
 
 from mcp import types as mcp_types
-from mcp.types import Request, RequestParams
-from pydantic import BaseModel
+from mcp.types import (
+    PaginatedRequest,
+    PaginatedRequestParams,
+    Request,
+    RequestParams,
+    Result,
+)
+from pydantic import BaseModel, ConfigDict
+
+# ═══════════════════════════════════════════════════════════════════════════
+# tasks/get - Get task status
+# SDK has: GetTaskRequest / GetTaskParams / GetTaskResult (types.py:631-665)
+# ═══════════════════════════════════════════════════════════════════════════
 
 
-class TasksGetParams(RequestParams):
-    """Parameters for tasks/get request."""
+class GetTaskParams(RequestParams):
+    """Parameters for tasks/get request.
+
+    SDK-compatible naming (was TasksGetParams).
+    """
 
     taskId: str
+    """The task identifier."""
+
+    model_config = ConfigDict(extra="allow")
 
 
-class TasksGetRequest(Request[TasksGetParams, Literal["tasks/get"]]):
-    """Request type for tasks/get method."""
+class GetTaskRequest(Request[GetTaskParams, Literal["tasks/get"]]):
+    """Request type for tasks/get method.
+
+    SDK-compatible naming (was TasksGetRequest).
+    SDK reference: types.py:640-644
+    """
 
     method: Literal["tasks/get"] = "tasks/get"
-    params: TasksGetParams
+    params: GetTaskParams
 
 
-class TasksResultParams(RequestParams):
-    """Parameters for tasks/result request."""
+class GetTaskResult(Result):
+    """Response to a tasks/get request.
+
+    SDK-compatible naming. Matches SDK structure but with spec-compliant fields.
+    SDK reference: types.py:647-665
+
+    ⚠️ SPEC CORRECTIONS (SDK is wrong):
+    - We use `ttl` field (SDK incorrectly uses `keepAlive`)
+    - We include `createdAt` field (SDK is missing this REQUIRED field per spec line 430)
+    """
 
     taskId: str
+    """The unique identifier for this task."""
+
+    status: Literal[
+        "submitted",
+        "working",
+        "input_required",
+        "completed",
+        "failed",
+        "cancelled",
+        "unknown",
+    ]
+    """Current task status."""
+
+    createdAt: str
+    """ISO 8601 timestamp when task was created. REQUIRED per spec line 430.
+    ⚠️ SDK is missing this field entirely!"""
+
+    ttl: int | None = None
+    """Time in milliseconds to keep task results available after completion.
+    ⚠️ SDK incorrectly calls this `keepAlive` - spec requires `ttl` (line 430-432)"""
+
+    pollInterval: int | None = None
+    """Recommended polling frequency in milliseconds."""
+
+    error: str | None = None
+    """Error message if status is 'failed' or 'cancelled'."""
+
+    model_config = ConfigDict(extra="allow")
 
 
-class TasksResultRequest(Request[TasksResultParams, Literal["tasks/result"]]):
-    """Request type for tasks/result method."""
+# ═══════════════════════════════════════════════════════════════════════════
+# tasks/result - Get task result payload
+# SDK has: GetTaskPayloadRequest / GetTaskPayloadParams (types.py:668-681)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class GetTaskPayloadParams(RequestParams):
+    """Parameters for tasks/result request.
+
+    SDK-compatible naming (was TasksResultParams).
+    """
+
+    taskId: str
+    """The task identifier."""
+
+    model_config = ConfigDict(extra="allow")
+
+
+class GetTaskPayloadRequest(Request[GetTaskPayloadParams, Literal["tasks/result"]]):
+    """Request type for tasks/result method.
+
+    SDK-compatible naming (was TasksResultRequest).
+    SDK reference: types.py:677-681
+    """
 
     method: Literal["tasks/result"] = "tasks/result"
-    params: TasksResultParams
+    params: GetTaskPayloadParams
 
 
-class TasksDeleteParams(RequestParams):
-    """Parameters for tasks/delete request."""
-
-    taskId: str
-
-
-class TasksDeleteRequest(Request[TasksDeleteParams, Literal["tasks/delete"]]):
-    """Request type for tasks/delete method."""
-
-    method: Literal["tasks/delete"] = "tasks/delete"
-    params: TasksDeleteParams
+# ═══════════════════════════════════════════════════════════════════════════
+# tasks/list - List tasks
+# SDK has: ListTasksRequest / ListTasksResult (types.py:684-700)
+# ═══════════════════════════════════════════════════════════════════════════
 
 
-class TasksListParams(RequestParams):
-    """Parameters for tasks/list request."""
+class ListTasksRequest(PaginatedRequest[Literal["tasks/list"]]):
+    """Request type for tasks/list method.
 
-    cursor: str | None = None
-    limit: int | None = None
-
-
-class TasksListRequest(Request[TasksListParams, Literal["tasks/list"]]):
-    """Request type for tasks/list method."""
+    SDK-compatible naming (was TasksListRequest).
+    SDK reference: types.py:684-688
+    """
 
     method: Literal["tasks/list"] = "tasks/list"
-    params: TasksListParams
+    params: PaginatedRequestParams | None = None
 
 
-class TasksCancelParams(RequestParams):
-    """Parameters for tasks/cancel request."""
+class ListTasksResult(Result):
+    """Response to a tasks/list request.
+
+    SDK-compatible naming.
+    SDK reference: types.py:691-700
+    """
+
+    tasks: list[dict[str, Any]]
+    """List of tasks (Task objects)."""
+
+    nextCursor: str | None = None
+    """Opaque token for pagination."""
+
+    model_config = ConfigDict(extra="allow")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# tasks/cancel - Cancel a task
+# SDK DOES NOT HAVE THIS YET - This is our extension per final spec
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class CancelTaskParams(RequestParams):
+    """Parameters for tasks/cancel request.
+
+    ⚠️ SDK doesn't define CancelTaskRequest yet - this is our spec-compliant extension.
+    Follows SDK naming pattern (was TasksCancelParams).
+    """
 
     taskId: str
+    """The task identifier."""
+
+    model_config = ConfigDict(extra="allow")
 
 
-class TasksCancelRequest(Request[TasksCancelParams, Literal["tasks/cancel"]]):
-    """Request type for tasks/cancel method."""
+class CancelTaskRequest(Request[CancelTaskParams, Literal["tasks/cancel"]]):
+    """Request type for tasks/cancel method.
+
+    ⚠️ SDK doesn't define CancelTaskRequest yet - this is our spec-compliant extension.
+    Follows SDK naming pattern (was TasksCancelRequest).
+    Spec reference: SEP-1686 lines 254-276
+    """
 
     method: Literal["tasks/cancel"] = "tasks/cancel"
-    params: TasksCancelParams
+    params: CancelTaskParams
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# tasks/delete - Delete a task
+# SDK has: DeleteTaskRequest / DeleteTaskParams (types.py:703-716)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class DeleteTaskParams(RequestParams):
+    """Parameters for tasks/delete request.
+
+    SDK-compatible naming (was TasksDeleteParams).
+    """
+
+    taskId: str
+    """The task identifier."""
+
+    model_config = ConfigDict(extra="allow")
+
+
+class DeleteTaskRequest(Request[DeleteTaskParams, Literal["tasks/delete"]]):
+    """Request type for tasks/delete method.
+
+    SDK-compatible naming (was TasksDeleteRequest).
+    SDK reference: types.py:712-716
+    """
+
+    method: Literal["tasks/delete"] = "tasks/delete"
+    params: DeleteTaskParams
 
 
 # TODO SEP-1686: Remove these response types when SDK officially supports them
@@ -139,24 +295,28 @@ class TasksResponse(BaseModel):
         return obj
 
 
-# TODO SEP-1686: Remove this monkey-patch when SDK officially supports task methods
-# Extend ClientRequest and ServerRequest unions to include SEP-1686 task methods
-# This allows both client and server validation to pass
+# ═══════════════════════════════════════════════════════════════════════════
+# Monkey-patch MCP SDK to accept our task request types
+# TODO SEP-1686: Remove when SDK officially supports all task methods
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Extend ClientRequest and ServerRequest unions to include SEP-1686 task methods.
+# This allows both client and server validation to pass for task protocol operations.
 
 # Patch ClientRequest (used by client to send requests)
 client_root_field = mcp_types.ClientRequest.model_fields["root"]
 client_original_union = client_root_field.annotation
 client_original_types = get_args(client_original_union)
 
-# Build new union (Python 3.10 compatible - can't use Union[*types] syntax)
+# Build new union with SDK-compatible type names (Python 3.10 compatible syntax)
 client_new_union = Union[
     (
         *client_original_types,
-        TasksGetRequest,
-        TasksResultRequest,
-        TasksDeleteRequest,
-        TasksListRequest,
-        TasksCancelRequest,
+        GetTaskRequest,  # SDK-compatible name (was TasksGetRequest)
+        GetTaskPayloadRequest,  # SDK-compatible name (was TasksResultRequest)
+        ListTasksRequest,  # SDK-compatible name (was TasksListRequest)
+        CancelTaskRequest,  # Our extension (SDK doesn't have yet)
+        DeleteTaskRequest,  # SDK-compatible name (was TasksDeleteRequest)
     )
 ]
 
@@ -168,15 +328,15 @@ server_root_field = mcp_types.ServerRequest.model_fields["root"]
 server_original_union = server_root_field.annotation
 server_original_types = get_args(server_original_union)
 
-# Build new union (Python 3.10 compatible - can't use Union[*types] syntax)
+# Build new union with SDK-compatible type names (Python 3.10 compatible syntax)
 server_new_union = Union[
     (
         *server_original_types,
-        TasksGetRequest,
-        TasksResultRequest,
-        TasksDeleteRequest,
-        TasksListRequest,
-        TasksCancelRequest,
+        GetTaskRequest,  # SDK-compatible name (was TasksGetRequest)
+        GetTaskPayloadRequest,  # SDK-compatible name (was TasksResultRequest)
+        ListTasksRequest,  # SDK-compatible name (was TasksListRequest)
+        CancelTaskRequest,  # Our extension (SDK doesn't have yet)
+        DeleteTaskRequest,  # SDK-compatible name (was TasksDeleteRequest)
     )
 ]
 

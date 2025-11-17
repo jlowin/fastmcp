@@ -432,42 +432,45 @@ def setup_task_protocol_handlers(server: FastMCP) -> None:
     """
 
     from fastmcp.server.tasks._temporary_mcp_shims import (
-        TasksCancelRequest,
-        TasksDeleteRequest,
-        TasksGetRequest,
-        TasksListRequest,
-        TasksResultRequest,
+        CancelTaskRequest,  # SDK-compatible name (was TasksCancelRequest)
+        DeleteTaskRequest,  # SDK-compatible name (was TasksDeleteRequest)
+        GetTaskPayloadRequest,  # SDK-compatible name (was TasksResultRequest)
+        GetTaskRequest,  # SDK-compatible name (was TasksGetRequest)
+        ListTasksRequest,  # SDK-compatible name (was TasksListRequest)
     )
 
     # Create wrappers that adapt Request objects to dict params and wrap results
-    async def tasks_get_wrapper(req: TasksGetRequest) -> mcp.types.ServerResult:
+    # Using SDK-compatible type names (Phase 3: SDK Type Reconciliation)
+    async def tasks_get_wrapper(req: GetTaskRequest) -> mcp.types.ServerResult:
         params_dict = req.params.model_dump(by_alias=True, exclude_none=True)
         result = await tasks_get_handler(server, params_dict)
         return mcp.types.ServerResult(root=result)  # type: ignore[arg-type]
 
-    async def tasks_result_wrapper(req: TasksResultRequest) -> mcp.types.ServerResult:
+    async def tasks_result_wrapper(
+        req: GetTaskPayloadRequest,
+    ) -> mcp.types.ServerResult:
         params_dict = req.params.model_dump(by_alias=True, exclude_none=True)
         result = await tasks_result_handler(server, params_dict)
         return mcp.types.ServerResult(root=result)  # type: ignore[arg-type]
 
-    async def tasks_list_wrapper(req: TasksListRequest) -> mcp.types.ServerResult:
+    async def tasks_list_wrapper(req: ListTasksRequest) -> mcp.types.ServerResult:
         params_dict = req.params.model_dump(by_alias=True, exclude_none=True)
         result = await tasks_list_handler(server, params_dict)
         return mcp.types.ServerResult(root=result)  # type: ignore[arg-type]
 
-    async def tasks_cancel_wrapper(req: TasksCancelRequest) -> mcp.types.ServerResult:
+    async def tasks_cancel_wrapper(req: CancelTaskRequest) -> mcp.types.ServerResult:
         params_dict = req.params.model_dump(by_alias=True, exclude_none=True)
         result = await tasks_cancel_handler(server, params_dict)
         return mcp.types.ServerResult(root=result)  # type: ignore[arg-type]
 
-    async def tasks_delete_wrapper(req: TasksDeleteRequest) -> mcp.types.ServerResult:
+    async def tasks_delete_wrapper(req: DeleteTaskRequest) -> mcp.types.ServerResult:
         params_dict = req.params.model_dump(by_alias=True, exclude_none=True)
         result = await tasks_delete_handler(server, params_dict)
         return mcp.types.ServerResult(root=result)  # type: ignore[arg-type]
 
-    # Register handlers with MCP server
-    server._mcp_server.request_handlers[TasksGetRequest] = tasks_get_wrapper
-    server._mcp_server.request_handlers[TasksResultRequest] = tasks_result_wrapper
-    server._mcp_server.request_handlers[TasksListRequest] = tasks_list_wrapper
-    server._mcp_server.request_handlers[TasksCancelRequest] = tasks_cancel_wrapper
-    server._mcp_server.request_handlers[TasksDeleteRequest] = tasks_delete_wrapper
+    # Register handlers with MCP server (using SDK-compatible type names)
+    server._mcp_server.request_handlers[GetTaskRequest] = tasks_get_wrapper
+    server._mcp_server.request_handlers[GetTaskPayloadRequest] = tasks_result_wrapper
+    server._mcp_server.request_handlers[ListTasksRequest] = tasks_list_wrapper
+    server._mcp_server.request_handlers[CancelTaskRequest] = tasks_cancel_wrapper
+    server._mcp_server.request_handlers[DeleteTaskRequest] = tasks_delete_wrapper

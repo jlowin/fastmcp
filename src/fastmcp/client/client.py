@@ -1366,14 +1366,14 @@ class Client(Generic[ClientTransportT]):
         Raises:
             RuntimeError: If client not connected
         """
-        # TODO SEP-1686: Use TasksGetRequest (monkey-patched into ClientRequest union)
+        # TODO SEP-1686: Use GetTaskRequest (SDK-compatible, monkey-patched into ClientRequest union)
         from fastmcp.server.tasks._temporary_mcp_shims import (
-            TasksGetParams,
-            TasksGetRequest,
+            GetTaskParams,  # SDK-compatible name (was TasksGetParams)
+            GetTaskRequest,  # SDK-compatible name (was TasksGetRequest)
             TasksResponse,
         )
 
-        request = TasksGetRequest(params=TasksGetParams(taskId=task_id))
+        request = GetTaskRequest(params=GetTaskParams(taskId=task_id))
         result = await self.session.send_request(
             request=request,  # type: ignore[arg-type]
             result_type=TasksResponse,  # type: ignore[arg-type]
@@ -1395,14 +1395,14 @@ class Client(Generic[ClientTransportT]):
         Raises:
             RuntimeError: If client not connected, task not found, or task failed
         """
-        # TODO SEP-1686: Use TasksResultRequest (monkey-patched into ClientRequest union)
+        # TODO SEP-1686: Use GetTaskPayloadRequest (SDK-compatible, monkey-patched into ClientRequest union)
         from fastmcp.server.tasks._temporary_mcp_shims import (
+            GetTaskPayloadParams,  # SDK-compatible name (was TasksResultParams)
+            GetTaskPayloadRequest,  # SDK-compatible name (was TasksResultRequest)
             TasksResponse,
-            TasksResultParams,
-            TasksResultRequest,
         )
 
-        request = TasksResultRequest(params=TasksResultParams(taskId=task_id))
+        request = GetTaskPayloadRequest(params=GetTaskPayloadParams(taskId=task_id))
         return await self.session.send_request(
             request=request,  # type: ignore[arg-type]
             result_type=TasksResponse,  # type: ignore[arg-type]
@@ -1431,16 +1431,17 @@ class Client(Generic[ClientTransportT]):
         Raises:
             RuntimeError: If client not connected
         """
-        # TODO SEP-1686: Use TasksListRequest (monkey-patched into ClientRequest union)
+        # TODO SEP-1686: Use ListTasksRequest (SDK-compatible, monkey-patched into ClientRequest union)
+        from mcp.types import PaginatedRequestParams
+
         from fastmcp.server.tasks._temporary_mcp_shims import (
-            TasksListParams,
-            TasksListRequest,
+            ListTasksRequest,  # SDK-compatible name (was TasksListRequest)
             TasksResponse,
         )
 
         # Send protocol request
-        params = TasksListParams(cursor=cursor, limit=limit)
-        request = TasksListRequest(params=params)
+        params = PaginatedRequestParams(cursor=cursor, limit=limit)
+        request = ListTasksRequest(params=params)
         server_response = await self.session.send_request(
             request=request,  # type: ignore[arg-type]
             result_type=TasksResponse,  # type: ignore[arg-type]
@@ -1529,14 +1530,14 @@ class Client(Generic[ClientTransportT]):
         Raises:
             RuntimeError: If task doesn't exist
         """
-        # TODO SEP-1686: Use TasksCancelRequest (monkey-patched into ClientRequest union)
+        # TODO SEP-1686: Use CancelTaskRequest (SDK-compatible, monkey-patched into ClientRequest union)
         from fastmcp.server.tasks._temporary_mcp_shims import (
-            TasksCancelParams,
-            TasksCancelRequest,
+            CancelTaskParams,  # SDK-compatible name (was TasksCancelParams)
+            CancelTaskRequest,  # SDK-compatible name (was TasksCancelRequest)
             TasksResponse,
         )
 
-        request = TasksCancelRequest(params=TasksCancelParams(taskId=task_id))
+        request = CancelTaskRequest(params=CancelTaskParams(taskId=task_id))
         result = await self.session.send_request(
             request=request,  # type: ignore[arg-type]
             result_type=TasksResponse,  # type: ignore[arg-type]
@@ -1556,14 +1557,14 @@ class Client(Generic[ClientTransportT]):
             NotFoundError: If task doesn't exist
             RuntimeError: If server refuses deletion
         """
-        # TODO SEP-1686: Use TasksDeleteRequest (monkey-patched into ClientRequest union)
+        # TODO SEP-1686: Use DeleteTaskRequest (SDK-compatible, monkey-patched into ClientRequest union)
         from fastmcp.server.tasks._temporary_mcp_shims import (
-            TasksDeleteParams,
-            TasksDeleteRequest,
+            DeleteTaskParams,  # SDK-compatible name (was TasksDeleteParams)
+            DeleteTaskRequest,  # SDK-compatible name (was TasksDeleteRequest)
             TasksResponse,
         )
 
-        request = TasksDeleteRequest(params=TasksDeleteParams(taskId=task_id))
+        request = DeleteTaskRequest(params=DeleteTaskParams(taskId=task_id))
         await self.session.send_request(
             request=request,  # type: ignore[arg-type]
             result_type=TasksResponse,  # type: ignore[arg-type]
