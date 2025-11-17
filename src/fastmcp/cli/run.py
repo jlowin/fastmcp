@@ -203,7 +203,15 @@ async def run_v1_server_async(
     port: int | None = None,
     transport: TransportType | None = None,
 ) -> None:
-    """Run a FastMCP 1.x server in an async context."""
+    """Run a FastMCP 1.x server in an async context.
+
+    Args:
+        server: FastMCP 1.x server instance
+        host: Host to bind to
+        port: Port to bind to
+        transport: Transport protocol to use
+    """
+    
     if host:
         server.settings.host = host
     if port:
