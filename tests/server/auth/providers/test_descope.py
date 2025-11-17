@@ -5,7 +5,6 @@ from unittest.mock import patch
 
 import httpx
 import pytest
-from pydantic import ValidationError
 
 from fastmcp import Client, FastMCP
 from fastmcp.client.transports import StreamableHttpTransport
@@ -41,6 +40,26 @@ class TestDescopeProvider:
             assert provider.project_id == "P2env123"
             assert str(provider.base_url) == "https://envserver.com/"
             assert str(provider.descope_base_url) == "https://api.descope.com"
+
+    def test_init_with_old_env_vars(self):
+        """Test DescopeProvider initialization from old environment variables (backwards compatibility)."""
+        with patch.dict(
+            os.environ,
+            {
+                "FASTMCP_SERVER_AUTH_DESCOPEPROVIDER_PROJECT_ID": "P2oldenv123",
+                "FASTMCP_SERVER_AUTH_DESCOPEPROVIDER_DESCOPE_BASE_URL": "https://api.descope.com",
+                "FASTMCP_SERVER_AUTH_DESCOPEPROVIDER_BASE_URL": "https://envserver.com",
+            },
+        ):
+            provider = DescopeProvider()
+
+            assert provider.project_id == "P2oldenv123"
+            assert str(provider.base_url) == "https://envserver.com/"
+            assert str(provider.descope_base_url) == "https://api.descope.com"
+            assert (
+                provider.token_verifier.issuer  # type: ignore[attr-defined]
+                == "https://api.descope.com/v1/apps/P2oldenv123"
+            )
 
     def test_environment_variable_loading(self):
         """Test that environment variables are loaded correctly."""
@@ -81,12 +100,66 @@ class TestDescopeProvider:
         assert str(provider3.descope_base_url) == "https://api.descope.com"
         assert provider3.project_id == "P2abc123"
 
-    def test_config_url_required(self):
-        """Test that config_url is required."""
-        with pytest.raises(ValidationError):
+    def test_requires_config_url_or_project_id_and_descope_base_url(self):
+        """Test that either config_url or both project_id and descope_base_url are required."""
+        # Should raise error when neither API is provided
+        with pytest.raises(ValueError, match="Either config_url"):
             DescopeProvider(
                 base_url="https://myserver.com",
             )
+
+    def test_backwards_compatibility_with_project_id_and_descope_base_url(self):
+        """Test backwards compatibility with old API using project_id and descope_base_url."""
+        provider = DescopeProvider(
+            project_id="P2abc123",
+            descope_base_url="https://api.descope.com",
+            base_url="https://myserver.com",
+        )
+
+        assert provider.project_id == "P2abc123"
+        assert str(provider.descope_base_url) == "https://api.descope.com"
+        assert str(provider.base_url) == "https://myserver.com/"
+
+        # Check that JWT verifier uses the old issuer format
+        assert (
+            provider.token_verifier.issuer  # type: ignore[attr-defined]
+            == "https://api.descope.com/v1/apps/P2abc123"
+        )
+        assert (
+            provider.token_verifier.jwks_uri  # type: ignore[attr-defined]
+            == "https://api.descope.com/P2abc123/.well-known/jwks.json"
+        )
+
+    def test_backwards_compatibility_descope_base_url_without_scheme(self):
+        """Test that descope_base_url without scheme gets https:// prefix added."""
+        provider = DescopeProvider(
+            project_id="P2abc123",
+            descope_base_url="api.descope.com",
+            base_url="https://myserver.com",
+        )
+
+        assert str(provider.descope_base_url) == "https://api.descope.com"
+        assert (
+            provider.token_verifier.issuer  # type: ignore[attr-defined]
+            == "https://api.descope.com/v1/apps/P2abc123"
+        )
+
+    def test_config_url_takes_precedence_over_old_api(self):
+        """Test that config_url takes precedence when both APIs are provided."""
+        provider = DescopeProvider(
+            config_url="https://api.descope.com/v1/apps/agentic/P2new123/M123/.well-known/openid-configuration",
+            project_id="P2old123",  # Should be ignored
+            descope_base_url="https://old.descope.com",  # Should be ignored
+            base_url="https://myserver.com",
+        )
+
+        # Should use values from config_url, not the old API
+        assert provider.project_id == "P2new123"
+        assert str(provider.descope_base_url) == "https://api.descope.com"
+        assert (
+            provider.token_verifier.issuer  # type: ignore[attr-defined]
+            == "https://api.descope.com/v1/apps/agentic/P2new123/M123"
+        )
 
     def test_jwt_verifier_configured_correctly(self):
         """Test that JWT verifier is configured correctly."""

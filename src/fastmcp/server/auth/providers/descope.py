@@ -31,7 +31,9 @@ class DescopeProviderSettings(BaseSettings):
         extra="ignore",
     )
 
-    config_url: AnyHttpUrl
+    config_url: AnyHttpUrl | None = None
+    project_id: str | None = None
+    descope_base_url: AnyHttpUrl | str | None = None
     base_url: AnyHttpUrl
 
 
@@ -77,6 +79,8 @@ class DescopeProvider(RemoteAuthProvider):
         self,
         *,
         config_url: AnyHttpUrl | str | NotSetT = NotSet,
+        project_id: str | NotSetT = NotSet,
+        descope_base_url: AnyHttpUrl | str | NotSetT = NotSet,
         base_url: AnyHttpUrl | str | NotSetT = NotSet,
         token_verifier: TokenVerifier | None = None,
     ):
@@ -84,6 +88,9 @@ class DescopeProvider(RemoteAuthProvider):
 
         Args:
             config_url: Your Descope Well-Known URL (e.g., "https://.../v1/apps/agentic/P.../M.../.well-known/openid-configuration")
+                This is the new recommended way. If provided, project_id and descope_base_url are ignored.
+            project_id: Your Descope Project ID (e.g., "P2abc123"). Used with descope_base_url for backwards compatibility.
+            descope_base_url: Your Descope base URL (e.g., "https://api.descope.com"). Used with project_id for backwards compatibility.
             base_url: Public URL of this FastMCP server
             token_verifier: Optional token verifier. If None, creates JWT verifier for Descope
         """
@@ -92,38 +99,58 @@ class DescopeProvider(RemoteAuthProvider):
                 k: v
                 for k, v in {
                     "config_url": config_url,
+                    "project_id": project_id,
+                    "descope_base_url": descope_base_url,
                     "base_url": base_url,
                 }.items()
                 if v is not NotSet
             }
         )
 
-        # Strip /.well-known/openid-configuration from config_url if present
-        issuer_url = str(settings.config_url)
-        if issuer_url.endswith("/.well-known/openid-configuration"):
-            issuer_url = issuer_url[: -len("/.well-known/openid-configuration")]
+        self.base_url = AnyHttpUrl(str(settings.base_url).rstrip("/"))
 
-        # Parse the issuer URL to extract descope_base_url and project_id for other uses
-        parsed_url = urlparse(issuer_url)
-        path_parts = parsed_url.path.strip("/").split("/")
+        # Determine which API is being used
+        if settings.config_url is not None:
+            # New API: use config_url
+            # Strip /.well-known/openid-configuration from config_url if present
+            issuer_url = str(settings.config_url)
+            if issuer_url.endswith("/.well-known/openid-configuration"):
+                issuer_url = issuer_url[: -len("/.well-known/openid-configuration")]
 
-        # Extract project_id from path (format: /v1/apps/agentic/P.../M...)
-        if "agentic" in path_parts:
-            agentic_index = path_parts.index("agentic")
-            if agentic_index + 1 < len(path_parts):
-                self.project_id = path_parts[agentic_index + 1]
+            # Parse the issuer URL to extract descope_base_url and project_id for other uses
+            parsed_url = urlparse(issuer_url)
+            path_parts = parsed_url.path.strip("/").split("/")
+
+            # Extract project_id from path (format: /v1/apps/agentic/P.../M...)
+            if "agentic" in path_parts:
+                agentic_index = path_parts.index("agentic")
+                if agentic_index + 1 < len(path_parts):
+                    self.project_id = path_parts[agentic_index + 1]
+                else:
+                    raise ValueError(
+                        f"Could not extract project_id from config_url: {issuer_url}"
+                    )
             else:
                 raise ValueError(
-                    f"Could not extract project_id from config_url: {issuer_url}"
+                    f"Could not find 'agentic' in config_url path: {issuer_url}"
                 )
+
+            # Extract descope_base_url (scheme + netloc)
+            self.descope_base_url = f"{parsed_url.scheme}://{parsed_url.netloc}".rstrip("/")
+        elif settings.project_id is not None and settings.descope_base_url is not None:
+            # Old API: use project_id and descope_base_url
+            self.project_id = settings.project_id
+            descope_base_url_str = str(settings.descope_base_url).rstrip("/")
+            # Ensure descope_base_url has a scheme
+            if not descope_base_url_str.startswith(("http://", "https://")):
+                descope_base_url_str = f"https://{descope_base_url_str}"
+            self.descope_base_url = descope_base_url_str
+            # Old issuer format
+            issuer_url = f"{self.descope_base_url}/v1/apps/{self.project_id}"
         else:
             raise ValueError(
-                f"Could not find 'agentic' in config_url path: {issuer_url}"
+                "Either config_url (new API) or both project_id and descope_base_url (old API) must be provided"
             )
-
-        # Extract descope_base_url (scheme + netloc)
-        self.descope_base_url = f"{parsed_url.scheme}://{parsed_url.netloc}".rstrip("/")
-        self.base_url = AnyHttpUrl(str(settings.base_url).rstrip("/"))
 
         # Create default JWT verifier if none provided
         if token_verifier is None:
