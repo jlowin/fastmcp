@@ -35,7 +35,7 @@ DOCKET_TO_MCP_STATE: dict[ExecutionState, str] = {
 }
 
 
-async def tasks_get_handler(server: FastMCP, params: dict[str, Any]) -> dict[str, Any]:
+async def tasks_get_handler(server: FastMCP, params: dict[str, Any]):
     """Handle MCP 'tasks/get' request (SEP-1686).
 
     Args:
@@ -43,9 +43,10 @@ async def tasks_get_handler(server: FastMCP, params: dict[str, Any]) -> dict[str
         params: Request params containing taskId
 
     Returns:
-        dict: Task status response
+        GetTaskResult: Task status response with spec-compliant fields
     """
     import fastmcp.server.context
+    from fastmcp.server.tasks._temporary_mcp_shims import GetTaskResult
 
     async with fastmcp.server.context.Context(fastmcp=server) as ctx:
         client_task_id = params.get("taskId")
@@ -85,24 +86,26 @@ async def tasks_get_handler(server: FastMCP, params: dict[str, Any]) -> dict[str
             # Task not found - return unknown state per SEP-1686
             # Use synthetic timestamp since task never existed or was deleted
             # Per spec lines 447-448: SHOULD NOT include related-task in tasks/get
-            return {
-                "taskId": client_task_id,
-                "status": "unknown",
-                "createdAt": created_at or datetime.now(timezone.utc).isoformat(),
-                "pollInterval": 1000,
-            }
+            return GetTaskResult(
+                taskId=client_task_id,
+                status="unknown",
+                createdAt=created_at or datetime.now(timezone.utc).isoformat(),
+                ttl=None,
+                pollInterval=1000,
+            )
 
         execution = await docket.get_execution(task_key)
         if execution is None:
             # Task key exists but no execution - unknown
             # Use stored timestamp if available, otherwise synthetic
             # Per spec lines 447-448: SHOULD NOT include related-task in tasks/get
-            return {
-                "taskId": client_task_id,
-                "status": "unknown",
-                "createdAt": created_at or datetime.now(timezone.utc).isoformat(),
-                "pollInterval": 1000,
-            }
+            return GetTaskResult(
+                taskId=client_task_id,
+                status="unknown",
+                createdAt=created_at or datetime.now(timezone.utc).isoformat(),
+                ttl=None,
+                pollInterval=1000,
+            )
 
         # Sync state from Redis
         await execution.sync()
@@ -113,22 +116,21 @@ async def tasks_get_handler(server: FastMCP, params: dict[str, Any]) -> dict[str
         # Build response (use default ttl since we don't track per-task values)
         # createdAt is REQUIRED per SEP-1686 final spec (line 430)
         # Per spec lines 447-448: SHOULD NOT include related-task metadata in tasks/get
-        response = {
-            "taskId": client_task_id,
-            "status": mcp_state,
-            "createdAt": created_at,  # Required ISO 8601 timestamp
-            "ttl": 60000,  # Default value in milliseconds
-            "pollInterval": 1000,
-        }
-
-        # Add error info if failed
+        error_message = None
         if execution.state == ExecutionState.FAILED:
             try:
                 await execution.get_result(timeout=timedelta(seconds=0))
             except Exception as error:
-                response["error"] = str(error)
+                error_message = str(error)
 
-        return response
+        return GetTaskResult(
+            taskId=client_task_id,
+            status=mcp_state,  # type: ignore[arg-type]
+            createdAt=created_at,  # type: ignore[arg-type]  # Required ISO 8601 timestamp
+            ttl=60000,  # Default value in milliseconds
+            pollInterval=1000,
+            error=error_message,
+        )
 
 
 async def tasks_result_handler(server: FastMCP, params: dict[str, Any]) -> Any:
@@ -245,7 +247,7 @@ async def tasks_result_handler(server: FastMCP, params: dict[str, Any]) -> Any:
             )
 
 
-async def tasks_list_handler(server: FastMCP, params: dict[str, Any]) -> dict[str, Any]:
+async def tasks_list_handler(server: FastMCP, params: dict[str, Any]):
     """Handle MCP 'tasks/list' request (SEP-1686).
 
     Note: With client-side tracking, this returns minimal info.
@@ -255,16 +257,15 @@ async def tasks_list_handler(server: FastMCP, params: dict[str, Any]) -> dict[st
         params: Request params (cursor, limit)
 
     Returns:
-        dict: Response with tasks list and pagination
+        ListTasksResult: Response with tasks list and pagination
     """
+    from fastmcp.server.tasks._temporary_mcp_shims import ListTasksResult
+
     # Return empty list - client tracks tasks locally
-    # Note: tasks/list is not task-specific, so _meta doesn't have taskId
-    return {"tasks": [], "nextCursor": None, "_meta": {}}
+    return ListTasksResult(tasks=[], nextCursor=None)
 
 
-async def tasks_cancel_handler(
-    server: FastMCP, params: dict[str, Any]
-) -> dict[str, Any]:
+async def tasks_cancel_handler(server: FastMCP, params: dict[str, Any]):
     """Handle MCP 'tasks/cancel' request (SEP-1686).
 
     Cancels a running task, transitioning it to cancelled state.
@@ -274,9 +275,10 @@ async def tasks_cancel_handler(
         params: Request params containing taskId
 
     Returns:
-        dict: Task status response showing cancelled state
+        GetTaskResult: Task status response showing cancelled state
     """
     import fastmcp.server.context
+    from fastmcp.server.tasks._temporary_mcp_shims import GetTaskResult
 
     async with fastmcp.server.context.Context(fastmcp=server) as ctx:
         client_task_id = params.get("taskId")
@@ -335,17 +337,16 @@ async def tasks_cancel_handler(
         # Return task status with cancelled state
         # createdAt is REQUIRED per SEP-1686 final spec (line 430)
         # Per spec lines 447-448: SHOULD NOT include related-task metadata in tasks/cancel
-        return {
-            "taskId": client_task_id,
-            "status": "cancelled",
-            "createdAt": created_at or datetime.now(timezone.utc).isoformat(),
-            "pollInterval": 1000,
-        }
+        return GetTaskResult(
+            taskId=client_task_id,
+            status="cancelled",
+            createdAt=created_at or datetime.now(timezone.utc).isoformat(),
+            ttl=None,
+            pollInterval=1000,
+        )
 
 
-async def tasks_delete_handler(
-    server: FastMCP, params: dict[str, Any]
-) -> dict[str, Any]:
+async def tasks_delete_handler(server: FastMCP, params: dict[str, Any]):
     """Handle MCP 'tasks/delete' request (SEP-1686).
 
     Deletion is discretionary - we allow deletion of any task.
@@ -355,8 +356,10 @@ async def tasks_delete_handler(
         params: Request params containing taskId
 
     Returns:
-        dict: Empty response with related-task metadata
+        EmptyResult: Response with related-task metadata
     """
+    from mcp.types import EmptyResult
+
     import fastmcp.server.context
 
     async with fastmcp.server.context.Context(fastmcp=server) as ctx:
@@ -413,13 +416,13 @@ async def tasks_delete_handler(
             await redis.delete(redis_key)
 
         # Return empty response with related-task metadata
-        return {
-            "_meta": {
+        return EmptyResult(
+            _meta={
                 "modelcontextprotocol.io/related-task": {
                     "taskId": client_task_id,
                 }
             }
-        }
+        )
 
 
 def setup_task_protocol_handlers(server: FastMCP) -> None:
@@ -444,7 +447,9 @@ def setup_task_protocol_handlers(server: FastMCP) -> None:
     async def tasks_get_wrapper(req: GetTaskRequest) -> mcp.types.ServerResult:
         params_dict = req.params.model_dump(by_alias=True, exclude_none=True)
         result = await tasks_get_handler(server, params_dict)
-        return mcp.types.ServerResult(root=result)  # type: ignore[arg-type]
+        # Serialize typed result to dict for ServerResult compatibility
+        result_dict = result.model_dump(by_alias=True, exclude_none=True)
+        return mcp.types.ServerResult(root=result_dict)  # type: ignore[arg-type]
 
     async def tasks_result_wrapper(
         req: GetTaskPayloadRequest,
@@ -454,19 +459,29 @@ def setup_task_protocol_handlers(server: FastMCP) -> None:
         return mcp.types.ServerResult(root=result)  # type: ignore[arg-type]
 
     async def tasks_list_wrapper(req: ListTasksRequest) -> mcp.types.ServerResult:
-        params_dict = req.params.model_dump(by_alias=True, exclude_none=True)
+        params_dict = (
+            req.params.model_dump(by_alias=True, exclude_none=True)
+            if req.params
+            else {}
+        )  # type: ignore[union-attr]
         result = await tasks_list_handler(server, params_dict)
-        return mcp.types.ServerResult(root=result)  # type: ignore[arg-type]
+        # Serialize typed result to dict for ServerResult compatibility
+        result_dict = result.model_dump(by_alias=True, exclude_none=True)
+        return mcp.types.ServerResult(root=result_dict)  # type: ignore[arg-type]
 
     async def tasks_cancel_wrapper(req: CancelTaskRequest) -> mcp.types.ServerResult:
         params_dict = req.params.model_dump(by_alias=True, exclude_none=True)
         result = await tasks_cancel_handler(server, params_dict)
-        return mcp.types.ServerResult(root=result)  # type: ignore[arg-type]
+        # Serialize typed result to dict for ServerResult compatibility
+        result_dict = result.model_dump(by_alias=True, exclude_none=True)
+        return mcp.types.ServerResult(root=result_dict)  # type: ignore[arg-type]
 
     async def tasks_delete_wrapper(req: DeleteTaskRequest) -> mcp.types.ServerResult:
         params_dict = req.params.model_dump(by_alias=True, exclude_none=True)
         result = await tasks_delete_handler(server, params_dict)
-        return mcp.types.ServerResult(root=result)  # type: ignore[arg-type]
+        # Serialize typed result to dict for ServerResult compatibility
+        result_dict = result.model_dump(by_alias=True, exclude_none=True)
+        return mcp.types.ServerResult(root=result_dict)  # type: ignore[arg-type]
 
     # Register handlers with MCP server (using SDK-compatible type names)
     server._mcp_server.request_handlers[GetTaskRequest] = tasks_get_wrapper
