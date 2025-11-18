@@ -6,6 +6,93 @@ from fastmcp import FastMCP
 from fastmcp.client import Client
 
 
+class TestResourceContentMetaRawResponse:
+    """Test that _meta is present in raw MCP response."""
+
+    async def test_raw_response_includes_meta(self):
+        """Test that raw MCP response includes _meta in content."""
+        mcp = FastMCP("TestServer")
+
+        @mcp.resource(uri="test://raw", meta={"widgetDomain": "example.com"})
+        def raw_resource() -> str:
+            return "Raw content"
+
+        async with Client(mcp) as client:
+            # Get the raw MCP response
+            result = await client.read_resource_mcp(AnyUrl("test://raw"))
+
+            # Verify response structure
+            assert result.contents is not None
+            assert len(result.contents) == 1
+
+            # Check the raw content object
+            content = result.contents[0]
+            assert hasattr(content, "meta")
+            assert content.meta is not None
+            assert "widgetDomain" in content.meta
+            assert content.meta["widgetDomain"] == "example.com"
+
+            # Verify serialization includes _meta
+            content_dict = content.model_dump()
+            assert "meta" in content_dict
+            assert content_dict["meta"]["widgetDomain"] == "example.com"
+
+    async def test_raw_response_template_includes_meta(self):
+        """Test that raw MCP response includes _meta for templates."""
+        mcp = FastMCP("TestServer")
+
+        @mcp.resource(
+            uri="test://item/{item_id}", meta={"widgetDomain": "items.example.com"}
+        )
+        def item_resource(item_id: str) -> str:
+            return f"Item: {item_id}"
+
+        async with Client(mcp) as client:
+            # Get the raw MCP response
+            result = await client.read_resource_mcp(AnyUrl("test://item/456"))
+
+            # Verify response structure
+            assert result.contents is not None
+            assert len(result.contents) == 1
+
+            # Check the raw content object
+            content = result.contents[0]
+            assert hasattr(content, "meta")
+            assert content.meta is not None
+            assert "widgetDomain" in content.meta
+            assert content.meta["widgetDomain"] == "items.example.com"
+
+    async def test_raw_response_meta_serialization(self):
+        """Test that _meta is properly serialized in the wire format."""
+        mcp = FastMCP("TestServer")
+
+        meta_data = {
+            "widgetDomain": "example.com",
+            "version": "2.0",
+            "author": "test",
+        }
+
+        @mcp.resource(uri="test://serialize", meta=meta_data)
+        def serialize_resource() -> str:
+            return "Serialized content"
+
+        async with Client(mcp) as client:
+            # Get the raw MCP response
+            result = await client.read_resource_mcp(AnyUrl("test://serialize"))
+
+            # Verify the content
+            content = result.contents[0]
+
+            # Serialize to dict and verify all meta fields are present
+            content_dict = content.model_dump()
+            assert "meta" in content_dict
+
+            # Verify all custom meta fields
+            for key, value in meta_data.items():
+                assert key in content_dict["meta"]
+                assert content_dict["meta"][key] == value
+
+
 class TestResourceContentMeta:
     """Test resource content _meta attribute."""
 
