@@ -464,8 +464,63 @@ class FastMCP(Generic[LifespanResultT]):
         self._mcp_server.call_tool(validate_input=self.strict_input_validation)(
             self._call_tool_mcp
         )
-        self._mcp_server.read_resource()(self._read_resource_mcp)
+        # Custom read_resource handler to support _meta in content
+        self._setup_read_resource_handler()
         self._mcp_server.get_prompt()(self._get_prompt_mcp)
+
+    def _setup_read_resource_handler(self) -> None:
+        """Set up custom read_resource handler with _meta support."""
+        import base64
+
+        async def handler(req: mcp.types.ReadResourceRequest):
+            """Custom handler that preserves resource meta in content."""
+            uri = req.params.uri
+            result = await self._read_resource_mcp(uri)
+
+            # Convert ReadResourceContents to proper MCP types with _meta
+            contents_list: list[
+                mcp.types.TextResourceContents | mcp.types.BlobResourceContents
+            ] = []
+
+            # Get the resource to access its meta
+            try:
+                resource = await self._resource_manager.get_resource(uri)
+                resource_meta = resource.get_meta(
+                    include_fastmcp_meta=self.include_fastmcp_meta
+                )
+            except Exception:
+                resource_meta = None
+
+            for content_item in result:
+                match content_item.content:
+                    case str() as data:
+                        contents_list.append(
+                            mcp.types.TextResourceContents(
+                                uri=uri,
+                                text=data,
+                                mimeType=content_item.mime_type or "text/plain",
+                                _meta=resource_meta,
+                            )
+                        )
+                    case bytes() as data:
+                        contents_list.append(
+                            mcp.types.BlobResourceContents(
+                                uri=uri,
+                                blob=base64.b64encode(data).decode(),
+                                mimeType=content_item.mime_type
+                                or "application/octet-stream",
+                                _meta=resource_meta,
+                            )
+                        )
+
+            return mcp.types.ServerResult(
+                mcp.types.ReadResourceResult(
+                    contents=contents_list,
+                )
+            )
+
+        # Register the custom handler directly
+        self._mcp_server.request_handlers[mcp.types.ReadResourceRequest] = handler
 
     async def _apply_middleware(
         self,

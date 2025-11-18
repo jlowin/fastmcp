@@ -184,10 +184,14 @@ class ResourceTemplate(FastMCPComponent):
             fn=resource_read_fn,
             uri=uri,
             name=self.name,
+            title=self.title,
             description=self.description,
+            icons=self.icons,
             mime_type=self.mime_type,
             tags=self.tags,
             enabled=self.enabled,
+            annotations=self.annotations,
+            meta=self.meta,
         )
 
     def to_mcp_template(
