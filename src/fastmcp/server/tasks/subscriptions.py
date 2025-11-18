@@ -45,16 +45,12 @@ async def subscribe_to_task_updates(
         docket: Docket instance for subscribing to execution events
     """
     try:
-        logger.info(f"[SUBSCRIPTION] Starting for task {task_id}, key={task_key}")
         execution = await docket.get_execution(task_key)
         if execution is None:
             logger.warning(f"No execution found for task {task_id}")
             return
 
-        logger.debug(f"Starting subscription for task {task_id}")
-
         # Subscribe to state and progress events from Docket
-        # This is an AsyncGenerator that yields events until task completes
         async for event in execution.subscribe():
             if event["type"] == "state":
                 # Send notifications/tasks/status when state changes
@@ -68,10 +64,7 @@ async def subscribe_to_task_updates(
                 )
             elif event["type"] == "progress":
                 # Progress events available but not used yet
-                # Could send progress notifications here if needed
                 pass
-
-        logger.info(f"[SUBSCRIPTION] Ended for task {task_id}")
 
     except Exception as e:
         logger.warning(f"Subscription task failed for {task_id}: {e}", exc_info=True)

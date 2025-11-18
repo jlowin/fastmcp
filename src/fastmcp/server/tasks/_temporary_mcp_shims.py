@@ -439,11 +439,11 @@ client_original_types = get_args(client_original_union)
 client_new_union = Union[
     (
         *client_original_types,
-        GetTaskRequest,  # SDK-compatible name (was TasksGetRequest)
-        GetTaskPayloadRequest,  # SDK-compatible name (was TasksResultRequest)
-        ListTasksRequest,  # SDK-compatible name (was TasksListRequest)
-        CancelTaskRequest,  # Our extension (SDK doesn't have yet)
-        DeleteTaskRequest,  # SDK-compatible name (was TasksDeleteRequest)
+        GetTaskRequest,
+        GetTaskPayloadRequest,
+        ListTasksRequest,
+        CancelTaskRequest,
+        DeleteTaskRequest,
     )
 ]
 
@@ -459,11 +459,11 @@ server_original_types = get_args(server_original_union)
 server_new_union = Union[
     (
         *server_original_types,
-        GetTaskRequest,  # SDK-compatible name (was TasksGetRequest)
-        GetTaskPayloadRequest,  # SDK-compatible name (was TasksResultRequest)
-        ListTasksRequest,  # SDK-compatible name (was TasksListRequest)
-        CancelTaskRequest,  # Our extension (SDK doesn't have yet)
-        DeleteTaskRequest,  # SDK-compatible name (was TasksDeleteRequest)
+        GetTaskRequest,
+        GetTaskPayloadRequest,
+        ListTasksRequest,
+        CancelTaskRequest,
+        DeleteTaskRequest,
     )
 ]
 

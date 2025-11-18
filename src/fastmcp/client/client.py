@@ -21,13 +21,14 @@ from mcp import ClientSession
 from pydantic import AnyUrl
 
 import fastmcp
+from fastmcp.client._temporary_sep_1686_shims import ClientMessageHandler
 from fastmcp.client.elicitation import ElicitationHandler, create_elicitation_callback
 from fastmcp.client.logging import (
     LogHandler,
     create_log_callback,
     default_log_handler,
 )
-from fastmcp.client.messages import Message, MessageHandler, MessageHandlerT
+from fastmcp.client.messages import MessageHandler, MessageHandlerT
 from fastmcp.client.progress import ProgressHandler, default_progress_handler
 from fastmcp.client.roots import (
     RootsHandler,
@@ -106,30 +107,6 @@ class ClientSessionState:
     ready_event: anyio.Event = field(default_factory=anyio.Event)
     stop_event: anyio.Event = field(default_factory=anyio.Event)
     initialize_result: mcp.types.InitializeResult | None = None
-
-
-class ClientMessageHandler(MessageHandler):
-    """MessageHandler that routes task status notifications to Task objects."""
-
-    def __init__(self, client: Client):
-        super().__init__()
-        self._client_ref: weakref.ref[Client] = weakref.ref(client)
-
-    async def dispatch(self, message: Message) -> None:
-        """Dispatch messages, including task status notifications."""
-        # Handle task status notifications
-        if isinstance(message, mcp.types.ServerNotification):
-            # Check if this is a task status notification (check method, not type)
-            if (
-                hasattr(message.root, "method")
-                and message.root.method == "notifications/tasks/status"
-            ):
-                client = self._client_ref()
-                if client:
-                    client._handle_task_status_notification(message.root)
-
-        # Call parent dispatch for all other messages
-        await super().dispatch(message)
 
 
 class Client(Generic[ClientTransportT]):
@@ -466,7 +443,7 @@ class Client(Generic[ClientTransportT]):
                 # Handle task capabilities if enabled
                 if fastmcp.settings.experimental.enable_tasks:
                     try:
-                        from fastmcp.client._temporary_task_capability_shim import (
+                        from fastmcp.client._temporary_sep_1686_shims import (
                             task_capable_initialize,
                         )
 
@@ -1463,8 +1440,8 @@ class Client(Generic[ClientTransportT]):
         """
         # TODO SEP-1686: Use GetTaskRequest (SDK-compatible, monkey-patched into ClientRequest union)
         from fastmcp.server.tasks._temporary_mcp_shims import (
-            GetTaskParams,  # SDK-compatible name (was TasksGetParams)
-            GetTaskRequest,  # SDK-compatible name (was TasksGetRequest)
+            GetTaskParams,
+            GetTaskRequest,
             TasksResponse,
         )
 
@@ -1492,8 +1469,8 @@ class Client(Generic[ClientTransportT]):
         """
         # TODO SEP-1686: Use GetTaskPayloadRequest (SDK-compatible, monkey-patched into ClientRequest union)
         from fastmcp.server.tasks._temporary_mcp_shims import (
-            GetTaskPayloadParams,  # SDK-compatible name (was TasksResultParams)
-            GetTaskPayloadRequest,  # SDK-compatible name (was TasksResultRequest)
+            GetTaskPayloadParams,
+            GetTaskPayloadRequest,
             TasksResponse,
         )
 
@@ -1530,7 +1507,7 @@ class Client(Generic[ClientTransportT]):
         from mcp.types import PaginatedRequestParams
 
         from fastmcp.server.tasks._temporary_mcp_shims import (
-            ListTasksRequest,  # SDK-compatible name (was TasksListRequest)
+            ListTasksRequest,
             TasksResponse,
         )
 
@@ -1627,8 +1604,8 @@ class Client(Generic[ClientTransportT]):
         """
         # TODO SEP-1686: Use CancelTaskRequest (SDK-compatible, monkey-patched into ClientRequest union)
         from fastmcp.server.tasks._temporary_mcp_shims import (
-            CancelTaskParams,  # SDK-compatible name (was TasksCancelParams)
-            CancelTaskRequest,  # SDK-compatible name (was TasksCancelRequest)
+            CancelTaskParams,
+            CancelTaskRequest,
             TasksResponse,
         )
 
@@ -1654,8 +1631,8 @@ class Client(Generic[ClientTransportT]):
         """
         # TODO SEP-1686: Use DeleteTaskRequest (SDK-compatible, monkey-patched into ClientRequest union)
         from fastmcp.server.tasks._temporary_mcp_shims import (
-            DeleteTaskParams,  # SDK-compatible name (was TasksDeleteParams)
-            DeleteTaskRequest,  # SDK-compatible name (was TasksDeleteRequest)
+            DeleteTaskParams,
+            DeleteTaskRequest,
             TasksResponse,
         )
 

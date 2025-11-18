@@ -11,8 +11,9 @@ from typing import TYPE_CHECKING, Any
 import mcp.types
 from docket.execution import ExecutionState
 from mcp.shared.exceptions import McpError
-from mcp.types import INTERNAL_ERROR, INVALID_PARAMS, ErrorData
+from mcp.types import INTERNAL_ERROR, INVALID_PARAMS, EmptyResult, ErrorData
 
+from fastmcp.server.tasks._temporary_mcp_shims import GetTaskResult, ListTasksResult
 from fastmcp.server.tasks.converters import (
     convert_prompt_result,
     convert_resource_result,
@@ -35,7 +36,7 @@ DOCKET_TO_MCP_STATE: dict[ExecutionState, str] = {
 }
 
 
-async def tasks_get_handler(server: FastMCP, params: dict[str, Any]):
+async def tasks_get_handler(server: FastMCP, params: dict[str, Any]) -> GetTaskResult:
     """Handle MCP 'tasks/get' request (SEP-1686).
 
     Args:
@@ -258,7 +259,9 @@ async def tasks_result_handler(server: FastMCP, params: dict[str, Any]) -> Any:
             )
 
 
-async def tasks_list_handler(server: FastMCP, params: dict[str, Any]):
+async def tasks_list_handler(
+    server: FastMCP, params: dict[str, Any]
+) -> ListTasksResult:
     """Handle MCP 'tasks/list' request (SEP-1686).
 
     Note: With client-side tracking, this returns minimal info.
@@ -276,7 +279,9 @@ async def tasks_list_handler(server: FastMCP, params: dict[str, Any]):
     return ListTasksResult(tasks=[], nextCursor=None)
 
 
-async def tasks_cancel_handler(server: FastMCP, params: dict[str, Any]):
+async def tasks_cancel_handler(
+    server: FastMCP, params: dict[str, Any]
+) -> GetTaskResult:
     """Handle MCP 'tasks/cancel' request (SEP-1686).
 
     Cancels a running task, transitioning it to cancelled state.
@@ -359,7 +364,7 @@ async def tasks_cancel_handler(server: FastMCP, params: dict[str, Any]):
         )
 
 
-async def tasks_delete_handler(server: FastMCP, params: dict[str, Any]):
+async def tasks_delete_handler(server: FastMCP, params: dict[str, Any]) -> EmptyResult:
     """Handle MCP 'tasks/delete' request (SEP-1686).
 
     Deletion is discretionary - we allow deletion of any task.
@@ -448,15 +453,14 @@ def setup_task_protocol_handlers(server: FastMCP) -> None:
     """
 
     from fastmcp.server.tasks._temporary_mcp_shims import (
-        CancelTaskRequest,  # SDK-compatible name (was TasksCancelRequest)
-        DeleteTaskRequest,  # SDK-compatible name (was TasksDeleteRequest)
-        GetTaskPayloadRequest,  # SDK-compatible name (was TasksResultRequest)
-        GetTaskRequest,  # SDK-compatible name (was TasksGetRequest)
-        ListTasksRequest,  # SDK-compatible name (was TasksListRequest)
+        CancelTaskRequest,
+        DeleteTaskRequest,
+        GetTaskPayloadRequest,
+        GetTaskRequest,
+        ListTasksRequest,
     )
 
     # Create wrappers that adapt Request objects to dict params and wrap results
-    # Using SDK-compatible type names (Phase 3: SDK Type Reconciliation)
     async def tasks_get_wrapper(req: GetTaskRequest) -> mcp.types.ServerResult:
         params_dict = req.params.model_dump(by_alias=True, exclude_none=True)
         result = await tasks_get_handler(server, params_dict)

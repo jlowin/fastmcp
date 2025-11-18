@@ -1,18 +1,19 @@
-"""SEP-1686 task protocol types and client Task classes."""
+"""SEP-1686 client Task classes."""
 
 import abc
 import asyncio
 import inspect
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar
+from typing import TYPE_CHECKING, Generic, TypeVar
 
 import mcp.types
-import pydantic
-from pydantic import BaseModel
 
+from fastmcp.client._temporary_sep_1686_shims import (
+    CallToolResult,
+    TaskStatusResponse,
+)
 from fastmcp.utilities.logging import get_logger
 
 logger = get_logger(__name__)
@@ -21,130 +22,7 @@ if TYPE_CHECKING:
     from fastmcp.client.client import Client
 
 
-class TasksGetRequest(BaseModel):
-    """Request for tasks/get MCP method."""
-
-    method: Literal["tasks/get"] = "tasks/get"
-    params: "TasksGetParams"
-
-
-class TasksGetParams(BaseModel):
-    """Parameters for tasks/get request."""
-
-    taskId: str
-    _meta: dict[str, Any] | None = None
-
-
-class TasksGetResult(BaseModel):
-    """Result from tasks/get MCP method."""
-
-    taskId: str
-    status: Literal[
-        "submitted", "working", "completed", "failed", "cancelled", "unknown"
-    ]
-    createdAt: str
-    ttl: int | None = None
-    pollInterval: int | None = None
-    error: str | None = None
-
-
-class TasksResultRequest(BaseModel):
-    """Request for tasks/result MCP method."""
-
-    method: Literal["tasks/result"] = "tasks/result"
-    params: "TasksResultParams"
-
-
-class TasksResultParams(BaseModel):
-    """Parameters for tasks/result request."""
-
-    taskId: str
-    _meta: dict[str, Any] | None = None
-
-
-class TasksListRequest(BaseModel):
-    """Request for tasks/list MCP method."""
-
-    method: Literal["tasks/list"] = "tasks/list"
-    params: "TasksListParams"
-
-
-class TasksListParams(BaseModel):
-    """Parameters for tasks/list request."""
-
-    cursor: str | None = None
-    limit: int = 50
-    _meta: dict[str, Any] | None = None
-
-
-class TasksListResult(BaseModel):
-    """Result from tasks/list MCP method."""
-
-    tasks: list[dict[str, Any]]
-    nextCursor: str | None = None
-
-
-class TasksDeleteRequest(BaseModel):
-    """Request for tasks/delete MCP method."""
-
-    method: Literal["tasks/delete"] = "tasks/delete"
-    params: "TasksDeleteParams"
-
-
-class TasksDeleteParams(BaseModel):
-    """Parameters for tasks/delete request."""
-
-    taskId: str
-    _meta: dict[str, Any] | None = None
-
-
-class TasksDeleteResult(BaseModel):
-    """Result from tasks/delete MCP method."""
-
-    _meta: dict[str, Any] | None = None
-
-
-# Task execution classes
-
-
-@dataclass
-class CallToolResult:
-    """Parsed result from a tool call."""
-
-    content: list[mcp.types.ContentBlock]
-    structured_content: dict[str, Any] | None
-    meta: dict[str, Any] | None
-    data: Any = None
-    is_error: bool = False
-
-
 TaskResultT = TypeVar("TaskResultT")
-
-
-class TaskStatusResponse(pydantic.BaseModel):
-    """Response from tasks/get endpoint (SEP-1686)."""
-
-    task_id: str = pydantic.Field(alias="taskId")
-    """The task identifier."""
-
-    status: Literal[
-        "submitted", "working", "completed", "failed", "cancelled", "unknown"
-    ]
-    """Current task state."""
-
-    created_at: str = pydantic.Field(alias="createdAt")
-    """ISO 8601 timestamp when the task was created."""
-
-    ttl: int | None = pydantic.Field(default=None, alias="ttl")
-    """Actual retention duration in milliseconds after completion, None for unlimited."""
-
-    poll_interval: int | None = pydantic.Field(default=None, alias="pollInterval")
-    """Suggested polling interval in milliseconds."""
-
-    error: str | None = None
-    """Error message if status is 'failed'."""
-
-    model_config = pydantic.ConfigDict(populate_by_name=True)
 
 
 class Task(abc.ABC, Generic[TaskResultT]):

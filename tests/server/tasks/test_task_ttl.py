@@ -85,39 +85,3 @@ async def test_default_keepalive_when_not_specified(keepalive_server: FastMCP):
         status = await task.status()
         # Should have default ttl (60000ms = 60 seconds)
         assert status.ttl == 60000
-
-
-@pytest.mark.skip(
-    reason="Cannot test per-task TTL expiration - Docket uses global execution_ttl (60s default)"
-)
-async def test_expired_task_returns_unknown(keepalive_server: FastMCP):
-    """Tasks return unknown state after ttl expires.
-
-    This test requires per-task TTL support to verify short-lived task expiration.
-    FastMCP uses Docket's global execution_ttl (60 seconds default) for all tasks.
-
-    TODO: If Docket gains per-task TTL support, un-skip this test and verify:
-    1. Client can request short TTL (e.g., 100ms)
-    2. Server respects this TTL
-    3. After TTL expires, tasks/get returns status="unknown"
-    4. Redis automatically cleans up expired task mappings
-
-    This is spec-compliant: servers MAY override requested TTL (spec line 431).
-    FastMCP's architectural choice is to use a consistent global TTL for all tasks.
-    """
-    async with Client(keepalive_server) as client:
-        # Submit task with very short ttl (100ms)
-        task = await client.call_tool("quick_task", {"value": 7}, task=True, ttl=100)
-        await task.wait(timeout=2.0)
-        task_id = task.task_id
-
-        # Task should be completed
-        status = await task.status()
-        assert status.status == "completed"
-
-        # Wait for ttl to expire
-        await asyncio.sleep(0.2)  # 200ms > 100ms ttl
-
-        # Docket's TTL handles cleanup automatically, task should now be expired
-        status = await client.get_task_status(task_id)
-        assert status.status == "unknown"
