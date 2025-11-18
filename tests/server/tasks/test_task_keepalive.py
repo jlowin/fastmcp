@@ -30,9 +30,6 @@ async def keepalive_server():
     return mcp
 
 
-@pytest.mark.skip(
-    reason="Per-task ttl tracking not supported - Docket uses global execution_ttl"
-)
 async def test_keepalive_returned_in_submitted_state(keepalive_server: FastMCP):
     """ttl is returned in tasks/get even when task is submitted/working."""
     async with Client(keepalive_server) as client:
@@ -41,7 +38,7 @@ async def test_keepalive_returned_in_submitted_state(keepalive_server: FastMCP):
             "slow_task",
             {},
             task=True,
-            ttl=30000,  # 30 seconds
+            ttl=30000,  # 30 seconds (client-requested)
         )
 
         # Check status immediately - should be submitted or working
@@ -49,23 +46,33 @@ async def test_keepalive_returned_in_submitted_state(keepalive_server: FastMCP):
         assert status.status in ["submitted", "working"]
 
         # ttl should be present per spec (MUST return in all responses)
-        assert status.ttl == 30000
+        # TODO: Docket uses a global execution_ttl for all tasks, not per-task TTLs.
+        # The spec allows servers to override client-requested TTL (line 431).
+        # FastMCP returns the server's actual global TTL (60000ms default from Docket).
+        # If Docket gains per-task TTL support, update this to verify client-requested TTL is respected.
+        assert status.ttl == 60000  # Server's global TTL, not client-requested 30000
 
 
-@pytest.mark.skip(
-    reason="Per-task ttl tracking not supported - Docket uses global execution_ttl"
-)
 async def test_keepalive_returned_in_completed_state(keepalive_server: FastMCP):
     """ttl is returned in tasks/get after task completes."""
     async with Client(keepalive_server) as client:
         # Submit and complete task
-        task = await client.call_tool("quick_task", {"value": 5}, task=True, ttl=45000)
+        task = await client.call_tool(
+            "quick_task",
+            {"value": 5},
+            task=True,
+            ttl=45000,  # Client-requested TTL
+        )
         await task.wait(timeout=2.0)
 
         # Check status - should be completed
         status = await task.status()
         assert status.status == "completed"
-        assert status.ttl == 45000
+
+        # TODO: Docket uses global execution_ttl, not per-task TTLs.
+        # Server returns its global TTL (60000ms), not the client-requested 45000ms.
+        # This is spec-compliant - servers MAY override requested TTL (spec line 431).
+        assert status.ttl == 60000  # Server's global TTL, not client-requested 45000
 
 
 async def test_default_keepalive_when_not_specified(keepalive_server: FastMCP):
@@ -81,10 +88,23 @@ async def test_default_keepalive_when_not_specified(keepalive_server: FastMCP):
 
 
 @pytest.mark.skip(
-    reason="Docket doesn't support per-task TTL - uses global execution_ttl instead"
+    reason="Cannot test per-task TTL expiration - Docket uses global execution_ttl (60s default)"
 )
 async def test_expired_task_returns_unknown(keepalive_server: FastMCP):
-    """Tasks return unknown state after ttl expires."""
+    """Tasks return unknown state after ttl expires.
+
+    This test requires per-task TTL support to verify short-lived task expiration.
+    FastMCP uses Docket's global execution_ttl (60 seconds default) for all tasks.
+
+    TODO: If Docket gains per-task TTL support, un-skip this test and verify:
+    1. Client can request short TTL (e.g., 100ms)
+    2. Server respects this TTL
+    3. After TTL expires, tasks/get returns status="unknown"
+    4. Redis automatically cleans up expired task mappings
+
+    This is spec-compliant: servers MAY override requested TTL (spec line 431).
+    FastMCP's architectural choice is to use a consistent global TTL for all tasks.
+    """
     async with Client(keepalive_server) as client:
         # Submit task with very short ttl (100ms)
         task = await client.call_tool("quick_task", {"value": 7}, task=True, ttl=100)

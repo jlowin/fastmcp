@@ -121,6 +121,9 @@ class GetTaskResult(Result):
     error: str | None = None
     """Error message if status is 'failed' or 'cancelled'."""
 
+    statusMessage: str | None = None
+    """Optional human-readable message describing the current state. Per spec line 403."""
+
     model_config = ConfigDict(extra="allow")
 
 

@@ -92,6 +92,8 @@ async def tasks_get_handler(server: FastMCP, params: dict[str, Any]):
                 createdAt=created_at or datetime.now(timezone.utc).isoformat(),
                 ttl=None,
                 pollInterval=1000,
+                error=None,
+                statusMessage="Task not found",  # Optional per spec line 403
             )
 
         execution = await docket.get_execution(task_key)
@@ -105,6 +107,8 @@ async def tasks_get_handler(server: FastMCP, params: dict[str, Any]):
                 createdAt=created_at or datetime.now(timezone.utc).isoformat(),
                 ttl=None,
                 pollInterval=1000,
+                error=None,
+                statusMessage="Task not found",  # Optional per spec line 403
             )
 
         # Sync state from Redis
@@ -117,11 +121,17 @@ async def tasks_get_handler(server: FastMCP, params: dict[str, Any]):
         # createdAt is REQUIRED per SEP-1686 final spec (line 430)
         # Per spec lines 447-448: SHOULD NOT include related-task metadata in tasks/get
         error_message = None
+        status_message = None
+
         if execution.state == ExecutionState.FAILED:
             try:
                 await execution.get_result(timeout=timedelta(seconds=0))
             except Exception as error:
                 error_message = str(error)
+                status_message = f"Task failed: {error_message}"
+        elif execution.progress and execution.progress.message:
+            # Extract progress message from Docket if available (spec line 403)
+            status_message = execution.progress.message
 
         return GetTaskResult(
             taskId=client_task_id,
@@ -130,6 +140,7 @@ async def tasks_get_handler(server: FastMCP, params: dict[str, Any]):
             ttl=60000,  # Default value in milliseconds
             pollInterval=1000,
             error=error_message,
+            statusMessage=status_message,  # Optional per spec line 403
         )
 
 
@@ -343,6 +354,8 @@ async def tasks_cancel_handler(server: FastMCP, params: dict[str, Any]):
             createdAt=created_at or datetime.now(timezone.utc).isoformat(),
             ttl=None,
             pollInterval=1000,
+            error=None,
+            statusMessage="Task cancelled",  # Optional per spec line 403
         )
 
 
