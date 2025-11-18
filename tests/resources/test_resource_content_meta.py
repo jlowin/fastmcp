@@ -33,9 +33,9 @@ class TestResourceContentMetaRawResponse:
             assert content.meta["widgetDomain"] == "example.com"
 
             # Verify serialization includes _meta
-            content_dict = content.model_dump()
-            assert "meta" in content_dict
-            assert content_dict["meta"]["widgetDomain"] == "example.com"
+            content_dict = content.model_dump(by_alias=True)
+            assert "_meta" in content_dict
+            assert content_dict["_meta"]["widgetDomain"] == "example.com"
 
     async def test_raw_response_template_includes_meta(self):
         """Test that raw MCP response includes _meta for templates."""
@@ -84,13 +84,13 @@ class TestResourceContentMetaRawResponse:
             content = result.contents[0]
 
             # Serialize to dict and verify all meta fields are present
-            content_dict = content.model_dump()
-            assert "meta" in content_dict
+            content_dict = content.model_dump(by_alias=True)
+            assert "_meta" in content_dict
 
             # Verify all custom meta fields
             for key, value in meta_data.items():
-                assert key in content_dict["meta"]
-                assert content_dict["meta"][key] == value
+                assert key in content_dict["_meta"]
+                assert content_dict["_meta"][key] == value
 
 
 class TestResourceContentMeta:
