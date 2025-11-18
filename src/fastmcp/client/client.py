@@ -713,7 +713,13 @@ class Client(Generic[ClientTransportT]):
         # If meta provided, use send_request for SEP-1686 task support
         if meta:
             request = mcp.types.ReadResourceRequest(
-                params=mcp.types.ReadResourceRequestParams(uri=uri, _meta=meta)
+                params=mcp.types.ReadResourceRequestParams(
+                    uri=uri,
+                    task=meta.get(
+                        "modelcontextprotocol.io/task"
+                    ),  # SEP-1686: task as direct param (spec-compliant)
+                    _meta=meta,  # Also send in _meta for SDK in-memory transport compatibility
+                )
             )
             result = await self.session.send_request(
                 request=request,  # type: ignore[arg-type]
@@ -907,7 +913,12 @@ class Client(Generic[ClientTransportT]):
         if meta:
             request = mcp.types.GetPromptRequest(
                 params=mcp.types.GetPromptRequestParams(
-                    name=name, arguments=serialized_arguments, _meta=meta
+                    name=name,
+                    arguments=serialized_arguments,
+                    task=meta.get(
+                        "modelcontextprotocol.io/task"
+                    ),  # SEP-1686: task as direct param (spec-compliant)
+                    _meta=meta,  # Also send in _meta for SDK in-memory transport compatibility
                 )
             )
             result = await self.session.send_request(
@@ -1147,7 +1158,12 @@ class Client(Generic[ClientTransportT]):
         if meta and "modelcontextprotocol.io/task" in meta:
             request = mcp.types.CallToolRequest(
                 params=mcp.types.CallToolRequestParams(
-                    name=name, arguments=arguments, _meta=meta
+                    name=name,
+                    arguments=arguments,
+                    task=meta.get(
+                        "modelcontextprotocol.io/task"
+                    ),  # SEP-1686: task as direct param (spec-compliant)
+                    _meta=meta,  # Also send in _meta for SDK in-memory transport compatibility
                 )
             )
             result = await self.session.send_request(

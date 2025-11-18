@@ -1221,19 +1221,16 @@ class FastMCP(Generic[LifespanResultT]):
                 task_meta = None
                 try:
                     req_ctx = request_ctx.get()
-                    # Get task metadata from req_ctx.meta (Pydantic RequestParams.Meta object)
-                    if req_ctx.meta:
+                    # Per SEP-1686 final spec: task is direct param, not in _meta
+                    # For HTTP transports: extract from request.params.task
+                    if req_ctx.request and req_ctx.request.params:
+                        task_meta = getattr(req_ctx.request.params, "task", None)
+                    # For in-memory transport (FastMCPTransport): SDK provides params via req_ctx.meta
+                    # req_ctx.meta is RequestParams.Meta with task aliased to "modelcontextprotocol.io/task"
+                    elif req_ctx.meta:
+                        # Extract from model_dump since task field is aliased
                         meta_dict = req_ctx.meta.model_dump()
                         task_meta = meta_dict.get("modelcontextprotocol.io/task")
-                    # Fall back to request.params._meta (for HTTP transports)
-                    elif req_ctx.request and req_ctx.request.params:
-                        task_meta = (
-                            req_ctx.request.params._meta.get(
-                                "modelcontextprotocol.io/task"
-                            )
-                            if req_ctx.request.params._meta
-                            else None
-                        )
                 except (LookupError, AttributeError):
                     # No request context available - proceed without task metadata
                     pass
@@ -1345,7 +1342,14 @@ class FastMCP(Generic[LifespanResultT]):
                 task_meta = None
                 try:
                     req_ctx = request_ctx.get()
-                    if req_ctx.meta:
+                    # Per SEP-1686 final spec: task is direct param, not in _meta
+                    # For HTTP transports: extract from request.params.task
+                    if req_ctx.request and req_ctx.request.params:
+                        task_meta = getattr(req_ctx.request.params, "task", None)
+                    # For in-memory transport (FastMCPTransport): SDK provides params via req_ctx.meta
+                    # req_ctx.meta is RequestParams.Meta with task aliased to "modelcontextprotocol.io/task"
+                    elif req_ctx.meta:
+                        # Extract from model_dump since task field is aliased
                         meta_dict = req_ctx.meta.model_dump()
                         task_meta = meta_dict.get("modelcontextprotocol.io/task")
                 except (LookupError, AttributeError):
@@ -1467,7 +1471,14 @@ class FastMCP(Generic[LifespanResultT]):
                 task_meta = None
                 try:
                     req_ctx = request_ctx.get()
-                    if req_ctx.meta:
+                    # Per SEP-1686 final spec: task is direct param, not in _meta
+                    # For HTTP transports: extract from request.params.task
+                    if req_ctx.request and req_ctx.request.params:
+                        task_meta = getattr(req_ctx.request.params, "task", None)
+                    # For in-memory transport (FastMCPTransport): SDK provides params via req_ctx.meta
+                    # req_ctx.meta is RequestParams.Meta with task aliased to "modelcontextprotocol.io/task"
+                    elif req_ctx.meta:
+                        # Extract from model_dump since task field is aliased
                         meta_dict = req_ctx.meta.model_dump()
                         task_meta = meta_dict.get("modelcontextprotocol.io/task")
                 except (LookupError, AttributeError):
