@@ -165,6 +165,18 @@ class Tool(FastMCPComponent):
         elif self.annotations and self.annotations.title:
             title = self.annotations.title
 
+        # Auto-populate taskHint based on tool.task flag if not explicitly set
+        # Per SEP-1686 spec lines 111-119: tools should declare task support via annotations.taskHint
+        # NOTE: SDK uses bool, spec wants string ("always"/"optional"/"never") - using bool until SDK updates
+        annotations = self.annotations
+        if self.task:
+            # Tool supports background execution
+            if annotations is None:
+                annotations = ToolAnnotations(taskHint=True)  # type: ignore[call-arg]
+            elif getattr(annotations, "taskHint", None) is None:
+                # Preserve existing annotations, add taskHint
+                annotations = annotations.model_copy(update={"taskHint": True})
+
         return MCPTool(
             name=overrides.get("name", self.name),
             title=overrides.get("title", title),
@@ -172,7 +184,7 @@ class Tool(FastMCPComponent):
             inputSchema=overrides.get("inputSchema", self.parameters),
             outputSchema=overrides.get("outputSchema", self.output_schema),
             icons=overrides.get("icons", self.icons),
-            annotations=overrides.get("annotations", self.annotations),
+            annotations=overrides.get("annotations", annotations),
             _meta=overrides.get(
                 "_meta", self.get_meta(include_fastmcp_meta=include_fastmcp_meta)
             ),
