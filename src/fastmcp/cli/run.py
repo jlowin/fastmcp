@@ -211,7 +211,7 @@ async def run_v1_server_async(
         port: Port to bind to
         transport: Transport protocol to use
     """
-    
+
     if host:
         server.settings.host = host
     if port:
