@@ -10,9 +10,12 @@ from contextlib import suppress
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-import mcp.types
 from docket.execution import ExecutionState
 
+from fastmcp.server.tasks._temporary_mcp_shims import (
+    TaskStatusNotification,
+    TaskStatusNotificationParams,
+)
 from fastmcp.server.tasks.protocol import DOCKET_TO_MCP_STATE
 from fastmcp.utilities.logging import get_logger
 
@@ -42,6 +45,7 @@ async def subscribe_to_task_updates(
         docket: Docket instance for subscribing to execution events
     """
     try:
+        logger.info(f"[SUBSCRIPTION] Starting for task {task_id}, key={task_key}")
         execution = await docket.get_execution(task_key)
         if execution is None:
             logger.warning(f"No execution found for task {task_id}")
@@ -67,7 +71,7 @@ async def subscribe_to_task_updates(
                 # Could send progress notifications here if needed
                 pass
 
-        logger.debug(f"Subscription ended for task {task_id}")
+        logger.info(f"[SUBSCRIPTION] Ended for task {task_id}")
 
     except Exception as e:
         logger.warning(f"Subscription task failed for {task_id}: {e}", exc_info=True)
@@ -91,7 +95,7 @@ async def _send_status_notification(
         task_id: Client-visible task ID
         task_key: Internal task key (for metadata lookup)
         docket: Docket instance
-        state: Docket execution state
+        state: Docket execution state (enum)
         error: Error message if task failed
     """
     # Map Docket state to MCP status
@@ -124,7 +128,7 @@ async def _send_status_notification(
         status_message = "Task cancelled"
 
     # Construct notification params (full Task object per spec lines 264, 452-454)
-    params = {
+    params_dict = {
         "taskId": task_id,
         "status": mcp_status,
         "createdAt": created_at,
@@ -133,19 +137,15 @@ async def _send_status_notification(
     }
 
     if error:
-        params["error"] = error
+        params_dict["error"] = error
     if status_message:
-        params["statusMessage"] = status_message
+        params_dict["statusMessage"] = status_message
 
     # Create notification (no related-task metadata per spec line 454)
-    notification = mcp.types.JSONRPCNotification(
-        jsonrpc="2.0",
-        method="notifications/tasks/status",
-        params=params,
+    notification = TaskStatusNotification(
+        params=TaskStatusNotificationParams.model_validate(params_dict),
     )
 
     # Send notification (don't let failures break the subscription)
     with suppress(Exception):
         await session.send_notification(notification)  # type: ignore[arg-type]
-
-    logger.debug(f"Sent task status notification: task={task_id} status={mcp_status}")

@@ -35,6 +35,8 @@ class MiddlewareServerSession(ServerSession):
     def __init__(self, fastmcp: FastMCP, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._fastmcp_ref: weakref.ref[FastMCP] = weakref.ref(fastmcp)
+        # Task group for subscription tasks (set during session run)
+        self._subscription_task_group: anyio.TaskGroup | None = None  # type: ignore[valid-type]
 
     @property
     def fastmcp(self) -> FastMCP:
@@ -148,6 +150,9 @@ class LowLevelServer(_Server[LifespanResultT, RequestT]):
             )
 
             async with anyio.create_task_group() as tg:
+                # Store task group on session for subscription tasks (SEP-1686)
+                session._subscription_task_group = tg
+
                 async for message in session.incoming_messages:
                     tg.start_soon(
                         self._handle_message,

@@ -1,6 +1,10 @@
 """SEP-1686 task protocol types and client Task classes."""
 
 import abc
+import asyncio
+import inspect
+import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar
@@ -8,6 +12,10 @@ from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar
 import mcp.types
 import pydantic
 from pydantic import BaseModel
+
+from fastmcp.utilities.logging import get_logger
+
+logger = get_logger(__name__)
 
 if TYPE_CHECKING:
     from fastmcp.client.client import Client
@@ -170,6 +178,13 @@ class Task(abc.ABC, Generic[TaskResultT]):
         self._task_id = task_id
         self._immediate_result = immediate_result
         self._is_immediate = immediate_result is not None
+
+        # Notification-based optimization (SEP-1686 notifications/tasks/status)
+        self._status_cache: TaskStatusResponse | None = None
+        self._status_event: asyncio.Event | None = None  # Lazy init
+        self._status_callbacks: list[
+            Callable[[TaskStatusResponse], None | Awaitable[None]]
+        ] = []
         self._cached_result: TaskResultT | None = None
 
     def _check_client_connected(self) -> None:
@@ -204,6 +219,58 @@ class Task(abc.ABC, Generic[TaskResultT]):
         """
         return self._is_immediate
 
+    def _handle_status_notification(self, status: TaskStatusResponse) -> None:
+        """Process incoming notifications/tasks/status (internal).
+
+        Called by Client when a notification is received for this task.
+        Updates cache, triggers events, and invokes user callbacks.
+
+        Args:
+            status: Task status from notification
+        """
+        # Update cache for next status() call
+        self._status_cache = status
+
+        # Wake up any wait() calls
+        if self._status_event is not None:
+            self._status_event.set()
+
+        # Invoke user callbacks
+        for callback in self._status_callbacks:
+            try:
+                result = callback(status)
+                if inspect.isawaitable(result):
+                    # Fire and forget async callbacks
+                    asyncio.create_task(result)  # noqa: RUF006
+            except Exception as e:
+                logger.warning(f"Task callback error: {e}", exc_info=True)
+
+    def on_status_change(
+        self,
+        callback: Callable[[TaskStatusResponse], None | Awaitable[None]],
+    ) -> None:
+        """Register callback for status change notifications.
+
+        The callback will be invoked when a notifications/tasks/status is received
+        for this task (optional server feature per SEP-1686 lines 436-444).
+
+        Supports both sync and async callbacks (auto-detected).
+
+        Args:
+            callback: Function to call with TaskStatusResponse when status changes.
+                     Can return None (sync) or Awaitable[None] (async).
+
+        Example:
+            >>> task = await client.call_tool("slow_operation", {}, task=True)
+            >>>
+            >>> def on_update(status: TaskStatusResponse):
+            ...     print(f"Task {status.task_id} is now {status.status}")
+            >>>
+            >>> task.on_status_change(on_update)
+            >>> result = await task  # Callback fires when status changes
+        """
+        self._status_callbacks.append(callback)
+
     async def status(self) -> TaskStatusResponse:
         """Get current task status.
 
@@ -221,7 +288,16 @@ class Task(abc.ABC, Generic[TaskResultT]):
                 ttl=None,
                 pollInterval=1000,  # Include poll interval even for immediate results
             )
-        return await self._client.get_task_status(self._task_id)
+
+        # Return cached status if available (from notification)
+        if self._status_cache is not None:
+            cached = self._status_cache
+            # Don't clear cache - keep it for next call
+            return cached
+
+        # Query server and cache the result
+        self._status_cache = await self._client.get_task_status(self._task_id)
+        return self._status_cache
 
     @abc.abstractmethod
     async def result(self) -> TaskResultT:
@@ -236,8 +312,9 @@ class Task(abc.ABC, Generic[TaskResultT]):
     ) -> TaskStatusResponse:
         """Wait for task to reach a specific state or complete.
 
-        If server executed immediately, returns immediately.
-        Otherwise polls until desired state is reached.
+        Uses event-based waiting when notifications are available (fast),
+        with fallback to polling (reliable). Optimally wakes up immediately
+        on status changes when server sends notifications/tasks/status.
 
         Args:
             state: Desired state ('submitted', 'working', 'completed', 'failed').
@@ -246,15 +323,52 @@ class Task(abc.ABC, Generic[TaskResultT]):
 
         Returns:
             TaskStatusResponse: Final task status
+
+        Raises:
+            TimeoutError: If desired state not reached within timeout
         """
         self._check_client_connected()
 
         if self._is_immediate:
             # Already done
             return await self.status()
-        return await self._client.wait_for_task(
-            self._task_id, state=state, timeout=timeout
-        )
+
+        # Initialize event for notification wake-ups
+        if self._status_event is None:
+            self._status_event = asyncio.Event()
+
+        start = time.time()
+        terminal_states = {"completed", "failed", "cancelled"}
+        poll_interval = 0.5  # Fallback polling interval (500ms)
+
+        while True:
+            # Check cached status first (updated by notifications)
+            if self._status_cache:
+                current = self._status_cache.status
+                if state is None:
+                    if current in terminal_states:
+                        return self._status_cache
+                elif current == state:
+                    return self._status_cache
+
+            # Check timeout
+            elapsed = time.time() - start
+            if elapsed >= timeout:
+                raise TimeoutError(
+                    f"Task {self._task_id} did not reach {state or 'terminal state'} within {timeout}s"
+                )
+
+            remaining = timeout - elapsed
+
+            # Wait for notification event OR poll timeout
+            try:
+                await asyncio.wait_for(
+                    self._status_event.wait(), timeout=min(poll_interval, remaining)
+                )
+                self._status_event.clear()
+            except asyncio.TimeoutError:
+                # Fallback: poll server (notification didn't arrive in time)
+                self._status_cache = await self._client.get_task_status(self._task_id)
 
     async def cancel(self) -> None:
         """Cancel this task, transitioning it to cancelled state.
@@ -270,6 +384,8 @@ class Task(abc.ABC, Generic[TaskResultT]):
             return
         self._check_client_connected()
         await self._client.cancel_task(self._task_id)
+        # Invalidate cache to force fresh status fetch
+        self._status_cache = None
 
     async def delete(self) -> None:
         """Delete this task and all associated data from the server.

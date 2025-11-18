@@ -6,6 +6,7 @@ import datetime
 import secrets
 import time
 import uuid
+import weakref
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -26,7 +27,7 @@ from fastmcp.client.logging import (
     create_log_callback,
     default_log_handler,
 )
-from fastmcp.client.messages import MessageHandler, MessageHandlerT
+from fastmcp.client.messages import Message, MessageHandler, MessageHandlerT
 from fastmcp.client.progress import ProgressHandler, default_progress_handler
 from fastmcp.client.roots import (
     RootsHandler,
@@ -105,6 +106,30 @@ class ClientSessionState:
     ready_event: anyio.Event = field(default_factory=anyio.Event)
     stop_event: anyio.Event = field(default_factory=anyio.Event)
     initialize_result: mcp.types.InitializeResult | None = None
+
+
+class ClientMessageHandler(MessageHandler):
+    """MessageHandler that routes task status notifications to Task objects."""
+
+    def __init__(self, client: Client):
+        super().__init__()
+        self._client_ref: weakref.ref[Client] = weakref.ref(client)
+
+    async def dispatch(self, message: Message) -> None:
+        """Dispatch messages, including task status notifications."""
+        # Handle task status notifications
+        if isinstance(message, mcp.types.ServerNotification):
+            # Check if this is a task status notification (check method, not type)
+            if (
+                hasattr(message.root, "method")
+                and message.root.method == "notifications/tasks/status"
+            ):
+                client = self._client_ref()
+                if client:
+                    client._handle_task_status_notification(message.root)
+
+        # Call parent dispatch for all other messages
+        await super().dispatch(message)
 
 
 class Client(Generic[ClientTransportT]):
@@ -275,7 +300,7 @@ class Client(Generic[ClientTransportT]):
             "sampling_callback": None,
             "list_roots_callback": None,
             "logging_callback": create_log_callback(log_handler),
-            "message_handler": message_handler,
+            "message_handler": message_handler or ClientMessageHandler(self),
             "read_timeout_seconds": timeout,  # ty: ignore[invalid-argument-type]
             "client_info": client_info,
         }
@@ -298,6 +323,12 @@ class Client(Generic[ClientTransportT]):
 
         # Track task IDs submitted by this client (for list_tasks support)
         self._submitted_task_ids: set[str] = set()
+
+        # Registry for routing notifications/tasks/status to Task objects
+
+        self._task_registry: dict[
+            str, weakref.ref[ToolTask | PromptTask | ResourceTask]
+        ] = {}
 
     @property
     def session(self) -> ClientSession:
@@ -581,6 +612,31 @@ class Client(Generic[ClientTransportT]):
             # Ensure ready event is set even if context manager entry fails
             self._session_state.ready_event.set()
 
+    def _handle_task_status_notification(self, notification) -> None:
+        """Route task status notification to appropriate Task object.
+
+        Called when notifications/tasks/status is received from server.
+        Updates Task object's cache and triggers events/callbacks.
+        """
+        # Convert params to dict (could be Pydantic model or dict)
+        if hasattr(notification.params, "model_dump"):
+            params = notification.params.model_dump()
+        else:
+            params = notification.params
+
+        task_id = params.get("taskId")
+        if not task_id:
+            return
+
+        # Look up task in registry (weakref)
+        task_ref = self._task_registry.get(task_id)
+        if task_ref:
+            task = task_ref()  # Dereference weakref
+            if task:
+                # Create TaskStatusResponse from notification params and route to task
+                status = TaskStatusResponse(**params)
+                task._handle_status_notification(status)
+
     async def close(self):
         await self._disconnect(force=True)
         await self.transport.close()
@@ -821,9 +877,16 @@ class Client(Generic[ClientTransportT]):
             server_task_id = result.meta["modelcontextprotocol.io/task"]["taskId"]
             # Track this task ID for list_tasks()
             self._submitted_task_ids.add(server_task_id)
-            return ResourceTask(
+
+            # Create task object
+            task_obj = ResourceTask(
                 self, server_task_id, uri=str(uri), immediate_result=None
             )
+
+            # Register for notification routing
+            self._task_registry[server_task_id] = weakref.ref(task_obj)  # type: ignore[assignment]
+
+            return task_obj
         else:
             # Server declined background execution (graceful degradation)
             # Use a synthetic task ID for the immediate result
@@ -1020,9 +1083,16 @@ class Client(Generic[ClientTransportT]):
             server_task_id = result.meta["modelcontextprotocol.io/task"]["taskId"]
             # Track this task ID for list_tasks()
             self._submitted_task_ids.add(server_task_id)
-            return PromptTask(
+
+            # Create task object
+            task_obj = PromptTask(
                 self, server_task_id, prompt_name=name, immediate_result=None
             )
+
+            # Register for notification routing
+            self._task_registry[server_task_id] = weakref.ref(task_obj)  # type: ignore[assignment]
+
+            return task_obj
         else:
             # Server declined background execution (graceful degradation)
             # Use a synthetic task ID for the immediate result
@@ -1356,7 +1426,16 @@ class Client(Generic[ClientTransportT]):
             server_task_id = result.meta["modelcontextprotocol.io/task"]["taskId"]
             # Track this task ID for list_tasks()
             self._submitted_task_ids.add(server_task_id)
-            return ToolTask(self, server_task_id, tool_name=name, immediate_result=None)
+
+            # Create task object
+            task_obj = ToolTask(
+                self, server_task_id, tool_name=name, immediate_result=None
+            )
+
+            # Register for notification routing
+            self._task_registry[server_task_id] = weakref.ref(task_obj)  # type: ignore[assignment]
+
+            return task_obj
         else:
             # Server declined background execution (graceful degradation)
             # Executed synchronously - wrap the immediate result

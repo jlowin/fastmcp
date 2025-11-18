@@ -106,17 +106,19 @@ async def handle_tool_as_task(
     )(**arguments)
 
     # Spawn subscription task to send status notifications (SEP-1686 optional feature)
-    # Subscription auto-cleanup when task completes or session disconnects
     from fastmcp.server.tasks.subscriptions import subscribe_to_task_updates
 
-    if hasattr(ctx.session, "_task_group"):
-        ctx.session._task_group.start_soon(
-            subscribe_to_task_updates,
-            server_task_id,
-            task_key,
-            ctx.session,
-            docket,
-        )
+    # Start subscription in session's task group (persists for connection lifetime)
+    if hasattr(ctx.session, "_subscription_task_group"):
+        tg = ctx.session._subscription_task_group  # type: ignore[attr-defined]
+        if tg:
+            tg.start_soon(  # type: ignore[union-attr]
+                subscribe_to_task_updates,
+                server_task_id,
+                task_key,
+                ctx.session,
+                docket,
+            )
 
     # Return task stub
     # Tasks MUST begin in "working" status per SEP-1686 final spec (line 381)
@@ -211,14 +213,17 @@ async def handle_prompt_as_task(
     # Spawn subscription task to send status notifications (SEP-1686 optional feature)
     from fastmcp.server.tasks.subscriptions import subscribe_to_task_updates
 
-    if hasattr(ctx.session, "_task_group"):
-        ctx.session._task_group.start_soon(
-            subscribe_to_task_updates,
-            server_task_id,
-            task_key,
-            ctx.session,
-            docket,
-        )
+    # Start subscription in session's task group (persists for connection lifetime)
+    if hasattr(ctx.session, "_subscription_task_group"):
+        tg = ctx.session._subscription_task_group  # type: ignore[attr-defined]
+        if tg:
+            tg.start_soon(  # type: ignore[union-attr]
+                subscribe_to_task_updates,
+                server_task_id,
+                task_key,
+                ctx.session,
+                docket,
+            )
 
     # Return task stub
     # Tasks MUST begin in "working" status per SEP-1686 final spec (line 381)
@@ -311,14 +316,17 @@ async def handle_resource_as_task(
     # Spawn subscription task to send status notifications (SEP-1686 optional feature)
     from fastmcp.server.tasks.subscriptions import subscribe_to_task_updates
 
-    if hasattr(ctx.session, "_task_group"):
-        ctx.session._task_group.start_soon(
-            subscribe_to_task_updates,
-            server_task_id,
-            task_key,
-            ctx.session,
-            docket,
-        )
+    # Start subscription in session's task group (persists for connection lifetime)
+    if hasattr(ctx.session, "_subscription_task_group"):
+        tg = ctx.session._subscription_task_group  # type: ignore[attr-defined]
+        if tg:
+            tg.start_soon(  # type: ignore[union-attr]
+                subscribe_to_task_updates,
+                server_task_id,
+                task_key,
+                ctx.session,
+                docket,
+            )
 
     # Return task stub
     # Tasks MUST begin in "working" status per SEP-1686 final spec (line 381)

@@ -221,6 +221,67 @@ class CancelTaskRequest(Request[CancelTaskParams, Literal["tasks/cancel"]]):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# notifications/tasks/status - Task status change notification
+# SDK DOES NOT HAVE THIS YET - This is our extension per final spec lines 436-444
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TaskStatusNotificationParams(BaseModel):
+    """Parameters for notifications/tasks/status.
+
+    Per SEP-1686 lines 436-444, servers MAY send status notifications.
+    Params contain full Task object (lines 452-454).
+    """
+
+    taskId: str
+    """The unique identifier for this task."""
+
+    status: Literal[
+        "submitted",
+        "working",
+        "input_required",
+        "completed",
+        "failed",
+        "cancelled",
+        "unknown",
+    ]
+    """Current task status."""
+
+    createdAt: str
+    """ISO 8601 timestamp when task was created."""
+
+    ttl: int | None = None
+    """Time in milliseconds to keep task results available after completion."""
+
+    pollInterval: int | None = None
+    """Recommended polling frequency in milliseconds."""
+
+    error: str | None = None
+    """Error message if status is 'failed' or 'cancelled'."""
+
+    statusMessage: str | None = None
+    """Optional human-readable message describing the current state."""
+
+    model_config = ConfigDict(extra="allow")
+
+
+class TaskStatusNotification(
+    mcp_types.Notification[
+        TaskStatusNotificationParams, Literal["notifications/tasks/status"]
+    ]  # type: ignore[type-arg]
+):
+    """Notification for task status changes.
+
+    Per SEP-1686 lines 436-444, servers MAY send these notifications when
+    task state changes. This is an optional optimization that reduces client
+    polling frequency.
+    """
+
+    method: Literal["notifications/tasks/status"] = "notifications/tasks/status"
+    params: TaskStatusNotificationParams
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # tasks/delete - Delete a task
 # SDK has: DeleteTaskRequest / DeleteTaskParams (types.py:703-716)
 # ═══════════════════════════════════════════════════════════════════════════
@@ -408,3 +469,15 @@ server_new_union = Union[
 
 server_root_field.annotation = server_new_union
 mcp_types.ServerRequest.model_rebuild(force=True)
+
+# Patch ServerNotification to include TaskStatusNotification
+# This allows the SDK to validate our notifications/tasks/status messages
+server_notif_root_field = mcp_types.ServerNotification.model_fields["root"]
+server_notif_original_union = server_notif_root_field.annotation
+server_notif_original_types = get_args(server_notif_original_union)
+
+# Add TaskStatusNotification to the union
+server_notif_new_union = Union[(*server_notif_original_types, TaskStatusNotification)]
+
+server_notif_root_field.annotation = server_notif_new_union
+mcp_types.ServerNotification.model_rebuild(force=True)
