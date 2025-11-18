@@ -307,7 +307,7 @@ class TestOIDCConfiguration:
         with pytest.raises(ValueError, match="Invalid URL for configuration metadata"):
             OIDCConfiguration.model_validate(valid_oidc_configuration_dict)
 
-    def test_explict_strict_with_bad_url_raises_error(
+    def test_explicit_strict_with_bad_url_raises_error(
         self, valid_oidc_configuration_dict
     ):
         """Test default configuration with explicit True strict setting and bad URL setting."""
@@ -359,7 +359,7 @@ class TestOIDCConfiguration:
 
 
 def validate_get_oidc_configuration(oidc_configuration, strict, timeout_seconds):
-    """Validate get_oidc_configuation call."""
+    """Validate get_oidc_configuration call."""
     with patch("httpx.get") as mock_get:
         mock_response = MagicMock(spec=Response)
         mock_response.json.return_value = oidc_configuration
@@ -783,3 +783,96 @@ class TestOIDCProxyInitialization:
             validate_proxy(mock_get, proxy, oidc_config)
             assert proxy._extra_authorize_params == {"audience": "test-audience"}
             assert proxy._extra_token_params == {"audience": "test-audience"}
+
+    def test_extra_authorize_params_initialization(self, valid_oidc_configuration_dict):
+        """Test extra authorize params initialization."""
+        with patch(
+            "fastmcp.server.auth.oidc_proxy.OIDCConfiguration.get_oidc_configuration"
+        ) as mock_get:
+            oidc_config = OIDCConfiguration.model_validate(
+                valid_oidc_configuration_dict
+            )
+            mock_get.return_value = oidc_config
+
+            proxy = OIDCProxy(
+                config_url=TEST_CONFIG_URL,
+                client_id=TEST_CLIENT_ID,
+                client_secret=TEST_CLIENT_SECRET,
+                base_url=TEST_BASE_URL,
+                jwt_signing_key="test-secret",
+                extra_authorize_params={
+                    "prompt": "consent",
+                    "access_type": "offline",
+                },
+            )
+
+            validate_proxy(mock_get, proxy, oidc_config)
+
+            assert proxy._extra_authorize_params == {
+                "prompt": "consent",
+                "access_type": "offline",
+            }
+            # Token params should be empty since we didn't set them
+            assert proxy._extra_token_params == {}
+
+    def test_extra_token_params_initialization(self, valid_oidc_configuration_dict):
+        """Test extra token params initialization."""
+        with patch(
+            "fastmcp.server.auth.oidc_proxy.OIDCConfiguration.get_oidc_configuration"
+        ) as mock_get:
+            oidc_config = OIDCConfiguration.model_validate(
+                valid_oidc_configuration_dict
+            )
+            mock_get.return_value = oidc_config
+
+            proxy = OIDCProxy(
+                config_url=TEST_CONFIG_URL,
+                client_id=TEST_CLIENT_ID,
+                client_secret=TEST_CLIENT_SECRET,
+                base_url=TEST_BASE_URL,
+                jwt_signing_key="test-secret",
+                extra_token_params={"custom_param": "custom_value"},
+            )
+
+            validate_proxy(mock_get, proxy, oidc_config)
+
+            # Authorize params should be empty since we didn't set them
+            assert proxy._extra_authorize_params == {}
+            assert proxy._extra_token_params == {"custom_param": "custom_value"}
+
+    def test_extra_params_merge_with_audience(self, valid_oidc_configuration_dict):
+        """Test that extra params merge with audience, with user params taking precedence."""
+        with patch(
+            "fastmcp.server.auth.oidc_proxy.OIDCConfiguration.get_oidc_configuration"
+        ) as mock_get:
+            oidc_config = OIDCConfiguration.model_validate(
+                valid_oidc_configuration_dict
+            )
+            mock_get.return_value = oidc_config
+
+            proxy = OIDCProxy(
+                config_url=TEST_CONFIG_URL,
+                client_id=TEST_CLIENT_ID,
+                client_secret=TEST_CLIENT_SECRET,
+                base_url=TEST_BASE_URL,
+                audience="original-audience",
+                jwt_signing_key="test-secret",
+                extra_authorize_params={
+                    "prompt": "consent",
+                    "audience": "overridden-audience",  # Should override the audience param
+                },
+                extra_token_params={"custom": "value"},
+            )
+
+            validate_proxy(mock_get, proxy, oidc_config)
+
+            # User's extra_authorize_params should override audience
+            assert proxy._extra_authorize_params == {
+                "audience": "overridden-audience",
+                "prompt": "consent",
+            }
+            # Token params should have both audience (from audience param) and custom
+            assert proxy._extra_token_params == {
+                "audience": "original-audience",
+                "custom": "value",
+            }
