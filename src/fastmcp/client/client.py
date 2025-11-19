@@ -4,7 +4,6 @@ import asyncio
 import copy
 import datetime
 import secrets
-import time
 import uuid
 import weakref
 from contextlib import AsyncExitStack, asynccontextmanager
@@ -1534,58 +1533,6 @@ class Client(Generic[ClientTransportT]):
                 continue
 
         return {"tasks": tasks, "nextCursor": None}
-
-    async def wait_for_task(
-        self,
-        task_id: str,
-        *,
-        state: str | None = None,
-        timeout: float = 300.0,
-        poll_interval: float = 0.05,
-    ) -> TaskStatusResponse:
-        """Wait for a task to reach a specific state or complete.
-
-        Polls task status at regular intervals until the desired state is reached
-        or a timeout occurs.
-
-        Args:
-            task_id: The task ID to wait for
-            state: Desired state ('submitted', 'working', 'completed', 'failed').
-                   If None, waits for any terminal state (completed/failed)
-            timeout: Maximum time to wait in seconds (default 300s/5min)
-            poll_interval: Time between status checks in seconds (default 50ms)
-
-        Returns:
-            TaskStatusResponse: Full task status including task_id, status, poll_interval, etc.
-
-        Raises:
-            TimeoutError: If desired state not reached within timeout
-        """
-        start = time.time()
-        terminal_states = {"completed", "failed"}
-
-        while time.time() - start < timeout:
-            status = await self.get_task_status(task_id)
-            current_state = status.status
-
-            # Check if we've reached the desired state
-            if state is not None:
-                if current_state == state:
-                    return status
-            else:
-                # No specific state requested - wait for terminal state
-                if current_state in terminal_states:
-                    return status
-
-            await asyncio.sleep(poll_interval)
-
-        # Timeout reached
-        if state is not None:
-            raise TimeoutError(
-                f"Task {task_id} did not reach state '{state}' within {timeout}s"
-            )
-        else:
-            raise TimeoutError(f"Task {task_id} did not complete within {timeout}s")
 
     async def cancel_task(self, task_id: str) -> TaskStatusResponse:
         """Cancel a task, transitioning it to cancelled state.

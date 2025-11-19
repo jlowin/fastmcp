@@ -12,6 +12,7 @@ from fastmcp.server.dependencies import (
     CurrentDocket,
     CurrentFastMCP,
     CurrentWorker,
+    Progress,
 )
 
 __all__ = [
@@ -20,4 +21,5 @@ __all__ = [
     "CurrentFastMCP",
     "CurrentWorker",
     "Depends",
+    "Progress",
 ]

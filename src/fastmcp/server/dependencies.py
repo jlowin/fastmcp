@@ -9,6 +9,7 @@ from functools import lru_cache
 from typing import TYPE_CHECKING, Any, cast, get_type_hints
 
 from docket.dependencies import Dependency, _Depends, get_dependency_parameters
+from docket.dependencies import Progress as DocketProgress
 from mcp.server.auth.middleware.auth_context import (
     get_access_token as _sdk_get_access_token,
 )
@@ -40,6 +41,7 @@ __all__ = [
     "CurrentDocket",
     "CurrentFastMCP",
     "CurrentWorker",
+    "Progress",
     "get_access_token",
     "get_context",
     "get_http_headers",
@@ -386,6 +388,83 @@ def CurrentWorker() -> Worker:
         ```
     """
     return cast("Worker", _CurrentWorker())
+
+
+class InMemoryProgress(DocketProgress):
+    """In-memory progress tracker for immediate tool execution.
+
+    Provides the same interface as Progress but stores state in memory
+    instead of Redis. Useful for testing and immediate execution where
+    progress doesn't need to be observable across processes.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._current: int | None = None
+        self._total: int = 1
+        self._message: str | None = None
+
+    async def __aenter__(self) -> DocketProgress:
+        return self
+
+    @property
+    def current(self) -> int | None:
+        return self._current
+
+    @property
+    def total(self) -> int:
+        return self._total
+
+    @property
+    def message(self) -> str | None:
+        return self._message
+
+    async def set_total(self, total: int) -> None:
+        """Set the total/target value for progress tracking."""
+        if total < 1:
+            raise ValueError("Total must be at least 1")
+        self._total = total
+
+    async def increment(self, amount: int = 1) -> None:
+        """Atomically increment the current progress value."""
+        if amount < 1:
+            raise ValueError("Amount must be at least 1")
+        if self._current is None:
+            self._current = amount
+        else:
+            self._current += amount
+
+    async def set_message(self, message: str | None) -> None:
+        """Update the progress status message."""
+        self._message = message
+
+
+class Progress(DocketProgress):
+    """FastMCP Progress dependency that works in both server and worker contexts.
+
+    Extends Docket's Progress to handle two execution modes:
+    - In Docket worker: Uses the execution's progress (standard Docket behavior)
+    - In FastMCP server: Uses in-memory progress (not observable remotely)
+
+    This allows tools to use Progress() regardless of whether they're called
+    immediately or as background tasks.
+    """
+
+    async def __aenter__(self) -> DocketProgress:
+        # Try to get execution from Docket worker context
+        try:
+            return await super().__aenter__()
+        except LookupError:
+            # Not in worker context - return in-memory progress
+            docket = _current_docket.get()
+            if docket is None:
+                raise RuntimeError(
+                    "Progress dependency requires Docket to be enabled. "
+                    "Set FASTMCP_EXPERIMENTAL_ENABLE_DOCKET=true"
+                ) from None
+
+            # Return in-memory progress for immediate execution
+            return InMemoryProgress()
 
 
 class _CurrentFastMCP(Dependency):

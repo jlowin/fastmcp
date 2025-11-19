@@ -7,7 +7,6 @@ import inspect
 import json
 import re
 import secrets
-import uuid
 import warnings
 from collections.abc import (
     AsyncIterator,
@@ -31,6 +30,7 @@ import anyio
 import httpx
 import mcp.types
 import uvicorn
+from docket import Docket, Worker
 from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.lowlevel.server import LifespanResultT, NotificationOptions
 from mcp.server.stdio import stdio_server
@@ -400,6 +400,14 @@ class FastMCP(Generic[LifespanResultT]):
         else:
             return list(self._mcp_server.icons)
 
+    @property
+    def docket(self) -> Docket | None:
+        """Get the Docket instance if Docket support is enabled.
+
+        Returns None if Docket is not enabled or server hasn't been started yet.
+        """
+        return self._docket
+
     @asynccontextmanager
     async def _docket_lifespan(
         self, user_lifespan_result: LifespanResultT
@@ -430,24 +438,63 @@ class FastMCP(Generic[LifespanResultT]):
             yield user_lifespan_result
             return
 
-        # Import Docket components
-        from docket import Docket, Worker
-
         # Set FastMCP server in ContextVar so CurrentFastMCP can access it
         from fastmcp.server.dependencies import _current_server
 
         server_token = _current_server.set(self)
+
         try:
-            # Create Docket instance with unique memory:// URL per server
-            async with Docket(url=f"memory://{uuid.uuid4()}") as docket:
+            # Create Docket instance using configured URL
+            async with Docket(url=settings.experimental.docket.url) as docket:
                 # Store on server instance for cross-task access (FastMCPTransport)
                 self._docket = docket
+
+                # Register task-enabled tools/prompts/resources with Docket
+                tools = await self.get_tools()
+                for tool in tools.values():
+                    supports_task = (
+                        tool.task
+                        if tool.task is not None
+                        else self._support_tasks_by_default
+                    )
+                    if supports_task:
+                        docket.register(tool.fn)
+
+                prompts = await self.get_prompts()
+                for prompt in prompts.values():
+                    supports_task = (
+                        prompt.task
+                        if prompt.task is not None
+                        else self._support_tasks_by_default
+                    )
+                    if supports_task:
+                        docket.register(prompt.fn)
+
+                resources = await self.get_resources()
+                for resource in resources.values():
+                    supports_task = (
+                        resource.task
+                        if resource.task is not None
+                        else self._support_tasks_by_default
+                    )
+                    if supports_task:
+                        docket.register(resource.fn)
+
                 # Set Docket in ContextVar so CurrentDocket can access it
                 docket_token = _current_docket.set(docket)
                 try:
+                    # Build worker kwargs from settings
+                    worker_kwargs: dict[str, Any] = {
+                        "concurrency": settings.experimental.docket.concurrency,
+                        "redelivery_timeout": settings.experimental.docket.redelivery_timeout,
+                        "reconnection_delay": settings.experimental.docket.reconnection_delay,
+                    }
+                    if settings.experimental.docket.worker_name:
+                        worker_kwargs["name"] = settings.experimental.docket.worker_name
+
                     # Create and start Worker, then task group for run_forever()
                     async with (
-                        Worker(docket) as worker,
+                        Worker(docket, **worker_kwargs) as worker,  # type: ignore[arg-type]
                         anyio.create_task_group() as tg,
                     ):
                         # Set Worker in ContextVar so CurrentWorker can access it
@@ -1233,7 +1280,7 @@ class FastMCP(Generic[LifespanResultT]):
                     # No request context available - proceed without task metadata
                     pass
 
-                if task_meta and self.settings.experimental.enable_tasks:
+                if task_meta and fastmcp.settings.experimental.enable_tasks:
                     # Task metadata present - check if tool supports background execution
                     tool = self._tool_manager._tools.get(key)
                     if tool and tool.task:
@@ -1351,7 +1398,7 @@ class FastMCP(Generic[LifespanResultT]):
                 except (LookupError, AttributeError):
                     pass
 
-                if task_meta and self.settings.experimental.enable_tasks:
+                if task_meta and fastmcp.settings.experimental.enable_tasks:
                     # Check resource/template task support
                     try:
                         resource = await self._resource_manager.get_resource(uri)
@@ -1478,7 +1525,7 @@ class FastMCP(Generic[LifespanResultT]):
                 except (LookupError, AttributeError):
                     pass
 
-                if task_meta and self.settings.experimental.enable_tasks:
+                if task_meta and fastmcp.settings.experimental.enable_tasks:
                     prompt = self._prompt_manager._prompts.get(name)
                     if prompt and prompt.task:
                         return await handle_prompt_as_task(

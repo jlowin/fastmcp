@@ -347,8 +347,8 @@ class ToolTask(Task[CallToolResult]):
             # Check client connected
             self._check_client_connected()
 
-            # Wait for completion
-            await self._client.wait_for_task(self._task_id)
+            # Wait for completion using event-based wait (respects notifications)
+            await self.wait()
 
             # Get the raw result (could be ToolResult or CallToolResult)
             raw_result = await self._client.get_task_result(self._task_id)
@@ -432,8 +432,8 @@ class PromptTask(Task[mcp.types.GetPromptResult]):
             # Check client connected
             self._check_client_connected()
 
-            # Wait for completion
-            await self._client.wait_for_task(self._task_id)
+            # Wait for completion using event-based wait (respects notifications)
+            await self.wait()
 
             # Get the raw MCP result
             mcp_result = await self._client.get_task_result(self._task_id)
@@ -504,8 +504,8 @@ class ResourceTask(
             # Check client connected
             self._check_client_connected()
 
-            # Wait for completion
-            await self._client.wait_for_task(self._task_id)
+            # Wait for completion using event-based wait (respects notifications)
+            await self.wait()
 
             # Get the raw MCP result
             mcp_result = await self._client.get_task_result(self._task_id)
