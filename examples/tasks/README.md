@@ -126,8 +126,7 @@ fastmcp tasks worker server.py
 ### Backend Options
 
 - **memory://** (default): In-memory, single-process only
-- **redis://**: Distributed, multi-process, survives restarts
-- **valkey://**: Redis-compatible alternative
+- **redis://**: Distributed, multi-process, survives restarts (works with Redis or Valkey)
 
 ## Environment Variables
 

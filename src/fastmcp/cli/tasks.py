@@ -76,12 +76,9 @@ def worker(
 ) -> None:
     """Start an additional worker to process background tasks.
 
-    This spawns a new FastMCP server instance that enters its lifespan and starts
-    its built-in Docket worker. The worker connects to your configured Docket backend
-    and processes tasks in parallel with any other running workers.
-
-    Worker configuration (concurrency, timeouts, etc.) is controlled via environment
-    variables - see DocketSettings in fastmcp.settings.
+    Connects to your Docket backend and processes tasks in parallel with
+    any other running workers. Configure via environment variables
+    (FASTMCP_EXPERIMENTAL_DOCKET_*).
 
     Example:
         fastmcp tasks worker server.py
