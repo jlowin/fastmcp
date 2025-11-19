@@ -105,7 +105,7 @@ async def test_client_advertises_task_capability_when_enabled():
         experimental__enable_tasks=True,
     ):
         # Import here so settings are applied
-        from fastmcp.client._temporary_task_capability_shim import (
+        from fastmcp.client._temporary_sep_1686_shims import (
             task_capable_initialize,
         )
 

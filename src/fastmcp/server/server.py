@@ -1221,19 +1221,14 @@ class FastMCP(Generic[LifespanResultT]):
                 task_meta = None
                 try:
                     req_ctx = request_ctx.get()
-                    # Get task metadata from req_ctx.meta (Pydantic RequestParams.Meta object)
-                    if req_ctx.meta:
+                    # Extract task metadata from request params
+                    if req_ctx.request and req_ctx.request.params:
+                        task_meta = getattr(req_ctx.request.params, "task", None)
+                    # Fallback: SDK provides params via req_ctx.meta
+                    elif req_ctx.meta:
+                        # Extract from model_dump since task field is aliased
                         meta_dict = req_ctx.meta.model_dump()
                         task_meta = meta_dict.get("modelcontextprotocol.io/task")
-                    # Fall back to request.params._meta (for HTTP transports)
-                    elif req_ctx.request and req_ctx.request.params:
-                        task_meta = (
-                            req_ctx.request.params._meta.get(
-                                "modelcontextprotocol.io/task"
-                            )
-                            if req_ctx.request.params._meta
-                            else None
-                        )
                 except (LookupError, AttributeError):
                     # No request context available - proceed without task metadata
                     pass
@@ -1345,7 +1340,12 @@ class FastMCP(Generic[LifespanResultT]):
                 task_meta = None
                 try:
                     req_ctx = request_ctx.get()
-                    if req_ctx.meta:
+                    # Extract task metadata from request params
+                    if req_ctx.request and req_ctx.request.params:
+                        task_meta = getattr(req_ctx.request.params, "task", None)
+                    # Fallback: SDK provides params via req_ctx.meta
+                    elif req_ctx.meta:
+                        # Extract from model_dump since task field is aliased
                         meta_dict = req_ctx.meta.model_dump()
                         task_meta = meta_dict.get("modelcontextprotocol.io/task")
                 except (LookupError, AttributeError):
@@ -1467,7 +1467,12 @@ class FastMCP(Generic[LifespanResultT]):
                 task_meta = None
                 try:
                     req_ctx = request_ctx.get()
-                    if req_ctx.meta:
+                    # Extract task metadata from request params
+                    if req_ctx.request and req_ctx.request.params:
+                        task_meta = getattr(req_ctx.request.params, "task", None)
+                    # Fallback: SDK provides params via req_ctx.meta
+                    elif req_ctx.meta:
+                        # Extract from model_dump since task field is aliased
                         meta_dict = req_ctx.meta.model_dump()
                         task_meta = meta_dict.get("modelcontextprotocol.io/task")
                 except (LookupError, AttributeError):
@@ -2264,11 +2269,16 @@ class FastMCP(Generic[LifespanResultT]):
                     # Build experimental capabilities
                     experimental_capabilities = {}
                     if fastmcp.settings.experimental.enable_tasks:
-                        # Declare SEP-1686 task support (enable_tasks requires enable_docket via validator)
+                        # Declare SEP-1686 task support per final spec (lines 49-63)
+                        # Nested structure: {list: {}, cancel: {}, requests: {tools: {call: {}}}}
                         experimental_capabilities["tasks"] = {
-                            "tools": True,
-                            "prompts": True,
-                            "resources": True,
+                            "list": {},
+                            "cancel": {},
+                            "requests": {
+                                "tools": {"call": {}},
+                                "prompts": {"get": {}},
+                                "resources": {"read": {}},
+                            },
                         }
 
                     await self._mcp_server.run(

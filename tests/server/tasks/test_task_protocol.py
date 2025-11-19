@@ -31,22 +31,22 @@ async def task_enabled_server():
     return mcp
 
 
-async def test_task_metadata_includes_task_id_and_keep_alive(task_enabled_server):
-    """Task metadata properly includes taskId and keepAlive."""
+async def test_task_metadata_includes_task_id_and_ttl(task_enabled_server):
+    """Task metadata properly includes server-generated taskId and ttl."""
     async with Client(task_enabled_server) as client:
-        # Submit with specific task ID and keepAlive
+        # Submit with specific ttl (server generates task ID)
         task = await client.call_tool(
             "simple_tool",
             {"message": "test"},
             task=True,
-            task_id="custom-task-123",
-            keep_alive=30000,
+            ttl=30000,
         )
         assert task
         assert not task.returned_immediately
 
-        # Should use our custom task ID
-        assert task.task_id == "custom-task-123"
+        # Server should have generated a task ID
+        assert task.task_id is not None
+        assert isinstance(task.task_id, str)
 
 
 async def test_task_notification_sent_after_submission(task_enabled_server):

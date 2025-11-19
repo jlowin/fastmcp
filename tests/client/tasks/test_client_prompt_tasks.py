@@ -39,17 +39,20 @@ async def test_get_prompt_as_task_returns_prompt_task(prompt_server):
         assert isinstance(task.task_id, str)
 
 
-async def test_prompt_task_with_custom_id(prompt_server):
-    """get_prompt with task=True accepts custom task ID."""
+async def test_prompt_task_server_generated_id(prompt_server):
+    """get_prompt with task=True gets server-generated task ID."""
     async with Client(prompt_server) as client:
         task = await client.get_prompt(
             "creative_prompt",
             {"theme": "future"},
             task=True,
-            task_id="custom-prompt-123",
         )
 
-        assert task.task_id == "custom-prompt-123"
+        # Server should generate a UUID task ID
+        assert task.task_id is not None
+        assert isinstance(task.task_id, str)
+        # UUIDs have hyphens
+        assert "-" in task.task_id
 
 
 async def test_prompt_task_result_returns_get_prompt_result(prompt_server):

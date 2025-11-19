@@ -55,14 +55,14 @@ async def test_tasks_get_endpoint_returns_status(endpoint_server):
         assert status.status == "completed"
 
 
-async def test_tasks_get_endpoint_includes_poll_frequency(endpoint_server):
+async def test_tasks_get_endpoint_includes_poll_interval(endpoint_server):
     """Task status includes pollFrequency hint."""
     async with Client(endpoint_server) as client:
         task = await client.call_tool("quick_tool", {"value": 42}, task=True)
 
         status = await task.status()
-        assert status.poll_frequency is not None
-        assert isinstance(status.poll_frequency, int)
+        assert status.poll_interval is not None
+        assert isinstance(status.poll_interval, int)
 
 
 async def test_tasks_result_endpoint_returns_result_when_completed(endpoint_server):
@@ -126,12 +126,10 @@ async def test_tasks_list_endpoint_session_isolation(endpoint_server):
     """list_tasks returns only tasks submitted by this client."""
     # Since client tracks tasks locally, this tests client-side tracking
     async with Client(endpoint_server) as client:
-        # Submit multiple tasks
+        # Submit multiple tasks (server generates IDs)
         tasks = []
         for i in range(3):
-            task = await client.call_tool(
-                "quick_tool", {"value": i}, task=True, task_id=f"list-task-{i}"
-            )
+            task = await client.call_tool("quick_tool", {"value": i}, task=True)
             tasks.append(task)
 
         # Wait for all to complete
