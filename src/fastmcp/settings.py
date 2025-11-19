@@ -80,12 +80,11 @@ class DocketSettings(BaseSettings):
                 """
                 URL for the Docket backend. Supports:
                 - memory:// - In-memory backend (single process only)
-                - redis://host:port/db - Redis backend (distributed, multi-process)
-                - valkey://host:port/db - Valkey backend (distributed, multi-process)
+                - redis://host:port/db - Redis/Valkey backend (distributed, multi-process)
 
                 Example: redis://localhost:6379/0
 
-                Default is memory:// for single-process scenarios. Use Redis/Valkey
+                Default is memory:// for single-process scenarios. Use Redis or Valkey
                 when coordinating tasks across multiple processes (e.g., additional
                 workers via the fastmcp tasks CLI).
                 """
