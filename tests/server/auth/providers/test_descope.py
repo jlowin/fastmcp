@@ -181,6 +181,43 @@ class TestDescopeProvider:
         )
         assert provider.token_verifier.audience == "P2abc123"  # type: ignore[attr-defined]
 
+    def test_required_scopes_support(self):
+        """Test that required_scopes are supported and passed to JWT verifier."""
+        provider = DescopeProvider(
+            config_url="https://api.descope.com/v1/apps/agentic/P2abc123/M123/.well-known/openid-configuration",
+            base_url="https://myserver.com",
+            required_scopes=["read", "write"],
+        )
+
+        # Check that required_scopes are set on the token verifier
+        assert provider.token_verifier.required_scopes == ["read", "write"]  # type: ignore[attr-defined]
+
+    def test_required_scopes_with_old_api(self):
+        """Test that required_scopes work with the old API (project_id + descope_base_url)."""
+        provider = DescopeProvider(
+            project_id="P2abc123",
+            descope_base_url="https://api.descope.com",
+            base_url="https://myserver.com",
+            required_scopes=["openid", "email"],
+        )
+
+        # Check that required_scopes are set on the token verifier
+        assert provider.token_verifier.required_scopes == ["openid", "email"]  # type: ignore[attr-defined]
+
+    def test_required_scopes_from_env(self):
+        """Test that required_scopes can be set via environment variable."""
+        with patch.dict(
+            os.environ,
+            {
+                "FASTMCP_SERVER_AUTH_DESCOPEPROVIDER_CONFIG_URL": "https://api.descope.com/v1/apps/agentic/P2env123/M123/.well-known/openid-configuration",
+                "FASTMCP_SERVER_AUTH_DESCOPEPROVIDER_BASE_URL": "https://envserver.com",
+                "FASTMCP_SERVER_AUTH_DESCOPEPROVIDER_REQUIRED_SCOPES": "read,write",
+            },
+        ):
+            provider = DescopeProvider()
+
+            assert provider.token_verifier.required_scopes == ["read", "write"]  # type: ignore[attr-defined]
+
 
 @pytest.fixture
 async def mcp_server_url():
