@@ -35,7 +35,7 @@ async def test_end_to_end_task_flow():
 
         # Check status while running
         status = await task.status()
-        assert status.status in ["submitted", "working"]
+        assert status.status in ["working"]
 
         # Signal completion
         complete_signal.set()

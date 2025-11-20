@@ -93,7 +93,7 @@ async def test_prompt_task_status_and_wait(prompt_server):
 
         # Check status
         status = await task.status()
-        assert status.status in ["submitted", "working", "completed"]
+        assert status.status in ["working", "completed"]
 
         # Wait for completion
         await task.wait(timeout=2.0)

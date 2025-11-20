@@ -78,7 +78,7 @@ async def test_tool_task_executes_in_background(tool_server):
 
         # Task should still be working
         status = await task.status()
-        assert status.status in ["submitted", "working"]
+        assert status.status in ["working"]
 
         # Signal completion
         execution_completed.set()

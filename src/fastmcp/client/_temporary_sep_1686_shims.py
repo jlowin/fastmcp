@@ -182,13 +182,10 @@ class TasksGetResult(BaseModel):
     """Result from tasks/get MCP method."""
 
     taskId: str
-    status: Literal[
-        "submitted", "working", "completed", "failed", "cancelled", "unknown"
-    ]
+    status: Literal["working", "input_required", "completed", "failed", "cancelled"]
     createdAt: str
     ttl: int | None = None
     pollInterval: int | None = None
-    error: str | None = None
 
 
 class TasksResultRequest(BaseModel):
@@ -267,13 +264,10 @@ class TaskStatusResponse(pydantic.BaseModel):
     """Response from tasks/get endpoint."""
 
     task_id: str = pydantic.Field(alias="taskId")
-    status: Literal[
-        "submitted", "working", "completed", "failed", "cancelled", "unknown"
-    ]
+    status: Literal["working", "input_required", "completed", "failed", "cancelled"]
     created_at: str = pydantic.Field(alias="createdAt")
     ttl: int | None = pydantic.Field(default=None, alias="ttl")
     poll_interval: int | None = pydantic.Field(default=None, alias="pollInterval")
-    error: str | None = None
     status_message: str | None = pydantic.Field(default=None, alias="statusMessage")
 
     model_config = pydantic.ConfigDict(populate_by_name=True)

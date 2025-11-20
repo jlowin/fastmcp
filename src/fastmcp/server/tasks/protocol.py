@@ -84,39 +84,19 @@ async def tasks_get_handler(server: FastMCP, params: dict[str, Any]) -> GetTaskR
         )
 
         if task_key is None:
-            # Task not found - return unknown state per SEP-1686
-            # Use synthetic timestamp since task never existed or was deleted
-            # Per spec lines 447-448: SHOULD NOT include related-task in tasks/get
-            return GetTaskResult(
-                taskId=client_task_id,
-                status="unknown",
-                createdAt=created_at or datetime.now(timezone.utc).isoformat(),
-                ttl=None,
-                pollInterval=1000,
-                error=None,
-                statusMessage="Task not found",  # Optional per spec line 403
-            )
+            # Task not found - raise error per MCP protocol
+            raise ValueError(f"Task {client_task_id} not found")
 
         execution = await docket.get_execution(task_key)
         if execution is None:
-            # Task key exists but no execution - unknown
-            # Use stored timestamp if available, otherwise synthetic
-            # Per spec lines 447-448: SHOULD NOT include related-task in tasks/get
-            return GetTaskResult(
-                taskId=client_task_id,
-                status="unknown",
-                createdAt=created_at or datetime.now(timezone.utc).isoformat(),
-                ttl=None,
-                pollInterval=1000,
-                error=None,
-                statusMessage="Task not found",  # Optional per spec line 403
-            )
+            # Task key exists but no execution - raise error
+            raise ValueError(f"Task {client_task_id} execution not found")
 
         # Sync state from Redis
         await execution.sync()
 
         # Map Docket state to MCP state
-        mcp_state = DOCKET_TO_MCP_STATE.get(execution.state, "unknown")
+        mcp_state = DOCKET_TO_MCP_STATE.get(execution.state, "failed")
 
         # Build response (use default ttl since we don't track per-task values)
         # createdAt is REQUIRED per SEP-1686 final spec (line 430)
@@ -140,7 +120,6 @@ async def tasks_get_handler(server: FastMCP, params: dict[str, Any]) -> GetTaskR
             createdAt=created_at,  # type: ignore[arg-type]  # Required ISO 8601 timestamp
             ttl=60000,  # Default value in milliseconds
             pollInterval=1000,
-            error=error_message,
             statusMessage=status_message,  # Optional per spec line 403
         )
 
@@ -210,7 +189,7 @@ async def tasks_result_handler(server: FastMCP, params: dict[str, Any]) -> Any:
 
         # Check if completed
         if execution.state not in (ExecutionState.COMPLETED, ExecutionState.FAILED):
-            mcp_state = DOCKET_TO_MCP_STATE.get(execution.state, "unknown")
+            mcp_state = DOCKET_TO_MCP_STATE.get(execution.state, "failed")
             raise McpError(
                 ErrorData(
                     code=INVALID_PARAMS,

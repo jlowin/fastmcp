@@ -43,7 +43,7 @@ async def test_keepalive_returned_in_submitted_state(keepalive_server: FastMCP):
 
         # Check status immediately - should be submitted or working
         status = await task.status()
-        assert status.status in ["submitted", "working"]
+        assert status.status in ["working"]
 
         # ttl should be present per spec (MUST return in all responses)
         # TODO: Docket uses a global execution_ttl for all tasks, not per-task TTLs.

@@ -7,6 +7,7 @@ Tests the tasks/get, tasks/result, and tasks/list JSON-RPC protocol methods.
 import asyncio
 
 import pytest
+from mcp.shared.exceptions import McpError
 
 from fastmcp import FastMCP
 from fastmcp.client import Client
@@ -45,7 +46,7 @@ async def test_tasks_get_endpoint_returns_status(endpoint_server):
         # Check status immediately - should be submitted or working
         status = await task.status()
         assert status.task_id == task.task_id
-        assert status.status in ["submitted", "working", "completed"]
+        assert status.status in ["working", "completed"]
 
         # Wait for completion
         await task.wait(timeout=2.0)
@@ -164,9 +165,9 @@ async def test_tasks_delete_removes_task(endpoint_server):
         # Delete the task
         await task.delete()
 
-        # Task should return unknown state (deleted tasks = unknown)
-        status = await client.get_task_status(task_id)
-        assert status.status == "unknown"
+        # Deleted tasks raise error when queried (per SDK behavior)
+        with pytest.raises(McpError, match="not found"):
+            await client.get_task_status(task_id)
 
 
 async def test_tasks_delete_on_running_task(endpoint_server):
@@ -181,9 +182,9 @@ async def test_tasks_delete_on_running_task(endpoint_server):
         # Delete while running
         await task.delete()
 
-        # Task should return unknown state (deleted tasks = unknown)
-        status = await client.get_task_status(task.task_id)
-        assert status.status == "unknown"
+        # Deleted tasks raise error when queried (per SDK behavior)
+        with pytest.raises(McpError, match="not found"):
+            await client.get_task_status(task.task_id)
 
 
 async def test_delete_nonexistent_task_raises_error(endpoint_server):
@@ -196,15 +197,13 @@ async def test_delete_nonexistent_task_raises_error(endpoint_server):
             await client.delete_task("nonexistent-task-id")
 
 
-async def test_get_status_nonexistent_task_returns_unknown(endpoint_server):
-    """Getting status for nonexistent task returns unknown state."""
+async def test_get_status_nonexistent_task_raises_error(endpoint_server):
+    """Getting status for nonexistent task raises MCP error (per SEP-1686 SDK behavior)."""
     async with Client(endpoint_server) as client:
         # Try to get status for task that was never created
-        status = await client.get_task_status("nonexistent-task-id")
-
-        # Should return unknown state instead of error
-        assert status.status == "unknown"
-        assert status.task_id == "nonexistent-task-id"
+        # Per SDK implementation: raises ValueError which becomes JSON-RPC error
+        with pytest.raises(McpError, match="Task nonexistent-task-id not found"):
+            await client.get_task_status("nonexistent-task-id")
 
 
 async def test_task_cancellation_workflow(endpoint_server):

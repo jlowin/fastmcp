@@ -61,7 +61,6 @@ async def subscribe_to_task_updates(
                     task_key=task_key,
                     docket=docket,
                     state=event["state"],  # type: ignore[typeddict-item]
-                    error=event.get("error"),  # type: ignore[typeddict-item]
                 )
             elif event["type"] == "progress":
                 # Send notification when progress message changes
@@ -83,7 +82,6 @@ async def _send_status_notification(
     task_key: str,
     docket: Docket,
     state: ExecutionState,
-    error: str | None = None,
 ) -> None:
     """Send notifications/tasks/status to client.
 
@@ -96,10 +94,9 @@ async def _send_status_notification(
         task_key: Internal task key (for metadata lookup)
         docket: Docket instance
         state: Docket execution state (enum)
-        error: Error message if task failed
     """
     # Map Docket state to MCP status
-    mcp_status = DOCKET_TO_MCP_STATE.get(state, "unknown")
+    mcp_status = DOCKET_TO_MCP_STATE.get(state, "failed")
 
     # Extract session_id from task_key for Redis lookup
     from fastmcp.server.tasks.keys import parse_task_key
@@ -123,7 +120,7 @@ async def _send_status_notification(
     if state == ExecutionState.COMPLETED:
         status_message = "Task completed successfully"
     elif state == ExecutionState.FAILED:
-        status_message = f"Task failed: {error}" if error else "Task failed"
+        status_message = "Task failed"
     elif state == ExecutionState.CANCELLED:
         status_message = "Task cancelled"
 
@@ -136,8 +133,6 @@ async def _send_status_notification(
         "pollInterval": 1000,
     }
 
-    if error:
-        params_dict["error"] = error
     if status_message:
         params_dict["statusMessage"] = status_message
 
@@ -175,7 +170,7 @@ async def _send_progress_notification(
         return
 
     # Map Docket state to MCP status
-    mcp_status = DOCKET_TO_MCP_STATE.get(execution.state, "unknown")
+    mcp_status = DOCKET_TO_MCP_STATE.get(execution.state, "failed")
 
     # Extract session_id from task_key for Redis lookup
     from fastmcp.server.tasks.keys import parse_task_key

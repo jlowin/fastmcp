@@ -97,13 +97,11 @@ class GetTaskResult(Result):
     """The unique identifier for this task."""
 
     status: Literal[
-        "submitted",
         "working",
         "input_required",
         "completed",
         "failed",
         "cancelled",
-        "unknown",
     ]
     """Current task status."""
 
@@ -117,9 +115,6 @@ class GetTaskResult(Result):
 
     pollInterval: int | None = None
     """Recommended polling frequency in milliseconds."""
-
-    error: str | None = None
-    """Error message if status is 'failed' or 'cancelled'."""
 
     statusMessage: str | None = None
     """Optional human-readable message describing the current state. Per spec line 403."""
@@ -237,13 +232,11 @@ class TaskStatusNotificationParams(BaseModel):
     """The unique identifier for this task."""
 
     status: Literal[
-        "submitted",
         "working",
         "input_required",
         "completed",
         "failed",
         "cancelled",
-        "unknown",
     ]
     """Current task status."""
 
@@ -255,9 +248,6 @@ class TaskStatusNotificationParams(BaseModel):
 
     pollInterval: int | None = None
     """Recommended polling frequency in milliseconds."""
-
-    error: str | None = None
-    """Error message if status is 'failed' or 'cancelled'."""
 
     statusMessage: str | None = None
     """Optional human-readable message describing the current state."""

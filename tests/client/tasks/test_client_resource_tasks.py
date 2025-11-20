@@ -98,7 +98,7 @@ async def test_resource_task_status_and_wait(resource_server):
 
         # Check status
         status = await task.status()
-        assert status.status in ["submitted", "working", "completed"]
+        assert status.status in ["working", "completed"]
 
         # Wait for completion
         await task.wait(timeout=2.0)
