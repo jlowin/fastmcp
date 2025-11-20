@@ -34,7 +34,7 @@ def fixture_streamable_http_client() -> Client[StreamableHttpTransport]:
     )
 
 
-@pytest.mark.flaky(reruns=2, reruns_delay=1)
+@pytest.mark.flaky(retries=2, delay=1)
 class TestGithubMCPRemote:
     async def test_connect_disconnect(
         self,
