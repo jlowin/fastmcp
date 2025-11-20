@@ -77,58 +77,30 @@ async def return_type_server():
     return mcp
 
 
-async def test_task_string_return(return_type_server):
-    """Task mode returns same string as immediate mode."""
+@pytest.mark.parametrize(
+    "tool_name,expected_type,expected_value",
+    [
+        ("return_string", str, "Hello, World!"),
+        ("return_int", int, 42),
+        ("return_float", float, 3.14159),
+        ("return_bool", bool, True),
+        ("return_dict", dict, {"count": 100, "total": 500}),
+        ("return_list", list, ["apple", "banana", "cherry"]),
+        ("return_none", type(None), None),
+    ],
+)
+async def test_task_basic_types(
+    return_type_server: FastMCP,
+    tool_name: str,
+    expected_type: type,
+    expected_value: Any,
+):
+    """Task mode returns basic types correctly."""
     async with Client(return_type_server) as client:
-        task = await client.call_tool("return_string", task=True)
+        task = await client.call_tool(tool_name, task=True)
         result = await task
-        assert isinstance(result.data, str)
-        assert result.data == "Hello, World!"
-
-
-async def test_task_int_return(return_type_server):
-    """Task mode returns same int as immediate mode."""
-    async with Client(return_type_server) as client:
-        task = await client.call_tool("return_int", task=True)
-        result = await task
-        assert isinstance(result.data, int)
-        assert result.data == 42
-
-
-async def test_task_float_return(return_type_server):
-    """Task mode returns same float as immediate mode."""
-    async with Client(return_type_server) as client:
-        task = await client.call_tool("return_float", task=True)
-        result = await task
-        assert isinstance(result.data, float)
-        assert result.data == 3.14159
-
-
-async def test_task_bool_return(return_type_server):
-    """Task mode returns same bool as immediate mode."""
-    async with Client(return_type_server) as client:
-        task = await client.call_tool("return_bool", task=True)
-        result = await task
-        assert isinstance(result.data, bool)
-        assert result.data is True
-
-
-async def test_task_dict_return(return_type_server):
-    """Task mode returns same dict as immediate mode."""
-    async with Client(return_type_server) as client:
-        task = await client.call_tool("return_dict", task=True)
-        result = await task
-        assert isinstance(result.data, dict)
-        assert result.data == {"count": 100, "total": 500}
-
-
-async def test_task_list_return(return_type_server):
-    """Task mode returns same list as immediate mode."""
-    async with Client(return_type_server) as client:
-        task = await client.call_tool("return_list", task=True)
-        result = await task
-        assert isinstance(result.data, list)
-        assert result.data == ["apple", "banana", "cherry"]
+        assert isinstance(result.data, expected_type)
+        assert result.data == expected_value
 
 
 async def test_task_model_return(return_type_server):
@@ -142,14 +114,6 @@ async def test_task_model_return(return_type_server):
         assert result.data.name == "Alice"
         assert result.data.age == 30
         assert result.data.active is True
-
-
-async def test_task_none_return(return_type_server):
-    """Task mode handles None return like immediate mode."""
-    async with Client(return_type_server) as client:
-        task = await client.call_tool("return_none", task=True)
-        result = await task
-        assert result.data is None
 
 
 async def test_task_vs_immediate_equivalence(return_type_server):
@@ -287,41 +251,43 @@ async def binary_type_server():
     return mcp
 
 
-async def test_task_bytes_return(binary_type_server):
-    """Task mode handles bytes return."""
+@pytest.mark.parametrize(
+    "tool_name,expected_type,assertion_fn",
+    [
+        (
+            "return_bytes",
+            str,
+            lambda r: "Hello bytes!" in r.data or "SGVsbG8gYnl0ZXMh" in r.data,
+        ),
+        (
+            "return_uuid",
+            str,
+            lambda r: r.data == "12345678-1234-5678-1234-567812345678",
+        ),
+        (
+            "return_path",
+            str,
+            lambda r: "tmp" in r.data and "test.txt" in r.data,
+        ),
+        (
+            "return_datetime",
+            datetime,
+            lambda r: r.data == datetime(2025, 11, 5, 12, 30, 45),
+        ),
+    ],
+)
+async def test_task_binary_types(
+    binary_type_server: FastMCP,
+    tool_name: str,
+    expected_type: type,
+    assertion_fn: Any,
+):
+    """Task mode handles binary and special types."""
     async with Client(binary_type_server) as client:
-        task = await client.call_tool("return_bytes", task=True)
+        task = await client.call_tool(tool_name, task=True)
         result = await task
-        assert isinstance(result.data, str)  # bytes serialized to base64 string
-        assert "Hello bytes!" in result.data or "SGVsbG8gYnl0ZXMh" in result.data
-
-
-async def test_task_uuid_return(binary_type_server):
-    """Task mode handles UUID return."""
-    async with Client(binary_type_server) as client:
-        task = await client.call_tool("return_uuid", task=True)
-        result = await task
-        assert isinstance(result.data, str)
-        assert result.data == "12345678-1234-5678-1234-567812345678"
-
-
-async def test_task_path_return(binary_type_server):
-    """Task mode handles Path return."""
-    async with Client(binary_type_server) as client:
-        task = await client.call_tool("return_path", task=True)
-        result = await task
-        assert isinstance(result.data, str)
-        # Path uses platform-specific separators
-        assert "tmp" in result.data and "test.txt" in result.data
-
-
-async def test_task_datetime_return(binary_type_server):
-    """Task mode handles datetime return."""
-    async with Client(binary_type_server) as client:
-        task = await client.call_tool("return_datetime", task=True)
-        result = await task
-        assert isinstance(result.data, datetime)
-        assert result.data == datetime(2025, 11, 5, 12, 30, 45)
+        assert isinstance(result.data, expected_type)
+        assert assertion_fn(result)
 
 
 # ==============================================================================
@@ -353,31 +319,26 @@ async def collection_server():
     return mcp
 
 
-async def test_task_tuple_return(collection_server):
-    """Task mode handles tuple return."""
+@pytest.mark.parametrize(
+    "tool_name,expected_type,expected_value",
+    [
+        ("return_tuple", list, [42, "hello", True]),
+        ("return_set", set, {1, 2, 3}),
+        ("return_empty_list", list, []),
+    ],
+)
+async def test_task_collection_types(
+    collection_server: FastMCP,
+    tool_name: str,
+    expected_type: type,
+    expected_value: Any,
+):
+    """Task mode handles collection types."""
     async with Client(collection_server) as client:
-        task = await client.call_tool("return_tuple", task=True)
+        task = await client.call_tool(tool_name, task=True)
         result = await task
-        assert isinstance(result.data, list)  # Tuples serialize as lists
-        assert result.data == [42, "hello", True]
-
-
-async def test_task_set_return(collection_server):
-    """Task mode handles set return."""
-    async with Client(collection_server) as client:
-        task = await client.call_tool("return_set", task=True)
-        result = await task
-        assert isinstance(result.data, set)
-        assert result.data == {1, 2, 3}
-
-
-async def test_task_empty_list_return(collection_server):
-    """Task mode handles empty list return."""
-    async with Client(collection_server) as client:
-        task = await client.call_tool("return_empty_list", task=True)
-        result = await task
-        assert isinstance(result.data, list)
-        assert result.data == []
+        assert isinstance(result.data, expected_type)
+        assert result.data == expected_value
 
 
 async def test_task_empty_dict_return(collection_server):
@@ -430,43 +391,39 @@ async def media_server(tmp_path):
     return mcp
 
 
-async def test_task_image_path_return(media_server):
-    """Task mode handles Image with path."""
+@pytest.mark.parametrize(
+    "tool_name,assertion_fn",
+    [
+        (
+            "return_image_path",
+            lambda r: len(r.content) == 1 and r.content[0].type == "image",
+        ),
+        (
+            "return_image_data",
+            lambda r: len(r.content) == 1
+            and r.content[0].type == "image"
+            and r.content[0].mimeType == "image/png",
+        ),
+        (
+            "return_audio",
+            lambda r: len(r.content) == 1 and r.content[0].type in ["text", "audio"],
+        ),
+        (
+            "return_file",
+            lambda r: len(r.content) == 1 and r.content[0].type == "resource",
+        ),
+    ],
+)
+async def test_task_media_types(
+    media_server: FastMCP,
+    tool_name: str,
+    assertion_fn: Any,
+):
+    """Task mode handles media types (Image, Audio, File)."""
     async with Client(media_server) as client:
-        task = await client.call_tool("return_image_path", task=True)
+        task = await client.call_tool(tool_name, task=True)
         result = await task
-        # Image converts to ImageContent
-        assert len(result.content) == 1
-        assert result.content[0].type == "image"
-
-
-async def test_task_image_data_return(media_server):
-    """Task mode handles Image with data."""
-    async with Client(media_server) as client:
-        task = await client.call_tool("return_image_data", task=True)
-        result = await task
-        assert len(result.content) == 1
-        assert result.content[0].type == "image"
-        assert result.content[0].mimeType == "image/png"
-
-
-async def test_task_audio_return(media_server):
-    """Task mode handles Audio return."""
-    async with Client(media_server) as client:
-        task = await client.call_tool("return_audio", task=True)
-        result = await task
-        assert len(result.content) == 1
-        # Audio may be returned as text or audio content depending on conversion
-        assert result.content[0].type in ["text", "audio"]
-
-
-async def test_task_file_return(media_server):
-    """Task mode handles File return."""
-    async with Client(media_server) as client:
-        task = await client.call_tool("return_file", task=True)
-        result = await task
-        assert len(result.content) == 1
-        assert result.content[0].type == "resource"
+        assert assertion_fn(result)
 
 
 # ==============================================================================
@@ -521,59 +478,68 @@ async def structured_type_server():
     return mcp
 
 
-async def test_task_typeddict_return(structured_type_server):
-    """Task mode handles TypedDict return."""
+@pytest.mark.parametrize(
+    "tool_name,expected_name,expected_age",
+    [
+        ("return_typeddict", "Bob", 25),
+        ("return_dataclass", "Charlie", 35),
+    ],
+)
+async def test_task_structured_dict_types(
+    structured_type_server: FastMCP,
+    tool_name: str,
+    expected_name: str,
+    expected_age: int,
+):
+    """Task mode handles TypedDict and dataclass returns."""
     async with Client(structured_type_server) as client:
-        task = await client.call_tool("return_typeddict", task=True)
+        task = await client.call_tool(tool_name, task=True)
         result = await task
-        # TypedDict deserializes to dynamic Root class
-        assert result.data.name == "Bob"
-        assert result.data.age == 25
+        # Both deserialize to dynamic Root class
+        assert result.data.name == expected_name
+        assert result.data.age == expected_age
 
 
-async def test_task_dataclass_return(structured_type_server):
-    """Task mode handles dataclass return."""
+@pytest.mark.parametrize(
+    "tool_name,expected_type,expected_value",
+    [
+        ("return_union", str, "string value"),
+        ("return_union_int", int, 123),
+    ],
+)
+async def test_task_union_types(
+    structured_type_server: FastMCP,
+    tool_name: str,
+    expected_type: type,
+    expected_value: Any,
+):
+    """Task mode handles union type branches."""
     async with Client(structured_type_server) as client:
-        task = await client.call_tool("return_dataclass", task=True)
+        task = await client.call_tool(tool_name, task=True)
         result = await task
-        # Dataclass deserializes to dynamic Root class
-        assert result.data.name == "Charlie"
-        assert result.data.age == 35
+        assert isinstance(result.data, expected_type)
+        assert result.data == expected_value
 
 
-async def test_task_union_str_return(structured_type_server):
-    """Task mode handles union type (str branch)."""
+@pytest.mark.parametrize(
+    "tool_name,expected_type,expected_value",
+    [
+        ("return_optional", str, "has value"),
+        ("return_optional_none", type(None), None),
+    ],
+)
+async def test_task_optional_types(
+    structured_type_server: FastMCP,
+    tool_name: str,
+    expected_type: type,
+    expected_value: Any,
+):
+    """Task mode handles Optional types."""
     async with Client(structured_type_server) as client:
-        task = await client.call_tool("return_union", task=True)
+        task = await client.call_tool(tool_name, task=True)
         result = await task
-        assert isinstance(result.data, str)
-        assert result.data == "string value"
-
-
-async def test_task_union_int_return(structured_type_server):
-    """Task mode handles union type (int branch)."""
-    async with Client(structured_type_server) as client:
-        task = await client.call_tool("return_union_int", task=True)
-        result = await task
-        assert isinstance(result.data, int)
-        assert result.data == 123
-
-
-async def test_task_optional_with_value(structured_type_server):
-    """Task mode handles Optional[str] with value."""
-    async with Client(structured_type_server) as client:
-        task = await client.call_tool("return_optional", task=True)
-        result = await task
-        assert isinstance(result.data, str)
-        assert result.data == "has value"
-
-
-async def test_task_optional_none(structured_type_server):
-    """Task mode handles Optional[str] with None."""
-    async with Client(structured_type_server) as client:
-        task = await client.call_tool("return_optional_none", task=True)
-        result = await task
-        assert result.data is None
+        assert isinstance(result.data, expected_type)
+        assert result.data == expected_value
 
 
 # ==============================================================================
@@ -642,43 +608,43 @@ async def mcp_content_server(tmp_path):
     return mcp
 
 
-async def test_task_text_content_return(mcp_content_server):
-    """Task mode handles TextContent return."""
+@pytest.mark.parametrize(
+    "tool_name,assertion_fn",
+    [
+        (
+            "return_text_content",
+            lambda r: len(r.content) == 1
+            and r.content[0].type == "text"
+            and r.content[0].text == "Direct text content",
+        ),
+        (
+            "return_image_content",
+            lambda r: len(r.content) == 1
+            and r.content[0].type == "image"
+            and r.content[0].mimeType == "image/png",
+        ),
+        (
+            "return_embedded_resource",
+            lambda r: len(r.content) == 1 and r.content[0].type == "resource",
+        ),
+        (
+            "return_resource_link",
+            lambda r: len(r.content) == 1
+            and r.content[0].type == "resource_link"
+            and str(r.content[0].uri) == "test://linked",
+        ),
+    ],
+)
+async def test_task_mcp_content_types(
+    mcp_content_server: FastMCP,
+    tool_name: str,
+    assertion_fn: Any,
+):
+    """Task mode handles MCP content block types."""
     async with Client(mcp_content_server) as client:
-        task = await client.call_tool("return_text_content", task=True)
+        task = await client.call_tool(tool_name, task=True)
         result = await task
-        assert len(result.content) == 1
-        assert result.content[0].type == "text"
-        assert result.content[0].text == "Direct text content"
-
-
-async def test_task_image_content_return(mcp_content_server):
-    """Task mode handles ImageContent return."""
-    async with Client(mcp_content_server) as client:
-        task = await client.call_tool("return_image_content", task=True)
-        result = await task
-        assert len(result.content) == 1
-        assert result.content[0].type == "image"
-        assert result.content[0].mimeType == "image/png"
-
-
-async def test_task_embedded_resource_return(mcp_content_server):
-    """Task mode handles EmbeddedResource return."""
-    async with Client(mcp_content_server) as client:
-        task = await client.call_tool("return_embedded_resource", task=True)
-        result = await task
-        assert len(result.content) == 1
-        assert result.content[0].type == "resource"
-
-
-async def test_task_resource_link_return(mcp_content_server):
-    """Task mode handles ResourceLink return."""
-    async with Client(mcp_content_server) as client:
-        task = await client.call_tool("return_resource_link", task=True)
-        result = await task
-        assert len(result.content) == 1
-        assert result.content[0].type == "resource_link"
-        assert str(result.content[0].uri) == "test://linked"
+        assert assertion_fn(result)
 
 
 async def test_task_mixed_content_return(mcp_content_server):
