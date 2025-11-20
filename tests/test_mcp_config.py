@@ -287,14 +287,11 @@ async def test_multi_client_parallel_calls(tmp_path: Path):
         assert all(len(result) == 2 for result in results)  # type: ignore[arg-type]
 
 
-@pytest.mark.skip(
-    reason="Test hangs during teardown - pre-existing issue, also fails on main"
-)
 @pytest.mark.skipif(
     running_under_debugger() or sys.platform.startswith("win32"),
     reason="Debugger holds a reference to the transport; Windows has process lifecycle issues",
 )
-@pytest.mark.timeout(10)
+@pytest.mark.timeout(5)
 async def test_multi_client_lifespan(tmp_path: Path):
     pid_1: int | None = None
     pid_2: int | None = None

@@ -1,7 +1,7 @@
 """Tests for response caching middleware."""
 
 import sys
-from pathlib import Path
+import tempfile
 from unittest.mock import AsyncMock, MagicMock
 
 import mcp.types
@@ -290,31 +290,24 @@ class TestResponseCachingMiddlewareIntegration:
         self,
         tracking_calculator: TrackingCalculator,
         request: pytest.FixtureRequest,
-        tmp_path: Path,
     ):
         """Create a FastMCP server for caching tests."""
         mcp = FastMCP("CachingTestServer")
 
-        if request.param == "disk":
-            disk_store = DiskStore(directory=tmp_path / "cache")
-            cache_storage = disk_store
-        else:
-            disk_store = None
-            cache_storage = MemoryStore()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            disk_store = DiskStore(directory=temp_dir)
+            response_caching_middleware = ResponseCachingMiddleware(
+                cache_storage=disk_store if request.param == "disk" else MemoryStore(),
+            )
 
-        response_caching_middleware = ResponseCachingMiddleware(
-            cache_storage=cache_storage,
-        )
+            mcp.add_middleware(middleware=response_caching_middleware)
 
-        mcp.add_middleware(middleware=response_caching_middleware)
+            tracking_calculator.add_tools(fastmcp=mcp)
+            tracking_calculator.add_resources(fastmcp=mcp)
+            tracking_calculator.add_prompts(fastmcp=mcp)
 
-        tracking_calculator.add_tools(fastmcp=mcp)
-        tracking_calculator.add_resources(fastmcp=mcp)
-        tracking_calculator.add_prompts(fastmcp=mcp)
+            yield mcp
 
-        yield mcp
-
-        if disk_store is not None:
             await disk_store.close()
 
     @pytest.fixture

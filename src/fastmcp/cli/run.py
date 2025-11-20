@@ -203,7 +203,7 @@ async def run_v1_server_async(
     port: int | None = None,
     transport: TransportType | None = None,
 ) -> None:
-    """Run a FastMCP 1.x server in an async context.
+    """Run a FastMCP 1.x server using async methods.
 
     Args:
         server: FastMCP 1.x server instance
@@ -211,11 +211,11 @@ async def run_v1_server_async(
         port: Port to bind to
         transport: Transport protocol to use
     """
-
     if host:
         server.settings.host = host
     if port:
         server.settings.port = port
+
     match transport:
         case "stdio":
             await server.run_stdio_async()
@@ -223,46 +223,3 @@ async def run_v1_server_async(
             await server.run_streamable_http_async()
         case "sse":
             await server.run_sse_async()
-
-
-def run_v1_server(
-    server: FastMCP1x,
-    host: str | None = None,
-    port: int | None = None,
-    transport: TransportType | None = None,
-) -> None:
-    """Run a FastMCP 1.x server, detecting if we're in an async context.
-
-    Args:
-        server: FastMCP 1.x server instance
-        host: Host to bind to
-        port: Port to bind to
-        transport: Transport protocol to use
-    """
-    import asyncio
-    from functools import partial
-
-    if host:
-        server.settings.host = host
-    if port:
-        server.settings.port = port
-
-    # Check if we're already in an async context
-    try:
-        asyncio.get_running_loop()
-        # We're in an async context, raise an error to be caught by caller
-        raise RuntimeError("Already running asyncio in this thread")
-    except RuntimeError as e:
-        if "no running event loop" in str(e).lower():
-            # Not in async context, safe to use sync run()
-            match transport:
-                case "stdio":
-                    runner = partial(server.run)
-                case "http" | "streamable-http" | None:
-                    runner = partial(server.run, transport="streamable-http")
-                case "sse":
-                    runner = partial(server.run, transport="sse")
-            runner()
-        else:
-            # Already in async context, re-raise
-            raise
