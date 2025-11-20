@@ -1,7 +1,5 @@
 import base64
 import os
-import tempfile
-from pathlib import Path
 from typing import Annotated, Any
 
 import pytest
@@ -141,14 +139,15 @@ class TestImage:
         assert not str(image.path).startswith("~")
         assert str(image.path).startswith(os.path.expanduser("~"))
 
-    def test_image_path_expansion_with_env_var(self, monkeypatch):
+    def test_image_path_expansion_with_env_var(self, monkeypatch, tmp_path):
         """Test that environment variables are expanded."""
-        test_dir = tempfile.mkdtemp()
-        monkeypatch.setenv("TEST_PATH", test_dir)
+        test_dir = tmp_path / "test_path"
+        test_dir.mkdir()
+        monkeypatch.setenv("TEST_PATH", str(test_dir))
         image = Image(path="$TEST_PATH/test.png")
         assert image.path is not None
         assert not str(image.path).startswith("$TEST_PATH")
-        expected_path = Path(test_dir) / "test.png"
+        expected_path = test_dir / "test.png"
         assert image.path == expected_path
 
     def test_image_initialization_with_data(self):
@@ -264,14 +263,15 @@ class TestAudio:
         assert not str(audio.path).startswith("~")
         assert str(audio.path).startswith(os.path.expanduser("~"))
 
-    def test_audio_path_expansion_with_env_var(self, monkeypatch):
+    def test_audio_path_expansion_with_env_var(self, monkeypatch, tmp_path):
         """Test that environment variables are expanded."""
-        test_dir = tempfile.mkdtemp()
-        monkeypatch.setenv("TEST_AUDIO_PATH", test_dir)
+        test_dir = tmp_path / "test_audio_path"
+        test_dir.mkdir()
+        monkeypatch.setenv("TEST_AUDIO_PATH", str(test_dir))
         audio = Audio(path="$TEST_AUDIO_PATH/test.wav")
         assert audio.path is not None
         assert not str(audio.path).startswith("$TEST_AUDIO_PATH")
-        expected_path = Path(test_dir) / "test.wav"
+        expected_path = test_dir / "test.wav"
         assert audio.path == expected_path
 
     def test_audio_initialization_with_data(self):
@@ -378,14 +378,15 @@ class TestFile:
         assert not str(file.path).startswith("~")
         assert str(file.path).startswith(os.path.expanduser("~"))
 
-    def test_file_path_expansion_with_env_var(self, monkeypatch):
+    def test_file_path_expansion_with_env_var(self, monkeypatch, tmp_path):
         """Test that environment variables are expanded."""
-        test_dir = tempfile.mkdtemp()
-        monkeypatch.setenv("TEST_FILE_PATH", test_dir)
+        test_dir = tmp_path / "test_file_path"
+        test_dir.mkdir()
+        monkeypatch.setenv("TEST_FILE_PATH", str(test_dir))
         file = File(path="$TEST_FILE_PATH/test.txt")
         assert file.path is not None
         assert not str(file.path).startswith("$TEST_FILE_PATH")
-        expected_path = Path(test_dir) / "test.txt"
+        expected_path = test_dir / "test.txt"
         assert file.path == expected_path
 
     def test_file_initialization_with_data(self):
