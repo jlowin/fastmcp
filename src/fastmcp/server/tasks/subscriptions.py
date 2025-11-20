@@ -21,6 +21,7 @@ from fastmcp.utilities.logging import get_logger
 
 if TYPE_CHECKING:
     from docket import Docket
+    from docket.execution import Execution
     from mcp.server.session import ServerSession
 
 logger = get_logger(__name__)
@@ -63,8 +64,14 @@ async def subscribe_to_task_updates(
                     error=event.get("error"),  # type: ignore[typeddict-item]
                 )
             elif event["type"] == "progress":
-                # Progress events available but not used yet
-                pass
+                # Send notification when progress message changes
+                await _send_progress_notification(
+                    session=session,
+                    task_id=task_id,
+                    task_key=task_key,
+                    docket=docket,
+                    execution=execution,
+                )
 
     except Exception as e:
         logger.warning(f"Subscription task failed for {task_id}: {e}", exc_info=True)
@@ -140,5 +147,67 @@ async def _send_status_notification(
     )
 
     # Send notification (don't let failures break the subscription)
+    with suppress(Exception):
+        await session.send_notification(notification)  # type: ignore[arg-type]
+
+
+async def _send_progress_notification(
+    session: ServerSession,
+    task_id: str,
+    task_key: str,
+    docket: Docket,
+    execution: Execution,
+) -> None:
+    """Send notifications/tasks/status when progress updates.
+
+    Args:
+        session: MCP ServerSession
+        task_id: Client-visible task ID
+        task_key: Internal task key
+        docket: Docket instance
+        execution: Execution object with current progress
+    """
+    # Sync execution to get latest progress
+    await execution.sync()
+
+    # Only send if there's a progress message
+    if not execution.progress or not execution.progress.message:
+        return
+
+    # Map Docket state to MCP status
+    mcp_status = DOCKET_TO_MCP_STATE.get(execution.state, "unknown")
+
+    # Extract session_id from task_key for Redis lookup
+    from fastmcp.server.tasks.keys import parse_task_key
+
+    key_parts = parse_task_key(task_key)
+    session_id = key_parts["session_id"]
+
+    # Retrieve createdAt timestamp from Redis
+    created_at_key = f"fastmcp:task:{session_id}:{task_id}:created_at"
+    async with docket.redis() as redis:
+        created_at_bytes = await redis.get(created_at_key)
+
+    created_at = (
+        created_at_bytes.decode("utf-8")
+        if created_at_bytes
+        else datetime.now(timezone.utc).isoformat()
+    )
+
+    # Construct notification params with progress message
+    params_dict = {
+        "taskId": task_id,
+        "status": mcp_status,
+        "createdAt": created_at,
+        "ttl": 60000,
+        "pollInterval": 1000,
+        "statusMessage": execution.progress.message,
+    }
+
+    # Create and send notification
+    notification = TaskStatusNotification(
+        params=TaskStatusNotificationParams.model_validate(params_dict),
+    )
+
     with suppress(Exception):
         await session.send_notification(notification)  # type: ignore[arg-type]

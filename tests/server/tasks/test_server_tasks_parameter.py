@@ -28,6 +28,13 @@ async def test_server_tasks_true_defaults_all_components():
         return "resource result"
 
     async with Client(mcp) as client:
+        # Verify all task-enabled components are registered with docket
+        docket = mcp.docket
+        assert docket is not None
+        assert "my_tool" in docket.tasks
+        assert "my_prompt" in docket.tasks
+        assert "my_resource" in docket.tasks
+
         # Tool should support background execution
         tool_task = await client.call_tool("my_tool", task=True)
         assert not tool_task.returned_immediately
@@ -119,6 +126,12 @@ async def test_component_explicit_false_overrides_server_true():
         return "background result"
 
     async with Client(mcp) as client:
+        # Verify docket registration matches task settings
+        docket = mcp.docket
+        assert docket is not None
+        assert "no_task_tool" not in docket.tasks  # task=False means not registered
+        assert "default_tool" in docket.tasks  # Inherits tasks=True
+
         # Explicit False should execute immediately despite server default
         no_task = await client.call_tool("no_task_tool", task=True)
         assert no_task.returned_immediately
@@ -141,6 +154,12 @@ async def test_component_explicit_true_overrides_server_false():
         return "immediate result"
 
     async with Client(mcp) as client:
+        # Verify docket registration matches task settings
+        docket = mcp.docket
+        assert docket is not None
+        assert "task_tool" in docket.tasks  # task=True means registered
+        assert "default_tool" not in docket.tasks  # Inherits tasks=False
+
         # Explicit True should support background execution despite server default
         task = await client.call_tool("task_tool", task=True)
         assert not task.returned_immediately
@@ -183,6 +202,19 @@ async def test_mixed_explicit_and_inherited():
         return "explicit False"
 
     async with Client(mcp) as client:
+        # Verify docket registration matches task settings
+        docket = mcp.docket
+        assert docket is not None
+        # task=True (explicit or inherited) means registered
+        assert "inherited_tool" in docket.tasks
+        assert "explicit_true_tool" in docket.tasks
+        assert "inherited_prompt" in docket.tasks
+        assert "inherited_resource" in docket.tasks
+        # task=False means NOT registered
+        assert "explicit_false_tool" not in docket.tasks
+        assert "explicit_false_prompt" not in docket.tasks
+        assert "explicit_false_resource" not in docket.tasks
+
         # Tools
         inherited = await client.call_tool("inherited_tool", task=True)
         assert not inherited.returned_immediately

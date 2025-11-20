@@ -274,6 +274,7 @@ class TaskStatusResponse(pydantic.BaseModel):
     ttl: int | None = pydantic.Field(default=None, alias="ttl")
     poll_interval: int | None = pydantic.Field(default=None, alias="pollInterval")
     error: str | None = None
+    status_message: str | None = pydantic.Field(default=None, alias="statusMessage")
 
     model_config = pydantic.ConfigDict(populate_by_name=True)
 
