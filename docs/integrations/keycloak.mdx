@@ -12,6 +12,10 @@ import { VersionBadge } from "/snippets/version-badge.mdx"
 
 This guide shows you how to secure your FastMCP server using **Keycloak OAuth**. This integration uses the [**Remote OAuth**](/servers/auth/remote-oauth) pattern with Dynamic Client Registration (DCR), where Keycloak handles user login and your FastMCP server validates the tokens.
 
+<Note>
+**MCP Compatibility Note**: While Keycloak has built-in support for Dynamic Client Registration (DCR), there is an important MCP compatibility limitation. Keycloak ignores the client's requested `token_endpoint_auth_method` and always returns `client_secret_basic`, but the MCP specification requires `client_secret_post`. The KeycloakAuthProvider works around this issue by acting as a minimal proxy that intercepts DCR responses from Keycloak and fixes this field automatically. All other OAuth functionality (authorization, token issuance, user authentication) is handled directly by Keycloak.
+</Note>
+
 ## Configuration
 
 ### Prerequisites
@@ -51,11 +55,13 @@ If you prefer using Docker Compose instead, you may want to have a look at the [
     1. Download the FastMCP Keycloak realm configuration: [`realm-fastmcp.json`](https://github.com/jlowin/fastmcp/blob/main/examples/auth/keycloak_auth/keycloak/realm-fastmcp.json)
     2. Open the file in a text editor and customize as needed:
        - **Realm name and display name**: Change `"realm": "fastmcp"` and `"displayName": "FastMCP Realm"` to match your project
-       - **Trusted hosts configuration**: Look for `"trusted-hosts"` section and update IP addresses if needed
+       - **Trusted hosts configuration**: Look for `"trusted-hosts"` section and update IP addresses for secure client registration:
          - `localhost`: For local development
          - `172.17.0.1`: Docker network gateway IP address (required when Keycloak is run with Docker and MCP server directly on localhost)
          - `172.18.0.1`: Docker Compose network gateway IP address (required when Keycloak is run with Docker Compose and MCP server directly on localhost)
+         - `github.com`: Required for MCP Inspector compatibility
          - For production, replace these with your actual domain names
+       - **Default scopes**: The configuration sets `openid`, `profile`, and `email` as default scopes for all clients
     3. **Review the test user**: The file includes a test user (`testuser` with password `password123`). You may want to:
        - Change the credentials for security
        - Replace with more meaningful user accounts
@@ -79,20 +85,9 @@ If you prefer using Docker Compose instead, you may want to have a look at the [
        - Click the **Create** button
 
     That's it! This single action will create the `fastmcp` realm and instantly configure everything from the file:
-    - The realm settings (including user registration policies)
+    - The realm settings with default scopes for all clients (`openid`, `profile`, `email`)
+    - The "Trusted Hosts" client registration policy for secure Dynamic Client Registration (DCR)
     - The test user with their credentials
-    - All the necessary Client Policies and Client Profiles required to support Dynamic Client Registration (DCR)
-    - Trusted hosts configuration for secure client registration
-
-    <Note>
-    You may see this warning in the Keycloak logs during import:
-    ```
-    Failed to deserialize client policies in the realm fastmcp.Fallback to return empty profiles.
-    Details: Unrecognized field "profiles" (class org.keycloak.representations.idm.ClientPoliciesRepresentation),
-    not marked as ignorable (2 known properties: "policies","globalPolicies"])
-    ```
-    This is due to Keycloak's buggy/strict parser not recognizing valid older JSON formats but doesn't seem to impact functionality and can be safely ignored.
-    </Note>
 </Step>
 
 <Step title="Verify the Configuration">
@@ -183,6 +178,28 @@ When you run the client for the first time:
 The client caches tokens locally, so you won't need to re-authenticate for subsequent runs unless the token expires or you explicitly clear the cache.
 </Info>
 
+### Testing with MCP Inspector
+
+The [MCP Inspector](https://github.com/modelcontextprotocol/inspector) provides an interactive web UI to explore and test your MCP server.
+
+**Prerequisites**: Node.js must be installed on your system.
+
+1. Launch the Inspector:
+   ```bash
+   npx -y @modelcontextprotocol/inspector
+   ```
+
+2. In the Inspector UI (opens in your browser), enter your server URL: `http://localhost:8000/mcp`
+3. In the **Authentication** section's **OAuth 2.0 Flow** area, locate the **Scope** field
+4. In the **Scope** field, enter: `openid profile` (these must exactly match the `required_scopes` configured in your KeycloakAuthProvider or `FASTMCP_SERVER_AUTH_KEYCLOAK_REQUIRED_SCOPES` environment variable)
+5. Click **Connect** - your browser will open for Keycloak authentication
+6. Log in with your test user credentials (e.g., `testuser` / `password123`)
+7. After successful authentication, the Inspector will connect to your server
+
+<Note>
+The MCP Inspector requires explicit scope configuration because it doesn't automatically request the scopes defined in Keycloak's client policies. This is the correct OAuth behavior - clients should explicitly request the scopes they need.
+</Note>
+
 ### Automatic Client Re-registration
 
 <Info>
@@ -266,7 +283,7 @@ from fastmcp.server.auth.providers.keycloak import KeycloakAuthProvider
 
 # Custom JWT verifier with specific audience
 custom_verifier = JWTVerifier(
-    jwks_uri="http://localhost:8080/realms/fastmcp/.well-known/jwks.json",
+    jwks_uri="http://localhost:8080/realms/fastmcp/protocol/openid-connect/certs",
     issuer="http://localhost:8080/realms/fastmcp",
     audience="my-specific-client",
     required_scopes=["api:read", "api:write"]

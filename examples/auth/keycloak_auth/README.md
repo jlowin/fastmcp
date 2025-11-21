@@ -75,12 +75,15 @@ Manually import the realm:
       ```
 
    2. In the Inspector UI (opens in your browser):
-      - Click "Add Server"
       - Enter server URL: `http://localhost:8000/mcp`
-      - Select connection type: **"Direct"** (connects directly to the HTTP server)
-      - Click "Connect"
-      - The Inspector will automatically handle the OAuth flow and open Keycloak for authentication
-      - Once authenticated, you can interactively explore available tools and test them
+      - In the **Authentication** section's **OAuth 2.0 Flow** area, locate the **Scope** field
+      - In the **Scope** field, enter: `openid profile` (these must exactly match the `required_scopes` configured in your KeycloakAuthProvider or `FASTMCP_SERVER_AUTH_KEYCLOAK_REQUIRED_SCOPES` environment variable)
+      - Click **Connect**
+      - Your browser will open for Keycloak authentication
+      - Log in with your test user credentials (e.g., `testuser` / `password123`)
+      - After successful authentication, you can interactively explore available tools and test them
+
+   **Note**: The MCP Inspector requires explicit scope configuration because it doesn't automatically request scopes. This is correct OAuth behavior - clients should explicitly request the scopes they need.
 
    The Inspector is particularly useful for:
    - Exploring the server's capabilities without writing code
