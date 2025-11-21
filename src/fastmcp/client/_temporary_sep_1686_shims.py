@@ -12,11 +12,8 @@ These shims will be removed when the MCP SDK is updated to match the final spec.
 DO NOT WRITE TESTS FOR THIS FILE - these are temporary hacks.
 """
 
-from __future__ import annotations
-
 import datetime
 import weakref
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 import mcp.types
@@ -102,19 +99,8 @@ async def task_capable_initialize(
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 3. Client-Side Type Helpers
+# 2. Client-Side Type Helpers
 # ═══════════════════════════════════════════════════════════════════════════
-
-
-@dataclass
-class CallToolResult:
-    """Parsed result from a tool call."""
-
-    content: list[mcp.types.ContentBlock]
-    structured_content: dict[str, Any] | None
-    meta: dict[str, Any] | None
-    data: Any = None
-    is_error: bool = False
 
 
 class TaskStatusResponse(pydantic.BaseModel):
@@ -179,14 +165,14 @@ class TasksResponse(pydantic.BaseModel):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 4. Task Notification Routing
+# 3. Task Notification Routing
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 class TaskNotificationHandler(MessageHandler):
     """MessageHandler that routes task status notifications to Task objects."""
 
-    def __init__(self, client: Client):
+    def __init__(self, client: "Client"):
         super().__init__()
         self._client_ref: weakref.ref[Client] = weakref.ref(client)
 

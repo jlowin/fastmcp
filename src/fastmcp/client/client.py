@@ -53,7 +53,6 @@ from fastmcp.client.sampling import (
     create_sampling_callback,
 )
 from fastmcp.client.tasks import (
-    CallToolResult,
     PromptTask,
     ResourceTask,
     TaskStatusResponse,
@@ -115,6 +114,17 @@ class ClientSessionState:
     ready_event: anyio.Event = field(default_factory=anyio.Event)
     stop_event: anyio.Event = field(default_factory=anyio.Event)
     initialize_result: mcp.types.InitializeResult | None = None
+
+
+@dataclass
+class CallToolResult:
+    """Parsed result from a tool call."""
+
+    content: list[mcp.types.ContentBlock]
+    structured_content: dict[str, Any] | None
+    meta: dict[str, Any] | None
+    data: Any = None
+    is_error: bool = False
 
 
 class Client(Generic[ClientTransportT]):
