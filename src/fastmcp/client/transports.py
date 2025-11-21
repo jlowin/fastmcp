@@ -974,12 +974,23 @@ class MCPConfigTransport(ClientTransport):
     async def connect_session(
         self, **session_kwargs: Unpack[SessionKwargs]
     ) -> AsyncIterator[ClientSession]:
-        async with self.transport.connect_session(**session_kwargs) as session:
-            yield session
+        try:
+            async with self.transport.connect_session(**session_kwargs) as session:
+                yield session
+        finally:
+            # Clean up underlying transports to ensure subprocesses terminate
+            # Use gather with return_exceptions to ensure all transports close even if one fails
+            await asyncio.gather(
+                *(transport.close() for transport in self._underlying_transports),
+                return_exceptions=True,
+            )
 
     async def close(self):
-        for transport in self._underlying_transports:
-            await transport.close()
+        # Use gather with return_exceptions to ensure all transports close even if one fails
+        await asyncio.gather(
+            *(transport.close() for transport in self._underlying_transports),
+            return_exceptions=True,
+        )
 
     def __repr__(self) -> str:
         return f"<MCPConfigTransport(config='{self.config}')>"
