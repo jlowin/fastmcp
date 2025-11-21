@@ -50,7 +50,6 @@ from mcp.types import (
     Request,
     RequestParams,
     Result,
-    TaskMetadata,
 )
 from pydantic import BaseModel, ConfigDict
 
@@ -320,68 +319,6 @@ class TasksResponse(BaseModel):
 
         # Fall back to returning dict as-is
         return obj
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Extend SDK Param Types to Add `task` Field (SEP-1686 Phase 2.1)
-# ═══════════════════════════════════════════════════════════════════════════
-
-# Per SEP-1686 final spec, task metadata should be a direct param field,
-# NOT nested in _meta. The SDK draft incorrectly uses _meta approach.
-#
-# We extend SDK param types to add the spec-compliant task field, then
-# monkeypatch them back into the SDK module so ALL SDK code uses our versions.
-#
-# When SDK is fixed to match final spec, we can simply remove this monkeypatch.
-
-
-class CallToolRequestParams(mcp_types.CallToolRequestParams):
-    """Extended CallToolRequestParams with task field per SEP-1686 final spec.
-
-    SDK draft uses _meta approach (WRONG per final spec lines 143-148).
-    Final spec requires task as direct sibling to name/arguments.
-
-    This extension adds the spec-compliant task field.
-    """
-
-    task: TaskMetadata | None = None
-    """Task metadata per SEP-1686 final spec. Contains ttl field."""
-
-
-class GetPromptRequestParams(mcp_types.GetPromptRequestParams):
-    """Extended GetPromptRequestParams with task field per SEP-1686 final spec.
-
-    SDK draft uses _meta approach (WRONG per final spec).
-    This extension adds the spec-compliant task field.
-    """
-
-    task: TaskMetadata | None = None
-    """Task metadata per SEP-1686 final spec. Contains ttl field."""
-
-
-class ReadResourceRequestParams(mcp_types.ReadResourceRequestParams):
-    """Extended ReadResourceRequestParams with task field per SEP-1686 final spec.
-
-    SDK draft uses _meta approach (WRONG per final spec).
-    This extension adds the spec-compliant task field.
-    """
-
-    task: TaskMetadata | None = None
-    """Task metadata per SEP-1686 final spec. Contains ttl field."""
-
-
-# Monkeypatch SDK to use our extended param types everywhere
-# This makes ALL SDK code (client sessions, server handlers, etc.) automatically
-# use our spec-compliant param types with the task field.
-mcp_types.CallToolRequestParams = CallToolRequestParams  # type: ignore[misc]
-mcp_types.GetPromptRequestParams = GetPromptRequestParams  # type: ignore[misc]
-mcp_types.ReadResourceRequestParams = ReadResourceRequestParams  # type: ignore[misc]
-
-# Force Pydantic to rebuild Request models that reference these param types
-# so they pick up our extended versions
-mcp_types.CallToolRequest.model_rebuild(force=True)
-mcp_types.GetPromptRequest.model_rebuild(force=True)
-mcp_types.ReadResourceRequest.model_rebuild(force=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════

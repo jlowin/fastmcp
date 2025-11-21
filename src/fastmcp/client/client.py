@@ -17,6 +17,16 @@ import mcp.types
 import pydantic_core
 from exceptiongroup import catch
 from mcp import ClientSession
+from mcp.types import (
+    CancelTaskRequest,
+    CancelTaskRequestParams,
+    GetTaskPayloadRequest,
+    GetTaskPayloadRequestParams,
+    GetTaskRequest,
+    GetTaskRequestParams,
+    ListTasksRequest,
+    PaginatedRequestParams,
+)
 from pydantic import AnyUrl
 
 import fastmcp
@@ -1437,14 +1447,9 @@ class Client(Generic[ClientTransportT]):
         Raises:
             RuntimeError: If client not connected
         """
-        # TODO SEP-1686: Use GetTaskRequest (SDK-compatible, monkey-patched into ClientRequest union)
-        from fastmcp.server.tasks._temporary_mcp_shims import (
-            GetTaskParams,
-            GetTaskRequest,
-            TasksResponse,
-        )
+        from fastmcp.server.tasks._temporary_mcp_shims import TasksResponse
 
-        request = GetTaskRequest(params=GetTaskParams(taskId=task_id))
+        request = GetTaskRequest(params=GetTaskRequestParams(taskId=task_id))
         result = await self.session.send_request(
             request=request,  # type: ignore[arg-type]
             result_type=TasksResponse,  # type: ignore[arg-type]
@@ -1466,14 +1471,11 @@ class Client(Generic[ClientTransportT]):
         Raises:
             RuntimeError: If client not connected, task not found, or task failed
         """
-        # TODO SEP-1686: Use GetTaskPayloadRequest (SDK-compatible, monkey-patched into ClientRequest union)
-        from fastmcp.server.tasks._temporary_mcp_shims import (
-            GetTaskPayloadParams,
-            GetTaskPayloadRequest,
-            TasksResponse,
-        )
+        from fastmcp.server.tasks._temporary_mcp_shims import TasksResponse
 
-        request = GetTaskPayloadRequest(params=GetTaskPayloadParams(taskId=task_id))
+        request = GetTaskPayloadRequest(
+            params=GetTaskPayloadRequestParams(taskId=task_id)
+        )
         return await self.session.send_request(
             request=request,  # type: ignore[arg-type]
             result_type=TasksResponse,  # type: ignore[arg-type]
@@ -1502,13 +1504,7 @@ class Client(Generic[ClientTransportT]):
         Raises:
             RuntimeError: If client not connected
         """
-        # TODO SEP-1686: Use ListTasksRequest (SDK-compatible, monkey-patched into ClientRequest union)
-        from mcp.types import PaginatedRequestParams
-
-        from fastmcp.server.tasks._temporary_mcp_shims import (
-            ListTasksRequest,
-            TasksResponse,
-        )
+        from fastmcp.server.tasks._temporary_mcp_shims import TasksResponse
 
         # Send protocol request
         params = PaginatedRequestParams(cursor=cursor, limit=limit)
@@ -1549,14 +1545,9 @@ class Client(Generic[ClientTransportT]):
         Raises:
             RuntimeError: If task doesn't exist
         """
-        # TODO SEP-1686: Use CancelTaskRequest (SDK-compatible, monkey-patched into ClientRequest union)
-        from fastmcp.server.tasks._temporary_mcp_shims import (
-            CancelTaskParams,
-            CancelTaskRequest,
-            TasksResponse,
-        )
+        from fastmcp.server.tasks._temporary_mcp_shims import TasksResponse
 
-        request = CancelTaskRequest(params=CancelTaskParams(taskId=task_id))
+        request = CancelTaskRequest(params=CancelTaskRequestParams(taskId=task_id))
         result = await self.session.send_request(
             request=request,  # type: ignore[arg-type]
             result_type=TasksResponse,  # type: ignore[arg-type]
