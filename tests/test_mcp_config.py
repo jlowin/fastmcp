@@ -340,17 +340,12 @@ async def test_multi_client_lifespan(tmp_path: Path):
 
     gc_collect_harder()
 
-    # This test will fail while debugging because the debugger holds a reference to the underlying transport
+    # Verify processes have terminated
+    with pytest.raises(psutil.NoSuchProcess):
+        psutil.Process(pid_1).status()
 
     with pytest.raises(psutil.NoSuchProcess):
-        while True:
-            psutil.Process(pid_1)
-            await asyncio.sleep(0.01)
-
-    with pytest.raises(psutil.NoSuchProcess):
-        while True:
-            psutil.Process(pid_2)
-            await asyncio.sleep(0.01)
+        psutil.Process(pid_2).status()
 
 
 @pytest.mark.skipif(

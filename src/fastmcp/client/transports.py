@@ -974,8 +974,13 @@ class MCPConfigTransport(ClientTransport):
     async def connect_session(
         self, **session_kwargs: Unpack[SessionKwargs]
     ) -> AsyncIterator[ClientSession]:
-        async with self.transport.connect_session(**session_kwargs) as session:
-            yield session
+        try:
+            async with self.transport.connect_session(**session_kwargs) as session:
+                yield session
+        finally:
+            # Clean up underlying transports to ensure subprocesses terminate
+            for transport in self._underlying_transports:
+                await transport.close()
 
     async def close(self):
         for transport in self._underlying_transports:
