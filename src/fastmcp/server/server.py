@@ -602,36 +602,60 @@ class FastMCP(Generic[LifespanResultT]):
         self._mcp_server.call_tool(validate_input=self.strict_input_validation)(
             self._call_tool_mcp
         )
-        # Register custom read_resource handler that supports SEP-1686 tasks
+        # Register custom read_resource handler (SDK decorator doesn't support CreateTaskResult)
         self._setup_read_resource_handler()
-        self._mcp_server.get_prompt()(self._get_prompt_mcp)
+        # Register custom get_prompt handler (SDK decorator doesn't support CreateTaskResult)
+        self._setup_get_prompt_handler()
         # Register custom SEP-1686 task protocol handlers
         self._setup_task_protocol_handlers()
 
     def _setup_read_resource_handler(self) -> None:
         """
-        Set up custom read_resource handler that bypasses MCP SDK's decorator.
+        Set up custom read_resource handler that supports task-augmented responses.
 
-        The SDK's decorator doesn't support returning ReadResourceResult with meta,
-        so we register our own handler directly that checks for task metadata.
+        The SDK's read_resource decorator doesn't support CreateTaskResult returns,
+        so we register a custom handler that checks request_context.experimental.is_task.
         """
 
         async def handler(req: mcp.types.ReadResourceRequest) -> mcp.types.ServerResult:
-            # Get the result from our handler
-            result = await self._read_resource_mcp(req.params.uri)
+            uri = req.params.uri
 
-            # If it's already a ServerResult (task case), return as-is
+            # Check for task metadata via SDK's request context
+            task_meta = None
+            try:
+                ctx = self._mcp_server.request_context
+                if ctx.experimental.is_task:
+                    task_meta = ctx.experimental.task_metadata
+            except (AttributeError, LookupError):
+                pass
+
+            # Check for task metadata and route appropriately
+            if task_meta and fastmcp.settings.experimental.enable_tasks:
+                async with fastmcp.server.context.Context(fastmcp=self):
+                    try:
+                        resource = await self._resource_manager.get_resource(uri)
+                        if resource and resource.task:
+                            # Convert TaskMetadata to dict for handler
+                            task_meta_dict = task_meta.model_dump(exclude_none=True)
+                            return await handle_resource_as_task(
+                                self, str(uri), resource, task_meta_dict
+                            )
+                    except NotFoundError:
+                        pass
+
+            # Synchronous execution
+            result = await self._read_resource_mcp(uri)
+
+            # Convert to proper ServerResult
             if isinstance(result, mcp.types.ServerResult):
                 return result
 
-            # Convert ReadResourceContents helper type to proper MCP types
             mcp_contents = []
             for item in result:
-                # ReadResourceContents has .content and .mime_type attributes
                 if isinstance(item.content, str):
                     mcp_contents.append(
                         mcp.types.TextResourceContents(
-                            uri=req.params.uri,
+                            uri=uri,
                             text=item.content,
                             mimeType=item.mime_type or "text/plain",
                         )
@@ -641,19 +665,62 @@ class FastMCP(Generic[LifespanResultT]):
 
                     mcp_contents.append(
                         mcp.types.BlobResourceContents(
-                            uri=req.params.uri,
+                            uri=uri,
                             blob=base64.b64encode(item.content).decode(),
                             mimeType=item.mime_type or "application/octet-stream",
                         )
                     )
 
-            # Wrap in ServerResult
             return mcp.types.ServerResult(
                 mcp.types.ReadResourceResult(contents=mcp_contents)
             )
 
-        # Register directly, bypassing the decorator
         self._mcp_server.request_handlers[mcp.types.ReadResourceRequest] = handler
+
+    def _setup_get_prompt_handler(self) -> None:
+        """
+        Set up custom get_prompt handler that supports task-augmented responses.
+
+        The SDK's get_prompt decorator doesn't support CreateTaskResult returns,
+        so we register a custom handler that checks request_context.experimental.is_task.
+        """
+
+        async def handler(req: mcp.types.GetPromptRequest) -> mcp.types.ServerResult:
+            name = req.params.name
+            arguments = req.params.arguments
+
+            # Check for task metadata via SDK's request context
+            task_meta = None
+            try:
+                ctx = self._mcp_server.request_context
+                if ctx.experimental.is_task:
+                    task_meta = ctx.experimental.task_metadata
+            except (AttributeError, LookupError):
+                pass
+
+            # Check for task metadata and route appropriately
+            if task_meta and fastmcp.settings.experimental.enable_tasks:
+                async with fastmcp.server.context.Context(fastmcp=self):
+                    prompts = await self.get_prompts()
+                    prompt = prompts.get(name)
+                    if prompt and prompt.task:
+                        # Convert TaskMetadata to dict for handler
+                        task_meta_dict = task_meta.model_dump(exclude_none=True)
+                        result = await handle_prompt_as_task(
+                            self, name, arguments, task_meta_dict
+                        )
+                        return mcp.types.ServerResult(result)
+                    else:
+                        logger.debug(
+                            f"[{self.name}] Prompt {name} does not support background execution, "
+                            "ignoring task metadata and executing synchronously"
+                        )
+
+            # Synchronous execution
+            result = await self._get_prompt_mcp(name, arguments)
+            return mcp.types.ServerResult(result)
+
+        self._mcp_server.request_handlers[mcp.types.GetPromptRequest] = handler
 
     def _setup_task_protocol_handlers(self) -> None:
         """Register SEP-1686 task protocol handlers with SDK."""
@@ -1312,21 +1379,14 @@ class FastMCP(Generic[LifespanResultT]):
 
         async with fastmcp.server.context.Context(fastmcp=self):
             try:
-                # Check for SEP-1686 task metadata in request
-                from mcp.server.lowlevel.server import request_ctx
-
+                # Check for SEP-1686 task metadata via request context
                 task_meta = None
                 try:
-                    req_ctx = request_ctx.get()
-                    # Extract task metadata from request params
-                    if req_ctx.request and req_ctx.request.params:
-                        task_meta = getattr(req_ctx.request.params, "task", None)
-                    # Fallback: SDK provides params via req_ctx.meta
-                    elif req_ctx.meta:
-                        # Extract from model_dump since task field is aliased
-                        meta_dict = req_ctx.meta.model_dump()
-                        task_meta = meta_dict.get("modelcontextprotocol.io/task")
-                except (LookupError, AttributeError):
+                    # Access task metadata from SDK's request context
+                    ctx = self._mcp_server.request_context
+                    if ctx.experimental.is_task:
+                        task_meta = ctx.experimental.task_metadata
+                except (AttributeError, LookupError):
                     # No request context available - proceed without task metadata
                     pass
 
@@ -1335,13 +1395,13 @@ class FastMCP(Generic[LifespanResultT]):
                     tool = self._tool_manager._tools.get(key)
                     if tool and tool.task:
                         # Route to background execution
+                        # Convert TaskMetadata to dict for handler
+                        task_meta_dict = task_meta.model_dump(exclude_none=True)
                         return await handle_tool_as_task(
-                            self, key, arguments, task_meta
+                            self, key, arguments, task_meta_dict
                         )
                     else:
-                        # Graceful degradation per SEP-1686 spec:
-                        # "Receivers that do not support task augmentation MUST process
-                        # the request normally, ignoring any task metadata"
+                        # Graceful degradation per SEP-1686 spec
                         logger.debug(
                             f"[{self.name}] Tool {key} does not support background execution, "
                             "ignoring task metadata and executing synchronously"
@@ -1418,48 +1478,17 @@ class FastMCP(Generic[LifespanResultT]):
 
         raise NotFoundError(f"Unknown tool: {tool_name!r}")
 
-    async def _read_resource_mcp(
-        self, uri: AnyUrl | str
-    ) -> list[ReadResourceContents] | mcp.types.ServerResult:
+    async def _read_resource_mcp(self, uri: AnyUrl | str) -> list[ReadResourceContents]:
         """
         Handle MCP 'readResource' requests.
 
         Delegates to _read_resource, which should be overridden by FastMCP subclasses.
-        Can return either a list of contents or a ServerResult for task support.
         """
         logger.debug(f"[{self.name}] Handler called: read_resource %s", uri)
 
         async with fastmcp.server.context.Context(fastmcp=self):
             try:
-                # Check for SEP-1686 task metadata
-                from mcp.server.lowlevel.server import request_ctx
-
-                task_meta = None
-                try:
-                    req_ctx = request_ctx.get()
-                    # Extract task metadata from request params
-                    if req_ctx.request and req_ctx.request.params:
-                        task_meta = getattr(req_ctx.request.params, "task", None)
-                    # Fallback: SDK provides params via req_ctx.meta
-                    elif req_ctx.meta:
-                        # Extract from model_dump since task field is aliased
-                        meta_dict = req_ctx.meta.model_dump()
-                        task_meta = meta_dict.get("modelcontextprotocol.io/task")
-                except (LookupError, AttributeError):
-                    pass
-
-                if task_meta and fastmcp.settings.experimental.enable_tasks:
-                    # Check resource/template task support
-                    try:
-                        resource = await self._resource_manager.get_resource(uri)
-                        if resource and resource.task:
-                            return await handle_resource_as_task(
-                                self, str(uri), resource, task_meta
-                            )
-                    except NotFoundError:
-                        # Resource not found - will fail in normal path
-                        pass
-
+                # Task routing handled by custom handler
                 return list[ReadResourceContents](
                     await self._read_resource_middleware(uri)
                 )
@@ -1558,30 +1587,7 @@ class FastMCP(Generic[LifespanResultT]):
 
         async with fastmcp.server.context.Context(fastmcp=self):
             try:
-                # Check for SEP-1686 task metadata
-                from mcp.server.lowlevel.server import request_ctx
-
-                task_meta = None
-                try:
-                    req_ctx = request_ctx.get()
-                    # Extract task metadata from request params
-                    if req_ctx.request and req_ctx.request.params:
-                        task_meta = getattr(req_ctx.request.params, "task", None)
-                    # Fallback: SDK provides params via req_ctx.meta
-                    elif req_ctx.meta:
-                        # Extract from model_dump since task field is aliased
-                        meta_dict = req_ctx.meta.model_dump()
-                        task_meta = meta_dict.get("modelcontextprotocol.io/task")
-                except (LookupError, AttributeError):
-                    pass
-
-                if task_meta and fastmcp.settings.experimental.enable_tasks:
-                    prompt = self._prompt_manager._prompts.get(name)
-                    if prompt and prompt.task:
-                        return await handle_prompt_as_task(
-                            self, name, arguments, task_meta
-                        )
-
+                # Task routing handled by custom handler
                 return await self._get_prompt_middleware(name, arguments)
             except DisabledError as e:
                 # convert to NotFoundError to avoid leaking prompt presence

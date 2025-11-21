@@ -751,7 +751,6 @@ class Client(Generic[ClientTransportT]):
                     task=mcp.types.TaskMetadata(**task_dict)
                     if task_dict
                     else None,  # SEP-1686: task as direct param (spec-compliant)
-                    _meta=meta,  # Also send in _meta for SDK in-memory transport compatibility
                 )
             )
             result = await self.session.send_request(
@@ -959,7 +958,6 @@ class Client(Generic[ClientTransportT]):
                     task=mcp.types.TaskMetadata(**task_dict)
                     if task_dict
                     else None,  # SEP-1686: task as direct param (spec-compliant)
-                    _meta=meta,  # Also send in _meta for SDK in-memory transport compatibility
                 )
             )
             result = await self.session.send_request(
@@ -1212,7 +1210,6 @@ class Client(Generic[ClientTransportT]):
                     task=mcp.types.TaskMetadata(**task_dict)
                     if task_dict
                     else None,  # SEP-1686: task as direct param (spec-compliant)
-                    _meta=meta,  # Also send in _meta for SDK in-memory transport compatibility
                 )
             )
             result = await self.session.send_request(
