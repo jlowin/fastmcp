@@ -854,11 +854,25 @@ class FastMCPTransport(ClientTransport):
                 anyio.create_task_group() as tg,
                 _enter_server_lifespan(server=self.server),
             ):
+                # Build experimental capabilities
+                import fastmcp
+
+                experimental_capabilities = {}
+                if fastmcp.settings.experimental.enable_tasks:
+                    # Declare SEP-1686 task support (enable_tasks requires enable_docket via validator)
+                    experimental_capabilities["tasks"] = {
+                        "tools": True,
+                        "prompts": True,
+                        "resources": True,
+                    }
+
                 tg.start_soon(
                     lambda: self.server._mcp_server.run(
                         server_read,
                         server_write,
-                        self.server._mcp_server.create_initialization_options(),
+                        self.server._mcp_server.create_initialization_options(
+                            experimental_capabilities=experimental_capabilities
+                        ),
                         raise_exceptions=self.raise_exceptions,
                     )
                 )
@@ -974,12 +988,23 @@ class MCPConfigTransport(ClientTransport):
     async def connect_session(
         self, **session_kwargs: Unpack[SessionKwargs]
     ) -> AsyncIterator[ClientSession]:
-        async with self.transport.connect_session(**session_kwargs) as session:
-            yield session
+        try:
+            async with self.transport.connect_session(**session_kwargs) as session:
+                yield session
+        finally:
+            # Clean up underlying transports to ensure subprocesses terminate
+            # Use gather with return_exceptions to ensure all transports close even if one fails
+            await asyncio.gather(
+                *(transport.close() for transport in self._underlying_transports),
+                return_exceptions=True,
+            )
 
     async def close(self):
-        for transport in self._underlying_transports:
-            await transport.close()
+        # Use gather with return_exceptions to ensure all transports close even if one fails
+        await asyncio.gather(
+            *(transport.close() for transport in self._underlying_transports),
+            return_exceptions=True,
+        )
 
     def __repr__(self) -> str:
         return f"<MCPConfigTransport(config='{self.config}')>"

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
 import re
@@ -29,6 +30,7 @@ import anyio
 import httpx
 import mcp.types
 import uvicorn
+from docket import Docket, Worker
 from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.lowlevel.server import LifespanResultT, NotificationOptions
 from mcp.server.stdio import stdio_server
@@ -52,6 +54,9 @@ from starlette.routing import BaseRoute, Route
 
 import fastmcp
 import fastmcp.server
+
+# TODO SEP-1686: Import triggers monkey-patch of ClientRequest union for task methods
+import fastmcp.server.tasks._temporary_mcp_shims
 from fastmcp.exceptions import DisabledError, NotFoundError
 from fastmcp.mcp_config import MCPConfig
 from fastmcp.prompts import Prompt
@@ -68,6 +73,12 @@ from fastmcp.server.http import (
 )
 from fastmcp.server.low_level import LowLevelServer
 from fastmcp.server.middleware import Middleware, MiddlewareContext
+from fastmcp.server.tasks.handlers import (
+    handle_prompt_as_task,
+    handle_resource_as_task,
+    handle_tool_as_task,
+)
+from fastmcp.server.tasks.protocol import setup_task_protocol_handlers
 from fastmcp.settings import Settings
 from fastmcp.tools.tool import FunctionTool, Tool, ToolResult
 from fastmcp.tools.tool_manager import ToolManager
@@ -171,6 +182,7 @@ class FastMCP(Generic[LifespanResultT]):
         on_duplicate_resources: DuplicateBehavior | None = None,
         on_duplicate_prompts: DuplicateBehavior | None = None,
         strict_input_validation: bool | None = None,
+        tasks: bool | None = None,
         # ---
         # ---
         # --- The following arguments are DEPRECATED ---
@@ -191,6 +203,14 @@ class FastMCP(Generic[LifespanResultT]):
         self.resource_prefix_format: Literal["protocol", "path"] = (
             resource_prefix_format or fastmcp.settings.resource_prefix_format
         )
+
+        # Resolve server default for background task support
+        self._support_tasks_by_default: bool = (
+            tasks if tasks is not None else fastmcp.settings.experimental.enable_tasks
+        )
+
+        # Docket instance (set during lifespan for cross-task access)
+        self._docket = None
 
         self._additional_http_routes: list[BaseRoute] = []
         self._mounted_servers: list[MountedServer] = []
@@ -262,8 +282,6 @@ class FastMCP(Generic[LifespanResultT]):
         # Handle dependencies with deprecation warning
         # TODO: Remove dependencies parameter (deprecated in v2.11.4)
         if dependencies is not None:
-            import warnings
-
             warnings.warn(
                 "The 'dependencies' parameter is deprecated as of FastMCP 2.11.4 and will be removed in a future version. "
                 "Please specify dependencies in a fastmcp.json configuration file instead:\n"
@@ -290,7 +308,6 @@ class FastMCP(Generic[LifespanResultT]):
             else fastmcp.settings.include_fastmcp_meta
         )
 
-        # handle deprecated settings
         self._handle_deprecated_settings(
             log_level=log_level,
             debug=debug,
@@ -383,13 +400,135 @@ class FastMCP(Generic[LifespanResultT]):
         else:
             return list(self._mcp_server.icons)
 
+    @property
+    def docket(self) -> Docket | None:
+        """Get the Docket instance if Docket support is enabled.
+
+        Returns None if Docket is not enabled or server hasn't been started yet.
+        """
+        return self._docket
+
+    @asynccontextmanager
+    async def _docket_lifespan(
+        self, user_lifespan_result: LifespanResultT
+    ) -> AsyncIterator[LifespanResultT]:
+        """Manage Docket instance and Worker when experimental support is enabled.
+
+        Args:
+            user_lifespan_result: The result from the user's lifespan function
+
+        Yields:
+            User's lifespan result (Docket is managed via ContextVar, not lifespan result)
+        """
+        from fastmcp import settings
+        from fastmcp.server.dependencies import _current_docket, _current_worker
+
+        # Validate configuration
+        if (
+            settings.experimental.enable_tasks
+            and not settings.experimental.enable_docket
+        ):
+            raise RuntimeError(
+                "Server requires experimental__enable_docket=True when experimental__enable_tasks=True. "
+                "Task protocol support needs Docket for background execution."
+            )
+
+        if not settings.experimental.enable_docket:
+            # Docket support not enabled, pass through user lifespan result
+            yield user_lifespan_result
+            return
+
+        # Set FastMCP server in ContextVar so CurrentFastMCP can access it
+        from fastmcp.server.dependencies import _current_server
+
+        server_token = _current_server.set(self)
+
+        try:
+            # Create Docket instance using configured URL
+            async with Docket(url=settings.experimental.docket.url) as docket:
+                # Store on server instance for cross-task access (FastMCPTransport)
+                self._docket = docket
+
+                # Register task-enabled tools/prompts/resources with Docket
+                tools = await self.get_tools()
+                for tool in tools.values():
+                    supports_task = (
+                        tool.task
+                        if tool.task is not None
+                        else self._support_tasks_by_default
+                    )
+                    if supports_task:
+                        docket.register(tool.fn)
+
+                prompts = await self.get_prompts()
+                for prompt in prompts.values():
+                    supports_task = (
+                        prompt.task
+                        if prompt.task is not None
+                        else self._support_tasks_by_default
+                    )
+                    if supports_task:
+                        docket.register(prompt.fn)
+
+                resources = await self.get_resources()
+                for resource in resources.values():
+                    supports_task = (
+                        resource.task
+                        if resource.task is not None
+                        else self._support_tasks_by_default
+                    )
+                    if supports_task:
+                        docket.register(resource.fn)
+
+                # Set Docket in ContextVar so CurrentDocket can access it
+                docket_token = _current_docket.set(docket)
+                try:
+                    # Build worker kwargs from settings
+                    worker_kwargs: dict[str, Any] = {
+                        "concurrency": settings.experimental.docket.concurrency,
+                        "redelivery_timeout": settings.experimental.docket.redelivery_timeout,
+                        "reconnection_delay": settings.experimental.docket.reconnection_delay,
+                    }
+                    if settings.experimental.docket.worker_name:
+                        worker_kwargs["name"] = settings.experimental.docket.worker_name
+
+                    # Create and start Worker, then task group for run_forever()
+                    async with (
+                        Worker(docket, **worker_kwargs) as worker,  # type: ignore[arg-type]
+                        anyio.create_task_group() as tg,
+                    ):
+                        # Set Worker in ContextVar so CurrentWorker can access it
+                        worker_token = _current_worker.set(worker)
+                        try:
+                            # Start worker as background task
+                            tg.start_soon(worker.run_forever)
+
+                            try:
+                                yield user_lifespan_result
+                            finally:
+                                # Cancel task group when exiting (cancels worker)
+                                tg.cancel_scope.cancel()
+                        finally:
+                            _current_worker.reset(worker_token)
+                finally:
+                    # Reset ContextVar
+                    _current_docket.reset(docket_token)
+                    # Clear instance attribute
+                    self._docket = None
+        finally:
+            # Reset server ContextVar
+            _current_server.reset(server_token)
+
     @asynccontextmanager
     async def _lifespan_manager(self) -> AsyncIterator[None]:
         if self._lifespan_result_set:
             yield
             return
 
-        async with self._lifespan(self) as lifespan_result:
+        async with (
+            self._lifespan(self) as user_lifespan_result,
+            self._docket_lifespan(user_lifespan_result) as lifespan_result,
+        ):
             self._lifespan_result = lifespan_result
             self._lifespan_result_set = True
 
@@ -464,8 +603,62 @@ class FastMCP(Generic[LifespanResultT]):
         self._mcp_server.call_tool(validate_input=self.strict_input_validation)(
             self._call_tool_mcp
         )
-        self._mcp_server.read_resource()(self._read_resource_mcp)
+        # Register custom read_resource handler that supports SEP-1686 tasks
+        self._setup_read_resource_handler()
         self._mcp_server.get_prompt()(self._get_prompt_mcp)
+        # Register custom SEP-1686 task protocol handlers
+        self._setup_task_protocol_handlers()
+
+    def _setup_read_resource_handler(self) -> None:
+        """
+        Set up custom read_resource handler that bypasses MCP SDK's decorator.
+
+        The SDK's decorator doesn't support returning ReadResourceResult with meta,
+        so we register our own handler directly that checks for task metadata.
+        """
+
+        async def handler(req: mcp.types.ReadResourceRequest) -> mcp.types.ServerResult:
+            # Get the result from our handler
+            result = await self._read_resource_mcp(req.params.uri)
+
+            # If it's already a ServerResult (task case), return as-is
+            if isinstance(result, mcp.types.ServerResult):
+                return result
+
+            # Convert ReadResourceContents helper type to proper MCP types
+            mcp_contents = []
+            for item in result:
+                # ReadResourceContents has .content and .mime_type attributes
+                if isinstance(item.content, str):
+                    mcp_contents.append(
+                        mcp.types.TextResourceContents(
+                            uri=req.params.uri,
+                            text=item.content,
+                            mimeType=item.mime_type or "text/plain",
+                        )
+                    )
+                elif isinstance(item.content, bytes):
+                    import base64
+
+                    mcp_contents.append(
+                        mcp.types.BlobResourceContents(
+                            uri=req.params.uri,
+                            blob=base64.b64encode(item.content).decode(),
+                            mimeType=item.mime_type or "application/octet-stream",
+                        )
+                    )
+
+            # Wrap in ServerResult
+            return mcp.types.ServerResult(
+                mcp.types.ReadResourceResult(contents=mcp_contents)
+            )
+
+        # Register directly, bypassing the decorator
+        self._mcp_server.request_handlers[mcp.types.ReadResourceRequest] = handler
+
+    def _setup_task_protocol_handlers(self) -> None:
+        """Register custom SEP-1686 task protocol handlers."""
+        setup_task_protocol_handlers(self)
 
     async def _apply_middleware(
         self,
@@ -1054,7 +1247,7 @@ class FastMCP(Generic[LifespanResultT]):
         """
         Handle MCP 'callTool' requests.
 
-        Delegates to _call_tool, which should be overridden by FastMCP subclasses.
+        Detects SEP-1686 task metadata and routes to background execution if supported.
 
         Args:
             key: The name of the tool to call
@@ -1069,6 +1262,43 @@ class FastMCP(Generic[LifespanResultT]):
 
         async with fastmcp.server.context.Context(fastmcp=self):
             try:
+                # Check for SEP-1686 task metadata in request
+                from mcp.server.lowlevel.server import request_ctx
+
+                task_meta = None
+                try:
+                    req_ctx = request_ctx.get()
+                    # Extract task metadata from request params
+                    if req_ctx.request and req_ctx.request.params:
+                        task_meta = getattr(req_ctx.request.params, "task", None)
+                    # Fallback: SDK provides params via req_ctx.meta
+                    elif req_ctx.meta:
+                        # Extract from model_dump since task field is aliased
+                        meta_dict = req_ctx.meta.model_dump()
+                        task_meta = meta_dict.get("modelcontextprotocol.io/task")
+                except (LookupError, AttributeError):
+                    # No request context available - proceed without task metadata
+                    pass
+
+                if task_meta and fastmcp.settings.experimental.enable_tasks:
+                    # Task metadata present - check if tool supports background execution
+                    tool = self._tool_manager._tools.get(key)
+                    if tool and tool.task:
+                        # Route to background execution
+                        return await handle_tool_as_task(
+                            self, key, arguments, task_meta
+                        )
+                    else:
+                        # Graceful degradation per SEP-1686 spec:
+                        # "Receivers that do not support task augmentation MUST process
+                        # the request normally, ignoring any task metadata"
+                        logger.debug(
+                            f"[{self.name}] Tool {key} does not support background execution, "
+                            "ignoring task metadata and executing synchronously"
+                        )
+                        # Fall through to synchronous execution
+
+                # Synchronous execution (normal path)
                 result = await self._call_tool_middleware(key, arguments)
                 return result.to_mcp_result()
             except DisabledError as e:
@@ -1138,16 +1368,48 @@ class FastMCP(Generic[LifespanResultT]):
 
         raise NotFoundError(f"Unknown tool: {tool_name!r}")
 
-    async def _read_resource_mcp(self, uri: AnyUrl | str) -> list[ReadResourceContents]:
+    async def _read_resource_mcp(
+        self, uri: AnyUrl | str
+    ) -> list[ReadResourceContents] | mcp.types.ServerResult:
         """
         Handle MCP 'readResource' requests.
 
         Delegates to _read_resource, which should be overridden by FastMCP subclasses.
+        Can return either a list of contents or a ServerResult for task support.
         """
         logger.debug(f"[{self.name}] Handler called: read_resource %s", uri)
 
         async with fastmcp.server.context.Context(fastmcp=self):
             try:
+                # Check for SEP-1686 task metadata
+                from mcp.server.lowlevel.server import request_ctx
+
+                task_meta = None
+                try:
+                    req_ctx = request_ctx.get()
+                    # Extract task metadata from request params
+                    if req_ctx.request and req_ctx.request.params:
+                        task_meta = getattr(req_ctx.request.params, "task", None)
+                    # Fallback: SDK provides params via req_ctx.meta
+                    elif req_ctx.meta:
+                        # Extract from model_dump since task field is aliased
+                        meta_dict = req_ctx.meta.model_dump()
+                        task_meta = meta_dict.get("modelcontextprotocol.io/task")
+                except (LookupError, AttributeError):
+                    pass
+
+                if task_meta and fastmcp.settings.experimental.enable_tasks:
+                    # Check resource/template task support
+                    try:
+                        resource = await self._resource_manager.get_resource(uri)
+                        if resource and resource.task:
+                            return await handle_resource_as_task(
+                                self, str(uri), resource, task_meta
+                            )
+                    except NotFoundError:
+                        # Resource not found - will fail in normal path
+                        pass
+
                 return list[ReadResourceContents](
                     await self._read_resource_middleware(uri)
                 )
@@ -1246,6 +1508,30 @@ class FastMCP(Generic[LifespanResultT]):
 
         async with fastmcp.server.context.Context(fastmcp=self):
             try:
+                # Check for SEP-1686 task metadata
+                from mcp.server.lowlevel.server import request_ctx
+
+                task_meta = None
+                try:
+                    req_ctx = request_ctx.get()
+                    # Extract task metadata from request params
+                    if req_ctx.request and req_ctx.request.params:
+                        task_meta = getattr(req_ctx.request.params, "task", None)
+                    # Fallback: SDK provides params via req_ctx.meta
+                    elif req_ctx.meta:
+                        # Extract from model_dump since task field is aliased
+                        meta_dict = req_ctx.meta.model_dump()
+                        task_meta = meta_dict.get("modelcontextprotocol.io/task")
+                except (LookupError, AttributeError):
+                    pass
+
+                if task_meta and fastmcp.settings.experimental.enable_tasks:
+                    prompt = self._prompt_manager._prompts.get(name)
+                    if prompt and prompt.task:
+                        return await handle_prompt_as_task(
+                            self, name, arguments, task_meta
+                        )
+
                 return await self._get_prompt_middleware(name, arguments)
             except DisabledError as e:
                 # convert to NotFoundError to avoid leaking prompt presence
@@ -1380,6 +1666,7 @@ class FastMCP(Generic[LifespanResultT]):
         exclude_args: list[str] | None = None,
         meta: dict[str, Any] | None = None,
         enabled: bool | None = None,
+        task: bool | None = None,
     ) -> FunctionTool: ...
 
     @overload
@@ -1397,6 +1684,7 @@ class FastMCP(Generic[LifespanResultT]):
         exclude_args: list[str] | None = None,
         meta: dict[str, Any] | None = None,
         enabled: bool | None = None,
+        task: bool | None = None,
     ) -> Callable[[AnyFunction], FunctionTool]: ...
 
     def tool(
@@ -1413,6 +1701,7 @@ class FastMCP(Generic[LifespanResultT]):
         exclude_args: list[str] | None = None,
         meta: dict[str, Any] | None = None,
         enabled: bool | None = None,
+        task: bool | None = None,
     ) -> Callable[[AnyFunction], FunctionTool] | FunctionTool:
         """Decorator to register a tool.
 
@@ -1484,6 +1773,21 @@ class FastMCP(Generic[LifespanResultT]):
             fn = name_or_fn
             tool_name = name  # Use keyword name if provided, otherwise None
 
+            # Resolve task parameter to concrete boolean
+            supports_task: bool = (
+                task if task is not None else self._support_tasks_by_default
+            )
+
+            # Disable task support for sync functions (Docket requires async)
+            if supports_task and not asyncio.iscoroutinefunction(fn):
+                if task is True:
+                    # User explicitly requested task=True for sync function
+                    logger.warning(
+                        f"Tool '{tool_name or fn.__name__}' has task=True but is synchronous. "
+                        "Background task support requires async functions. Disabling task support."
+                    )
+                supports_task = False
+
             # Register the tool immediately and return the tool object
             tool = Tool.from_function(
                 fn,
@@ -1498,6 +1802,7 @@ class FastMCP(Generic[LifespanResultT]):
                 meta=meta,
                 serializer=self._tool_serializer,
                 enabled=enabled,
+                task=supports_task,
             )
             self.add_tool(tool)
             return tool
@@ -1531,6 +1836,7 @@ class FastMCP(Generic[LifespanResultT]):
             exclude_args=exclude_args,
             meta=meta,
             enabled=enabled,
+            task=task,
         )
 
     def add_resource(self, resource: Resource) -> Resource:
@@ -1628,6 +1934,7 @@ class FastMCP(Generic[LifespanResultT]):
         enabled: bool | None = None,
         annotations: Annotations | dict[str, Any] | None = None,
         meta: dict[str, Any] | None = None,
+        task: bool | None = None,
     ) -> Callable[[AnyFunction], Resource | ResourceTemplate]:
         """Decorator to register a function as a resource.
 
@@ -1692,8 +1999,6 @@ class FastMCP(Generic[LifespanResultT]):
             )
 
         def decorator(fn: AnyFunction) -> Resource | ResourceTemplate:
-            from fastmcp.server.context import Context
-
             if isinstance(fn, classmethod):  # type: ignore[reportUnnecessaryIsInstance]
                 raise ValueError(
                     inspect.cleandoc(
@@ -1706,14 +2011,28 @@ class FastMCP(Generic[LifespanResultT]):
                     )
                 )
 
+            # Resolve task parameter to concrete boolean
+            supports_task: bool = (
+                task if task is not None else self._support_tasks_by_default
+            )
+
+            # Disable task support for sync functions (Docket requires async)
+            if supports_task and not asyncio.iscoroutinefunction(fn):
+                if task is True:
+                    # User explicitly requested task=True for sync function
+                    logger.warning(
+                        f"Resource '{uri}' has task=True but is synchronous. "
+                        "Background task support requires async functions. Disabling task support."
+                    )
+                supports_task = False
+
             # Check if this should be a template
             has_uri_params = "{" in uri and "}" in uri
-            # check if the function has any parameters (other than injected context)
-            has_func_params = any(
-                p
-                for p in inspect.signature(fn).parameters.values()
-                if p.annotation is not Context
-            )
+            # Use wrapper to check for user-facing parameters
+            from fastmcp.server.dependencies import without_injected_parameters
+
+            wrapper_fn = without_injected_parameters(fn)
+            has_func_params = bool(inspect.signature(wrapper_fn).parameters)
 
             if has_uri_params or has_func_params:
                 template = ResourceTemplate.from_function(
@@ -1728,6 +2047,7 @@ class FastMCP(Generic[LifespanResultT]):
                     enabled=enabled,
                     annotations=annotations,
                     meta=meta,
+                    task=supports_task,
                 )
                 self.add_template(template)
                 return template
@@ -1744,6 +2064,7 @@ class FastMCP(Generic[LifespanResultT]):
                     enabled=enabled,
                     annotations=annotations,
                     meta=meta,
+                    task=supports_task,
                 )
                 self.add_resource(resource)
                 return resource
@@ -1789,6 +2110,7 @@ class FastMCP(Generic[LifespanResultT]):
         tags: set[str] | None = None,
         enabled: bool | None = None,
         meta: dict[str, Any] | None = None,
+        task: bool | None = None,
     ) -> FunctionPrompt: ...
 
     @overload
@@ -1803,6 +2125,7 @@ class FastMCP(Generic[LifespanResultT]):
         tags: set[str] | None = None,
         enabled: bool | None = None,
         meta: dict[str, Any] | None = None,
+        task: bool | None = None,
     ) -> Callable[[AnyFunction], FunctionPrompt]: ...
 
     def prompt(
@@ -1816,6 +2139,7 @@ class FastMCP(Generic[LifespanResultT]):
         tags: set[str] | None = None,
         enabled: bool | None = None,
         meta: dict[str, Any] | None = None,
+        task: bool | None = None,
     ) -> Callable[[AnyFunction], FunctionPrompt] | FunctionPrompt:
         """Decorator to register a prompt.
 
@@ -1906,6 +2230,21 @@ class FastMCP(Generic[LifespanResultT]):
             fn = name_or_fn
             prompt_name = name  # Use keyword name if provided, otherwise None
 
+            # Resolve task parameter to concrete boolean
+            supports_task: bool = (
+                task if task is not None else self._support_tasks_by_default
+            )
+
+            # Disable task support for sync functions (Docket requires async)
+            if supports_task and not asyncio.iscoroutinefunction(fn):
+                if task is True:
+                    # User explicitly requested task=True for sync function
+                    logger.warning(
+                        f"Prompt '{prompt_name or fn.__name__}' has task=True but is synchronous. "
+                        "Background task support requires async functions. Disabling task support."
+                    )
+                supports_task = False
+
             # Register the prompt immediately
             prompt = Prompt.from_function(
                 fn=fn,
@@ -1916,6 +2255,7 @@ class FastMCP(Generic[LifespanResultT]):
                 tags=tags,
                 enabled=enabled,
                 meta=meta,
+                task=supports_task,
             )
             self.add_prompt(prompt)
 
@@ -1947,6 +2287,7 @@ class FastMCP(Generic[LifespanResultT]):
             tags=tags,
             enabled=enabled,
             meta=meta,
+            task=task,
         )
 
     async def run_stdio_async(
@@ -1971,11 +2312,30 @@ class FastMCP(Generic[LifespanResultT]):
                     logger.info(
                         f"Starting MCP server {self.name!r} with transport 'stdio'"
                     )
+
+                    # Build experimental capabilities
+                    experimental_capabilities = {}
+                    if fastmcp.settings.experimental.enable_tasks:
+                        # Declare SEP-1686 task support per final spec (lines 49-63)
+                        # Nested structure: {list: {}, cancel: {}, requests: {tools: {call: {}}}}
+                        experimental_capabilities["tasks"] = {
+                            "list": {},
+                            "cancel": {},
+                            "requests": {
+                                "tools": {"call": {}},
+                                "prompts": {"get": {}},
+                                "resources": {"read": {}},
+                            },
+                        }
+
                     await self._mcp_server.run(
                         read_stream,
                         write_stream,
                         self._mcp_server.create_initialization_options(
-                            NotificationOptions(tools_changed=True)
+                            notification_options=NotificationOptions(
+                                tools_changed=True
+                            ),
+                            experimental_capabilities=experimental_capabilities,
                         ),
                     )
 

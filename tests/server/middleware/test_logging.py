@@ -332,7 +332,7 @@ class TestLoggingMiddleware:
 
         assert get_log_lines(caplog) == snapshot(
             [
-                '{"event": "request_start", "method": "test_method", "source": "client", "payload": "{\\"name\\":\\"tmpl\\",\\"title\\":null,\\"description\\":null,\\"icons\\":null,\\"tags\\":[],\\"meta\\":null,\\"enabled\\":true,\\"uri_template\\":\\"tmpl://{id}\\",\\"mime_type\\":\\"text/plain\\",\\"parameters\\":{\\"id\\":{\\"type\\":\\"string\\"}},\\"annotations\\":null}", "payload_type": "ResourceTemplate"}',
+                '{"event": "request_start", "method": "test_method", "source": "client", "payload": "{\\"name\\":\\"tmpl\\",\\"title\\":null,\\"description\\":null,\\"icons\\":null,\\"tags\\":[],\\"meta\\":null,\\"enabled\\":true,\\"uri_template\\":\\"tmpl://{id}\\",\\"mime_type\\":\\"text/plain\\",\\"parameters\\":{\\"id\\":{\\"type\\":\\"string\\"}},\\"annotations\\":null,\\"task\\":false}", "payload_type": "ResourceTemplate"}',
                 '{"event": "request_success", "method": "test_method", "source": "client", "duration_ms": 0.02}',
             ]
         )
@@ -546,7 +546,7 @@ class TestLoggingMiddlewareIntegration:
 
         assert get_log_lines(caplog) == snapshot(
             [
-                'event=request_start method=tools/call source=client payload={"_meta":null,"name":"simple_operation","arguments":{"data":"payload_test"}} payload_type=CallToolRequestParams',
+                'event=request_start method=tools/call source=client payload={"_meta":null,"name":"simple_operation","arguments":{"data":"payload_test"},"task":null} payload_type=CallToolRequestParams',
                 "event=request_success method=tools/call source=client duration_ms=0.02",
             ]
         )
@@ -570,7 +570,7 @@ class TestLoggingMiddlewareIntegration:
 
         assert get_log_lines(caplog) == snapshot(
             [
-                '{"event": "request_start", "method": "tools/call", "source": "client", "payload": "{\\"_meta\\":null,\\"name\\":\\"simple_operation\\",\\"arguments\\":{\\"data\\":\\"json_test\\"}}", "payload_type": "CallToolRequestParams"}',
+                '{"event": "request_start", "method": "tools/call", "source": "client", "payload": "{\\"_meta\\":null,\\"name\\":\\"simple_operation\\",\\"arguments\\":{\\"data\\":\\"json_test\\"},\\"task\\":null}", "payload_type": "CallToolRequestParams"}',
                 '{"event": "request_success", "method": "tools/call", "source": "client", "duration_ms": 0.02}',
             ]
         )
@@ -665,6 +665,6 @@ class TestLoggingMiddlewareIntegration:
         # Check that our custom logger captured the logs
         log_output = log_buffer.getvalue()
         assert log_output == snapshot("""\
-event=request_start method=tools/call source=client payload={"_meta":null,"name":"simple_operation","arguments":{"data":"custom_test"}} payload_type=CallToolRequestParams
+event=request_start method=tools/call source=client payload={"_meta":null,"name":"simple_operation","arguments":{"data":"custom_test"},"task":null} payload_type=CallToolRequestParams
 event=request_success method=tools/call source=client duration_ms=0.02
 """)
