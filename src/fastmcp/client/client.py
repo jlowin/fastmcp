@@ -1563,32 +1563,6 @@ class Client(Generic[ClientTransportT]):
         )
         return TaskStatusResponse.model_validate(result)
 
-    async def delete_task(self, task_id: str) -> None:
-        """Delete a task and all associated data from the server.
-
-        Sends a tasks/delete request to remove the task state, results, and metadata.
-        Deletion is discretionary - servers may reject requests.
-
-        Args:
-            task_id: The task ID to delete
-
-        Raises:
-            NotFoundError: If task doesn't exist
-            RuntimeError: If server refuses deletion
-        """
-        # TODO SEP-1686: Use DeleteTaskRequest (SDK-compatible, monkey-patched into ClientRequest union)
-        from fastmcp.server.tasks._temporary_mcp_shims import (
-            DeleteTaskParams,
-            DeleteTaskRequest,
-            TasksResponse,
-        )
-
-        request = DeleteTaskRequest(params=DeleteTaskParams(taskId=task_id))
-        await self.session.send_request(
-            request=request,  # type: ignore[arg-type]
-            result_type=TasksResponse,  # type: ignore[arg-type]
-        )
-
     @classmethod
     def generate_name(cls, name: str | None = None) -> str:
         class_name = cls.__name__

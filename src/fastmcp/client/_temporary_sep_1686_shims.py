@@ -224,26 +224,6 @@ class TasksListResult(BaseModel):
     nextCursor: str | None = None
 
 
-class TasksDeleteRequest(BaseModel):
-    """Request for tasks/delete MCP method."""
-
-    method: Literal["tasks/delete"] = "tasks/delete"
-    params: TasksDeleteParams
-
-
-class TasksDeleteParams(BaseModel):
-    """Parameters for tasks/delete request."""
-
-    taskId: str
-    _meta: dict[str, Any] | None = None
-
-
-class TasksDeleteResult(BaseModel):
-    """Result from tasks/delete MCP method."""
-
-    _meta: dict[str, Any] | None = None
-
-
 # ═══════════════════════════════════════════════════════════════════════════
 # 3. Client-Side Type Helpers
 # ═══════════════════════════════════════════════════════════════════════════

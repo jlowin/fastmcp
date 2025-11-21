@@ -272,34 +272,6 @@ class TaskStatusNotification(
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# tasks/delete - Delete a task
-# SDK has: DeleteTaskRequest / DeleteTaskParams (types.py:703-716)
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-class DeleteTaskParams(RequestParams):
-    """Parameters for tasks/delete request.
-
-    SDK-compatible naming (was TasksDeleteParams).
-    """
-
-    taskId: str
-    """The task identifier."""
-
-    model_config = ConfigDict(extra="allow")
-
-
-class DeleteTaskRequest(Request[DeleteTaskParams, Literal["tasks/delete"]]):
-    """Request type for tasks/delete method.
-
-    SDK-compatible naming (was TasksDeleteRequest).
-    SDK reference: types.py:712-716
-    """
-
-    method: Literal["tasks/delete"] = "tasks/delete"
-    params: DeleteTaskParams
-
-
 # TODO SEP-1686: Remove these response types when SDK officially supports them
 class TasksResponse(BaseModel):
     """Generic response wrapper for task protocol methods.
@@ -433,7 +405,6 @@ client_new_union = Union[
         GetTaskPayloadRequest,
         ListTasksRequest,
         CancelTaskRequest,
-        DeleteTaskRequest,
     )
 ]
 
@@ -453,7 +424,6 @@ server_new_union = Union[
         GetTaskPayloadRequest,
         ListTasksRequest,
         CancelTaskRequest,
-        DeleteTaskRequest,
     )
 ]
 

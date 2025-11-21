@@ -82,18 +82,6 @@ async def test_task_cancel_outside_context_raises(task_server):
         await task.cancel()
 
 
-async def test_task_delete_outside_context_raises(task_server):
-    """Calling task.delete() outside context raises error."""
-    task = None
-    async with Client(task_server) as client:
-        task = await client.call_tool("background_tool", {"value": "test"}, task=True)
-        assert not task.returned_immediately
-    # Now outside context
-
-    with pytest.raises(RuntimeError, match="outside client context"):
-        await task.delete()
-
-
 async def test_cached_tool_task_accessible_outside_context(task_server):
     """Tool tasks with cached results work outside context."""
     task = None

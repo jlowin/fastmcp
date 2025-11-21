@@ -145,58 +145,6 @@ async def test_tasks_list_endpoint_session_isolation(endpoint_server):
         assert all(tid in task_ids for tid in returned_ids)
 
 
-async def test_tasks_delete_removes_task(endpoint_server):
-    """tasks/delete removes task state and results."""
-    async with Client(endpoint_server) as client:
-        # Submit a task
-        task = await client.call_tool("quick_tool", {"value": 10}, task=True)
-        task_id = task.task_id
-
-        # Wait for completion
-        await task.wait(timeout=2.0)
-
-        # Verify task exists and has result
-        status = await client.get_task_status(task_id)
-        assert status.status == "completed"
-
-        result = await client.get_task_result(task_id)
-        assert result is not None
-
-        # Delete the task
-        await task.delete()
-
-        # Deleted tasks raise error when queried (per SDK behavior)
-        with pytest.raises(McpError, match="not found"):
-            await client.get_task_status(task_id)
-
-
-async def test_tasks_delete_on_running_task(endpoint_server):
-    """tasks/delete cancels running tasks."""
-    async with Client(endpoint_server) as client:
-        # Submit the slow task
-        task = await client.call_tool("slow_tool", {}, task=True)
-
-        # Give it a moment to start
-        await asyncio.sleep(0.1)
-
-        # Delete while running
-        await task.delete()
-
-        # Deleted tasks raise error when queried (per SDK behavior)
-        with pytest.raises(McpError, match="not found"):
-            await client.get_task_status(task.task_id)
-
-
-async def test_delete_nonexistent_task_raises_error(endpoint_server):
-    """Deleting a non-existent task raises McpError."""
-    from mcp.shared.exceptions import McpError
-
-    async with Client(endpoint_server) as client:
-        # Try to delete non-existent task
-        with pytest.raises(McpError, match="not found"):
-            await client.delete_task("nonexistent-task-id")
-
-
 async def test_get_status_nonexistent_task_raises_error(endpoint_server):
     """Getting status for nonexistent task raises MCP error (per SEP-1686 SDK behavior)."""
     async with Client(endpoint_server) as client:

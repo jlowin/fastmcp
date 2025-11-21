@@ -265,21 +265,6 @@ class Task(abc.ABC, Generic[TaskResultT]):
         # Invalidate cache to force fresh status fetch
         self._status_cache = None
 
-    async def delete(self) -> None:
-        """Delete this task and all associated data from the server.
-
-        Deletion is discretionary - servers may reject delete requests.
-        After successful deletion, calling result() or status() will raise errors.
-
-        Note: If server executed immediately (graceful degradation), this is a no-op
-        as there's no server-side task to delete.
-        """
-        if self._is_immediate:
-            # No server-side task to delete
-            return
-        self._check_client_connected()
-        await self._client.delete_task(self._task_id)
-
     def __await__(self):
         """Allow 'await task' to get result."""
         return self.result().__await__()

@@ -19,9 +19,7 @@ from fastmcp.server.tasks.keys import (
     parse_task_key,
 )
 from fastmcp.server.tasks.protocol import (
-    setup_task_protocol_handlers,
     tasks_cancel_handler,
-    tasks_delete_handler,
     tasks_get_handler,
     tasks_list_handler,
     tasks_result_handler,
@@ -37,9 +35,7 @@ __all__ = [
     "handle_resource_as_task",
     "handle_tool_as_task",
     "parse_task_key",
-    "setup_task_protocol_handlers",
     "tasks_cancel_handler",
-    "tasks_delete_handler",
     "tasks_get_handler",
     "tasks_list_handler",
     "tasks_result_handler",

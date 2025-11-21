@@ -78,7 +78,6 @@ from fastmcp.server.tasks.handlers import (
     handle_resource_as_task,
     handle_tool_as_task,
 )
-from fastmcp.server.tasks.protocol import setup_task_protocol_handlers
 from fastmcp.settings import Settings
 from fastmcp.tools.tool import FunctionTool, Tool, ToolResult
 from fastmcp.tools.tool_manager import ToolManager
@@ -657,8 +656,59 @@ class FastMCP(Generic[LifespanResultT]):
         self._mcp_server.request_handlers[mcp.types.ReadResourceRequest] = handler
 
     def _setup_task_protocol_handlers(self) -> None:
-        """Register custom SEP-1686 task protocol handlers."""
-        setup_task_protocol_handlers(self)
+        """Register SEP-1686 task protocol handlers with SDK."""
+        if not fastmcp.settings.experimental.enable_tasks:
+            return
+
+        from mcp.types import (
+            CancelTaskRequest,
+            GetTaskPayloadRequest,
+            GetTaskRequest,
+            ListTasksRequest,
+            ServerResult,
+        )
+
+        from fastmcp.server.tasks.protocol import (
+            tasks_cancel_handler,
+            tasks_get_handler,
+            tasks_list_handler,
+            tasks_result_handler,
+        )
+
+        # Manually register handlers (SDK decorators fail with locally-defined functions)
+        # SDK expects handlers that receive Request objects and return ServerResult
+
+        async def handle_get_task(req: GetTaskRequest) -> ServerResult:
+            params = req.params.model_dump(by_alias=True, exclude_none=True)
+            result = await tasks_get_handler(self, params)
+            return ServerResult(result)
+
+        async def handle_get_task_result(req: GetTaskPayloadRequest) -> ServerResult:
+            params = req.params.model_dump(by_alias=True, exclude_none=True)
+            result = await tasks_result_handler(self, params)
+            return ServerResult(result)
+
+        async def handle_list_tasks(req: ListTasksRequest) -> ServerResult:
+            params = (
+                req.params.model_dump(by_alias=True, exclude_none=True)
+                if req.params
+                else {}
+            )
+            result = await tasks_list_handler(self, params)
+            return ServerResult(result)
+
+        async def handle_cancel_task(req: CancelTaskRequest) -> ServerResult:
+            params = req.params.model_dump(by_alias=True, exclude_none=True)
+            result = await tasks_cancel_handler(self, params)
+            return ServerResult(result)
+
+        # Register directly with SDK (same as what decorators do internally)
+        self._mcp_server.request_handlers[GetTaskRequest] = handle_get_task
+        self._mcp_server.request_handlers[GetTaskPayloadRequest] = (
+            handle_get_task_result
+        )
+        self._mcp_server.request_handlers[ListTasksRequest] = handle_list_tasks
+        self._mcp_server.request_handlers[CancelTaskRequest] = handle_cancel_task
 
     async def _apply_middleware(
         self,
