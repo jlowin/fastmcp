@@ -11,11 +11,8 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from docket.execution import ExecutionState
+from mcp.types import TaskStatusNotification, TaskStatusNotificationParams
 
-from fastmcp.server.tasks._temporary_mcp_shims import (
-    TaskStatusNotification,
-    TaskStatusNotificationParams,
-)
 from fastmcp.server.tasks.protocol import DOCKET_TO_MCP_STATE
 from fastmcp.utilities.logging import get_logger
 

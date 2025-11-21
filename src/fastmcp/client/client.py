@@ -17,10 +17,23 @@ import mcp.types
 import pydantic_core
 from exceptiongroup import catch
 from mcp import ClientSession
+from mcp.types import (
+    CancelTaskRequest,
+    CancelTaskRequestParams,
+    GetTaskPayloadRequest,
+    GetTaskPayloadRequestParams,
+    GetTaskRequest,
+    GetTaskRequestParams,
+    ListTasksRequest,
+    PaginatedRequestParams,
+)
 from pydantic import AnyUrl
 
 import fastmcp
-from fastmcp.client._temporary_sep_1686_shims import ClientMessageHandler
+from fastmcp.client._temporary_sep_1686_shims import (
+    TaskNotificationHandler,
+    TasksResponse,
+)
 from fastmcp.client.elicitation import ElicitationHandler, create_elicitation_callback
 from fastmcp.client.logging import (
     LogHandler,
@@ -40,7 +53,6 @@ from fastmcp.client.sampling import (
     create_sampling_callback,
 )
 from fastmcp.client.tasks import (
-    CallToolResult,
     PromptTask,
     ResourceTask,
     TaskStatusResponse,
@@ -49,10 +61,6 @@ from fastmcp.client.tasks import (
 from fastmcp.exceptions import ToolError
 from fastmcp.mcp_config import MCPConfig
 from fastmcp.server import FastMCP
-
-# TODO SEP-1686: Import to trigger monkey-patch of ClientRequest union
-# This must happen before any code tries to send tasks/get, tasks/result, tasks/delete
-from fastmcp.server.tasks import _temporary_mcp_shims  # noqa: F401
 from fastmcp.utilities.exceptions import get_catch_handlers
 from fastmcp.utilities.json_schema_type import json_schema_to_type
 from fastmcp.utilities.logging import get_logger
@@ -106,6 +114,17 @@ class ClientSessionState:
     ready_event: anyio.Event = field(default_factory=anyio.Event)
     stop_event: anyio.Event = field(default_factory=anyio.Event)
     initialize_result: mcp.types.InitializeResult | None = None
+
+
+@dataclass
+class CallToolResult:
+    """Parsed result from a tool call."""
+
+    content: list[mcp.types.ContentBlock]
+    structured_content: dict[str, Any] | None
+    meta: dict[str, Any] | None
+    data: Any = None
+    is_error: bool = False
 
 
 class Client(Generic[ClientTransportT]):
@@ -276,7 +295,7 @@ class Client(Generic[ClientTransportT]):
             "sampling_callback": None,
             "list_roots_callback": None,
             "logging_callback": create_log_callback(log_handler),
-            "message_handler": message_handler or ClientMessageHandler(self),
+            "message_handler": message_handler or TaskNotificationHandler(self),
             "read_timeout_seconds": timeout,  # ty: ignore[invalid-argument-type]
             "client_info": client_info,
         }
@@ -744,13 +763,13 @@ class Client(Generic[ClientTransportT]):
 
         # If meta provided, use send_request for SEP-1686 task support
         if meta:
+            task_dict = meta.get("modelcontextprotocol.io/task")
             request = mcp.types.ReadResourceRequest(
                 params=mcp.types.ReadResourceRequestParams(
                     uri=uri,
-                    task=meta.get(
-                        "modelcontextprotocol.io/task"
-                    ),  # SEP-1686: task as direct param (spec-compliant)
-                    _meta=meta,  # Also send in _meta for SDK in-memory transport compatibility
+                    task=mcp.types.TaskMetadata(**task_dict)
+                    if task_dict
+                    else None,  # SEP-1686: task as direct param (spec-compliant)
                 )
             )
             result = await self.session.send_request(
@@ -950,14 +969,14 @@ class Client(Generic[ClientTransportT]):
 
         # If meta provided, use send_request for SEP-1686 task support
         if meta:
+            task_dict = meta.get("modelcontextprotocol.io/task")
             request = mcp.types.GetPromptRequest(
                 params=mcp.types.GetPromptRequestParams(
                     name=name,
                     arguments=serialized_arguments,
-                    task=meta.get(
-                        "modelcontextprotocol.io/task"
-                    ),  # SEP-1686: task as direct param (spec-compliant)
-                    _meta=meta,  # Also send in _meta for SDK in-memory transport compatibility
+                    task=mcp.types.TaskMetadata(**task_dict)
+                    if task_dict
+                    else None,  # SEP-1686: task as direct param (spec-compliant)
                 )
             )
             result = await self.session.send_request(
@@ -1202,14 +1221,14 @@ class Client(Generic[ClientTransportT]):
         # For task submissions, use send_request to bypass SDK validation
         # Task acknowledgments don't have structured content, which would fail validation
         if meta and "modelcontextprotocol.io/task" in meta:
+            task_dict = meta.get("modelcontextprotocol.io/task")
             request = mcp.types.CallToolRequest(
                 params=mcp.types.CallToolRequestParams(
                     name=name,
                     arguments=arguments,
-                    task=meta.get(
-                        "modelcontextprotocol.io/task"
-                    ),  # SEP-1686: task as direct param (spec-compliant)
-                    _meta=meta,  # Also send in _meta for SDK in-memory transport compatibility
+                    task=mcp.types.TaskMetadata(**task_dict)
+                    if task_dict
+                    else None,  # SEP-1686: task as direct param (spec-compliant)
                 )
             )
             result = await self.session.send_request(
@@ -1437,14 +1456,7 @@ class Client(Generic[ClientTransportT]):
         Raises:
             RuntimeError: If client not connected
         """
-        # TODO SEP-1686: Use GetTaskRequest (SDK-compatible, monkey-patched into ClientRequest union)
-        from fastmcp.server.tasks._temporary_mcp_shims import (
-            GetTaskParams,
-            GetTaskRequest,
-            TasksResponse,
-        )
-
-        request = GetTaskRequest(params=GetTaskParams(taskId=task_id))
+        request = GetTaskRequest(params=GetTaskRequestParams(taskId=task_id))
         result = await self.session.send_request(
             request=request,  # type: ignore[arg-type]
             result_type=TasksResponse,  # type: ignore[arg-type]
@@ -1466,14 +1478,9 @@ class Client(Generic[ClientTransportT]):
         Raises:
             RuntimeError: If client not connected, task not found, or task failed
         """
-        # TODO SEP-1686: Use GetTaskPayloadRequest (SDK-compatible, monkey-patched into ClientRequest union)
-        from fastmcp.server.tasks._temporary_mcp_shims import (
-            GetTaskPayloadParams,
-            GetTaskPayloadRequest,
-            TasksResponse,
+        request = GetTaskPayloadRequest(
+            params=GetTaskPayloadRequestParams(taskId=task_id)
         )
-
-        request = GetTaskPayloadRequest(params=GetTaskPayloadParams(taskId=task_id))
         return await self.session.send_request(
             request=request,  # type: ignore[arg-type]
             result_type=TasksResponse,  # type: ignore[arg-type]
@@ -1502,14 +1509,6 @@ class Client(Generic[ClientTransportT]):
         Raises:
             RuntimeError: If client not connected
         """
-        # TODO SEP-1686: Use ListTasksRequest (SDK-compatible, monkey-patched into ClientRequest union)
-        from mcp.types import PaginatedRequestParams
-
-        from fastmcp.server.tasks._temporary_mcp_shims import (
-            ListTasksRequest,
-            TasksResponse,
-        )
-
         # Send protocol request
         params = PaginatedRequestParams(cursor=cursor, limit=limit)
         request = ListTasksRequest(params=params)
@@ -1549,45 +1548,12 @@ class Client(Generic[ClientTransportT]):
         Raises:
             RuntimeError: If task doesn't exist
         """
-        # TODO SEP-1686: Use CancelTaskRequest (SDK-compatible, monkey-patched into ClientRequest union)
-        from fastmcp.server.tasks._temporary_mcp_shims import (
-            CancelTaskParams,
-            CancelTaskRequest,
-            TasksResponse,
-        )
-
-        request = CancelTaskRequest(params=CancelTaskParams(taskId=task_id))
+        request = CancelTaskRequest(params=CancelTaskRequestParams(taskId=task_id))
         result = await self.session.send_request(
             request=request,  # type: ignore[arg-type]
             result_type=TasksResponse,  # type: ignore[arg-type]
         )
         return TaskStatusResponse.model_validate(result)
-
-    async def delete_task(self, task_id: str) -> None:
-        """Delete a task and all associated data from the server.
-
-        Sends a tasks/delete request to remove the task state, results, and metadata.
-        Deletion is discretionary - servers may reject requests.
-
-        Args:
-            task_id: The task ID to delete
-
-        Raises:
-            NotFoundError: If task doesn't exist
-            RuntimeError: If server refuses deletion
-        """
-        # TODO SEP-1686: Use DeleteTaskRequest (SDK-compatible, monkey-patched into ClientRequest union)
-        from fastmcp.server.tasks._temporary_mcp_shims import (
-            DeleteTaskParams,
-            DeleteTaskRequest,
-            TasksResponse,
-        )
-
-        request = DeleteTaskRequest(params=DeleteTaskParams(taskId=task_id))
-        await self.session.send_request(
-            request=request,  # type: ignore[arg-type]
-            result_type=TasksResponse,  # type: ignore[arg-type]
-        )
 
     @classmethod
     def generate_name(cls, name: str | None = None) -> str:

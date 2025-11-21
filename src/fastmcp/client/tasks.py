@@ -1,5 +1,7 @@
 """SEP-1686 client Task classes."""
 
+from __future__ import annotations
+
 import abc
 import asyncio
 import inspect
@@ -10,16 +12,13 @@ from typing import TYPE_CHECKING, Generic, TypeVar
 
 import mcp.types
 
-from fastmcp.client._temporary_sep_1686_shims import (
-    CallToolResult,
-    TaskStatusResponse,
-)
+from fastmcp.client._temporary_sep_1686_shims import TaskStatusResponse
 from fastmcp.utilities.logging import get_logger
 
 logger = get_logger(__name__)
 
 if TYPE_CHECKING:
-    from fastmcp.client.client import Client
+    from fastmcp.client.client import CallToolResult, Client
 
 
 TaskResultT = TypeVar("TaskResultT")
@@ -40,7 +39,7 @@ class Task(abc.ABC, Generic[TaskResultT]):
 
     def __init__(
         self,
-        client: "Client",
+        client: Client,
         task_id: str,
         immediate_result: TaskResultT | None = None,
     ):
@@ -265,27 +264,12 @@ class Task(abc.ABC, Generic[TaskResultT]):
         # Invalidate cache to force fresh status fetch
         self._status_cache = None
 
-    async def delete(self) -> None:
-        """Delete this task and all associated data from the server.
-
-        Deletion is discretionary - servers may reject delete requests.
-        After successful deletion, calling result() or status() will raise errors.
-
-        Note: If server executed immediately (graceful degradation), this is a no-op
-        as there's no server-side task to delete.
-        """
-        if self._is_immediate:
-            # No server-side task to delete
-            return
-        self._check_client_connected()
-        await self._client.delete_task(self._task_id)
-
     def __await__(self):
         """Allow 'await task' to get result."""
         return self.result().__await__()
 
 
-class ToolTask(Task[CallToolResult]):
+class ToolTask(Task["CallToolResult"]):
     """
     Represents a tool call that may execute in background or immediately.
 
@@ -310,7 +294,7 @@ class ToolTask(Task[CallToolResult]):
 
     def __init__(
         self,
-        client: "Client",
+        client: Client,
         task_id: str,
         tool_name: str,
         immediate_result: CallToolResult | None = None,
@@ -395,7 +379,7 @@ class PromptTask(Task[mcp.types.GetPromptResult]):
 
     def __init__(
         self,
-        client: "Client",
+        client: Client,
         task_id: str,
         prompt_name: str,
         immediate_result: mcp.types.GetPromptResult | None = None,
@@ -462,7 +446,7 @@ class ResourceTask(
 
     def __init__(
         self,
-        client: "Client",
+        client: Client,
         task_id: str,
         uri: str,
         immediate_result: list[

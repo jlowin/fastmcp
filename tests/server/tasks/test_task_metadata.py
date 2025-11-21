@@ -6,7 +6,6 @@ modelcontextprotocol.io/related-task in _meta.
 """
 
 import pytest
-from mcp.shared.exceptions import McpError
 
 from fastmcp import FastMCP
 from fastmcp.client import Client
@@ -62,21 +61,3 @@ async def test_tasks_list_includes_related_task_metadata(metadata_server: FastMC
         # Verify list_tasks works and returns proper structure
         assert "tasks" in result
         assert isinstance(result["tasks"], list)
-
-
-async def test_tasks_delete_includes_related_task_metadata(metadata_server: FastMCP):
-    """tasks/delete response includes modelcontextprotocol.io/related-task in _meta."""
-    async with Client(metadata_server) as client:
-        # Submit a task
-        task = await client.call_tool("test_tool", {"value": 9}, task=True)
-        task_id = task.task_id
-
-        # Wait for completion
-        await task.wait(timeout=2.0)
-
-        # Delete via client (which uses protocol properly)
-        await task.delete()
-
-        # Verify task is deleted by trying to get status (should raise error)
-        with pytest.raises(McpError, match="not found"):
-            await client.get_task_status(task_id)

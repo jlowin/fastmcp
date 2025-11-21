@@ -235,7 +235,7 @@ async def test_task_hint_auto_populated_for_task_enabled_tool():
         assert len(tools_result) == 1
         assert tools_result[0].name == "background_tool"
         assert tools_result[0].annotations is not None
-        assert tools_result[0].annotations.taskHint is True
+        assert tools_result[0].annotations.taskHint == "optional"
 
 
 async def test_task_hint_omitted_for_task_disabled_tool():
@@ -260,7 +260,7 @@ async def test_explicit_task_hint_not_overridden():
     """Test that explicitly set taskHint is not overridden by auto-population."""
     mcp = FastMCP("Test Server")
 
-    @mcp.tool(task=True, annotations=ToolAnnotations(taskHint=False))
+    @mcp.tool(task=True, annotations=ToolAnnotations(taskHint="never"))
     async def tool_with_explicit_hint(data: str) -> str:
         """Tool with explicit taskHint that contradicts task flag."""
         return f"Processed: {data}"
@@ -270,5 +270,5 @@ async def test_explicit_task_hint_not_overridden():
         assert len(tools_result) == 1
         assert tools_result[0].name == "tool_with_explicit_hint"
         assert tools_result[0].annotations is not None
-        # Explicit taskHint=False should be preserved, not overridden to True
-        assert tools_result[0].annotations.taskHint is False
+        # Explicit taskHint="never" should be preserved, not overridden to "optional"
+        assert tools_result[0].annotations.taskHint == "never"
