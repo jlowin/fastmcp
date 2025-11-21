@@ -993,12 +993,18 @@ class MCPConfigTransport(ClientTransport):
                 yield session
         finally:
             # Clean up underlying transports to ensure subprocesses terminate
-            for transport in self._underlying_transports:
-                await transport.close()
+            # Use gather with return_exceptions to ensure all transports close even if one fails
+            await asyncio.gather(
+                *(transport.close() for transport in self._underlying_transports),
+                return_exceptions=True,
+            )
 
     async def close(self):
-        for transport in self._underlying_transports:
-            await transport.close()
+        # Use gather with return_exceptions to ensure all transports close even if one fails
+        await asyncio.gather(
+            *(transport.close() for transport in self._underlying_transports),
+            return_exceptions=True,
+        )
 
     def __repr__(self) -> str:
         return f"<MCPConfigTransport(config='{self.config}')>"
