@@ -654,7 +654,7 @@ requires-dist = [
     { name = "exceptiongroup", specifier = ">=1.2.2" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "jsonschema-path", specifier = ">=0.3.4" },
-    { name = "mcp", directory = "../../modelcontextprotocol/python-sdk" },
+    { name = "mcp", git = "https://github.com/modelcontextprotocol/python-sdk.git?rev=maxisbey%2FSEP-1686_Tasks" },
     { name = "openai", marker = "extra == 'openai'", specifier = ">=1.102.0" },
     { name = "openapi-pydantic", specifier = ">=0.5.1" },
     { name = "platformdirs", specifier = ">=4.0.0" },
@@ -1144,7 +1144,8 @@ wheels = [
 
 [[package]]
 name = "mcp"
-source = { directory = "../../modelcontextprotocol/python-sdk" }
+version = "1.21.2.dev6+9bd2aa8"
+source = { git = "https://github.com/modelcontextprotocol/python-sdk.git?rev=maxisbey%2FSEP-1686_Tasks#9bd2aa89aa50979fc6d0bd45535eedf1f69fda5d" }
 dependencies = [
     { name = "anyio" },
     { name = "httpx" },
@@ -1160,50 +1161,6 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "typing-inspection" },
     { name = "uvicorn", marker = "sys_platform != 'emscripten'" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "anyio", specifier = ">=4.5" },
-    { name = "httpx", specifier = ">=0.27.1" },
-    { name = "httpx-sse", specifier = ">=0.4" },
-    { name = "jsonschema", specifier = ">=4.20.0" },
-    { name = "pydantic", specifier = ">=2.11.0,<3.0.0" },
-    { name = "pydantic-settings", specifier = ">=2.5.2" },
-    { name = "pyjwt", extras = ["crypto"], specifier = ">=2.10.1" },
-    { name = "python-dotenv", marker = "extra == 'cli'", specifier = ">=1.0.0" },
-    { name = "python-multipart", specifier = ">=0.0.9" },
-    { name = "pywin32", marker = "sys_platform == 'win32'", specifier = ">=310" },
-    { name = "rich", marker = "extra == 'rich'", specifier = ">=13.9.4" },
-    { name = "sse-starlette", specifier = ">=1.6.1" },
-    { name = "starlette", specifier = ">=0.27" },
-    { name = "typer", marker = "extra == 'cli'", specifier = ">=0.16.0" },
-    { name = "typing-extensions", specifier = ">=4.9.0" },
-    { name = "typing-inspection", specifier = ">=0.4.1" },
-    { name = "uvicorn", marker = "sys_platform != 'emscripten'", specifier = ">=0.31.1" },
-    { name = "websockets", marker = "extra == 'ws'", specifier = ">=15.0.1" },
-]
-provides-extras = ["cli", "rich", "ws"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "coverage", extras = ["toml"], specifier = "==7.10.7" },
-    { name = "dirty-equals", specifier = ">=0.9.0" },
-    { name = "inline-snapshot", specifier = ">=0.23.0" },
-    { name = "pyright", specifier = ">=1.1.400" },
-    { name = "pytest", specifier = ">=8.3.4" },
-    { name = "pytest-examples", specifier = ">=0.0.14" },
-    { name = "pytest-flakefinder", specifier = ">=1.1.0" },
-    { name = "pytest-pretty", specifier = ">=1.2.0" },
-    { name = "pytest-xdist", specifier = ">=3.6.1" },
-    { name = "ruff", specifier = ">=0.8.5" },
-    { name = "trio", specifier = ">=0.26.2" },
-]
-docs = [
-    { name = "mkdocs", specifier = ">=1.6.1" },
-    { name = "mkdocs-glightbox", specifier = ">=0.4.0" },
-    { name = "mkdocs-material", extras = ["imaging"], specifier = ">=9.5.45" },
-    { name = "mkdocstrings-python", specifier = ">=1.12.2" },
 ]
 
 [[package]]
