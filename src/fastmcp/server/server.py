@@ -54,9 +54,6 @@ from starlette.routing import BaseRoute, Route
 
 import fastmcp
 import fastmcp.server
-
-# TODO SEP-1686: Import triggers monkey-patch of ClientRequest union for task methods
-import fastmcp.server.tasks._temporary_mcp_shims
 from fastmcp.exceptions import DisabledError, NotFoundError
 from fastmcp.mcp_config import MCPConfig
 from fastmcp.prompts import Prompt

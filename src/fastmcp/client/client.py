@@ -30,7 +30,10 @@ from mcp.types import (
 from pydantic import AnyUrl
 
 import fastmcp
-from fastmcp.client._temporary_sep_1686_shims import ClientMessageHandler
+from fastmcp.client._temporary_sep_1686_shims import (
+    TaskNotificationHandler,
+    TasksResponse,
+)
 from fastmcp.client.elicitation import ElicitationHandler, create_elicitation_callback
 from fastmcp.client.logging import (
     LogHandler,
@@ -59,10 +62,6 @@ from fastmcp.client.tasks import (
 from fastmcp.exceptions import ToolError
 from fastmcp.mcp_config import MCPConfig
 from fastmcp.server import FastMCP
-
-# TODO SEP-1686: Import to trigger monkey-patch of ClientRequest union
-# This must happen before any code tries to send tasks/get, tasks/result, tasks/delete
-from fastmcp.server.tasks import _temporary_mcp_shims  # noqa: F401
 from fastmcp.utilities.exceptions import get_catch_handlers
 from fastmcp.utilities.json_schema_type import json_schema_to_type
 from fastmcp.utilities.logging import get_logger
@@ -286,7 +285,7 @@ class Client(Generic[ClientTransportT]):
             "sampling_callback": None,
             "list_roots_callback": None,
             "logging_callback": create_log_callback(log_handler),
-            "message_handler": message_handler or ClientMessageHandler(self),
+            "message_handler": message_handler or TaskNotificationHandler(self),
             "read_timeout_seconds": timeout,  # ty: ignore[invalid-argument-type]
             "client_info": client_info,
         }
@@ -1447,8 +1446,6 @@ class Client(Generic[ClientTransportT]):
         Raises:
             RuntimeError: If client not connected
         """
-        from fastmcp.server.tasks._temporary_mcp_shims import TasksResponse
-
         request = GetTaskRequest(params=GetTaskRequestParams(taskId=task_id))
         result = await self.session.send_request(
             request=request,  # type: ignore[arg-type]
@@ -1471,8 +1468,6 @@ class Client(Generic[ClientTransportT]):
         Raises:
             RuntimeError: If client not connected, task not found, or task failed
         """
-        from fastmcp.server.tasks._temporary_mcp_shims import TasksResponse
-
         request = GetTaskPayloadRequest(
             params=GetTaskPayloadRequestParams(taskId=task_id)
         )
@@ -1504,8 +1499,6 @@ class Client(Generic[ClientTransportT]):
         Raises:
             RuntimeError: If client not connected
         """
-        from fastmcp.server.tasks._temporary_mcp_shims import TasksResponse
-
         # Send protocol request
         params = PaginatedRequestParams(cursor=cursor, limit=limit)
         request = ListTasksRequest(params=params)
@@ -1545,8 +1538,6 @@ class Client(Generic[ClientTransportT]):
         Raises:
             RuntimeError: If task doesn't exist
         """
-        from fastmcp.server.tasks._temporary_mcp_shims import TasksResponse
-
         request = CancelTaskRequest(params=CancelTaskRequestParams(taskId=task_id))
         result = await self.session.send_request(
             request=request,  # type: ignore[arg-type]
