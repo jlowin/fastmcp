@@ -50,6 +50,7 @@ from mcp.types import (
     Request,
     RequestParams,
     Result,
+    TaskMetadata,
 )
 from pydantic import BaseModel, ConfigDict
 
@@ -343,9 +344,8 @@ class CallToolRequestParams(mcp_types.CallToolRequestParams):
     This extension adds the spec-compliant task field.
     """
 
-    task: dict[str, Any] | None = None
-    """Task metadata per SEP-1686 final spec. Contains ttl field.
-    Example: {"ttl": 60000}"""
+    task: TaskMetadata | None = None
+    """Task metadata per SEP-1686 final spec. Contains ttl field."""
 
 
 class GetPromptRequestParams(mcp_types.GetPromptRequestParams):
@@ -355,7 +355,7 @@ class GetPromptRequestParams(mcp_types.GetPromptRequestParams):
     This extension adds the spec-compliant task field.
     """
 
-    task: dict[str, Any] | None = None
+    task: TaskMetadata | None = None
     """Task metadata per SEP-1686 final spec. Contains ttl field."""
 
 
@@ -366,7 +366,7 @@ class ReadResourceRequestParams(mcp_types.ReadResourceRequestParams):
     This extension adds the spec-compliant task field.
     """
 
-    task: dict[str, Any] | None = None
+    task: TaskMetadata | None = None
     """Task metadata per SEP-1686 final spec. Contains ttl field."""
 
 

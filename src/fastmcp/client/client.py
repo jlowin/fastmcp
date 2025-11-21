@@ -744,12 +744,13 @@ class Client(Generic[ClientTransportT]):
 
         # If meta provided, use send_request for SEP-1686 task support
         if meta:
+            task_dict = meta.get("modelcontextprotocol.io/task")
             request = mcp.types.ReadResourceRequest(
                 params=mcp.types.ReadResourceRequestParams(
                     uri=uri,
-                    task=meta.get(
-                        "modelcontextprotocol.io/task"
-                    ),  # SEP-1686: task as direct param (spec-compliant)
+                    task=mcp.types.TaskMetadata(**task_dict)
+                    if task_dict
+                    else None,  # SEP-1686: task as direct param (spec-compliant)
                     _meta=meta,  # Also send in _meta for SDK in-memory transport compatibility
                 )
             )
@@ -950,13 +951,14 @@ class Client(Generic[ClientTransportT]):
 
         # If meta provided, use send_request for SEP-1686 task support
         if meta:
+            task_dict = meta.get("modelcontextprotocol.io/task")
             request = mcp.types.GetPromptRequest(
                 params=mcp.types.GetPromptRequestParams(
                     name=name,
                     arguments=serialized_arguments,
-                    task=meta.get(
-                        "modelcontextprotocol.io/task"
-                    ),  # SEP-1686: task as direct param (spec-compliant)
+                    task=mcp.types.TaskMetadata(**task_dict)
+                    if task_dict
+                    else None,  # SEP-1686: task as direct param (spec-compliant)
                     _meta=meta,  # Also send in _meta for SDK in-memory transport compatibility
                 )
             )
@@ -1202,13 +1204,14 @@ class Client(Generic[ClientTransportT]):
         # For task submissions, use send_request to bypass SDK validation
         # Task acknowledgments don't have structured content, which would fail validation
         if meta and "modelcontextprotocol.io/task" in meta:
+            task_dict = meta.get("modelcontextprotocol.io/task")
             request = mcp.types.CallToolRequest(
                 params=mcp.types.CallToolRequestParams(
                     name=name,
                     arguments=arguments,
-                    task=meta.get(
-                        "modelcontextprotocol.io/task"
-                    ),  # SEP-1686: task as direct param (spec-compliant)
+                    task=mcp.types.TaskMetadata(**task_dict)
+                    if task_dict
+                    else None,  # SEP-1686: task as direct param (spec-compliant)
                     _meta=meta,  # Also send in _meta for SDK in-memory transport compatibility
                 )
             )
