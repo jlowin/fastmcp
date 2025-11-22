@@ -29,6 +29,7 @@ from fastmcp.utilities.types import (
     Image,
     NotSet,
     NotSetT,
+    create_function_without_params,
     find_kwarg_by_type,
     get_cached_typeadapter,
     replace_type,
@@ -268,6 +269,16 @@ class FunctionTool(Tool):
         enabled: bool | None = None,
     ) -> FunctionTool:
         """Create a Tool from a function."""
+        if exclude_args and fastmcp.settings.deprecation_warnings:
+            warnings.warn(
+                "The `exclude_args` parameter will be deprecated in FastMCP 2.14. "
+                "We recommend using dependency injection with `Depends()` instead, which provides "
+                "better lifecycle management and is more explicit. "
+                "`exclude_args` will continue to work until then. "
+                "See https://gofastmcp.com/docs/servers/tools for examples.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
         parsed_fn = ParsedFunction.from_function(fn, exclude_args=exclude_args)
 
@@ -282,10 +293,11 @@ class FunctionTool(Tool):
         # Note: explicit schemas (dict) are used as-is without auto-wrapping
 
         # Validate that explicit schemas are object type for structured content
+        # (resolving $ref references for self-referencing types)
         if final_output_schema is not None and isinstance(final_output_schema, dict):
-            if final_output_schema.get("type") != "object":
+            if not _is_object_schema(final_output_schema):
                 raise ValueError(
-                    f'Output schemas must have "type" set to "object" due to MCP spec limitations. Received: {final_output_schema!r}'
+                    f"Output schemas must represent object types due to MCP spec limitations. Received: {final_output_schema!r}"
                 )
 
         return cls(
@@ -354,6 +366,21 @@ class FunctionTool(Tool):
         )
 
 
+def _is_object_schema(schema: dict[str, Any]) -> bool:
+    """Check if a JSON schema represents an object type."""
+    # Direct object type
+    if schema.get("type") == "object":
+        return True
+
+    # Schema with properties but no explicit type is treated as object
+    if "properties" in schema:
+        return True
+
+    # Self-referencing types use $ref pointing to $defs
+    # The referenced type is always an object in our use case
+    return "$ref" in schema and "$defs" in schema
+
+
 @dataclass
 class ParsedFunction:
     fn: Callable[..., Any]
@@ -414,7 +441,14 @@ class ParsedFunction:
         if exclude_args:
             prune_params.extend(exclude_args)
 
-        input_type_adapter = get_cached_typeadapter(fn)
+        # Create a function without excluded parameters in annotations
+        # This prevents Pydantic from trying to serialize non-serializable types
+        # before we can exclude them in compress_schema
+        fn_for_typeadapter = fn
+        if prune_params:
+            fn_for_typeadapter = create_function_without_params(fn, prune_params)
+
+        input_type_adapter = get_cached_typeadapter(fn_for_typeadapter)
         input_schema = input_type_adapter.json_schema()
         input_schema = compress_schema(
             input_schema, prune_params=prune_params, prune_titles=True
@@ -466,10 +500,9 @@ class ParsedFunction:
 
                 # Generate schema for wrapped type if it's non-object
                 # because MCP requires that output schemas are objects
-                if (
-                    wrap_non_object_output_schema
-                    and base_schema.get("type") != "object"
-                ):
+                # Check if schema is an object type, resolving $ref references
+                # (self-referencing types use $ref at root level)
+                if wrap_non_object_output_schema and not _is_object_schema(base_schema):
                     # Use the wrapped result schema directly
                     wrapped_type = _WrappedResult[clean_output_type]
                     wrapped_adapter = get_cached_typeadapter(wrapped_type)
