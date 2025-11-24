@@ -1,0 +1,5 @@
+version: 1
+project: fastmcp-maos
+telemetry:
+  enabled: true
+  heartbeat_interval_seconds: 60
