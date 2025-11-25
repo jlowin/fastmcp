@@ -1296,7 +1296,25 @@ class OAuthProxy(OAuthProvider):
         refresh_token: str,
     ) -> RefreshToken | None:
         """Load refresh token from local storage."""
-        return self._refresh_tokens.get(refresh_token)
+        if local_refresh_token := self._refresh_tokens.get(refresh_token):
+            return local_refresh_token
+
+        # Verify then return
+        try:
+            refresh_payload = self._jwt_issuer.verify_token(refresh_token)
+            client_id = refresh_payload.get("client_id", "")
+            if not client_id or client_id != client.client_id:
+                return None  # Belongs to different client
+
+            return RefreshToken(
+                token=refresh_token,
+                client_id=client_id,
+                scopes=refresh_payload.get("scope", "").split(" "),
+                expires_at=refresh_payload.get("exp", 0),
+            )
+        except Exception as e:
+            logger.debug("FastMCP refresh token validation failed: %s", e)
+            raise TokenError("invalid_grant", "Invalid refresh token") from e
 
     async def exchange_refresh_token(
         self,

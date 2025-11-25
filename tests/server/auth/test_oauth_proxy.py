@@ -1311,6 +1311,179 @@ class TestTokenHandlerErrorTransformation:
         assert b'"error":"invalid_grant"' in response.body
 
 
+class TestLoadRefreshToken:
+    """Tests for load_refresh_token functionality."""
+
+    async def test_load_refresh_token_from_memory(self, oauth_proxy):
+        """Test loading refresh token from in-memory storage."""
+        client = OAuthClientInformationFull(
+            client_id="test-client",
+            client_secret="test-secret",
+            redirect_uris=[AnyUrl("http://localhost:12345/callback")],
+        )
+
+        # Store a refresh token in memory
+        refresh_token = RefreshToken(
+            token="memory-refresh-token",
+            client_id="test-client",
+            scopes=["read", "write"],
+            expires_at=None,
+        )
+        oauth_proxy._refresh_tokens["memory-refresh-token"] = refresh_token
+
+        # Load should return from memory without JWT verification
+        loaded = await oauth_proxy.load_refresh_token(client, "memory-refresh-token")
+
+        assert loaded is not None
+        assert loaded.token == "memory-refresh-token"
+        assert loaded.client_id == "test-client"
+        assert loaded.scopes == ["read", "write"]
+
+    async def test_load_refresh_token_from_jwt(self, oauth_proxy):
+        """Test loading refresh token by verifying JWT when not in memory."""
+        client = OAuthClientInformationFull(
+            client_id="test-client",
+            client_secret="test-secret",
+            redirect_uris=[AnyUrl("http://localhost:12345/callback")],
+        )
+
+        # Register client
+        await oauth_proxy.register_client(client)
+
+        # Create a valid JWT refresh token
+        refresh_token_jwt = oauth_proxy._jwt_issuer.issue_refresh_token(
+            client_id="test-client",
+            scopes=["read", "write"],
+            jti=secrets.token_urlsafe(32),
+            expires_in=60 * 60 * 24 * 30,  # 30 days
+        )
+
+        # Load should verify JWT and return RefreshToken
+        loaded = await oauth_proxy.load_refresh_token(client, refresh_token_jwt)
+
+        assert loaded is not None
+        assert loaded.token == refresh_token_jwt
+        assert loaded.client_id == "test-client"
+        assert loaded.scopes == ["read", "write"]
+
+    async def test_load_refresh_token_wrong_client(self, oauth_proxy):
+        """Test that refresh token for different client returns None."""
+        client = OAuthClientInformationFull(
+            client_id="test-client",
+            client_secret="test-secret",
+            redirect_uris=[AnyUrl("http://localhost:12345/callback")],
+        )
+
+        # Create a JWT for a different client
+        other_client_token = oauth_proxy._jwt_issuer.issue_refresh_token(
+            client_id="other-client",
+            scopes=["read"],
+            jti=secrets.token_urlsafe(32),
+            expires_in=60 * 60 * 24 * 30,
+        )
+
+        # Should return None for wrong client
+        loaded = await oauth_proxy.load_refresh_token(client, other_client_token)
+
+        assert loaded is None
+
+    async def test_load_refresh_token_invalid_jwt(self, oauth_proxy):
+        """Test that invalid JWT raises TokenError."""
+        from mcp.server.auth.provider import TokenError
+
+        client = OAuthClientInformationFull(
+            client_id="test-client",
+            client_secret="test-secret",
+            redirect_uris=[AnyUrl("http://localhost:12345/callback")],
+        )
+
+        # Invalid JWT token
+        invalid_token = "invalid.jwt.token"
+
+        # Should raise TokenError with invalid_grant
+        with pytest.raises(TokenError) as exc_info:
+            await oauth_proxy.load_refresh_token(client, invalid_token)
+
+        assert exc_info.value.error == "invalid_grant"
+        assert "Invalid refresh token" in exc_info.value.error_description
+
+    async def test_load_refresh_token_expired_jwt(self, oauth_proxy):
+        """Test that expired JWT raises TokenError."""
+        from mcp.server.auth.provider import TokenError
+
+        client = OAuthClientInformationFull(
+            client_id="test-client",
+            client_secret="test-secret",
+            redirect_uris=[AnyUrl("http://localhost:12345/callback")],
+        )
+
+        await oauth_proxy.register_client(client)
+
+        # Create an expired token (negative expiry)
+        expired_token = oauth_proxy._jwt_issuer.issue_refresh_token(
+            client_id="test-client",
+            scopes=["read"],
+            jti=secrets.token_urlsafe(32),
+            expires_in=-1,  # Expired 1 second ago
+        )
+
+        # Should raise TokenError
+        with pytest.raises(TokenError) as exc_info:
+            await oauth_proxy.load_refresh_token(client, expired_token)
+
+        assert exc_info.value.error == "invalid_grant"
+
+    async def test_load_refresh_token_missing_client_id_in_jwt(self, jwt_verifier):
+        """Test that JWT without client_id returns None."""
+        proxy = OAuthProxy(
+            upstream_authorization_endpoint="https://oauth.example.com/authorize",
+            upstream_token_endpoint="https://oauth.example.com/token",
+            upstream_client_id="upstream-client",
+            upstream_client_secret="upstream-secret",
+            token_verifier=jwt_verifier,
+            base_url="https://proxy.example.com",
+            jwt_signing_key="test-secret",
+        )
+
+        client = OAuthClientInformationFull(
+            client_id="test-client",
+            client_secret="test-secret",
+            redirect_uris=[AnyUrl("http://localhost:12345/callback")],
+        )
+
+        # Mock JWT issuer to return payload without client_id
+        with patch.object(
+            proxy._jwt_issuer, "verify_token", return_value={"scope": "read", "exp": 0}
+        ):
+            loaded = await proxy.load_refresh_token(client, "some-token")
+
+            assert loaded is None
+
+    async def test_load_refresh_token_memory_takes_precedence(self, oauth_proxy):
+        """Test that in-memory token is returned before JWT verification."""
+        client = OAuthClientInformationFull(
+            client_id="test-client",
+            client_secret="test-secret",
+            redirect_uris=[AnyUrl("http://localhost:12345/callback")],
+        )
+
+        # Store a token in memory
+        memory_token = RefreshToken(
+            token="test-token",
+            client_id="test-client",
+            scopes=["read"],
+            expires_at=None,
+        )
+        oauth_proxy._refresh_tokens["test-token"] = memory_token
+
+        # Load should return memory version without JWT verification
+        # (even if the token string happens to be a valid JWT)
+        loaded = await oauth_proxy.load_refresh_token(client, "test-token")
+
+        assert loaded is memory_token
+        assert loaded.scopes == ["read"]
+
+
 class TestErrorPageRendering:
     """Test error page rendering for OAuth callback errors."""
 
