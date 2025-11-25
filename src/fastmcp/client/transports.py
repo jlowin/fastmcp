@@ -287,11 +287,17 @@ class StreamableHttpTransport(ClientTransport):
             auth=self.auth,
             **client_kwargs,
         ) as transport:
-            read_stream, write_stream, _ = transport
+            read_stream, write_stream, get_session_id = transport
+            self.get_session_id_cb = get_session_id
             async with ClientSession(
                 read_stream, write_stream, **session_kwargs
             ) as session:
                 yield session
+
+    def get_session_id(self) -> str | None:
+        if self.get_session_id_cb:
+            return self.get_session_id_cb()
+        return None
 
     def __repr__(self) -> str:
         return f"<StreamableHttpTransport(url='{self.url}')>"
