@@ -253,6 +253,7 @@ class StreamableHttpTransport(ClientTransport):
         if isinstance(sse_read_timeout, int | float):
             sse_read_timeout = datetime.timedelta(seconds=float(sse_read_timeout))
         self.sse_read_timeout = sse_read_timeout
+        self.get_session_id_cb = None
 
     def _set_auth(self, auth: httpx.Auth | Literal["oauth"] | str | None):
         if auth == "oauth":
