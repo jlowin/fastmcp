@@ -473,7 +473,7 @@ def create_page(
 
     # Only include CSP meta tag if policy is non-empty
     csp_meta = (
-        f'<meta http-equiv="Content-Security-Policy" content="{csp_policy}" />'
+        f'<meta http-equiv="Content-Security-Policy" content="{html.escape(csp_policy, quote=True)}" />'
         if csp_policy
         else ""
     )

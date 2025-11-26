@@ -1052,8 +1052,11 @@ class TestConsentCSPPolicy:
             response = client.get(f"/consent?txn_id={txn_id}")
 
             assert response.status_code == 200
-            # Custom CSP should be present
+            # Custom CSP should be present (HTML-escaped)
             assert 'http-equiv="Content-Security-Policy"' in response.text
-            assert custom_csp in response.text
+            # Check for the HTML-escaped version (single quotes become &#x27;)
+            import html
+
+            assert html.escape(custom_csp, quote=True) in response.text
             # Default form-action should NOT be present (we're using custom)
             assert "form-action" not in response.text
