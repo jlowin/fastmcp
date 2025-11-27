@@ -101,6 +101,7 @@ class TestTools:
             title=None,
             annotations=None,
             icons=None,
+            execution=None,
             description=IsStr(regex=r"^Create a new user\..*$", regex_flags=re.DOTALL),
             inputSchema={
                 "type": "object",
@@ -127,6 +128,7 @@ class TestTools:
             title=None,
             annotations=None,
             icons=None,
+            execution=None,
             description=IsStr(
                 regex=r"^Update a user's name\..*$", regex_flags=re.DOTALL
             ),

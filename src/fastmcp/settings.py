@@ -3,6 +3,7 @@ from __future__ import annotations as _annotations
 import inspect
 import os
 import warnings
+from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
@@ -64,6 +65,82 @@ class ExtendedSettingsConfigDict(SettingsConfigDict, total=False):
     env_prefixes: list[str] | None
 
 
+class DocketSettings(BaseSettings):
+    """Docket worker configuration."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="FASTMCP_EXPERIMENTAL_DOCKET_",
+        extra="ignore",
+    )
+
+    url: Annotated[
+        str,
+        Field(
+            description=inspect.cleandoc(
+                """
+                URL for the Docket backend. Supports:
+                - memory:// - In-memory backend (single process only)
+                - redis://host:port/db - Redis/Valkey backend (distributed, multi-process)
+
+                Example: redis://localhost:6379/0
+
+                Default is memory:// for single-process scenarios. Use Redis or Valkey
+                when coordinating tasks across multiple processes (e.g., additional
+                workers via the fastmcp tasks CLI).
+                """
+            ),
+        ),
+    ] = "memory://"
+
+    worker_name: Annotated[
+        str | None,
+        Field(
+            description=inspect.cleandoc(
+                """
+                Name for the Docket worker. If None, Docket will auto-generate
+                a unique worker name.
+                """
+            ),
+        ),
+    ] = None
+
+    concurrency: Annotated[
+        int,
+        Field(
+            description=inspect.cleandoc(
+                """
+                Maximum number of tasks the worker can process concurrently.
+                """
+            ),
+        ),
+    ] = 10
+
+    redelivery_timeout: Annotated[
+        timedelta,
+        Field(
+            description=inspect.cleandoc(
+                """
+                Task redelivery timeout. If a worker doesn't complete
+                a task within this time, the task will be redelivered to another
+                worker.
+                """
+            ),
+        ),
+    ] = timedelta(seconds=300)
+
+    reconnection_delay: Annotated[
+        timedelta,
+        Field(
+            description=inspect.cleandoc(
+                """
+                Delay between reconnection attempts when the worker
+                loses connection to the Docket backend.
+                """
+            ),
+        ),
+    ] = timedelta(seconds=5)
+
+
 class ExperimentalSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="FASTMCP_EXPERIMENTAL_",
@@ -81,6 +158,39 @@ class ExperimentalSettings(BaseSettings):
             ),
         ),
     ] = False
+
+    enable_docket: Annotated[
+        bool,
+        Field(
+            description=inspect.cleandoc(
+                """
+                Enable experimental Docket support for background task execution.
+                When enabled, FastMCP will create a Docket instance with a Worker
+                available via dependency injection. This allows tools, prompts, and
+                resources to schedule background work using CurrentDocket().
+                """
+            ),
+        ),
+    ] = False
+
+    enable_tasks: Annotated[
+        bool,
+        Field(
+            description=inspect.cleandoc(
+                """
+                Enable MCP SEP-1686 task protocol support for background execution.
+
+                Server-side: Requires enable_docket=True (validated at server startup).
+                Advertises task capabilities and handles task/* protocol methods.
+
+                Client-side: Advertises task capability to servers. No Docket needed
+                on client side.
+                """
+            ),
+        ),
+    ] = False
+
+    docket: DocketSettings = DocketSettings()
 
 
 class Settings(BaseSettings):
