@@ -1504,6 +1504,7 @@ class FastMCP(Generic[LifespanResultT]):
                 meta=meta,
                 serializer=self._tool_serializer,
                 enabled=enabled,
+                unpack_pydantic_args=unpack_pydantic_args,
             )
             self.add_tool(tool)
             return tool

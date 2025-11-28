@@ -188,6 +188,7 @@ class Tool(FastMCPComponent):
         serializer: ToolResultSerializerType | None = None,
         meta: dict[str, Any] | None = None,
         enabled: bool | None = None,
+        unpack_pydantic_args: bool = False,
     ) -> FunctionTool:
         """Create a Tool from a function."""
         return FunctionTool.from_function(
