@@ -1380,6 +1380,7 @@ class FastMCP(Generic[LifespanResultT]):
         exclude_args: list[str] | None = None,
         meta: dict[str, Any] | None = None,
         enabled: bool | None = None,
+        unpack_pydantic_args: bool = False,
     ) -> FunctionTool: ...
 
     @overload
@@ -1397,6 +1398,7 @@ class FastMCP(Generic[LifespanResultT]):
         exclude_args: list[str] | None = None,
         meta: dict[str, Any] | None = None,
         enabled: bool | None = None,
+        unpack_pydantic_args: bool = False,
     ) -> Callable[[AnyFunction], FunctionTool]: ...
 
     def tool(
@@ -1413,6 +1415,7 @@ class FastMCP(Generic[LifespanResultT]):
         exclude_args: list[str] | None = None,
         meta: dict[str, Any] | None = None,
         enabled: bool | None = None,
+        unpack_pydantic_args: bool = False,
     ) -> Callable[[AnyFunction], FunctionTool] | FunctionTool:
         """Decorator to register a tool.
 
@@ -1534,6 +1537,7 @@ class FastMCP(Generic[LifespanResultT]):
             exclude_args=exclude_args,
             meta=meta,
             enabled=enabled,
+            unpack_pydantic_args=unpack_pydantic_args,
         )
 
     def add_resource(self, resource: Resource) -> Resource:

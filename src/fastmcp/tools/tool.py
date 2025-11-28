@@ -203,6 +203,7 @@ class Tool(FastMCPComponent):
             serializer=serializer,
             meta=meta,
             enabled=enabled,
+            unpack_pydantic_args=unpack_pydantic_args,
         )
 
     async def run(self, arguments: dict[str, Any]) -> ToolResult:
@@ -254,6 +255,8 @@ class Tool(FastMCPComponent):
 
 class FunctionTool(Tool):
     fn: Callable[..., Any]
+    unpack_pydantic_args: bool = False
+    unpacked_models_map: dict | None = None
 
     @classmethod
     def from_function(
@@ -270,6 +273,7 @@ class FunctionTool(Tool):
         serializer: ToolResultSerializerType | None = None,
         meta: dict[str, Any] | None = None,
         enabled: bool | None = None,
+        unpack_pydantic_args: bool = False,
     ) -> FunctionTool:
         """Create a Tool from a function."""
         if exclude_args and fastmcp.settings.deprecation_warnings:
@@ -283,7 +287,11 @@ class FunctionTool(Tool):
                 stacklevel=2,
             )
 
-        parsed_fn = ParsedFunction.from_function(fn, exclude_args=exclude_args)
+        parsed_fn = ParsedFunction.from_function(
+            fn,
+            exclude_args=exclude_args,
+            unpack_pydantic_args=unpack_pydantic_args,
+        )
 
         if name is None and parsed_fn.name == "<lambda>":
             raise ValueError("You must provide a name for lambda functions")
@@ -325,6 +333,8 @@ class FunctionTool(Tool):
             serializer=serializer,
             meta=meta,
             enabled=enabled if enabled is not None else True,
+            unpack_pydantic_args=unpack_pydantic_args,
+            unpacked_models_map=parsed_fn.unpacked_models_map,
         )
 
     async def run(self, arguments: dict[str, Any]) -> ToolResult:
@@ -332,6 +342,28 @@ class FunctionTool(Tool):
         from fastmcp.server.context import Context
 
         arguments = arguments.copy()
+
+        # If unpacking is enabled, re-assemble the Pydantic models from the arguments
+        if self.unpack_pydantic_args and self.unpacked_models_map:
+            assembled_args = {}
+            consumed_keys = set()
+
+            for arg_name, model_cls in self.unpacked_models_map.items():
+                model_fields = model_cls.model_fields.keys()
+                model_kwargs = {}
+                for field_name in model_fields:
+                    if field_name in arguments:
+                        model_kwargs[field_name] = arguments[field_name]
+                        consumed_keys.add(field_name)
+
+                assembled_args[arg_name] = model_cls(**model_kwargs)
+
+            # Add the remaining non-pydantic arguments
+            for key, value in arguments.items():
+                if key not in consumed_keys:
+                    assembled_args[key] = value
+
+            arguments = assembled_args
 
         context_kwarg = find_kwarg_by_type(self.fn, kwarg_type=Context)
         if context_kwarg and context_kwarg not in arguments:
@@ -400,6 +432,7 @@ class ParsedFunction:
     description: str | None
     input_schema: dict[str, Any]
     output_schema: dict[str, Any] | None
+    unpacked_models_map: dict[str, Any] | None = None
 
     @classmethod
     def from_function(
@@ -408,6 +441,7 @@ class ParsedFunction:
         exclude_args: list[str] | None = None,
         validate: bool = True,
         wrap_non_object_output_schema: bool = True,
+        unpack_pydantic_args: bool = False,
     ) -> ParsedFunction:
         from fastmcp.server.context import Context
 
@@ -453,12 +487,56 @@ class ParsedFunction:
         if exclude_args:
             prune_params.extend(exclude_args)
 
+        unpacked_models_map = {}
+        fn_for_schema = fn
+
+        if unpack_pydantic_args:
+            import pydantic
+
+            original_sig = inspect.signature(fn)
+            new_params = []
+            has_pydantic_model = False
+
+            for param in original_sig.parameters.values():
+                # Check if the parameter type is a Pydantic model
+                if isinstance(param.annotation, type) and issubclass(param.annotation, pydantic.BaseModel):
+                    has_pydantic_model = True
+                    unpacked_models_map[param.name] = param.annotation
+                    # Unpack the model's fields into new parameters
+                    for field_name, field in param.annotation.model_fields.items():
+                        # Create a new parameter for each field
+                        new_param = inspect.Parameter(
+                            name=field_name,
+                            kind=inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                            default=field.default if not field.is_required() else inspect.Parameter.empty,
+                            annotation=field.annotation,
+                        )
+                        new_params.append(new_param)
+                else:
+                    new_params.append(param)
+
+            if has_pydantic_model:
+                # Sort parameters to ensure non-defaults come first
+                required_params = [p for p in new_params if p.default == inspect.Parameter.empty]
+                optional_params = [p for p in new_params if p.default != inspect.Parameter.empty]
+                new_params = required_params + optional_params
+
+                # Create a new function with the unpacked signature for schema generation
+                def placeholder_fn(*args, **kwargs): ...
+
+                new_sig = original_sig.replace(parameters=new_params)
+                new_annotations = {p.name: p.annotation for p in new_params if p.annotation != inspect.Parameter.empty}
+
+                placeholder_fn.__signature__ = new_sig
+                placeholder_fn.__annotations__ = new_annotations
+                fn_for_schema = placeholder_fn
+
         # Create a function without excluded parameters in annotations
         # This prevents Pydantic from trying to serialize non-serializable types
         # before we can exclude them in compress_schema
-        fn_for_typeadapter = fn
+        fn_for_typeadapter = fn_for_schema
         if prune_params:
-            fn_for_typeadapter = create_function_without_params(fn, prune_params)
+            fn_for_typeadapter = create_function_without_params(fn_for_schema, prune_params)
 
         input_type_adapter = get_cached_typeadapter(fn_for_typeadapter)
         input_schema = input_type_adapter.json_schema()
@@ -535,6 +613,7 @@ class ParsedFunction:
             description=fn_doc,
             input_schema=input_schema,
             output_schema=output_schema or None,
+            unpacked_models_map=unpacked_models_map or None,
         )
 
 
