@@ -528,8 +528,8 @@ class ParsedFunction:
                 new_sig = original_sig.replace(parameters=new_params)
                 new_annotations = {p.name: p.annotation for p in new_params if p.annotation != inspect.Parameter.empty}
 
-                placeholder_fn.__signature__ = new_sig
-                placeholder_fn.__annotations__ = new_annotations
+                placeholder_fn.__signature__ = new_sig  # type: ignore[attr-defined]
+                placeholder_fn.__annotations__ = new_annotations  # type: ignore[attr-defined]
                 fn_for_schema = placeholder_fn
 
         # Create a function without excluded parameters in annotations
