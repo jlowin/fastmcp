@@ -1,4 +1,6 @@
+import pytest
 from pydantic import BaseModel, Field
+
 from fastmcp import FastMCP
 
 
@@ -64,3 +66,66 @@ def test_unpack_pydantic_args_nested():
 
     result = asyncio.run(tool.run({"city": "New York", "zipcode": "10001"}))
     assert result.content[0].text == "New York 10001"
+
+
+def test_unpack_pydantic_args_collision():
+    mcp = FastMCP("test")
+
+    class User(BaseModel):
+        name: str
+
+    class Admin(BaseModel):
+        name: str
+
+    # Should raise ValueError due to duplicate 'name' field
+    with pytest.raises(
+        ValueError, match="Field name 'name' from Pydantic model 'Admin' conflicts"
+    ):
+
+        @mcp.tool(unpack_pydantic_args=True)
+        def process(user: User, admin: Admin):
+            pass
+
+
+def test_unpack_pydantic_args_collision_with_arg():
+    mcp = FastMCP("test")
+
+    class User(BaseModel):
+        name: str
+
+    # Should raise ValueError due to duplicate 'name' field
+    with pytest.raises(
+        ValueError, match="Field name 'name' from Pydantic model 'User' conflicts"
+    ):
+
+        @mcp.tool(unpack_pydantic_args=True)
+        def greet(name: str, user: User):
+            pass
+
+
+def test_unpack_pydantic_args_default_factory():
+    mcp = FastMCP("test")
+
+    def generate_id():
+        return "123"
+
+    class Item(BaseModel):
+        id: str = Field(default_factory=generate_id)
+        name: str
+
+    @mcp.tool(unpack_pydantic_args=True)
+    def create_item(item: Item) -> str:
+        return f"{item.id}:{item.name}"
+
+    tool = mcp._tool_manager._tools["create_item"]
+    schema = tool.parameters
+
+    # id should be required in schema because factory can't be represented statically
+    assert "id" in schema["required"]
+    assert "name" in schema["required"]
+
+    import asyncio
+
+    # User provides id
+    result = asyncio.run(tool.run({"id": "custom", "name": "test"}))
+    assert result.content[0].text == "custom:test"

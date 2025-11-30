@@ -498,18 +498,49 @@ class ParsedFunction:
             new_params = []
             has_pydantic_model = False
 
+            seen_field_names: set[str] = set()
+
+            # First pass: collect non-Pydantic param names
+            for param in original_sig.parameters.values():
+                if not (
+                    isinstance(param.annotation, type)
+                    and issubclass(param.annotation, pydantic.BaseModel)
+                ):
+                    if param.name in seen_field_names:
+                        raise ValueError(f"Duplicate parameter name: {param.name}")
+                    seen_field_names.add(param.name)
+
             for param in original_sig.parameters.values():
                 # Check if the parameter type is a Pydantic model
-                if isinstance(param.annotation, type) and issubclass(param.annotation, pydantic.BaseModel):
+                if isinstance(param.annotation, type) and issubclass(
+                    param.annotation, pydantic.BaseModel
+                ):
                     has_pydantic_model = True
                     unpacked_models_map[param.name] = param.annotation
                     # Unpack the model's fields into new parameters
                     for field_name, field in param.annotation.model_fields.items():
+                        if field_name in seen_field_names:
+                            raise ValueError(
+                                f"Field name '{field_name}' from Pydantic model '{param.annotation.__name__}' "
+                                f"conflicts with another parameter. Cannot unpack."
+                            )
+                        seen_field_names.add(field_name)
+
                         # Create a new parameter for each field
+                        # Handle default vs default_factory
+                        if field.is_required():
+                            default = inspect.Parameter.empty
+                        elif field.default is not pydantic_core.PydanticUndefined:
+                            default = field.default
+                        else:
+                            # Field has default_factory - cannot represent as static default
+                            # Use empty to make it required in schema (factory runs at validation)
+                            default = inspect.Parameter.empty
+
                         new_param = inspect.Parameter(
                             name=field_name,
                             kind=inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                            default=field.default if not field.is_required() else inspect.Parameter.empty,
+                            default=default,
                             annotation=field.annotation,
                         )
                         new_params.append(new_param)
@@ -518,15 +549,23 @@ class ParsedFunction:
 
             if has_pydantic_model:
                 # Sort parameters to ensure non-defaults come first
-                required_params = [p for p in new_params if p.default == inspect.Parameter.empty]
-                optional_params = [p for p in new_params if p.default != inspect.Parameter.empty]
+                required_params = [
+                    p for p in new_params if p.default == inspect.Parameter.empty
+                ]
+                optional_params = [
+                    p for p in new_params if p.default != inspect.Parameter.empty
+                ]
                 new_params = required_params + optional_params
 
                 # Create a new function with the unpacked signature for schema generation
                 def placeholder_fn(*args, **kwargs): ...
 
                 new_sig = original_sig.replace(parameters=new_params)
-                new_annotations = {p.name: p.annotation for p in new_params if p.annotation != inspect.Parameter.empty}
+                new_annotations = {
+                    p.name: p.annotation
+                    for p in new_params
+                    if p.annotation != inspect.Parameter.empty
+                }
 
                 placeholder_fn.__signature__ = new_sig  # type: ignore[attr-defined]
                 placeholder_fn.__annotations__ = new_annotations  # type: ignore[attr-defined]
@@ -537,7 +576,9 @@ class ParsedFunction:
         # before we can exclude them in compress_schema
         fn_for_typeadapter = fn_for_schema
         if prune_params:
-            fn_for_typeadapter = create_function_without_params(fn_for_schema, prune_params)
+            fn_for_typeadapter = create_function_without_params(
+                fn_for_schema, prune_params
+            )
 
         input_type_adapter = get_cached_typeadapter(fn_for_typeadapter)
         input_schema = input_type_adapter.json_schema()
