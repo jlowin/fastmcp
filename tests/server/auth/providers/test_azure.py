@@ -768,8 +768,25 @@ class TestOIDCScopeHandling:
         assert "api://my-api/openid" not in result
         assert "api://my-api/profile" not in result
 
-    def test_prefix_scopes_dot_notation_not_prefixed(self):
-        """Test that dot-notation scopes (Microsoft Graph) are not prefixed."""
+    def test_prefix_scopes_dot_notation_gets_prefixed(self):
+        """Test that dot-notation scopes get prefixed (use additional_authorize_scopes for Graph)."""
+        provider = AzureProvider(
+            client_id="test_client",
+            client_secret="test_secret",
+            tenant_id="test-tenant",
+            identifier_uri="api://my-api",
+            required_scopes=["read"],
+            jwt_signing_key="test-secret",
+        )
+
+        # Dot-notation scopes ARE prefixed - use additional_authorize_scopes for Graph
+        # or fully-qualified format like https://graph.microsoft.com/User.Read
+        result = provider._prefix_scopes_for_azure(["my.scope", "admin.read"])
+
+        assert result == ["api://my-api/my.scope", "api://my-api/admin.read"]
+
+    def test_prefix_scopes_fully_qualified_graph_not_prefixed(self):
+        """Test that fully-qualified Graph scopes are not prefixed."""
         provider = AzureProvider(
             client_id="test_client",
             client_secret="test_secret",
@@ -780,11 +797,17 @@ class TestOIDCScopeHandling:
         )
 
         result = provider._prefix_scopes_for_azure(
-            ["User.Read", "Mail.Send", "Directory.Read.All"]
+            [
+                "https://graph.microsoft.com/User.Read",
+                "https://graph.microsoft.com/Mail.Send",
+            ]
         )
 
-        # Dot-notation scopes should pass through unchanged
-        assert result == ["User.Read", "Mail.Send", "Directory.Read.All"]
+        # Fully-qualified URIs pass through unchanged
+        assert result == [
+            "https://graph.microsoft.com/User.Read",
+            "https://graph.microsoft.com/Mail.Send",
+        ]
 
     def test_required_scopes_with_oidc_filters_validation(self):
         """Test that OIDC scopes in required_scopes are filtered from token validation."""

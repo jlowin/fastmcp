@@ -170,10 +170,9 @@ FastMCP automatically handles different Azure scope formats:
 
 | Scope Type | Example | Behavior |
 |------------|---------|----------|
-| Custom API scopes | `read`, `write` | Prefixed with `identifier_uri` (e.g., `api://xxx/read`) |
+| Custom API scopes | `read`, `write`, `my.scope` | Prefixed with `identifier_uri` (e.g., `api://xxx/read`) |
 | OIDC scopes | `openid`, `profile`, `email`, `offline_access` | Sent as-is, excluded from token validation |
-| Microsoft Graph | `User.Read`, `Mail.Send` | Sent as-is (dot-notation recognized) |
-| Fully-qualified | `api://xxx/read` | Sent as-is (already prefixed) |
+| Fully-qualified | `api://xxx/read`, `https://graph.microsoft.com/User.Read` | Sent as-is (already has URI) |
 
 <Info>
 Standard OIDC scopes work seamlessly in `required_scopes`. For example, `required_scopes=["read", "openid", "profile"]` will:
@@ -181,6 +180,10 @@ Standard OIDC scopes work seamlessly in `required_scopes`. For example, `require
 - Only validate `read` in access tokens (Azure doesn't include OIDC scopes in `scp` claims)
 - Advertise all three scopes to MCP clients via Protected Resource Metadata
 </Info>
+
+<Tip>
+**Microsoft Graph scopes**: Use `additional_authorize_scopes` for Graph permissions like `User.Read` or `Mail.Send`. Alternatively, use the fully-qualified format: `https://graph.microsoft.com/User.Read`.
+</Tip>
 
 ## Testing
 

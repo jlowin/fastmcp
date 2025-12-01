@@ -356,7 +356,10 @@ class AzureProvider(OAuthProxy):
         - Standard OIDC scopes (openid, profile, email, offline_access)
         - Fully-qualified URIs (contain "://")
         - Scopes with path component (contain "/")
-        - Dot-notation scopes (contain "." - Microsoft Graph shorthand like User.Read)
+
+        Note: Microsoft Graph scopes (e.g., User.Read) should be passed via
+        `additional_authorize_scopes` or use fully-qualified format
+        (e.g., https://graph.microsoft.com/User.Read).
 
         Args:
             scopes: List of scopes, may be prefixed or unprefixed
@@ -370,11 +373,8 @@ class AzureProvider(OAuthProxy):
                 # Standard OIDC scopes - never prefix
                 prefixed.append(scope)
             elif "://" in scope or "/" in scope:
-                # Already fully-qualified (e.g., "api://xxx/read")
-                prefixed.append(scope)
-            elif "." in scope:
-                # Microsoft Graph shorthand (e.g., "User.Read", "Mail.Send")
-                # Azure assumes Graph as default resource for dot-notation scopes
+                # Already fully-qualified (e.g., "api://xxx/read" or
+                # "https://graph.microsoft.com/User.Read")
                 prefixed.append(scope)
             else:
                 # Unprefixed custom API scope - prefix with identifier_uri
