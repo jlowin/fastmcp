@@ -36,18 +36,6 @@ class ExperimentalSettings(BaseSettings):
         extra="ignore",
     )
 
-    enable_new_openapi_parser: Annotated[
-        bool,
-        Field(
-            description=inspect.cleandoc(
-                """
-                Whether to use the new OpenAPI parser. This parser was introduced
-                for testing in 2.11 and will become the default soon.
-                """
-            ),
-        ),
-    ] = False
-
 
 class Settings(BaseSettings):
     """FastMCP settings."""
