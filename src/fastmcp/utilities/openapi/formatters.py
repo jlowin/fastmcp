@@ -67,7 +67,7 @@ def format_deep_object_parameter(
     param_value: dict, parameter_name: str
 ) -> dict[str, str]:
     """
-    Format a dictionary parameter for deepObject style serialization.
+    Format a dictionary parameter for deep-object style serialization.
 
     According to OpenAPI 3.0 spec, deepObject style with explode=true serializes
     object properties as separate query parameters with bracket notation.
@@ -84,7 +84,7 @@ def format_deep_object_parameter(
     """
     if not isinstance(param_value, dict):
         logger.warning(
-            f"deepObject style parameter '{parameter_name}' expected dict, got {type(param_value)}"
+            f"Deep-object style parameter '{parameter_name}' expected dict, got {type(param_value)}"
         )
         return {}
 
@@ -181,7 +181,7 @@ def generate_example_from_schema(schema: JsonSchema | None) -> Any:
 
 
 def format_json_for_description(data: Any, indent: int = 2) -> str:
-    """Formats Python data as a JSON string block for markdown."""
+    """Formats Python data as a JSON string block for Markdown."""
     try:
         json_str = json.dumps(data, indent=indent)
         return f"```json\n{json_str}\n```"

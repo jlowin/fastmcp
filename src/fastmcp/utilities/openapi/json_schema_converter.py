@@ -60,7 +60,7 @@ def convert_openapi_schema_to_json_schema(
         convert_one_of_to_any_of: Whether to convert oneOf to anyOf
 
     Returns:
-        JSON Schema compatible dictionary
+        JSON Schema-compatible dictionary
     """
     if not isinstance(schema, dict):
         return schema
