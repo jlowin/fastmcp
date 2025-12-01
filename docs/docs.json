@@ -201,6 +201,7 @@
                   "integrations/github",
                   "integrations/scalekit",
                   "integrations/google",
+                  "integrations/keycloak",
                   "integrations/workos"
                 ]
               },
