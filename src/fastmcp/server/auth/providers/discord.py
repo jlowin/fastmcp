@@ -22,6 +22,7 @@ Example:
 from __future__ import annotations
 
 import time
+from datetime import datetime
 
 import httpx
 from key_value.aio.protocols import AsyncKeyValue
@@ -110,16 +111,21 @@ class DiscordTokenVerifier(TokenVerifier):
                 token_info = response.json()
 
                 # Check if token is expired
-                expires_in = token_info.get("expires_in")
-                if expires_in and int(expires_in) <= 0:
-                    logger.debug("Discord token has expired")
-                    return None
+                # Discord returns "expires" as ISO timestamp, not "expires_in" as seconds
+                expires_str = token_info.get("expires")
+                expires_at = None
+                if expires_str:
+                    expires_dt = datetime.fromisoformat(
+                        expires_str.replace("Z", "+00:00")
+                    )
+                    expires_at = int(expires_dt.timestamp())
+                    if expires_at <= int(time.time()):
+                        logger.debug("Discord token has expired")
+                        return None
 
                 # Extract scopes from token info
-                scope_string = token_info.get("scope", "")
-                token_scopes = [
-                    scope.strip() for scope in scope_string.split(" ") if scope.strip()
-                ]
+                # Discord returns "scopes" as a list, not "scope" as a string
+                token_scopes = token_info.get("scopes", [])
 
                 # Check required scopes
                 if self.required_scopes:
@@ -133,25 +139,9 @@ class DiscordTokenVerifier(TokenVerifier):
                         )
                         return None
 
-                # Get additional user info if we have the right scopes
-                user_data = {}
-                if "identify" in token_scopes:
-                    try:
-                        userinfo_response = await client.get(
-                            "https://discord.com/api/users/@me",
-                            headers=headers,
-                        )
-                        if userinfo_response.status_code == 200:
-                            user_data = userinfo_response.json()
-                    except Exception as e:
-                        logger.debug("Failed to fetch Discord user info: %s", e)
-
-                # Calculate expiration time
-                expires_at = None
-                if expires_in:
-                    expires_at = int(time.time() + int(expires_in))
-
-                application = token_info.get("application") or {}
+                # Discord includes user data in @me response when identify scope is present
+                user_data = token_info.get("user", {})
+                application = token_info.get("application", {})
                 client_id = str(application.get("id", "unknown"))
 
                 # Create AccessToken with Discord user info
