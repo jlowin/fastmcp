@@ -141,8 +141,9 @@ def get_access_token() -> AccessToken | None:
     if access_token is None or isinstance(access_token, AccessToken):
         return access_token
 
-    # If the object is not a FastMCP AccessToken, convert it to one if the fields are compatible
-    # This is a workaround for the case where the SDK returns a different type
+    # If the object is not a FastMCP AccessToken, convert it to one if the
+    # fields are compatible (e.g. `claims` is not present in the SDK's AccessToken).
+    # This is a workaround for the case where the SDK or auth provider returns a different type
     # If it fails, it will raise a TypeError
     try:
         access_token_as_dict = access_token.model_dump()
