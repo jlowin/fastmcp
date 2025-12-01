@@ -110,8 +110,7 @@ class DiscordTokenVerifier(TokenVerifier):
 
                 token_info = response.json()
 
-                # Check if token is expired
-                # Discord returns "expires" as ISO timestamp, not "expires_in" as seconds
+                # Check if token is expired (Discord returns ISO timestamp)
                 expires_str = token_info.get("expires")
                 expires_at = None
                 if expires_str:
@@ -123,8 +122,6 @@ class DiscordTokenVerifier(TokenVerifier):
                         logger.debug("Discord token has expired")
                         return None
 
-                # Extract scopes from token info
-                # Discord returns "scopes" as a list, not "scope" as a string
                 token_scopes = token_info.get("scopes", [])
 
                 # Check required scopes
@@ -139,9 +136,8 @@ class DiscordTokenVerifier(TokenVerifier):
                         )
                         return None
 
-                # Discord includes user data in @me response when identify scope is present
                 user_data = token_info.get("user", {})
-                application = token_info.get("application", {})
+                application = token_info.get("application") or {}
                 client_id = str(application.get("id", "unknown"))
 
                 # Create AccessToken with Discord user info
