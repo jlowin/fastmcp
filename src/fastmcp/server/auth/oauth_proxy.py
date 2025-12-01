@@ -1285,16 +1285,16 @@ class OAuthProxy(OAuthProvider):
             )
 
         # Store refresh token metadata (keyed by hash for security)
-        if fastmcp_refresh_token:
+        if fastmcp_refresh_token and refresh_expires_in:
             await self._refresh_token_store.put(
                 key=_hash_token(fastmcp_refresh_token),
                 value=RefreshTokenMetadata(
                     client_id=client.client_id,
                     scopes=authorization_code.scopes,
-                    expires_at=None,
+                    expires_at=int(time.time()) + refresh_expires_in,
                     created_at=time.time(),
                 ),
-                ttl=60 * 60 * 24 * 30,  # 30 days
+                ttl=refresh_expires_in,
             )
 
         logger.debug(
@@ -1342,10 +1342,19 @@ class OAuthProxy(OAuthProvider):
         """Load refresh token metadata from distributed storage.
 
         Looks up by token hash and reconstructs the RefreshToken object.
+        Validates that the token belongs to the requesting client.
         """
         token_hash = _hash_token(refresh_token)
         metadata = await self._refresh_token_store.get(key=token_hash)
         if not metadata:
+            return None
+        # Verify token belongs to this client (prevents cross-client token usage)
+        if metadata.client_id != client.client_id:
+            logger.warning(
+                "Refresh token client_id mismatch: expected %s, got %s",
+                client.client_id,
+                metadata.client_id,
+            )
             return None
         return RefreshToken(
             token=refresh_token,
@@ -1529,7 +1538,7 @@ class OAuthProxy(OAuthProvider):
             value=RefreshTokenMetadata(
                 client_id=client.client_id,
                 scopes=scopes,
-                expires_at=None,
+                expires_at=int(time.time()) + refresh_ttl,
                 created_at=time.time(),
             ),
             ttl=refresh_ttl,
