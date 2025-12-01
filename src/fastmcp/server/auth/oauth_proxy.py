@@ -179,6 +179,28 @@ class JTIMapping(BaseModel):
     created_at: float  # Unix timestamp
 
 
+class RefreshTokenMetadata(BaseModel):
+    """Metadata for a refresh token, stored keyed by token hash.
+
+    We store only metadata (not the token itself) for security - if storage
+    is compromised, attackers get hashes they can't reverse into usable tokens.
+    """
+
+    client_id: str
+    scopes: list[str]
+    expires_at: int | None = None
+    created_at: float
+
+
+def _hash_token(token: str) -> str:
+    """Hash a token for secure storage lookup.
+
+    Uses SHA-256 to create a one-way hash. The original token cannot be
+    recovered from the hash, providing defense in depth if storage is compromised.
+    """
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
 class ProxyDCRClient(OAuthClientInformationFull):
     """Client for DCR proxy with configurable redirect URI validation.
 
@@ -246,8 +268,16 @@ def create_consent_html(
     server_icon_url: str | None = None,
     server_website_url: str | None = None,
     client_website_url: str | None = None,
+    csp_policy: str | None = None,
 ) -> str:
-    """Create a styled HTML consent page for OAuth authorization requests."""
+    """Create a styled HTML consent page for OAuth authorization requests.
+
+    Args:
+        csp_policy: Content Security Policy override.
+            If None, uses the built-in CSP policy with appropriate directives.
+            If empty string "", disables CSP entirely (no meta tag is rendered).
+            If a non-empty string, uses that as the CSP policy value.
+    """
     import html as html_module
 
     client_display = html_module.escape(client_name or client_id)
@@ -368,20 +398,25 @@ def create_consent_html(
         + TOOLTIP_STYLES
     )
 
-    # Need to allow form-action for form submission
-    # Chrome requires explicit scheme declarations in CSP form-action when redirect chains
-    # end in custom protocol schemes (e.g., cursor://). Parse redirect_uri to include its scheme.
-    parsed_redirect = urlparse(redirect_uri)
-    redirect_scheme = parsed_redirect.scheme.lower()
+    # Determine CSP policy to use
+    # If csp_policy is None, build the default CSP policy
+    # If csp_policy is empty string, CSP will be disabled entirely in create_page
+    # If csp_policy is a non-empty string, use it as-is
+    if csp_policy is None:
+        # Need to allow form-action for form submission
+        # Chrome requires explicit scheme declarations in CSP form-action when redirect chains
+        # end in custom protocol schemes (e.g., cursor://). Parse redirect_uri to include its scheme.
+        parsed_redirect = urlparse(redirect_uri)
+        redirect_scheme = parsed_redirect.scheme.lower()
 
-    # Build form-action directive with standard schemes plus custom protocol if present
-    form_action_schemes = ["https:", "http:"]
-    if redirect_scheme and redirect_scheme not in ("http", "https"):
-        # Custom protocol scheme (e.g., cursor:, vscode:, etc.)
-        form_action_schemes.append(f"{redirect_scheme}:")
+        # Build form-action directive with standard schemes plus custom protocol if present
+        form_action_schemes = ["https:", "http:"]
+        if redirect_scheme and redirect_scheme not in ("http", "https"):
+            # Custom protocol scheme (e.g., cursor:, vscode:, etc.)
+            form_action_schemes.append(f"{redirect_scheme}:")
 
-    form_action_directive = " ".join(form_action_schemes)
-    csp_policy = f"default-src 'none'; style-src 'unsafe-inline'; img-src https: data:; base-uri 'none'; form-action {form_action_directive}"
+        form_action_directive = " ".join(form_action_schemes)
+        csp_policy = f"default-src 'none'; style-src 'unsafe-inline'; img-src https: data:; base-uri 'none'; form-action {form_action_directive}"
 
     return create_page(
         content=content,
@@ -611,14 +646,18 @@ class OAuthProxy(OAuthProvider):
 
     State Management
     ---------------
-    The proxy maintains minimal but crucial state:
+    The proxy maintains minimal but crucial state via pluggable storage (client_storage):
     - _oauth_transactions: Active authorization flows with client context
     - _client_codes: Authorization codes with PKCE challenges and upstream tokens
-    - _access_tokens, _refresh_tokens: Token storage for revocation
-    - Token relationship mappings for cleanup and rotation
+    - _jti_mapping_store: Maps FastMCP token JTIs to upstream token IDs
+    - _refresh_token_store: Refresh token metadata (keyed by token hash)
+
+    All state is stored in the configured client_storage backend (Redis, disk, etc.)
+    enabling horizontal scaling across multiple instances.
 
     Security Considerations
     ----------------------
+    - Refresh tokens stored by hash only (defense in depth if storage compromised)
     - PKCE enforced end-to-end (client to proxy, proxy to upstream)
     - Authorization codes are single-use with short expiry
     - Transaction IDs are cryptographically random
@@ -672,6 +711,7 @@ class OAuthProxy(OAuthProvider):
         jwt_signing_key: str | bytes | None = None,
         # Consent screen configuration
         require_authorization_consent: bool = True,
+        consent_csp_policy: str | None = None,
     ):
         """Initialize the OAuth proxy provider.
 
@@ -715,6 +755,12 @@ class OAuthProxy(OAuthProvider):
                 When True, users see a consent screen before being redirected to the upstream IdP.
                 When False, authorization proceeds directly without user confirmation.
                 SECURITY WARNING: Only disable for local development or testing environments.
+            consent_csp_policy: Content Security Policy for the consent page.
+                If None (default), uses the built-in CSP policy with appropriate directives.
+                If empty string "", disables CSP entirely (no meta tag is rendered).
+                If a non-empty string, uses that as the CSP policy value.
+                This allows organizations with their own CSP policies to override or disable
+                the built-in CSP directives.
         """
 
         # Always enable DCR since we implement it locally for MCP clients
@@ -775,6 +821,7 @@ class OAuthProxy(OAuthProvider):
 
         # Consent screen configuration
         self._require_authorization_consent: bool = require_authorization_consent
+        self._consent_csp_policy: str | None = consent_csp_policy
         if not require_authorization_consent:
             logger.warning(
                 "Authorization consent screen disabled - only use for local development or testing. "
@@ -874,13 +921,17 @@ class OAuthProxy(OAuthProvider):
             raise_on_validation_error=True,
         )
 
-        # Local state for token bookkeeping only (no client caching)
-        self._access_tokens: dict[str, AccessToken] = {}
-        self._refresh_tokens: dict[str, RefreshToken] = {}
-
-        # Token relation mappings for cleanup
-        self._access_to_refresh: dict[str, str] = {}
-        self._refresh_to_access: dict[str, str] = {}
+        # Refresh token metadata storage, keyed by token hash for security.
+        # We only store metadata (not the token itself) - if storage is compromised,
+        # attackers get hashes they can't reverse into usable tokens.
+        self._refresh_token_store: PydanticAdapter[RefreshTokenMetadata] = (
+            PydanticAdapter[RefreshTokenMetadata](
+                key_value=self._client_storage,
+                pydantic_model=RefreshTokenMetadata,
+                default_collection="mcp-refresh-tokens",
+                raise_on_validation_error=True,
+            )
+        )
 
         # Use the provided token validator
         self._token_validator: TokenVerifier = token_verifier
@@ -1233,25 +1284,18 @@ class OAuthProxy(OAuthProvider):
                 ttl=60 * 60 * 24 * 30,  # Auto-expire with refresh token (30 days)
             )
 
-        # Store FastMCP access token for MCP framework validation
-        self._access_tokens[fastmcp_access_token] = AccessToken(
-            token=fastmcp_access_token,
-            client_id=client.client_id,
-            scopes=authorization_code.scopes,
-            expires_at=int(time.time() + expires_in),
-        )
-
-        # Store FastMCP refresh token if provided
-        if fastmcp_refresh_token:
-            self._refresh_tokens[fastmcp_refresh_token] = RefreshToken(
-                token=fastmcp_refresh_token,
-                client_id=client.client_id,
-                scopes=authorization_code.scopes,
-                expires_at=None,
+        # Store refresh token metadata (keyed by hash for security)
+        if fastmcp_refresh_token and refresh_expires_in:
+            await self._refresh_token_store.put(
+                key=_hash_token(fastmcp_refresh_token),
+                value=RefreshTokenMetadata(
+                    client_id=client.client_id,
+                    scopes=authorization_code.scopes,
+                    expires_at=int(time.time()) + refresh_expires_in,
+                    created_at=time.time(),
+                ),
+                ttl=refresh_expires_in,
             )
-            # Maintain token relationships for cleanup
-            self._access_to_refresh[fastmcp_access_token] = fastmcp_refresh_token
-            self._refresh_to_access[fastmcp_refresh_token] = fastmcp_access_token
 
         logger.debug(
             "Issued FastMCP tokens for client=%s (access_jti=%s, refresh_jti=%s)",
@@ -1295,8 +1339,29 @@ class OAuthProxy(OAuthProvider):
         client: OAuthClientInformationFull,
         refresh_token: str,
     ) -> RefreshToken | None:
-        """Load refresh token from local storage."""
-        return self._refresh_tokens.get(refresh_token)
+        """Load refresh token metadata from distributed storage.
+
+        Looks up by token hash and reconstructs the RefreshToken object.
+        Validates that the token belongs to the requesting client.
+        """
+        token_hash = _hash_token(refresh_token)
+        metadata = await self._refresh_token_store.get(key=token_hash)
+        if not metadata:
+            return None
+        # Verify token belongs to this client (prevents cross-client token usage)
+        if metadata.client_id != client.client_id:
+            logger.warning(
+                "Refresh token client_id mismatch: expected %s, got %s",
+                client.client_id,
+                metadata.client_id,
+            )
+            return None
+        return RefreshToken(
+            token=refresh_token,
+            client_id=metadata.client_id,
+            scopes=metadata.scopes,
+            expires_at=metadata.expires_at,
+        )
 
     async def exchange_refresh_token(
         self,
@@ -1467,30 +1532,20 @@ class OAuthProxy(OAuthProvider):
             "Rotated refresh token (old JTI invalidated - one-time use enforced)"
         )
 
-        # Update local token tracking
-        self._access_tokens[new_fastmcp_access] = AccessToken(
-            token=new_fastmcp_access,
-            client_id=client.client_id,
-            scopes=scopes,
-            expires_at=int(time.time() + new_expires_in),
-        )
-        self._refresh_tokens[new_fastmcp_refresh] = RefreshToken(
-            token=new_fastmcp_refresh,
-            client_id=client.client_id,
-            scopes=scopes,
-            expires_at=None,
+        # Store new refresh token metadata (keyed by hash)
+        await self._refresh_token_store.put(
+            key=_hash_token(new_fastmcp_refresh),
+            value=RefreshTokenMetadata(
+                client_id=client.client_id,
+                scopes=scopes,
+                expires_at=int(time.time()) + refresh_ttl,
+                created_at=time.time(),
+            ),
+            ttl=refresh_ttl,
         )
 
-        # Update token relationship mappings
-        self._access_to_refresh[new_fastmcp_access] = new_fastmcp_refresh
-        self._refresh_to_access[new_fastmcp_refresh] = new_fastmcp_access
-
-        # Clean up old token from in-memory tracking
-        self._refresh_tokens.pop(refresh_token.token, None)
-        old_access = self._refresh_to_access.pop(refresh_token.token, None)
-        if old_access:
-            self._access_tokens.pop(old_access, None)
-            self._access_to_refresh.pop(old_access, None)
+        # Delete old refresh token (by hash)
+        await self._refresh_token_store.delete(key=_hash_token(refresh_token.token))
 
         logger.info(
             "Issued new FastMCP tokens (rotated refresh) for client=%s (access_jti=%s, refresh_jti=%s)",
@@ -1571,24 +1626,13 @@ class OAuthProxy(OAuthProvider):
     async def revoke_token(self, token: AccessToken | RefreshToken) -> None:
         """Revoke token locally and with upstream server if supported.
 
-        Removes tokens from local storage and attempts to revoke them with
-        the upstream server if a revocation endpoint is configured.
+        For refresh tokens, removes from local storage by hash.
+        For all tokens, attempts upstream revocation if endpoint is configured.
+        Access token JTI mappings expire via TTL.
         """
-        # Clean up local token storage
-        if isinstance(token, AccessToken):
-            self._access_tokens.pop(token.token, None)
-            # Also remove associated refresh token
-            paired_refresh = self._access_to_refresh.pop(token.token, None)
-            if paired_refresh:
-                self._refresh_tokens.pop(paired_refresh, None)
-                self._refresh_to_access.pop(paired_refresh, None)
-        else:  # RefreshToken
-            self._refresh_tokens.pop(token.token, None)
-            # Also remove associated access token
-            paired_access = self._refresh_to_access.pop(token.token, None)
-            if paired_access:
-                self._access_tokens.pop(paired_access, None)
-                self._access_to_refresh.pop(paired_access, None)
+        # For refresh tokens, delete from local storage by hash
+        if isinstance(token, RefreshToken):
+            await self._refresh_token_store.delete(key=_hash_token(token.token))
 
         # Attempt upstream revocation if endpoint is configured
         if self._upstream_revocation_endpoint:
@@ -2106,6 +2150,7 @@ class OAuthProxy(OAuthProvider):
             server_name=server_name,
             server_icon_url=server_icon_url,
             server_website_url=server_website_url,
+            csp_policy=self._consent_csp_policy,
         )
         response = create_secure_html_response(html)
         # Store CSRF in cookie with short lifetime
