@@ -166,24 +166,31 @@ Using your specific tenant ID is recommended for better security and control.
 
 ### Scope Handling
 
-FastMCP automatically handles different Azure scope formats:
+FastMCP automatically prefixes `required_scopes` with your `identifier_uri` (e.g., `api://your-client-id`) since these are your custom API scopes. Scopes in `additional_authorize_scopes` are sent as-is since they target external resources like Microsoft Graph.
 
-| Scope Type | Example | Behavior |
-|------------|---------|----------|
-| Custom API scopes | `read`, `write`, `my.scope` | Prefixed with `identifier_uri` (e.g., `api://xxx/read`) |
-| OIDC scopes | `openid`, `profile`, `email`, `offline_access` | Sent as-is, excluded from token validation |
-| Fully-qualified | `api://xxx/read`, `https://graph.microsoft.com/User.Read` | Sent as-is (already has URI) |
+**`required_scopes`** — Your custom API scopes, defined in Azure "Expose an API":
+
+| You write | Sent to Azure | Validated on tokens |
+|-----------|---------------|---------------------|
+| `mcp-read` | `api://xxx/mcp-read` | ✓ |
+| `my.scope` | `api://xxx/my.scope` | ✓ |
+| `openid` | `openid` | ✗ (OIDC scope) |
+| `api://xxx/read` | `api://xxx/read` | ✓ |
+
+**`additional_authorize_scopes`** — External scopes (e.g., Microsoft Graph) for server-side use:
+
+| You write | Sent to Azure | Validated on tokens |
+|-----------|---------------|---------------------|
+| `User.Read` | `User.Read` | ✗ |
+| `Mail.Send` | `Mail.Send` | ✗ |
 
 <Info>
-Standard OIDC scopes work seamlessly in `required_scopes`. For example, `required_scopes=["read", "openid", "profile"]` will:
-- Send `api://xxx/read`, `openid`, and `profile` to Azure during authorization
-- Only validate `read` in access tokens (Azure doesn't include OIDC scopes in `scp` claims)
-- Advertise all three scopes to MCP clients via Protected Resource Metadata
+**Why aren't `additional_authorize_scopes` validated?** Azure issues separate tokens per resource. The access token FastMCP receives is for *your API*—Graph scopes aren't in its `scp` claim. To call Graph APIs, your server uses the upstream Azure token in an on-behalf-of (OBO) flow.
 </Info>
 
-<Tip>
-**Microsoft Graph scopes**: Use `additional_authorize_scopes` for Graph permissions like `User.Read` or `Mail.Send`. Alternatively, use the fully-qualified format: `https://graph.microsoft.com/User.Read`.
-</Tip>
+<Note>
+OIDC scopes (`openid`, `profile`, `email`, `offline_access`) are never prefixed and excluded from validation because Azure doesn't include them in access token `scp` claims.
+</Note>
 
 ## Testing
 
