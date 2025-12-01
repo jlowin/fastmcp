@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import (
@@ -19,6 +20,7 @@ from mcp.types import Tool as MCPTool
 from pydantic import Field, PydanticSchemaGenerationError
 from typing_extensions import TypeVar
 
+import fastmcp
 from fastmcp.server.dependencies import get_context
 from fastmcp.utilities.components import FastMCPComponent
 from fastmcp.utilities.json_schema import compress_schema
