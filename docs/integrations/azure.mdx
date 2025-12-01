@@ -164,6 +164,24 @@ Using your specific tenant ID is recommended for better security and control.
 **Important**: The `required_scopes` parameter is **REQUIRED** and must include at least one scope. Azure's OAuth API requires the `scope` parameter in all authorization requests - you cannot authenticate without specifying at least one scope. Use the unprefixed scope names from your Azure App registration (e.g., `["read", "write"]`). These scopes must be created under **Expose an API** in your App registration.
 </Note>
 
+### Scope Handling
+
+FastMCP automatically handles different Azure scope formats:
+
+| Scope Type | Example | Behavior |
+|------------|---------|----------|
+| Custom API scopes | `read`, `write` | Prefixed with `identifier_uri` (e.g., `api://xxx/read`) |
+| OIDC scopes | `openid`, `profile`, `email`, `offline_access` | Sent as-is, excluded from token validation |
+| Microsoft Graph | `User.Read`, `Mail.Send` | Sent as-is (dot-notation recognized) |
+| Fully-qualified | `api://xxx/read` | Sent as-is (already prefixed) |
+
+<Info>
+Standard OIDC scopes work seamlessly in `required_scopes`. For example, `required_scopes=["read", "openid", "profile"]` will:
+- Send `api://xxx/read`, `openid`, and `profile` to Azure during authorization
+- Only validate `read` in access tokens (Azure doesn't include OIDC scopes in `scp` claims)
+- Advertise all three scopes to MCP clients via Protected Resource Metadata
+</Info>
+
 ## Testing
 
 ### Running the Server
@@ -303,6 +321,8 @@ Redirect path configured in your Azure App registration
 
 <ParamField path="FASTMCP_SERVER_AUTH_AZURE_REQUIRED_SCOPES" required>
 Comma-, space-, or JSON-separated list of required scopes for your API (at least one scope required). These are validated on tokens and used as defaults if the client does not request specific scopes. Use unprefixed scope names from your Azure App registration (e.g., `read,write`).
+
+You can include standard OIDC scopes (`openid`, `profile`, `email`, `offline_access`) in `required_scopes`. FastMCP automatically handles them correctly: they're sent to Azure unprefixed and excluded from token validation (since Azure doesn't include OIDC scopes in access token `scp` claims).
 
 <Note>
 Azure's OAuth API requires the `scope` parameter - you must provide at least one scope.
