@@ -16,10 +16,11 @@ from fastmcp.server.server import FastMCP
 
 def mcp_config_to_servers_and_transports(
     config: MCPConfig,
+    **client_kwargs: Any,
 ) -> list[tuple[str, FastMCP[Any], ClientTransport]]:
     """A utility function to convert each entry of an MCP Config into a transport and server."""
     return [
-        mcp_server_type_to_servers_and_transports(name, mcp_server)
+        mcp_server_type_to_servers_and_transports(name, mcp_server, **client_kwargs)
         for name, mcp_server in config.mcpServers.items()
     ]
 
@@ -27,6 +28,7 @@ def mcp_config_to_servers_and_transports(
 def mcp_server_type_to_servers_and_transports(
     name: str,
     mcp_server: MCPServerTypes,
+    **client_kwargs: Any,
 ) -> tuple[str, FastMCP[Any], ClientTransport]:
     """A utility function to convert each entry of an MCP Config into a transport and server."""
 
@@ -44,14 +46,17 @@ def mcp_server_type_to_servers_and_transports(
     if isinstance(mcp_server, TransformingRemoteMCPServer | TransformingStdioMCPServer):
         server, transport = mcp_server._to_server_and_underlying_transport(
             server_name=server_name,
-            client_name=client_name,
+            client_name=client_name
         )
     else:
+        print("non transforming server")
         transport = mcp_server.to_transport()
         client: ProxyClient[StreamableHttpTransport | SSETransport | StdioTransport] = (
-            ProxyClient(transport=transport, name=client_name)
+            ProxyClient(transport=transport, name=client_name, **client_kwargs)
         )
 
         server = FastMCP.as_proxy(name=server_name, backend=client)
+        print(f"new proxy server: {server}")
+        print(f"proxy server progress handler: {client._progress_handler}")
 
     return name, server, transport

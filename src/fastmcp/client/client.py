@@ -239,7 +239,19 @@ class Client(Generic[ClientTransportT]):
     ) -> None:
         self.name = name or self.generate_name()
 
-        self.transport = cast(ClientTransportT, infer_transport(transport))
+        client_kwargs = {
+            "progress_handler": progress_handler,
+            "sampling_handler": sampling_handler,
+            "elicitation_handler": elicitation_handler,
+            "log_handler": log_handler,
+            "message_handler": message_handler,
+            "timeout": timeout,
+            "auto_initialize": auto_initialize,
+            "init_timeout": init_timeout,
+            "client_info": client_info,
+            "auth": auth,
+        }
+        self.transport = cast(ClientTransportT, infer_transport(transport, **client_kwargs))
         if auth is not None:
             self.transport._set_auth(auth)
 

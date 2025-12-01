@@ -284,11 +284,16 @@ class ProxyTool(Tool, MirroredComponent):
         arguments: dict[str, Any],
         context: Context | None = None,
     ) -> ToolResult:
+        from fastmcp.utilities.types import find_kwarg_by_type
         """Executes the tool by making a call through the client."""
         async with self._client:
+            context = get_context()
+            # try to get request context meta
+            meta = dict(context.request_context.meta) if hasattr(context, 'request_context') and hasattr(context.request_context, 'meta') else None
             result = await self._client.call_tool_mcp(
                 name=self.name,
                 arguments=arguments,
+                meta=meta
             )
         if result.isError:
             raise ToolError(cast(mcp.types.TextContent, result.content[0]).text)
