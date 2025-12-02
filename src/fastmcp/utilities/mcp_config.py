@@ -49,7 +49,7 @@ def mcp_server_type_to_servers_and_transports(
             client_name=client_name
         )
     else:
-        print("non transforming server")
+        transport = mcp_server.to_transport()
         transport = mcp_server.to_transport()
         client: ProxyClient[StreamableHttpTransport | SSETransport | StdioTransport] = (
             ProxyClient(transport=transport, name=client_name, **client_kwargs)
