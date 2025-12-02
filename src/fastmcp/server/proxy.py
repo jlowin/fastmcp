@@ -115,6 +115,7 @@ class ProxyToolManager(ToolManager, ProxyManagerMixin):
                 return ToolResult(
                     content=result.content,
                     structured_content=result.structured_content,
+                    meta=result.meta,
                 )
 
 
@@ -295,6 +296,7 @@ class ProxyTool(Tool, MirroredComponent):
         return ToolResult(
             content=result.content,
             structured_content=result.structuredContent,
+            meta=result.meta,
         )
 
 
