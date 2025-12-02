@@ -1111,7 +1111,7 @@ def infer_transport(
 
     # if the transport is a config dict or MCPConfig
     elif isinstance(transport, dict | MCPConfig):
-        print(f"client_kwargs: {client_kwargs}")
+         inferred_transport = MCPConfigTransport(
         inferred_transport = MCPConfigTransport(
             config=cast(dict | MCPConfig, transport),
             **client_kwargs,
