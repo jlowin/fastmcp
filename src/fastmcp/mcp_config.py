@@ -105,7 +105,9 @@ class _TransformingMCPServerMixin(FastMCPBaseModel):
         transport: ClientTransport = super().to_transport()  # pyright: ignore[reportUnknownMemberType, reportAttributeAccessIssue, reportUnknownVariableType]  # ty: ignore[unresolved-attribute]
         transport = cast(ClientTransport, transport)
 
-        client: Client[ClientTransport] = Client(transport=transport, name=client_name, **client_kwargs)
+        client: Client[ClientTransport] = Client(
+            transport=transport, name=client_name, **client_kwargs
+        )
 
         wrapped_mcp_server = FastMCP.as_proxy(
             name=server_name,

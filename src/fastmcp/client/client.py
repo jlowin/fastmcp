@@ -251,7 +251,9 @@ class Client(Generic[ClientTransportT]):
             "client_info": client_info,
             "auth": auth,
         }
-        self.transport = cast(ClientTransportT, infer_transport(transport, **client_kwargs))
+        self.transport = cast(
+            ClientTransportT, infer_transport(transport, **client_kwargs)
+        )
         if auth is not None:
             self.transport._set_auth(auth)
 

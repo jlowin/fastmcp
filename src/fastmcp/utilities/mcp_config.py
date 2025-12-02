@@ -45,18 +45,14 @@ def mcp_server_type_to_servers_and_transports(
 
     if isinstance(mcp_server, TransformingRemoteMCPServer | TransformingStdioMCPServer):
         server, transport = mcp_server._to_server_and_underlying_transport(
-            server_name=server_name,
-            client_name=client_name
+            server_name=server_name, client_name=client_name
         )
     else:
-        transport = mcp_server.to_transport()
         transport = mcp_server.to_transport()
         client: ProxyClient[StreamableHttpTransport | SSETransport | StdioTransport] = (
             ProxyClient(transport=transport, name=client_name, **client_kwargs)
         )
 
         server = FastMCP.as_proxy(name=server_name, backend=client)
-        print(f"new proxy server: {server}")
-        print(f"proxy server progress handler: {client._progress_handler}")
 
     return name, server, transport

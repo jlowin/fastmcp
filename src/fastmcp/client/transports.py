@@ -937,7 +937,12 @@ class MCPConfigTransport(ClientTransport):
         ```
     """
 
-    def __init__(self, config: MCPConfig | dict, name_as_prefix: bool = True, **client_kwargs: Any):
+    def __init__(
+        self,
+        config: MCPConfig | dict,
+        name_as_prefix: bool = True,
+        **client_kwargs: Any,
+    ):
         from fastmcp.utilities.mcp_config import mcp_config_to_servers_and_transports
 
         if isinstance(config, dict):
@@ -1000,8 +1005,11 @@ def infer_transport(transport: FastMCP1Server) -> FastMCPTransport: ...
 @overload
 def infer_transport(transport: MCPConfig) -> MCPConfigTransport: ...
 
+
 @overload
-def infer_transport(transport: MCPConfig, **client_kwargs: Any) -> MCPConfigTransport: ...
+def infer_transport(
+    transport: MCPConfig, **client_kwargs: Any
+) -> MCPConfigTransport: ...
 
 
 @overload
@@ -1111,7 +1119,6 @@ def infer_transport(
 
     # if the transport is a config dict or MCPConfig
     elif isinstance(transport, dict | MCPConfig):
-         inferred_transport = MCPConfigTransport(
         inferred_transport = MCPConfigTransport(
             config=cast(dict | MCPConfig, transport),
             **client_kwargs,
