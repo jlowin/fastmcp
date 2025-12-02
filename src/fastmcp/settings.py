@@ -8,11 +8,8 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from platformdirs import user_data_dir
 from pydantic import Field, ImportString, field_validator
-from pydantic.fields import FieldInfo
 from pydantic_settings import (
     BaseSettings,
-    EnvSettingsSource,
-    PydanticBaseSettingsSource,
     SettingsConfigDict,
 )
 from typing_extensions import Self
@@ -33,61 +30,35 @@ if TYPE_CHECKING:
     from fastmcp.server.auth.auth import AuthProvider
 
 
-class ExtendedEnvSettingsSource(EnvSettingsSource):
-    """
-    A special EnvSettingsSource that allows for multiple env var prefixes to be used.
-
-    Raises a deprecation warning if the old `FASTMCP_SERVER_` prefix is used.
-    """
-
-    def get_field_value(
-        self, field: FieldInfo, field_name: str
-    ) -> tuple[Any, str, bool]:
-        if prefixes := self.config.get("env_prefixes"):
-            for prefix in prefixes:
-                self.env_prefix = prefix
-                env_val, field_key, value_is_complex = super().get_field_value(
-                    field, field_name
-                )
-                if env_val is not None:
-                    if prefix == "FASTMCP_SERVER_":
-                        # Deprecated in 2.8.0
-                        logger.warning(
-                            "Using `FASTMCP_SERVER_` environment variables is deprecated. Use `FASTMCP_` instead.",
-                        )
-                    return env_val, field_key, value_is_complex
-
-        return super().get_field_value(field, field_name)
-
-
-class ExtendedSettingsConfigDict(SettingsConfigDict, total=False):
-    env_prefixes: list[str] | None
-
-
 class ExperimentalSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="FASTMCP_EXPERIMENTAL_",
         extra="ignore",
+        validate_assignment=True,
     )
 
-    enable_new_openapi_parser: Annotated[
-        bool,
-        Field(
-            description=inspect.cleandoc(
-                """
-                Whether to use the new OpenAPI parser. This parser was introduced
-                for testing in 2.11 and will become the default soon.
-                """
-            ),
-        ),
-    ] = False
+    # Deprecated in 2.14 - the new OpenAPI parser is now the default and only parser
+    enable_new_openapi_parser: bool = False
+
+    @field_validator("enable_new_openapi_parser", mode="after")
+    @classmethod
+    def _warn_openapi_parser_deprecated(cls, v: bool) -> bool:
+        if v:
+            warnings.warn(
+                "enable_new_openapi_parser is deprecated. "
+                "The new OpenAPI parser is now the default (and only) parser. "
+                "You can remove this setting.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        return v
 
 
 class Settings(BaseSettings):
     """FastMCP settings."""
 
-    model_config = ExtendedSettingsConfigDict(
-        env_prefixes=["FASTMCP_", "FASTMCP_SERVER_"],
+    model_config = SettingsConfigDict(
+        env_prefix="FASTMCP_",
         env_file=ENV_FILE,
         extra="ignore",
         env_nested_delimiter="__",
@@ -120,24 +91,6 @@ class Settings(BaseSettings):
                 raise AttributeError(f"Setting {parent_attr} does not exist.")
             settings = getattr(settings, parent_attr)
         setattr(settings, attr, value)
-
-    @classmethod
-    def settings_customise_sources(
-        cls,
-        settings_cls: type[BaseSettings],
-        init_settings: PydanticBaseSettingsSource,
-        env_settings: PydanticBaseSettingsSource,
-        dotenv_settings: PydanticBaseSettingsSource,
-        file_secret_settings: PydanticBaseSettingsSource,
-    ) -> tuple[PydanticBaseSettingsSource, ...]:
-        # can remove this classmethod after deprecated FASTMCP_SERVER_ prefix is
-        # removed
-        return (
-            init_settings,
-            ExtendedEnvSettingsSource(settings_cls),
-            dotenv_settings,
-            file_secret_settings,
-        )
 
     @property
     def settings(self) -> Self:
@@ -206,19 +159,6 @@ class Settings(BaseSettings):
             ),
         ),
     ] = True
-
-    resource_prefix_format: Annotated[
-        Literal["protocol", "path"],
-        Field(
-            description=inspect.cleandoc(
-                """
-                When perfixing a resource URI, either use path formatting (resource://prefix/path)
-                or protocol formatting (prefix+resource://path). Protocol formatting was the default in FastMCP < 2.4;
-                path formatting is current default.
-                """
-            ),
-        ),
-    ] = "path"
 
     client_init_timeout: Annotated[
         float | None,

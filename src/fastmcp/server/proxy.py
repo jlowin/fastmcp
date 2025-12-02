@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import inspect
-import warnings
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -20,7 +19,6 @@ from mcp.types import (
 )
 from pydantic.networks import AnyUrl
 
-import fastmcp
 from fastmcp.client.client import Client, FastMCP1Server
 from fastmcp.client.elicitation import ElicitResult
 from fastmcp.client.logging import LogMessage
@@ -270,10 +268,12 @@ class ProxyTool(Tool, MirroredComponent):
         return cls(
             client=client,
             name=mcp_tool.name,
+            title=mcp_tool.title,
             description=mcp_tool.description,
             parameters=mcp_tool.inputSchema,
             annotations=mcp_tool.annotations,
             output_schema=mcp_tool.outputSchema,
+            icons=mcp_tool.icons,
             meta=mcp_tool.meta,
             tags=(mcp_tool.meta or {}).get("_fastmcp", {}).get("tags", []),
             _mirrored=True,
@@ -334,8 +334,10 @@ class ProxyResource(Resource, MirroredComponent):
             client=client,
             uri=mcp_resource.uri,
             name=mcp_resource.name,
+            title=mcp_resource.title,
             description=mcp_resource.description,
             mime_type=mcp_resource.mimeType or "text/plain",
+            icons=mcp_resource.icons,
             meta=mcp_resource.meta,
             tags=(mcp_resource.meta or {}).get("_fastmcp", {}).get("tags", []),
             _mirrored=True,
@@ -374,8 +376,10 @@ class ProxyTemplate(ResourceTemplate, MirroredComponent):
             client=client,
             uri_template=mcp_template.uriTemplate,
             name=mcp_template.name,
+            title=mcp_template.title,
             description=mcp_template.description,
             mime_type=mcp_template.mimeType or "text/plain",
+            icons=mcp_template.icons,
             parameters={},  # Remote templates don't have local parameters
             meta=mcp_template.meta,
             tags=(mcp_template.meta or {}).get("_fastmcp", {}).get("tags", []),
@@ -409,8 +413,10 @@ class ProxyTemplate(ResourceTemplate, MirroredComponent):
             client=self._client,
             uri=parameterized_uri,
             name=self.name,
+            title=self.title,
             description=self.description,
             mime_type=result[0].mimeType,
+            icons=self.icons,
             meta=self.meta,
             tags=(self.meta or {}).get("_fastmcp", {}).get("tags", []),
             _value=value,
@@ -444,8 +450,10 @@ class ProxyPrompt(Prompt, MirroredComponent):
         return cls(
             client=client,
             name=mcp_prompt.name,
+            title=mcp_prompt.title,
             description=mcp_prompt.description,
             arguments=arguments,
+            icons=mcp_prompt.icons,
             meta=mcp_prompt.meta,
             tags=(mcp_prompt.meta or {}).get("_fastmcp", {}).get("tags", []),
             _mirrored=True,
@@ -466,9 +474,8 @@ class FastMCPProxy(FastMCP):
 
     def __init__(
         self,
-        client: Client | None = None,
         *,
-        client_factory: ClientFactoryT | None = None,
+        client_factory: ClientFactoryT,
         **kwargs,
     ):
         """
@@ -478,9 +485,6 @@ class FastMCPProxy(FastMCP):
         Use FastMCP.as_proxy() for convenience with automatic session strategy.
 
         Args:
-            client: [DEPRECATED] A Client instance. Use client_factory instead for explicit
-                   session management. When provided, a client_factory will be automatically
-                   created that provides session isolation for backwards compatibility.
             client_factory: A callable that returns a Client instance when called.
                            This gives you full control over session creation and reuse.
                            Can be either a synchronous or asynchronous function.
@@ -489,29 +493,7 @@ class FastMCPProxy(FastMCP):
 
         super().__init__(**kwargs)
 
-        # Handle client and client_factory parameters
-        if client is not None and client_factory is not None:
-            raise ValueError("Cannot specify both 'client' and 'client_factory'")
-
-        if client is not None:
-            # Deprecated in 2.10.3
-            if fastmcp.settings.deprecation_warnings:
-                warnings.warn(
-                    "Passing 'client' to FastMCPProxy is deprecated. Use 'client_factory' instead for explicit session management. "
-                    "For automatic session strategy, use FastMCP.as_proxy().",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-
-            # Create a factory that provides session isolation for backwards compatibility
-            def deprecated_client_factory():
-                return client.new()
-
-            self.client_factory = deprecated_client_factory
-        elif client_factory is not None:
-            self.client_factory = client_factory
-        else:
-            raise ValueError("Must specify 'client_factory'")
+        self.client_factory = client_factory
 
         # Replace the default managers with our specialized proxy managers.
         self._tool_manager = ProxyToolManager(
