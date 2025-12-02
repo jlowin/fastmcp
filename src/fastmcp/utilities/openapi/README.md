@@ -1,10 +1,10 @@
-# OpenAPI Utilities (New Implementation)
+# OpenAPI Utilities
 
-This directory contains the next-generation OpenAPI integration utilities for FastMCP, designed to replace the legacy `openapi.py` implementation.
+This directory contains the OpenAPI integration utilities for FastMCP.
 
 ## Architecture Overview
 
-The new implementation follows a **stateless request building strategy** using `openapi-core` for high-performance, per-request HTTP request construction, eliminating startup latency while maintaining robust OpenAPI compliance.
+The implementation follows a **stateless request building strategy** using `openapi-core` for high-performance, per-request HTTP request construction, eliminating startup latency while maintaining robust OpenAPI compliance.
 
 ### Core Components
 
@@ -83,7 +83,7 @@ MCP Tool Call → RequestDirector.build() → httpx.Request → HTTP Response �
 
 ## Component Integration
 
-### Server Components (`/server/openapi_new/`)
+### Server Components (`/server/openapi/`)
 
 1. **`OpenAPITool`** - Simplified tool implementation using RequestDirector
 2. **`OpenAPIResource`** - Resource implementation with RequestDirector
@@ -104,7 +104,7 @@ All components use the same RequestDirector approach:
 
 ```python
 import httpx
-from fastmcp.server.openapi_new import FastMCPOpenAPI
+from fastmcp.server.openapi import FastMCPOpenAPI
 
 # OpenAPI spec (can be loaded from file/URL)
 openapi_spec = {...}
@@ -141,7 +141,7 @@ async with httpx.AsyncClient() as client:
 
 ## Testing Strategy
 
-Tests are located in `/tests/server/openapi_new/`:
+Tests are located in `/tests/server/openapi/`:
 
 ### Test Categories
 
@@ -159,34 +159,6 @@ Tests are located in `/tests/server/openapi_new/`:
 - **Minimal Mocking**: Only mock external HTTP endpoints
 - **Performance Focus**: Test that initialization is fast and stateless
 - **Behavioral Testing**: Verify OpenAPI compliance without implementation details
-
-## Migration Guide
-
-### From Legacy Implementation
-
-1. **Import Changes**:
-   ```python
-   # Old
-   from fastmcp.server.openapi import FastMCPOpenAPI
-   
-   # New  
-   from fastmcp.server.openapi_new import FastMCPOpenAPI
-   ```
-
-2. **Constructor**: Same interface, no changes needed
-
-3. **Automatic Benefits**: 
-   - Eliminates startup latency (100-200ms improvement)
-   - Better OpenAPI compliance via openapi-core
-   - Serverless-friendly performance characteristics
-   - Simplified architecture without fallback complexity
-
-### Performance Improvements
-
-- **Cold Start**: Zero latency penalty for serverless deployments
-- **Memory Usage**: Lower memory footprint without generated client code
-- **Reliability**: No dynamic code generation failures
-- **Maintainability**: Simpler architecture with fewer moving parts
 
 ## Future Enhancements
 

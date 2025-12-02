@@ -248,7 +248,7 @@ class FastMCPOpenAPI(FastMCP):
             # Create the new name
             new_name = f"{name}_{self._used_names[component_type][name]}"
             logger.debug(
-                f"Name collision detected: '{name}' already exists as a {component_type[:-1]}. "
+                f"Name collision detected: '{name}' already exists as a {component_type}. "
                 f"Using '{new_name}' instead."
             )
 
