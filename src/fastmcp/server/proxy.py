@@ -284,7 +284,7 @@ class ProxyTool(Tool, MirroredComponent):
         arguments: dict[str, Any],
         context: Context | None = None,
     ) -> ToolResult:
-        from fastmcp.utilities.types import find_kwarg_by_type
+        """Executes the tool by making a call through the client."""
         """Executes the tool by making a call through the client."""
         async with self._client:
             context = get_context()
