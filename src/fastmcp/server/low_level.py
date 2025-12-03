@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 import anyio
 import mcp.types
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
+from mcp import McpError
 from mcp.server.lowlevel.server import (
     LifespanResultT,
     NotificationOptions,
@@ -103,9 +104,16 @@ class MiddlewareServerSession(ServerSession):
                     fastmcp_context=fastmcp_ctx,
                 )
 
-                return await self.fastmcp._apply_middleware(
-                    mw_context, call_original_handler
-                )
+                try:
+                    return await self.fastmcp._apply_middleware(
+                        mw_context, call_original_handler
+                    )
+                except McpError as e:
+                    # McpError can be thrown from middleware in `on_initialize`
+                    # send the error to responder.
+                    if not responder._completed:
+                        with responder:
+                            await responder.respond(e.error)
         else:
             return await super()._received_request(responder)
 
