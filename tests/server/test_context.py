@@ -1,64 +1,13 @@
-import warnings
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 from mcp.types import ModelPreferences
-from starlette.requests import Request
 
-from fastmcp.server.context import Context, _parse_model_preferences
+from fastmcp.server.context import (
+    Context,
+    _parse_model_preferences,
+)
 from fastmcp.server.server import FastMCP
-
-
-class TestContextDeprecations:
-    def test_get_http_request_deprecation_warning(self):
-        """Test that using Context.get_http_request() raises a deprecation warning."""
-        # Create a mock FastMCP instance
-        mock_fastmcp = MagicMock()
-        context = Context(fastmcp=mock_fastmcp)
-
-        # Patch the dependency function to return a mock request
-        mock_request = MagicMock(spec=Request)
-        with patch(
-            "fastmcp.server.dependencies.get_http_request", return_value=mock_request
-        ):
-            # Check that the deprecation warning is raised
-            with pytest.warns(
-                DeprecationWarning, match="Context.get_http_request\\(\\) is deprecated"
-            ):
-                request = context.get_http_request()
-
-            # Verify the function still works and returns the request
-            assert request is mock_request
-
-    def test_get_http_request_deprecation_message(self):
-        """Test that the deprecation warning has the correct message with guidance."""
-        # Create a mock FastMCP instance
-        mock_fastmcp = MagicMock()
-        context = Context(fastmcp=mock_fastmcp)
-
-        # Patch the dependency function to return a mock request
-        mock_request = MagicMock(spec=Request)
-        with patch(
-            "fastmcp.server.dependencies.get_http_request", return_value=mock_request
-        ):
-            # Capture and check the specific warning message
-            with warnings.catch_warnings(record=True) as w:
-                warnings.simplefilter("always")
-                context.get_http_request()
-
-                assert len(w) == 1
-                warning = w[0]
-                assert issubclass(warning.category, DeprecationWarning)
-                assert "Context.get_http_request() is deprecated" in str(
-                    warning.message
-                )
-                assert (
-                    "Use get_http_request() from fastmcp.server.dependencies instead"
-                    in str(warning.message)
-                )
-                assert "https://gofastmcp.com/servers/context#http-requests" in str(
-                    warning.message
-                )
 
 
 @pytest.fixture
@@ -134,7 +83,6 @@ class TestSessionId:
 class TestContextState:
     """Test suite for Context state functionality."""
 
-    @pytest.mark.asyncio
     async def test_context_state(self):
         """Test that state modifications in child contexts don't affect parent."""
         mock_fastmcp = MagicMock()
@@ -149,7 +97,6 @@ class TestContextState:
             context.set_state("test1", "new_value")
             assert context.get_state("test1") == "new_value"
 
-    @pytest.mark.asyncio
     async def test_context_state_inheritance(self):
         """Test that child contexts inherit parent state."""
         mock_fastmcp = MagicMock()
@@ -177,3 +124,59 @@ class TestContextState:
 
             assert context1.get_state("key1") == "key1-context1"
             assert context1.get_state("key-context3-only") is None
+
+
+class TestContextMeta:
+    """Test suite for Context meta functionality."""
+
+    def test_request_context_meta_access(self, context):
+        """Test that meta can be accessed from request context."""
+        from mcp.server.lowlevel.server import request_ctx
+        from mcp.shared.context import RequestContext
+
+        # Create a mock meta object with attributes
+        class MockMeta:
+            def __init__(self):
+                self.user_id = "user-123"
+                self.trace_id = "trace-456"
+                self.custom_field = "custom-value"
+
+        mock_meta = MockMeta()
+
+        token = request_ctx.set(
+            RequestContext(  # type: ignore[arg-type]
+                request_id=0,
+                meta=mock_meta,  # type: ignore[arg-type]
+                session=MagicMock(wraps={}),
+                lifespan_context=MagicMock(),
+            )
+        )
+
+        # Access meta through context
+        retrieved_meta = context.request_context.meta
+        assert retrieved_meta is not None
+        assert retrieved_meta.user_id == "user-123"
+        assert retrieved_meta.trace_id == "trace-456"
+        assert retrieved_meta.custom_field == "custom-value"
+
+        request_ctx.reset(token)
+
+    def test_request_context_meta_none(self, context):
+        """Test that context handles None meta gracefully."""
+        from mcp.server.lowlevel.server import request_ctx
+        from mcp.shared.context import RequestContext
+
+        token = request_ctx.set(
+            RequestContext(  # type: ignore[arg-type]
+                request_id=0,
+                meta=None,
+                session=MagicMock(wraps={}),
+                lifespan_context=MagicMock(),
+            )
+        )
+
+        # Access meta through context
+        retrieved_meta = context.request_context.meta
+        assert retrieved_meta is None
+
+        request_ctx.reset(token)

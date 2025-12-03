@@ -31,11 +31,11 @@ jobs:
       (github.event_name == 'issues' && github.event.action == 'labeled' && github.event.label.name == 'marvin')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       # Install UV package manager
       - name: Install UV
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
@@ -44,11 +44,10 @@ jobs:
       - name: Install dependencies
         run: uv sync --python 3.12
 
-      # Install pre-commit hooks automatically
-      - name: Install pre-commit hooks
-        run: |
-          uv run pre-commit install
-          echo "✅ Pre-commit hooks installed"
+      - name: Run prek
+        uses: j178/prek-action@v1
+        env:
+          SKIP: no-commit-to-branch
 
       - name: Generate Marvin App token
         id: marvin-token
@@ -74,5 +73,6 @@ jobs:
               "model": "claude-sonnet-4-5-20250929",
               "env": {
                 "GH_TOKEN": "${{ steps.marvin-token.outputs.token }}"
-              }
+              },
+              "customInstructions": "When you complete work on an issue: (1) You MUST create a pull request using the mcp__github__create_pull_request tool instead of posting a link, and (2) You MUST add the 'marvin-pr' label to the original issue using mcp__github__update_issue. Even if PR creation fails and you post a link instead, you MUST still add the 'marvin-pr' label. Follow the PR message guidelines in CLAUDE.md."
             }

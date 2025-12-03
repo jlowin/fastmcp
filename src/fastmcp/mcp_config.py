@@ -101,7 +101,7 @@ class _TransformingMCPServerMixin(FastMCPBaseModel):
             ClientTransport,  # pyright: ignore[reportUnusedImport]
         )
 
-        transport: ClientTransport = super().to_transport()  # pyright: ignore[reportUnknownMemberType, reportAttributeAccessIssue, reportUnknownVariableType]
+        transport: ClientTransport = super().to_transport()  # pyright: ignore[reportUnknownMemberType, reportAttributeAccessIssue, reportUnknownVariableType]  # ty: ignore[unresolved-attribute]
         transport = cast(ClientTransport, transport)
 
         client: Client[ClientTransport] = Client(transport=transport, name=client_name)
@@ -288,9 +288,8 @@ class MCPConfig(BaseModel):
     @classmethod
     def from_file(cls, file_path: Path) -> Self:
         """Load configuration from JSON file."""
-        if file_path.exists():
-            if content := file_path.read_text().strip():
-                return cls.model_validate_json(content)
+        if file_path.exists() and (content := file_path.read_text().strip()):
+            return cls.model_validate_json(content)
 
         raise ValueError(f"No MCP servers defined in the config: {file_path}")
 

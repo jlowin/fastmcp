@@ -61,20 +61,30 @@ from .transports import (
 
 __all__ = [
     "Client",
-    "SessionKwargs",
-    "RootsHandler",
-    "RootsList",
+    "ClientSamplingHandler",
+    "ElicitationHandler",
     "LogHandler",
     "MessageHandler",
-    "ClientSamplingHandler",
-    "SamplingHandler",
-    "ElicitationHandler",
     "ProgressHandler",
+    "RootsHandler",
+    "RootsList",
+    "SamplingHandler",
+    "SessionKwargs",
 ]
 
 logger = get_logger(__name__)
 
 T = TypeVar("T", bound="ClientTransport")
+
+
+def _timeout_to_seconds(
+    timeout: datetime.timedelta | float | int | None,
+) -> float | None:
+    if timeout is None:
+        return None
+    if isinstance(timeout, datetime.timedelta):
+        return timeout.total_seconds()
+    return float(timeout)
 
 
 @dataclass
@@ -222,6 +232,7 @@ class Client(Generic[ClientTransportT]):
         message_handler: MessageHandlerT | MessageHandler | None = None,
         progress_handler: ProgressHandler | None = None,
         timeout: datetime.timedelta | float | int | None = None,
+        auto_initialize: bool = True,
         init_timeout: datetime.timedelta | float | int | None = None,
         client_info: mcp.types.Implementation | None = None,
         auth: httpx.Auth | Literal["oauth"] | str | None = None,
@@ -240,26 +251,23 @@ class Client(Generic[ClientTransportT]):
 
         self._progress_handler = progress_handler
 
+        # Convert timeout to timedelta if needed
         if isinstance(timeout, int | float):
             timeout = datetime.timedelta(seconds=float(timeout))
 
         # handle init handshake timeout
         if init_timeout is None:
             init_timeout = fastmcp.settings.client_init_timeout
-        if isinstance(init_timeout, datetime.timedelta):
-            init_timeout = init_timeout.total_seconds()
-        elif not init_timeout:
-            init_timeout = None
-        else:
-            init_timeout = float(init_timeout)
-        self._init_timeout = init_timeout
+        self._init_timeout = _timeout_to_seconds(init_timeout)
+
+        self.auto_initialize = auto_initialize
 
         self._session_kwargs: SessionKwargs = {
             "sampling_callback": None,
             "list_roots_callback": None,
             "logging_callback": create_log_callback(log_handler),
             "message_handler": message_handler,
-            "read_timeout_seconds": timeout,
+            "read_timeout_seconds": timeout,  # ty: ignore[invalid-argument-type]
             "client_info": client_info,
         }
 
@@ -290,12 +298,8 @@ class Client(Generic[ClientTransportT]):
         return self._session_state.session
 
     @property
-    def initialize_result(self) -> mcp.types.InitializeResult:
+    def initialize_result(self) -> mcp.types.InitializeResult | None:
         """Get the result of the initialization request."""
-        if self._session_state.initialize_result is None:
-            raise RuntimeError(
-                "Client is not connected. Use the 'async with client:' context manager first."
-            )
         return self._session_state.initialize_result
 
     def set_roots(self, roots: RootsList | RootsHandler) -> None:
@@ -357,15 +361,11 @@ class Client(Generic[ClientTransportT]):
                 self._session_state.session = session
                 # Initialize the session
                 try:
-                    with anyio.fail_after(self._init_timeout):
-                        self._session_state.initialize_result = (
-                            await self._session_state.session.initialize()
-                        )
+                    if self.auto_initialize:
+                        await self.initialize()
                     yield
-                except anyio.ClosedResourceError:
-                    raise RuntimeError("Server session was closed unexpectedly")
-                except TimeoutError:
-                    raise RuntimeError("Failed to initialize server session")
+                except anyio.ClosedResourceError as e:
+                    raise RuntimeError("Server session was closed unexpectedly") from e
                 finally:
                     self._session_state.session = None
                     self._session_state.initialize_result = None
@@ -492,6 +492,55 @@ class Client(Generic[ClientTransportT]):
         await self.transport.close()
 
     # --- MCP Client Methods ---
+
+    async def initialize(
+        self,
+        timeout: datetime.timedelta | float | int | None = None,
+    ) -> mcp.types.InitializeResult:
+        """Send an initialize request to the server.
+
+        This method performs the MCP initialization handshake with the server,
+        exchanging capabilities and server information. It is idempotent - calling
+        it multiple times returns the cached result from the first call.
+
+        The initialization happens automatically when entering the client context
+        manager unless `auto_initialize=False` was set during client construction.
+        Manual calls to this method are only needed when auto-initialization is disabled.
+
+        Args:
+            timeout: Optional timeout for the initialization request (seconds or timedelta).
+                If None, uses the client's init_timeout setting.
+
+        Returns:
+            InitializeResult: The server's initialization response containing server info,
+                capabilities, protocol version, and optional instructions.
+
+        Raises:
+            RuntimeError: If the client is not connected or initialization times out.
+
+        Example:
+            ```python
+            # With auto-initialization disabled
+            client = Client(server, auto_initialize=False)
+            async with client:
+                result = await client.initialize()
+                print(f"Server: {result.serverInfo.name}")
+                print(f"Instructions: {result.instructions}")
+            ```
+        """
+
+        if self.initialize_result is not None:
+            return self.initialize_result
+
+        if timeout is None:
+            timeout = self._init_timeout
+        try:
+            with anyio.fail_after(_timeout_to_seconds(timeout)):
+                initialize_result = await self.session.initialize()
+                self._session_state.initialize_result = initialize_result
+                return initialize_result
+        except TimeoutError as e:
+            raise RuntimeError("Failed to initialize server session") from e
 
     async def ping(self) -> bool:
         """Send a ping request."""
@@ -831,6 +880,7 @@ class Client(Generic[ClientTransportT]):
         arguments: dict[str, Any],
         progress_handler: ProgressHandler | None = None,
         timeout: datetime.timedelta | float | int | None = None,
+        meta: dict[str, Any] | None = None,
     ) -> mcp.types.CallToolResult:
         """Send a tools/call request and return the complete MCP protocol result.
 
@@ -842,6 +892,10 @@ class Client(Generic[ClientTransportT]):
             arguments (dict[str, Any]): Arguments to pass to the tool.
             timeout (datetime.timedelta | float | int | None, optional): The timeout for the tool call. Defaults to None.
             progress_handler (ProgressHandler | None, optional): The progress handler to use for the tool call. Defaults to None.
+            meta (dict[str, Any] | None, optional): Additional metadata to include with the request.
+                This is useful for passing contextual information (like user IDs, trace IDs, or preferences)
+                that shouldn't be tool arguments but may influence server-side processing. The server
+                can access this via `context.request_context.meta`. Defaults to None.
 
         Returns:
             mcp.types.CallToolResult: The complete response object from the protocol,
@@ -852,13 +906,16 @@ class Client(Generic[ClientTransportT]):
         """
         logger.debug(f"[{self.name}] called call_tool: {name}")
 
+        # Convert timeout to timedelta if needed
         if isinstance(timeout, int | float):
             timeout = datetime.timedelta(seconds=float(timeout))
+
         result = await self.session.call_tool(
             name=name,
             arguments=arguments,
-            read_timeout_seconds=timeout,
+            read_timeout_seconds=timeout,  # ty: ignore[invalid-argument-type]
             progress_callback=progress_handler or self._progress_handler,
+            meta=meta,
         )
         return result
 
@@ -869,6 +926,7 @@ class Client(Generic[ClientTransportT]):
         timeout: datetime.timedelta | float | int | None = None,
         progress_handler: ProgressHandler | None = None,
         raise_on_error: bool = True,
+        meta: dict[str, Any] | None = None,
     ) -> CallToolResult:
         """Call a tool on the server.
 
@@ -879,6 +937,11 @@ class Client(Generic[ClientTransportT]):
             arguments (dict[str, Any] | None, optional): Arguments to pass to the tool. Defaults to None.
             timeout (datetime.timedelta | float | int | None, optional): The timeout for the tool call. Defaults to None.
             progress_handler (ProgressHandler | None, optional): The progress handler to use for the tool call. Defaults to None.
+            raise_on_error (bool, optional): Whether to raise a ToolError if the tool call results in an error. Defaults to True.
+            meta (dict[str, Any] | None, optional): Additional metadata to include with the request.
+                This is useful for passing contextual information (like user IDs, trace IDs, or preferences)
+                that shouldn't be tool arguments but may influence server-side processing. The server
+                can access this via `context.request_context.meta`. Defaults to None.
 
         Returns:
             CallToolResult:
@@ -898,6 +961,7 @@ class Client(Generic[ClientTransportT]):
             arguments=arguments or {},
             timeout=timeout,
             progress_handler=progress_handler,
+            meta=meta,
         )
         data = None
         if result.isError and raise_on_error:
@@ -928,6 +992,7 @@ class Client(Generic[ClientTransportT]):
         return CallToolResult(
             content=result.content,
             structured_content=result.structuredContent,
+            meta=result.meta,
             data=data,
             is_error=result.isError,
         )
@@ -945,5 +1010,6 @@ class Client(Generic[ClientTransportT]):
 class CallToolResult:
     content: list[mcp.types.ContentBlock]
     structured_content: dict[str, Any] | None
+    meta: dict[str, Any] | None
     data: Any = None
     is_error: bool = False

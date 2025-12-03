@@ -123,10 +123,10 @@ class OIDCConfiguration(BaseModel):
 
             try:
                 AnyHttpUrl(value)
-            except Exception:
+            except Exception as e:
                 message = f"Invalid URL for configuration metadata: {attr}"
                 logger.error(message)
-                raise ValueError(message)
+                raise ValueError(message) from e
 
         enforce("issuer", True)
         enforce("authorization_endpoint", True)
@@ -206,16 +206,26 @@ class OIDCProxy(OAuthProxy):
         audience: str | None = None,
         timeout_seconds: int | None = None,
         # Token verifier
+        token_verifier: TokenVerifier | None = None,
         algorithm: str | None = None,
         required_scopes: list[str] | None = None,
         # FastMCP server configuration
         base_url: AnyHttpUrl | str,
+        issuer_url: AnyHttpUrl | str | None = None,
         redirect_path: str | None = None,
         # Client configuration
         allowed_client_redirect_uris: list[str] | None = None,
         client_storage: AsyncKeyValue | None = None,
+        # JWT and encryption keys
+        jwt_signing_key: str | bytes | None = None,
         # Token validation configuration
         token_endpoint_auth_method: str | None = None,
+        # Consent screen configuration
+        require_authorization_consent: bool = True,
+        consent_csp_policy: str | None = None,
+        # Extra parameters
+        extra_authorize_params: dict[str, str] | None = None,
+        extra_token_params: dict[str, str] | None = None,
     ) -> None:
         """Initialize the OIDC proxy provider.
 
@@ -226,20 +236,42 @@ class OIDCProxy(OAuthProxy):
             client_secret: Client secret for upstream server
             audience: Audience for upstream server
             timeout_seconds: HTTP request timeout in seconds
-            algorithm: Token verifier algorithm
-            required_scopes: Required OAuth scopes
-            base_url: Public URL of the server that exposes this FastMCP server; redirect path is
-                relative to this URL
+            token_verifier: Optional custom token verifier (e.g., IntrospectionTokenVerifier for opaque tokens).
+                If not provided, a JWTVerifier will be created using the OIDC configuration.
+                Cannot be used with algorithm or required_scopes parameters (configure these on your verifier instead).
+            algorithm: Token verifier algorithm (only used if token_verifier is not provided)
+            required_scopes: Required scopes for token validation (only used if token_verifier is not provided)
+            base_url: Public URL where OAuth endpoints will be accessible (includes any mount path)
+            issuer_url: Issuer URL for OAuth metadata (defaults to base_url). Use root-level URL
+                to avoid 404s during discovery when mounting under a path.
             redirect_path: Redirect path configured in upstream OAuth app (defaults to "/auth/callback")
             allowed_client_redirect_uris: List of allowed redirect URI patterns for MCP clients.
                 Patterns support wildcards (e.g., "http://localhost:*", "https://*.example.com/*").
                 If None (default), only localhost redirect URIs are allowed.
                 If empty list, all redirect URIs are allowed (not recommended for production).
                 These are for MCP clients performing loopback redirects, NOT for the upstream OAuth app.
-            client_storage: An AsyncKeyValue-compatible store for client registrations, registrations are stored in memory if not provided
+            client_storage: Storage backend for OAuth state (client registrations, encrypted tokens).
+                If None, a DiskStore will be created in the data directory (derived from `platformdirs`). The
+                disk store will be encrypted using a key derived from the JWT Signing Key.
+            jwt_signing_key: Secret for signing FastMCP JWT tokens (any string or bytes). If bytes are provided,
+                they will be used as is. If a string is provided, it will be derived into a 32-byte key. If not
+                provided, the upstream client secret will be used to derive a 32-byte key using PBKDF2.
             token_endpoint_auth_method: Token endpoint authentication method for upstream server.
                 Common values: "client_secret_basic", "client_secret_post", "none".
                 If None, authlib will use its default (typically "client_secret_basic").
+            require_authorization_consent: Whether to require user consent before authorizing clients (default True).
+                When True, users see a consent screen before being redirected to the upstream IdP.
+                When False, authorization proceeds directly without user confirmation.
+                SECURITY WARNING: Only disable for local development or testing environments.
+            consent_csp_policy: Content Security Policy for the consent page.
+                If None (default), uses the built-in CSP policy with appropriate directives.
+                If empty string "", disables CSP entirely (no meta tag is rendered).
+                If a non-empty string, uses that as the CSP policy value.
+            extra_authorize_params: Additional parameters to forward to the upstream authorization endpoint.
+                Useful for provider-specific parameters like prompt=consent or access_type=offline.
+                Example: {"prompt": "consent", "access_type": "offline"}
+            extra_token_params: Additional parameters to forward to the upstream token endpoint.
+                Useful for provider-specific parameters during token exchange.
         """
         if not config_url:
             raise ValueError("Missing required config URL")
@@ -252,6 +284,19 @@ class OIDCProxy(OAuthProxy):
 
         if not base_url:
             raise ValueError("Missing required base URL")
+
+        # Validate that verifier-specific parameters are not used with custom verifier
+        if token_verifier is not None:
+            if algorithm is not None:
+                raise ValueError(
+                    "Cannot specify 'algorithm' when providing a custom token_verifier. "
+                    "Configure the algorithm on your token verifier instead."
+                )
+            if required_scopes is not None:
+                raise ValueError(
+                    "Cannot specify 'required_scopes' when providing a custom token_verifier. "
+                    "Configure required scopes on your token verifier instead."
+                )
 
         if isinstance(config_url, str):
             config_url = AnyHttpUrl(config_url)
@@ -272,12 +317,14 @@ class OIDCProxy(OAuthProxy):
             else None
         )
 
-        token_verifier = self.get_token_verifier(
-            algorithm=algorithm,
-            audience=audience,
-            required_scopes=required_scopes,
-            timeout_seconds=timeout_seconds,
-        )
+        # Use custom verifier if provided, otherwise create default JWTVerifier
+        if token_verifier is None:
+            token_verifier = self.get_token_verifier(
+                algorithm=algorithm,
+                audience=audience,
+                required_scopes=required_scopes,
+                timeout_seconds=timeout_seconds,
+            )
 
         init_kwargs = {
             "upstream_authorization_endpoint": str(
@@ -289,21 +336,39 @@ class OIDCProxy(OAuthProxy):
             "upstream_revocation_endpoint": revocation_endpoint,
             "token_verifier": token_verifier,
             "base_url": base_url,
+            "issuer_url": issuer_url or base_url,
             "service_documentation_url": self.oidc_config.service_documentation,
             "allowed_client_redirect_uris": allowed_client_redirect_uris,
             "client_storage": client_storage,
+            "jwt_signing_key": jwt_signing_key,
             "token_endpoint_auth_method": token_endpoint_auth_method,
+            "require_authorization_consent": require_authorization_consent,
+            "consent_csp_policy": consent_csp_policy,
         }
 
         if redirect_path:
             init_kwargs["redirect_path"] = redirect_path
 
-        if audience:
-            extra_params = {"audience": audience}
-            init_kwargs["extra_authorize_params"] = extra_params
-            init_kwargs["extra_token_params"] = extra_params
+        # Build extra params, merging audience with user-provided params
+        # User params override audience if there's a conflict
+        final_authorize_params: dict[str, str] = {}
+        final_token_params: dict[str, str] = {}
 
-        super().__init__(**init_kwargs)
+        if audience:
+            final_authorize_params["audience"] = audience
+            final_token_params["audience"] = audience
+
+        if extra_authorize_params:
+            final_authorize_params.update(extra_authorize_params)
+        if extra_token_params:
+            final_token_params.update(extra_token_params)
+
+        if final_authorize_params:
+            init_kwargs["extra_authorize_params"] = final_authorize_params
+        if final_token_params:
+            init_kwargs["extra_token_params"] = final_token_params
+
+        super().__init__(**init_kwargs)  # ty: ignore[invalid-argument-type]
 
     def get_oidc_configuration(
         self,

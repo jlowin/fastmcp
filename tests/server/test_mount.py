@@ -66,22 +66,6 @@ class TestBasicMount:
             result = await client.call_tool("sub_greet", {"name": "World"})
             assert result.data == "Hello, World!"
 
-    async def test_mount_invalid_resource_prefix(self):
-        main_app = FastMCP("MainApp")
-        api_app = FastMCP("APIApp")
-
-        # This test doesn't apply anymore with the new prefix format
-        # just mount the server to maintain test coverage
-        main_app.mount(api_app, "api:sub")
-
-    async def test_mount_invalid_resource_separator(self):
-        main_app = FastMCP("MainApp")
-        api_app = FastMCP("APIApp")
-
-        # This test doesn't apply anymore with the new prefix format
-        # Mount without deprecated parameters
-        main_app.mount(api_app, "api")
-
     @pytest.mark.parametrize("prefix", ["", None])
     async def test_mount_with_no_prefix(self, prefix):
         main_app = FastMCP("MainApp")
@@ -888,15 +872,18 @@ class TestAsProxyKwarg:
         assert isinstance(mcp._mounted_servers[0].server, FastMCPProxy)
 
     async def test_as_proxy_defaults_true_if_lifespan(self):
+        """Test that as_proxy defaults to True when server_lifespan is provided."""
+
         @asynccontextmanager
-        async def lifespan(mcp: FastMCP):
+        async def server_lifespan(mcp: FastMCP):
             yield
 
         mcp = FastMCP("Main")
-        sub = FastMCP("Sub", lifespan=lifespan)
+        sub = FastMCP("Sub", lifespan=server_lifespan)
 
         mcp.mount(sub, "sub")
 
+        # Should auto-proxy because lifespan is set
         assert mcp._mounted_servers[0].server is not sub
         assert isinstance(mcp._mounted_servers[0].server, FastMCPProxy)
 

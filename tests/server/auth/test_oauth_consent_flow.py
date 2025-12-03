@@ -78,6 +78,7 @@ def oauth_proxy_with_storage(storage):
         base_url="https://myserver.com",
         redirect_path="/auth/callback",
         client_storage=storage,  # Use our test storage
+        jwt_signing_key="test-secret",
     )
 
 
@@ -92,6 +93,7 @@ def oauth_proxy_https():
         token_verifier=_Verifier(),
         base_url="https://myserver.example",
         client_storage=MemoryStore(),
+        jwt_signing_key="test-secret",
     )
 
 
@@ -231,10 +233,16 @@ class TestServerSideStorage:
                 csrf_token = secrets.token_urlsafe(32)
 
             # Approve consent with CSRF token
+            # Set cookies on client instance to avoid deprecation warning
+            for k, v in consent_response.cookies.items():
+                test_client.cookies.set(k, v)
             approval_response = test_client.post(
                 "/consent",
-                data={"action": "approve", "txn": txn_id, "csrf_token": csrf_token},
-                cookies=consent_response.cookies,
+                data={
+                    "action": "approve",
+                    "txn_id": txn_id,
+                    "csrf_token": csrf_token if csrf_token else "",
+                },
                 follow_redirects=False,
             )
 
@@ -404,7 +412,7 @@ class TestCSRFProtection:
         with TestClient(app) as test_client:
             # Try to submit consent WITHOUT CSRF token
             response = test_client.post(
-                "/consent/submit",
+                "/consent",
                 data={"action": "approve", "txn_id": txn_id},
                 # No CSRF token!
                 follow_redirects=False,
@@ -563,7 +571,7 @@ class TestConsentSecurity:
             for k, v in consent.cookies.items():
                 c.cookies.set(k, v)
             r = c.post(
-                "/consent/submit",
+                "/consent",
                 data={"action": "deny", "txn_id": txn_id, "csrf_token": csrf},
                 follow_redirects=False,
             )
@@ -594,7 +602,7 @@ class TestConsentSecurity:
             for k, v in consent.cookies.items():
                 c.cookies.set(k, v)
             r = c.post(
-                "/consent/submit",
+                "/consent",
                 data={"action": "approve", "txn_id": txn_id, "csrf_token": csrf},
                 follow_redirects=False,
             )
@@ -636,8 +644,12 @@ class TestConsentSecurity:
             for k, v in consent.cookies.items():
                 c.cookies.set(k, v)
             r = c.post(
-                "/consent/submit",
-                data={"action": "approve", "txn_id": txn_id, "csrf_token": csrf},
+                "/consent",
+                data={
+                    "action": "approve",
+                    "txn_id": txn_id,
+                    "csrf_token": csrf if csrf else "",
+                },
                 follow_redirects=False,
             )
             # Extract approved cookie value
@@ -655,3 +667,396 @@ class TestConsentSecurity:
             assert r2.headers.get("location", "").startswith(
                 "https://github.com/login/oauth/authorize"
             )
+
+
+class TestConsentPageServerIcon:
+    """Tests for server icon display in OAuth consent screen."""
+
+    async def test_consent_screen_displays_server_icon(self):
+        """Test that consent screen shows server's custom icon when available."""
+        from unittest.mock import Mock
+
+        from fastmcp import FastMCP
+
+        # Create mock JWT verifier
+        verifier = Mock(spec=TokenVerifier)
+        verifier.required_scopes = ["read"]
+        verifier.verify_token = Mock(return_value=None)
+
+        # Create OAuthProxy
+        proxy = OAuthProxy(
+            upstream_authorization_endpoint="https://oauth.example.com/authorize",
+            upstream_token_endpoint="https://oauth.example.com/token",
+            upstream_client_id="upstream-client",
+            upstream_client_secret="upstream-secret",
+            token_verifier=verifier,
+            base_url="https://proxy.example.com",
+            client_storage=MemoryStore(),
+            jwt_signing_key="test-secret",
+        )
+
+        # Create FastMCP server with custom icon
+        from mcp.types import Icon
+
+        server = FastMCP(
+            name="My Custom Server",
+            auth=proxy,
+            icons=[Icon(src="https://example.com/custom-icon.png")],
+            website_url="https://example.com",
+        )
+
+        # Create HTTP app
+        app = server.http_app()
+
+        # Register a test client with the proxy
+        client_info = OAuthClientInformationFull(
+            client_id="test-client",
+            client_secret="test-secret",
+            redirect_uris=[AnyUrl("http://localhost:12345/callback")],
+        )
+        await proxy.register_client(client_info)
+
+        # Create a transaction manually
+        from fastmcp.server.auth.oauth_proxy import OAuthTransaction
+
+        txn_id = "test-txn-id"
+        transaction = OAuthTransaction(
+            txn_id=txn_id,
+            client_id="test-client",
+            client_redirect_uri="http://localhost:12345/callback",
+            client_state="client-state",
+            code_challenge="challenge",
+            code_challenge_method="S256",
+            scopes=["read"],
+            created_at=time.time(),
+        )
+        await proxy._transaction_store.put(key=txn_id, value=transaction)
+
+        # Make request to consent page
+        with TestClient(app) as client:
+            response = client.get(f"/consent?txn_id={txn_id}")
+
+            # Check that response is successful
+            assert response.status_code == 200
+
+            # Check that HTML contains custom icon
+            assert "https://example.com/custom-icon.png" in response.text
+
+            # Check that server name is used as alt text
+            assert 'alt="My Custom Server"' in response.text
+
+    async def test_consent_screen_falls_back_to_fastmcp_logo(self):
+        """Test that consent screen shows FastMCP logo when no server icon provided."""
+        from unittest.mock import Mock
+
+        from fastmcp import FastMCP
+
+        # Create mock JWT verifier
+        verifier = Mock(spec=TokenVerifier)
+        verifier.required_scopes = ["read"]
+        verifier.verify_token = Mock(return_value=None)
+
+        # Create OAuthProxy
+        proxy = OAuthProxy(
+            upstream_authorization_endpoint="https://oauth.example.com/authorize",
+            upstream_token_endpoint="https://oauth.example.com/token",
+            upstream_client_id="upstream-client",
+            upstream_client_secret="upstream-secret",
+            token_verifier=verifier,
+            base_url="https://proxy.example.com",
+            client_storage=MemoryStore(),
+            jwt_signing_key="test-secret",
+        )
+
+        # Create FastMCP server without icon
+        server = FastMCP(name="Server Without Icon", auth=proxy)
+
+        # Create HTTP app
+        app = server.http_app()
+
+        # Register a test client
+        client_info = OAuthClientInformationFull(
+            client_id="test-client",
+            client_secret="test-secret",
+            redirect_uris=[AnyUrl("http://localhost:12345/callback")],
+        )
+        await proxy.register_client(client_info)
+
+        # Create a transaction
+        from fastmcp.server.auth.oauth_proxy import OAuthTransaction
+
+        txn_id = "test-txn-id"
+        transaction = OAuthTransaction(
+            txn_id=txn_id,
+            client_id="test-client",
+            client_redirect_uri="http://localhost:12345/callback",
+            client_state="client-state",
+            code_challenge="challenge",
+            code_challenge_method="S256",
+            scopes=["read"],
+            created_at=time.time(),
+        )
+        await proxy._transaction_store.put(key=txn_id, value=transaction)
+
+        # Make request to consent page
+        with TestClient(app) as client:
+            response = client.get(f"/consent?txn_id={txn_id}")
+
+            # Check that response is successful
+            assert response.status_code == 200
+
+            # Check that HTML contains FastMCP logo
+            assert "gofastmcp.com/assets/brand/blue-logo.png" in response.text
+
+            # Check that alt text is still the server name
+            assert 'alt="Server Without Icon"' in response.text
+
+    async def test_consent_screen_escapes_server_name(self):
+        """Test that server name is properly HTML-escaped."""
+        from unittest.mock import Mock
+
+        from mcp.types import Icon
+
+        from fastmcp import FastMCP
+
+        # Create mock JWT verifier
+        verifier = Mock(spec=TokenVerifier)
+        verifier.required_scopes = ["read"]
+        verifier.verify_token = Mock(return_value=None)
+
+        # Create OAuthProxy
+        proxy = OAuthProxy(
+            upstream_authorization_endpoint="https://oauth.example.com/authorize",
+            upstream_token_endpoint="https://oauth.example.com/token",
+            upstream_client_id="upstream-client",
+            upstream_client_secret="upstream-secret",
+            token_verifier=verifier,
+            base_url="https://proxy.example.com",
+            client_storage=MemoryStore(),
+            jwt_signing_key="test-secret",
+        )
+
+        # Create FastMCP server with special characters in name
+        server = FastMCP(
+            name='<script>alert("xss")</script>Server',
+            auth=proxy,
+            icons=[Icon(src="https://example.com/icon.png")],
+        )
+
+        # Create HTTP app
+        app = server.http_app()
+
+        # Register a test client
+        client_info = OAuthClientInformationFull(
+            client_id="test-client",
+            client_secret="test-secret",
+            redirect_uris=[AnyUrl("http://localhost:12345/callback")],
+        )
+        await proxy.register_client(client_info)
+
+        # Create a transaction
+        from fastmcp.server.auth.oauth_proxy import OAuthTransaction
+
+        txn_id = "test-txn-id"
+        transaction = OAuthTransaction(
+            txn_id=txn_id,
+            client_id="test-client",
+            client_redirect_uri="http://localhost:12345/callback",
+            client_state="client-state",
+            code_challenge="challenge",
+            code_challenge_method="S256",
+            scopes=["read"],
+            created_at=time.time(),
+        )
+        await proxy._transaction_store.put(key=txn_id, value=transaction)
+
+        # Make request to consent page
+        with TestClient(app) as client:
+            response = client.get(f"/consent?txn_id={txn_id}")
+
+            # Check that response is successful
+            assert response.status_code == 200
+
+            # Check that script tag is escaped
+            assert "<script>" not in response.text
+            assert "&lt;script&gt;" in response.text
+            assert (
+                'alt="&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;Server"'
+                in response.text
+            )
+
+
+class TestConsentCSPPolicy:
+    """Tests for Content Security Policy customization on consent page."""
+
+    async def test_default_csp_includes_form_action(self):
+        """Test that default CSP includes form-action directive."""
+        from unittest.mock import Mock
+
+        from fastmcp import FastMCP
+
+        verifier = Mock(spec=TokenVerifier)
+        verifier.required_scopes = ["read"]
+        verifier.verify_token = Mock(return_value=None)
+
+        # Create OAuthProxy with default CSP (no custom CSP)
+        proxy = OAuthProxy(
+            upstream_authorization_endpoint="https://oauth.example.com/authorize",
+            upstream_token_endpoint="https://oauth.example.com/token",
+            upstream_client_id="upstream-client",
+            upstream_client_secret="upstream-secret",
+            token_verifier=verifier,
+            base_url="https://proxy.example.com",
+            client_storage=MemoryStore(),
+            jwt_signing_key="test-secret",
+        )
+
+        server = FastMCP(name="Test Server", auth=proxy)
+        app = server.http_app()
+
+        client_info = OAuthClientInformationFull(
+            client_id="test-client",
+            client_secret="test-secret",
+            redirect_uris=[AnyUrl("http://localhost:12345/callback")],
+        )
+        await proxy.register_client(client_info)
+
+        from fastmcp.server.auth.oauth_proxy import OAuthTransaction
+
+        txn_id = "test-txn-id"
+        transaction = OAuthTransaction(
+            txn_id=txn_id,
+            client_id="test-client",
+            client_redirect_uri="http://localhost:12345/callback",
+            client_state="client-state",
+            code_challenge="challenge",
+            code_challenge_method="S256",
+            scopes=["read"],
+            created_at=time.time(),
+        )
+        await proxy._transaction_store.put(key=txn_id, value=transaction)
+
+        with TestClient(app) as client:
+            response = client.get(f"/consent?txn_id={txn_id}")
+
+            assert response.status_code == 200
+            # Default CSP should be present with form-action
+            assert 'http-equiv="Content-Security-Policy"' in response.text
+            assert "form-action" in response.text
+
+    async def test_empty_csp_disables_csp_meta_tag(self):
+        """Test that empty string CSP disables CSP meta tag entirely."""
+        from unittest.mock import Mock
+
+        from fastmcp import FastMCP
+
+        verifier = Mock(spec=TokenVerifier)
+        verifier.required_scopes = ["read"]
+        verifier.verify_token = Mock(return_value=None)
+
+        # Create OAuthProxy with empty CSP to disable it
+        proxy = OAuthProxy(
+            upstream_authorization_endpoint="https://oauth.example.com/authorize",
+            upstream_token_endpoint="https://oauth.example.com/token",
+            upstream_client_id="upstream-client",
+            upstream_client_secret="upstream-secret",
+            token_verifier=verifier,
+            base_url="https://proxy.example.com",
+            client_storage=MemoryStore(),
+            jwt_signing_key="test-secret",
+            consent_csp_policy="",  # Empty string disables CSP
+        )
+
+        server = FastMCP(name="Test Server", auth=proxy)
+        app = server.http_app()
+
+        client_info = OAuthClientInformationFull(
+            client_id="test-client",
+            client_secret="test-secret",
+            redirect_uris=[AnyUrl("http://localhost:12345/callback")],
+        )
+        await proxy.register_client(client_info)
+
+        from fastmcp.server.auth.oauth_proxy import OAuthTransaction
+
+        txn_id = "test-txn-id"
+        transaction = OAuthTransaction(
+            txn_id=txn_id,
+            client_id="test-client",
+            client_redirect_uri="http://localhost:12345/callback",
+            client_state="client-state",
+            code_challenge="challenge",
+            code_challenge_method="S256",
+            scopes=["read"],
+            created_at=time.time(),
+        )
+        await proxy._transaction_store.put(key=txn_id, value=transaction)
+
+        with TestClient(app) as client:
+            response = client.get(f"/consent?txn_id={txn_id}")
+
+            assert response.status_code == 200
+            # CSP meta tag should NOT be present
+            assert 'http-equiv="Content-Security-Policy"' not in response.text
+
+    async def test_custom_csp_policy_is_used(self):
+        """Test that custom CSP policy is applied to consent page."""
+        from unittest.mock import Mock
+
+        from fastmcp import FastMCP
+
+        verifier = Mock(spec=TokenVerifier)
+        verifier.required_scopes = ["read"]
+        verifier.verify_token = Mock(return_value=None)
+
+        # Create OAuthProxy with custom CSP policy
+        custom_csp = "default-src 'self'; script-src 'none'"
+        proxy = OAuthProxy(
+            upstream_authorization_endpoint="https://oauth.example.com/authorize",
+            upstream_token_endpoint="https://oauth.example.com/token",
+            upstream_client_id="upstream-client",
+            upstream_client_secret="upstream-secret",
+            token_verifier=verifier,
+            base_url="https://proxy.example.com",
+            client_storage=MemoryStore(),
+            jwt_signing_key="test-secret",
+            consent_csp_policy=custom_csp,
+        )
+
+        server = FastMCP(name="Test Server", auth=proxy)
+        app = server.http_app()
+
+        client_info = OAuthClientInformationFull(
+            client_id="test-client",
+            client_secret="test-secret",
+            redirect_uris=[AnyUrl("http://localhost:12345/callback")],
+        )
+        await proxy.register_client(client_info)
+
+        from fastmcp.server.auth.oauth_proxy import OAuthTransaction
+
+        txn_id = "test-txn-id"
+        transaction = OAuthTransaction(
+            txn_id=txn_id,
+            client_id="test-client",
+            client_redirect_uri="http://localhost:12345/callback",
+            client_state="client-state",
+            code_challenge="challenge",
+            code_challenge_method="S256",
+            scopes=["read"],
+            created_at=time.time(),
+        )
+        await proxy._transaction_store.put(key=txn_id, value=transaction)
+
+        with TestClient(app) as client:
+            response = client.get(f"/consent?txn_id={txn_id}")
+
+            assert response.status_code == 200
+            # Custom CSP should be present (HTML-escaped)
+            assert 'http-equiv="Content-Security-Policy"' in response.text
+            # Check for the HTML-escaped version (single quotes become &#x27;)
+            import html
+
+            assert html.escape(custom_csp, quote=True) in response.text
+            # Default form-action should NOT be present (we're using custom)
+            assert "form-action" not in response.text

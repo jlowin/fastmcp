@@ -8,7 +8,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
 import pydantic_core
-from mcp.types import ContentBlock, PromptMessage, Role, TextContent
+from mcp.types import ContentBlock, Icon, PromptMessage, Role, TextContent
 from mcp.types import Prompt as MCPPrompt
 from mcp.types import PromptArgument as MCPPromptArgument
 from pydantic import Field, TypeAdapter
@@ -105,6 +105,7 @@ class Prompt(FastMCPComponent):
             description=overrides.get("description", self.description),
             arguments=arguments,
             title=overrides.get("title", self.title),
+            icons=overrides.get("icons", self.icons),
             _meta=overrides.get(
                 "_meta", self.get_meta(include_fastmcp_meta=include_fastmcp_meta)
             ),
@@ -116,6 +117,7 @@ class Prompt(FastMCPComponent):
         name: str | None = None,
         title: str | None = None,
         description: str | None = None,
+        icons: list[Icon] | None = None,
         tags: set[str] | None = None,
         enabled: bool | None = None,
         meta: dict[str, Any] | None = None,
@@ -133,6 +135,7 @@ class Prompt(FastMCPComponent):
             name=name,
             title=title,
             description=description,
+            icons=icons,
             tags=tags,
             enabled=enabled,
             meta=meta,
@@ -162,6 +165,7 @@ class FunctionPrompt(Prompt):
         name: str | None = None,
         title: str | None = None,
         description: str | None = None,
+        icons: list[Icon] | None = None,
         tags: set[str] | None = None,
         enabled: bool | None = None,
         meta: dict[str, Any] | None = None,
@@ -203,10 +207,7 @@ class FunctionPrompt(Prompt):
         # Auto-detect context parameter if not provided
 
         context_kwarg = find_kwarg_by_type(fn, kwarg_type=Context)
-        if context_kwarg:
-            prune_params = [context_kwarg]
-        else:
-            prune_params = None
+        prune_params = [context_kwarg] if context_kwarg else None
 
         parameters = compress_schema(parameters, prune_params=prune_params)
 
@@ -255,6 +256,7 @@ class FunctionPrompt(Prompt):
             name=func_name,
             title=title,
             description=description,
+            icons=icons,
             arguments=arguments,
             tags=tags or set(),
             enabled=enabled if enabled is not None else True,
@@ -285,10 +287,7 @@ class FunctionPrompt(Prompt):
                 if (
                     param.annotation == inspect.Parameter.empty
                     or param.annotation is str
-                ):
-                    converted_kwargs[param_name] = param_value
-                # If argument is not a string, pass as-is (already properly typed)
-                elif not isinstance(param_value, str):
+                ) or not isinstance(param_value, str):
                     converted_kwargs[param_name] = param_value
                 else:
                     # Try to convert string argument using type adapter
@@ -309,7 +308,7 @@ class FunctionPrompt(Prompt):
                         raise PromptError(
                             f"Could not convert argument '{param_name}' with value '{param_value}' "
                             f"to expected type {param.annotation}. Error: {e}"
-                        )
+                        ) from e
             else:
                 # Parameter not in function signature, pass as-is
                 converted_kwargs[param_name] = param_value
@@ -371,10 +370,12 @@ class FunctionPrompt(Prompt):
                                 content=TextContent(type="text", text=content),
                             )
                         )
-                except Exception:
-                    raise PromptError("Could not convert prompt result to message.")
+                except Exception as e:
+                    raise PromptError(
+                        "Could not convert prompt result to message."
+                    ) from e
 
             return messages
-        except Exception:
+        except Exception as e:
             logger.exception(f"Error rendering prompt {self.name}")
-            raise PromptError(f"Error rendering prompt {self.name}.")
+            raise PromptError(f"Error rendering prompt {self.name}.") from e

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from mcp.server.auth.middleware.auth_context import AuthContextMiddleware
 from mcp.server.auth.middleware.bearer_auth import BearerAuthBackend
@@ -23,16 +23,20 @@ from mcp.server.auth.settings import (
     ClientRegistrationOptions,
     RevocationOptions,
 )
-from pydantic import AnyHttpUrl
+from pydantic import AnyHttpUrl, Field
 from starlette.middleware import Middleware
 from starlette.middleware.authentication import AuthenticationMiddleware
 from starlette.routing import Route
+
+from fastmcp.utilities.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class AccessToken(_SDKAccessToken):
     """AccessToken that includes all JWT claims."""
 
-    claims: dict[str, Any] = {}
+    claims: dict[str, Any] = Field(default_factory=dict)
 
 
 class AuthProvider(TokenVerifierProtocol):
@@ -79,8 +83,9 @@ class AuthProvider(TokenVerifierProtocol):
         self,
         mcp_path: str | None = None,
     ) -> list[Route]:
-        """Get the routes for this authentication provider.
+        """Get all routes for this authentication provider.
 
+        This includes both well-known discovery routes and operational routes.
         Each provider is responsible for creating whatever routes it needs:
         - TokenVerifier: typically no routes (default implementation)
         - RemoteAuthProvider: protected resource metadata routes
@@ -93,9 +98,41 @@ class AuthProvider(TokenVerifierProtocol):
                 provider does not create the actual MCP endpoint route.
 
         Returns:
-            List of routes for this provider (excluding the MCP endpoint itself)
+            List of all routes for this provider (excluding the MCP endpoint itself)
         """
         return []
+
+    def get_well_known_routes(
+        self,
+        mcp_path: str | None = None,
+    ) -> list[Route]:
+        """Get well-known discovery routes for this authentication provider.
+
+        This is a utility method that filters get_routes() to return only
+        well-known discovery routes (those starting with /.well-known/).
+
+        Well-known routes provide OAuth metadata and discovery endpoints that
+        clients use to discover authentication capabilities. These routes should
+        be mounted at the root level of the application to comply with RFC 8414
+        and RFC 9728.
+
+        Common well-known routes:
+        - /.well-known/oauth-authorization-server (authorization server metadata)
+        - /.well-known/oauth-protected-resource/* (protected resource metadata)
+
+        Args:
+            mcp_path: The path where the MCP endpoint is mounted (e.g., "/mcp")
+                This is used to construct path-scoped well-known URLs.
+
+        Returns:
+            List of well-known discovery routes (typically mounted at root level)
+        """
+        all_routes = self.get_routes(mcp_path)
+        return [
+            route
+            for route in all_routes
+            if isinstance(route, Route) and route.path.startswith("/.well-known/")
+        ]
 
     def get_middleware(self) -> list:
         """Get HTTP application-level middleware for this auth provider.
@@ -205,12 +242,11 @@ class RemoteAuthProvider(AuthProvider):
         self,
         mcp_path: str | None = None,
     ) -> list[Route]:
-        """Get OAuth routes for this provider.
+        """Get routes for this provider.
 
-        Creates protected resource metadata routes.
+        Creates protected resource metadata routes (RFC 9728).
         """
-        # Start with base routes
-        routes = super().get_routes(mcp_path)
+        routes = []
 
         # Get the resource URL based on the MCP path
         resource_url = self._get_resource_url(mcp_path)
@@ -262,19 +298,26 @@ class OAuthProvider(
             required_scopes: Scopes that are required for all requests.
         """
 
-        # Convert URLs to proper types
-        if isinstance(base_url, str):
-            base_url = AnyHttpUrl(base_url)
-
         super().__init__(base_url=base_url, required_scopes=required_scopes)
-        self.base_url = base_url
 
         if issuer_url is None:
-            self.issuer_url = base_url
+            self.issuer_url = self.base_url
         elif isinstance(issuer_url, str):
             self.issuer_url = AnyHttpUrl(issuer_url)
         else:
             self.issuer_url = issuer_url
+
+        # Log if issuer_url and base_url differ (requires additional setup)
+        if (
+            self.base_url is not None
+            and self.issuer_url is not None
+            and str(self.base_url) != str(self.issuer_url)
+        ):
+            logger.info(
+                f"OAuth endpoints at {self.base_url}, issuer at {self.issuer_url}. "
+                f"Ensure well-known routes are accessible at root ({self.issuer_url}/.well-known/). "
+                f"See: https://gofastmcp.com/deployment/http#mounting-authenticated-servers"
+            )
 
         # Initialize OAuth Authorization Server Provider
         OAuthAuthorizationServerProvider.__init__(self)
@@ -316,9 +359,17 @@ class OAuthProvider(
         """
 
         # Create standard OAuth authorization server routes
+        # Pass base_url as issuer_url to ensure metadata declares endpoints where
+        # they're actually accessible (operational routes are mounted at
+        # base_url)
+        assert self.base_url is not None  # typing check
+        assert (
+            self.issuer_url is not None
+        )  # typing check (issuer_url defaults to base_url)
+
         oauth_routes = create_auth_routes(
             provider=self,
-            issuer_url=self.issuer_url,
+            issuer_url=self.base_url,
             service_documentation_url=self.service_documentation_url,
             client_registration_options=self.client_registration_options,
             revocation_options=self.revocation_options,
@@ -337,7 +388,7 @@ class OAuthProvider(
             )
             protected_routes = create_protected_resource_routes(
                 resource_url=resource_url,
-                authorization_servers=[self.issuer_url],
+                authorization_servers=[cast(AnyHttpUrl, self.issuer_url)],
                 scopes_supported=supported_scopes,
             )
             oauth_routes.extend(protected_routes)

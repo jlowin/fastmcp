@@ -319,6 +319,7 @@ def oauth_proxy(jwt_verifier):
         token_verifier=jwt_verifier,
         base_url="https://myserver.com",
         redirect_path="/auth/callback",
+        jwt_signing_key="test-secret",
     )
 
 
@@ -348,6 +349,7 @@ class TestOAuthProxyInitialization:
             upstream_client_secret="secret-456",
             token_verifier=jwt_verifier,
             base_url="https://api.example.com",
+            jwt_signing_key="test-secret",
         )
 
         assert (
@@ -376,6 +378,7 @@ class TestOAuthProxyInitialization:
             valid_scopes=["custom", "scopes"],
             forward_pkce=False,
             token_endpoint_auth_method="client_secret_post",
+            jwt_signing_key="test-secret",
         )
 
         assert proxy._upstream_revocation_endpoint == "https://auth.example.com/revoke"
@@ -395,6 +398,7 @@ class TestOAuthProxyInitialization:
             token_verifier=jwt_verifier,
             base_url="https://api.com",
             redirect_path="auth/callback",  # No leading slash
+            jwt_signing_key="test-secret",
         )
         assert proxy._redirect_path == "/auth/callback"
 
@@ -416,7 +420,8 @@ class TestOAuthProxyClientRegistration:
         stored = await oauth_proxy.get_client("original-client")
         assert stored is not None
         assert stored.client_id == "original-client"
-        assert stored.client_secret == "original-secret"
+        # Proxy uses token_endpoint_auth_method="none", so client_secret is not stored
+        assert stored.client_secret is None
 
     async def test_get_registered_client(self, oauth_proxy):
         """Test retrieving a registered client."""
@@ -446,6 +451,7 @@ class TestOAuthProxyAuthorization:
             client_id="test-client",
             client_secret="test-secret",
             redirect_uris=[AnyUrl("http://localhost:54321/callback")],
+            jwt_signing_key="test-secret",
         )
 
         # Register client first (required for consent flow)
@@ -493,6 +499,7 @@ class TestOAuthProxyPKCE:
             token_verifier=jwt_verifier,
             base_url="https://proxy.example.com",
             forward_pkce=True,
+            jwt_signing_key="test-secret",
         )
 
     @pytest.fixture
@@ -505,6 +512,7 @@ class TestOAuthProxyPKCE:
             token_verifier=jwt_verifier,
             base_url="https://proxy.example.com",
             forward_pkce=False,
+            jwt_signing_key="test-secret",
         )
 
     async def test_pkce_forwarding_enabled(self, proxy_with_pkce):
@@ -591,6 +599,7 @@ class TestOAuthProxyTokenEndpointAuth:
             token_verifier=jwt_verifier,
             base_url="https://proxy.example.com",
             token_endpoint_auth_method="client_secret_post",
+            jwt_signing_key="test-secret",
         )
         assert proxy_post._token_endpoint_auth_method == "client_secret_post"
 
@@ -603,6 +612,7 @@ class TestOAuthProxyTokenEndpointAuth:
             token_verifier=jwt_verifier,
             base_url="https://proxy.example.com",
             token_endpoint_auth_method="client_secret_basic",
+            jwt_signing_key="test-secret",
         )
         assert proxy_basic._token_endpoint_auth_method == "client_secret_basic"
 
@@ -614,10 +624,10 @@ class TestOAuthProxyTokenEndpointAuth:
             upstream_client_secret="secret",
             token_verifier=jwt_verifier,
             base_url="https://proxy.example.com",
+            jwt_signing_key="test-secret",
         )
         assert proxy_default._token_endpoint_auth_method is None
 
-    @pytest.mark.asyncio
     async def test_token_auth_method_passed_to_client(self, jwt_verifier):
         """Test that auth method is passed to AsyncOAuth2Client."""
         proxy = OAuthProxy(
@@ -628,35 +638,106 @@ class TestOAuthProxyTokenEndpointAuth:
             token_verifier=jwt_verifier,
             base_url="https://proxy.example.com",
             token_endpoint_auth_method="client_secret_post",
+            jwt_signing_key="test-secret",
         )
 
+        # First, create a valid FastMCP token via full OAuth flow
+        client = OAuthClientInformationFull(
+            client_id="test-client",
+            client_secret="test-secret",
+            redirect_uris=[AnyUrl("http://localhost:12345/callback")],
+        )
+
+        # Mock the upstream OAuth provider response
         with patch("fastmcp.server.auth.oauth_proxy.AsyncOAuth2Client") as MockClient:
             mock_client = AsyncMock()
+
+            # Mock initial token exchange (authorization code flow)
+            mock_client.fetch_token = AsyncMock(
+                return_value={
+                    "access_token": "upstream-access-token",
+                    "refresh_token": "upstream-refresh-token",
+                    "expires_in": 3600,
+                    "token_type": "Bearer",
+                }
+            )
+
+            # Mock token refresh
             mock_client.refresh_token = AsyncMock(
                 return_value={
-                    "access_token": "new-token",
-                    "refresh_token": "new-refresh",
+                    "access_token": "new-upstream-token",
+                    "refresh_token": "new-upstream-refresh",
                     "expires_in": 3600,
+                    "token_type": "Bearer",
                 }
             )
             MockClient.return_value = mock_client
 
-            client = OAuthClientInformationFull(
+            # Register client and do initial OAuth flow to get valid FastMCP tokens
+            await proxy.register_client(client)
+
+            # Store client code that would be created during OAuth callback
+            from fastmcp.server.auth.oauth_proxy import ClientCode
+
+            client_code = ClientCode(
+                code="test-auth-code",
                 client_id="test-client",
-                client_secret="test-secret",
-                redirect_uris=[AnyUrl("http://localhost:12345/callback")],
+                redirect_uri="http://localhost:12345/callback",
+                code_challenge="",
+                code_challenge_method="S256",
+                scopes=["read"],
+                idp_tokens={
+                    "access_token": "upstream-access-token",
+                    "refresh_token": "upstream-refresh-token",
+                    "expires_in": 3600,
+                    "token_type": "Bearer",
+                },
+                expires_at=time.time() + 300,
+                created_at=time.time(),
+            )
+            await proxy._code_store.put(key=client_code.code, value=client_code)
+
+            # Exchange authorization code to get FastMCP tokens
+            from mcp.server.auth.provider import AuthorizationCode
+
+            auth_code = AuthorizationCode(
+                code="test-auth-code",
+                scopes=["read"],
+                expires_at=time.time() + 300,
+                client_id="test-client",
+                code_challenge="",
+                redirect_uri=AnyUrl("http://localhost:12345/callback"),
+                redirect_uri_provided_explicitly=True,
+            )
+            result = await proxy.exchange_authorization_code(
+                client=client,
+                authorization_code=auth_code,
             )
 
-            refresh_token = RefreshToken(
-                token="old-refresh",
+            # Now test refresh with the valid FastMCP refresh token
+            assert result.refresh_token is not None
+            fastmcp_refresh = RefreshToken(
+                token=result.refresh_token,
                 client_id="test-client",
                 scopes=["read"],
                 expires_at=None,
             )
 
-            await proxy.exchange_refresh_token(client, refresh_token, ["read"])
+            # Reset mock to check refresh call
+            MockClient.reset_mock()
+            mock_client.refresh_token = AsyncMock(
+                return_value={
+                    "access_token": "new-upstream-token-2",
+                    "refresh_token": "new-upstream-refresh-2",
+                    "expires_in": 3600,
+                    "token_type": "Bearer",
+                }
+            )
+            MockClient.return_value = mock_client
 
-            # Verify auth method was passed
+            await proxy.exchange_refresh_token(client, fastmcp_refresh, ["read"])
+
+            # Verify auth method was passed to OAuth client
             MockClient.assert_called_with(
                 client_id="client-id",
                 client_secret="client-secret",
@@ -668,7 +749,6 @@ class TestOAuthProxyTokenEndpointAuth:
 class TestOAuthProxyE2E:
     """End-to-end tests using mock OAuth provider."""
 
-    @pytest.mark.asyncio
     async def test_full_oauth_flow_with_mock_provider(self, mock_oauth_provider):
         """Test complete OAuth flow with mock provider."""
         # Create proxy pointing to mock provider
@@ -679,6 +759,7 @@ class TestOAuthProxyE2E:
             upstream_client_secret="mock-secret",
             token_verifier=MockTokenVerifier(),
             base_url="http://localhost:8000",
+            jwt_signing_key="test-secret",
         )
 
         # Create FastMCP server with proxy
@@ -723,7 +804,6 @@ class TestOAuthProxyE2E:
         # Transaction ID itself is used as upstream state parameter
         assert transaction.txn_id == txn_id
 
-    @pytest.mark.asyncio
     async def test_token_refresh_with_mock_provider(self, mock_oauth_provider):
         """Test token refresh flow with mock provider."""
         proxy = OAuthProxy(
@@ -733,11 +813,21 @@ class TestOAuthProxyE2E:
             upstream_client_secret="mock-secret",
             token_verifier=MockTokenVerifier(),
             base_url="http://localhost:8000",
+            jwt_signing_key="test-secret",
         )
 
-        # Mock initial tokens in provider
-        refresh_token = "mock_refresh_initial"
-        mock_oauth_provider.refresh_tokens[refresh_token] = {
+        client = OAuthClientInformationFull(
+            client_id="test-client",
+            client_secret="test-secret",
+            redirect_uris=[AnyUrl("http://localhost:12345/callback")],
+        )
+
+        # Register client first
+        await proxy.register_client(client)
+
+        # Set up initial upstream tokens in mock provider
+        upstream_refresh_token = "mock_refresh_initial"
+        mock_oauth_provider.refresh_tokens[upstream_refresh_token] = {
             "client_id": "mock-client",
             "scope": "read write",
         }
@@ -745,14 +835,24 @@ class TestOAuthProxyE2E:
         with patch("fastmcp.server.auth.oauth_proxy.AsyncOAuth2Client") as MockClient:
             mock_client = AsyncMock()
 
-            # Configure mock to call real provider
+            # Mock initial token exchange to get FastMCP tokens
+            mock_client.fetch_token = AsyncMock(
+                return_value={
+                    "access_token": "upstream-access-initial",
+                    "refresh_token": upstream_refresh_token,
+                    "expires_in": 3600,
+                    "token_type": "Bearer",
+                }
+            )
+
+            # Configure mock to call real provider for refresh
             async def mock_refresh(*args, **kwargs):
                 async with httpx.AsyncClient() as http:
                     response = await http.post(
                         mock_oauth_provider.token_endpoint,
                         data={
                             "grant_type": "refresh_token",
-                            "refresh_token": refresh_token,
+                            "refresh_token": upstream_refresh_token,
                         },
                     )
                     return response.json()
@@ -760,26 +860,63 @@ class TestOAuthProxyE2E:
             mock_client.refresh_token = mock_refresh
             MockClient.return_value = mock_client
 
-            # Test refresh
-            client = OAuthClientInformationFull(
+            # Store client code that would be created during OAuth callback
+            from fastmcp.server.auth.oauth_proxy import ClientCode
+
+            client_code = ClientCode(
+                code="test-auth-code",
                 client_id="test-client",
-                client_secret="test-secret",
-                redirect_uris=[AnyUrl("http://localhost:12345/callback")],
+                redirect_uri="http://localhost:12345/callback",
+                code_challenge="",
+                code_challenge_method="S256",
+                scopes=["read", "write"],
+                idp_tokens={
+                    "access_token": "upstream-access-initial",
+                    "refresh_token": upstream_refresh_token,
+                    "expires_in": 3600,
+                    "token_type": "Bearer",
+                },
+                expires_at=time.time() + 300,
+                created_at=time.time(),
+            )
+            await proxy._code_store.put(key=client_code.code, value=client_code)
+
+            # Exchange authorization code to get FastMCP tokens
+            from mcp.server.auth.provider import AuthorizationCode
+
+            auth_code = AuthorizationCode(
+                code="test-auth-code",
+                scopes=["read", "write"],
+                expires_at=time.time() + 300,
+                client_id="test-client",
+                code_challenge="",
+                redirect_uri=AnyUrl("http://localhost:12345/callback"),
+                redirect_uri_provided_explicitly=True,
+            )
+            initial_result = await proxy.exchange_authorization_code(
+                client=client,
+                authorization_code=auth_code,
             )
 
-            refresh = RefreshToken(
-                token=refresh_token,
+            # Now test refresh with the valid FastMCP refresh token
+            assert initial_result.refresh_token is not None
+            fastmcp_refresh = RefreshToken(
+                token=initial_result.refresh_token,
                 client_id="test-client",
                 scopes=["read"],
                 expires_at=None,
             )
 
-            result = await proxy.exchange_refresh_token(client, refresh, ["read"])
+            result = await proxy.exchange_refresh_token(
+                client, fastmcp_refresh, ["read"]
+            )
 
-            assert result.access_token.startswith("mock_access_")
+            # Should return new FastMCP tokens (not upstream tokens)
+            assert result.access_token != "upstream-access-initial"
+            # FastMCP tokens are JWTs (have 3 segments)
+            assert len(result.access_token.split(".")) == 3
             assert mock_oauth_provider.refresh_called
 
-    @pytest.mark.asyncio
     async def test_pkce_validation_with_mock_provider(self, mock_oauth_provider):
         """Test PKCE validation with mock provider."""
         mock_oauth_provider.require_pkce = True
@@ -792,6 +929,7 @@ class TestOAuthProxyE2E:
             token_verifier=MockTokenVerifier(),
             base_url="http://localhost:8000",
             forward_pkce=True,  # Enable PKCE forwarding
+            jwt_signing_key="test-secret",
         )
 
         client = OAuthClientInformationFull(
@@ -847,6 +985,7 @@ class TestParameterForwarding:
             base_url="https://proxy.example.com",
             extra_authorize_params={"audience": "https://api.example.com"},
             extra_token_params={"audience": "https://api.example.com"},
+            jwt_signing_key="test-secret",
         )
 
     @pytest.fixture
@@ -859,6 +998,7 @@ class TestParameterForwarding:
             upstream_client_secret="upstream-secret",
             token_verifier=jwt_verifier,
             base_url="https://proxy.example.com",
+            jwt_signing_key="test-secret",
         )
 
     async def test_resource_parameter_forwarding(self, proxy_without_extra_params):
@@ -1010,6 +1150,7 @@ class TestParameterForwarding:
                 "prompt": "consent",
                 "max_age": "3600",
             },
+            jwt_signing_key="test-secret",
         )
 
         client = OAuthClientInformationFull(
@@ -1047,7 +1188,6 @@ class TestParameterForwarding:
         assert proxy._extra_authorize_params.get("prompt") == "consent"
         assert proxy._extra_authorize_params.get("max_age") == "3600"
 
-    @pytest.mark.asyncio
     async def test_token_endpoint_invalid_client_error(self, jwt_verifier):
         """Test that invalid client_id returns OAuth 2.1 compliant error response.
 
@@ -1067,6 +1207,7 @@ class TestParameterForwarding:
             upstream_client_secret="upstream-secret",
             token_verifier=jwt_verifier,
             base_url="https://proxy.example.com",
+            jwt_signing_key="test-secret",
         )
 
         # Create a test app with OAuth routes
@@ -1107,29 +1248,36 @@ class TestParameterForwarding:
 class TestTokenHandlerErrorTransformation:
     """Tests for TokenHandler's OAuth 2.1 compliant error transformation."""
 
-    def test_transforms_client_auth_failure_to_invalid_client_401(self):
+    async def test_transforms_client_auth_failure_to_invalid_client_401(self):
         """Test that client authentication failures return invalid_client with 401."""
-        from mcp.server.auth.handlers.token import TokenErrorResponse
+        from unittest.mock import AsyncMock, patch
+
+        from mcp.server.auth.handlers.token import TokenHandler as SDKTokenHandler
 
         from fastmcp.server.auth.oauth_proxy import TokenHandler
 
         handler = TokenHandler(provider=Mock(), client_authenticator=Mock())
 
-        # Simulate error from ClientAuthenticator.authenticate() failure
-        error_response = TokenErrorResponse(
-            error="unauthorized_client",
-            error_description="Invalid client_id 'test-client-id'",
+        # Create a mock 401 response like the SDK returns for auth failures
+        mock_response = Mock()
+        mock_response.status_code = 401
+        mock_response.body = (
+            b'{"error":"unauthorized_client","error_description":"Invalid client_id"}'
         )
 
-        response = handler.response(error_response)
+        # Patch the parent class's handle() to return our mock response
+        with patch.object(
+            SDKTokenHandler,
+            "handle",
+            new_callable=AsyncMock,
+            return_value=mock_response,
+        ):
+            response = await handler.handle(Mock())
 
         # Should transform to OAuth 2.1 compliant response
         assert response.status_code == 401
         assert b'"error":"invalid_client"' in response.body
-        assert (
-            b'"error_description":"Invalid client_id \'test-client-id\'"'
-            in response.body
-        )
+        assert b'"error_description":"Invalid client_id"' in response.body
 
     def test_does_not_transform_grant_type_unauthorized_to_invalid_client(self):
         """Test that grant type authorization errors stay as unauthorized_client with 400."""
@@ -1169,3 +1317,103 @@ class TestTokenHandlerErrorTransformation:
         # Should pass through unchanged
         assert response.status_code == 400
         assert b'"error":"invalid_grant"' in response.body
+
+
+class TestErrorPageRendering:
+    """Test error page rendering for OAuth callback errors."""
+
+    def test_create_error_html_basic(self):
+        """Test basic error page generation."""
+        from fastmcp.server.auth.oauth_proxy import create_error_html
+
+        html = create_error_html(
+            error_title="Test Error",
+            error_message="This is a test error message",
+        )
+
+        # Verify it's valid HTML
+        assert "<!DOCTYPE html>" in html
+        assert "<title>Test Error</title>" in html
+        assert "This is a test error message" in html
+        assert 'class="info-box error"' in html
+
+    def test_create_error_html_with_details(self):
+        """Test error page with error details."""
+        from fastmcp.server.auth.oauth_proxy import create_error_html
+
+        html = create_error_html(
+            error_title="OAuth Error",
+            error_message="Authentication failed",
+            error_details={
+                "Error Code": "invalid_scope",
+                "Description": "Requested scope does not exist",
+            },
+        )
+
+        # Verify error details are included
+        assert "Error Details" in html
+        assert "Error Code" in html
+        assert "invalid_scope" in html
+        assert "Description" in html
+        assert "Requested scope does not exist" in html
+
+    def test_create_error_html_escapes_user_input(self):
+        """Test that error page properly escapes HTML in user input."""
+        from fastmcp.server.auth.oauth_proxy import create_error_html
+
+        html = create_error_html(
+            error_title="Error <script>alert('xss')</script>",
+            error_message="Message with <b>HTML</b> tags",
+            error_details={"Key<script>": "Value<img>"},
+        )
+
+        # Verify HTML is escaped
+        assert "<script>alert('xss')</script>" not in html
+        assert "&lt;script&gt;" in html
+        assert "<b>HTML</b>" not in html
+        assert "&lt;b&gt;HTML&lt;/b&gt;" in html
+
+    async def test_callback_error_returns_html_page(self):
+        """Test that OAuth callback errors return styled HTML instead of data: URLs."""
+        from unittest.mock import Mock
+
+        from starlette.requests import Request
+        from starlette.responses import HTMLResponse
+
+        from fastmcp.server.auth.oauth_proxy import OAuthProxy
+        from fastmcp.server.auth.providers.jwt import JWTVerifier
+
+        # Create a minimal OAuth proxy
+        provider = OAuthProxy(
+            upstream_authorization_endpoint="https://idp.example.com/authorize",
+            upstream_token_endpoint="https://idp.example.com/token",
+            upstream_client_id="test-client",
+            upstream_client_secret="test-secret",
+            token_verifier=JWTVerifier(
+                jwks_uri="https://idp.example.com/.well-known/jwks.json",
+                issuer="https://idp.example.com",
+                audience="test-client",
+            ),
+            base_url="http://localhost:8000",
+            jwt_signing_key="test-signing-key",
+        )
+
+        # Mock a request with an error from the IdP
+        mock_request = Mock(spec=Request)
+        mock_request.query_params = {
+            "error": "invalid_scope",
+            "error_description": "The application asked for scope 'read' that doesn't exist",
+            "state": "test-state",
+        }
+
+        # Call the callback handler
+        response = await provider._handle_idp_callback(mock_request)
+
+        # Verify we get an HTMLResponse, not a RedirectResponse
+        assert isinstance(response, HTMLResponse)
+        assert response.status_code == 400
+
+        # Verify the response contains the error message
+        assert b"invalid_scope" in response.body
+        assert b"doesn&#x27;t exist" in response.body  # HTML-escaped apostrophe
+        assert b"OAuth Error" in response.body

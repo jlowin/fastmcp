@@ -46,16 +46,16 @@ ClientTransportT = TypeVar("ClientTransportT", bound="ClientTransport")
 
 __all__ = [
     "ClientTransport",
-    "SSETransport",
-    "StreamableHttpTransport",
-    "StdioTransport",
-    "PythonStdioTransport",
     "FastMCPStdioTransport",
-    "NodeStdioTransport",
-    "UvxStdioTransport",
-    "UvStdioTransport",
-    "NpxStdioTransport",
     "FastMCPTransport",
+    "NodeStdioTransport",
+    "NpxStdioTransport",
+    "PythonStdioTransport",
+    "SSETransport",
+    "StdioTransport",
+    "StreamableHttpTransport",
+    "UvStdioTransport",
+    "UvxStdioTransport",
     "infer_transport",
 ]
 
@@ -109,9 +109,8 @@ class ClientTransport(abc.ABC):
         # Basic representation for subclasses
         return f"<{self.__class__.__name__}>"
 
-    async def close(self):
+    async def close(self):  # noqa: B027
         """Close the transport."""
-        pass
 
     def _set_auth(self, auth: httpx.Auth | Literal["oauth"] | str | None):
         if auth is not None:
@@ -141,10 +140,10 @@ class WSTransport(ClientTransport):
     ) -> AsyncIterator[ClientSession]:
         try:
             from mcp.client.websocket import websocket_client
-        except ImportError:
+        except ImportError as e:
             raise ImportError(
                 "The websocket transport is not available. Please install fastmcp[websockets] or install the websockets package manually."
-            )
+            ) from e
 
         async with websocket_client(self.url) as transport:
             read_stream, write_stream = transport
@@ -178,8 +177,8 @@ class SSETransport(ClientTransport):
 
         self.url = url
         self.headers = headers or {}
-        self._set_auth(auth)
         self.httpx_client_factory = httpx_client_factory
+        self._set_auth(auth)
 
         if isinstance(sse_read_timeout, int | float):
             sse_read_timeout = datetime.timedelta(seconds=float(sse_read_timeout))
@@ -187,7 +186,7 @@ class SSETransport(ClientTransport):
 
     def _set_auth(self, auth: httpx.Auth | Literal["oauth"] | str | None):
         if auth == "oauth":
-            auth = OAuth(self.url)
+            auth = OAuth(self.url, httpx_client_factory=self.httpx_client_factory)
         elif isinstance(auth, str):
             auth = BearerAuth(auth)
         self.auth = auth
@@ -207,7 +206,7 @@ class SSETransport(ClientTransport):
         # instead we simply leave the kwarg out if it's not provided
         if self.sse_read_timeout is not None:
             client_kwargs["sse_read_timeout"] = self.sse_read_timeout.total_seconds()
-        if session_kwargs.get("read_timeout_seconds", None) is not None:
+        if session_kwargs.get("read_timeout_seconds") is not None:
             read_timeout_seconds = cast(
                 datetime.timedelta, session_kwargs.get("read_timeout_seconds")
             )
@@ -248,8 +247,8 @@ class StreamableHttpTransport(ClientTransport):
 
         self.url = url
         self.headers = headers or {}
-        self._set_auth(auth)
         self.httpx_client_factory = httpx_client_factory
+        self._set_auth(auth)
 
         if isinstance(sse_read_timeout, int | float):
             sse_read_timeout = datetime.timedelta(seconds=float(sse_read_timeout))
@@ -257,7 +256,7 @@ class StreamableHttpTransport(ClientTransport):
 
     def _set_auth(self, auth: httpx.Auth | Literal["oauth"] | str | None):
         if auth == "oauth":
-            auth = OAuth(self.url)
+            auth = OAuth(self.url, httpx_client_factory=self.httpx_client_factory)
         elif isinstance(auth, str):
             auth = BearerAuth(auth)
         self.auth = auth
@@ -277,7 +276,7 @@ class StreamableHttpTransport(ClientTransport):
         # instead we simply leave the kwarg out if it's not provided
         if self.sse_read_timeout is not None:
             client_kwargs["sse_read_timeout"] = self.sse_read_timeout
-        if session_kwargs.get("read_timeout_seconds", None) is not None:
+        if session_kwargs.get("read_timeout_seconds") is not None:
             client_kwargs["timeout"] = session_kwargs.get("read_timeout_seconds")
 
         if self.httpx_client_factory is not None:
@@ -451,8 +450,7 @@ async def _stdio_transport_connect_task(
                 if log_file is None:
                     log_file_handle = sys.stderr
                 elif isinstance(log_file, Path):
-                    log_file_handle = open(log_file, "a")
-                    stack.callback(log_file_handle.close)
+                    log_file_handle = stack.enter_context(log_file.open("a"))
                 else:
                     # Must be TextIO - use it directly
                     log_file_handle = log_file
@@ -748,6 +746,7 @@ class UvxStdioTransport(StdioTransport):
         env: dict[str, str] | None = None
         if env_vars:
             env = os.environ.copy()
+            env.update(env_vars)
 
         super().__init__(
             command="uvx",
@@ -851,7 +850,10 @@ class FastMCPTransport(ClientTransport):
             server_read, server_write = server_streams
 
             # Create a cancel scope for the server task
-            async with anyio.create_task_group() as tg:
+            async with (
+                anyio.create_task_group() as tg,
+                _enter_server_lifespan(server=self.server),
+            ):
                 tg.start_soon(
                     lambda: self.server._mcp_server.run(
                         server_read,
@@ -873,6 +875,18 @@ class FastMCPTransport(ClientTransport):
 
     def __repr__(self) -> str:
         return f"<FastMCPTransport(server='{self.server.name}')>"
+
+
+@contextlib.asynccontextmanager
+async def _enter_server_lifespan(
+    server: FastMCP | FastMCP1Server,
+) -> AsyncIterator[None]:
+    """Enters the server's lifespan context for FastMCP servers and does nothing for FastMCP 1 servers."""
+    if isinstance(server, FastMCP):
+        async with server._lifespan_manager():
+            yield
+    else:
+        yield
 
 
 class MCPConfigTransport(ClientTransport):
@@ -938,7 +952,7 @@ class MCPConfigTransport(ClientTransport):
 
         # if there's exactly one server, create a client for that server
         elif len(self.config.mcpServers) == 1:
-            self.transport = list(self.config.mcpServers.values())[0].to_transport()
+            self.transport = next(iter(self.config.mcpServers.values())).to_transport()
             self._underlying_transports.append(self.transport)
 
         # otherwise create a composite client

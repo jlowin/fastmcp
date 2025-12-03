@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import warnings
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from mcp.types import ToolAnnotations
+from pydantic import ValidationError
 
 from fastmcp import settings
 from fastmcp.exceptions import NotFoundError, ToolError
@@ -26,11 +27,15 @@ class ToolManager:
         self,
         duplicate_behavior: DuplicateBehavior | None = None,
         mask_error_details: bool | None = None,
-        transformations: dict[str, ToolTransformConfig] | None = None,
+        transformations: Mapping[str, ToolTransformConfig] | None = None,
     ):
         self._tools: dict[str, Tool] = {}
-        self.mask_error_details = mask_error_details or settings.mask_error_details
-        self.transformations = transformations or {}
+        self.mask_error_details: bool = (
+            mask_error_details or settings.mask_error_details
+        )
+        self.transformations: dict[str, ToolTransformConfig] = dict(
+            transformations or {}
+        )
 
         # Default to "warn" if None is provided
         if duplicate_behavior is None:
@@ -153,6 +158,9 @@ class ToolManager:
         tool = await self.get_tool(key)
         try:
             return await tool.run(arguments)
+        except ValidationError as e:
+            logger.exception(f"Error validating tool {key!r}: {e}")
+            raise e
         except ToolError as e:
             logger.exception(f"Error calling tool {key!r}")
             raise e

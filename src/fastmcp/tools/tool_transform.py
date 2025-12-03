@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import inspect
-import warnings
 from collections.abc import Callable
 from contextvars import ContextVar
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Annotated, Any, Literal, cast
 
@@ -13,7 +13,6 @@ from pydantic import ConfigDict
 from pydantic.fields import Field
 from pydantic.functional_validators import BeforeValidator
 
-import fastmcp
 from fastmcp.tools.tool import ParsedFunction, Tool, ToolResult, _convert_to_content
 from fastmcp.utilities.components import _convert_set_default_none
 from fastmcp.utilities.json_schema import compress_schema
@@ -365,15 +364,15 @@ class TransformedTool(Tool):
         cls,
         tool: Tool,
         name: str | None = None,
-        title: str | None | NotSetT = NotSet,
-        description: str | None | NotSetT = NotSet,
+        title: str | NotSetT | None = NotSet,
+        description: str | NotSetT | None = NotSet,
         tags: set[str] | None = None,
         transform_fn: Callable[..., Any] | None = None,
         transform_args: dict[str, ArgTransform] | None = None,
-        annotations: ToolAnnotations | None | NotSetT = NotSet,
-        output_schema: dict[str, Any] | None | NotSetT | Literal[False] = NotSet,
-        serializer: Callable[[Any], str] | None | NotSetT = NotSet,
-        meta: dict[str, Any] | None | NotSetT = NotSet,
+        annotations: ToolAnnotations | NotSetT | None = NotSet,
+        output_schema: dict[str, Any] | NotSetT | None = NotSet,
+        serializer: Callable[[Any], str] | NotSetT | None = NotSet,
+        meta: dict[str, Any] | NotSetT | None = NotSet,
         enabled: bool | None = None,
     ) -> TransformedTool:
         """Create a transformed tool from a parent tool.
@@ -486,15 +485,6 @@ class TransformedTool(Tool):
                         final_output_schema = tool.output_schema
             else:
                 final_output_schema = tool.output_schema
-        elif output_schema is False:
-            # Handle False as deprecated synonym for None (deprecated in 2.11.4)
-            if fastmcp.settings.deprecation_warnings:
-                warnings.warn(
-                    "Passing output_schema=False is deprecated. Use output_schema=None instead.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-            final_output_schema = None
         else:
             final_output_schema = cast(dict | None, output_schema)
 
@@ -620,7 +610,8 @@ class TransformedTool(Tool):
         """
 
         # Build transformed schema and mapping
-        parent_defs = parent_tool.parameters.get("$defs", {})
+        # Deep copy to prevent compress_schema from mutating parent tool's $defs
+        parent_defs = deepcopy(parent_tool.parameters.get("$defs", {}))
         parent_props = parent_tool.parameters.get("properties", {}).copy()
         parent_required = set(parent_tool.parameters.get("required", []))
 

@@ -110,7 +110,9 @@ mcp = FastMCP(name="My Server", auth=auth)
 </ParamField>
 
 <ParamField body="base_url" type="AnyHttpUrl | str" required>
-  Public URL of your FastMCP server (e.g., `https://your-server.com`)
+  Public URL where OAuth endpoints will be accessible, **including any mount path** (e.g., `https://your-server.com/api`).
+
+  This URL is used to construct OAuth callback URLs and operational endpoints. When mounting under a path prefix, include that prefix in `base_url`. Use `issuer_url` separately to specify where auth server metadata is located (typically at root level).
 </ParamField>
 
 <ParamField body="redirect_path" type="str" default="/auth/callback">
@@ -123,7 +125,25 @@ mcp = FastMCP(name="My Server", auth=auth)
 </ParamField>
 
 <ParamField body="issuer_url" type="AnyHttpUrl | str | None">
-  Issuer URL for OAuth metadata (defaults to base_url)
+  Issuer URL for OAuth authorization server metadata (defaults to `base_url`).
+
+  When mounting your MCP server under a path prefix (e.g., `/api`), set this to your root-level URL to avoid 404 logs during OAuth discovery. MCP clients try path-scoped discovery first per RFC 8414, which will fail if your auth server metadata is at the root level.
+
+  **Example with mounting:**
+  ```python
+  auth = GitHubProvider(
+      base_url="http://localhost:8000/api",  # OAuth endpoints under /api
+      issuer_url="http://localhost:8000"     # Auth server metadata at root
+  )
+  ```
+
+  Without `issuer_url`, clients will attempt `/.well-known/oauth-authorization-server/api` (404) before falling back to `/.well-known/oauth-authorization-server` (success). Setting `issuer_url` to the root eliminates the 404 attempt.
+
+  **When to use:**
+  - **Default (`None`)**: Use `base_url` as issuer - simple deployments at root path
+  - **Root-level URL**: Mounting under a path prefix - avoids 404 logs
+
+  See the [HTTP Deployment guide](/deployment/http#mounting-authenticated-servers) for complete mounting examples.
 </ParamField>
 
 <ParamField body="service_documentation_url" type="AnyHttpUrl | str | None">
@@ -190,16 +210,112 @@ These parameters are included in all token requests to the upstream provider.
 
 </ParamField>
 
-<ParamField body="client_storage" type="KVStorage | None">
-  Storage backend for persisting OAuth client registrations. By default, clients are automatically persisted to disk in `~/.config/fastmcp/oauth-proxy-clients/`, allowing them to survive server restarts as long as the filesystem remains accessible. This means MCP clients only need to register once and can reconnect seamlessly after your server restarts.
+<ParamField body="client_storage" type="AsyncKeyValue | None">
+
+<VersionBadge version="2.13.0" />
+  Storage backend for persisting OAuth client registrations and upstream tokens.
+
+  **Default behavior:**
+  By default, clients are automatically persisted to an encrypted disk store, allowing them to survive server restarts as long as the filesystem remains accessible. This means MCP clients only need to register once and can reconnect seamlessly. The disk store is encrypted using a key derived from the JWT Signing Key (which is derived from the upstream client secret by default). For client registrations to survive upstream client secret rotation, you should provide a JWT Signing Key or your own client_storage.
+
+For production deployments with multiple servers or cloud deployments, see [Storage Backends](/servers/storage-backends) for available options.
+
+<Warning>
+  **When providing custom storage**, wrap it in `FernetEncryptionWrapper` to encrypt sensitive OAuth tokens at rest:
+
+  ```python
+  from key_value.aio.stores.redis import RedisStore
+  from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
+  from cryptography.fernet import Fernet
+  import os
+
+  auth = OAuthProxy(
+      ...,
+      jwt_signing_key=os.environ["JWT_SIGNING_KEY"],
+      client_storage=FernetEncryptionWrapper(
+          key_value=RedisStore(host="redis.example.com", port=6379),
+          fernet=Fernet(os.environ["STORAGE_ENCRYPTION_KEY"])
+      )
+  )
+  ```
+
+  Without encryption, upstream OAuth tokens are stored in plaintext.
+</Warning>
+
+Testing with in-memory storage (unencrypted):
 
 ```python
-from fastmcp.utilities.storage import InMemoryStorage
+from key_value.aio.stores.memory import MemoryStore
 
 # Use in-memory storage for testing (clients lost on restart)
-auth = OAuthProxy(..., client_storage=InMemoryStorage())
+auth = OAuthProxy(..., client_storage=MemoryStore())
 ```
 
+</ParamField>
+
+<ParamField body="jwt_signing_key" type="str | bytes | None">
+
+<VersionBadge version="2.13.0" />
+  Secret used to sign FastMCP JWT tokens issued to clients. Accepts any string or bytes - will be derived into a proper 32-byte cryptographic key using HKDF.
+
+  **Default behavior (`None`):**
+  Derives a 32-byte key using PBKDF2 from the upstream client secret.
+
+  **For production:**
+  Provide an explicit secret (e.g., from environment variable) to use a fixed key instead of the key derived from the upstream client secret. This allows you to manage keys securely in cloud environments, allows keys to work across multiple instances, and allows you to rotate keys without losing client registrations.
+
+  ```python
+  import os
+
+  auth = OAuthProxy(
+      ...,
+      jwt_signing_key=os.environ["JWT_SIGNING_KEY"],  # Any sufficiently complex string!
+      client_storage=RedisStore(...)  # Persistent storage
+  )
+  ```
+
+  See [HTTP Deployment - OAuth Token Security](/deployment/http#oauth-token-security) for complete production setup.
+</ParamField>
+
+
+<ParamField body="require_authorization_consent" type="bool" default="True">
+  Whether to require user consent before authorizing MCP clients. When enabled (default), users see a consent screen that displays which client is requesting access, preventing [confused deputy attacks](https://modelcontextprotocol.io/specification/2025-06-18/basic/security_best_practices#confused-deputy-problem) by ensuring users explicitly approve new clients.
+
+  **Default behavior (True):**
+  Users see a consent screen on first authorization. Consent choices are remembered via signed cookies, so users only need to approve each client once. This protects against malicious clients impersonating the user.
+
+  **Disabling consent (False):**
+  Authorization proceeds directly to the upstream provider without user confirmation. Only use this for local development or testing environments where the security trade-off is acceptable.
+
+  ```python
+  # Development/testing only - skip consent screen
+  auth = OAuthProxy(
+      ...,
+      require_authorization_consent=False  # ⚠️ Security warning: only for local/testing
+  )
+  ```
+
+  <Warning>
+    Disabling consent removes an important security layer. Only disable for local development or testing environments where you fully control all connecting clients.
+  </Warning>
+</ParamField>
+
+<ParamField body="consent_csp_policy" type="str | None" default="None">
+  Content Security Policy for the consent page.
+
+  - `None` (default): Uses the built-in CSP policy with appropriate directives for form submission
+  - Empty string `""`: Disables CSP entirely (no meta tag rendered)
+  - Custom string: Uses the provided value as the CSP policy
+
+  This is useful for organizations that have their own CSP policies and need to override or disable FastMCP's built-in CSP directives.
+
+  ```python
+  # Disable CSP entirely (let org CSP policies apply)
+  auth = OAuthProxy(..., consent_csp_policy="")
+
+  # Use custom CSP policy
+  auth = OAuthProxy(..., consent_csp_policy="default-src 'self'; style-src 'unsafe-inline'")
+  ```
 </ParamField>
 </Card>
 
@@ -226,7 +342,8 @@ Available providers include `GitHubProvider`, `GoogleProvider`, and others. Thes
 The OAuth proxy requires a compatible `TokenVerifier` to validate tokens from your provider. Different providers use different token formats:
 
 - **JWT tokens** (Google, Azure): Use `JWTVerifier` with the provider's JWKS endpoint
-- **Opaque tokens** (GitHub, Discord): Use provider-specific verifiers or implement custom validation
+- **Opaque tokens with RFC 7662 introspection** (Auth0, Okta, WorkOS): Use `IntrospectionTokenVerifier`
+- **Opaque tokens (provider-specific)** (GitHub, Discord): Use provider-specific verifiers like `GitHubTokenVerifier`
 
 See the [Token Verification guide](/servers/auth/token-verification) for detailed setup instructions for your provider.
 
@@ -331,6 +448,38 @@ Finally, the client exchanges its authorization code with the proxy to receive t
 
 This entire flow is transparent to the MCP client—it experiences a standard OAuth flow with dynamic registration, unaware that a proxy is managing the complexity behind the scenes.
 
+### Token Architecture
+
+The OAuth proxy implements a **token factory pattern**: instead of directly forwarding tokens from the upstream OAuth provider, it issues its own JWT tokens to MCP clients. This maintains proper OAuth 2.0 token audience boundaries and enables better security controls.
+
+**How it works:**
+
+When an MCP client completes authorization, the proxy:
+
+1. **Receives upstream tokens** from the OAuth provider (GitHub, Google, etc.)
+2. **Encrypts and stores** these tokens using Fernet encryption (AES-128-CBC + HMAC-SHA256)
+3. **Issues FastMCP JWT tokens** to the client, signed with HS256
+
+The FastMCP JWT contains minimal claims: issuer, audience, client ID, scopes, expiration, and a unique token identifier (JTI). The JTI acts as a reference linking to the encrypted upstream token.
+
+**Token validation:**
+
+When a client makes an MCP request with its FastMCP token:
+
+1. **FastMCP validates the JWT** signature, expiration, issuer, and audience
+2. **Looks up the upstream token** using the JTI from the validated JWT
+3. **Decrypts and validates** the upstream token with the provider
+
+This two-tier validation ensures that FastMCP tokens can only be used with this server (via audience validation) while maintaining full upstream token security.
+
+**Token expiry alignment:**
+
+FastMCP token lifetimes match the upstream token lifetimes. When the upstream token expires, the FastMCP token also expires, maintaining consistent security boundaries.
+
+**Refresh tokens:**
+
+The proxy issues its own refresh tokens that map to upstream refresh tokens. When a client uses a FastMCP refresh token, the proxy refreshes the upstream token and issues a new FastMCP access token.
+
 ### PKCE Forwarding
 
 The OAuth proxy automatically handles PKCE (Proof Key for Code Exchange) when working with providers that support or require it. The proxy generates its own PKCE parameters to send upstream while separately validating the client's PKCE, ensuring end-to-end security at both layers.
@@ -374,6 +523,18 @@ Check your server logs for "Client registered with redirect_uri" messages to ide
 
 ## Security
 
+### Key and Storage Management
+
+<VersionBadge version="2.13.0" />
+The OAuth proxy requires cryptographic keys for JWT signing and storage encryption, plus persistent storage to maintain valid tokens across server restarts.
+
+**Default behavior (appropriate for development only):**
+- **Mac/Windows**: FastMCP automatically generates keys and stores them in your system keyring. Storage defaults to disk. Tokens survive server restarts. This is **only** suitable for development and local testing.
+- **Linux**: Keys are ephemeral (random salt at startup). Storage defaults to memory. Tokens become invalid on server restart.
+
+**For production:**
+Configure the following parameters together: provide a unique `jwt_signing_key` (for signing FastMCP JWTs), and a shared `client_storage` backend (for storing tokens). Both are required for production deployments. Use a network-accessible storage backend like Redis or DynamoDB rather than local disk storage. **Wrap your storage in `FernetEncryptionWrapper` to encrypt sensitive OAuth tokens at rest** (see the `client_storage` parameter documentation above for examples). The keys accept any secret string and derive proper cryptographic keys using HKDF. See [OAuth Token Security](/deployment/http#oauth-token-security) and [Storage Backends](/servers/storage-backends) for complete production setup.
+
 ### Confused Deputy Attacks
 
 <VersionBadge version="2.13.0" />
@@ -385,6 +546,12 @@ The OAuth proxy works by bridging DCR clients to traditional auth providers, whi
 #### Mitigation
 
 FastMCP's OAuth proxy requires you to explicitly consent whenever any new or unrecognized client attempts to connect to your server. Before any authorization happens, you see a consent page showing the client's details, redirect URI, and requested scopes. This gives you the opportunity to review and deny suspicious requests. Once you approve a client, it's remembered so you don't see the consent page again for that client. The consent mechanism is implemented with CSRF tokens and cryptographically signed cookies to prevent tampering.
+
+![](/assets/images/oauth-proxy-consent-screen.png)
+
+The consent page automatically displays your server's name, icon, and website URL, if available. These visual identifiers help users confirm they're authorizing the correct server.
+
+
 
 **Learn more:**
 - [MCP Security Best Practices](https://modelcontextprotocol.io/specification/2025-06-18/basic/security_best_practices#confused-deputy-problem) - Official specification guidance

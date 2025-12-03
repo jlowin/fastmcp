@@ -1,0 +1,36 @@
+name: Auto-close needs MRE issues
+description: Auto-closes issues that need minimal reproducible examples after 7 days of author inactivity
+on:
+  schedule:
+    - cron: "0 9 * * *" # Run daily at 9 AM UTC
+  workflow_dispatch:
+
+jobs:
+  auto-close-needs-mre:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Generate Marvin App token
+        id: marvin-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.MARVIN_APP_ID }}
+          private-key: ${{ secrets.MARVIN_APP_PRIVATE_KEY }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Auto-close needs MRE issues
+        run: uv run scripts/auto_close_needs_mre.py
+        env:
+          GITHUB_TOKEN: ${{ steps.marvin-token.outputs.token }}
+          GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
+          GITHUB_REPOSITORY_NAME: ${{ github.event.repository.name }}

@@ -14,16 +14,16 @@ import math
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Annotated, Any, Self
 
 import asyncpg
 import numpy as np
 from openai import AsyncOpenAI
-from pgvector.asyncpg import register_vector  # Import register_vector
+from pgvector.asyncpg import register_vector
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 
+import fastmcp
 from fastmcp import FastMCP
 
 MAX_DEPTH = 5
@@ -34,20 +34,13 @@ REINFORCEMENT_FACTOR = 1.1
 DEFAULT_LLM_MODEL = "openai:gpt-4o"
 DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
 
-mcp = FastMCP(
-    "memory",
-    dependencies=[
-        "pydantic-ai-slim[openai]",
-        "asyncpg",
-        "numpy",
-        "pgvector",
-    ],
-)
+# Dependencies are configured in memory.fastmcp.json
+mcp = FastMCP("memory")
 
 DB_DSN = "postgresql://postgres:postgres@localhost:54320/memory_db"
-# reset memory with rm ~/.fastmcp/{USER}/memory/*
+# reset memory by deleting the profile directory
 PROFILE_DIR = (
-    Path.home() / ".fastmcp" / os.environ.get("USER", "anon") / "memory"
+    fastmcp.settings.home / os.environ.get("USER", "anon") / "memory"
 ).resolve()
 PROFILE_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -149,7 +142,9 @@ class MemoryNode(BaseModel):
         )
         self.importance += other.importance
         self.access_count += other.access_count
-        self.embedding = [(a + b) / 2 for a, b in zip(self.embedding, other.embedding)]
+        self.embedding = [
+            (a + b) / 2 for a, b in zip(self.embedding, other.embedding, strict=True)
+        ]
         self.summary = await do_ai(
             self.content, "Summarize the following text concisely.", str, deps
         )
@@ -281,9 +276,9 @@ async def display_memory_tree(deps: Deps) -> str:
 
 @mcp.tool
 async def remember(
-    contents: list[str] = Field(
-        description="List of observations or memories to store"
-    ),
+    contents: Annotated[
+        list[str], Field(description="List of observations or memories to store")
+    ],
 ):
     deps = Deps(openai=AsyncOpenAI(), pool=await get_db_pool())
     try:

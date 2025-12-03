@@ -7,6 +7,8 @@ consent pages, and other user-facing interfaces.
 
 from __future__ import annotations
 
+import html
+
 from starlette.responses import HTMLResponse
 
 # FastMCP branding
@@ -109,15 +111,23 @@ BUTTON_STYLES = """
 # Info box / message box styles
 INFO_BOX_STYLES = """
     .info-box {
-        background: #f9fafb;
-        border: 1px solid #e5e7eb;
+        background: #f0f9ff;
+        border: 1px solid #bae6fd;
         border-radius: 0.5rem;
-        padding: 0.875rem;
-        margin: 1.25rem 0;
-        font-size: 0.875rem;
-        color: #6b7280;
-        font-family: 'SF Mono', 'Monaco', 'Consolas', 'Courier New', monospace;
+        padding: 1rem;
+        margin-bottom: 1.5rem;
         text-align: left;
+        font-size: 0.9375rem;
+        line-height: 1.5;
+        color: #374151;
+    }
+
+    .info-box p {
+        margin-bottom: 0.5rem;
+    }
+
+    .info-box p:last-child {
+        margin-bottom: 0;
     }
 
     .info-box.centered {
@@ -131,23 +141,63 @@ INFO_BOX_STYLES = """
     }
 
     .info-box strong {
+        color: #0ea5e9;
+        font-weight: 600;
+    }
+
+    .info-box .server-name-link {
+        color: #0ea5e9;
+        text-decoration: underline;
+        font-weight: 600;
+        cursor: pointer;
+        transition: opacity 0.15s;
+    }
+
+    .info-box .server-name-link:hover {
+        opacity: 0.8;
+    }
+
+    /* Monospace info box - gray styling with code font */
+    .info-box-mono {
+        background: #f9fafb;
+        border: 1px solid #e5e7eb;
+        border-radius: 0.5rem;
+        padding: 0.875rem;
+        margin: 1.25rem 0;
+        font-size: 0.875rem;
+        color: #6b7280;
+        font-family: 'SF Mono', 'Monaco', 'Consolas', 'Courier New', monospace;
+        text-align: left;
+    }
+
+    .info-box-mono.centered {
+        text-align: center;
+    }
+
+    .info-box-mono.error {
+        background: #fef2f2;
+        border-color: #fecaca;
+        color: #991b1b;
+    }
+
+    .info-box-mono strong {
         color: #111827;
         font-weight: 600;
     }
 
     .warning-box {
-        background: #fffbeb;
-        border: 1px solid #fcd34d;
+        background: #f0f9ff;
+        border: 1px solid #bae6fd;
         border-radius: 0.5rem;
         padding: 1rem;
         margin-bottom: 1.5rem;
-        text-align: left;
+        text-align: center;
     }
 
     .warning-box p {
         margin-bottom: 0.5rem;
         line-height: 1.5;
-        color: #92400e;
+        color: #6b7280;
         font-size: 0.9375rem;
     }
 
@@ -156,7 +206,19 @@ INFO_BOX_STYLES = """
     }
 
     .warning-box strong {
+        color: #0ea5e9;
         font-weight: 600;
+    }
+
+    .warning-box a {
+        color: #0ea5e9;
+        text-decoration: underline;
+        font-weight: 600;
+    }
+
+    .warning-box a:hover {
+        color: #0284c7;
+        text-decoration: underline;
     }
 """
 
@@ -222,10 +284,11 @@ DETAIL_BOX_STYLES = """
 
     .detail-label {
         font-weight: 600;
-        min-width: 140px;
+        min-width: 160px;
         color: #6b7280;
         font-size: 0.875rem;
         flex-shrink: 0;
+        padding-right: 1rem;
     }
 
     .detail-value {
@@ -235,6 +298,72 @@ DETAIL_BOX_STYLES = """
         color: #111827;
         word-break: break-all;
         overflow-wrap: break-word;
+    }
+"""
+
+# Redirect section styles (for OAuth redirect URI box)
+REDIRECT_SECTION_STYLES = """
+    .redirect-section {
+        background: #fffbeb;
+        border: 1px solid #fcd34d;
+        border-radius: 0.5rem;
+        padding: 1rem;
+        margin-bottom: 1.5rem;
+        text-align: left;
+    }
+
+    .redirect-section .label {
+        font-size: 0.875rem;
+        color: #6b7280;
+        font-weight: 600;
+        margin-bottom: 0.5rem;
+        display: block;
+    }
+
+    .redirect-section .value {
+        font-family: 'SF Mono', 'Monaco', 'Consolas', 'Courier New', monospace;
+        font-size: 0.875rem;
+        color: #111827;
+        word-break: break-all;
+        margin-top: 0.25rem;
+    }
+"""
+
+# Collapsible details styles
+DETAILS_STYLES = """
+    details {
+        margin-bottom: 1.5rem;
+        text-align: left;
+    }
+
+    summary {
+        cursor: pointer;
+        font-size: 0.875rem;
+        color: #6b7280;
+        font-weight: 600;
+        list-style: none;
+        padding: 0.5rem;
+        border-radius: 0.25rem;
+    }
+
+    summary:hover {
+        background: #f9fafb;
+    }
+
+    summary::marker {
+        display: none;
+    }
+
+    summary::before {
+        content: "▶";
+        display: inline-block;
+        margin-right: 0.5rem;
+        transition: transform 0.2s;
+        font-size: 0.75rem;
+    }
+
+    details[open] summary::before {
+        transform: rotate(90deg);
     }
 """
 
@@ -325,7 +454,7 @@ def create_page(
     content: str,
     title: str = "FastMCP",
     additional_styles: str = "",
-    csp_policy: str = "default-src 'none'; style-src 'unsafe-inline'; img-src https:; base-uri 'none'",
+    csp_policy: str = "default-src 'none'; style-src 'unsafe-inline'; img-src https: data:; base-uri 'none'",
 ) -> str:
     """
     Create a complete HTML page with FastMCP styling.
@@ -334,11 +463,21 @@ def create_page(
         content: HTML content to place inside the page
         title: Page title
         additional_styles: Extra CSS to include
-        csp_policy: Content Security Policy header value
+        csp_policy: Content Security Policy header value.
+            If empty string "", the CSP meta tag is omitted entirely.
 
     Returns:
         Complete HTML page as string
     """
+    title = html.escape(title)
+
+    # Only include CSP meta tag if policy is non-empty
+    csp_meta = (
+        f'<meta http-equiv="Content-Security-Policy" content="{html.escape(csp_policy, quote=True)}" />'
+        if csp_policy
+        else ""
+    )
+
     return f"""
     <!DOCTYPE html>
     <html lang="en">
@@ -350,7 +489,7 @@ def create_page(
             {BASE_STYLES}
             {additional_styles}
         </style>
-        <meta http-equiv="Content-Security-Policy" content="{csp_policy}" />
+        {csp_meta}
     </head>
     <body>
         {content}
@@ -359,9 +498,19 @@ def create_page(
     """
 
 
-def create_logo() -> str:
-    """Create FastMCP logo HTML."""
-    return f'<img src="{FASTMCP_LOGO_URL}" alt="FastMCP" class="logo" />'
+def create_logo(icon_url: str | None = None, alt_text: str = "FastMCP") -> str:
+    """Create logo HTML.
+
+    Args:
+        icon_url: Optional custom icon URL. If not provided, uses the FastMCP logo.
+        alt_text: Alt text for the logo image.
+
+    Returns:
+        HTML for logo image tag.
+    """
+    url = icon_url or FASTMCP_LOGO_URL
+    alt = html.escape(alt_text)
+    return f'<img src="{html.escape(url)}" alt="{alt}" class="logo" />'
 
 
 def create_status_message(message: str, is_success: bool = True) -> str:
@@ -375,6 +524,7 @@ def create_status_message(message: str, is_success: bool = True) -> str:
     Returns:
         HTML for status message
     """
+    message = html.escape(message)
     icon = "✓" if is_success else "✕"
     icon_class = "success" if is_success else "error"
 
@@ -387,7 +537,10 @@ def create_status_message(message: str, is_success: bool = True) -> str:
 
 
 def create_info_box(
-    content: str, is_error: bool = False, centered: bool = False
+    content: str,
+    is_error: bool = False,
+    centered: bool = False,
+    monospace: bool = False,
 ) -> str:
     """
     Create an info box.
@@ -396,11 +549,14 @@ def create_info_box(
         content: HTML content for the info box
         is_error: True for error styling, False for normal
         centered: True to center the text, False for left-aligned
+        monospace: True to use gray monospace font styling instead of blue
 
     Returns:
         HTML for info box
     """
-    classes = ["info-box"]
+    content = html.escape(content)
+    base_class = "info-box-mono" if monospace else "info-box"
+    classes = [base_class]
     if is_error:
         classes.append("error")
     if centered:
@@ -422,8 +578,8 @@ def create_detail_box(rows: list[tuple[str, str]]) -> str:
     rows_html = "\n".join(
         f"""
         <div class="detail-row">
-            <div class="detail-label">{label}:</div>
-            <div class="detail-value">{value}</div>
+            <div class="detail-label">{html.escape(label)}:</div>
+            <div class="detail-value">{html.escape(value)}</div>
         </div>
         """
         for label, value in rows

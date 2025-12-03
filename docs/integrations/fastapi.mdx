@@ -7,12 +7,6 @@ icon: bolt
 
 import { VersionBadge } from '/snippets/version-badge.mdx'
 
-<Tip>
-**New in 2.11**: FastMCP is introducing a next-generation OpenAPI parser. The new parser has greatly improved performance and compatibility, and is also easier to maintain. To enable it, set the environment variable `FASTMCP_EXPERIMENTAL_ENABLE_NEW_OPENAPI_PARSER=true`. 
-
-The new parser is largely API-compatible with the existing implementation and will become the default in a future version. We encourage all users to test it and report any issues before it becomes the default.
-</Tip>
-
 FastMCP provides two powerful ways to integrate with FastAPI applications:
 
 1. **[Generate an MCP server FROM your FastAPI app](#generating-an-mcp-server)** - Convert existing API endpoints into MCP tools
@@ -224,9 +218,6 @@ Because FastMCP's FastAPI integration is based on its [OpenAPI integration](/int
 from fastmcp import FastMCP
 from fastmcp.server.openapi import RouteMap, MCPType
 
-# If using experimental parser, import from experimental module:
-# from fastmcp.experimental.server.openapi import RouteMap, MCPType
-
 # Custom mapping rules
 mcp = FastMCP.from_fastapi(
     app=app,
@@ -366,7 +357,7 @@ combined_app = FastAPI(
 
 # Now you have:
 # - Regular API: http://localhost:8000/products
-# - LLM-friendly MCP: http://localhost:8000/mcp/
+# - LLM-friendly MCP: http://localhost:8000/mcp
 # Both served from the same FastAPI application!
 ```
 
@@ -404,6 +395,14 @@ app.mount("/mcp", mcp_app)
 app = FastAPI()
 app.mount("/mcp", mcp.http_app())  # Session manager won't initialize
 ```
+
+If you're mounting an authenticated MCP server under a path prefix, see [Mounting Authenticated Servers](/deployment/http#mounting-authenticated-servers) for important OAuth routing considerations.
+
+### CORS Middleware
+
+If your FastAPI app uses `CORSMiddleware` and you're mounting an OAuth-protected FastMCP server, avoid adding application-wide CORS middleware. FastMCP and the MCP SDK already handle CORS for OAuth routes, and layering CORS middleware can cause conflicts (such as 404 errors on `.well-known` routes or OPTIONS requests).
+
+If you need CORS on your own FastAPI routes, use the sub-app pattern: mount your API and FastMCP as separate apps, each with their own middleware, rather than adding top-level `CORSMiddleware` to the combined application.
 
 ### Combining Lifespans
 

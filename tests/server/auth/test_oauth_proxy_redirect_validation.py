@@ -110,6 +110,7 @@ class TestOAuthProxyRedirectValidation:
             upstream_client_secret="test-secret",
             token_verifier=MockTokenVerifier(),
             base_url="http://localhost:8000",
+            jwt_signing_key="test-secret",
         )
 
         # The proxy should store None for default (allow all)
@@ -127,6 +128,7 @@ class TestOAuthProxyRedirectValidation:
             token_verifier=MockTokenVerifier(),
             base_url="http://localhost:8000",
             allowed_client_redirect_uris=custom_patterns,
+            jwt_signing_key="test-secret",
         )
 
         assert proxy._allowed_client_redirect_uris == custom_patterns
@@ -141,11 +143,11 @@ class TestOAuthProxyRedirectValidation:
             token_verifier=MockTokenVerifier(),
             base_url="http://localhost:8000",
             allowed_client_redirect_uris=[],
+            jwt_signing_key="test-secret",
         )
 
         assert proxy._allowed_client_redirect_uris == []
 
-    @pytest.mark.asyncio
     async def test_proxy_register_client_uses_patterns(self):
         """Test that registered clients use the configured patterns."""
         custom_patterns = ["https://app.example.com/*"]
@@ -158,6 +160,7 @@ class TestOAuthProxyRedirectValidation:
             token_verifier=MockTokenVerifier(),
             base_url="http://localhost:8000",
             allowed_client_redirect_uris=custom_patterns,
+            jwt_signing_key="test-secret",
         )
 
         # Register a client
@@ -178,7 +181,6 @@ class TestOAuthProxyRedirectValidation:
         assert isinstance(registered, ProxyDCRClient)
         assert registered.allowed_redirect_uri_patterns == custom_patterns
 
-    @pytest.mark.asyncio
     async def test_proxy_unregistered_client_returns_none(self):
         """Test that unregistered clients return None."""
         custom_patterns = ["http://localhost:*", "http://127.0.0.1:*"]
@@ -191,6 +193,7 @@ class TestOAuthProxyRedirectValidation:
             token_verifier=MockTokenVerifier(),
             base_url="http://localhost:8000",
             allowed_client_redirect_uris=custom_patterns,
+            jwt_signing_key="test-secret",
         )
 
         # Get an unregistered client

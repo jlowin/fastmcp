@@ -12,7 +12,7 @@ with the following configuration:
 
 import os
 import re
-from collections.abc import Generator
+from collections.abc import AsyncGenerator
 from urllib.parse import parse_qs, urlparse
 
 import httpx
@@ -21,7 +21,7 @@ import pytest
 from fastmcp import FastMCP
 from fastmcp.client import Client
 from fastmcp.server.auth.providers.github import GitHubProvider
-from fastmcp.utilities.tests import HeadlessOAuth, run_server_in_process
+from fastmcp.utilities.tests import HeadlessOAuth, run_server_async
 
 FASTMCP_TEST_AUTH_GITHUB_CLIENT_ID = os.getenv("FASTMCP_TEST_AUTH_GITHUB_CLIENT_ID")
 FASTMCP_TEST_AUTH_GITHUB_CLIENT_SECRET = os.getenv(
@@ -36,7 +36,7 @@ pytestmark = pytest.mark.xfail(
 )
 
 
-def create_github_server(host: str = "127.0.0.1", port: int = 9100, **kwargs) -> None:
+def create_github_server(base_url: str) -> FastMCP:
     """Create FastMCP server with GitHub OAuth protection."""
     assert FASTMCP_TEST_AUTH_GITHUB_CLIENT_ID is not None
     assert FASTMCP_TEST_AUTH_GITHUB_CLIENT_SECRET is not None
@@ -45,7 +45,8 @@ def create_github_server(host: str = "127.0.0.1", port: int = 9100, **kwargs) ->
     auth = GitHubProvider(
         client_id=FASTMCP_TEST_AUTH_GITHUB_CLIENT_ID,
         client_secret=FASTMCP_TEST_AUTH_GITHUB_CLIENT_SECRET,
-        base_url=f"http://{host}:{port}",
+        base_url=base_url,
+        jwt_signing_key="test-secret",
     )
 
     # Create FastMCP server with GitHub authentication
@@ -61,13 +62,10 @@ def create_github_server(host: str = "127.0.0.1", port: int = 9100, **kwargs) ->
         """Returns user info from OAuth context."""
         return "📝 GitHub OAuth user authenticated successfully"
 
-    # Run the server
-    server.run(host=host, port=port, **kwargs)
+    return server
 
 
-def create_github_server_with_mock_callback(
-    host: str = "127.0.0.1", port: int = 9100, **kwargs
-) -> None:
+def create_github_server_with_mock_callback(base_url: str) -> FastMCP:
     """Create FastMCP server with GitHub OAuth that mocks the callback for testing."""
     assert FASTMCP_TEST_AUTH_GITHUB_CLIENT_ID is not None
     assert FASTMCP_TEST_AUTH_GITHUB_CLIENT_SECRET is not None
@@ -76,7 +74,8 @@ def create_github_server_with_mock_callback(
     auth = GitHubProvider(
         client_id=FASTMCP_TEST_AUTH_GITHUB_CLIENT_ID,
         client_secret=FASTMCP_TEST_AUTH_GITHUB_CLIENT_SECRET,
-        base_url=f"http://{host}:{port}",
+        base_url=base_url,
+        jwt_signing_key="test-secret",
     )
 
     # Mock the authorize method to return a fake code instead of redirecting to GitHub
@@ -159,29 +158,31 @@ def create_github_server_with_mock_callback(
         """Returns user info from OAuth context."""
         return "📝 GitHub OAuth user authenticated successfully"
 
-    # Run the server
-    server.run(host=host, port=port, **kwargs)
+    return server
 
 
-@pytest.fixture(scope="module")
-def github_server() -> Generator[str, None, None]:
-    """Start GitHub OAuth server in background process on fixed port 9100."""
-    with run_server_in_process(
-        create_github_server, transport="http", host="127.0.0.1", port=9100
-    ) as url:
-        yield f"{url}/mcp"
+@pytest.fixture
+async def github_server() -> AsyncGenerator[str, None]:
+    """Start GitHub OAuth server on a random available port."""
+    from fastmcp.utilities.http import find_available_port
+
+    port = find_available_port()
+    base_url = f"http://127.0.0.1:{port}"
+    server = create_github_server(base_url)
+    async with run_server_async(server, port=port, transport="http") as url:
+        yield url
 
 
-@pytest.fixture(scope="module")
-def github_server_with_mock() -> Generator[str, None, None]:
-    """Start GitHub OAuth server with mocked callback in background process on port 9101."""
-    with run_server_in_process(
-        create_github_server_with_mock_callback,
-        transport="http",
-        host="127.0.0.1",
-        port=9101,
-    ) as url:
-        yield f"{url}/mcp"
+@pytest.fixture
+async def github_server_with_mock() -> AsyncGenerator[str, None]:
+    """Start GitHub OAuth server with mocked callback on a random available port."""
+    from fastmcp.utilities.http import find_available_port
+
+    port = find_available_port()
+    base_url = f"http://127.0.0.1:{port}"
+    server = create_github_server_with_mock_callback(base_url)
+    async with run_server_async(server, port=port, transport="http") as url:
+        yield url
 
 
 @pytest.fixture
@@ -283,7 +284,7 @@ async def test_github_oauth_authorization_redirect(github_server: str):
 
         # Step 4: Approve consent
         approve_response = await http_client.post(
-            f"{base_url}/consent/submit",
+            f"{base_url}/consent",
             data={
                 "action": "approve",
                 "txn_id": txn_id,
@@ -359,6 +360,7 @@ async def test_github_oauth_unauthorized_access(github_server: str):
 
 async def test_github_oauth_with_mock(github_client_with_mock: Client):
     """Test complete GitHub OAuth flow with mocked callback."""
+
     async with github_client_with_mock:
         # Test that we can ping the server (requires successful OAuth)
         assert await github_client_with_mock.ping()

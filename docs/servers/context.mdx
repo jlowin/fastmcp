@@ -14,10 +14,11 @@ The `Context` object provides a clean interface to access MCP features within yo
 
 - **Logging**: Send debug, info, warning, and error messages back to the client
 - **Progress Reporting**: Update the client on the progress of long-running operations
-- **Resource Access**: Read data from resources registered with the server
+- **Resource Access**: List and read data from resources registered with the server
+- **Prompt Access**: List and retrieve prompts registered with the server
 - **LLM Sampling**: Request the client's LLM to generate text based on provided messages
 - **User Elicitation**: Request structured input from users during tool execution
-- **State Management**: Store and share data across middleware and tool calls within a request
+- **State Management**: Store and share data between middleware and the handler within a single request
 - **Request Information**: Access metadata about the current request
 - **Server Access**: When needed, access the underlying FastMCP server instance
 
@@ -34,6 +35,7 @@ To use the context object within any of your functions, simply add a parameter t
 - The context is optional - functions that don't need it can omit the parameter entirely.
 - Context methods are async, so your function usually needs to be async as well.
 - The type hint can be a union (`Context | None`) or use `Annotated[]` and it will still work properly.
+- **Each MCP request receives a new context object.** Context is scoped to a single request; state or data set in one request will not be available in subsequent requests.
 - Context is only available during a request; attempting to use context methods outside a request will raise errors. If you need to debug or call your context methods outside of a request, you can type your variable as `Context | None=None` to avoid missing argument errors.
 
 #### Tools
@@ -176,23 +178,51 @@ See [Progress Reporting](/servers/progress) for detailed patterns and examples.
 
 ### Resource Access
 
-Read data from resources registered with your FastMCP server, allowing access to files, configuration, or dynamic content.
+List and read data from resources registered with your FastMCP server, allowing access to files, configuration, or dynamic content.
 
 ```python
+# List available resources
+resources = await ctx.list_resources()
+
+# Read a specific resource
 content_list = await ctx.read_resource("resource://config")
 content = content_list[0].content
 ```
 
-**Method signature:**
+**Method signatures:**
+- **`ctx.list_resources() -> list[MCPResource]`**: <VersionBadge version="2.13.0" /> Returns list of all available resources
 - **`ctx.read_resource(uri: str | AnyUrl) -> list[ReadResourceContents]`**: Returns a list of resource content parts
+
+### Prompt Access
+
+<VersionBadge version="2.13.0" />
+
+List and retrieve prompts registered with your FastMCP server, allowing tools and middleware to discover and use available prompts programmatically.
+
+```python
+# List available prompts
+prompts = await ctx.list_prompts()
+
+# Get a specific prompt with arguments
+result = await ctx.get_prompt("analyze_data", {"dataset": "users"})
+messages = result.messages
+```
+
+**Method signatures:**
+- **`ctx.list_prompts() -> list[MCPPrompt]`**: Returns list of all available prompts
+- **`ctx.get_prompt(name: str, arguments: dict[str, Any] | None = None) -> GetPromptResult`**: Get a specific prompt with optional arguments
 
 ### State Management
 
 <VersionBadge version="2.11.0" />
 
-Store and share data across middleware and tool calls within a request. Context objects maintain a state dictionary that's especially useful for passing information from [middleware](/servers/middleware) to your tools.
+Store and share data between middleware and handlers within a single MCP request. Each MCP request (such as calling a tool, reading a resource, listing tools, or listing resources) receives its own context object with isolated state. Context state is particularly useful for passing information from [middleware](/servers/middleware) to your handlers.
 
 To store a value in the context state, use `ctx.set_state(key, value)`. To retrieve a value, use `ctx.get_state(key)`.
+
+<Warning>
+Context state is scoped to a single MCP request. Each operation (tool call, resource read, list operation, etc.) receives a new context object. State set during one request will not be available in subsequent requests. For persistent data storage across requests, use external storage mechanisms like databases, files, or in-memory caches.
+</Warning>
 
 This simplified example shows how to use MCP middleware to store user info in the context state, and how to access that state in a tool:
 
@@ -205,8 +235,8 @@ class UserAuthMiddleware(Middleware):
         # Middleware stores user info in context state
         context.fastmcp_context.set_state("user_id", "user_123")
         context.fastmcp_context.set_state("permissions", ["read", "write"])
-        
-        return await call_next()
+
+        return await call_next(context)
 
 @mcp.tool
 async def secure_operation(data: str, ctx: Context) -> str:
@@ -282,6 +312,77 @@ async def request_info(ctx: Context) -> dict:
 - **`ctx.request_id -> str`**: Get the unique ID for the current MCP request
 - **`ctx.client_id -> str | None`**: Get the ID of the client making the request, if provided during initialization
 - **`ctx.session_id -> str | None`**: Get the MCP session ID for session-based data sharing (HTTP transports only)
+
+#### Request Context Availability
+
+<VersionBadge version="2.13.1" />
+
+The `ctx.request_context` property provides access to the underlying MCP request context, but returns `None` when the MCP session has not been established yet. This typically occurs:
+
+- During middleware execution in the `on_request` hook before the MCP handshake completes
+- During the initialization phase of client connections
+
+The MCP request context is distinct from the HTTP request. For HTTP transports, HTTP request data may be available even when the MCP session is not yet established.
+
+To safely access the request context in situations where it may not be available:
+
+```python
+from fastmcp import FastMCP, Context
+from fastmcp.server.dependencies import get_http_request
+
+mcp = FastMCP(name="Session Aware Demo")
+
+@mcp.tool
+async def session_info(ctx: Context) -> dict:
+    """Return session information when available."""
+
+    # Check if MCP session is available
+    if ctx.request_context:
+        # MCP session available - can access MCP-specific attributes
+        return {
+            "session_id": ctx.session_id,
+            "request_id": ctx.request_id,
+            "has_meta": ctx.request_context.meta is not None
+        }
+    else:
+        # MCP session not available - use HTTP helpers for request data (if using HTTP transport)
+        request = get_http_request()
+        return {
+            "message": "MCP session not available",
+            "user_agent": request.headers.get("user-agent", "Unknown")
+        }
+```
+
+For HTTP request access that works regardless of MCP session availability (when using HTTP transports), use the [HTTP request helpers](#http-requests) like `get_http_request()` and `get_http_headers()`.
+
+#### Client Metadata
+
+<VersionBadge version="2.13.1" />
+
+Clients can send contextual information with their requests using the `meta` parameter. This metadata is accessible through `ctx.request_context.meta` and is available for all MCP operations (tools, resources, prompts).
+
+The `meta` field is `None` when clients don't provide metadata. When provided, metadata is accessible via attribute access (e.g., `meta.user_id`) rather than dictionary access. The structure of metadata is determined by the client making the request.
+
+```python
+@mcp.tool
+def send_email(to: str, subject: str, body: str, ctx: Context) -> str:
+    """Send an email, logging metadata about the request."""
+
+    # Access client-provided metadata
+    meta = ctx.request_context.meta
+
+    if meta:
+        # Meta is accessed as an object with attribute access
+        user_id = meta.user_id if hasattr(meta, 'user_id') else None
+        trace_id = meta.trace_id if hasattr(meta, 'trace_id') else None
+
+        # Use metadata for logging, observability, etc.
+        if trace_id:
+            log_with_trace(f"Sending email for user {user_id}", trace_id)
+
+    # Send the email...
+    return f"Email sent to {to}"
+```
 
 <Warning>
 The MCP request is part of the low-level MCP SDK and intended for advanced use cases. Most users will not need to use it directly.

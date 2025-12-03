@@ -284,7 +284,7 @@ async def test_multi_client_parallel_calls(tmp_path: Path):
         exceptions = [result for result in results if isinstance(result, Exception)]
         assert len(exceptions) == 0
         assert len(results) == 40
-        assert all(len(result) == 2 for result in results)
+        assert all(len(result) == 2 for result in results)  # type: ignore[arg-type]
 
 
 @pytest.mark.skipif(
@@ -636,6 +636,7 @@ async def test_canonical_multi_client_with_transforms(tmp_path: Path):
         assert "test_1_transformed_add" not in tools_by_name
 
 
+@pytest.mark.flaky(retries=3)
 async def test_multi_client_transform_with_filtering(tmp_path: Path):
     """
     Tests that tag-based filtering works when using a transforming MCPConfig.

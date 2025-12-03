@@ -4,15 +4,16 @@ on:
   issues:
     types: [opened, labeled]
 
-concurrency:
-  group: triage-martian-${{ github.event.issue.number }}
-  cancel-in-progress: true
-
 jobs:
   martian-issue-triage:
     if: |
       (github.event.action == 'opened' && github.actor == 'strawgate') ||
       (github.event.action == 'labeled' && github.event.label.name == 'triage-martian')
+
+    concurrency:
+      group: triage-martian-${{ github.event.issue.number }}
+      cancel-in-progress: true
+
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -23,14 +24,14 @@ jobs:
 
     steps:
       - name: Checkout base repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           repository: ${{ github.repository }}
           ref: ${{ github.event.repository.default_branch }}
 
       # Install UV package manager
       - name: Install UV
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
           cache-dependency-glob: "uv.lock"

@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import asyncio
 import time
 import webbrowser
-from asyncio import Future
 from collections.abc import AsyncGenerator
 from typing import Any
 from urllib.parse import urlparse
@@ -14,6 +12,7 @@ from key_value.aio.adapters.pydantic import PydanticAdapter
 from key_value.aio.protocols import AsyncKeyValue
 from key_value.aio.stores.memory import MemoryStore
 from mcp.client.auth import OAuthClientProvider, TokenStorage
+from mcp.shared._httpx_utils import McpHttpClientFactory
 from mcp.shared.auth import (
     OAuthClientInformationFull,
     OAuthClientMetadata,
@@ -24,6 +23,7 @@ from typing_extensions import override
 from uvicorn.server import Server
 
 from fastmcp.client.oauth_callback import (
+    OAuthCallbackResult,
     create_oauth_callback_server,
 )
 from fastmcp.utilities.http import find_available_port
@@ -36,8 +36,6 @@ logger = get_logger(__name__)
 
 class ClientNotFoundError(Exception):
     """Raised when OAuth client credentials are not found on the server."""
-
-    pass
 
 
 async def check_if_auth_required(
@@ -59,7 +57,7 @@ async def check_if_auth_required(
                 return True
 
             # Check for WWW-Authenticate header
-            if "WWW-Authenticate" in response.headers:
+            if "WWW-Authenticate" in response.headers:  # noqa: SIM103
                 return True
 
             # If we get a successful response, auth may not be required
@@ -150,6 +148,7 @@ class OAuth(OAuthClientProvider):
         token_storage: AsyncKeyValue | None = None,
         additional_client_metadata: dict[str, Any] | None = None,
         callback_port: int | None = None,
+        httpx_client_factory: McpHttpClientFactory | None = None,
     ):
         """
         Initialize OAuth client provider for an MCP server.
@@ -167,6 +166,7 @@ class OAuth(OAuthClientProvider):
         server_base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
 
         # Setup OAuth client
+        self.httpx_client_factory = httpx_client_factory or httpx.AsyncClient
         self.redirect_port = callback_port or find_available_port()
         redirect_uri = f"http://localhost:{self.redirect_port}/callback"
 
@@ -190,6 +190,16 @@ class OAuth(OAuthClientProvider):
 
         # Create server-specific token storage
         token_storage = token_storage or MemoryStore()
+
+        if isinstance(token_storage, MemoryStore):
+            from warnings import warn
+
+            warn(
+                message="Using in-memory token storage -- tokens will be lost when the client restarts. "
+                + "For persistent storage across multiple MCP servers, provide an encrypted AsyncKeyValue backend. "
+                + "See https://gofastmcp.com/clients/auth/oauth#token-storage for details.",
+                stacklevel=2,
+            )
 
         self.token_storage_adapter: TokenStorageAdapter = TokenStorageAdapter(
             async_key_value=token_storage, server_url=server_base_url
@@ -219,7 +229,7 @@ class OAuth(OAuthClientProvider):
     async def redirect_handler(self, authorization_url: str) -> None:
         """Open browser for authorization, with pre-flight check for invalid client."""
         # Pre-flight check to detect invalid client_id before opening browser
-        async with httpx.AsyncClient() as client:
+        async with self.httpx_client_factory() as client:
             response = await client.get(authorization_url, follow_redirects=False)
 
             # Check for client not found error (400 typically means bad client_id)
@@ -239,14 +249,16 @@ class OAuth(OAuthClientProvider):
 
     async def callback_handler(self) -> tuple[str, str | None]:
         """Handle OAuth callback and return (auth_code, state)."""
-        # Create a future to capture the OAuth response
-        response_future: Future[Any] = asyncio.get_running_loop().create_future()
+        # Create result container and event to capture the OAuth response
+        result = OAuthCallbackResult()
+        result_ready = anyio.Event()
 
-        # Create server with the future
+        # Create server with result tracking
         server: Server = create_oauth_callback_server(
             port=self.redirect_port,
             server_url=self.server_base_url,
-            response_future=response_future,
+            result_container=result,
+            result_ready=result_ready,
         )
 
         # Run server until response is received with timeout logic
@@ -259,13 +271,17 @@ class OAuth(OAuthClientProvider):
             TIMEOUT = 300.0  # 5 minute timeout
             try:
                 with anyio.fail_after(TIMEOUT):
-                    auth_code, state = await response_future
-                    return auth_code, state
-            except TimeoutError:
-                raise TimeoutError(f"OAuth callback timed out after {TIMEOUT} seconds")
+                    await result_ready.wait()
+                    if result.error:
+                        raise result.error
+                    return result.code, result.state  # type: ignore
+            except TimeoutError as e:
+                raise TimeoutError(
+                    f"OAuth callback timed out after {TIMEOUT} seconds"
+                ) from e
             finally:
                 server.should_exit = True
-                await asyncio.sleep(0.1)  # Allow server to shut down gracefully
+                await anyio.sleep(0.1)  # Allow server to shut down gracefully
                 tg.cancel_scope.cancel()
 
         raise RuntimeError("OAuth callback handler could not be started")
@@ -284,7 +300,8 @@ class OAuth(OAuthClientProvider):
             response = None
             while True:
                 try:
-                    yielded_request = await gen.asend(response)
+                    # First iteration sends None, subsequent iterations send response
+                    yielded_request = await gen.asend(response)  # ty: ignore[invalid-argument-type]
                     response = yield yielded_request
                 except StopAsyncIteration:
                     break
@@ -293,16 +310,16 @@ class OAuth(OAuthClientProvider):
             logger.debug(
                 "OAuth client not found on server, clearing cache and retrying..."
             )
-
             # Clear cached state and retry once
             self._initialized = False
             await self.token_storage_adapter.clear()
 
+            # Retry with fresh registration
             gen = super().async_auth_flow(request)
             response = None
             while True:
                 try:
-                    yielded_request = await gen.asend(response)
+                    yielded_request = await gen.asend(response)  # ty: ignore[invalid-argument-type]
                     response = yield yielded_request
                 except StopAsyncIteration:
                     break

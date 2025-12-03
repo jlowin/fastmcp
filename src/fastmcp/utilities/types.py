@@ -175,6 +175,55 @@ def find_kwarg_by_type(fn: Callable, kwarg_type: type) -> str | None:
     return None
 
 
+def create_function_without_params(
+    fn: Callable[..., Any], exclude_params: list[str]
+) -> Callable[..., Any]:
+    """
+    Create a new function with the same code but without the specified parameters in annotations.
+
+    This is used to exclude parameters from type adapter processing when they can't be serialized.
+    The excluded parameters are removed from the function's __annotations__ dictionary.
+    """
+    import types
+
+    if inspect.ismethod(fn):
+        actual_func = fn.__func__
+        code = actual_func.__code__  # ty: ignore[unresolved-attribute]
+        globals_dict = actual_func.__globals__  # ty: ignore[unresolved-attribute]
+        name = actual_func.__name__  # ty: ignore[unresolved-attribute]
+        defaults = actual_func.__defaults__  # ty: ignore[unresolved-attribute]
+        closure = actual_func.__closure__  # ty: ignore[unresolved-attribute]
+    else:
+        code = fn.__code__  # ty: ignore[unresolved-attribute]
+        globals_dict = fn.__globals__  # ty: ignore[unresolved-attribute]
+        name = fn.__name__  # ty: ignore[unresolved-attribute]
+        defaults = fn.__defaults__  # ty: ignore[unresolved-attribute]
+        closure = fn.__closure__  # ty: ignore[unresolved-attribute]
+
+    # Create a copy of annotations without the excluded parameters
+    original_annotations = getattr(fn, "__annotations__", {})
+    new_annotations = {
+        k: v for k, v in original_annotations.items() if k not in exclude_params
+    }
+
+    new_func = types.FunctionType(
+        code,
+        globals_dict,
+        name,
+        defaults,
+        closure,
+    )
+    new_func.__dict__.update(fn.__dict__)
+    new_func.__module__ = fn.__module__
+    new_func.__qualname__ = getattr(fn, "__qualname__", fn.__name__)  # ty: ignore[unresolved-attribute]
+    new_func.__annotations__ = new_annotations
+
+    if inspect.ismethod(fn):
+        return types.MethodType(new_func, fn.__self__)
+    else:
+        return new_func
+
+
 class Image:
     """Helper class for returning images from tools."""
 
@@ -190,11 +239,16 @@ class Image:
         if path is not None and data is not None:
             raise ValueError("Only one of path or data can be provided")
 
-        self.path = Path(os.path.expandvars(str(path))).expanduser() if path else None
+        self.path = self._get_expanded_path(path)
         self.data = data
         self._format = format
         self._mime_type = self._get_mime_type()
         self.annotations = annotations
+
+    @staticmethod
+    def _get_expanded_path(path: str | Path | None) -> Path | None:
+        """Expand environment variables and user home in path."""
+        return Path(os.path.expandvars(str(path))).expanduser() if path else None
 
     def _get_mime_type(self) -> str:
         """Get MIME type from format or guess from file extension."""
@@ -202,22 +256,16 @@ class Image:
             return f"image/{self._format.lower()}"
 
         if self.path:
-            suffix = self.path.suffix.lower()
-            return {
-                ".png": "image/png",
-                ".jpg": "image/jpeg",
-                ".jpeg": "image/jpeg",
-                ".gif": "image/gif",
-                ".webp": "image/webp",
-            }.get(suffix, "application/octet-stream")
+            # Workaround for WEBP in Py3.10
+            mimetypes.add_type("image/webp", ".webp")
+            resp = mimetypes.guess_type(self.path, strict=False)
+            if resp and resp[0] is not None:
+                return resp[0]
+            return "application/octet-stream"
         return "image/png"  # default for raw binary data
 
-    def to_image_content(
-        self,
-        mime_type: str | None = None,
-        annotations: Annotations | None = None,
-    ) -> mcp.types.ImageContent:
-        """Convert to MCP ImageContent."""
+    def _get_data(self) -> str:
+        """Get raw image data as base64-encoded string."""
         if self.path:
             with open(self.path, "rb") as f:
                 data = base64.b64encode(f.read()).decode()
@@ -225,6 +273,15 @@ class Image:
             data = base64.b64encode(self.data).decode()
         else:
             raise ValueError("No image data available")
+        return data
+
+    def to_image_content(
+        self,
+        mime_type: str | None = None,
+        annotations: Annotations | None = None,
+    ) -> mcp.types.ImageContent:
+        """Convert to MCP ImageContent."""
+        data = self._get_data()
 
         return mcp.types.ImageContent(
             type="image",
@@ -232,6 +289,11 @@ class Image:
             mimeType=mime_type or self._mime_type,
             annotations=annotations or self.annotations,
         )
+
+    def to_data_uri(self, mime_type: str | None = None) -> str:
+        """Get image as a data URI."""
+        data = self._get_data()
+        return f"data:{mime_type or self._mime_type};base64,{data}"
 
 
 class Audio:

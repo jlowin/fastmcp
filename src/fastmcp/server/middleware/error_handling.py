@@ -6,8 +6,11 @@ import traceback
 from collections.abc import Callable
 from typing import Any
 
+import anyio
 from mcp import McpError
 from mcp.types import ErrorData
+
+from fastmcp.exceptions import NotFoundError
 
 from .middleware import CallNext, Middleware, MiddlewareContext
 
@@ -61,7 +64,7 @@ class ErrorHandlingMiddleware(Middleware):
         error_key = f"{error_type}:{method}"
         self.error_counts[error_key] = self.error_counts.get(error_key, 0) + 1
 
-        base_message = f"Error in {method}: {error_type}: {str(error)}"
+        base_message = f"Error in {method}: {error_type}: {error!s}"
 
         if self.include_traceback:
             self.logger.error(f"{base_message}\n{traceback.format_exc()}")
@@ -88,23 +91,24 @@ class ErrorHandlingMiddleware(Middleware):
 
         if error_type in (ValueError, TypeError):
             return McpError(
-                ErrorData(code=-32602, message=f"Invalid params: {str(error)}")
+                ErrorData(code=-32602, message=f"Invalid params: {error!s}")
             )
-        elif error_type in (FileNotFoundError, KeyError):
+        elif error_type in (FileNotFoundError, KeyError, NotFoundError):
             return McpError(
-                ErrorData(code=-32001, message=f"Resource not found: {str(error)}")
+                ErrorData(code=-32001, message=f"Resource not found: {error!s}")
             )
         elif error_type is PermissionError:
             return McpError(
-                ErrorData(code=-32000, message=f"Permission denied: {str(error)}")
+                ErrorData(code=-32000, message=f"Permission denied: {error!s}")
             )
+        # asyncio.TimeoutError is a subclass of TimeoutError in Python 3.10, alias in 3.11+
         elif error_type in (TimeoutError, asyncio.TimeoutError):
             return McpError(
-                ErrorData(code=-32000, message=f"Request timeout: {str(error)}")
+                ErrorData(code=-32000, message=f"Request timeout: {error!s}")
             )
         else:
             return McpError(
-                ErrorData(code=-32603, message=f"Internal error: {str(error)}")
+                ErrorData(code=-32603, message=f"Internal error: {error!s}")
             )
 
     async def on_message(self, context: MiddlewareContext, call_next: CallNext) -> Any:
@@ -116,7 +120,7 @@ class ErrorHandlingMiddleware(Middleware):
 
             # Transform and re-raise
             transformed_error = self._transform_error(error)
-            raise transformed_error
+            raise transformed_error from error
 
     def get_error_stats(self) -> dict[str, int]:
         """Get error statistics for monitoring."""
@@ -196,10 +200,10 @@ class RetryMiddleware(Middleware):
                 delay = self._calculate_delay(attempt)
                 self.logger.warning(
                     f"Request {context.method} failed (attempt {attempt + 1}/{self.max_retries + 1}): "
-                    f"{type(error).__name__}: {str(error)}. Retrying in {delay:.1f}s..."
+                    f"{type(error).__name__}: {error!s}. Retrying in {delay:.1f}s..."
                 )
 
-                await asyncio.sleep(delay)
+                await anyio.sleep(delay)
 
         # Re-raise the last error if all retries failed
         if last_error:

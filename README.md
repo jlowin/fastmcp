@@ -15,6 +15,7 @@
 *Made with ☕️ by [Prefect](https://www.prefect.io/)*
 
 [![Docs](https://img.shields.io/badge/docs-gofastmcp.com-blue)](https://gofastmcp.com)
+[![Discord](https://img.shields.io/badge/community-discord-5865F2?logo=discord&logoColor=white)](https://discord.gg/uu8dJCgttd)
 [![PyPI - Version](https://img.shields.io/pypi/v/fastmcp.svg)](https://pypi.org/project/fastmcp)
 [![Tests](https://github.com/jlowin/fastmcp/actions/workflows/run-tests.yml/badge.svg)](https://github.com/jlowin/fastmcp/actions/workflows/run-tests.yml)
 [![License](https://img.shields.io/github/license/jlowin/fastmcp.svg)](https://github.com/jlowin/fastmcp/blob/main/LICENSE)
@@ -69,6 +70,8 @@ There are two ways to access the LLM-friendly documentation:
 
 - [`llms.txt`](https://gofastmcp.com/llms.txt) is essentially a sitemap, listing all the pages in the documentation.
 - [`llms-full.txt`](https://gofastmcp.com/llms-full.txt) contains the entire documentation. Note this may exceed the context window of your LLM.
+
+**Community:** Join our [Discord server](https://discord.gg/uu8dJCgttd) to connect with other FastMCP developers and share what you're building.
 
 ---
 
@@ -140,6 +143,8 @@ uv pip install fastmcp
 
 For full installation instructions, including verification, upgrading from the official MCPSDK, and developer setup, see the [**Installation Guide**](https://gofastmcp.com/getting-started/installation).
 
+**Dependency Licensing:** FastMCP depends on Cyclopts for CLI functionality. Cyclopts v4 includes docutils as a transitive dependency, which has complex licensing that may trigger compliance reviews in some organizations. If this is a concern, you can install Cyclopts v5 alpha (`pip install "cyclopts>=5.0.0a1"`) which removes this dependency, or wait for the stable v5 release. See [this issue](https://github.com/BrianPugh/cyclopts/issues/672) for details.
+
 ## Core Concepts
 
 These are the building blocks for creating MCP servers and clients with FastMCP.
@@ -208,7 +213,6 @@ Access MCP session capabilities within your tools, resources, or prompts by addi
 
 - **Logging:** Log messages to MCP clients with `ctx.info()`, `ctx.error()`, etc.
 - **LLM Sampling:** Use `ctx.sample()` to request completions from the client's LLM.
-- **HTTP Request:** Use `ctx.http_request()` to make HTTP requests to other servers.
 - **Resource Access:** Use `ctx.read_resource()` to access resources on the server
 - **Progress Reporting:** Use `ctx.report_progress()` to report progress to the client.
 - and more...
@@ -312,13 +316,14 @@ FastMCP provides comprehensive authentication support that sets it apart from ba
 - **Auth0**
 - **WorkOS**
 - **Descope**
+- **Discord**
 - **JWT/Custom**
 - **API Keys**
 
 Protecting a server takes just two lines:
 
 ```python
-from fastmcp.server.auth import GoogleProvider
+from fastmcp.server.auth.providers.google import GoogleProvider
 
 auth = GoogleProvider(client_id="...", client_secret="...", base_url="https://myserver.com")
 mcp = FastMCP("Protected Server", auth=auth)
@@ -479,20 +484,20 @@ uv run pytest --cov=src --cov=examples --cov-report=html
 
 ### Static Checks
 
-FastMCP uses `pre-commit` for code formatting, linting, and type-checking. All PRs must pass these checks (they run automatically in CI).
+FastMCP uses `prek` for code formatting, linting, and type-checking. All PRs must pass these checks (they run automatically in CI).
 
 Install the hooks locally:
 
 ```bash
-uv run pre-commit install
+uv run prek install
 ```
 
 The hooks will now run automatically on `git commit`. You can also run them manually at any time:
 
 ```bash
-pre-commit run --all-files
+prek run --all-files
 # or via uv
-uv run pre-commit run --all-files
+uv run prek run --all-files
 ```
 
 ### Pull Requests
@@ -500,7 +505,7 @@ uv run pre-commit run --all-files
 1. Fork the repository on GitHub.
 2. Create a feature branch from `main`.
 3. Make your changes, including tests and documentation updates.
-4. Ensure tests and pre-commit hooks pass.
+4. Ensure tests and prek hooks pass.
 5. Commit your changes and push to your fork.
 6. Open a pull request against the `main` branch of `jlowin/fastmcp`.
 
