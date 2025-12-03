@@ -47,11 +47,15 @@ classifiers = [
 
 [project.optional-dependencies]
 openai = ["openai>=1.102.0"]
+opentelemetry = [
+    "opentelemetry-api>=1.20.0",
+    "opentelemetry-sdk>=1.20.0",
+]
 
 [dependency-groups]
 dev = [
     "dirty-equals>=0.9.0",
-    "fastmcp[openai]",
+    "fastmcp[openai,opentelemetry]",
     # add optional dependencies for fastmcp dev
     "fastapi>=0.115.12",
     "inline-snapshot[dirty-equals]>=0.27.2",

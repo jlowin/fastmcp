@@ -27,10 +27,9 @@ from opentelemetry.sdk._logs.export import BatchLogRecordProcessor, ConsoleLogEx
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
-from opentelemetry.trace import Status, StatusCode
 
 from fastmcp import FastMCP
-from fastmcp.server.middleware import Middleware, MiddlewareContext
+from fastmcp.server.middleware.opentelemetry import OpenTelemetryMiddleware
 from fastmcp.utilities.logging import get_logger
 
 # ============================================================================
@@ -55,50 +54,6 @@ trace.set_tracer_provider(trace_provider)
 logger_provider = LoggerProvider(resource=resource)
 logger_provider.add_log_record_processor(BatchLogRecordProcessor(ConsoleLogExporter()))
 set_logger_provider(logger_provider)
-
-# ============================================================================
-# Custom Middleware for OpenTelemetry Spans
-# ============================================================================
-
-
-class OpenTelemetryMiddleware(Middleware):
-    """Middleware that creates OpenTelemetry spans for MCP operations."""
-
-    def __init__(self, tracer_name: str = "fastmcp"):
-        self.tracer = trace.get_tracer(tracer_name)
-
-    async def on_call_tool(self, context: MiddlewareContext, call_next):
-        """Create a span for each tool call with detailed attributes."""
-        tool_name = context.message.name
-
-        # Create a span for this tool call
-        with self.tracer.start_as_current_span(
-            f"tool.{tool_name}",
-            attributes={
-                "mcp.method": context.method,
-                "mcp.source": context.source,
-                "mcp.tool.name": tool_name,
-                "mcp.tool.arguments": str(context.message.arguments),
-            },
-        ) as span:
-            try:
-                # Execute the tool
-                result = await call_next(context)
-
-                # Mark span as successful
-                span.set_attribute("mcp.tool.success", True)
-                span.set_status(Status(StatusCode.OK))
-
-                return result
-
-            except Exception as e:
-                # Record the error in the span
-                span.set_attribute("mcp.tool.success", False)
-                span.set_attribute("mcp.tool.error", str(e))
-                span.set_status(Status(StatusCode.ERROR, str(e)))
-                span.record_exception(e)
-                raise
-
 
 # ============================================================================
 # FastMCP Server Setup
