@@ -1,0 +1,218 @@
+---
+title: Read-Only Tool Patterns
+sidebarTitle: Read-Only Tools
+description: Using readOnlyHint to signal non-destructive operations
+icon: book-open-reader
+---
+
+Many MCP clients (Claude, ChatGPT, and others) use the `readOnlyHint` annotation to understand which tools modify state and which only read data. This enables smarter permission models and better user experiences.
+
+## Why Read-Only Hints Matter
+
+When a tool is marked as read-only, clients can:
+
+- **Skip confirmation prompts** for safe operations
+- **Allow broader access** without security concerns
+- **Batch operations** more aggressively
+- **Cache results** more confidently
+
+This improves the user experience by reducing friction for safe operations while maintaining caution for state-changing actions.
+
+## Basic Usage
+
+Mark a tool as read-only by setting `readOnlyHint=True` in the tool's annotations:
+
+```python
+from fastmcp import FastMCP
+
+mcp = FastMCP("Data Server")
+
+@mcp.tool(annotations={"readOnlyHint": True})
+def get_user(user_id: str) -> dict:
+    """Retrieve user information by ID."""
+    return {"id": user_id, "name": "Alice", "email": "alice@example.com"}
+
+@mcp.tool()  # No annotation - treated as potentially modifying
+def update_user(user_id: str, name: str) -> dict:
+    """Update user information."""
+    # Modifies state - will prompt for confirmation in some clients
+    return {"id": user_id, "name": name, "updated": True}
+```
+
+## Using ToolAnnotations
+
+For more control, use the `ToolAnnotations` object:
+
+```python
+from fastmcp import FastMCP
+from mcp.types import ToolAnnotations
+
+mcp = FastMCP("API Server")
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        title="Search Products",
+        readOnlyHint=True,
+        openWorldHint=False  # Closed domain - only internal data
+    )
+)
+def search_products(query: str, category: str | None = None) -> list[dict]:
+    """Search the product catalog."""
+    # Read-only search operation
+    return [{"id": 1, "name": "Widget", "price": 29.99}]
+```
+
+## Client-Specific Behavior
+
+### ChatGPT
+
+ChatGPT uses `readOnlyHint` to skip confirmation prompts in Chat mode. Tools without this annotation may require user approval before execution:
+
+```python
+@mcp.tool(annotations={"readOnlyHint": True})
+def get_status() -> str:
+    """Check system status - no confirmation needed."""
+    return "All systems operational"
+
+@mcp.tool()  # May prompt user for confirmation
+def restart_service(service_name: str) -> str:
+    """Restart a service - potentially destructive."""
+    return f"Service {service_name} restarted"
+```
+
+See the [ChatGPT integration guide](/integrations/chatgpt) for more details.
+
+### Claude Desktop and Claude Code
+
+Claude applications use read-only hints to understand the safety profile of tools. This helps the AI make better decisions about when to use tools and how to present them to users.
+
+## What Makes a Tool Read-Only?
+
+A tool should be marked as read-only when it:
+
+- **Retrieves data** without modification
+- **Performs calculations** without side effects
+- **Queries databases** without writes
+- **Reads files** without changes
+- **Checks status** without triggering actions
+
+A tool should NOT be marked as read-only if it:
+
+- **Writes to databases** or files
+- **Sends emails** or notifications
+- **Creates, updates, or deletes** resources
+- **Triggers workflows** or processes
+- **Modifies external state** in any way
+
+## Combining Annotations
+
+Read-only hints work well with other annotations:
+
+```python
+from mcp.types import ToolAnnotations
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        title="Get Configuration",
+        readOnlyHint=True,        # Safe to call
+        idempotentHint=True,      # Same result every time (until config changes)
+        openWorldHint=False       # Only reads internal config
+    )
+)
+def get_config(key: str) -> str:
+    """Retrieve a configuration value."""
+    return config_store.get(key)
+```
+
+## Read-Only with Destructive Operations
+
+Sometimes a tool that modifies state should NOT be marked as read-only. Use `destructiveHint` to signal dangerous operations:
+
+```python
+@mcp.tool(
+    annotations=ToolAnnotations(
+        title="Delete User",
+        readOnlyHint=False,      # Modifies state
+        destructiveHint=True,    # Cannot be undone
+        idempotentHint=True      # Deleting twice has same effect
+    )
+)
+def delete_user(user_id: str) -> dict:
+    """Permanently delete a user account."""
+    # Destructive operation
+    return {"deleted": user_id, "permanent": True}
+```
+
+## Pattern: Separating Read and Write Tools
+
+A clean pattern is to create separate read and write tool sets:
+
+```python
+from fastmcp import FastMCP
+from mcp.types import ToolAnnotations
+
+mcp = FastMCP("User Management")
+
+# Read-only tools
+@mcp.tool(annotations={"readOnlyHint": True})
+def list_users() -> list[dict]:
+    """List all users."""
+    return get_all_users()
+
+@mcp.tool(annotations={"readOnlyHint": True})
+def get_user(user_id: str) -> dict:
+    """Get user by ID."""
+    return find_user(user_id)
+
+@mcp.tool(annotations={"readOnlyHint": True})
+def search_users(query: str) -> list[dict]:
+    """Search users by name or email."""
+    return search_user_db(query)
+
+# Write tools (no readOnlyHint or explicitly False)
+@mcp.tool()
+def create_user(name: str, email: str) -> dict:
+    """Create a new user."""
+    return create_new_user(name, email)
+
+@mcp.tool()
+def update_user(user_id: str, name: str | None = None, email: str | None = None) -> dict:
+    """Update user information."""
+    return update_user_info(user_id, name, email)
+
+@mcp.tool(annotations={"destructiveHint": True})
+def delete_user(user_id: str) -> dict:
+    """Delete a user permanently."""
+    return remove_user(user_id)
+```
+
+## Best Practices
+
+1. **Be accurate**: Only mark tools as read-only if they truly don't modify state
+2. **Be consistent**: Use the same annotation style across your server
+3. **Document behavior**: Make it clear in docstrings what the tool does
+4. **Consider caching**: Read-only tools are good candidates for response caching
+5. **Group by operation type**: Organize tools by whether they read or write
+
+## Resources
+
+Resources can also use `readOnlyHint`. Since resources are typically read-only by nature, this annotation is often redundant but can be explicit:
+
+```python
+@mcp.resource(
+    "data://users/{user_id}",
+    annotations={"readOnlyHint": True}
+)
+def get_user_resource(user_id: str) -> str:
+    """Get user data as a resource."""
+    user = find_user(user_id)
+    return json.dumps(user)
+```
+
+See the [Resources documentation](/servers/resources) for more details on resource annotations.
+
+## See Also
+
+- [Tools documentation](/servers/tools) - Complete tool annotation reference
+- [ChatGPT integration](/integrations/chatgpt) - How ChatGPT uses read-only hints
+- [Resources documentation](/servers/resources) - Resource annotations
