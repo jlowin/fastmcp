@@ -173,8 +173,43 @@ mcp.add_middleware(OpenTelemetryMiddleware(
     tracer_name="my-custom-tracer",       # Custom tracer name
     enabled=True,                          # Explicitly enable/disable
     include_arguments=False,               # Don't include arguments for privacy
-    max_argument_length=1000              # Limit argument string length in spans
+    max_argument_length=1000,             # Limit argument string length in spans
+    propagate_context=True                # Enable trace context propagation (default)
 ))
+```
+
+### Trace Context Propagation
+
+The middleware automatically propagates trace context across MCP calls using the `_meta` field. This enables distributed tracing even when using protocols like SSE that don't support standard HTTP headers.
+
+**How it works:**
+
+1. **Incoming requests**: The middleware extracts trace context (W3C `traceparent` and `tracestate`) from the request's `_meta` field
+2. **Span creation**: New spans are created as children of the incoming trace context
+3. **Outgoing responses**: The middleware injects the current trace context into the response's `_meta` field
+
+This means that if a client includes trace context in their request metadata, your server's spans will be linked to the client's trace. Similarly, if your server calls another MCP server, you can propagate context downstream.
+
+**Example: Client propagating context**
+
+```python
+# Client code - sending trace context
+result = await client.call_tool(
+    "my_tool",
+    {"arg": "value"},
+    _meta={"traceparent": "00-trace_id-span_id-01", "tracestate": "vendor=value"}
+)
+
+# The server will create spans as children of this trace
+# And the response will include updated trace context in result.meta
+if result.meta:
+    downstream_traceparent = result.meta.get("traceparent")
+```
+
+To disable context propagation:
+
+```python
+mcp.add_middleware(OpenTelemetryMiddleware(propagate_context=False))
 ```
 
 ### What Gets Traced

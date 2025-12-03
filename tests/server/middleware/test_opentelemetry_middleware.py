@@ -178,3 +178,128 @@ class TestOpenTelemetryMiddlewareErrorHandling:
         async with Client(mcp) as client:
             with pytest.raises(Exception):
                 await client.call_tool("failing_tool", {})
+
+
+class TestOpenTelemetryMiddlewareContextPropagation:
+    """Test trace context propagation through MCP _meta fields."""
+
+    def test_propagate_context_can_be_disabled(self):
+        """Test that context propagation can be disabled."""
+        from fastmcp.server.middleware.opentelemetry import OpenTelemetryMiddleware
+
+        middleware = OpenTelemetryMiddleware(propagate_context=False)
+        assert middleware.propagate_context is False
+        assert middleware.propagator is None
+
+    def test_propagate_context_enabled_by_default(self):
+        """Test that context propagation is enabled by default when OTel is available."""
+        from fastmcp.server.middleware.opentelemetry import (
+            OPENTELEMETRY_AVAILABLE,
+            OpenTelemetryMiddleware,
+        )
+
+        middleware = OpenTelemetryMiddleware()
+        assert middleware.propagate_context is True
+        if OPENTELEMETRY_AVAILABLE:
+            assert middleware.propagator is not None
+        else:
+            assert middleware.propagator is None
+
+    async def test_trace_context_injection_in_tool_result(self):
+        """Test that trace context is injected into tool result metadata."""
+        from fastmcp.server.middleware.opentelemetry import (
+            OPENTELEMETRY_AVAILABLE,
+            OpenTelemetryMiddleware,
+        )
+
+        if not OPENTELEMETRY_AVAILABLE:
+            pytest.skip("OpenTelemetry not available")
+
+        from opentelemetry import trace
+        from opentelemetry.sdk.trace import TracerProvider
+
+        # Set up a tracer provider
+        trace.set_tracer_provider(TracerProvider())
+
+        mcp = FastMCP("Test")
+        mcp.add_middleware(OpenTelemetryMiddleware(propagate_context=True))
+
+        @mcp.tool()
+        def test_tool(value: str) -> str:
+            return f"result: {value}"
+
+        async with Client(mcp) as client:
+            result = await client.call_tool("test_tool", {"value": "test"})
+            # Check that result has metadata with trace context
+            assert result.meta is not None
+            assert "traceparent" in result.meta
+
+    async def test_trace_context_extraction_from_request(self):
+        """Test that trace context is extracted from request metadata."""
+        from fastmcp.server.middleware.opentelemetry import (
+            OPENTELEMETRY_AVAILABLE,
+            OpenTelemetryMiddleware,
+        )
+
+        if not OPENTELEMETRY_AVAILABLE:
+            pytest.skip("OpenTelemetry not available")
+
+        from opentelemetry import trace
+        from opentelemetry.sdk.trace import TracerProvider
+
+        # Set up a tracer provider
+        trace_provider = TracerProvider()
+        trace.set_tracer_provider(trace_provider)
+
+        mcp = FastMCP("Test")
+        middleware = OpenTelemetryMiddleware(propagate_context=True)
+        mcp.add_middleware(middleware)
+
+        # Track whether context was extracted
+        extracted_context = []
+
+        original_extract = middleware._extract_trace_context
+
+        def mock_extract(context):
+            result = original_extract(context)
+            extracted_context.append(result)
+            return result
+
+        middleware._extract_trace_context = mock_extract  # type: ignore[method-assign]
+
+        @mcp.tool()
+        def test_tool(value: str) -> str:
+            return f"result: {value}"
+
+        async with Client(mcp) as client:
+            # Call tool without trace context - should extract None
+            await client.call_tool("test_tool", {"value": "test"})
+            assert len(extracted_context) > 0
+
+    async def test_context_propagation_disabled_no_injection(self):
+        """Test that no context is injected when propagation is disabled."""
+        from fastmcp.server.middleware.opentelemetry import (
+            OPENTELEMETRY_AVAILABLE,
+            OpenTelemetryMiddleware,
+        )
+
+        if not OPENTELEMETRY_AVAILABLE:
+            pytest.skip("OpenTelemetry not available")
+
+        from opentelemetry import trace
+        from opentelemetry.sdk.trace import TracerProvider
+
+        # Set up a tracer provider
+        trace.set_tracer_provider(TracerProvider())
+
+        mcp = FastMCP("Test")
+        mcp.add_middleware(OpenTelemetryMiddleware(propagate_context=False))
+
+        @mcp.tool()
+        def test_tool(value: str) -> str:
+            return f"result: {value}"
+
+        async with Client(mcp) as client:
+            result = await client.call_tool("test_tool", {"value": "test"})
+            # Check that result has no trace context metadata
+            assert result.meta is None or "traceparent" not in result.meta
