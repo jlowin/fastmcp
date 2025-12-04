@@ -163,6 +163,10 @@ client = Client(
 If the client doesn't provide a sampling handler, servers can optionally configure a fallback handler. See [Server Sampling](/servers/sampling#sampling-fallback-handler) for details.
 </Note>
 
+<Tip>
+When you provide a `sampling_handler`, FastMCP automatically advertises full sampling capabilities including tool support to the server.
+</Tip>
+
 ## Handling Tool Requests
 
 <VersionBadge version="2.14.0" />

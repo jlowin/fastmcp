@@ -70,6 +70,9 @@ _clamp_logger(logger=to_client_logger, max_level="DEBUG")
 T = TypeVar("T", default=Any)
 ResultT = TypeVar("ResultT", default=str)
 
+# Simplified tool choice type - just the mode string instead of the full MCP object
+ToolChoiceOption = Literal["auto", "required", "none"]
+
 _current_context: ContextVar[Context | None] = ContextVar("context", default=None)  # type: ignore[assignment]
 
 
@@ -517,7 +520,7 @@ class Context:
         max_tokens: int | None = None,
         model_preferences: ModelPreferences | str | list[str] | None = None,
         tools: Sequence[SamplingTool | FastMCPTool] | None = None,
-        tool_choice: ToolChoice | None = None,
+        tool_choice: ToolChoiceOption | None = None,
         max_iterations: int = 10,
         result_type: type[ResultT],
     ) -> SamplingResult[ResultT]:
@@ -534,7 +537,7 @@ class Context:
         max_tokens: int | None = None,
         model_preferences: ModelPreferences | str | list[str] | None = None,
         tools: Sequence[SamplingTool | FastMCPTool] | None = None,
-        tool_choice: ToolChoice | None = None,
+        tool_choice: ToolChoiceOption | None = None,
         max_iterations: int = 10,
         result_type: None = None,
     ) -> SamplingResult[str]:
@@ -550,7 +553,7 @@ class Context:
         max_tokens: int | None = None,
         model_preferences: ModelPreferences | str | list[str] | None = None,
         tools: Sequence[SamplingTool | FastMCPTool] | None = None,
-        tool_choice: ToolChoice | None = None,
+        tool_choice: ToolChoiceOption | None = None,
         max_iterations: int = 10,
         result_type: type[ResultT] | None = None,
     ) -> SamplingResult[ResultT] | SamplingResult[str]:
@@ -728,7 +731,7 @@ class Context:
         max_tokens: int,
         model_preferences: ModelPreferences | str | list[str] | None,
         sdk_tools: list[SDKTool] | None,
-        tool_choice: ToolChoice | None,
+        tool_choice: ToolChoiceOption | None,
         tool_map: dict[str, SamplingTool],
         max_iterations: int,
         result_type: type[ResultT] | None,
@@ -744,7 +747,9 @@ class Context:
 
         while True:
             # On last iteration, force completion
-            effective_tool_choice = tool_choice
+            effective_tool_choice: ToolChoice | None = (
+                ToolChoice(mode=tool_choice) if tool_choice else None
+            )
             if iteration == max_iterations - 1:
                 if has_result_type and final_response_tool is not None:
                     # Force final_response tool on last iteration
@@ -857,7 +862,7 @@ class Context:
         max_tokens: int,
         model_preferences: ModelPreferences | str | list[str] | None,
         sdk_tools: list[SDKTool] | None,
-        tool_choice: ToolChoice | None,
+        tool_choice: ToolChoiceOption | None,
         tool_map: dict[str, SamplingTool],
         max_iterations: int,
         result_type: type[ResultT] | None,
@@ -871,7 +876,9 @@ class Context:
 
         while True:
             # On last iteration, force completion
-            effective_tool_choice = tool_choice
+            effective_tool_choice: ToolChoice | None = (
+                ToolChoice(mode=tool_choice) if tool_choice else None
+            )
             if iteration == max_iterations - 1:
                 if has_result_type and final_response_tool is not None:
                     # Force final_response tool on last iteration
@@ -969,7 +976,9 @@ class Context:
             SamplingMessage(role="assistant", content=result.content)
         )
 
-        # Execute each tool and collect results
+        # Execute each tool and collect results into a single list
+        tool_results: list[ToolResultContent] = []
+
         for tool_use in tool_use_blocks:
             # Check if this is the final_response tool
             if (
@@ -993,53 +1002,65 @@ class Context:
                     )
                 except Exception as e:
                     # Validation failed - add error and continue the loop
-                    tool_result = ToolResultContent(
-                        type="tool_result",
-                        toolUseId=tool_use.id,
-                        content=[
-                            TextContent(
-                                type="text",
-                                text=f"Validation error: {e}. Please try again.",
-                            )
-                        ],
-                        isError=True,
-                    )
-                    current_messages.append(
-                        SamplingMessage(role="user", content=tool_result)
+                    tool_results.append(
+                        ToolResultContent(
+                            type="tool_result",
+                            toolUseId=tool_use.id,
+                            content=[
+                                TextContent(
+                                    type="text",
+                                    text=f"Validation error: {e}. Please try again.",
+                                )
+                            ],
+                            isError=True,
+                        )
                     )
                     continue
 
             tool = tool_map.get(tool_use.name)
             if tool is None:
                 # Tool not found - add error result
-                tool_result = ToolResultContent(
-                    type="tool_result",
-                    toolUseId=tool_use.id,
-                    content=[
-                        TextContent(
-                            type="text", text=f"Error: Unknown tool '{tool_use.name}'"
-                        )
-                    ],
-                    isError=True,
+                tool_results.append(
+                    ToolResultContent(
+                        type="tool_result",
+                        toolUseId=tool_use.id,
+                        content=[
+                            TextContent(
+                                type="text",
+                                text=f"Error: Unknown tool '{tool_use.name}'",
+                            )
+                        ],
+                        isError=True,
+                    )
                 )
             else:
                 try:
                     result_value = await tool.run(tool_use.input)
-                    tool_result = ToolResultContent(
-                        type="tool_result",
-                        toolUseId=tool_use.id,
-                        content=[TextContent(type="text", text=str(result_value))],
+                    tool_results.append(
+                        ToolResultContent(
+                            type="tool_result",
+                            toolUseId=tool_use.id,
+                            content=[TextContent(type="text", text=str(result_value))],
+                        )
                     )
                 except Exception as e:
-                    tool_result = ToolResultContent(
-                        type="tool_result",
-                        toolUseId=tool_use.id,
-                        content=[TextContent(type="text", text=f"Error: {e}")],
-                        isError=True,
+                    tool_results.append(
+                        ToolResultContent(
+                            type="tool_result",
+                            toolUseId=tool_use.id,
+                            content=[TextContent(type="text", text=f"Error: {e}")],
+                            isError=True,
+                        )
                     )
 
-            # Add tool result to messages
-            current_messages.append(SamplingMessage(role="user", content=tool_result))
+        # Add all tool results as a single user message with list content
+        if tool_results:
+            current_messages.append(
+                SamplingMessage(
+                    role="user",
+                    content=tool_results,  # type: ignore[arg-type]
+                )
+            )
 
         return current_messages, True
 

@@ -3,6 +3,7 @@ title: LLM Sampling
 sidebarTitle: Sampling
 description: Request LLM text generation from the client or a configured provider through the MCP context.
 icon: robot
+tag: NEW
 ---
 
 import { VersionBadge } from '/snippets/version-badge.mdx'
@@ -85,8 +86,8 @@ async def analyze_sentiment(text: str, ctx: Context) -> dict:
       Optional list of tools the LLM can use during sampling. See [Sampling with Tools](#sampling-with-tools).
     </ResponseField>
 
-    <ResponseField name="tool_choice" type="ToolChoice | None" default="None">
-      Optional control over tool usage behavior (`auto`, `required`, or `none`)
+    <ResponseField name="tool_choice" type="str | None" default="None">
+      Optional control over tool usage behavior: `"auto"`, `"required"`, or `"none"`
     </ResponseField>
 
     <ResponseField name="max_iterations" type="int" default="10">
@@ -259,9 +260,10 @@ def search(query: str) -> str:
     return f"Search results for: {query}"
 
 @sampling_tool
-async def calculate(expression: str) -> float:
-    """Evaluate a mathematical expression."""
-    return eval(expression)  # In production, use a safe math parser
+def get_current_time() -> str:
+    """Get the current time."""
+    from datetime import datetime
+    return datetime.now().strftime("%H:%M:%S")
 ```
 
 You can also pass existing FastMCP tools directly to `ctx.sample()`:
@@ -298,9 +300,10 @@ def search(query: str) -> str:
     return f"Results for: {query}"
 
 @sampling_tool
-def calculate(expression: str) -> float:
-    """Calculate a math expression."""
-    return eval(expression)
+def get_time() -> str:
+    """Get the current time."""
+    from datetime import datetime
+    return datetime.now().strftime("%H:%M:%S")
 
 mcp = FastMCP()
 
@@ -310,7 +313,7 @@ async def research_assistant(question: str, ctx: Context) -> str:
     result = await ctx.sample(
         messages=question,
         system_prompt="You are a research assistant. Use the available tools to answer questions.",
-        tools=[search, calculate],
+        tools=[search, get_time],
     )
 
     return result.text
@@ -332,7 +335,7 @@ Use `max_iterations` to limit the number of LLM calls (default is 10). On the la
 # Allow up to 5 tool-use cycles
 result = await ctx.sample(
     messages=prompt,
-    tools=[search, calculate],
+    tools=[search, get_time],
     max_iterations=5,
 )
 
@@ -340,7 +343,7 @@ result = await ctx.sample(
 # Useful for building your own loop with result.history
 result = await ctx.sample(
     messages=prompt,
-    tools=[search, calculate],
+    tools=[search, get_time],
     max_iterations=1,
 )
 ```
@@ -350,16 +353,14 @@ result = await ctx.sample(
 Control how the LLM uses tools with `tool_choice`:
 
 ```python
-from mcp.types import ToolChoice
-
 # Let the LLM decide (default)
-result = await ctx.sample(messages=prompt, tools=tools, tool_choice=ToolChoice(mode="auto"))
+result = await ctx.sample(messages=prompt, tools=tools, tool_choice="auto")
 
 # Force the LLM to use a tool
-result = await ctx.sample(messages=prompt, tools=tools, tool_choice=ToolChoice(mode="required"))
+result = await ctx.sample(messages=prompt, tools=tools, tool_choice="required")
 
 # Prevent tool use (useful for final response)
-result = await ctx.sample(messages=prompt, tools=tools, tool_choice=ToolChoice(mode="none"))
+result = await ctx.sample(messages=prompt, tools=tools, tool_choice="none")
 ```
 
 ### Structured Output
@@ -419,7 +420,7 @@ This is useful when you need to:
 async def custom_agent(question: str, ctx: Context) -> str:
     """Agent with custom loop logic."""
     history = []
-    tools = [search, calculate]
+    tools = [search, get_time]
 
     while True:
         result = await ctx.sample(
@@ -576,5 +577,5 @@ By default, LLM sampling requires client support:
 - Use `sampling_handler_behavior="always"` to completely bypass the client and control which LLM is used
 
 <Note>
-Sampling with tools requires either a client that advertises the `sampling.tools` capability, or a fallback handler configured with `sampling_handler_behavior="always"`. Most current MCP clients don't yet advertise tool support, so using a fallback handler is the recommended approach for tool-enabled sampling.
+Sampling with tools requires a client that advertises the `sampling.tools` capability. FastMCP clients automatically advertise this capability when a `sampling_handler` is provided. For external clients that don't support tool-enabled sampling, configure a fallback handler with `sampling_handler_behavior="always"`.
 </Note>

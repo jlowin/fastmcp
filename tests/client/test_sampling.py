@@ -3,7 +3,7 @@ from typing import cast
 from unittest.mock import AsyncMock
 
 import pytest
-from mcp.types import TextContent, ToolChoice
+from mcp.types import TextContent
 from pydantic_core import to_json
 
 from fastmcp import Client, Context, FastMCP
@@ -171,16 +171,18 @@ class TestSamplingWithTools:
 
     async def test_sampling_with_tools_requires_capability(self):
         """Test that sampling with tools raises error when client lacks capability."""
+        import mcp.types as mcp_types
+
         from fastmcp.exceptions import ToolError
 
-        mcp = FastMCP()
+        server = FastMCP()
 
         @sampling_tool
         def search(query: str) -> str:
             """Search the web."""
             return f"Results for: {query}"
 
-        @mcp.tool
+        @server.tool
         async def sample_with_tool(context: Context) -> str:
             # This should fail because the client doesn't advertise tools capability
             result = await context.sample(
@@ -194,7 +196,12 @@ class TestSamplingWithTools:
         ) -> str:
             return "Response"
 
-        async with Client(mcp, sampling_handler=sampling_handler) as client:
+        # Explicitly disable tools capability by passing SamplingCapability without tools
+        async with Client(
+            server,
+            sampling_handler=sampling_handler,
+            sampling_capabilities=mcp_types.SamplingCapability(),  # No tools
+        ) as client:
             with pytest.raises(ToolError, match="sampling.tools capability"):
                 await client.call_tool("sample_with_tool", {})
 
@@ -279,23 +286,15 @@ class TestSamplingWithTools:
         assert sampling.fn is mcp_tool.fn
 
     def test_tool_choice_parameter(self):
-        """Test that tool_choice parameter is accepted."""
-        # This is a basic type check - full integration requires tools capability
+        """Test that tool_choice parameter accepts string literals."""
+        from fastmcp.server.context import ToolChoiceOption
 
-        @sampling_tool
-        def search(query: str) -> str:
-            """Search."""
-            return query
-
-        # Just verify the ToolChoice type works
-        choice = ToolChoice(mode="required")
-        assert choice.mode == "required"
-
-        choice_auto = ToolChoice(mode="auto")
-        assert choice_auto.mode == "auto"
-
-        choice_none = ToolChoice(mode="none")
-        assert choice_none.mode == "none"
+        # Verify ToolChoiceOption type accepts the valid string values
+        choices: list[ToolChoiceOption] = ["auto", "required", "none"]
+        assert len(choices) == 3
+        assert "auto" in choices
+        assert "required" in choices
+        assert "none" in choices
 
 
 class TestAutomaticToolLoop:
@@ -547,16 +546,22 @@ class TestAutomaticToolLoop:
         # Check that error was passed back in messages
         assert len(messages_received) == 2
         last_messages = messages_received[1]
-        # Find the tool result message
-        tool_result_msg = None
+        # Find the tool result in list content
+        tool_result = None
         for msg in last_messages:
-            if isinstance(msg.content, ToolResultContent):
-                tool_result_msg = msg
+            # Tool results are now in a list
+            if isinstance(msg.content, list):
+                for item in msg.content:
+                    if isinstance(item, ToolResultContent):
+                        tool_result = item
+                        break
+            elif isinstance(msg.content, ToolResultContent):
+                tool_result = msg.content
                 break
-        assert tool_result_msg is not None
-        assert tool_result_msg.content.isError is True  # type: ignore[union-attr]
+        assert tool_result is not None
+        assert tool_result.isError is True
         # Content is list of TextContent objects
-        error_text = tool_result_msg.content.content[0].text  # type: ignore[union-attr]
+        error_text = tool_result.content[0].text  # type: ignore[union-attr]
         assert "Unknown tool" in error_text
         assert result.data == "Handled error"
 
@@ -615,15 +620,22 @@ class TestAutomaticToolLoop:
         # Check that error was passed back
         assert len(messages_received) == 2
         last_messages = messages_received[1]
-        tool_result_msg = None
+        # Find the tool result in list content
+        tool_result = None
         for msg in last_messages:
-            if isinstance(msg.content, ToolResultContent):
-                tool_result_msg = msg
+            # Tool results are now in a list
+            if isinstance(msg.content, list):
+                for item in msg.content:
+                    if isinstance(item, ToolResultContent):
+                        tool_result = item
+                        break
+            elif isinstance(msg.content, ToolResultContent):
+                tool_result = msg.content
                 break
-        assert tool_result_msg is not None
-        assert tool_result_msg.content.isError is True  # type: ignore[union-attr]
+        assert tool_result is not None
+        assert tool_result.isError is True
         # Content is list of TextContent objects
-        error_text = tool_result_msg.content.content[0].text  # type: ignore[union-attr]
+        error_text = tool_result.content[0].text  # type: ignore[union-attr]
         assert "Tool failed intentionally" in error_text
         assert result.data == "Handled error"
 
@@ -885,14 +897,21 @@ class TestSamplingResultType:
 
         # Check that error was passed back
         last_messages = messages_received[1]
-        tool_result_msg = None
+        # Find the tool result in list content
+        tool_result = None
         for msg in last_messages:
-            if isinstance(msg.content, ToolResultContent):
-                tool_result_msg = msg
+            # Tool results are now in a list
+            if isinstance(msg.content, list):
+                for item in msg.content:
+                    if isinstance(item, ToolResultContent):
+                        tool_result = item
+                        break
+            elif isinstance(msg.content, ToolResultContent):
+                tool_result = msg.content
                 break
-        assert tool_result_msg is not None
-        assert tool_result_msg.content.isError is True  # type: ignore[union-attr]
-        error_text = tool_result_msg.content.content[0].text  # type: ignore[union-attr]
+        assert tool_result is not None
+        assert tool_result.isError is True
+        error_text = tool_result.content[0].text  # type: ignore[union-attr]
         assert "Validation error" in error_text
 
         # Final result should be correct
