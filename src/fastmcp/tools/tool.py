@@ -17,7 +17,7 @@ import mcp.types
 import pydantic_core
 from mcp.shared.tool_name_validation import validate_and_warn_tool_name
 from mcp.types import CallToolResult, ContentBlock, Icon, TextContent, ToolAnnotations
-from mcp.types import Tool as MCPTool
+from mcp.types import Tool as SDKTool
 from pydantic import Field, PydanticSchemaGenerationError, model_validator
 from typing_extensions import TypeVar
 
@@ -158,7 +158,7 @@ class Tool(FastMCPComponent):
         *,
         include_fastmcp_meta: bool | None = None,
         **overrides: Any,
-    ) -> MCPTool:
+    ) -> SDKTool:
         """Convert the FastMCP tool to an MCP tool."""
         title = None
 
@@ -167,7 +167,7 @@ class Tool(FastMCPComponent):
         elif self.annotations and self.annotations.title:
             title = self.annotations.title
 
-        return MCPTool(
+        return SDKTool(
             name=overrides.get("name", self.name),
             title=overrides.get("title", title),
             description=overrides.get("description", self.description),
