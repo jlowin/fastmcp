@@ -38,49 +38,63 @@ class ElicitationJsonSchema(GenerateJsonSchema):
     """
 
     def generate_inner(self, schema: core_schema.CoreSchema) -> JsonSchemaValue:
-        """Override to prevent ref generation for enums."""
+        """Override to prevent ref generation for enums and handle list schemas."""
         # For enum schemas, bypass the ref mechanism entirely
         if schema["type"] == "enum":
             # Directly call our custom enum_schema without going through handler
             # This prevents the ref/defs mechanism from being invoked
             return self.enum_schema(schema)
+        # For list schemas, check if items are enums
+        if schema["type"] == "list":
+            return self.list_schema(schema)
         # For all other types, use the default implementation
         return super().generate_inner(schema)
 
+    def list_schema(self, schema: core_schema.ListSchema) -> JsonSchemaValue:
+        """Generate schema for list types, detecting enum items for multi-select."""
+        items_schema = schema.get("items_schema")
+
+        # Check if items are enum/Literal
+        if items_schema and items_schema.get("type") == "enum":
+            # Generate array with enum items
+            items = self.enum_schema(items_schema)
+            # If items have oneOf pattern, convert to anyOf for multi-select per SEP-1330
+            if "oneOf" in items:
+                items = {"anyOf": items["oneOf"]}
+            return {
+                "type": "array",
+                "items": items,  # Will be {"enum": [...]} or {"anyOf": [...]}
+            }
+
+        # Check if items are Literal (which Pydantic represents differently)
+        if items_schema:
+            # Try to detect Literal patterns
+            items_result = super().generate_inner(items_schema)
+            # If it's a const pattern or enum-like, allow it
+            if (
+                "const" in items_result
+                or "enum" in items_result
+                or "oneOf" in items_result
+            ):
+                # Convert oneOf to anyOf for multi-select
+                if "oneOf" in items_result:
+                    items_result = {"anyOf": items_result["oneOf"]}
+                return {
+                    "type": "array",
+                    "items": items_result,
+                }
+
+        # Default behavior for non-enum arrays
+        return super().list_schema(schema)
+
     def enum_schema(self, schema: core_schema.EnumSchema) -> JsonSchemaValue:
-        """Generate inline enum schema with optional enumNames for better UI.
+        """Generate inline enum schema.
 
-        If enum members have a _display_name_ attribute or custom __str__,
-        we'll include enumNames for better UI representation.
+        Always generates enum pattern: {"enum": [value, ...]}
+        Titled enums are handled separately via dict-based syntax in ctx.elicit().
         """
-        # Get the base schema from parent
-        result = super().enum_schema(schema)
-
-        # Try to add enumNames if the enum has display-friendly names
-        enum_cls = schema.get("cls")
-        if enum_cls:
-            members = schema.get("members", [])
-            enum_names = []
-            has_custom_names = False
-
-            for member in members:
-                # Check if member has a custom display name attribute
-                if hasattr(member, "_display_name_"):
-                    enum_names.append(member._display_name_)
-                    has_custom_names = True
-                # Or use the member name with better formatting
-                else:
-                    # Convert SNAKE_CASE to Title Case for display
-                    display_name = member.name.replace("_", " ").title()
-                    enum_names.append(display_name)
-                    if display_name != member.value:
-                        has_custom_names = True
-
-            # Only add enumNames if they differ from the values
-            if has_custom_names:
-                result["enumNames"] = enum_names
-
-        return result
+        # Get the base schema from parent - always use simple enum pattern
+        return super().enum_schema(schema)
 
 
 # we can't use the low-level AcceptedElicitation because it only works with BaseModels
@@ -94,6 +108,27 @@ class AcceptedElicitation(BaseModel, Generic[T]):
 @dataclass
 class ScalarElicitationType(Generic[T]):
     value: T
+
+
+def _dict_to_enum_schema(
+    enum_dict: dict[str, dict[str, str]], multi_select: bool = False
+) -> dict[str, Any]:
+    """Convert dict enum to SEP-1330 compliant schema pattern.
+
+    Args:
+        enum_dict: {"low": {"title": "Low Priority"}, "medium": {"title": "Medium Priority"}}
+        multi_select: If True, use anyOf pattern; if False, use oneOf pattern
+
+    Returns:
+        {"oneOf": [{"const": "low", "title": "Low Priority"}, ...]} for single-select
+        {"anyOf": [{"const": "low", "title": "Low Priority"}, ...]} for multi-select
+    """
+    pattern_key = "anyOf" if multi_select else "oneOf"
+    pattern = []
+    for value, metadata in enum_dict.items():
+        title = metadata.get("title", value)
+        pattern.append({"const": value, "title": title})
+    return {pattern_key: pattern}
 
 
 def get_elicitation_schema(response_type: type[T]) -> dict[str, Any]:
@@ -197,20 +232,7 @@ def validate_elicitation_json_schema(schema: dict[str, Any]) -> None:
                     )
             continue
 
-        # Check if it's a primitive type
-        if prop_type not in ALLOWED_TYPES:
-            raise TypeError(
-                f"Elicitation schema field '{prop_name}' has type '{prop_type}' which is not "
-                f"a primitive type. Only {ALLOWED_TYPES} are allowed in elicitation schemas."
-            )
-
-        # Check for nested objects or arrays of objects (not allowed)
-        if prop_type == "object":
-            raise TypeError(
-                f"Elicitation schema field '{prop_name}' is an object, but nested objects are not allowed. "
-                "Elicitation schemas must be flat objects with primitive properties only."
-            )
-
+        # Check for arrays before checking primitive types
         if prop_type == "array":
             items_schema = prop_schema.get("items", {})
             if items_schema.get("type") == "object":
@@ -218,3 +240,35 @@ def validate_elicitation_json_schema(schema: dict[str, Any]) -> None:
                     f"Elicitation schema field '{prop_name}' is an array of objects, but arrays of objects are not allowed. "
                     "Elicitation schemas must be flat objects with primitive properties only."
                 )
+
+            # Allow arrays with enum patterns (for multi-select)
+            if "enum" in items_schema:
+                continue  # Allowed: {"type": "array", "items": {"enum": [...]}}
+
+            # Allow arrays with oneOf/anyOf const patterns (SEP-1330)
+            if "oneOf" in items_schema or "anyOf" in items_schema:
+                union_schemas = items_schema.get("oneOf", []) + items_schema.get(
+                    "anyOf", []
+                )
+                if union_schemas and all("const" in s for s in union_schemas):
+                    continue  # Allowed: {"type": "array", "items": {"anyOf": [{"const": ...}, ...]}}
+
+            # Reject other array types (e.g., arrays of primitives without enum pattern)
+            raise TypeError(
+                f"Elicitation schema field '{prop_name}' is an array, but arrays are only allowed "
+                "when items are enums (for multi-select). Only enum arrays are supported in elicitation schemas."
+            )
+
+        # Check for nested objects (not allowed)
+        if prop_type == "object":
+            raise TypeError(
+                f"Elicitation schema field '{prop_name}' is an object, but nested objects are not allowed. "
+                "Elicitation schemas must be flat objects with primitive properties only."
+            )
+
+        # Check if it's a primitive type
+        if prop_type not in ALLOWED_TYPES:
+            raise TypeError(
+                f"Elicitation schema field '{prop_name}' has type '{prop_type}' which is not "
+                f"a primitive type. Only {ALLOWED_TYPES} are allowed in elicitation schemas."
+            )
