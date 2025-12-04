@@ -10,12 +10,13 @@ dependencies = [
     "mcp>=1.23.1",
     "openapi-pydantic>=0.5.1",
     "platformdirs>=4.0.0",
+    "pydocket>=0.14.0",
     "rich>=13.9.4",
     "cyclopts>=4.0.0",
     "authlib>=1.6.5",
     "pydantic[email]>=2.11.7",
     "pyperclip>=1.9.0",
-    "py-key-value-aio[disk,memory]>=0.2.8,<0.4.0",
+    "py-key-value-aio[disk,keyring,memory]>=0.3.0,<0.4.0",
     "uvicorn>=0.35",
     "websockets>=15.0.1",
     "jsonschema-path>=0.3.4",
@@ -51,6 +52,8 @@ openai = ["openai>=1.102.0"]
 [dependency-groups]
 dev = [
     "dirty-equals>=0.9.0",
+    # Dependency to support Docket memory:// brokers - only necessary until next fakeredis release
+    "fakeredis[lua] @ git+https://github.com/cunla/fakeredis-py.git@ad50a0de8d6dce554fb629ec284bc4ccbc6a7f12",
     "fastmcp[openai]",
     # add optional dependencies for fastmcp dev
     "fastapi>=0.115.12",
