@@ -109,6 +109,14 @@ The sampling handler receives three parameters:
     <ResponseField name="metadata" type="dict[str, Any] | None">
       Optional metadata to pass through to the LLM provider.
     </ResponseField>
+
+    <ResponseField name="tools" type="list[Tool] | None">
+      Optional list of tools the LLM can use during sampling. See [Handling Tool Requests](#handling-tool-requests).
+    </ResponseField>
+
+    <ResponseField name="toolChoice" type="ToolChoice | None">
+      Optional control over tool usage behavior (`auto`, `required`, or `none`).
+    </ResponseField>
     </Expandable>
 
 </ResponseField>
@@ -153,4 +161,108 @@ client = Client(
 
 <Note>
 If the client doesn't provide a sampling handler, servers can optionally configure a fallback handler. See [Server Sampling](/servers/sampling#sampling-fallback-handler) for details.
+</Note>
+
+## Handling Tool Requests
+
+<VersionBadge version="2.14.0" />
+
+Servers may request sampling with tools, allowing the LLM to make tool calls during generation. When tools are provided in `params.tools`, your handler should return a `CreateMessageResultWithTools` object instead of a simple string.
+
+### Checking for Tools
+
+```python
+from fastmcp import Client
+from fastmcp.client.sampling import SamplingMessage, SamplingParams, RequestContext
+from mcp.types import (
+    CreateMessageResultWithTools,
+    TextContent,
+    ToolUseContent,
+    ToolChoice,
+)
+
+async def sampling_handler_with_tools(
+    messages: list[SamplingMessage],
+    params: SamplingParams,
+    context: RequestContext
+) -> str | CreateMessageResultWithTools:
+    # Check if tools were provided
+    if params.tools:
+        # Call your LLM with tool support
+        # Return CreateMessageResultWithTools with appropriate content
+        return CreateMessageResultWithTools(
+            role="assistant",
+            content=[TextContent(type="text", text="I'll help you with that.")],
+            model="gpt-4",
+            stopReason="endTurn",
+        )
+
+    # Standard text response when no tools
+    return "Generated response"
+
+client = Client(
+    "my_mcp_server.py",
+    sampling_handler=sampling_handler_with_tools,
+)
+```
+
+### Returning Tool Use
+
+When the LLM wants to call a tool, return a `CreateMessageResultWithTools` with `stopReason="toolUse"` and `ToolUseContent` in the content:
+
+```python
+from mcp.types import CreateMessageResultWithTools, ToolUseContent
+
+async def sampling_handler_with_tools(
+    messages: list[SamplingMessage],
+    params: SamplingParams,
+    context: RequestContext
+) -> str | CreateMessageResultWithTools:
+    if params.tools:
+        # Your LLM decided to call a tool
+        return CreateMessageResultWithTools(
+            role="assistant",
+            content=[
+                ToolUseContent(
+                    type="toolUse",
+                    id="call_123",
+                    name="search",
+                    input={"query": "Python tutorials"},
+                )
+            ],
+            model="gpt-4",
+            stopReason="toolUse",  # Indicates tool use
+        )
+
+    return "Response without tools"
+```
+
+### Tool Choice
+
+The `params.toolChoice` field indicates how the server wants tools to be used:
+
+- **`auto`**: The LLM decides whether to use tools
+- **`required`**: The LLM must use at least one tool
+- **`none`**: The LLM should not use any tools
+
+```python
+async def sampling_handler_with_tools(
+    messages: list[SamplingMessage],
+    params: SamplingParams,
+    context: RequestContext
+) -> str | CreateMessageResultWithTools:
+    if params.tools and params.toolChoice:
+        if params.toolChoice.mode == "required":
+            # Must return a tool call
+            pass
+        elif params.toolChoice.mode == "none":
+            # Should not return tool calls even though tools are available
+            pass
+        # "auto" - let the LLM decide
+
+    return "Response"
+```
+
+<Note>
+Tool execution happens on the server side. The client's role is to pass tools to the LLM and return the LLM's response (which may include tool use requests). The server then executes the tools and may send follow-up sampling requests with tool results.
 </Note>
