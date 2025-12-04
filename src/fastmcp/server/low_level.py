@@ -114,6 +114,13 @@ class MiddlewareServerSession(ServerSession):
                     if not responder._completed:
                         with responder:
                             await responder.respond(e.error)
+                    else:
+                        # Don't re-raise: prevents responding to initialize request twice
+                        logger.warning(
+                            "Received McpError but responder is already completed. "
+                            "Cannot send error response as response was already sent.",
+                            exc_info=e,
+                        )
         else:
             return await super()._received_request(responder)
 
