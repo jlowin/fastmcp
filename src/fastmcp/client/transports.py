@@ -6,7 +6,7 @@ import os
 import shutil
 import sys
 import warnings
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import Any, Literal, TextIO, TypeVar, cast, overload
 
@@ -253,7 +253,8 @@ class StreamableHttpTransport(ClientTransport):
         if isinstance(sse_read_timeout, int | float):
             sse_read_timeout = datetime.timedelta(seconds=float(sse_read_timeout))
         self.sse_read_timeout = sse_read_timeout
-        self.get_session_id_cb = None
+
+        self._get_session_id_cb: Callable[[], str | None] | None = None
 
     def _set_auth(self, auth: httpx.Auth | Literal["oauth"] | str | None):
         if auth == "oauth":
@@ -289,16 +290,23 @@ class StreamableHttpTransport(ClientTransport):
             **client_kwargs,
         ) as transport:
             read_stream, write_stream, get_session_id = transport
-            self.get_session_id_cb = get_session_id
+            self._get_session_id_cb = get_session_id
             async with ClientSession(
                 read_stream, write_stream, **session_kwargs
             ) as session:
                 yield session
 
     def get_session_id(self) -> str | None:
-        if self.get_session_id_cb:
-            return self.get_session_id_cb()
+        if self._get_session_id_cb:
+            try:
+                return self._get_session_id_cb()
+            except Exception:
+                return None
         return None
+
+    async def close(self):
+        # Reset the session id callback
+        self._get_session_id_cb = None
 
     def __repr__(self) -> str:
         return f"<StreamableHttpTransport(url='{self.url}')>"
