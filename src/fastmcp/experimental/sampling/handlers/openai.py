@@ -171,17 +171,19 @@ class OpenAISamplingHandler(BaseLLMSamplingHandler):
                         elif isinstance(item, TextContent):
                             text_parts.append(item.text)
                         elif isinstance(item, ToolResultContent):
-                            # Tool results in a list - add as separate messages
-                            result_text = ""
+                            # Each tool result becomes a separate tool message
+                            content_parts: list[dict[str, str]] = []
                             if item.content:
                                 for sub_item in item.content:
                                     if isinstance(sub_item, TextContent):
-                                        result_text += sub_item.text
+                                        content_parts.append(
+                                            {"type": "text", "text": sub_item.text}
+                                        )
                             openai_messages.append(
                                 ChatCompletionToolMessageParam(
                                     role="tool",
                                     tool_call_id=item.toolUseId,
-                                    content=result_text,
+                                    content=content_parts if content_parts else "",
                                 )
                             )
 
@@ -234,17 +236,19 @@ class OpenAISamplingHandler(BaseLLMSamplingHandler):
 
                 # Handle ToolResultContent (user's tool results)
                 if isinstance(content, ToolResultContent):
-                    # Extract text from the content list
-                    result_text = ""
+                    # Extract text parts from the content list
+                    result_parts: list[dict[str, str]] = []
                     if content.content:
                         for item in content.content:
                             if isinstance(item, TextContent):
-                                result_text += item.text
+                                result_parts.append(
+                                    {"type": "text", "text": item.text}
+                                )
                     openai_messages.append(
                         ChatCompletionToolMessageParam(
                             role="tool",
                             tool_call_id=content.toolUseId,
-                            content=result_text,
+                            content=result_parts if result_parts else "",
                         )
                     )
                     continue
