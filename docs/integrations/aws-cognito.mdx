@@ -86,21 +86,19 @@ Set up AWS Cognito user pool with an app client to get the credentials needed fo
     </Tip>
 </Step>
 
-<Step title="Pick Up AWS Cognito Domain">
-    Navigate to **"Branding" → "Domain"** in the side navigation to find or configure Your AWS Cognito domain:
+<Step title="Configure Resource Server">
+    AWS Cognito requires a resource server entry to support OAuth with protected resources. Without this, token exchange will fail with an `invalid_grant` error.
 
-    **Option 1: Use Auto-Generated Domain**
-    - If AWS has already created a domain automatically, note the **domain prefix** (the part before `.auth.region.amazoncognito.com`)
-    - This prefix is what you'll use in your FastMCP configuration
+    Navigate to **"Branding" → "Domain"** in the side navigation, then:
 
-    **Option 2: Create a Custom Domain Prefix**
-    - If no domain exists or you want a better name, delete the existing domain and create a new one using the **"Actions"** menu
-    - Under **"Domain"** → **"Cognito domain"** in the **"Create Cognito domain"** dialog, enter a meaningful prefix (e.g., `my-app`) that is available in the AWS region you are in
-    - Just note the **domain prefix** you entered (e.g., `my-fastmcp-app`) - this is what you'll use in your FastMCP configuration
+    1. Click **"Create resource server"**
+    2. **Resource server name**: Enter a descriptive name (e.g., `My MCP Server`)
+    3. **Resource server identifier**: Enter your MCP endpoint URL exactly as it will be accessed (e.g., `http://localhost:8000/mcp` for development, or `https://your-server.com/mcp` for production)
+    4. Click **"Create resource server"**
 
-    <Info>
-    The FastMCP AWS Cognito provider automatically constructs the full domain from your prefix and region, simplifying configuration.
-    </Info>
+    <Warning>
+    The resource server identifier must exactly match your `base_url + mcp_path`. For the default configuration with `base_url="http://localhost:8000"` and `path="/mcp"`, use `http://localhost:8000/mcp`.
+    </Warning>
 </Step>
 
 <Step title="Save Your Credentials">
@@ -109,7 +107,6 @@ Set up AWS Cognito user pool with an app client to get the credentials needed fo
     - **User Pool ID**: Format like `eu-central-1_XXXXXXXXX`
     - **Client ID**: Your application's client identifier
     - **Client Secret**: Generated client secret (keep secure)
-    - **Domain Prefix**: The prefix of Your AWS Cognito domain
     - **AWS Region**: Where Your AWS Cognito user pool is located
 
     <Tip>
@@ -173,7 +170,7 @@ import asyncio
 
 async def main():
     # The client will automatically handle AWS Cognito OAuth
-    async with Client("http://localhost:8000/mcp/", auth="oauth") as client:
+    async with Client("http://localhost:8000/mcp", auth="oauth") as client:
         # First-time connection will open AWS Cognito login in your browser
         print("✓ Authenticated with AWS Cognito!")
 
@@ -198,6 +195,48 @@ When you run the client for the first time:
 <Info>
 The client caches tokens locally, so you won't need to re-authenticate for subsequent runs unless the token expires or you explicitly clear the cache.
 </Info>
+
+## Production Configuration
+
+<VersionBadge version="2.13.0" />
+
+For production deployments with persistent token management across server restarts, configure `jwt_signing_key`, and `client_storage`:
+
+```python server.py
+import os
+from fastmcp import FastMCP
+from fastmcp.server.auth.providers.aws import AWSCognitoProvider
+from key_value.aio.stores.redis import RedisStore
+from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
+from cryptography.fernet import Fernet
+
+# Production setup with encrypted persistent token storage
+auth_provider = AWSCognitoProvider(
+    user_pool_id="eu-central-1_XXXXXXXXX",
+    aws_region="eu-central-1",
+    client_id="your-app-client-id",
+    client_secret="your-app-client-secret",
+    base_url="https://your-production-domain.com",
+
+    # Production token management
+    jwt_signing_key=os.environ["JWT_SIGNING_KEY"],
+    client_storage=FernetEncryptionWrapper(
+        key_value=RedisStore(
+            host=os.environ["REDIS_HOST"],
+            port=int(os.environ["REDIS_PORT"])
+        ),
+        fernet=Fernet(os.environ["STORAGE_ENCRYPTION_KEY"])
+    )
+)
+
+mcp = FastMCP(name="Production AWS Cognito App", auth=auth_provider)
+```
+
+<Note>
+Parameters (`jwt_signing_key` and `client_storage`) work together to ensure tokens and client registrations survive server restarts. **Wrap your storage in `FernetEncryptionWrapper` to encrypt sensitive OAuth tokens at rest** - without it, tokens are stored in plaintext. Store secrets in environment variables and use a persistent storage backend like Redis for distributed deployments.
+
+For complete details on these parameters, see the [OAuth Proxy documentation](/servers/auth/oauth-proxy#configuration-parameters).
+</Note>
 
 ## Environment Variables
 
@@ -235,7 +274,11 @@ Your AWS Cognito app client secret
 </ParamField>
 
 <ParamField path="FASTMCP_SERVER_AUTH_AWS_COGNITO_BASE_URL" default="http://localhost:8000">
-Public URL of your FastMCP server for OAuth callbacks
+Public URL where OAuth endpoints will be accessible (includes any mount path)
+</ParamField>
+
+<ParamField path="FASTMCP_SERVER_AUTH_AWS_COGNITO_ISSUER_URL" default="Uses BASE_URL">
+Issuer URL for OAuth metadata (defaults to `BASE_URL`). Set to root-level URL when mounting under a path prefix to avoid 404 logs. See [HTTP Deployment guide](/deployment/http#mounting-authenticated-servers) for details.
 </ParamField>
 
 <ParamField path="FASTMCP_SERVER_AUTH_AWS_COGNITO_REDIRECT_PATH" default="/auth/callback">

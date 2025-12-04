@@ -11,7 +11,8 @@ with the following configuration:
 """
 
 import os
-from collections.abc import Generator
+import re
+from collections.abc import AsyncGenerator
 from urllib.parse import parse_qs, urlparse
 
 import httpx
@@ -20,7 +21,7 @@ import pytest
 from fastmcp import FastMCP
 from fastmcp.client import Client
 from fastmcp.server.auth.providers.github import GitHubProvider
-from fastmcp.utilities.tests import HeadlessOAuth, run_server_in_process
+from fastmcp.utilities.tests import HeadlessOAuth, run_server_async
 
 FASTMCP_TEST_AUTH_GITHUB_CLIENT_ID = os.getenv("FASTMCP_TEST_AUTH_GITHUB_CLIENT_ID")
 FASTMCP_TEST_AUTH_GITHUB_CLIENT_SECRET = os.getenv(
@@ -35,7 +36,7 @@ pytestmark = pytest.mark.xfail(
 )
 
 
-def create_github_server(host: str = "127.0.0.1", port: int = 9100, **kwargs) -> None:
+def create_github_server(base_url: str) -> FastMCP:
     """Create FastMCP server with GitHub OAuth protection."""
     assert FASTMCP_TEST_AUTH_GITHUB_CLIENT_ID is not None
     assert FASTMCP_TEST_AUTH_GITHUB_CLIENT_SECRET is not None
@@ -44,7 +45,8 @@ def create_github_server(host: str = "127.0.0.1", port: int = 9100, **kwargs) ->
     auth = GitHubProvider(
         client_id=FASTMCP_TEST_AUTH_GITHUB_CLIENT_ID,
         client_secret=FASTMCP_TEST_AUTH_GITHUB_CLIENT_SECRET,
-        base_url=f"http://{host}:{port}",
+        base_url=base_url,
+        jwt_signing_key="test-secret",
     )
 
     # Create FastMCP server with GitHub authentication
@@ -60,13 +62,10 @@ def create_github_server(host: str = "127.0.0.1", port: int = 9100, **kwargs) ->
         """Returns user info from OAuth context."""
         return "📝 GitHub OAuth user authenticated successfully"
 
-    # Run the server
-    server.run(host=host, port=port, **kwargs)
+    return server
 
 
-def create_github_server_with_mock_callback(
-    host: str = "127.0.0.1", port: int = 9100, **kwargs
-) -> None:
+def create_github_server_with_mock_callback(base_url: str) -> FastMCP:
     """Create FastMCP server with GitHub OAuth that mocks the callback for testing."""
     assert FASTMCP_TEST_AUTH_GITHUB_CLIENT_ID is not None
     assert FASTMCP_TEST_AUTH_GITHUB_CLIENT_SECRET is not None
@@ -75,7 +74,8 @@ def create_github_server_with_mock_callback(
     auth = GitHubProvider(
         client_id=FASTMCP_TEST_AUTH_GITHUB_CLIENT_ID,
         client_secret=FASTMCP_TEST_AUTH_GITHUB_CLIENT_SECRET,
-        base_url=f"http://{host}:{port}",
+        base_url=base_url,
+        jwt_signing_key="test-secret",
     )
 
     # Mock the authorize method to return a fake code instead of redirecting to GitHub
@@ -83,6 +83,8 @@ def create_github_server_with_mock_callback(
         # Instead of redirecting to GitHub, simulate an immediate callback
         import secrets
         import time
+
+        from fastmcp.server.auth.oauth_proxy import ClientCode
 
         # Generate a fake authorization code
         fake_code = secrets.token_urlsafe(32)
@@ -94,17 +96,21 @@ def create_github_server_with_mock_callback(
             "expires_in": 3600,
         }
 
-        # Store the mock tokens in the proxy's client codes
-        auth._client_codes[fake_code] = {
-            "client_id": client.client_id,
-            "redirect_uri": str(params.redirect_uri),
-            "code_challenge": params.code_challenge,
-            "code_challenge_method": getattr(params, "code_challenge_method", "S256"),
-            "scopes": params.scopes or [],
-            "idp_tokens": mock_tokens,
-            "expires_at": int(time.time() + 300),  # 5 minutes
-            "created_at": time.time(),
-        }
+        # Store the mock tokens in the proxy's code storage
+        await auth._code_store.put(
+            key=fake_code,
+            value=ClientCode(
+                code=fake_code,
+                client_id=client.client_id,
+                redirect_uri=str(params.redirect_uri),
+                code_challenge=params.code_challenge,
+                code_challenge_method=getattr(params, "code_challenge_method", "S256"),
+                scopes=params.scopes or [],
+                idp_tokens=mock_tokens,
+                expires_at=int(time.time() + 300),  # 5 minutes
+                created_at=time.time(),
+            ),
+        )
 
         # Return the redirect to the client's callback with the fake code
         callback_params = {
@@ -152,29 +158,31 @@ def create_github_server_with_mock_callback(
         """Returns user info from OAuth context."""
         return "📝 GitHub OAuth user authenticated successfully"
 
-    # Run the server
-    server.run(host=host, port=port, **kwargs)
+    return server
 
 
-@pytest.fixture(scope="module")
-def github_server() -> Generator[str, None, None]:
-    """Start GitHub OAuth server in background process on fixed port 9100."""
-    with run_server_in_process(
-        create_github_server, transport="http", host="127.0.0.1", port=9100
-    ) as url:
-        yield f"{url}/mcp"
+@pytest.fixture
+async def github_server() -> AsyncGenerator[str, None]:
+    """Start GitHub OAuth server on a random available port."""
+    from fastmcp.utilities.http import find_available_port
+
+    port = find_available_port()
+    base_url = f"http://127.0.0.1:{port}"
+    server = create_github_server(base_url)
+    async with run_server_async(server, port=port, transport="http") as url:
+        yield url
 
 
-@pytest.fixture(scope="module")
-def github_server_with_mock() -> Generator[str, None, None]:
-    """Start GitHub OAuth server with mocked callback in background process on port 9101."""
-    with run_server_in_process(
-        create_github_server_with_mock_callback,
-        transport="http",
-        host="127.0.0.1",
-        port=9101,
-    ) as url:
-        yield f"{url}/mcp"
+@pytest.fixture
+async def github_server_with_mock() -> AsyncGenerator[str, None]:
+    """Start GitHub OAuth server with mocked callback on a random available port."""
+    from fastmcp.utilities.http import find_available_port
+
+    port = find_available_port()
+    base_url = f"http://127.0.0.1:{port}"
+    server = create_github_server_with_mock_callback(base_url)
+    async with run_server_async(server, port=port, transport="http") as url:
+        yield url
 
 
 @pytest.fixture
@@ -204,11 +212,12 @@ async def test_github_oauth_credentials_available():
 
 
 async def test_github_oauth_authorization_redirect(github_server: str):
-    """Test that GitHub OAuth authorization redirects to GitHub correctly.
+    """Test that GitHub OAuth authorization redirects to GitHub correctly through consent flow.
 
     Since HeadlessOAuth can't handle real GitHub redirects, we test that:
     1. DCR client registration works
-    2. Authorization endpoint redirects to GitHub with correct parameters
+    2. Authorization endpoint redirects to consent page
+    3. Consent approval redirects to GitHub with correct parameters
     """
     # Extract base URL
     parsed = urlparse(github_server)
@@ -235,7 +244,7 @@ async def test_github_oauth_authorization_redirect(github_server: str):
         client_id = client_info["client_id"]
         assert client_id is not None
 
-        # Step 2: Test authorization endpoint redirects to GitHub
+        # Step 2: Test authorization endpoint redirects to consent page
         auth_url = f"{base_url}/authorize"
         auth_params = {
             "response_type": "code",
@@ -250,9 +259,44 @@ async def test_github_oauth_authorization_redirect(github_server: str):
             auth_url, params=auth_params, follow_redirects=False
         )
 
-        # Should redirect to GitHub
+        # Should redirect to consent page (confused deputy protection)
         assert auth_response.status_code == 302
-        redirect_location = auth_response.headers["location"]
+        consent_location = auth_response.headers["location"]
+        assert "/consent" in consent_location
+
+        # Step 3: Visit consent page to get CSRF token
+        consent_response = await http_client.get(
+            consent_location, follow_redirects=False
+        )
+        assert consent_response.status_code == 200
+
+        # Extract CSRF token from consent page HTML
+        csrf_match = re.search(
+            r'name="csrf_token"\s+value="([^"]+)"', consent_response.text
+        )
+        assert csrf_match, "CSRF token not found in consent page"
+        csrf_token = csrf_match.group(1)
+
+        # Extract txn_id from consent URL
+        txn_id_match = re.search(r"txn_id=([^&]+)", consent_location)
+        assert txn_id_match, "txn_id not found in consent URL"
+        txn_id = txn_id_match.group(1)
+
+        # Step 4: Approve consent
+        approve_response = await http_client.post(
+            f"{base_url}/consent",
+            data={
+                "action": "approve",
+                "txn_id": txn_id,
+                "csrf_token": csrf_token,
+            },
+            cookies=consent_response.cookies,
+            follow_redirects=False,
+        )
+
+        # Should redirect to GitHub
+        assert approve_response.status_code in (302, 303)
+        redirect_location = approve_response.headers["location"]
 
         # Parse redirect URL - should be GitHub
         redirect_parsed = urlparse(redirect_location)
@@ -316,6 +360,7 @@ async def test_github_oauth_unauthorized_access(github_server: str):
 
 async def test_github_oauth_with_mock(github_client_with_mock: Client):
     """Test complete GitHub OAuth flow with mocked callback."""
+
     async with github_client_with_mock:
         # Test that we can ping the server (requires successful OAuth)
         assert await github_client_with_mock.ping()

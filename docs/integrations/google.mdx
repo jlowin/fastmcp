@@ -125,7 +125,7 @@ import asyncio
 
 async def main():
     # The client will automatically handle Google OAuth
-    async with Client("http://localhost:8000/mcp/", auth="oauth") as client:
+    async with Client("http://localhost:8000/mcp", auth="oauth") as client:
         # First-time connection will open Google login in your browser
         print("✓ Authenticated with Google!")
         
@@ -147,6 +147,47 @@ When you run the client for the first time:
 <Info>
 The client caches tokens locally, so you won't need to re-authenticate for subsequent runs unless the token expires or you explicitly clear the cache.
 </Info>
+
+## Production Configuration
+
+<VersionBadge version="2.13.0" />
+
+For production deployments with persistent token management across server restarts, configure `jwt_signing_key` and `client_storage`:
+
+```python server.py
+import os
+from fastmcp import FastMCP
+from fastmcp.server.auth.providers.google import GoogleProvider
+from key_value.aio.stores.redis import RedisStore
+from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
+from cryptography.fernet import Fernet
+
+# Production setup with encrypted persistent token storage
+auth_provider = GoogleProvider(
+    client_id="123456789.apps.googleusercontent.com",
+    client_secret="GOCSPX-abc123...",
+    base_url="https://your-production-domain.com",
+    required_scopes=["openid", "https://www.googleapis.com/auth/userinfo.email"],
+
+    # Production token management
+    jwt_signing_key=os.environ["JWT_SIGNING_KEY"],
+    client_storage=FernetEncryptionWrapper(
+        key_value=RedisStore(
+            host=os.environ["REDIS_HOST"],
+            port=int(os.environ["REDIS_PORT"])
+        ),
+        fernet=Fernet(os.environ["STORAGE_ENCRYPTION_KEY"])
+    )
+)
+
+mcp = FastMCP(name="Production Google App", auth=auth_provider)
+```
+
+<Note>
+Parameters (`jwt_signing_key` and `client_storage`) work together to ensure tokens and client registrations survive server restarts. **Wrap your storage in `FernetEncryptionWrapper` to encrypt sensitive OAuth tokens at rest** - without it, tokens are stored in plaintext. Store secrets in environment variables and use a persistent storage backend like Redis for distributed deployments.
+
+For complete details on these parameters, see the [OAuth Proxy documentation](/servers/auth/oauth-proxy#configuration-parameters).
+</Note>
 
 ## Environment Variables
 
@@ -178,7 +219,11 @@ Your Google OAuth 2.0 Client Secret (e.g., `GOCSPX-abc123...`)
 </ParamField>
 
 <ParamField path="FASTMCP_SERVER_AUTH_GOOGLE_BASE_URL" default="http://localhost:8000">
-Public URL of your FastMCP server for OAuth callbacks
+Public URL where OAuth endpoints will be accessible (includes any mount path)
+</ParamField>
+
+<ParamField path="FASTMCP_SERVER_AUTH_GOOGLE_ISSUER_URL" default="Uses BASE_URL">
+Issuer URL for OAuth metadata (defaults to `BASE_URL`). Set to root-level URL when mounting under a path prefix to avoid 404 logs. See [HTTP Deployment guide](/deployment/http#mounting-authenticated-servers) for details.
 </ParamField>
 
 <ParamField path="FASTMCP_SERVER_AUTH_GOOGLE_REDIRECT_PATH" default="/auth/callback">

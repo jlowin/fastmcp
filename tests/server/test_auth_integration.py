@@ -49,6 +49,8 @@ class MockOAuthProvider(OAuthAuthorizationServerProvider):
     ) -> str:
         # toy authorize implementation which just immediately generates an authorization
         # code and completes the redirect
+        if client.client_id is None:
+            raise ValueError("client_id is required")
         code = AuthorizationCode(
             code=f"code_{int(time.time())}",
             client_id=client.client_id,
@@ -79,6 +81,8 @@ class MockOAuthProvider(OAuthAuthorizationServerProvider):
         refresh_token = f"refresh_{secrets.token_hex(32)}"
 
         # Store the tokens
+        if client.client_id is None:
+            raise ValueError("client_id is required")
         self.tokens[access_token] = AccessToken(
             token=access_token,
             client_id=client.client_id,
@@ -142,6 +146,8 @@ class MockOAuthProvider(OAuthAuthorizationServerProvider):
         new_refresh_token = f"refresh_{secrets.token_hex(32)}"
 
         # Store the new tokens
+        if client.client_id is None:
+            raise ValueError("client_id is required")
         self.tokens[new_access_token] = AccessToken(
             token=new_access_token,
             client_id=client.client_id,
@@ -360,9 +366,10 @@ class TestAuthEndpoints:
         assert metadata["revocation_endpoint"] == "https://auth.example.com/revoke"
         assert metadata["response_types_supported"] == ["code"]
         assert metadata["code_challenge_methods_supported"] == ["S256"]
-        assert metadata["token_endpoint_auth_methods_supported"] == [
-            "client_secret_post"
-        ]
+        assert set(metadata["token_endpoint_auth_methods_supported"]) == {
+            "client_secret_post",
+            "client_secret_basic",
+        }
         assert metadata["grant_types_supported"] == [
             "authorization_code",
             "refresh_token",
@@ -370,8 +377,8 @@ class TestAuthEndpoints:
         assert metadata["service_documentation"] == "https://docs.example.com/"
 
     async def test_token_validation_error(self, test_client: httpx.AsyncClient):
-        """Test token endpoint error - validation error."""
-        # Missing required fields
+        """Test token endpoint error - missing client_id returns auth error."""
+        # Missing required fields - SDK validates client_id first
         response = await test_client.post(
             "/token",
             data={
@@ -380,10 +387,11 @@ class TestAuthEndpoints:
             },
         )
         error_response = response.json()
-        assert error_response["error"] == "invalid_request"
-        assert (
-            "error_description" in error_response
-        )  # Contains validation error messages
+        # SDK validates client_id before other fields, returning unauthorized_client
+        # (FastMCP's OAuthProxy transforms this to invalid_client, but this test
+        # uses the SDK's create_auth_routes directly)
+        assert error_response["error"] == "unauthorized_client"
+        assert "error_description" in error_response
 
     async def test_token_invalid_auth_code(
         self, test_client, registered_client, pkce_challenge

@@ -81,6 +81,10 @@ def data_analysis_prompt(
   Sets the explicit prompt name exposed via MCP. If not provided, uses the function name
 </ParamField>
 
+<ParamField body="title" type="str | None">
+  A human-readable title for the prompt
+</ParamField>
+
 <ParamField body="description" type="str | None">
   Provides the description exposed via MCP. If set, the function's docstring is ignored for this purpose
 </ParamField>
@@ -93,9 +97,15 @@ def data_analysis_prompt(
   A boolean to enable or disable the prompt. See [Disabling Prompts](#disabling-prompts) for more information
 </ParamField>
 
+<ParamField body="icons" type="list[Icon] | None">
+  <VersionBadge version="2.13.0" />
+
+  Optional list of icon representations for this prompt. See [Icons](/servers/icons) for detailed examples
+</ParamField>
+
 <ParamField body="meta" type="dict[str, Any] | None">
   <VersionBadge version="2.11.0" />
-  
+
   Optional meta information about the prompt. This data is passed through to the MCP client as the `_meta` field of the client-side prompt object and can be used for custom metadata, versioning, or other application-specific purposes.
 </ParamField>
 </Card>

@@ -1,9 +1,15 @@
 from __future__ import annotations
 
-from typing import Any
+import json
+from typing import Any, cast
+from urllib.parse import urlparse
 
+from mcp.server.auth.handlers.token import TokenErrorResponse
+from mcp.server.auth.handlers.token import TokenHandler as _SDKTokenHandler
+from mcp.server.auth.json_response import PydanticJSONResponse
 from mcp.server.auth.middleware.auth_context import AuthContextMiddleware
 from mcp.server.auth.middleware.bearer_auth import BearerAuthBackend
+from mcp.server.auth.middleware.client_auth import ClientAuthenticator
 from mcp.server.auth.provider import (
     AccessToken as _SDKAccessToken,
 )
@@ -16,6 +22,7 @@ from mcp.server.auth.provider import (
     TokenVerifier as TokenVerifierProtocol,
 )
 from mcp.server.auth.routes import (
+    cors_middleware,
     create_auth_routes,
     create_protected_resource_routes,
 )
@@ -23,16 +30,62 @@ from mcp.server.auth.settings import (
     ClientRegistrationOptions,
     RevocationOptions,
 )
-from pydantic import AnyHttpUrl
+from pydantic import AnyHttpUrl, Field
 from starlette.middleware import Middleware
 from starlette.middleware.authentication import AuthenticationMiddleware
 from starlette.routing import Route
+
+from fastmcp.utilities.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class AccessToken(_SDKAccessToken):
     """AccessToken that includes all JWT claims."""
 
-    claims: dict[str, Any] = {}
+    claims: dict[str, Any] = Field(default_factory=dict)
+
+
+class TokenHandler(_SDKTokenHandler):
+    """TokenHandler that returns OAuth 2.1 compliant error responses.
+
+    The MCP SDK returns `unauthorized_client` for client authentication failures.
+    However, per RFC 6749 Section 5.2, authentication failures should return
+    `invalid_client` with HTTP 401, not `unauthorized_client`.
+
+    This distinction matters: `unauthorized_client` means "client exists but
+    can't do this", while `invalid_client` means "client doesn't exist or
+    credentials are wrong". Claude's OAuth client uses this to decide whether
+    to re-register.
+
+    This handler transforms 401 responses with `unauthorized_client` to use
+    `invalid_client` instead, making the error semantics correct per OAuth spec.
+    """
+
+    async def handle(self, request: Any):
+        """Wrap SDK handle() and transform auth error responses."""
+        response = await super().handle(request)
+
+        # Transform 401 unauthorized_client -> invalid_client
+        if response.status_code == 401:
+            try:
+                body = json.loads(response.body)
+                if body.get("error") == "unauthorized_client":
+                    return PydanticJSONResponse(
+                        content=TokenErrorResponse(
+                            error="invalid_client",
+                            error_description=body.get("error_description"),
+                        ),
+                        status_code=401,
+                        headers={
+                            "Cache-Control": "no-store",
+                            "Pragma": "no-cache",
+                        },
+                    )
+            except (json.JSONDecodeError, AttributeError):
+                pass  # Not JSON or unexpected format, return as-is
+
+        return response
 
 
 class AuthProvider(TokenVerifierProtocol):
@@ -79,8 +132,9 @@ class AuthProvider(TokenVerifierProtocol):
         self,
         mcp_path: str | None = None,
     ) -> list[Route]:
-        """Get the routes for this authentication provider.
+        """Get all routes for this authentication provider.
 
+        This includes both well-known discovery routes and operational routes.
         Each provider is responsible for creating whatever routes it needs:
         - TokenVerifier: typically no routes (default implementation)
         - RemoteAuthProvider: protected resource metadata routes
@@ -93,9 +147,41 @@ class AuthProvider(TokenVerifierProtocol):
                 provider does not create the actual MCP endpoint route.
 
         Returns:
-            List of routes for this provider (excluding the MCP endpoint itself)
+            List of all routes for this provider (excluding the MCP endpoint itself)
         """
         return []
+
+    def get_well_known_routes(
+        self,
+        mcp_path: str | None = None,
+    ) -> list[Route]:
+        """Get well-known discovery routes for this authentication provider.
+
+        This is a utility method that filters get_routes() to return only
+        well-known discovery routes (those starting with /.well-known/).
+
+        Well-known routes provide OAuth metadata and discovery endpoints that
+        clients use to discover authentication capabilities. These routes should
+        be mounted at the root level of the application to comply with RFC 8414
+        and RFC 9728.
+
+        Common well-known routes:
+        - /.well-known/oauth-authorization-server (authorization server metadata)
+        - /.well-known/oauth-protected-resource/* (protected resource metadata)
+
+        Args:
+            mcp_path: The path where the MCP endpoint is mounted (e.g., "/mcp")
+                This is used to construct path-scoped well-known URLs.
+
+        Returns:
+            List of well-known discovery routes (typically mounted at root level)
+        """
+        all_routes = self.get_routes(mcp_path)
+        return [
+            route
+            for route in all_routes
+            if isinstance(route, Route) and route.path.startswith("/.well-known/")
+        ]
 
     def get_middleware(self) -> list:
         """Get HTTP application-level middleware for this auth provider.
@@ -205,12 +291,11 @@ class RemoteAuthProvider(AuthProvider):
         self,
         mcp_path: str | None = None,
     ) -> list[Route]:
-        """Get OAuth routes for this provider.
+        """Get routes for this provider.
 
-        Creates protected resource metadata routes.
+        Creates protected resource metadata routes (RFC 9728).
         """
-        # Start with base routes
-        routes = super().get_routes(mcp_path)
+        routes = []
 
         # Get the resource URL based on the MCP path
         resource_url = self._get_resource_url(mcp_path)
@@ -262,19 +347,26 @@ class OAuthProvider(
             required_scopes: Scopes that are required for all requests.
         """
 
-        # Convert URLs to proper types
-        if isinstance(base_url, str):
-            base_url = AnyHttpUrl(base_url)
-
         super().__init__(base_url=base_url, required_scopes=required_scopes)
-        self.base_url = base_url
 
         if issuer_url is None:
-            self.issuer_url = base_url
+            self.issuer_url = self.base_url
         elif isinstance(issuer_url, str):
             self.issuer_url = AnyHttpUrl(issuer_url)
         else:
             self.issuer_url = issuer_url
+
+        # Log if issuer_url and base_url differ (requires additional setup)
+        if (
+            self.base_url is not None
+            and self.issuer_url is not None
+            and str(self.base_url) != str(self.issuer_url)
+        ):
+            logger.info(
+                f"OAuth endpoints at {self.base_url}, issuer at {self.issuer_url}. "
+                f"Ensure well-known routes are accessible at root ({self.issuer_url}/.well-known/). "
+                f"See: https://gofastmcp.com/deployment/http#mounting-authenticated-servers"
+            )
 
         # Initialize OAuth Authorization Server Provider
         OAuthAuthorizationServerProvider.__init__(self)
@@ -316,13 +408,47 @@ class OAuthProvider(
         """
 
         # Create standard OAuth authorization server routes
-        oauth_routes = create_auth_routes(
+        # Pass base_url as issuer_url to ensure metadata declares endpoints where
+        # they're actually accessible (operational routes are mounted at
+        # base_url)
+        assert self.base_url is not None  # typing check
+        assert (
+            self.issuer_url is not None
+        )  # typing check (issuer_url defaults to base_url)
+
+        sdk_routes = create_auth_routes(
             provider=self,
-            issuer_url=self.issuer_url,
+            issuer_url=self.base_url,
             service_documentation_url=self.service_documentation_url,
             client_registration_options=self.client_registration_options,
             revocation_options=self.revocation_options,
         )
+
+        # Replace the token endpoint with our custom handler that returns
+        # proper OAuth 2.1 error codes (invalid_client instead of unauthorized_client)
+        oauth_routes: list[Route] = []
+        for route in sdk_routes:
+            if (
+                isinstance(route, Route)
+                and route.path == "/token"
+                and route.methods is not None
+                and "POST" in route.methods
+            ):
+                # Replace with our OAuth 2.1 compliant token handler
+                token_handler = TokenHandler(
+                    provider=self, client_authenticator=ClientAuthenticator(self)
+                )
+                oauth_routes.append(
+                    Route(
+                        path="/token",
+                        endpoint=cors_middleware(
+                            token_handler.handle, ["POST", "OPTIONS"]
+                        ),
+                        methods=["POST", "OPTIONS"],
+                    )
+                )
+            else:
+                oauth_routes.append(route)
 
         # Get the resource URL based on the MCP path
         resource_url = self._get_resource_url(mcp_path)
@@ -337,7 +463,7 @@ class OAuthProvider(
             )
             protected_routes = create_protected_resource_routes(
                 resource_url=resource_url,
-                authorization_servers=[self.issuer_url],
+                authorization_servers=[cast(AnyHttpUrl, self.issuer_url)],
                 scopes_supported=supported_scopes,
             )
             oauth_routes.extend(protected_routes)
@@ -346,3 +472,51 @@ class OAuthProvider(
         oauth_routes.extend(super().get_routes(mcp_path))
 
         return oauth_routes
+
+    def get_well_known_routes(
+        self,
+        mcp_path: str | None = None,
+    ) -> list[Route]:
+        """Get well-known discovery routes with RFC 8414 path-aware support.
+
+        Overrides the base implementation to support path-aware authorization
+        server metadata discovery per RFC 8414. If issuer_url has a path component,
+        the authorization server metadata route is adjusted to include that path.
+
+        For example, if issuer_url is "http://example.com/api", the discovery
+        endpoint will be at "/.well-known/oauth-authorization-server/api" instead
+        of just "/.well-known/oauth-authorization-server".
+
+        Args:
+            mcp_path: The path where the MCP endpoint is mounted (e.g., "/mcp")
+
+        Returns:
+            List of well-known discovery routes
+        """
+        routes = super().get_well_known_routes(mcp_path)
+
+        # RFC 8414: If issuer_url has a path, use path-aware discovery
+        if self.issuer_url:
+            parsed = urlparse(str(self.issuer_url))
+            issuer_path = parsed.path.rstrip("/")
+
+            if issuer_path and issuer_path != "/":
+                # Replace /.well-known/oauth-authorization-server with path-aware version
+                new_routes = []
+                for route in routes:
+                    if route.path == "/.well-known/oauth-authorization-server":
+                        new_path = (
+                            f"/.well-known/oauth-authorization-server{issuer_path}"
+                        )
+                        new_routes.append(
+                            Route(
+                                new_path,
+                                endpoint=route.endpoint,
+                                methods=route.methods,
+                            )
+                        )
+                    else:
+                        new_routes.append(route)
+                return new_routes
+
+        return routes

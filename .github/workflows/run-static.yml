@@ -30,9 +30,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
@@ -48,7 +48,7 @@ jobs:
             exit 1
           fi
           echo "✅ Lockfile is up to date"
-      - name: Run pre-commit
-        run: uv run pre-commit run --all-files
+      - name: Run prek
+        uses: j178/prek-action@v1
         env:
           SKIP: no-commit-to-branch

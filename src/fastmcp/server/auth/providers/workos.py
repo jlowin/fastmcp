@@ -11,6 +11,7 @@ Choose based on your WorkOS setup and authentication requirements.
 from __future__ import annotations
 
 import httpx
+from key_value.aio.protocols import AsyncKeyValue
 from pydantic import AnyHttpUrl, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from starlette.responses import JSONResponse
@@ -19,9 +20,9 @@ from starlette.routing import Route
 from fastmcp.server.auth import AccessToken, RemoteAuthProvider, TokenVerifier
 from fastmcp.server.auth.oauth_proxy import OAuthProxy
 from fastmcp.server.auth.providers.jwt import JWTVerifier
+from fastmcp.settings import ENV_FILE
 from fastmcp.utilities.auth import parse_scopes
 from fastmcp.utilities.logging import get_logger
-from fastmcp.utilities.storage import KVStorage
 from fastmcp.utilities.types import NotSet, NotSetT
 
 logger = get_logger(__name__)
@@ -32,7 +33,7 @@ class WorkOSProviderSettings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="FASTMCP_SERVER_AUTH_WORKOS_",
-        env_file=".env",
+        env_file=ENV_FILE,
         extra="ignore",
     )
 
@@ -40,10 +41,12 @@ class WorkOSProviderSettings(BaseSettings):
     client_secret: SecretStr | None = None
     authkit_domain: str | None = None  # e.g., "https://your-app.authkit.app"
     base_url: AnyHttpUrl | str | None = None
+    issuer_url: AnyHttpUrl | str | None = None
     redirect_path: str | None = None
     required_scopes: list[str] | None = None
     timeout_seconds: int | None = None
     allowed_client_redirect_uris: list[str] | None = None
+    jwt_signing_key: str | None = None
 
     @field_validator("required_scopes", mode="before")
     @classmethod
@@ -164,11 +167,14 @@ class WorkOSProvider(OAuthProxy):
         client_secret: str | NotSetT = NotSet,
         authkit_domain: str | NotSetT = NotSet,
         base_url: AnyHttpUrl | str | NotSetT = NotSet,
+        issuer_url: AnyHttpUrl | str | NotSetT = NotSet,
         redirect_path: str | NotSetT = NotSet,
-        required_scopes: list[str] | None | NotSetT = NotSet,
+        required_scopes: list[str] | NotSetT | None = NotSet,
         timeout_seconds: int | NotSetT = NotSet,
         allowed_client_redirect_uris: list[str] | NotSetT = NotSet,
-        client_storage: KVStorage | None = None,
+        client_storage: AsyncKeyValue | None = None,
+        jwt_signing_key: str | bytes | NotSetT = NotSet,
+        require_authorization_consent: bool = True,
     ):
         """Initialize WorkOS OAuth provider.
 
@@ -176,14 +182,24 @@ class WorkOSProvider(OAuthProxy):
             client_id: WorkOS client ID
             client_secret: WorkOS client secret
             authkit_domain: Your WorkOS AuthKit domain (e.g., "https://your-app.authkit.app")
-            base_url: Public URL of your FastMCP server (for OAuth callbacks)
+            base_url: Public URL where OAuth endpoints will be accessible (includes any mount path)
+            issuer_url: Issuer URL for OAuth metadata (defaults to base_url). Use root-level URL
+                to avoid 404s during discovery when mounting under a path.
             redirect_path: Redirect path configured in WorkOS (defaults to "/auth/callback")
             required_scopes: Required OAuth scopes (no default)
             timeout_seconds: HTTP request timeout for WorkOS API calls
             allowed_client_redirect_uris: List of allowed redirect URI patterns for MCP clients.
                 If None (default), all URIs are allowed. If empty list, no URIs are allowed.
-            client_storage: Storage implementation for OAuth client registrations.
-                Defaults to file-based storage if not specified.
+            client_storage: Storage backend for OAuth state (client registrations, encrypted tokens).
+                If None, a DiskStore will be created in the data directory (derived from `platformdirs`). The
+                disk store will be encrypted using a key derived from the JWT Signing Key.
+            jwt_signing_key: Secret for signing FastMCP JWT tokens (any string or bytes). If bytes are provided,
+                they will be used as is. If a string is provided, it will be derived into a 32-byte key. If not
+                provided, the upstream client secret will be used to derive a 32-byte key using PBKDF2.
+            require_authorization_consent: Whether to require user consent before authorizing clients (default True).
+                When True, users see a consent screen before being redirected to WorkOS.
+                When False, authorization proceeds directly without user confirmation.
+                SECURITY WARNING: Only disable for local development or testing environments.
         """
 
         settings = WorkOSProviderSettings.model_validate(
@@ -194,10 +210,12 @@ class WorkOSProvider(OAuthProxy):
                     "client_secret": client_secret,
                     "authkit_domain": authkit_domain,
                     "base_url": base_url,
+                    "issuer_url": issuer_url,
                     "redirect_path": redirect_path,
                     "required_scopes": required_scopes,
                     "timeout_seconds": timeout_seconds,
                     "allowed_client_redirect_uris": allowed_client_redirect_uris,
+                    "jwt_signing_key": jwt_signing_key,
                 }.items()
                 if v is not NotSet
             }
@@ -247,12 +265,15 @@ class WorkOSProvider(OAuthProxy):
             token_verifier=token_verifier,
             base_url=settings.base_url,
             redirect_path=settings.redirect_path,
-            issuer_url=settings.base_url,
+            issuer_url=settings.issuer_url
+            or settings.base_url,  # Default to base_url if not specified
             allowed_client_redirect_uris=allowed_client_redirect_uris_final,
             client_storage=client_storage,
+            jwt_signing_key=settings.jwt_signing_key,
+            require_authorization_consent=require_authorization_consent,
         )
 
-        logger.info(
+        logger.debug(
             "Initialized WorkOS OAuth provider for client %s with AuthKit domain %s",
             settings.client_id,
             authkit_domain_final,
@@ -262,7 +283,7 @@ class WorkOSProvider(OAuthProxy):
 class AuthKitProviderSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="FASTMCP_SERVER_AUTH_AUTHKITPROVIDER_",
-        env_file=".env",
+        env_file=ENV_FILE,
         extra="ignore",
     )
 
@@ -317,7 +338,7 @@ class AuthKitProvider(RemoteAuthProvider):
         *,
         authkit_domain: AnyHttpUrl | str | NotSetT = NotSet,
         base_url: AnyHttpUrl | str | NotSetT = NotSet,
-        required_scopes: list[str] | None | NotSetT = NotSet,
+        required_scopes: list[str] | NotSetT | None = NotSet,
         token_verifier: TokenVerifier | None = None,
     ):
         """Initialize AuthKit metadata provider.
@@ -341,7 +362,7 @@ class AuthKitProvider(RemoteAuthProvider):
         )
 
         self.authkit_domain = str(settings.authkit_domain).rstrip("/")
-        self.base_url = str(settings.base_url).rstrip("/")
+        self.base_url = AnyHttpUrl(str(settings.base_url).rstrip("/"))
 
         # Create default JWT verifier if none provided
         if token_verifier is None:

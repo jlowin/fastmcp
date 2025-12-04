@@ -53,7 +53,7 @@ async with Client("https://fastmcp.cloud/mcp", auth=oauth) as client:
 - **`mcp_url`** (`str`): The full URL of the target MCP server endpoint. Used to discover OAuth server metadata
 - **`scopes`** (`str | list[str]`, optional): OAuth scopes to request. Can be space-separated string or list of strings
 - **`client_name`** (`str`, optional): Client name for dynamic registration. Defaults to `"FastMCP Client"`
-- **`token_storage_cache_dir`** (`Path`, optional): Token cache directory. Defaults to `~/.fastmcp/oauth-mcp-client-cache/`
+- **`token_storage`** (`AsyncKeyValue`, optional): Storage backend for persisting OAuth tokens. Defaults to in-memory storage (tokens lost on restart). See [Token Storage](#token-storage) for encrypted storage options
 - **`additional_client_metadata`** (`dict[str, Any]`, optional): Extra metadata for client registration
 - **`callback_port`** (`int`, optional): Fixed port for OAuth callback server. If not specified, uses a random available port
 
@@ -64,7 +64,7 @@ The OAuth flow is triggered when you use a FastMCP `Client` configured to use OA
 
 <Steps>
 <Step title="Token Check">
-The client first checks the `token_storage_cache_dir` for existing, valid tokens for the target server. If one is found, it will be used to authenticate the client.
+The client first checks the configured `token_storage` backend for existing, valid tokens for the target server. If one is found, it will be used to authenticate the client.
 </Step>
 <Step title="OAuth Server Discovery">
 If no valid tokens exist, the client attempts to discover the OAuth server's endpoints using a well-known URI (e.g., `/.well-known/oauth-authorization-server`) based on the `mcp_url`.
@@ -82,37 +82,51 @@ The user's default web browser is automatically opened, directing them to the OA
 Upon approval, the OAuth server redirects the user's browser to the local callback server with an `authorization_code`. The client captures this code and exchanges it with the OAuth server's token endpoint for an `access_token` (and often a `refresh_token`) using PKCE for security.
 </Step>
 <Step title="Token Caching">
-The obtained tokens are saved to the `token_storage_cache_dir` for future use, eliminating the need for repeated browser interactions.
-</Step> 
+The obtained tokens are saved to the configured `token_storage` backend for future use, eliminating the need for repeated browser interactions.
+</Step>
 <Step title="Authenticated Requests">
-The access token is automatically included in the `Authorization` header for requests to the MCP server. 
+The access token is automatically included in the `Authorization` header for requests to the MCP server.
 </Step>
 <Step title="Refresh Token">
 If the access token expires, the client will automatically use the refresh token to get a new access token.
 </Step>
 </Steps>
 
-## Token Management
+## Token Storage
 
-### Token Storage
+<VersionBadge version="2.13.0" />
 
-OAuth access tokens are automatically cached in `~/.fastmcp/oauth-mcp-client-cache/` and persist between application runs. Files are keyed by the OAuth server's base URL.
+By default, tokens are stored in memory and lost when your application restarts. For persistent storage, pass an `AsyncKeyValue`-compatible storage backend to the `token_storage` parameter.
 
-### Managing Cache
-
-To clear the tokens for a specific server, instantiate a `FileTokenStorage` instance and call the `clear` method:
-
-```python
-from fastmcp.client.auth.oauth import FileTokenStorage
-
-storage = FileTokenStorage(server_url="https://fastmcp.cloud/mcp")
-await storage.clear()
-```
-
-To clear *all* tokens for all servers, call the `clear_all` method on the `FileTokenStorage` class:
+<Warning>
+**Security Consideration**: Use encrypted storage for production. MCP clients can accumulate OAuth credentials for many servers over time, and a compromised token store could expose access to multiple services.
+</Warning>
 
 ```python
-from fastmcp.client.auth.oauth import FileTokenStorage
+from fastmcp import Client
+from fastmcp.client.auth import OAuth
+from key_value.aio.stores.disk import DiskStore
+from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
+from cryptography.fernet import Fernet
+import os
 
-FileTokenStorage.clear_all()
+# Create encrypted disk storage
+encrypted_storage = FernetEncryptionWrapper(
+    key_value=DiskStore(directory="~/.fastmcp/oauth-tokens"),
+    fernet=Fernet(os.environ["OAUTH_STORAGE_ENCRYPTION_KEY"])
+)
+
+oauth = OAuth(
+    mcp_url="https://fastmcp.cloud/mcp",
+    token_storage=encrypted_storage
+)
+
+async with Client("https://fastmcp.cloud/mcp", auth=oauth) as client:
+    await client.ping()
 ```
+
+You can use any `AsyncKeyValue`-compatible backend from the [key-value library](https://github.com/strawgate/py-key-value) including Redis, DynamoDB, and more. Wrap your storage in `FernetEncryptionWrapper` for encryption.
+
+<Note>
+When selecting a storage backend, review the [py-key-value documentation](https://github.com/strawgate/py-key-value) to understand the maturity level and limitations of your chosen backend. Some backends may be in preview or have constraints that affect production suitability.
+</Note>

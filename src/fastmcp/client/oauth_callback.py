@@ -7,17 +7,26 @@ and display styled responses to users.
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass
 
+import anyio
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import HTMLResponse
 from starlette.routing import Route
 from uvicorn import Config, Server
 
 from fastmcp.utilities.http import find_available_port
 from fastmcp.utilities.logging import get_logger
+from fastmcp.utilities.ui import (
+    HELPER_TEXT_STYLES,
+    INFO_BOX_STYLES,
+    STATUS_MESSAGE_STYLES,
+    create_info_box,
+    create_logo,
+    create_page,
+    create_secure_html_response,
+    create_status_message,
+)
 
 logger = get_logger(__name__)
 
@@ -29,154 +38,42 @@ def create_callback_html(
     server_url: str | None = None,
 ) -> str:
     """Create a styled HTML response for OAuth callbacks."""
-    logo_url = "https://gofastmcp.com/assets/brand/blue-logo.png"
-
     # Build the main status message
-    if is_success:
-        status_title = "Authentication successful"
-        status_icon = "✓"
-        icon_bg = "#10b98120"
-    else:
-        status_title = "Authentication failed"
-        status_icon = "✕"
-        icon_bg = "#ef444420"
+    status_title = (
+        "Authentication successful" if is_success else "Authentication failed"
+    )
 
     # Add detail info box for both success and error cases
     detail_info = ""
     if is_success and server_url:
-        detail_info = f"""
-            <div class="info-box">
-                Connected to: <strong>{server_url}</strong>
-            </div>
-        """
+        detail_info = create_info_box(
+            f"Connected to: {server_url}", centered=True, monospace=True
+        )
     elif not is_success:
-        detail_info = f"""
-            <div class="info-box error">
-                {message}
-            </div>
-        """
+        detail_info = create_info_box(
+            message, is_error=True, centered=True, monospace=True
+        )
 
-    return f"""
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>{title}</title>
-        <style>
-            * {{
-                margin: 0;
-                padding: 0;
-                box-sizing: border-box;
-            }}
-            
-            body {{
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-                margin: 0;
-                padding: 0;
-                min-height: 100vh;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                background: #ffffff;
-                color: #0a0a0a;
-            }}
-            
-            .container {{
-                background: #ffffff;
-                border: 1px solid #e5e5e5;
-                padding: 3rem 2rem;
-                border-radius: 0.75rem;
-                box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
-                text-align: center;
-                max-width: 28rem;
-                margin: 1rem;
-                position: relative;
-            }}
-            
-            .logo {{
-                width: 60px;
-                height: auto;
-                margin-bottom: 2rem;
-                display: block;
-                margin-left: auto;
-                margin-right: auto;
-            }}
-            
-            .status-message {{
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                gap: 0.75rem;
-                margin-bottom: 1.5rem;
-            }}
-            
-            .status-icon {{
-                font-size: 1.5rem;
-                line-height: 1;
-                display: inline-flex;
-                align-items: center;
-                justify-content: center;
-                width: 2rem;
-                height: 2rem;
-                background: {icon_bg};
-                border-radius: 0.5rem;
-                flex-shrink: 0;
-            }}
-            
-            .message {{
-                font-size: 1.125rem;
-                line-height: 1.75;
-                color: #0a0a0a;
-                font-weight: 600;
-                text-align: left;
-            }}
-            
-            .info-box {{
-                background: #f5f5f5;
-                border: 1px solid #e5e5e5;
-                border-radius: 0.5rem;
-                padding: 0.875rem;
-                margin: 1.25rem 0;
-                font-size: 0.875rem;
-                color: #525252;
-                font-family: 'SF Mono', 'Monaco', 'Consolas', 'Courier New', monospace;
-                text-align: left;
-            }}
-            
-            .info-box.error {{
-                background: #fef2f2;
-                border-color: #fecaca;
-                color: #991b1b;
-            }}
-            
-            .info-box strong {{
-                color: #0a0a0a;
-                font-weight: 600;
-            }}
-            
-            .close-instruction {{
-                font-size: 0.875rem;
-                color: #737373;
-                margin-top: 1.5rem;
-            }}
-        </style>
-    </head>
-    <body>
+    # Build the page content
+    content = f"""
         <div class="container">
-            <img src="{logo_url}" alt="FastMCP" class="logo" />
-            <div class="status-message">
-                <span class="status-icon">{status_icon}</span>
-                <div class="message">{status_title}</div>
-            </div>
+            {create_logo()}
+            {create_status_message(status_title, is_success=is_success)}
             {detail_info}
             <div class="close-instruction">
                 You can safely close this tab now.
             </div>
         </div>
-    </body>
-    </html>
     """
+
+    # Additional styles needed for this page
+    additional_styles = STATUS_MESSAGE_STYLES + INFO_BOX_STYLES + HELPER_TEXT_STYLES
+
+    return create_page(
+        content=content,
+        title=title,
+        additional_styles=additional_styles,
+    )
 
 
 @dataclass
@@ -194,11 +91,21 @@ class CallbackResponse:
         return {k: v for k, v in self.__dict__.items() if v is not None}
 
 
+@dataclass
+class OAuthCallbackResult:
+    """Container for OAuth callback results, used with anyio.Event for async coordination."""
+
+    code: str | None = None
+    state: str | None = None
+    error: Exception | None = None
+
+
 def create_oauth_callback_server(
     port: int,
     callback_path: str = "/callback",
     server_url: str | None = None,
-    response_future: asyncio.Future | None = None,
+    result_container: OAuthCallbackResult | None = None,
+    result_ready: anyio.Event | None = None,
 ) -> Server:
     """
     Create an OAuth callback server.
@@ -207,7 +114,8 @@ def create_oauth_callback_server(
         port: The port to run the server on
         callback_path: The path to listen for OAuth redirects on
         server_url: Optional server URL to display in success messages
-        response_future: Optional future to resolve when OAuth callback is received
+        result_container: Optional container to store callback results
+        result_ready: Optional event to signal when callback is received
 
     Returns:
         Configured uvicorn Server instance (not yet running)
@@ -221,32 +129,36 @@ def create_oauth_callback_server(
         if callback_response.error:
             error_desc = callback_response.error_description or "Unknown error"
 
-            # Resolve future with exception if provided
-            if response_future and not response_future.done():
-                response_future.set_exception(
-                    RuntimeError(
-                        f"OAuth error: {callback_response.error} - {error_desc}"
-                    )
-                )
+            # Create user-friendly error messages
+            if callback_response.error == "access_denied":
+                user_message = "Access was denied by the authorization server."
+            else:
+                user_message = f"Authorization failed: {error_desc}"
 
-            return HTMLResponse(
+            # Store error and signal completion if result tracking provided
+            if result_container is not None and result_ready is not None:
+                result_container.error = RuntimeError(user_message)
+                result_ready.set()
+
+            return create_secure_html_response(
                 create_callback_html(
-                    f"FastMCP OAuth Error: {callback_response.error}<br>{error_desc}",
+                    user_message,
                     is_success=False,
                 ),
                 status_code=400,
             )
 
         if not callback_response.code:
-            # Resolve future with exception if provided
-            if response_future and not response_future.done():
-                response_future.set_exception(
-                    RuntimeError("OAuth callback missing authorization code")
-                )
+            user_message = "No authorization code was received from the server."
 
-            return HTMLResponse(
+            # Store error and signal completion if result tracking provided
+            if result_container is not None and result_ready is not None:
+                result_container.error = RuntimeError(user_message)
+                result_ready.set()
+
+            return create_secure_html_response(
                 create_callback_html(
-                    "FastMCP OAuth Error: No authorization code received",
+                    user_message,
                     is_success=False,
                 ),
                 status_code=400,
@@ -254,29 +166,30 @@ def create_oauth_callback_server(
 
         # Check for missing state parameter (indicates OAuth flow issue)
         if callback_response.state is None:
-            # Resolve future with exception if provided
-            if response_future and not response_future.done():
-                response_future.set_exception(
-                    RuntimeError(
-                        "OAuth server did not return state parameter - authentication failed"
-                    )
-                )
+            user_message = (
+                "The OAuth server did not return the expected state parameter."
+            )
 
-            return HTMLResponse(
+            # Store error and signal completion if result tracking provided
+            if result_container is not None and result_ready is not None:
+                result_container.error = RuntimeError(user_message)
+                result_ready.set()
+
+            return create_secure_html_response(
                 create_callback_html(
-                    "FastMCP OAuth Error: Authentication failed<br>The OAuth server did not return the expected state parameter",
+                    user_message,
                     is_success=False,
                 ),
                 status_code=400,
             )
 
-        # Success case
-        if response_future and not response_future.done():
-            response_future.set_result(
-                (callback_response.code, callback_response.state)
-            )
+        # Success case - store result and signal completion if result tracking provided
+        if result_container is not None and result_ready is not None:
+            result_container.code = callback_response.code
+            result_container.state = callback_response.state
+            result_ready.set()
 
-        return HTMLResponse(
+        return create_secure_html_response(
             create_callback_html("", is_success=True, server_url=server_url)
         )
 

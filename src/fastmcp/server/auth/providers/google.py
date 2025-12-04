@@ -24,15 +24,16 @@ from __future__ import annotations
 import time
 
 import httpx
+from key_value.aio.protocols import AsyncKeyValue
 from pydantic import AnyHttpUrl, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from fastmcp.server.auth import TokenVerifier
 from fastmcp.server.auth.auth import AccessToken
 from fastmcp.server.auth.oauth_proxy import OAuthProxy
+from fastmcp.settings import ENV_FILE
 from fastmcp.utilities.auth import parse_scopes
 from fastmcp.utilities.logging import get_logger
-from fastmcp.utilities.storage import KVStorage
 from fastmcp.utilities.types import NotSet, NotSetT
 
 logger = get_logger(__name__)
@@ -43,17 +44,19 @@ class GoogleProviderSettings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="FASTMCP_SERVER_AUTH_GOOGLE_",
-        env_file=".env",
+        env_file=ENV_FILE,
         extra="ignore",
     )
 
     client_id: str | None = None
     client_secret: SecretStr | None = None
     base_url: AnyHttpUrl | str | None = None
+    issuer_url: AnyHttpUrl | str | None = None
     redirect_path: str | None = None
     required_scopes: list[str] | None = None
     timeout_seconds: int | None = None
     allowed_client_redirect_uris: list[str] | None = None
+    jwt_signing_key: str | None = None
 
     @field_validator("required_scopes", mode="before")
     @classmethod
@@ -77,7 +80,7 @@ class GoogleTokenVerifier(TokenVerifier):
         """Initialize the Google token verifier.
 
         Args:
-            required_scopes: Required OAuth scopes (e.g., ['openid', 'email'])
+            required_scopes: Required OAuth scopes (e.g., ['openid', 'https://www.googleapis.com/auth/userinfo.email'])
             timeout_seconds: HTTP request timeout
         """
         super().__init__(required_scopes=required_scopes)
@@ -214,18 +217,24 @@ class GoogleProvider(OAuthProxy):
         client_id: str | NotSetT = NotSet,
         client_secret: str | NotSetT = NotSet,
         base_url: AnyHttpUrl | str | NotSetT = NotSet,
+        issuer_url: AnyHttpUrl | str | NotSetT = NotSet,
         redirect_path: str | NotSetT = NotSet,
         required_scopes: list[str] | NotSetT = NotSet,
         timeout_seconds: int | NotSetT = NotSet,
         allowed_client_redirect_uris: list[str] | NotSetT = NotSet,
-        client_storage: KVStorage | None = None,
+        client_storage: AsyncKeyValue | None = None,
+        jwt_signing_key: str | bytes | NotSetT = NotSet,
+        require_authorization_consent: bool = True,
+        extra_authorize_params: dict[str, str] | None = None,
     ):
         """Initialize Google OAuth provider.
 
         Args:
             client_id: Google OAuth client ID (e.g., "123456789.apps.googleusercontent.com")
             client_secret: Google OAuth client secret (e.g., "GOCSPX-abc123...")
-            base_url: Public URL of your FastMCP server (for OAuth callbacks)
+            base_url: Public URL where OAuth endpoints will be accessible (includes any mount path)
+            issuer_url: Issuer URL for OAuth metadata (defaults to base_url). Use root-level URL
+                to avoid 404s during discovery when mounting under a path.
             redirect_path: Redirect path configured in Google OAuth app (defaults to "/auth/callback")
             required_scopes: Required Google scopes (defaults to ["openid"]). Common scopes include:
                 - "openid" for OpenID Connect (default)
@@ -234,8 +243,20 @@ class GoogleProvider(OAuthProxy):
             timeout_seconds: HTTP request timeout for Google API calls
             allowed_client_redirect_uris: List of allowed redirect URI patterns for MCP clients.
                 If None (default), all URIs are allowed. If empty list, no URIs are allowed.
-            client_storage: Storage implementation for OAuth client registrations.
-                Defaults to file-based storage if not specified.
+            client_storage: Storage backend for OAuth state (client registrations, encrypted tokens).
+                If None, a DiskStore will be created in the data directory (derived from `platformdirs`). The
+                disk store will be encrypted using a key derived from the JWT Signing Key.
+            jwt_signing_key: Secret for signing FastMCP JWT tokens (any string or bytes). If bytes are provided,
+                they will be used as is. If a string is provided, it will be derived into a 32-byte key. If not
+                provided, the upstream client secret will be used to derive a 32-byte key using PBKDF2.
+            require_authorization_consent: Whether to require user consent before authorizing clients (default True).
+                When True, users see a consent screen before being redirected to Google.
+                When False, authorization proceeds directly without user confirmation.
+                SECURITY WARNING: Only disable for local development or testing environments.
+            extra_authorize_params: Additional parameters to forward to Google's authorization endpoint.
+                By default, GoogleProvider sets {"access_type": "offline", "prompt": "consent"} to ensure
+                refresh tokens are returned. You can override these defaults or add additional parameters.
+                Example: {"prompt": "select_account"} to let users choose their Google account.
         """
 
         settings = GoogleProviderSettings.model_validate(
@@ -245,10 +266,12 @@ class GoogleProvider(OAuthProxy):
                     "client_id": client_id,
                     "client_secret": client_secret,
                     "base_url": base_url,
+                    "issuer_url": issuer_url,
                     "redirect_path": redirect_path,
                     "required_scopes": required_scopes,
                     "timeout_seconds": timeout_seconds,
                     "allowed_client_redirect_uris": allowed_client_redirect_uris,
+                    "jwt_signing_key": jwt_signing_key,
                 }.items()
                 if v is not NotSet
             }
@@ -281,6 +304,18 @@ class GoogleProvider(OAuthProxy):
             settings.client_secret.get_secret_value() if settings.client_secret else ""
         )
 
+        # Set Google-specific defaults for extra authorize params
+        # access_type=offline ensures refresh tokens are returned
+        # prompt=consent forces consent screen to get refresh token (Google only issues on first auth otherwise)
+        google_defaults = {
+            "access_type": "offline",
+            "prompt": "consent",
+        }
+        # User-provided params override defaults
+        if extra_authorize_params:
+            google_defaults.update(extra_authorize_params)
+        extra_authorize_params_final = google_defaults
+
         # Initialize OAuth proxy with Google endpoints
         super().__init__(
             upstream_authorization_endpoint="https://accounts.google.com/o/oauth2/v2/auth",
@@ -290,12 +325,16 @@ class GoogleProvider(OAuthProxy):
             token_verifier=token_verifier,
             base_url=settings.base_url,
             redirect_path=settings.redirect_path,
-            issuer_url=settings.base_url,  # We act as the issuer for client registration
+            issuer_url=settings.issuer_url
+            or settings.base_url,  # Default to base_url if not specified
             allowed_client_redirect_uris=allowed_client_redirect_uris_final,
             client_storage=client_storage,
+            jwt_signing_key=settings.jwt_signing_key,
+            require_authorization_consent=require_authorization_consent,
+            extra_authorize_params=extra_authorize_params_final,
         )
 
-        logger.info(
+        logger.debug(
             "Initialized Google OAuth provider for client %s with scopes: %s",
             settings.client_id,
             required_scopes_final,

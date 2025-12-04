@@ -7,15 +7,18 @@ dependencies = [
     "python-dotenv>=1.1.0",
     "exceptiongroup>=1.2.2",
     "httpx>=0.28.1",
-    "mcp>=1.12.4,<2.0.0",
+    "mcp>=1.23.1",
     "openapi-pydantic>=0.5.1",
+    "platformdirs>=4.0.0",
     "rich>=13.9.4",
-    "cyclopts>=3.0.0",
-    "authlib>=1.5.2",
+    "cyclopts>=4.0.0",
+    "authlib>=1.6.5",
     "pydantic[email]>=2.11.7",
     "pyperclip>=1.9.0",
-    "openapi-core>=0.19.5",
+    "py-key-value-aio[disk,memory]>=0.2.8,<0.4.0",
+    "uvicorn>=0.35",
     "websockets>=15.0.1",
+    "jsonschema-path>=0.3.4",
 ]
 
 requires-python = ">=3.10"
@@ -38,6 +41,7 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Typing :: Typed",
 ]
 
@@ -52,23 +56,23 @@ dev = [
     "fastapi>=0.115.12",
     "inline-snapshot[dirty-equals]>=0.27.2",
     "ipython>=8.12.3",
-    "pdbpp>=0.10.3",
-    "pre-commit",
-    "psutil",
+    "pdbpp>=0.11.7",
+    "psutil>=7.0.0",
     "pyinstrument>=5.0.2",
     "pyperclip>=1.9.0",
     "pytest>=8.3.3",
-    "pytest-asyncio>=0.23.5",
+    "pytest-asyncio>=1.2.0",
     "pytest-cov>=6.1.1",
     "pytest-env>=1.1.5",
-    "pytest-flakefinder",
+    "pytest-flakefinder>=1.1.0",
     "pytest-httpx>=0.35.0",
     "pytest-report>=0.2.1",
     "pytest-retry>=1.7.0",
     "pytest-timeout>=2.4.0",
     "pytest-xdist>=3.6.1",
-    "ruff",
-    "ty>=0.0.1a19",
+    "ruff>=0.12.8",
+    "ty==0.0.1a25",
+    "prek>=0.2.12",
 ]
 
 [project.scripts]
@@ -98,9 +102,12 @@ fallback-version = "0.0.0"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-asyncio_default_fixture_loop_scope = "session"
-asyncio_default_test_loop_scope = "session"
 # filterwarnings = ["error::DeprecationWarning"]
+filterwarnings = [
+    # Suppress OAuth in-memory token storage warnings in tests
+    # Tests intentionally use ephemeral storage; this warning is for end users
+    "ignore:Using in-memory token storage:UserWarning",
+]
 timeout = 5
 env = [
     "FASTMCP_TEST_MODE=1",
@@ -129,19 +136,46 @@ python-version = "3.10"
 
 [tool.ty.rules]
 # Rules with too many errors to fix right now (40+ each)
-no-matching-overload = "ignore" # 126 errors  
+no-matching-overload = "ignore" # 126 errors
 unknown-argument = "ignore"     # 61 errors
 
 # Rules with moderate errors that need more investigation
 call-non-callable = "ignore" # 7 errors
 
+# NOTE: ty currently doesn't support type narrowing with isinstance() on unions
+# See: https://github.com/astral-sh/ty/issues/122 and https://github.com/astral-sh/ty/issues/1113
+# Some code uses `# ty: ignore[invalid-argument-type]` for this limitation.
+# TODO: Remove these ignores once ty supports union narrowing
+
 [tool.ruff.lint]
-extend-select = ["I", "UP"]
+fixable = ["ALL"]
+ignore = [
+    "COM812",
+    "PLR0913", # Too many arguments, MCP Servers have a lot of arguments, OKAY?!
+    "SIM102",  # Dont require combining if statements
+]
+extend-select = [
+    "B",   # flake8-bugbear: Catches actual bugs like mutable default arguments
+    "C4",  # flake8-comprehensions: More efficient/readable comprehensions
+    "I",   # flake8-builtins: Catches builtins that are not explicitly imported
+    "PIE", # flake8-pie: More idiomatic Python code
+    "RUF", # Ruff-specific: Modern best practices unique to Ruff
+    "SIM", # flake8-simplify: Simplifies verbose code patterns
+    "UP",  # flake8-unused-imports: Catches unused imports
+]
+
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401", "I001", "RUF013"]
 # allow imports not at the top of the file
 "src/fastmcp/__init__.py" = ["E402"]
+"!src/**.py" = [ # Only enforce extended ruff rules for code in src/
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "PIE", # flake8-pie
+    "RUF", # Ruff-specific
+    "SIM", # flake8-simplify
+]
 
 [tool.codespell]
 ignore-words-list = "asend,shttp,te"

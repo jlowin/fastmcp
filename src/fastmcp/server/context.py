@@ -1,41 +1,42 @@
 from __future__ import annotations
 
-import asyncio
 import copy
 import inspect
-import warnings
+import logging
 import weakref
 from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from enum import Enum
+from logging import Logger
 from typing import Any, Literal, cast, get_origin, overload
 
+import anyio
 from mcp import LoggingLevel, ServerSession
 from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.lowlevel.server import request_ctx
 from mcp.shared.context import RequestContext
 from mcp.types import (
-    AudioContent,
     ClientCapabilities,
     CreateMessageResult,
-    ImageContent,
+    GetPromptResult,
     IncludeContext,
     ModelHint,
     ModelPreferences,
     Root,
     SamplingCapability,
     SamplingMessage,
+    SamplingMessageContentBlock,
     TextContent,
 )
 from mcp.types import CreateMessageRequestParams as SamplingParams
+from mcp.types import Prompt as MCPPrompt
+from mcp.types import Resource as MCPResource
 from pydantic.networks import AnyUrl
 from starlette.requests import Request
 from typing_extensions import TypeVar
 
-import fastmcp.server.dependencies
-from fastmcp import settings
 from fastmcp.server.elicitation import (
     AcceptedElicitation,
     CancelledElicitation,
@@ -44,14 +45,22 @@ from fastmcp.server.elicitation import (
     get_elicitation_schema,
 )
 from fastmcp.server.server import FastMCP
-from fastmcp.utilities.logging import get_logger
+from fastmcp.utilities.logging import _clamp_logger, get_logger
 from fastmcp.utilities.types import get_cached_typeadapter
 
-logger = get_logger(__name__)
+logger: Logger = get_logger(name=__name__)
+to_client_logger: Logger = logger.getChild(suffix="to_client")
+
+# Convert all levels of server -> client messages to debug level
+# This clamp can be undone at runtime by calling `_unclamp_logger` or calling
+# `_clamp_logger` with a different max level.
+_clamp_logger(logger=to_client_logger, max_level="DEBUG")
+
 
 T = TypeVar("T", default=Any)
+
 _current_context: ContextVar[Context | None] = ContextVar("context", default=None)  # type: ignore[assignment]
-_flush_lock = asyncio.Lock()
+_flush_lock = anyio.Lock()
 
 
 @dataclass
@@ -64,6 +73,18 @@ class LogData:
 
     msg: str
     extra: Mapping[str, Any] | None = None
+
+
+_mcp_level_to_python_level = {
+    "debug": logging.DEBUG,
+    "info": logging.INFO,
+    "notice": logging.INFO,
+    "warning": logging.WARNING,
+    "error": logging.ERROR,
+    "critical": logging.CRITICAL,
+    "alert": logging.CRITICAL,
+    "emergency": logging.CRITICAL,
+}
 
 
 @contextmanager
@@ -157,15 +178,33 @@ class Context:
             _current_context.reset(token)
 
     @property
-    def request_context(self) -> RequestContext[ServerSession, Any, Request]:
+    def request_context(self) -> RequestContext[ServerSession, Any, Request] | None:
         """Access to the underlying request context.
 
-        If called outside of a request context, this will raise a ValueError.
+        Returns None when the MCP session has not been established yet.
+        Returns the full RequestContext once the MCP session is available.
+
+        For HTTP request access in middleware, use `get_http_request()` from fastmcp.server.dependencies,
+        which works whether or not the MCP session is available.
+
+        Example in middleware:
+        ```python
+        async def on_request(self, context, call_next):
+            ctx = context.fastmcp_context
+            if ctx.request_context:
+                # MCP session available - can access session_id, request_id, etc.
+                session_id = ctx.session_id
+            else:
+                # MCP session not available yet - use HTTP helpers
+                from fastmcp.server.dependencies import get_http_request
+                request = get_http_request()
+            return await call_next(context)
+        ```
         """
         try:
             return request_ctx.get()
         except LookupError:
-            raise ValueError("Context is not available outside of a request")
+            return None
 
     async def report_progress(
         self, progress: float, total: float | None = None, message: str | None = None
@@ -179,7 +218,7 @@ class Context:
 
         progress_token = (
             self.request_context.meta.progressToken
-            if self.request_context.meta
+            if self.request_context and self.request_context.meta
             else None
         )
 
@@ -194,6 +233,36 @@ class Context:
             related_request_id=self.request_id,
         )
 
+    async def list_resources(self) -> list[MCPResource]:
+        """List all available resources from the server.
+
+        Returns:
+            List of Resource objects available on the server
+        """
+        return await self.fastmcp._list_resources_mcp()
+
+    async def list_prompts(self) -> list[MCPPrompt]:
+        """List all available prompts from the server.
+
+        Returns:
+            List of Prompt objects available on the server
+        """
+        return await self.fastmcp._list_prompts_mcp()
+
+    async def get_prompt(
+        self, name: str, arguments: dict[str, Any] | None = None
+    ) -> GetPromptResult:
+        """Get a prompt by name with optional arguments.
+
+        Args:
+            name: The name of the prompt to get
+            arguments: Optional arguments to pass to the prompt
+
+        Returns:
+            The prompt result
+        """
+        return await self.fastmcp._get_prompt_mcp(name, arguments)
+
     async def read_resource(self, uri: str | AnyUrl) -> list[ReadResourceContents]:
         """Read a resource by URI.
 
@@ -203,8 +272,6 @@ class Context:
         Returns:
             The resource content as either text or bytes
         """
-        if self.fastmcp is None:
-            raise ValueError("Context is not available outside of a request")
         return await self.fastmcp._read_resource_mcp(uri)
 
     async def log(
@@ -216,6 +283,8 @@ class Context:
     ) -> None:
         """Send a log message to the client.
 
+        Messages sent to Clients are also logged to the `fastmcp.server.context.to_client` logger with a level of `DEBUG`.
+
         Args:
             message: Log message
             level: Optional log level. One of "debug", "info", "notice", "warning", "error", "critical",
@@ -223,13 +292,13 @@ class Context:
             logger_name: Optional logger name
             extra: Optional mapping for additional arguments
         """
-        if level is None:
-            level = "info"
         data = LogData(msg=message, extra=extra)
-        await self.session.send_log_message(
-            level=level,
+
+        await _log_to_server_and_client(
             data=data,
-            logger=logger_name,
+            session=self.session,
+            level=level or "info",
+            logger_name=logger_name,
             related_request_id=self.request_id,
         )
 
@@ -238,13 +307,21 @@ class Context:
         """Get the client ID if available."""
         return (
             getattr(self.request_context.meta, "client_id", None)
-            if self.request_context.meta
+            if self.request_context and self.request_context.meta
             else None
         )
 
     @property
     def request_id(self) -> str:
-        """Get the unique ID for this request."""
+        """Get the unique ID for this request.
+
+        Raises RuntimeError if MCP request context is not available.
+        """
+        if self.request_context is None:
+            raise RuntimeError(
+                "request_id is not available because the MCP session has not been established yet. "
+                "Check `context.request_context` for None before accessing this attribute."
+            )
         return str(self.request_context.request_id)
 
     @property
@@ -259,6 +336,9 @@ class Context:
             The session ID for StreamableHTTP transports, or a generated ID
             for other transports.
 
+        Raises:
+            RuntimeError if MCP request context is not available.
+
         Example:
             ```python
             @server.tool
@@ -269,6 +349,11 @@ class Context:
             ```
         """
         request_ctx = self.request_context
+        if request_ctx is None:
+            raise RuntimeError(
+                "session_id is not available because the MCP session has not been established yet. "
+                "Check `context.request_context` for None before accessing this attribute."
+            )
         session = request_ctx.session
 
         # Try to get the session ID from the session attributes
@@ -288,12 +373,20 @@ class Context:
             session_id = str(uuid4())
 
         # Save the session id to the session attributes
-        setattr(session, "_fastmcp_id", session_id)
+        session._fastmcp_id = session_id
         return session_id
 
     @property
     def session(self) -> ServerSession:
-        """Access to the underlying session for advanced usage."""
+        """Access to the underlying session for advanced usage.
+
+        Raises RuntimeError if MCP request context is not available.
+        """
+        if self.request_context is None:
+            raise RuntimeError(
+                "session is not available because the MCP session has not been established yet. "
+                "Check `context.request_context` for None before accessing this attribute."
+            )
         return self.request_context.session
 
     # Convenience methods for common log levels
@@ -303,9 +396,14 @@ class Context:
         logger_name: str | None = None,
         extra: Mapping[str, Any] | None = None,
     ) -> None:
-        """Send a debug log message."""
+        """Send a `DEBUG`-level message to the connected MCP Client.
+
+        Messages sent to Clients are also logged to the `fastmcp.server.context.to_client` logger with a level of `DEBUG`."""
         await self.log(
-            level="debug", message=message, logger_name=logger_name, extra=extra
+            level="debug",
+            message=message,
+            logger_name=logger_name,
+            extra=extra,
         )
 
     async def info(
@@ -314,9 +412,14 @@ class Context:
         logger_name: str | None = None,
         extra: Mapping[str, Any] | None = None,
     ) -> None:
-        """Send an info log message."""
+        """Send a `INFO`-level message to the connected MCP Client.
+
+        Messages sent to Clients are also logged to the `fastmcp.server.context.to_client` logger with a level of `DEBUG`."""
         await self.log(
-            level="info", message=message, logger_name=logger_name, extra=extra
+            level="info",
+            message=message,
+            logger_name=logger_name,
+            extra=extra,
         )
 
     async def warning(
@@ -325,9 +428,14 @@ class Context:
         logger_name: str | None = None,
         extra: Mapping[str, Any] | None = None,
     ) -> None:
-        """Send a warning log message."""
+        """Send a `WARNING`-level message to the connected MCP Client.
+
+        Messages sent to Clients are also logged to the `fastmcp.server.context.to_client` logger with a level of `DEBUG`."""
         await self.log(
-            level="warning", message=message, logger_name=logger_name, extra=extra
+            level="warning",
+            message=message,
+            logger_name=logger_name,
+            extra=extra,
         )
 
     async def error(
@@ -336,9 +444,14 @@ class Context:
         logger_name: str | None = None,
         extra: Mapping[str, Any] | None = None,
     ) -> None:
-        """Send an error log message."""
+        """Send a `ERROR`-level message to the connected MCP Client.
+
+        Messages sent to Clients are also logged to the `fastmcp.server.context.to_client` logger with a level of `DEBUG`."""
         await self.log(
-            level="error", message=message, logger_name=logger_name, extra=extra
+            level="error",
+            message=message,
+            logger_name=logger_name,
+            extra=extra,
         )
 
     async def list_roots(self) -> list[Root]:
@@ -366,7 +479,7 @@ class Context:
         temperature: float | None = None,
         max_tokens: int | None = None,
         model_preferences: ModelPreferences | str | list[str] | None = None,
-    ) -> TextContent | ImageContent | AudioContent:
+    ) -> SamplingMessageContentBlock | list[SamplingMessageContentBlock]:
         """
         Send a sampling request to the client and await the response.
 
@@ -521,13 +634,11 @@ class Context:
                 choice_literal = Literal[tuple(response_type)]  # type: ignore
                 response_type = ScalarElicitationType[choice_literal]  # type: ignore
             # if the user provided a primitive scalar, wrap it in an object schema
-            elif response_type in {bool, int, float, str}:
-                response_type = ScalarElicitationType[response_type]  # type: ignore
-            # if the user provided a Literal type, wrap it in an object schema
-            elif get_origin(response_type) is Literal:
-                response_type = ScalarElicitationType[response_type]  # type: ignore
-            # if the user provided an Enum type, wrap it in an object schema
-            elif isinstance(response_type, type) and issubclass(response_type, Enum):
+            elif (
+                response_type in {bool, int, float, str}
+                or get_origin(response_type) is Literal
+                or (isinstance(response_type, type) and issubclass(response_type, Enum))
+            ):
                 response_type = ScalarElicitationType[response_type]  # type: ignore
 
             response_type = cast(type[T], response_type)
@@ -566,21 +677,6 @@ class Context:
             # This should never happen, but handle it just in case
             raise ValueError(f"Unexpected elicitation action: {result.action}")
 
-    def get_http_request(self) -> Request:
-        """Get the active starlette request."""
-
-        # Deprecated in 2.2.11
-        if settings.deprecation_warnings:
-            warnings.warn(
-                "Context.get_http_request() is deprecated and will be removed in a future version. "
-                "Use get_http_request() from fastmcp.server.dependencies instead. "
-                "See https://gofastmcp.com/servers/context#http-requests for more details.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
-        return fastmcp.server.dependencies.get_http_request()
-
     def set_state(self, key: str, value: Any) -> None:
         """Set a value in the context state."""
         self._state[key] = value
@@ -592,30 +688,14 @@ class Context:
     def _queue_tool_list_changed(self) -> None:
         """Queue a tool list changed notification."""
         self._notification_queue.add("notifications/tools/list_changed")
-        self._try_flush_notifications()
 
     def _queue_resource_list_changed(self) -> None:
         """Queue a resource list changed notification."""
         self._notification_queue.add("notifications/resources/list_changed")
-        self._try_flush_notifications()
 
     def _queue_prompt_list_changed(self) -> None:
         """Queue a prompt list changed notification."""
         self._notification_queue.add("notifications/prompts/list_changed")
-        self._try_flush_notifications()
-
-    def _try_flush_notifications(self) -> None:
-        """Synchronous method that attempts to flush notifications if we're in an async context."""
-        try:
-            # Check if we're in an async context
-            loop = asyncio.get_running_loop()
-            if loop and not loop.is_running():
-                return
-            # Schedule flush as a task (fire-and-forget)
-            asyncio.create_task(self._flush_notifications())
-        except RuntimeError:
-            # No event loop - will flush later
-            pass
 
     async def _flush_notifications(self) -> None:
         """Send all queued notifications."""
@@ -675,3 +755,31 @@ def _parse_model_preferences(
         raise ValueError(
             "model_preferences must be one of: ModelPreferences, str, list[str], or None."
         )
+
+
+async def _log_to_server_and_client(
+    data: LogData,
+    session: ServerSession,
+    level: LoggingLevel,
+    logger_name: str | None = None,
+    related_request_id: str | None = None,
+) -> None:
+    """Log a message to the server and client."""
+
+    msg_prefix = f"Sending {level.upper()} to client"
+
+    if logger_name:
+        msg_prefix += f" ({logger_name})"
+
+    to_client_logger.log(
+        level=_mcp_level_to_python_level[level],
+        msg=f"{msg_prefix}: {data.msg}",
+        extra=data.extra,
+    )
+
+    await session.send_log_message(
+        level=level,
+        data=data,
+        logger=logger_name,
+        related_request_id=related_request_id,
+    )

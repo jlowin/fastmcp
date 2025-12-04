@@ -18,6 +18,7 @@ class TestGoogleProvider:
             client_secret="GOCSPX-test123",
             base_url="https://myserver.com",
             required_scopes=["openid", "email", "profile"],
+            jwt_signing_key="test-secret",
         )
 
         assert provider._upstream_client_id == "123456789.apps.googleusercontent.com"
@@ -40,6 +41,7 @@ class TestGoogleProvider:
                 "FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_SECRET": "GOCSPX-env456",
                 "FASTMCP_SERVER_AUTH_GOOGLE_BASE_URL": "https://envserver.com",
                 "FASTMCP_SERVER_AUTH_GOOGLE_REQUIRED_SCOPES": scopes_env,
+                "FASTMCP_SERVER_AUTH_GOOGLE_JWT_SIGNING_KEY": "test-secret",
             },
         ):
             provider = GoogleProvider()
@@ -73,6 +75,7 @@ class TestGoogleProvider:
         provider = GoogleProvider(
             client_id="123456789.apps.googleusercontent.com",
             client_secret="GOCSPX-test123",
+            jwt_signing_key="test-secret",
         )
 
         # Check defaults
@@ -86,6 +89,7 @@ class TestGoogleProvider:
             client_id="123456789.apps.googleusercontent.com",
             client_secret="GOCSPX-test123",
             base_url="https://myserver.com",
+            jwt_signing_key="test-secret",
         )
 
         # Check that endpoints use Google's OAuth2 endpoints
@@ -110,7 +114,51 @@ class TestGoogleProvider:
                 "https://www.googleapis.com/auth/userinfo.email",
                 "https://www.googleapis.com/auth/userinfo.profile",
             ],
+            jwt_signing_key="test-secret",
         )
 
         # Provider should initialize successfully with these scopes
         assert provider is not None
+
+    def test_extra_authorize_params_defaults(self):
+        """Test that Google-specific defaults are set for refresh token support."""
+        provider = GoogleProvider(
+            client_id="123456789.apps.googleusercontent.com",
+            client_secret="GOCSPX-test123",
+            jwt_signing_key="test-secret",
+        )
+
+        # Should have Google-specific defaults for refresh token support
+        assert provider._extra_authorize_params == {
+            "access_type": "offline",
+            "prompt": "consent",
+        }
+
+    def test_extra_authorize_params_override_defaults(self):
+        """Test that user can override default extra authorize params."""
+        provider = GoogleProvider(
+            client_id="123456789.apps.googleusercontent.com",
+            client_secret="GOCSPX-test123",
+            jwt_signing_key="test-secret",
+            extra_authorize_params={"prompt": "select_account"},
+        )
+
+        # User override should replace the default
+        assert provider._extra_authorize_params["prompt"] == "select_account"
+        # But other defaults should remain
+        assert provider._extra_authorize_params["access_type"] == "offline"
+
+    def test_extra_authorize_params_add_new_params(self):
+        """Test that user can add additional authorize params."""
+        provider = GoogleProvider(
+            client_id="123456789.apps.googleusercontent.com",
+            client_secret="GOCSPX-test123",
+            jwt_signing_key="test-secret",
+            extra_authorize_params={"login_hint": "user@example.com"},
+        )
+
+        # New param should be added
+        assert provider._extra_authorize_params["login_hint"] == "user@example.com"
+        # Defaults should still be present
+        assert provider._extra_authorize_params["access_type"] == "offline"
+        assert provider._extra_authorize_params["prompt"] == "consent"
