@@ -35,10 +35,5 @@ python server.py
 
 Connect with the client:
 ```bash
-# Connect to both servers
 python client.py
-
-# Connect to just one
-python client.py github
-python client.py google
 ```
