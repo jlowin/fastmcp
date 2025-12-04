@@ -366,6 +366,8 @@ async def test_middleware_mcp_error_after_call_next():
     middleware = PostProcessingErrorMiddleware()
     server.add_middleware(middleware)
 
-    # Connection succeeds because responder._completed check prevents re-responding
+    # Error is logged but not re-raised to prevent duplicate response
     async with Client(server):
-        assert middleware.error_raised is True
+        pass
+
+    assert middleware.error_raised is True
