@@ -21,11 +21,10 @@ from pathlib import Path
 from typing import Annotated
 
 import cyclopts
-from mcp.types import TextContent
+from mcp.types import GetTaskResult, TextContent
 from rich.console import Console
 
 from fastmcp.client import Client
-from fastmcp.client.tasks import TaskStatusResponse
 
 console = Console()
 app = cyclopts.App(name="tasks-client", help="FastMCP Tasks Example Client")
@@ -49,7 +48,7 @@ def load_server():
 _last_notification_message = None
 
 
-def print_notification(status: TaskStatusResponse) -> None:
+def print_notification(status: GetTaskResult) -> None:
     """Callback function for push notifications from server.
 
     This is called automatically when the server sends notifications/tasks/status.
@@ -58,10 +57,10 @@ def print_notification(status: TaskStatusResponse) -> None:
     global _last_notification_message
 
     # Skip if this is the same message we just printed
-    if status.status_message == _last_notification_message:
+    if status.statusMessage == _last_notification_message:
         return
 
-    _last_notification_message = status.status_message
+    _last_notification_message = status.statusMessage
 
     color = {
         "working": "yellow",
@@ -76,7 +75,7 @@ def print_notification(status: TaskStatusResponse) -> None:
     }.get(status.status, "⚠️")
 
     console.print(
-        f"[{color}]📢 Notification: {status.status} {icon} - {status.status_message}[/{color}]"
+        f"[{color}]📢 Notification: {status.status} {icon} - {status.statusMessage}[/{color}]"
     )
 
 
