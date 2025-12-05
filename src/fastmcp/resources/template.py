@@ -308,13 +308,6 @@ class FunctionResourceTemplate(ResourceTemplate):
                     "Functions with *args are not supported as resource templates"
                 )
 
-        # Validate that task=True requires async functions
-        if task and not inspect.iscoroutinefunction(fn):
-            raise ValueError(
-                f"Resource template '{func_name}' uses a sync function but has task=True. "
-                "Background tasks require async functions. Set task=False to disable."
-            )
-
         # Extract path and query parameters from URI template
         path_params = set(re.findall(r"{(\w+)(?:\*)?}", uri_template))
         query_params = extract_query_params(uri_template)
@@ -375,6 +368,13 @@ class FunctionResourceTemplate(ResourceTemplate):
         # if the fn is a staticmethod, we need to work with the underlying function
         if isinstance(fn, staticmethod):
             fn = fn.__func__
+
+        # Validate that task=True requires async functions (after unwrapping)
+        if task and not inspect.iscoroutinefunction(fn):
+            raise ValueError(
+                f"Resource template '{func_name}' uses a sync function but has task=True. "
+                "Background tasks require async functions. Set task=False to disable."
+            )
 
         wrapper_fn = without_injected_parameters(fn)
         type_adapter = get_cached_typeadapter(wrapper_fn)

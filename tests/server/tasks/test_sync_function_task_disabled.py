@@ -161,3 +161,46 @@ async def test_sync_resource_with_task_false_works():
 
     resource = await mcp._resource_manager.get_resource("test://sync")
     assert resource.task is False
+
+
+# =============================================================================
+# Callable classes and staticmethods with async __call__
+# =============================================================================
+
+
+async def test_async_callable_class_tool_with_task_true_works():
+    """Callable class with async __call__ and task=True should work."""
+    from fastmcp.tools import Tool
+
+    class AsyncCallableTool:
+        async def __call__(self, x: int) -> int:
+            return x * 2
+
+    # Callable classes use Tool.from_function() directly
+    tool = Tool.from_function(AsyncCallableTool(), task=True)
+    assert tool.task is True
+
+
+async def test_async_callable_class_prompt_with_task_true_works():
+    """Callable class with async __call__ and task=True should work."""
+    from fastmcp.prompts import Prompt
+
+    class AsyncCallablePrompt:
+        async def __call__(self) -> str:
+            return "Hello"
+
+    # Callable classes use Prompt.from_function() directly
+    prompt = Prompt.from_function(AsyncCallablePrompt(), task=True)
+    assert prompt.task is True
+
+
+async def test_sync_callable_class_tool_with_task_true_raises():
+    """Callable class with sync __call__ and task=True should raise."""
+    from fastmcp.tools import Tool
+
+    class SyncCallableTool:
+        def __call__(self, x: int) -> int:
+            return x * 2
+
+    with pytest.raises(ValueError, match="uses a sync function but has task=True"):
+        Tool.from_function(SyncCallableTool(), task=True)
