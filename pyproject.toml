@@ -52,8 +52,7 @@ openai = ["openai>=1.102.0"]
 [dependency-groups]
 dev = [
     "dirty-equals>=0.9.0",
-    # Dependency to support Docket memory:// brokers - only necessary until next fakeredis release
-    "fakeredis[lua] @ git+https://github.com/cunla/fakeredis-py.git@ad50a0de8d6dce554fb629ec284bc4ccbc6a7f12",
+    "fakeredis[lua]>=2.32.1",
     "fastmcp[openai]",
     # add optional dependencies for fastmcp dev
     "fastapi>=0.115.12",
