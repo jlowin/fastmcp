@@ -52,7 +52,6 @@ openai = ["openai>=1.102.0"]
 [dependency-groups]
 dev = [
     "dirty-equals>=0.9.0",
-    "fakeredis[lua]>=2.32.1",
     "fastmcp[openai]",
     # add optional dependencies for fastmcp dev
     "fastapi>=0.115.12",

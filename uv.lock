@@ -626,7 +626,6 @@ openai = [
 [package.dev-dependencies]
 dev = [
     { name = "dirty-equals" },
-    { name = "fakeredis", extra = ["lua"] },
     { name = "fastapi" },
     { name = "fastmcp", extra = ["openai"] },
     { name = "inline-snapshot", extra = ["dirty-equals"] },
@@ -676,7 +675,6 @@ provides-extras = ["openai"]
 [package.metadata.requires-dev]
 dev = [
     { name = "dirty-equals", specifier = ">=0.9.0" },
-    { name = "fakeredis", extras = ["lua"], specifier = ">=2.32.1" },
     { name = "fastapi", specifier = ">=0.115.12" },
     { name = "fastmcp", extras = ["openai"] },
     { name = "inline-snapshot", extras = ["dirty-equals"], specifier = ">=0.27.2" },
