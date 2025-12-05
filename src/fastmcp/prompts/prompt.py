@@ -199,6 +199,13 @@ class FunctionPrompt(Prompt):
             if param.kind == inspect.Parameter.VAR_KEYWORD:
                 raise ValueError("Functions with **kwargs are not supported as prompts")
 
+        # Validate that task=True requires async functions
+        if task and not inspect.iscoroutinefunction(fn):
+            raise ValueError(
+                f"Prompt '{func_name}' uses a sync function but has task=True. "
+                "Background tasks require async functions. Set task=False to disable."
+            )
+
         description = description or inspect.getdoc(fn)
 
         # if the fn is a callable class, we need to get the __call__ method from here out
