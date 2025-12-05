@@ -5,7 +5,7 @@ import inspect
 import json
 import logging
 import weakref
-from collections.abc import Generator, Mapping, Sequence
+from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
@@ -519,7 +519,7 @@ class Context:
         temperature: float | None = None,
         max_tokens: int | None = None,
         model_preferences: ModelPreferences | str | list[str] | None = None,
-        tools: Sequence[SamplingTool | FastMCPTool] | None = None,
+        tools: Sequence[SamplingTool | FastMCPTool | Callable[..., Any]] | None = None,
         tool_choice: ToolChoiceOption | None = None,
         max_iterations: int = 10,
         result_type: type[ResultT],
@@ -536,7 +536,7 @@ class Context:
         temperature: float | None = None,
         max_tokens: int | None = None,
         model_preferences: ModelPreferences | str | list[str] | None = None,
-        tools: Sequence[SamplingTool | FastMCPTool] | None = None,
+        tools: Sequence[SamplingTool | FastMCPTool | Callable[..., Any]] | None = None,
         tool_choice: ToolChoiceOption | None = None,
         max_iterations: int = 10,
         result_type: None = None,
@@ -552,7 +552,7 @@ class Context:
         temperature: float | None = None,
         max_tokens: int | None = None,
         model_preferences: ModelPreferences | str | list[str] | None = None,
-        tools: Sequence[SamplingTool | FastMCPTool] | None = None,
+        tools: Sequence[SamplingTool | FastMCPTool | Callable[..., Any]] | None = None,
         tool_choice: ToolChoiceOption | None = None,
         max_iterations: int = 10,
         result_type: type[ResultT] | None = None,
@@ -581,8 +581,8 @@ class Context:
             temperature: Optional sampling temperature.
             max_tokens: Maximum tokens to generate. Defaults to 512.
             model_preferences: Optional model preferences.
-            tools: Optional list of tools the LLM can use. Accepts both
-                SamplingTools and FastMCP Tools (which are auto-converted).
+            tools: Optional list of tools the LLM can use. Accepts plain
+                functions, SamplingTools, or FastMCP Tools (all are auto-converted).
                 When provided, the method automatically handles tool execution
                 and returns the final response after all tool calls complete.
             tool_choice: Optional control over tool usage behavior. Only valid
@@ -626,9 +626,11 @@ class Context:
                     sampling_tools.append(t)
                 elif isinstance(t, FastMCPTool):
                     sampling_tools.append(SamplingTool.from_mcp_tool(t))
+                elif callable(t):
+                    sampling_tools.append(SamplingTool.from_function(t))
                 else:
                     raise TypeError(
-                        f"Expected SamplingTool or FastMCP Tool, got {type(t)}"
+                        f"Expected SamplingTool, FastMCP Tool, or callable, got {type(t)}"
                     )
 
         # Create synthetic final_response tool for structured output

@@ -19,11 +19,9 @@ from pydantic import BaseModel
 
 from fastmcp import Client, Context, FastMCP
 from fastmcp.experimental.sampling.handlers.openai import OpenAISamplingHandler
-from fastmcp.server.sampling import sampling_tool
 
 
-# Define sampling tools (available to the LLM during sampling)
-@sampling_tool
+# Define tools (available to the LLM during sampling)
 def search_web(query: str) -> str:
     """Search the web for information."""
     # Simulated search results
@@ -38,7 +36,6 @@ def search_web(query: str) -> str:
     return f"No results found for: {query}"
 
 
-@sampling_tool
 def get_word_count(text: str) -> str:
     """Count words in text."""
     return str(len(text.split()))

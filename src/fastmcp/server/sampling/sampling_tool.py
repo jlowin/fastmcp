@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, overload
+from typing import TYPE_CHECKING, Any
 
 from mcp.types import Tool as SDKTool
 from pydantic import BaseModel, ConfigDict
@@ -22,21 +22,24 @@ class SamplingTool(BaseModel):
     an executor function, enabling servers to execute agentic workflows where
     the LLM can request tool calls during sampling.
 
-    Create a SamplingTool using the @sampling_tool decorator or class methods:
+    In most cases, pass functions directly to ctx.sample():
 
-        @sampling_tool
         def search(query: str) -> str:
             '''Search the web.'''
             return web_search(query)
 
-        # Or from an existing FastMCP Tool
-        sampling_tool = SamplingTool.from_mcp_tool(existing_tool)
-
-        # Then use in sampling
         result = await context.sample(
             messages="Find info about Python",
-            tools=[search],
+            tools=[search],  # Plain functions work directly
         )
+
+    Create a SamplingTool explicitly when you need custom name/description:
+
+        tool = SamplingTool.from_function(search, name="web_search")
+
+    Or from an existing FastMCP Tool:
+
+        sampling_tool = SamplingTool.from_mcp_tool(existing_tool)
     """
 
     name: str
@@ -136,52 +139,3 @@ class SamplingTool(BaseModel):
             parameters=parsed.input_schema,
             fn=parsed.fn,
         )
-
-
-@overload
-def sampling_tool(fn: Callable[..., Any]) -> SamplingTool: ...
-
-
-@overload
-def sampling_tool(
-    *,
-    name: str | None = None,
-    description: str | None = None,
-) -> Callable[[Callable[..., Any]], SamplingTool]: ...
-
-
-def sampling_tool(
-    fn: Callable[..., Any] | None = None,
-    *,
-    name: str | None = None,
-    description: str | None = None,
-) -> SamplingTool | Callable[[Callable[..., Any]], SamplingTool]:
-    """Decorator to create a SamplingTool from a function.
-
-    Can be used with or without arguments:
-
-        @sampling_tool
-        def search(query: str) -> str:
-            '''Search the web.'''
-            return web_search(query)
-
-        @sampling_tool(name="web_search", description="Search the internet")
-        def search(query: str) -> str:
-            return web_search(query)
-
-    Args:
-        fn: The function to wrap (when used without parentheses).
-        name: Optional name override for the tool.
-        description: Optional description override for the tool.
-
-    Returns:
-        A SamplingTool if called directly on a function, or a decorator
-        if called with arguments.
-    """
-    if fn is not None:
-        return SamplingTool.from_function(fn)
-
-    def decorator(fn: Callable[..., Any]) -> SamplingTool:
-        return SamplingTool.from_function(fn, name=name, description=description)
-
-    return decorator

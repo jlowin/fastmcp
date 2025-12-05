@@ -2,7 +2,7 @@
 
 import pytest
 
-from fastmcp.server.sampling import SamplingTool, sampling_tool
+from fastmcp.server.sampling import SamplingTool
 from fastmcp.tools.tool import Tool
 
 
@@ -94,75 +94,43 @@ class TestSamplingToolFromMCPTool:
             SamplingTool.from_mcp_tool(tool)
 
 
-class TestSamplingToolDecorator:
-    """Tests for the @sampling_tool decorator."""
-
-    def test_decorator_without_args(self):
-        @sampling_tool
-        def search(query: str) -> str:
-            """Search the web."""
-            return f"Results for: {query}"
-
-        assert isinstance(search, SamplingTool)
-        assert search.name == "search"
-        assert search.description == "Search the web."
-
-    def test_decorator_with_args(self):
-        @sampling_tool(name="web_search", description="Custom description")
-        def search(query: str) -> str:
-            return f"Results for: {query}"
-
-        assert isinstance(search, SamplingTool)
-        assert search.name == "web_search"
-        assert search.description == "Custom description"
-
-    def test_decorator_with_partial_args(self):
-        @sampling_tool(name="custom_name")
-        def search(query: str) -> str:
-            """Original docstring."""
-            return f"Results for: {query}"
-
-        assert search.name == "custom_name"
-        assert search.description == "Original docstring."
-
-
 class TestSamplingToolRun:
     """Tests for SamplingTool.run()."""
 
     async def test_run_sync_function(self):
-        @sampling_tool
         def add(a: int, b: int) -> int:
             """Add two numbers."""
             return a + b
 
-        result = await add.run({"a": 2, "b": 3})
+        tool = SamplingTool.from_function(add)
+        result = await tool.run({"a": 2, "b": 3})
         assert result == 5
 
     async def test_run_async_function(self):
-        @sampling_tool
         async def async_add(a: int, b: int) -> int:
             """Add two numbers asynchronously."""
             return a + b
 
-        result = await async_add.run({"a": 2, "b": 3})
+        tool = SamplingTool.from_function(async_add)
+        result = await tool.run({"a": 2, "b": 3})
         assert result == 5
 
     async def test_run_with_no_arguments(self):
-        @sampling_tool
         def get_value() -> str:
             """Return a fixed value."""
             return "hello"
 
-        result = await get_value.run()
+        tool = SamplingTool.from_function(get_value)
+        result = await tool.run()
         assert result == "hello"
 
     async def test_run_with_none_arguments(self):
-        @sampling_tool
         def get_value() -> str:
             """Return a fixed value."""
             return "hello"
 
-        result = await get_value.run(None)
+        tool = SamplingTool.from_function(get_value)
+        result = await tool.run(None)
         assert result == "hello"
 
 
@@ -170,12 +138,12 @@ class TestSamplingToolSDKConversion:
     """Tests for SamplingTool._to_sdk_tool() internal method."""
 
     def test_to_sdk_tool(self):
-        @sampling_tool
         def search(query: str) -> str:
             """Search the web."""
             return f"Results for: {query}"
 
-        sdk_tool = search._to_sdk_tool()
+        tool = SamplingTool.from_function(search)
+        sdk_tool = tool._to_sdk_tool()
 
         assert sdk_tool.name == "search"
         assert sdk_tool.description == "Search the web."

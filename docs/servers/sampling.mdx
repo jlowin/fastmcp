@@ -248,23 +248,36 @@ Sampling with tools enables agentic workflows where the LLM can request tool cal
 
 ### Creating Sampling Tools
 
-Use the `@sampling_tool` decorator to create tools for use during sampling:
+Define regular Python functions and pass them directly to `ctx.sample()`:
 
 ```python
 from fastmcp import FastMCP, Context
-from fastmcp.server.sampling import sampling_tool
 
-@sampling_tool
 def search(query: str) -> str:
     """Search the web for information."""
     return f"Search results for: {query}"
 
-@sampling_tool
 def get_current_time() -> str:
     """Get the current time."""
     from datetime import datetime
     return datetime.now().strftime("%H:%M:%S")
 ```
+
+<Note>
+To create a tool with a custom name or description, use `SamplingTool.from_function()`:
+
+```python
+from fastmcp.server.sampling import SamplingTool
+
+tool = SamplingTool.from_function(
+    my_search_function,
+    name="web_search",
+    description="Search the web for information"
+)
+
+result = await ctx.sample(messages="...", tools=[tool])
+```
+</Note>
 
 You can also pass existing FastMCP tools directly to `ctx.sample()`:
 
@@ -292,14 +305,11 @@ Pass tools to `ctx.sample()` to enable agentic tool use. FastMCP automatically h
 
 ```python
 from fastmcp import FastMCP, Context
-from fastmcp.server.sampling import sampling_tool
 
-@sampling_tool
 def search(query: str) -> str:
     """Search the web."""
     return f"Results for: {query}"
 
-@sampling_tool
 def get_time() -> str:
     """Get the current time."""
     from datetime import datetime
@@ -370,19 +380,16 @@ Combine `result_type` with tools for agentic workflows that return structured da
 ```python
 from pydantic import BaseModel
 from fastmcp import FastMCP, Context
-from fastmcp.server.sampling import sampling_tool
 
 class ResearchResult(BaseModel):
     summary: str
     sources: list[str]
     confidence: float
 
-@sampling_tool
 def search(query: str) -> str:
     """Search for information."""
     return f"Found information about: {query}"
 
-@sampling_tool
 def fetch_url(url: str) -> str:
     """Fetch content from a URL."""
     return f"Content from {url}"
@@ -538,12 +545,10 @@ The fallback handler fully supports sampling with tools:
 
 ```python
 from fastmcp import FastMCP, Context
-from fastmcp.server.sampling import sampling_tool
 from fastmcp.experimental.sampling.handlers.openai import OpenAISamplingHandler
 from openai import OpenAI
 import os
 
-@sampling_tool
 def search(query: str) -> str:
     """Search for information."""
     return f"Results for: {query}"

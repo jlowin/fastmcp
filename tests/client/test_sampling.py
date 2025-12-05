@@ -8,7 +8,7 @@ from pydantic_core import to_json
 
 from fastmcp import Client, Context, FastMCP
 from fastmcp.client.sampling import RequestContext, SamplingMessage, SamplingParams
-from fastmcp.server.sampling import SamplingTool, sampling_tool
+from fastmcp.server.sampling import SamplingTool
 from fastmcp.utilities.types import Image
 
 
@@ -177,7 +177,6 @@ class TestSamplingWithTools:
 
         server = FastMCP()
 
-        @sampling_tool
         def search(query: str) -> str:
             """Search the web."""
             return f"Results for: {query}"
@@ -214,7 +213,6 @@ class TestSamplingWithTools:
 
         mcp = FastMCP(sampling_handler=invalid_handler)
 
-        @sampling_tool
         def search(query: str) -> str:
             """Search the web."""
             return f"Results for: {query}"
@@ -238,36 +236,36 @@ class TestSamplingWithTools:
     def test_sampling_tool_schema(self):
         """Test that SamplingTool generates correct schema."""
 
-        @sampling_tool
         def search(query: str, limit: int = 10) -> str:
             """Search the web for results."""
             return f"Results for: {query}"
 
-        assert search.name == "search"
-        assert search.description == "Search the web for results."
-        assert "query" in search.parameters.get("properties", {})
-        assert "limit" in search.parameters.get("properties", {})
+        tool = SamplingTool.from_function(search)
+        assert tool.name == "search"
+        assert tool.description == "Search the web for results."
+        assert "query" in tool.parameters.get("properties", {})
+        assert "limit" in tool.parameters.get("properties", {})
 
     async def test_sampling_tool_run(self):
         """Test that SamplingTool.run() executes correctly."""
 
-        @sampling_tool
         def add(a: int, b: int) -> int:
             """Add two numbers."""
             return a + b
 
-        result = await add.run({"a": 5, "b": 3})
+        tool = SamplingTool.from_function(add)
+        result = await tool.run({"a": 5, "b": 3})
         assert result == 8
 
     async def test_sampling_tool_run_async(self):
         """Test that SamplingTool.run() works with async functions."""
 
-        @sampling_tool
         async def async_multiply(a: int, b: int) -> int:
             """Multiply two numbers."""
             return a * b
 
-        result = await async_multiply.run({"a": 4, "b": 7})
+        tool = SamplingTool.from_function(async_multiply)
+        result = await tool.run({"a": 4, "b": 7})
         assert result == 28
 
     def test_sampling_tool_from_mcp_tool(self):
@@ -307,7 +305,6 @@ class TestAutomaticToolLoop:
         call_count = 0
         tool_was_called = False
 
-        @sampling_tool
         def get_weather(city: str) -> str:
             """Get weather for a city."""
             nonlocal tool_was_called
@@ -370,13 +367,11 @@ class TestAutomaticToolLoop:
 
         executed_tools: list[str] = []
 
-        @sampling_tool
         def tool_a(x: int) -> int:
             """Tool A."""
             executed_tools.append(f"tool_a({x})")
             return x * 2
 
-        @sampling_tool
         def tool_b(y: int) -> int:
             """Tool B."""
             executed_tools.append(f"tool_b({y})")
@@ -436,7 +431,6 @@ class TestAutomaticToolLoop:
         call_count = 0
         received_tool_choices: list = []
 
-        @sampling_tool
         def looping_tool() -> str:
             """A tool that always gets called again."""
             return "keep going"
@@ -498,7 +492,6 @@ class TestAutomaticToolLoop:
             ToolUseContent,
         )
 
-        @sampling_tool
         def known_tool() -> str:
             """A known tool."""
             return "known result"
@@ -573,7 +566,6 @@ class TestAutomaticToolLoop:
             ToolUseContent,
         )
 
-        @sampling_tool
         def failing_tool() -> str:
             """A tool that raises an exception."""
             raise ValueError("Tool failed intentionally")
@@ -649,7 +641,6 @@ class TestAutomaticToolLoop:
 
         received_tool_choices: list = []
 
-        @sampling_tool
         def my_tool() -> str:
             """A tool."""
             return "result"
@@ -763,7 +754,6 @@ class TestSamplingResultType:
             summary: str
             sources: list[str]
 
-        @sampling_tool
         def search(query: str) -> str:
             """Search for information."""
             return f"Found info about: {query}"
