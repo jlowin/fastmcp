@@ -250,7 +250,6 @@
           {
             "group": "Patterns",
             "pages": [
-              "patterns/read-only-tools",
               "patterns/tool-transformation",
               "patterns/decorating-methods",
               "patterns/cli",
