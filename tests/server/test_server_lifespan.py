@@ -17,9 +17,11 @@ class TestServerLifespan:
 
         @asynccontextmanager
         async def server_lifespan(mcp: FastMCP) -> AsyncIterator[dict[str, Any]]:
-            _ = lifespan_events.append("enter")
-            yield {"initialized": True}
-            _ = lifespan_events.append("exit")
+            lifespan_events.append("enter")
+            try:
+                yield {"initialized": True}
+            finally:
+                lifespan_events.append("exit")
 
         mcp = FastMCP("TestServer", lifespan=server_lifespan)
 
@@ -60,6 +62,7 @@ class TestServerLifespan:
         @mcp.tool
         def get_db_info(ctx: Context) -> str:
             # Access the server lifespan context
+            assert ctx.request_context is not None
             lifespan_context = ctx.request_context.lifespan_context
             return lifespan_context.get("db_connection", "no_db")
 

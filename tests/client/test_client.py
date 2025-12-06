@@ -159,6 +159,7 @@ async def test_call_tool_with_meta():
         from fastmcp.server.dependencies import get_context
 
         context = get_context()
+        assert context.request_context is not None
         meta = context.request_context.meta
 
         # Return the meta data as a dict
@@ -463,6 +464,7 @@ async def test_server_info_custom_version():
 
     async with client:
         result = client.initialize_result
+        assert result is not None
         assert result.serverInfo.name == "CustomVersionServer"
         assert result.serverInfo.version == "1.2.3"
 
@@ -472,6 +474,7 @@ async def test_server_info_custom_version():
 
     async with client:
         result = client.initialize_result
+        assert result is not None
         assert result.serverInfo.name == "DefaultVersionServer"
         # Should fall back to FastMCP version
         assert result.serverInfo.version == fastmcp.__version__
@@ -1130,7 +1133,9 @@ class TestInitialize:
         client = Client(server)
 
         async with client:
-            assert client.initialize_result.instructions == "Use the greet tool!"
+            result = client.initialize_result
+            assert result is not None
+            assert result.instructions == "Use the greet tool!"
 
     async def test_initialize_timeout_custom(self, fastmcp_server):
         """Test custom timeout for initialize()."""
@@ -1148,6 +1153,7 @@ class TestInitialize:
         async with client:
             # Access via property
             result = client.initialize_result
+            assert result is not None
             assert result.serverInfo.name == "TestServer"
 
             # Call method - should return cached

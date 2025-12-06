@@ -18,17 +18,16 @@ from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.lowlevel.server import request_ctx
 from mcp.shared.context import RequestContext
 from mcp.types import (
-    AudioContent,
     ClientCapabilities,
     CreateMessageResult,
     GetPromptResult,
-    ImageContent,
     IncludeContext,
     ModelHint,
     ModelPreferences,
     Root,
     SamplingCapability,
     SamplingMessage,
+    SamplingMessageContentBlock,
     TextContent,
 )
 from mcp.types import CreateMessageRequestParams as SamplingParams
@@ -59,6 +58,7 @@ _clamp_logger(logger=to_client_logger, max_level="DEBUG")
 
 
 T = TypeVar("T", default=Any)
+
 _current_context: ContextVar[Context | None] = ContextVar("context", default=None)  # type: ignore[assignment]
 _flush_lock = anyio.Lock()
 
@@ -166,6 +166,12 @@ class Context:
         # Always set this context and save the token
         token = _current_context.set(self)
         self._tokens.append(token)
+
+        # Set current server for dependency injection (use weakref to avoid reference cycles)
+        from fastmcp.server.dependencies import _current_server
+
+        self._server_token = _current_server.set(weakref.ref(self.fastmcp))
+
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
@@ -173,6 +179,14 @@ class Context:
         # Flush any remaining notifications before exiting
         await self._flush_notifications()
 
+        # Reset server token
+        if hasattr(self, "_server_token"):
+            from fastmcp.server.dependencies import _current_server
+
+            _current_server.reset(self._server_token)
+            delattr(self, "_server_token")
+
+        # Reset context token
         if self._tokens:
             token = self._tokens.pop()
             _current_context.reset(token)
@@ -272,7 +286,8 @@ class Context:
         Returns:
             The resource content as either text or bytes
         """
-        return await self.fastmcp._read_resource_mcp(uri)
+        # Context calls don't have task metadata, so always returns list
+        return await self.fastmcp._read_resource_mcp(uri)  # type: ignore[return-value]
 
     async def log(
         self,
@@ -373,7 +388,7 @@ class Context:
             session_id = str(uuid4())
 
         # Save the session id to the session attributes
-        session._fastmcp_id = session_id
+        session._fastmcp_id = session_id  # type: ignore[attr-defined]
         return session_id
 
     @property
@@ -479,7 +494,7 @@ class Context:
         temperature: float | None = None,
         max_tokens: int | None = None,
         model_preferences: ModelPreferences | str | list[str] | None = None,
-    ) -> TextContent | ImageContent | AudioContent:
+    ) -> SamplingMessageContentBlock | list[SamplingMessageContentBlock]:
         """
         Send a sampling request to the client and await the response.
 
@@ -525,7 +540,7 @@ class Context:
                     maxTokens=max_tokens,
                     modelPreferences=_parse_model_preferences(model_preferences),
                 ),
-                self.request_context,
+                self.request_context,  # type: ignore[arg-type]
             )
 
             if inspect.isawaitable(create_message_result):
