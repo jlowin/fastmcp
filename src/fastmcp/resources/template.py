@@ -103,12 +103,6 @@ class ResourceTemplate(FastMCPComponent):
     annotations: Annotations | None = Field(
         default=None, description="Optional annotations about the resource's behavior"
     )
-    task: Annotated[
-        bool,
-        Field(
-            description="Whether this resource template supports background task execution (SEP-1686)"
-        ),
-    ] = False
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(uri_template={self.uri_template!r}, name={self.name!r}, description={self.description!r}, tags={self.tags})"
@@ -178,22 +172,14 @@ class ResourceTemplate(FastMCPComponent):
         )
 
     async def create_resource(self, uri: str, params: dict[str, Any]) -> Resource:
-        """Create a resource from the template with the given parameters."""
+        """Create a resource from the template with the given parameters.
 
-        async def resource_read_fn() -> str | bytes:
-            # Call function and check if result is a coroutine
-            result = await self.read(arguments=params)
-            return result
-
-        return Resource.from_function(
-            fn=resource_read_fn,
-            uri=uri,
-            name=self.name,
-            description=self.description,
-            mime_type=self.mime_type,
-            tags=self.tags,
-            enabled=self.enabled,
-            task=self.task,
+        The base implementation does not support background tasks.
+        Use FunctionResourceTemplate for task support.
+        """
+        raise NotImplementedError(
+            "Subclasses must implement create_resource(). "
+            "Use FunctionResourceTemplate for task support."
         )
 
     def to_mcp_template(
@@ -245,6 +231,31 @@ class FunctionResourceTemplate(ResourceTemplate):
     """A template for dynamically creating resources."""
 
     fn: Callable[..., Any]
+    task: Annotated[
+        bool,
+        Field(
+            description="Whether this resource template supports background task execution (SEP-1686)"
+        ),
+    ] = False
+
+    async def create_resource(self, uri: str, params: dict[str, Any]) -> Resource:
+        """Create a resource from the template with the given parameters."""
+
+        async def resource_read_fn() -> str | bytes:
+            # Call function and check if result is a coroutine
+            result = await self.read(arguments=params)
+            return result
+
+        return Resource.from_function(
+            fn=resource_read_fn,
+            uri=uri,
+            name=self.name,
+            description=self.description,
+            mime_type=self.mime_type,
+            tags=self.tags,
+            enabled=self.enabled,
+            task=self.task,
+        )
 
     async def read(self, arguments: dict[str, Any]) -> str | bytes:
         """Read the resource content."""
@@ -368,6 +379,13 @@ class FunctionResourceTemplate(ResourceTemplate):
         # if the fn is a staticmethod, we need to work with the underlying function
         if isinstance(fn, staticmethod):
             fn = fn.__func__
+
+        # Validate that task=True requires async functions (after unwrapping)
+        if task and not inspect.iscoroutinefunction(fn):
+            raise ValueError(
+                f"Resource template '{func_name}' uses a sync function but has task=True. "
+                "Background tasks require async functions. Set task=False to disable."
+            )
 
         wrapper_fn = without_injected_parameters(fn)
         type_adapter = get_cached_typeadapter(wrapper_fn)

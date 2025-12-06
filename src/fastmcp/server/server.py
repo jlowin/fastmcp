@@ -20,6 +20,7 @@ from contextlib import (
     AbstractAsyncContextManager,
     AsyncExitStack,
     asynccontextmanager,
+    suppress,
 )
 from dataclasses import dataclass
 from functools import partial
@@ -59,9 +60,9 @@ from fastmcp.mcp_config import MCPConfig
 from fastmcp.prompts import Prompt
 from fastmcp.prompts.prompt import FunctionPrompt
 from fastmcp.prompts.prompt_manager import PromptManager
-from fastmcp.resources.resource import Resource
+from fastmcp.resources.resource import FunctionResource, Resource
 from fastmcp.resources.resource_manager import ResourceManager
-from fastmcp.resources.template import ResourceTemplate
+from fastmcp.resources.template import FunctionResourceTemplate, ResourceTemplate
 from fastmcp.server.auth import AuthProvider
 from fastmcp.server.http import (
     StarletteWithLifespan,
@@ -214,6 +215,7 @@ class FastMCP(Generic[LifespanResultT]):
         self._lifespan: LifespanCallable[LifespanResultT] = lifespan or default_lifespan
         self._lifespan_result: LifespanResultT | None = None
         self._lifespan_result_set: bool = False
+        self._started: asyncio.Event = asyncio.Event()
 
         # Generate random ID if no name provided
         self._mcp_server: LowLevelServer[LifespanResultT, Any] = LowLevelServer[
@@ -375,34 +377,16 @@ class FastMCP(Generic[LifespanResultT]):
         return self._docket
 
     @asynccontextmanager
-    async def _docket_lifespan(
-        self, user_lifespan_result: LifespanResultT
-    ) -> AsyncIterator[LifespanResultT]:
-        """Manage Docket instance and Worker when experimental support is enabled.
-
-        Args:
-            user_lifespan_result: The result from the user's lifespan function
-
-        Yields:
-            User's lifespan result (Docket is managed via ContextVar, not lifespan result)
-        """
+    async def _docket_lifespan(self) -> AsyncIterator[None]:
+        """Manage Docket instance and Worker for background task execution."""
         from fastmcp import settings
-        from fastmcp.server.dependencies import _current_docket, _current_worker
-
-        # Validate configuration
-        if settings.enable_tasks and not settings.enable_docket:
-            raise RuntimeError(
-                "Server requires enable_docket=True when enable_tasks=True. "
-                "Task protocol support needs Docket for background execution."
-            )
-
-        if not settings.enable_docket:
-            # Docket support not enabled, pass through user lifespan result
-            yield user_lifespan_result
-            return
 
         # Set FastMCP server in ContextVar so CurrentFastMCP can access it (use weakref to avoid reference cycles)
-        from fastmcp.server.dependencies import _current_server
+        from fastmcp.server.dependencies import (
+            _current_docket,
+            _current_server,
+            _current_worker,
+        )
 
         server_token = _current_server.set(weakref.ref(self))
 
@@ -415,36 +399,23 @@ class FastMCP(Generic[LifespanResultT]):
                 # Store on server instance for cross-task access (FastMCPTransport)
                 self._docket = docket
 
-                # Register task-enabled tools/prompts/resources with Docket
-                tools = await self.get_tools()
-                for tool in tools.values():
-                    supports_task = (
-                        tool.task
-                        if tool.task is not None
-                        else self._support_tasks_by_default
-                    )
-                    if supports_task:
+                # Register local task-enabled tools/prompts/resources with Docket
+                # Only function-based variants support background tasks
+                for tool in self._tool_manager._tools.values():
+                    if isinstance(tool, FunctionTool) and tool.task:
                         docket.register(tool.fn)
 
-                prompts = await self.get_prompts()
-                for prompt in prompts.values():
-                    supports_task = (
-                        prompt.task
-                        if prompt.task is not None
-                        else self._support_tasks_by_default
-                    )
-                    if supports_task:
+                for prompt in self._prompt_manager._prompts.values():
+                    if isinstance(prompt, FunctionPrompt) and prompt.task:
                         docket.register(prompt.fn)
 
-                resources = await self.get_resources()
-                for resource in resources.values():
-                    supports_task = (
-                        resource.task
-                        if resource.task is not None
-                        else self._support_tasks_by_default
-                    )
-                    if supports_task:
+                for resource in self._resource_manager._resources.values():
+                    if isinstance(resource, FunctionResource) and resource.task:
                         docket.register(resource.fn)
+
+                for template in self._resource_manager._templates.values():
+                    if isinstance(template, FunctionResourceTemplate) and template.task:
+                        docket.register(template.fn)
 
                 # Set Docket in ContextVar so CurrentDocket can access it
                 docket_token = _current_docket.set(docket)
@@ -458,22 +429,21 @@ class FastMCP(Generic[LifespanResultT]):
                     if settings.docket.worker_name:
                         worker_kwargs["name"] = settings.docket.worker_name
 
-                    # Create and start Worker, then task group for run_forever()
-                    async with (
-                        Worker(docket, **worker_kwargs) as worker,  # type: ignore[arg-type]
-                        anyio.create_task_group() as tg,
-                    ):
+                    # Create and start Worker
+                    async with Worker(docket, **worker_kwargs) as worker:  # type: ignore[arg-type]
                         # Set Worker in ContextVar so CurrentWorker can access it
                         worker_token = _current_worker.set(worker)
                         try:
-                            # Start worker as background task
-                            tg.start_soon(worker.run_forever)
-
+                            worker_task = asyncio.create_task(worker.run_forever())
                             try:
-                                yield user_lifespan_result
+                                yield
                             finally:
-                                # Cancel task group when exiting (cancels worker)
-                                tg.cancel_scope.cancel()
+                                # Cancel worker task on exit with timeout to prevent hanging
+                                worker_task.cancel()
+                                with suppress(
+                                    asyncio.CancelledError, asyncio.TimeoutError
+                                ):
+                                    await asyncio.wait_for(worker_task, timeout=2.0)
                         finally:
                             _current_worker.reset(worker_token)
                 finally:
@@ -493,9 +463,9 @@ class FastMCP(Generic[LifespanResultT]):
 
         async with (
             self._lifespan(self) as user_lifespan_result,
-            self._docket_lifespan(user_lifespan_result) as lifespan_result,
+            self._docket_lifespan(),
         ):
-            self._lifespan_result = lifespan_result
+            self._lifespan_result = user_lifespan_result
             self._lifespan_result_set = True
 
             async with AsyncExitStack[bool | None]() as stack:
@@ -504,7 +474,11 @@ class FastMCP(Generic[LifespanResultT]):
                         cm=server.server._lifespan_manager()
                     )
 
-                yield
+                self._started.set()
+                try:
+                    yield
+                finally:
+                    self._started.clear()
 
         self._lifespan_result_set = False
         self._lifespan_result = None
@@ -601,7 +575,11 @@ class FastMCP(Generic[LifespanResultT]):
                 async with fastmcp.server.context.Context(fastmcp=self):
                     try:
                         resource = await self._resource_manager.get_resource(uri)
-                        if resource and resource.task:
+                        if (
+                            resource
+                            and isinstance(resource, FunctionResource)
+                            and resource.task
+                        ):
                             # Convert TaskMetadata to dict for handler
                             task_meta_dict = task_meta.model_dump(exclude_none=True)
                             return await handle_resource_as_task(
@@ -670,7 +648,7 @@ class FastMCP(Generic[LifespanResultT]):
                 async with fastmcp.server.context.Context(fastmcp=self):
                     prompts = await self.get_prompts()
                     prompt = prompts.get(name)
-                    if prompt and prompt.task:
+                    if prompt and isinstance(prompt, FunctionPrompt) and prompt.task:
                         # Convert TaskMetadata to dict for handler
                         task_meta_dict = task_meta.model_dump(exclude_none=True)
                         result = await handle_prompt_as_task(
@@ -1348,7 +1326,7 @@ class FastMCP(Generic[LifespanResultT]):
                 if task_meta and fastmcp.settings.enable_tasks:
                     # Task metadata present - check if tool supports background execution
                     tool = self._tool_manager._tools.get(key)
-                    if tool and tool.task:
+                    if tool and isinstance(tool, FunctionTool) and tool.task:
                         # Route to background execution
                         # Convert TaskMetadata to dict for handler
                         task_meta_dict = task_meta.model_dump(exclude_none=True)
@@ -1787,16 +1765,6 @@ class FastMCP(Generic[LifespanResultT]):
                 task if task is not None else self._support_tasks_by_default
             )
 
-            # Disable task support for sync functions (Docket requires async)
-            if supports_task and not asyncio.iscoroutinefunction(fn):
-                if task is True:
-                    # User explicitly requested task=True for sync function
-                    logger.warning(
-                        f"Tool '{tool_name or fn.__name__}' has task=True but is synchronous. "
-                        "Background task support requires async functions. Disabling task support."
-                    )
-                supports_task = False
-
             # Register the tool immediately and return the tool object
             # Note: Deprecation warning for exclude_args is handled in Tool.from_function
             tool = Tool.from_function(
@@ -1987,16 +1955,6 @@ class FastMCP(Generic[LifespanResultT]):
             supports_task: bool = (
                 task if task is not None else self._support_tasks_by_default
             )
-
-            # Disable task support for sync functions (Docket requires async)
-            if supports_task and not asyncio.iscoroutinefunction(fn):
-                if task is True:
-                    # User explicitly requested task=True for sync function
-                    logger.warning(
-                        f"Resource '{uri}' has task=True but is synchronous. "
-                        "Background task support requires async functions. Disabling task support."
-                    )
-                supports_task = False
 
             # Check if this should be a template
             has_uri_params = "{" in uri and "}" in uri
@@ -2206,16 +2164,6 @@ class FastMCP(Generic[LifespanResultT]):
             supports_task: bool = (
                 task if task is not None else self._support_tasks_by_default
             )
-
-            # Disable task support for sync functions (Docket requires async)
-            if supports_task and not asyncio.iscoroutinefunction(fn):
-                if task is True:
-                    # User explicitly requested task=True for sync function
-                    logger.warning(
-                        f"Prompt '{prompt_name or fn.__name__}' has task=True but is synchronous. "
-                        "Background task support requires async functions. Disabling task support."
-                    )
-                supports_task = False
 
             # Register the prompt immediately
             prompt = Prompt.from_function(

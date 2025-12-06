@@ -47,12 +47,6 @@ class Resource(FastMCPComponent):
         Annotations | None,
         Field(description="Optional annotations about the resource's behavior"),
     ] = None
-    task: Annotated[
-        bool,
-        Field(
-            description="Whether this resource supports background task execution (SEP-1686)"
-        ),
-    ] = False
 
     def enable(self) -> None:
         super().enable()
@@ -176,6 +170,12 @@ class FunctionResource(Resource):
     """
 
     fn: Callable[..., Any]
+    task: Annotated[
+        bool,
+        Field(
+            description="Whether this resource supports background task execution (SEP-1686)"
+        ),
+    ] = False
 
     @classmethod
     def from_function(
@@ -196,6 +196,19 @@ class FunctionResource(Resource):
         """Create a FunctionResource from a function."""
         if isinstance(uri, str):
             uri = AnyUrl(uri)
+
+        # Validate that task=True requires async functions
+        # Handle callable classes and staticmethods before checking
+        fn_to_check = fn
+        if not inspect.isroutine(fn) and callable(fn):
+            fn_to_check = fn.__call__
+        if isinstance(fn_to_check, staticmethod):
+            fn_to_check = fn_to_check.__func__
+        if task and not inspect.iscoroutinefunction(fn_to_check):
+            raise ValueError(
+                f"Resource '{name or get_fn_name(fn)}' uses a sync function but has task=True. "
+                "Background tasks require async functions. Set task=False to disable."
+            )
 
         # Wrap fn to handle dependency resolution internally
         wrapped_fn = without_injected_parameters(fn)

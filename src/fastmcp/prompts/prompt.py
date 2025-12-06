@@ -66,12 +66,6 @@ class Prompt(FastMCPComponent):
     arguments: list[PromptArgument] | None = Field(
         default=None, description="Arguments that can be passed to the prompt"
     )
-    task: Annotated[
-        bool,
-        Field(
-            description="Whether this prompt supports background task execution (SEP-1686)"
-        ),
-    ] = False
 
     def enable(self) -> None:
         super().enable()
@@ -164,6 +158,12 @@ class FunctionPrompt(Prompt):
     """A prompt that is a function."""
 
     fn: Callable[..., PromptResult | Awaitable[PromptResult]]
+    task: Annotated[
+        bool,
+        Field(
+            description="Whether this prompt supports background task execution (SEP-1686)"
+        ),
+    ] = False
 
     @classmethod
     def from_function(
@@ -207,6 +207,13 @@ class FunctionPrompt(Prompt):
         # if the fn is a staticmethod, we need to work with the underlying function
         if isinstance(fn, staticmethod):
             fn = fn.__func__  # type: ignore[assignment]
+
+        # Validate that task=True requires async functions (after unwrapping)
+        if task and not inspect.iscoroutinefunction(fn):
+            raise ValueError(
+                f"Prompt '{func_name}' uses a sync function but has task=True. "
+                "Background tasks require async functions. Set task=False to disable."
+            )
 
         # Wrap fn to handle dependency resolution internally
         wrapped_fn = without_injected_parameters(fn)
