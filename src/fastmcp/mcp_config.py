@@ -93,7 +93,6 @@ class _TransformingMCPServerMixin(FastMCPBaseModel):
         self,
         server_name: str | None = None,
         client_name: str | None = None,
-        **client_kwargs: Any,
     ) -> tuple[FastMCP[Any], ClientTransport]:
         """Turn the Transforming MCPServer into a FastMCP Server and also return the underlying transport."""
         from fastmcp import FastMCP
@@ -105,9 +104,7 @@ class _TransformingMCPServerMixin(FastMCPBaseModel):
         transport: ClientTransport = super().to_transport()  # pyright: ignore[reportUnknownMemberType, reportAttributeAccessIssue, reportUnknownVariableType]  # ty: ignore[unresolved-attribute]
         transport = cast(ClientTransport, transport)
 
-        client: Client[ClientTransport] = Client(
-            transport=transport, name=client_name, **client_kwargs
-        )
+        client: Client[ClientTransport] = Client(transport=transport, name=client_name)
 
         wrapped_mcp_server = FastMCP.as_proxy(
             name=server_name,

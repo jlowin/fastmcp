@@ -285,7 +285,6 @@ class ProxyTool(Tool, MirroredComponent):
         context: Context | None = None,
     ) -> ToolResult:
         """Executes the tool by making a call through the client."""
-        """Executes the tool by making a call through the client."""
         async with self._client:
             context = get_context()
             # try to get request context meta

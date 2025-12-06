@@ -937,12 +937,7 @@ class MCPConfigTransport(ClientTransport):
         ```
     """
 
-    def __init__(
-        self,
-        config: MCPConfig | dict,
-        name_as_prefix: bool = True,
-        **client_kwargs: Any,
-    ):
+    def __init__(self, config: MCPConfig | dict, name_as_prefix: bool = True):
         from fastmcp.utilities.mcp_config import mcp_config_to_servers_and_transports
 
         if isinstance(config, dict):
@@ -966,7 +961,7 @@ class MCPConfigTransport(ClientTransport):
             self._composite_server = FastMCP[Any](name=name)
 
             for name, server, transport in mcp_config_to_servers_and_transports(
-                self.config, **client_kwargs
+                self.config
             ):
                 self._underlying_transports.append(transport)
                 self._composite_server.mount(
@@ -1007,12 +1002,6 @@ def infer_transport(transport: MCPConfig) -> MCPConfigTransport: ...
 
 
 @overload
-def infer_transport(
-    transport: MCPConfig, **client_kwargs: Any
-) -> MCPConfigTransport: ...
-
-
-@overload
 def infer_transport(transport: dict[str, Any]) -> MCPConfigTransport: ...
 
 
@@ -1043,7 +1032,6 @@ def infer_transport(
     | MCPConfig
     | dict[str, Any]
     | str,
-    **client_kwargs: Any,
 ) -> ClientTransport:
     """
     Infer the appropriate transport type from the given transport argument.
@@ -1120,8 +1108,7 @@ def infer_transport(
     # if the transport is a config dict or MCPConfig
     elif isinstance(transport, dict | MCPConfig):
         inferred_transport = MCPConfigTransport(
-            config=cast(dict | MCPConfig, transport),
-            **client_kwargs,
+            config=cast(dict | MCPConfig, transport)
         )
 
     # the transport is an unknown type
