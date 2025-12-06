@@ -149,6 +149,7 @@ class OAuth(OAuthClientProvider):
         additional_client_metadata: dict[str, Any] | None = None,
         callback_port: int | None = None,
         httpx_client_factory: McpHttpClientFactory | None = None,
+        client_metadata_url: str | None = None,
     ):
         """
         Initialize OAuth client provider for an MCP server.
@@ -161,7 +162,12 @@ class OAuth(OAuthClientProvider):
             token_storage: An AsyncKeyValue-compatible token store, tokens are stored in memory if not provided
             additional_client_metadata: Extra fields for OAuthClientMetadata
             callback_port: Fixed port for OAuth callback (default: random available port)
+            client_metadata_url: URL-based client ID per CIMD (SEP-991). When provided
+                and the server supports CIMD, this URL is used as the client_id instead
+                of performing Dynamic Client Registration. The URL must be HTTPS with
+                a non-root path and point to a JSON document containing client metadata.
         """
+        self.client_metadata_url = client_metadata_url
         parsed_url = urlparse(mcp_url)
         server_base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
 
@@ -215,6 +221,7 @@ class OAuth(OAuthClientProvider):
             storage=self.token_storage_adapter,
             redirect_handler=self.redirect_handler,
             callback_handler=self.callback_handler,
+            client_metadata_url=client_metadata_url,
         )
 
     async def _initialize(self) -> None:

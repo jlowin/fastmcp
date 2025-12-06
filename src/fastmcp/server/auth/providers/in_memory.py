@@ -63,6 +63,10 @@ class InMemoryOAuthProvider(OAuthProvider):
         ] = {}  # refresh_token_str -> access_token_str
 
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
+        # Try CIMD lookup first for URL-based client_ids
+        if cimd_client := await self._lookup_cimd_client(client_id):
+            return cimd_client
+        # Fall back to registered clients
         return self.clients.get(client_id)
 
     async def register_client(self, client_info: OAuthClientInformationFull) -> None:

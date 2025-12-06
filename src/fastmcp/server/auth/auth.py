@@ -4,6 +4,7 @@ import json
 from typing import Any, cast
 from urllib.parse import urlparse
 
+from mcp.server.auth.handlers.metadata import MetadataHandler
 from mcp.server.auth.handlers.token import TokenErrorResponse
 from mcp.server.auth.handlers.token import TokenHandler as _SDKTokenHandler
 from mcp.server.auth.json_response import PydanticJSONResponse
@@ -30,11 +31,13 @@ from mcp.server.auth.settings import (
     ClientRegistrationOptions,
     RevocationOptions,
 )
+from mcp.shared.auth import OAuthClientInformationFull, OAuthMetadata
 from pydantic import AnyHttpUrl, Field
 from starlette.middleware import Middleware
 from starlette.middleware.authentication import AuthenticationMiddleware
 from starlette.routing import Route
 
+from fastmcp.server.auth._cimd import _CIMDCache, _get_cimd_client, _is_cimd_client_id
 from fastmcp.utilities.logging import get_logger
 
 logger = get_logger(__name__)
@@ -335,6 +338,7 @@ class OAuthProvider(
         client_registration_options: ClientRegistrationOptions | None = None,
         revocation_options: RevocationOptions | None = None,
         required_scopes: list[str] | None = None,
+        cimd_enabled: bool = True,
     ):
         """
         Initialize the OAuth provider.
@@ -346,6 +350,9 @@ class OAuthProvider(
             client_registration_options: The client registration options.
             revocation_options: The revocation options.
             required_scopes: Scopes that are required for all requests.
+            cimd_enabled: Whether to enable Client ID Metadata Document (CIMD)
+                support per SEP-991. When enabled, URL-based client_ids will be
+                fetched and validated automatically. Defaults to True.
         """
 
         super().__init__(base_url=base_url, required_scopes=required_scopes)
@@ -378,6 +385,69 @@ class OAuthProvider(
         self.service_documentation_url = service_documentation_url
         self.client_registration_options = client_registration_options
         self.revocation_options = revocation_options
+
+        # CIMD (Client ID Metadata Document) support - SEP-991
+        self._cimd_enabled = cimd_enabled
+        self._cimd_cache = _CIMDCache() if cimd_enabled else None
+
+    async def _lookup_cimd_client(
+        self, client_id: str
+    ) -> OAuthClientInformationFull | None:
+        """Try to look up client via CIMD if it's a URL-based client_id.
+
+        Subclasses should call this in their get_client() implementation
+        before falling back to their normal client lookup.
+
+        Args:
+            client_id: The client ID to look up
+
+        Returns:
+            OAuthClientInformationFull if found via CIMD, None otherwise
+        """
+        if not self._cimd_enabled:
+            return None
+        if not _is_cimd_client_id(client_id):
+            return None
+        try:
+            return await _get_cimd_client(client_id, cache=self._cimd_cache)
+        except Exception as e:
+            logger.debug(f"CIMD lookup failed for {client_id}: {e}")
+            return None
+
+    def _build_cimd_metadata(self) -> OAuthMetadata:
+        """Build OAuth metadata with CIMD support flag enabled.
+
+        This creates metadata identical to what the SDK builds, but with
+        client_id_metadata_document_supported set to True.
+        """
+        from mcp.server.auth.routes import build_metadata
+
+        assert self.base_url is not None
+
+        # Build base metadata using SDK function
+        metadata = build_metadata(
+            issuer_url=self.base_url,
+            service_documentation_url=self.service_documentation_url,
+            client_registration_options=self.client_registration_options
+            or ClientRegistrationOptions(),
+            revocation_options=self.revocation_options or RevocationOptions(),
+        )
+
+        # Add CIMD support flag
+        metadata.client_id_metadata_document_supported = True
+
+        return metadata
+
+    def _create_cimd_metadata_route(self) -> Route:
+        """Create a metadata route that advertises CIMD support."""
+        metadata = self._build_cimd_metadata()
+        metadata_handler = MetadataHandler(metadata=metadata)
+
+        return Route(
+            path="/.well-known/oauth-authorization-server",
+            endpoint=cors_middleware(metadata_handler.handle, ["GET", "OPTIONS"]),
+            methods=["GET", "OPTIONS"],
+        )
 
     async def verify_token(self, token: str) -> AccessToken | None:
         """
@@ -425,8 +495,9 @@ class OAuthProvider(
             revocation_options=self.revocation_options,
         )
 
-        # Replace the token endpoint with our custom handler that returns
-        # proper OAuth 2.1 error codes (invalid_client instead of unauthorized_client)
+        # Replace certain endpoints with our custom handlers:
+        # - Token endpoint: OAuth 2.1 compliant error codes
+        # - Metadata endpoint: Add CIMD support flag when enabled
         oauth_routes: list[Route] = []
         for route in sdk_routes:
             if (
@@ -448,6 +519,13 @@ class OAuthProvider(
                         methods=["POST", "OPTIONS"],
                     )
                 )
+            elif (
+                isinstance(route, Route)
+                and route.path == "/.well-known/oauth-authorization-server"
+                and self._cimd_enabled
+            ):
+                # Replace metadata endpoint to advertise CIMD support
+                oauth_routes.append(self._create_cimd_metadata_route())
             else:
                 oauth_routes.append(route)
 

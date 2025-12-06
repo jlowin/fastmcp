@@ -911,8 +911,13 @@ class OAuthProxy(OAuthProvider):
         provided to the DCR client during registration, not the upstream client ID.
 
         For unregistered clients, returns None (which will raise an error in the SDK).
+        CIMD (URL-based) client_ids are also supported if cimd_enabled is True.
         """
-        # Load from storage
+        # Try CIMD lookup first for URL-based client_ids
+        if cimd_client := await self._lookup_cimd_client(client_id):
+            return cimd_client
+
+        # Load from storage (DCR-registered clients)
         if not (client := await self._client_store.get(key=client_id)):
             return None
 
