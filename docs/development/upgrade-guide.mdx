@@ -18,13 +18,15 @@ The experimental OpenAPI parser is now the standard implementation. The legacy p
 
 **If you were using the experimental parser:** Update your imports from the experimental module to the standard location:
 
-```python
-# Before (deprecated, will show warnings)
+<CodeGroup>
+```python Before
 from fastmcp.experimental.server.openapi import FastMCPOpenAPI, RouteMap, MCPType
+```
 
-# After
+```python After
 from fastmcp.server.openapi import FastMCPOpenAPI, RouteMap, MCPType
 ```
+</CodeGroup>
 
 The experimental imports will continue working temporarily but will show deprecation warnings. The `FASTMCP_EXPERIMENTAL_ENABLE_NEW_OPENAPI_PARSER` environment variable is no longer needed and can be removed.
 
@@ -33,54 +35,81 @@ The experimental imports will continue working temporarily but will show depreca
 The following deprecated features have been removed in v2.14.0:
 
 **BearerAuthProvider** (deprecated in v2.11):
-```python
-# Before
+<CodeGroup>
+```python Before
 from fastmcp.server.auth.providers.bearer import BearerAuthProvider
-
-# After
-from fastmcp.server.auth.providers.jwt import JWTVerifier
 ```
 
-**Context.get_http_request()** (deprecated in v2.2.11):
-```python
-# Before
-request = context.get_http_request()
+```python After
+from fastmcp.server.auth.providers.jwt import JWTVerifier
+```
+</CodeGroup>
 
-# After
+**Context.get_http_request()** (deprecated in v2.2.11):
+<CodeGroup>
+```python Before
+request = context.get_http_request()
+```
+
+```python After
 from fastmcp.server.dependencies import get_http_request
 request = get_http_request()
 ```
+</CodeGroup>
 
 **Top-level Image import** (deprecated in v2.8.1):
-```python
-# Before
+<CodeGroup>
+```python Before
 from fastmcp import Image
+```
 
-# After
+```python After
 from fastmcp.utilities.types import Image
 ```
+</CodeGroup>
 
 **FastMCP dependencies parameter** (deprecated in v2.11.4):
-```python
-# Before
+<CodeGroup>
+```python Before
 mcp = FastMCP("server", dependencies=["requests", "pandas"])
-
-# After: Use fastmcp.json configuration file
-# See https://gofastmcp.com/deployment/server-configuration
 ```
+
+```json After
+{
+  "environment": {
+    "dependencies": ["requests", "pandas"]
+  }
+}
+```
+</CodeGroup>
 
 **Legacy resource prefix format**: The `resource_prefix_format` parameter and "protocol" format have been removed. Only the "path" format is supported (this was already the default).
 
 **FastMCPProxy client parameter**:
-```python
-# Before
+<CodeGroup>
+```python Before
 proxy = FastMCPProxy(client=my_client)
-
-# After
-proxy = FastMCPProxy(client_factory=lambda: my_client)
 ```
 
-**output_schema=False**: The `output_schema=False` option for tools has been removed. Either omit the parameter or provide an explicit schema.
+```python After
+proxy = FastMCPProxy(client_factory=lambda: my_client)
+```
+</CodeGroup>
+
+**output_schema=False**:
+<CodeGroup>
+```python Before
+@mcp.tool(output_schema=False)
+def my_tool() -> str:
+    return "result"
+```
+
+```python After
+@mcp.tool(output_schema=None)
+def my_tool() -> str:
+    return "result"
+```
+</CodeGroup>
 
 ## v2.13.0
 
