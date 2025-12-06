@@ -562,9 +562,7 @@ class TestCreateFunctionWithoutParams:
         class Result(BaseModel):
             name: str
 
-        def tool_function(
-            ctx: str, search_query: str, limit: int = 10
-        ) -> list[Result]:
+        def tool_function(ctx: str, search_query: str, limit: int = 10) -> list[Result]:
             return []
 
         # Remove context parameter (what FastMCP does internally)
