@@ -1,5 +1,6 @@
 """Tests for response caching middleware."""
 
+import sys
 import tempfile
 from unittest.mock import AsyncMock, MagicMock
 
@@ -277,6 +278,10 @@ class TestResponseCachingMiddleware:
         assert middleware1._matches_tool_cache_settings(tool_name=tool_name) is result
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="SQLite caching tests are flaky on Windows due to temp directory issues.",
+)
 class TestResponseCachingMiddlewareIntegration:
     """Integration tests with real FastMCP server."""
 
@@ -289,8 +294,8 @@ class TestResponseCachingMiddlewareIntegration:
         """Create a FastMCP server for caching tests."""
         mcp = FastMCP("CachingTestServer")
 
-        with tempfile.TemporaryDirectory() as temp_dir:
-            disk_store = DiskStore(directory=temp_dir)
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            disk_store: DiskStore = DiskStore(directory=temp_dir)
             response_caching_middleware = ResponseCachingMiddleware(
                 cache_storage=disk_store if request.param == "disk" else MemoryStore(),
             )

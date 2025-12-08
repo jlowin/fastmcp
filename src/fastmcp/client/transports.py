@@ -375,7 +375,8 @@ class StdioTransport(ClientTransport):
                 env=self.env,
                 cwd=self.cwd,
                 log_file=self.log_file,
-                session_kwargs=session_kwargs,
+                # TODO(ty): remove when ty supports Unpack[TypedDict] inference
+                session_kwargs=session_kwargs,  # type: ignore[arg-type]
                 ready_event=self._ready_event,
                 stop_event=self._stop_event,
                 session_future=session_future,
@@ -854,11 +855,25 @@ class FastMCPTransport(ClientTransport):
                 anyio.create_task_group() as tg,
                 _enter_server_lifespan(server=self.server),
             ):
+                # Build experimental capabilities
+                import fastmcp
+
+                experimental_capabilities = {}
+                if fastmcp.settings.enable_tasks:
+                    # Declare SEP-1686 task support
+                    experimental_capabilities["tasks"] = {
+                        "tools": True,
+                        "prompts": True,
+                        "resources": True,
+                    }
+
                 tg.start_soon(
                     lambda: self.server._mcp_server.run(
                         server_read,
                         server_write,
-                        self.server._mcp_server.create_initialization_options(),
+                        self.server._mcp_server.create_initialization_options(
+                            experimental_capabilities=experimental_capabilities
+                        ),
                         raise_exceptions=self.raise_exceptions,
                     )
                 )

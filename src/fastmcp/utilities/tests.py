@@ -12,6 +12,7 @@ from urllib.parse import parse_qs, urlparse
 
 import httpx
 import uvicorn
+from pytest import LogCaptureFixture
 
 from fastmcp import settings
 from fastmcp.client.auth.oauth import OAuth
@@ -208,20 +209,25 @@ async def run_server_async(
         )
     )
 
-    # Give the server a moment to start
+    # Wait for server lifespan to be ready
+    await server._started.wait()
+
+    # Give uvicorn a moment to bind the port after lifespan is ready
     await asyncio.sleep(0.1)
 
     try:
         yield f"http://{host}:{port}{path}"
     finally:
-        # Cleanup: cancel the task
+        # Cleanup: cancel the task with timeout to avoid hanging on Windows
         server_task.cancel()
-        with suppress(asyncio.CancelledError):
-            await server_task
+        with suppress(asyncio.CancelledError, asyncio.TimeoutError):
+            await asyncio.wait_for(server_task, timeout=2.0)
 
 
 @contextmanager
-def caplog_for_fastmcp(caplog):
+def caplog_for_fastmcp(
+    caplog: LogCaptureFixture,
+) -> Generator[LogCaptureFixture, None, None]:
     """Context manager to capture logs from FastMCP loggers even when propagation is disabled."""
     caplog.clear()
     logger = logging.getLogger("fastmcp")

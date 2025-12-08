@@ -35,6 +35,8 @@ class MiddlewareServerSession(ServerSession):
     def __init__(self, fastmcp: FastMCP, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._fastmcp_ref: weakref.ref[FastMCP] = weakref.ref(fastmcp)
+        # Task group for subscription tasks (set during session run)
+        self._subscription_task_group: anyio.TaskGroup | None = None  # type: ignore[valid-type]
 
     @property
     def fastmcp(self) -> FastMCP:
@@ -49,23 +51,46 @@ class MiddlewareServerSession(ServerSession):
         responder: RequestResponder[mcp.types.ClientRequest, mcp.types.ServerResult],
     ):
         """
-        Override the _received_request method to route initialization requests
+        Override the _received_request method to route special requests
         through FastMCP middleware.
 
-        These are not handled by routes that FastMCP typically overrides and
-        require special handling.
+        Handles initialization requests and SEP-1686 task methods.
         """
         import fastmcp.server.context
         from fastmcp.server.middleware.middleware import MiddlewareContext
 
         if isinstance(responder.request.root, mcp.types.InitializeRequest):
+            # The MCP SDK's ServerSession._received_request() handles the
+            # initialize request internally by calling responder.respond()
+            # to send the InitializeResult directly to the write stream, then
+            # returning None. This bypasses the middleware return path entirely,
+            # so middleware would only see the request, never the response.
+            #
+            # To expose the response to middleware (e.g., for logging server
+            # capabilities), we wrap responder.respond() to capture the
+            # InitializeResult before it's sent, then return it from
+            # call_original_handler so it flows back through the middleware chain.
+            captured_response: mcp.types.ServerResult | None = None
+            original_respond = responder.respond
+
+            async def capturing_respond(
+                response: mcp.types.ServerResult,
+            ) -> None:
+                nonlocal captured_response
+                captured_response = response
+                return await original_respond(response)
+
+            responder.respond = capturing_respond  # type: ignore[method-assign]
 
             async def call_original_handler(
                 ctx: MiddlewareContext,
-            ) -> None:
-                return await super(MiddlewareServerSession, self)._received_request(
-                    responder
-                )
+            ) -> mcp.types.InitializeResult | None:
+                await super(MiddlewareServerSession, self)._received_request(responder)
+                if captured_response is not None and isinstance(
+                    captured_response.root, mcp.types.InitializeResult
+                ):
+                    return captured_response.root
+                return None
 
             async with fastmcp.server.context.Context(
                 fastmcp=self.fastmcp
@@ -82,8 +107,9 @@ class MiddlewareServerSession(ServerSession):
                 return await self.fastmcp._apply_middleware(
                     mw_context, call_original_handler
                 )
-        else:
-            return await super()._received_request(responder)
+
+        # Fall through to default handling (task methods now handled via registered handlers)
+        return await super()._received_request(responder)
 
 
 class LowLevelServer(_Server[LifespanResultT, RequestT]):
@@ -146,6 +172,9 @@ class LowLevelServer(_Server[LifespanResultT, RequestT]):
             )
 
             async with anyio.create_task_group() as tg:
+                # Store task group on session for subscription tasks (SEP-1686)
+                session._subscription_task_group = tg
+
                 async for message in session.incoming_messages:
                     tg.start_soon(
                         self._handle_message,

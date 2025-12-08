@@ -9,20 +9,28 @@ from typing import (
     Annotated,
     Any,
     Generic,
-    Literal,
     TypeAlias,
     get_type_hints,
 )
 
 import mcp.types
 import pydantic_core
-from mcp.types import CallToolResult, ContentBlock, Icon, TextContent, ToolAnnotations
+from mcp.shared.tool_name_validation import validate_and_warn_tool_name
+from mcp.types import (
+    CallToolResult,
+    ContentBlock,
+    Icon,
+    TextContent,
+    ToolAnnotations,
+    ToolExecution,
+)
 from mcp.types import Tool as MCPTool
-from pydantic import Field, PydanticSchemaGenerationError
+from pydantic import Field, PydanticSchemaGenerationError, model_validator
 from typing_extensions import TypeVar
 
 import fastmcp
-from fastmcp.server.dependencies import get_context
+from fastmcp.server.dependencies import get_context, without_injected_parameters
+from fastmcp.server.tasks.config import TaskConfig
 from fastmcp.utilities.components import FastMCPComponent
 from fastmcp.utilities.json_schema import compress_schema
 from fastmcp.utilities.logging import get_logger
@@ -32,7 +40,7 @@ from fastmcp.utilities.types import (
     Image,
     NotSet,
     NotSetT,
-    find_kwarg_by_type,
+    create_function_without_params,
     get_cached_typeadapter,
     replace_type,
 )
@@ -130,6 +138,12 @@ class Tool(FastMCPComponent):
         Field(description="Optional custom serializer for tool results"),
     ] = None
 
+    @model_validator(mode="after")
+    def _validate_tool_name(self) -> Tool:
+        """Validate tool name according to MCP specification (SEP-986)."""
+        validate_and_warn_tool_name(self.name)
+        return self
+
     def enable(self) -> None:
         super().enable()
         try:
@@ -168,6 +182,7 @@ class Tool(FastMCPComponent):
             outputSchema=overrides.get("outputSchema", self.output_schema),
             icons=overrides.get("icons", self.icons),
             annotations=overrides.get("annotations", self.annotations),
+            execution=overrides.get("execution"),
             _meta=overrides.get(
                 "_meta", self.get_meta(include_fastmcp_meta=include_fastmcp_meta)
             ),
@@ -183,10 +198,11 @@ class Tool(FastMCPComponent):
         tags: set[str] | None = None,
         annotations: ToolAnnotations | None = None,
         exclude_args: list[str] | None = None,
-        output_schema: dict[str, Any] | Literal[False] | NotSetT | None = NotSet,
+        output_schema: dict[str, Any] | NotSetT | None = NotSet,
         serializer: ToolResultSerializerType | None = None,
         meta: dict[str, Any] | None = None,
         enabled: bool | None = None,
+        task: bool | TaskConfig | None = None,
     ) -> FunctionTool:
         """Create a Tool from a function."""
         return FunctionTool.from_function(
@@ -202,6 +218,7 @@ class Tool(FastMCPComponent):
             serializer=serializer,
             meta=meta,
             enabled=enabled,
+            task=task,
         )
 
     async def run(self, arguments: dict[str, Any]) -> ToolResult:
@@ -226,7 +243,7 @@ class Tool(FastMCPComponent):
         description: str | NotSetT | None = NotSet,
         tags: set[str] | None = None,
         annotations: ToolAnnotations | NotSetT | None = NotSet,
-        output_schema: dict[str, Any] | Literal[False] | NotSetT | None = NotSet,
+        output_schema: dict[str, Any] | NotSetT | None = NotSet,
         serializer: ToolResultSerializerType | None = None,
         meta: dict[str, Any] | NotSetT | None = NotSet,
         transform_args: dict[str, ArgTransform] | None = None,
@@ -253,6 +270,32 @@ class Tool(FastMCPComponent):
 
 class FunctionTool(Tool):
     fn: Callable[..., Any]
+    task_config: Annotated[
+        TaskConfig,
+        Field(description="Background task execution configuration (SEP-1686)."),
+    ] = Field(default_factory=lambda: TaskConfig(mode="forbidden"))
+
+    def to_mcp_tool(
+        self,
+        *,
+        include_fastmcp_meta: bool | None = None,
+        **overrides: Any,
+    ) -> MCPTool:
+        """Convert the FastMCP tool to an MCP tool.
+
+        Extends the base implementation to add task execution mode if enabled.
+        """
+        # Get base MCP tool from parent
+        mcp_tool = super().to_mcp_tool(
+            include_fastmcp_meta=include_fastmcp_meta, **overrides
+        )
+
+        # Add task execution mode per SEP-1686
+        # Only set execution if not overridden and mode is not "forbidden"
+        if self.task_config.mode != "forbidden" and "execution" not in overrides:
+            mcp_tool.execution = ToolExecution(taskSupport=self.task_config.mode)
+
+        return mcp_tool
 
     @classmethod
     def from_function(
@@ -265,31 +308,43 @@ class FunctionTool(Tool):
         tags: set[str] | None = None,
         annotations: ToolAnnotations | None = None,
         exclude_args: list[str] | None = None,
-        output_schema: dict[str, Any] | Literal[False] | NotSetT | None = NotSet,
+        output_schema: dict[str, Any] | NotSetT | None = NotSet,
         serializer: ToolResultSerializerType | None = None,
         meta: dict[str, Any] | None = None,
         enabled: bool | None = None,
+        task: bool | TaskConfig | None = None,
     ) -> FunctionTool:
         """Create a Tool from a function."""
+        if exclude_args and fastmcp.settings.deprecation_warnings:
+            warnings.warn(
+                "The `exclude_args` parameter will be deprecated in FastMCP 2.14. "
+                "We recommend using dependency injection with `Depends()` instead, which provides "
+                "better lifecycle management and is more explicit. "
+                "`exclude_args` will continue to work until then. "
+                "See https://gofastmcp.com/docs/servers/tools for examples.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
         parsed_fn = ParsedFunction.from_function(fn, exclude_args=exclude_args)
+        func_name = name or parsed_fn.name
 
-        if name is None and parsed_fn.name == "<lambda>":
+        if func_name == "<lambda>":
             raise ValueError("You must provide a name for lambda functions")
+
+        # Normalize task to TaskConfig and validate
+        if task is None:
+            task_config = TaskConfig(mode="forbidden")
+        elif isinstance(task, bool):
+            task_config = TaskConfig.from_bool(task)
+        else:
+            task_config = task
+        task_config.validate_function(fn, func_name)
 
         if isinstance(output_schema, NotSetT):
             final_output_schema = parsed_fn.output_schema
-        elif output_schema is False:
-            # Handle False as deprecated synonym for None (deprecated in 2.11.4)
-            if fastmcp.settings.deprecation_warnings:
-                warnings.warn(
-                    "Passing output_schema=False is deprecated. Use output_schema=None instead.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-            final_output_schema = None
         else:
-            # At this point output_schema is not NotSetT and not False, so it must be dict | None
+            # At this point output_schema is not NotSetT, so it must be dict | None
             final_output_schema = output_schema
         # Note: explicit schemas (dict) are used as-is without auto-wrapping
 
@@ -314,21 +369,14 @@ class FunctionTool(Tool):
             serializer=serializer,
             meta=meta,
             enabled=enabled if enabled is not None else True,
+            task_config=task_config,
         )
 
     async def run(self, arguments: dict[str, Any]) -> ToolResult:
         """Run the tool with arguments."""
-        from fastmcp.server.context import Context
-
-        arguments = arguments.copy()
-
-        context_kwarg = find_kwarg_by_type(self.fn, kwarg_type=Context)
-        if context_kwarg and context_kwarg not in arguments:
-            arguments[context_kwarg] = get_context()
-
-        type_adapter = get_cached_typeadapter(self.fn)
+        wrapper_fn = without_injected_parameters(self.fn)
+        type_adapter = get_cached_typeadapter(wrapper_fn)
         result = type_adapter.validate_python(arguments)
-
         if inspect.isawaitable(result):
             result = await result
 
@@ -398,8 +446,6 @@ class ParsedFunction:
         validate: bool = True,
         wrap_non_object_output_schema: bool = True,
     ) -> ParsedFunction:
-        from fastmcp.server.context import Context
-
         if validate:
             sig = inspect.signature(fn)
             # Reject functions with *args or **kwargs
@@ -435,15 +481,19 @@ class ParsedFunction:
         if isinstance(fn, staticmethod):
             fn = fn.__func__
 
-        prune_params: list[str] = []
-        context_kwarg = find_kwarg_by_type(fn, kwarg_type=Context)
-        if context_kwarg:
-            prune_params.append(context_kwarg)
-        if exclude_args:
-            prune_params.extend(exclude_args)
+        # Handle injected parameters (Context, Docket dependencies)
+        wrapper_fn = without_injected_parameters(fn)
 
-        input_type_adapter = get_cached_typeadapter(fn)
+        # Also handle exclude_args with non-serializable types (issue #2431)
+        # This must happen before Pydantic tries to serialize the parameters
+        if exclude_args:
+            wrapper_fn = create_function_without_params(wrapper_fn, list(exclude_args))
+
+        input_type_adapter = get_cached_typeadapter(wrapper_fn)
         input_schema = input_type_adapter.json_schema()
+
+        # Compress and handle exclude_args
+        prune_params = list(exclude_args) if exclude_args else None
         input_schema = compress_schema(
             input_schema, prune_params=prune_params, prune_titles=True
         )

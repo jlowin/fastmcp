@@ -25,6 +25,11 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+# Standard OIDC scopes that should never be prefixed with identifier_uri.
+# Per Microsoft docs: https://learn.microsoft.com/en-us/entra/identity-platform/scopes-oidc
+# "OIDC scopes are requested as simple string identifiers without resource prefixes"
+OIDC_SCOPES = frozenset({"openid", "profile", "email", "offline_access"})
+
 
 class AzureProviderSettings(BaseSettings):
     """Settings for Azure OAuth provider."""
@@ -240,13 +245,25 @@ class AzureProvider(OAuthProxy):
             f"https://{base_authority_final}/{tenant_id_final}/discovery/v2.0/keys"
         )
 
-        # Azure returns unprefixed scopes in JWT tokens, so validate against unprefixed scopes
+        # Azure access tokens only include custom API scopes in the `scp` claim,
+        # NOT standard OIDC scopes (openid, profile, email, offline_access).
+        # Filter out OIDC scopes from validation - they'll still be sent to Azure
+        # during authorization (handled by _prefix_scopes_for_azure).
+        validation_scopes = None
+        if settings.required_scopes:
+            validation_scopes = [
+                s for s in settings.required_scopes if s not in OIDC_SCOPES
+            ]
+            # If all scopes were OIDC scopes, use None (no scope validation)
+            if not validation_scopes:
+                validation_scopes = None
+
         token_verifier = JWTVerifier(
             jwks_uri=jwks_uri,
             issuer=issuer,
             audience=settings.client_id,
             algorithm="RS256",
-            required_scopes=settings.required_scopes,  # Unprefixed scopes for validation
+            required_scopes=validation_scopes,  # Only validate non-OIDC scopes
         )
 
         # Extract secret string from SecretStr
@@ -277,6 +294,8 @@ class AzureProvider(OAuthProxy):
             client_storage=client_storage,
             jwt_signing_key=settings.jwt_signing_key,
             require_authorization_consent=require_authorization_consent,
+            # Advertise full scopes including OIDC (even though we only validate non-OIDC)
+            valid_scopes=settings.required_scopes,
         )
 
         authority_info = ""
@@ -327,6 +346,41 @@ class AzureProvider(OAuthProxy):
         separator = "&" if "?" in auth_url else "?"
         return f"{auth_url}{separator}prompt=select_account"
 
+    def _prefix_scopes_for_azure(self, scopes: list[str]) -> list[str]:
+        """Prefix unprefixed custom API scopes with identifier_uri for Azure.
+
+        This helper centralizes the scope prefixing logic used in both
+        authorization and token refresh flows.
+
+        Scopes that are NOT prefixed:
+        - Standard OIDC scopes (openid, profile, email, offline_access)
+        - Fully-qualified URIs (contain "://")
+        - Scopes with path component (contain "/")
+
+        Note: Microsoft Graph scopes (e.g., User.Read) should be passed via
+        `additional_authorize_scopes` or use fully-qualified format
+        (e.g., https://graph.microsoft.com/User.Read).
+
+        Args:
+            scopes: List of scopes, may be prefixed or unprefixed
+
+        Returns:
+            List of scopes with identifier_uri prefix applied where needed
+        """
+        prefixed = []
+        for scope in scopes:
+            if scope in OIDC_SCOPES:
+                # Standard OIDC scopes - never prefix
+                prefixed.append(scope)
+            elif "://" in scope or "/" in scope:
+                # Already fully-qualified (e.g., "api://xxx/read" or
+                # "https://graph.microsoft.com/User.Read")
+                prefixed.append(scope)
+            else:
+                # Unprefixed custom API scope - prefix with identifier_uri
+                prefixed.append(f"{self.identifier_uri}/{scope}")
+        return prefixed
+
     def _build_upstream_authorize_url(
         self, txn_id: str, transaction: dict[str, Any]
     ) -> str:
@@ -339,14 +393,7 @@ class AzureProvider(OAuthProxy):
         unprefixed_scopes = transaction.get("scopes") or self.required_scopes or []
 
         # Prefix scopes for Azure authorization request
-        prefixed_scopes = []
-        for scope in unprefixed_scopes:
-            if "://" in scope or "/" in scope:
-                # Already a full URI or path (e.g., "api://xxx/read" or "User.Read")
-                prefixed_scopes.append(scope)
-            else:
-                # Unprefixed scope name - prefix it with identifier_uri
-                prefixed_scopes.append(f"{self.identifier_uri}/{scope}")
+        prefixed_scopes = self._prefix_scopes_for_azure(unprefixed_scopes)
 
         # Add Microsoft Graph scopes (not validated, not prefixed)
         if self.additional_authorize_scopes:
@@ -358,3 +405,42 @@ class AzureProvider(OAuthProxy):
 
         # Let parent build the URL with prefixed scopes
         return super()._build_upstream_authorize_url(txn_id, modified_transaction)
+
+    def _prepare_scopes_for_upstream_refresh(self, scopes: list[str]) -> list[str]:
+        """Prepare scopes for Azure token refresh.
+
+        Azure requires:
+        1. Fully-qualified custom scopes (e.g., "api://xxx/read" not "read")
+        2. Microsoft Graph scopes (e.g., "User.Read", "openid") sent as-is
+        3. Additional scopes from provider config (additional_authorize_scopes)
+
+        This method transforms base client scopes for Azure while keeping them
+        unprefixed in storage to prevent accumulation.
+
+        Args:
+            scopes: Base scopes from RefreshToken (unprefixed, e.g., ["read"])
+
+        Returns:
+            Deduplicated list of scopes formatted for Azure token endpoint
+        """
+        logger.debug("Base scopes from storage: %s", scopes)
+
+        # Filter out any additional_authorize_scopes that may have been stored
+        # (they shouldn't be in storage, but clean them up if they are)
+        additional_scopes_set = set(self.additional_authorize_scopes or [])
+        base_scopes = [s for s in scopes if s not in additional_scopes_set]
+
+        # Prefix base scopes with identifier_uri for Azure using shared helper
+        prefixed_scopes = self._prefix_scopes_for_azure(base_scopes)
+
+        # Add additional scopes (Graph + OIDC) for the Azure request
+        # These are NOT stored in RefreshToken, only sent to Azure
+        if self.additional_authorize_scopes:
+            prefixed_scopes.extend(self.additional_authorize_scopes)
+
+        # Deduplicate while preserving order (in case older tokens have duplicates)
+        # Use dict.fromkeys() for O(n) deduplication with order preservation
+        deduplicated_scopes = list(dict.fromkeys(prefixed_scopes))
+
+        logger.debug("Scopes for Azure token endpoint: %s", deduplicated_scopes)
+        return deduplicated_scopes

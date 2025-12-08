@@ -116,7 +116,8 @@
                   "servers/progress",
                   "servers/proxy",
                   "servers/sampling",
-                  "servers/storage-backends"
+                  "servers/storage-backends",
+                  "servers/tasks"
                 ]
               },
               {
@@ -171,6 +172,7 @@
                   "clients/logging",
                   "clients/progress",
                   "clients/sampling",
+                  "clients/tasks",
                   "clients/messages",
                   "clients/roots"
                 ]
@@ -197,10 +199,13 @@
                   "integrations/aws-cognito",
                   "integrations/azure",
                   "integrations/descope",
+                  "integrations/discord",
                   "integrations/github",
-                  "integrations/scalekit",
                   "integrations/google",
                   "integrations/keycloak",
+                  "integrations/oci",
+                  "integrations/scalekit",
+                  "integrations/supabase",
                   "integrations/workos"
                 ]
               },
@@ -356,14 +361,15 @@
                           "python-sdk/fastmcp-server-auth-providers-auth0",
                           "python-sdk/fastmcp-server-auth-providers-aws",
                           "python-sdk/fastmcp-server-auth-providers-azure",
-                          "python-sdk/fastmcp-server-auth-providers-bearer",
                           "python-sdk/fastmcp-server-auth-providers-debug",
                           "python-sdk/fastmcp-server-auth-providers-descope",
+                          "python-sdk/fastmcp-server-auth-providers-discord",
                           "python-sdk/fastmcp-server-auth-providers-github",
                           "python-sdk/fastmcp-server-auth-providers-google",
                           "python-sdk/fastmcp-server-auth-providers-in_memory",
                           "python-sdk/fastmcp-server-auth-providers-introspection",
                           "python-sdk/fastmcp-server-auth-providers-jwt",
+                          "python-sdk/fastmcp-server-auth-providers-oci",
                           "python-sdk/fastmcp-server-auth-providers-scalekit",
                           "python-sdk/fastmcp-server-auth-providers-supabase",
                           "python-sdk/fastmcp-server-auth-providers-workos"
@@ -390,7 +396,15 @@
                       "python-sdk/fastmcp-server-middleware-tool_injection"
                     ]
                   },
-                  "python-sdk/fastmcp-server-openapi",
+                  {
+                    "group": "openapi",
+                    "pages": [
+                      "python-sdk/fastmcp-server-openapi-__init__",
+                      "python-sdk/fastmcp-server-openapi-components",
+                      "python-sdk/fastmcp-server-openapi-routing",
+                      "python-sdk/fastmcp-server-openapi-server"
+                    ]
+                  },
                   "python-sdk/fastmcp-server-proxy",
                   "python-sdk/fastmcp-server-server"
                 ]
@@ -447,7 +461,18 @@
                       }
                     ]
                   },
-                  "python-sdk/fastmcp-utilities-openapi",
+                  {
+                    "group": "openapi",
+                    "pages": [
+                      "python-sdk/fastmcp-utilities-openapi-__init__",
+                      "python-sdk/fastmcp-utilities-openapi-director",
+                      "python-sdk/fastmcp-utilities-openapi-formatters",
+                      "python-sdk/fastmcp-utilities-openapi-json_schema_converter",
+                      "python-sdk/fastmcp-utilities-openapi-models",
+                      "python-sdk/fastmcp-utilities-openapi-parser",
+                      "python-sdk/fastmcp-utilities-openapi-schemas"
+                    ]
+                  },
                   "python-sdk/fastmcp-utilities-tests",
                   "python-sdk/fastmcp-utilities-types",
                   "python-sdk/fastmcp-utilities-ui"

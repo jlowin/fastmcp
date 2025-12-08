@@ -3,16 +3,14 @@ from __future__ import annotations as _annotations
 import inspect
 import os
 import warnings
+from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from platformdirs import user_data_dir
 from pydantic import Field, ImportString, field_validator
-from pydantic.fields import FieldInfo
 from pydantic_settings import (
     BaseSettings,
-    EnvSettingsSource,
-    PydanticBaseSettingsSource,
     SettingsConfigDict,
 )
 from typing_extensions import Self
@@ -33,61 +31,123 @@ if TYPE_CHECKING:
     from fastmcp.server.auth.auth import AuthProvider
 
 
-class ExtendedEnvSettingsSource(EnvSettingsSource):
-    """
-    A special EnvSettingsSource that allows for multiple env var prefixes to be used.
+class DocketSettings(BaseSettings):
+    """Docket worker configuration."""
 
-    Raises a deprecation warning if the old `FASTMCP_SERVER_` prefix is used.
-    """
+    model_config = SettingsConfigDict(
+        env_prefix="FASTMCP_DOCKET_",
+        extra="ignore",
+    )
 
-    def get_field_value(
-        self, field: FieldInfo, field_name: str
-    ) -> tuple[Any, str, bool]:
-        if prefixes := self.config.get("env_prefixes"):
-            for prefix in prefixes:
-                self.env_prefix = prefix
-                env_val, field_key, value_is_complex = super().get_field_value(
-                    field, field_name
-                )
-                if env_val is not None:
-                    if prefix == "FASTMCP_SERVER_":
-                        # Deprecated in 2.8.0
-                        logger.warning(
-                            "Using `FASTMCP_SERVER_` environment variables is deprecated. Use `FASTMCP_` instead.",
-                        )
-                    return env_val, field_key, value_is_complex
+    name: Annotated[
+        str,
+        Field(
+            description=inspect.cleandoc(
+                """
+                Name for the Docket queue. All servers/workers sharing the same name
+                and backend URL will share a task queue.
+                """
+            ),
+        ),
+    ] = "fastmcp"
 
-        return super().get_field_value(field, field_name)
+    url: Annotated[
+        str,
+        Field(
+            description=inspect.cleandoc(
+                """
+                URL for the Docket backend. Supports:
+                - memory:// - In-memory backend (single process only)
+                - redis://host:port/db - Redis/Valkey backend (distributed, multi-process)
 
+                Example: redis://localhost:6379/0
 
-class ExtendedSettingsConfigDict(SettingsConfigDict, total=False):
-    env_prefixes: list[str] | None
+                Default is memory:// for single-process scenarios. Use Redis or Valkey
+                when coordinating tasks across multiple processes (e.g., additional
+                workers via the fastmcp tasks CLI).
+                """
+            ),
+        ),
+    ] = "memory://"
+
+    worker_name: Annotated[
+        str | None,
+        Field(
+            description=inspect.cleandoc(
+                """
+                Name for the Docket worker. If None, Docket will auto-generate
+                a unique worker name.
+                """
+            ),
+        ),
+    ] = None
+
+    concurrency: Annotated[
+        int,
+        Field(
+            description=inspect.cleandoc(
+                """
+                Maximum number of tasks the worker can process concurrently.
+                """
+            ),
+        ),
+    ] = 10
+
+    redelivery_timeout: Annotated[
+        timedelta,
+        Field(
+            description=inspect.cleandoc(
+                """
+                Task redelivery timeout. If a worker doesn't complete
+                a task within this time, the task will be redelivered to another
+                worker.
+                """
+            ),
+        ),
+    ] = timedelta(seconds=300)
+
+    reconnection_delay: Annotated[
+        timedelta,
+        Field(
+            description=inspect.cleandoc(
+                """
+                Delay between reconnection attempts when the worker
+                loses connection to the Docket backend.
+                """
+            ),
+        ),
+    ] = timedelta(seconds=5)
 
 
 class ExperimentalSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="FASTMCP_EXPERIMENTAL_",
         extra="ignore",
+        validate_assignment=True,
     )
 
-    enable_new_openapi_parser: Annotated[
-        bool,
-        Field(
-            description=inspect.cleandoc(
-                """
-                Whether to use the new OpenAPI parser. This parser was introduced
-                for testing in 2.11 and will become the default soon.
-                """
-            ),
-        ),
-    ] = False
+    # Deprecated in 2.14 - the new OpenAPI parser is now the default and only parser
+    enable_new_openapi_parser: bool = False
+
+    @field_validator("enable_new_openapi_parser", mode="after")
+    @classmethod
+    def _warn_openapi_parser_deprecated(cls, v: bool) -> bool:
+        if v:
+            warnings.warn(
+                "enable_new_openapi_parser is deprecated. "
+                "The new OpenAPI parser is now the default (and only) parser. "
+                "You can remove this setting.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        return v
 
 
 class Settings(BaseSettings):
     """FastMCP settings."""
 
-    model_config = ExtendedSettingsConfigDict(
-        env_prefixes=["FASTMCP_", "FASTMCP_SERVER_"],
+    model_config = SettingsConfigDict(
+        env_prefix="FASTMCP_",
         env_file=ENV_FILE,
         extra="ignore",
         env_nested_delimiter="__",
@@ -121,24 +181,6 @@ class Settings(BaseSettings):
             settings = getattr(settings, parent_attr)
         setattr(settings, attr, value)
 
-    @classmethod
-    def settings_customise_sources(
-        cls,
-        settings_cls: type[BaseSettings],
-        init_settings: PydanticBaseSettingsSource,
-        env_settings: PydanticBaseSettingsSource,
-        dotenv_settings: PydanticBaseSettingsSource,
-        file_secret_settings: PydanticBaseSettingsSource,
-    ) -> tuple[PydanticBaseSettingsSource, ...]:
-        # can remove this classmethod after deprecated FASTMCP_SERVER_ prefix is
-        # removed
-        return (
-            init_settings,
-            ExtendedEnvSettingsSource(settings_cls),
-            dotenv_settings,
-            file_secret_settings,
-        )
-
     @property
     def settings(self) -> Self:
         """
@@ -166,6 +208,26 @@ class Settings(BaseSettings):
         return v
 
     experimental: ExperimentalSettings = ExperimentalSettings()
+
+    # Tasks settings
+    enable_tasks: Annotated[
+        bool,
+        Field(
+            description=inspect.cleandoc(
+                """
+                Enable MCP SEP-1686 task protocol support for background execution.
+
+                Server-side: Advertises task capabilities and handles task/* protocol
+                methods. Tools, prompts, and resources marked with task=True will
+                execute in the background via Docket.
+
+                Client-side: Advertises task capability to servers.
+                """
+            ),
+        ),
+    ] = False
+
+    docket: DocketSettings = DocketSettings()
 
     enable_rich_tracebacks: Annotated[
         bool,
@@ -206,19 +268,6 @@ class Settings(BaseSettings):
             ),
         ),
     ] = True
-
-    resource_prefix_format: Annotated[
-        Literal["protocol", "path"],
-        Field(
-            description=inspect.cleandoc(
-                """
-                When perfixing a resource URI, either use path formatting (resource://prefix/path)
-                or protocol formatting (prefix+resource://path). Protocol formatting was the default in FastMCP < 2.4;
-                path formatting is current default.
-                """
-            ),
-        ),
-    ] = "path"
 
     client_init_timeout: Annotated[
         float | None,

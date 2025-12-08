@@ -160,7 +160,7 @@ from fastmcp import FastMCP
 mcp = FastMCP(name="MyAssistantServer")
 ```
 
-Learn more in the [**FastMCP Server Documentation**](https://gofastmcp.com/servers/fastmcp).
+Learn more in the [**FastMCP Server Documentation**](https://gofastmcp.com/servers/server).
 
 ### Tools
 
@@ -316,6 +316,7 @@ FastMCP provides comprehensive authentication support that sets it apart from ba
 - **Auth0**
 - **WorkOS**
 - **Descope**
+- **Discord**
 - **JWT/Custom**
 - **API Keys**
 

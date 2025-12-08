@@ -1,8 +1,5 @@
 import base64
 import os
-import tempfile
-from pathlib import Path
-from types import EllipsisType
 from typing import Annotated, Any
 
 import pytest
@@ -13,7 +10,7 @@ from fastmcp.utilities.types import (
     Audio,
     File,
     Image,
-    find_kwarg_by_type,
+    create_function_without_params,
     get_cached_typeadapter,
     is_class_member_of_type,
     issubclass_safe,
@@ -143,14 +140,15 @@ class TestImage:
         assert not str(image.path).startswith("~")
         assert str(image.path).startswith(os.path.expanduser("~"))
 
-    def test_image_path_expansion_with_env_var(self, monkeypatch):
+    def test_image_path_expansion_with_env_var(self, monkeypatch, tmp_path):
         """Test that environment variables are expanded."""
-        test_dir = tempfile.mkdtemp()
-        monkeypatch.setenv("TEST_PATH", test_dir)
+        test_dir = tmp_path / "test_path"
+        test_dir.mkdir()
+        monkeypatch.setenv("TEST_PATH", str(test_dir))
         image = Image(path="$TEST_PATH/test.png")
         assert image.path is not None
         assert not str(image.path).startswith("$TEST_PATH")
-        expected_path = Path(test_dir) / "test.png"
+        expected_path = test_dir / "test.png"
         assert image.path == expected_path
 
     def test_image_initialization_with_data(self):
@@ -266,14 +264,15 @@ class TestAudio:
         assert not str(audio.path).startswith("~")
         assert str(audio.path).startswith(os.path.expanduser("~"))
 
-    def test_audio_path_expansion_with_env_var(self, monkeypatch):
+    def test_audio_path_expansion_with_env_var(self, monkeypatch, tmp_path):
         """Test that environment variables are expanded."""
-        test_dir = tempfile.mkdtemp()
-        monkeypatch.setenv("TEST_AUDIO_PATH", test_dir)
+        test_dir = tmp_path / "test_audio_path"
+        test_dir.mkdir()
+        monkeypatch.setenv("TEST_AUDIO_PATH", str(test_dir))
         audio = Audio(path="$TEST_AUDIO_PATH/test.wav")
         assert audio.path is not None
         assert not str(audio.path).startswith("$TEST_AUDIO_PATH")
-        expected_path = Path(test_dir) / "test.wav"
+        expected_path = test_dir / "test.wav"
         assert audio.path == expected_path
 
     def test_audio_initialization_with_data(self):
@@ -380,14 +379,15 @@ class TestFile:
         assert not str(file.path).startswith("~")
         assert str(file.path).startswith(os.path.expanduser("~"))
 
-    def test_file_path_expansion_with_env_var(self, monkeypatch):
+    def test_file_path_expansion_with_env_var(self, monkeypatch, tmp_path):
         """Test that environment variables are expanded."""
-        test_dir = tempfile.mkdtemp()
-        monkeypatch.setenv("TEST_FILE_PATH", test_dir)
+        test_dir = tmp_path / "test_file_path"
+        test_dir.mkdir()
+        monkeypatch.setenv("TEST_FILE_PATH", str(test_dir))
         file = File(path="$TEST_FILE_PATH/test.txt")
         assert file.path is not None
         assert not str(file.path).startswith("$TEST_FILE_PATH")
-        expected_path = Path(test_dir) / "test.txt"
+        expected_path = test_dir / "test.txt"
         assert file.path == expected_path
 
     def test_file_initialization_with_data(self):
@@ -493,130 +493,6 @@ class TestFile:
         assert resource.resource.mimeType == "application/custom"
 
 
-class TestFindKwargByType:
-    def test_exact_type_match(self):
-        """Test finding parameter with exact type match."""
-
-        def func(a: int, b: str, c: BaseClass):
-            pass
-
-        assert find_kwarg_by_type(func, BaseClass) == "c"
-
-    def test_no_matching_parameter(self):
-        """Test finding parameter when no match exists."""
-
-        def func(a: int, b: str, c: OtherClass):
-            pass
-
-        assert find_kwarg_by_type(func, BaseClass) is None
-
-    def test_parameter_with_no_annotation(self):
-        """Test with a parameter that has no type annotation."""
-
-        def func(a: int, b, c: BaseClass):
-            pass
-
-        assert find_kwarg_by_type(func, BaseClass) == "c"
-
-    def test_union_type_match_pipe_syntax(self):
-        """Test finding parameter with union type using pipe syntax."""
-
-        def func(a: int, b: str | BaseClass, c: str):
-            pass
-
-        assert find_kwarg_by_type(func, BaseClass) == "b"
-
-    def test_union_type_match_typing_union(self):
-        """Test finding parameter with union type using Union."""
-
-        def func(a: int, b: str | BaseClass, c: str):
-            pass
-
-        assert find_kwarg_by_type(func, BaseClass) == "b"
-
-    def test_annotated_type_match(self):
-        """Test finding parameter with Annotated type."""
-
-        def func(a: int, b: Annotated[BaseClass, "metadata"], c: str):
-            pass
-
-        assert find_kwarg_by_type(func, BaseClass) == "b"
-
-    def test_method_parameter(self):
-        """Test finding parameter in a class method."""
-
-        class TestClass:
-            def method(self, a: int, b: BaseClass):
-                pass
-
-        instance = TestClass()
-        assert find_kwarg_by_type(instance.method, BaseClass) == "b"
-
-    def test_static_method_parameter(self):
-        """Test finding parameter in a static method."""
-
-        class TestClass:
-            @staticmethod
-            def static_method(a: int, b: BaseClass, c: str):
-                pass
-
-        assert find_kwarg_by_type(TestClass.static_method, BaseClass) == "b"
-
-    def test_class_method_parameter(self):
-        """Test finding parameter in a class method."""
-
-        class TestClass:
-            @classmethod
-            def class_method(cls, a: int, b: BaseClass, c: str):
-                pass
-
-        assert find_kwarg_by_type(TestClass.class_method, BaseClass) == "b"
-
-    def test_multiple_matching_parameters(self):
-        """Test finding first parameter when multiple matches exist."""
-
-        def func(a: BaseClass, b: str, c: BaseClass):
-            pass
-
-        # Should return the first match
-        assert find_kwarg_by_type(func, BaseClass) == "a"
-
-    def test_subclass_match(self):
-        """Test finding parameter with a subclass of the target type."""
-
-        def func(a: int, b: ChildClass, c: str):
-            pass
-
-        assert find_kwarg_by_type(func, BaseClass) == "b"
-
-    def test_nonstandard_annotation(self):
-        """Test finding parameter with a nonstandard annotation like an
-        instance. This is irregular."""
-
-        SENTINEL = object()
-
-        def func(a: int, b: SENTINEL, c: str):  # type: ignore
-            pass
-
-        assert find_kwarg_by_type(func, SENTINEL) is None  # type: ignore
-
-    def test_ellipsis_annotation(self):
-        """Test finding parameter with an ellipsis annotation."""
-
-        def func(a: int, b: EllipsisType, c: str):  # type: ignore  # noqa: F821
-            pass
-
-        assert find_kwarg_by_type(func, EllipsisType) == "b"  # type: ignore
-
-    def test_missing_type_annotation(self):
-        """Test finding parameter with a missing type annotation."""
-
-        def func(a: int, b, c: str):
-            pass
-
-        assert find_kwarg_by_type(func, str) == "c"
-
-
 class TestReplaceType:
     @pytest.mark.parametrize(
         "input,type_map,expected",
@@ -641,6 +517,87 @@ class TestReplaceType:
     def test_replace_type(self, input, type_map, expected):
         """Test replacing a type with another type."""
         assert replace_type(input, type_map) == expected
+
+
+class TestCreateFunctionWithoutParams:
+    """Test create_function_without_params properly removes parameters from both annotations and signature."""
+
+    def test_removes_params_from_both_annotations_and_signature(self):
+        """Test that excluded parameters are removed from __annotations__ AND __signature__."""
+        import inspect
+
+        def original_func(ctx: str, query: str, limit: int = 10) -> list[str]:
+            return []
+
+        new_func = create_function_without_params(original_func, ["ctx"])
+
+        # Verify removal from annotations
+        assert "ctx" not in new_func.__annotations__
+        assert "query" in new_func.__annotations__
+        assert "limit" in new_func.__annotations__
+
+        # Verify removal from signature (regression test for #2562)
+        sig = inspect.signature(new_func)
+        assert "ctx" not in sig.parameters
+        assert "query" in sig.parameters
+        assert "limit" in sig.parameters
+
+    def test_preserves_return_annotation_in_signature(self):
+        """Test that return annotation is preserved in both annotations and signature."""
+        import inspect
+
+        def original_func(ctx: str, value: int) -> dict[str, int]:
+            return {}
+
+        new_func = create_function_without_params(original_func, ["ctx"])
+
+        sig = inspect.signature(new_func)
+        assert sig.return_annotation == dict[str, int]
+        assert new_func.__annotations__["return"] == dict[str, int]
+
+    def test_pydantic_typeadapter_compatibility(self):
+        """Test that modified function works with Pydantic TypeAdapter (regression test for #2562)."""
+        from pydantic import BaseModel
+
+        class Result(BaseModel):
+            name: str
+
+        def tool_function(ctx: str, search_query: str, limit: int = 10) -> list[Result]:
+            return []
+
+        # Remove context parameter (what FastMCP does internally)
+        new_func = create_function_without_params(tool_function, ["ctx"])
+
+        # This raised KeyError: 'ctx' before the fix
+        adapter = get_cached_typeadapter(new_func)
+        schema = adapter.json_schema()
+
+        # Verify schema excludes the removed parameter
+        assert "properties" in schema
+        assert "ctx" not in schema["properties"]
+        assert "search_query" in schema["properties"]
+        assert "limit" in schema["properties"]
+
+    def test_multiple_excluded_parameters(self):
+        """Test excluding multiple parameters simultaneously."""
+        import inspect
+
+        def func(ctx: str, session: int, query: str, limit: int = 5) -> str:
+            return ""
+
+        new_func = create_function_without_params(func, ["ctx", "session"])
+
+        sig = inspect.signature(new_func)
+
+        # Both excluded params should be removed
+        assert "ctx" not in sig.parameters
+        assert "session" not in sig.parameters
+        assert "ctx" not in new_func.__annotations__
+        assert "session" not in new_func.__annotations__
+
+        # Non-excluded params should remain
+        assert "query" in sig.parameters
+        assert "limit" in sig.parameters
 
 
 class TestAnnotationStringDescriptions:

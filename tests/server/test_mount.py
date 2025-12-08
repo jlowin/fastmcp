@@ -66,22 +66,6 @@ class TestBasicMount:
             result = await client.call_tool("sub_greet", {"name": "World"})
             assert result.data == "Hello, World!"
 
-    async def test_mount_invalid_resource_prefix(self):
-        main_app = FastMCP("MainApp")
-        api_app = FastMCP("APIApp")
-
-        # This test doesn't apply anymore with the new prefix format
-        # just mount the server to maintain test coverage
-        main_app.mount(api_app, "api:sub")
-
-    async def test_mount_invalid_resource_separator(self):
-        main_app = FastMCP("MainApp")
-        api_app = FastMCP("APIApp")
-
-        # This test doesn't apply anymore with the new prefix format
-        # Mount without deprecated parameters
-        main_app.mount(api_app, "api")
-
     @pytest.mark.parametrize("prefix", ["", None])
     async def test_mount_with_no_prefix(self, prefix):
         main_app = FastMCP("MainApp")
@@ -966,10 +950,8 @@ class TestAsProxyKwarg:
         async with Client(mcp) as client:
             await client.call_tool("hello", {})
 
-        assert len(lifespan_check) > 0
-        # in the present implementation the sub server will be invoked 3 times
-        # to call its tool
-        assert lifespan_check.count("start") >= 2
+        # Lifespan is entered exactly once and kept alive by Docket worker
+        assert lifespan_check == ["start"]
 
 
 class TestResourceNamePrefixing:

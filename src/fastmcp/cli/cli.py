@@ -19,7 +19,7 @@ from rich.table import Table
 import fastmcp
 from fastmcp.cli import run as run_module
 from fastmcp.cli.install import install_app
-from fastmcp.server.server import FastMCP
+from fastmcp.cli.tasks import tasks_app
 from fastmcp.utilities.cli import is_already_in_uv_subprocess, load_and_merge_config
 from fastmcp.utilities.inspect import (
     InspectFormat,
@@ -28,7 +28,6 @@ from fastmcp.utilities.inspect import (
 )
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.mcp_server_config import MCPServerConfig
-from fastmcp.utilities.mcp_server_config.v1.environments.uv import UVEnvironment
 
 logger = get_logger("cli")
 console = Console()
@@ -104,7 +103,7 @@ def version(
         "MCP version": importlib.metadata.version("mcp"),
         "Python version": platform.python_version(),
         "Platform": platform.platform(),
-        "FastMCP root path": Path(fastmcp.__file__).resolve().parents[1],
+        "FastMCP root path": Path(fastmcp.__file__ or ".").resolve().parents[1],
     }
 
     g = Table.grid(padding=(0, 1))
@@ -224,29 +223,11 @@ async def dev(
     )
 
     try:
-        # Load server to check for deprecated dependencies
         if not config:
             logger.error("No configuration available")
             sys.exit(1)
         assert config is not None  # For type checker
-        server: FastMCP = await config.source.load_server()
-        if server.dependencies:
-            import warnings
-
-            warnings.warn(
-                f"Server '{server.name}' uses deprecated 'dependencies' parameter (deprecated in FastMCP 2.11.4). "
-                "Please migrate to fastmcp.json configuration file. "
-                "See https://gofastmcp.com/docs/deployment/server-configuration for details.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            # Merge server dependencies with environment dependencies
-            env_deps = config.environment.dependencies or []
-            all_deps = list(set(env_deps + server.dependencies))
-            if not config.environment:
-                config.environment = UVEnvironment(dependencies=all_deps)
-            else:
-                config.environment.dependencies = all_deps
+        await config.source.load_server()
 
         env_vars = {}
         if ui_port:
@@ -838,11 +819,13 @@ async def prepare(
             )
             sys.exit(1)
 
+    assert config_path is not None
     config_file = Path(config_path)
     if not config_file.exists():
         logger.error(f"Configuration file not found: {config_path}")
         sys.exit(1)
 
+    assert output_dir is not None
     output_path = Path(output_dir)
 
     try:
@@ -872,6 +855,9 @@ app.command(project_app)
 
 # Add install subcommands using proper Cyclopts pattern
 app.command(install_app)
+
+# Add tasks subcommand group
+app.command(tasks_app)
 
 
 if __name__ == "__main__":
