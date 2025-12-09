@@ -515,7 +515,7 @@ class TestValidation:
         """Test that nested object schemas are rejected."""
 
         with pytest.raises(
-            TypeError, match="has type 'object' which is not a primitive type"
+            TypeError, match="is an object, but nested objects are not allowed"
         ):
             validate_elicitation_json_schema(
                 {
@@ -530,11 +530,9 @@ class TestValidation:
             )
 
     async def test_schema_validation_rejects_arrays(self):
-        """Test that array schemas are rejected."""
+        """Test that non-enum array schemas are rejected."""
 
-        with pytest.raises(
-            TypeError, match="has type 'array' which is not a primitive type"
-        ):
+        with pytest.raises(TypeError, match="is an array, but arrays are only allowed"):
             validate_elicitation_json_schema(
                 {
                     "type": "object",

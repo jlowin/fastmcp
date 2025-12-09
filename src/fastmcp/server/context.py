@@ -42,6 +42,7 @@ from fastmcp.server.elicitation import (
     CancelledElicitation,
     DeclinedElicitation,
     ScalarElicitationType,
+    _dict_to_enum_schema,
     get_elicitation_schema,
 )
 from fastmcp.server.server import FastMCP
@@ -635,29 +636,66 @@ class Context:
                 type or dataclass or BaseModel. If it is a primitive type, an
                 object schema with a single "value" field will be generated.
         """
+        # Track if we built schema directly (vs using Pydantic)
+        _raw_schema = False
+
         if response_type is None:
             schema = {"type": "object", "properties": {}}
-        else:
-            # if the user provided a list of strings, treat it as a Literal
-            if isinstance(response_type, list):
-                if not all(isinstance(item, str) for item in response_type):
-                    raise ValueError(
-                        "List of options must be a list of strings. Received: "
-                        f"{response_type}"
-                    )
-                # Convert list of options to Literal type and wrap
+        # Dict syntax: {"low": {"title": "Low"}} -> single-select titled
+        elif isinstance(response_type, dict):
+            enum_schema = _dict_to_enum_schema(response_type, multi_select=False)
+            schema = {
+                "type": "object",
+                "properties": {"value": enum_schema},
+                "required": ["value"],
+            }
+            _raw_schema = True
+        # List syntax: various patterns
+        elif isinstance(response_type, list):
+            # [["a", "b", "c"]] -> multi-select untitled
+            if (
+                len(response_type) == 1
+                and isinstance(response_type[0], list)
+                and all(isinstance(item, str) for item in response_type[0])
+            ):
+                schema = {
+                    "type": "object",
+                    "properties": {
+                        "value": {"type": "array", "items": {"enum": response_type[0]}}
+                    },
+                    "required": ["value"],
+                }
+                _raw_schema = True
+            # [{"low": {"title": "..."}}] -> multi-select titled
+            elif len(response_type) == 1 and isinstance(response_type[0], dict):
+                enum_schema = _dict_to_enum_schema(response_type[0], multi_select=True)
+                schema = {
+                    "type": "object",
+                    "properties": {"value": {"type": "array", "items": enum_schema}},
+                    "required": ["value"],
+                }
+                _raw_schema = True
+            # ["a", "b", "c"] -> single-select untitled (existing behavior)
+            elif all(isinstance(item, str) for item in response_type):
                 choice_literal = Literal[tuple(response_type)]  # type: ignore
                 response_type = ScalarElicitationType[choice_literal]  # type: ignore
-            # if the user provided a primitive scalar, wrap it in an object schema
-            elif (
-                response_type in {bool, int, float, str}
-                or get_origin(response_type) is Literal
-                or (isinstance(response_type, type) and issubclass(response_type, Enum))
-            ):
-                response_type = ScalarElicitationType[response_type]  # type: ignore
-
+                schema = get_elicitation_schema(response_type)  # type: ignore[arg-type]
+            else:
+                raise ValueError(
+                    f"Invalid list response_type format. Received: {response_type}"
+                )
+        # Scalar type, Enum, or list[X] -> wrap in ScalarElicitationType
+        elif (
+            get_origin(response_type) is list
+            or response_type in {bool, int, float, str}
+            or get_origin(response_type) is Literal
+            or (isinstance(response_type, type) and issubclass(response_type, Enum))
+        ):
+            response_type = ScalarElicitationType[response_type]  # type: ignore
+            schema = get_elicitation_schema(response_type)  # type: ignore[arg-type]
+        # Other types (dataclass, BaseModel, etc.)
+        else:
             response_type = cast(type[T], response_type)
-
             schema = get_elicitation_schema(response_type)
 
         result = await self.session.elicit(
@@ -667,7 +705,11 @@ class Context:
         )
 
         if result.action == "accept":
-            if response_type is not None:
+            # For raw schemas (dict/nested-list syntax), extract value directly
+            if _raw_schema:
+                content = result.content or {}
+                return AcceptedElicitation[Any](data=content.get("value"))
+            elif response_type is not None:
                 type_adapter = get_cached_typeadapter(response_type)
                 validated_data = cast(
                     T | ScalarElicitationType[T],
