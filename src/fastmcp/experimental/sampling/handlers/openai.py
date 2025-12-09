@@ -241,9 +241,7 @@ class OpenAISamplingHandler(BaseLLMSamplingHandler):
                     if content.content:
                         for item in content.content:
                             if isinstance(item, TextContent):
-                                result_parts.append(
-                                    {"type": "text", "text": item.text}
-                                )
+                                result_parts.append({"type": "text", "text": item.text})
                     openai_messages.append(
                         ChatCompletionToolMessageParam(
                             role="tool",
