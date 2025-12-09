@@ -676,7 +676,7 @@ class Context:
                 }
                 _raw_schema = True
             # ["a", "b", "c"] -> single-select untitled (existing behavior)
-            elif all(isinstance(item, str) for item in response_type):
+            elif response_type and all(isinstance(item, str) for item in response_type):
                 choice_literal = Literal[tuple(response_type)]  # type: ignore
                 response_type = ScalarElicitationType[choice_literal]  # type: ignore
                 schema = get_elicitation_schema(response_type)  # type: ignore[arg-type]
