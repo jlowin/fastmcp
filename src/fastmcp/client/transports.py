@@ -6,7 +6,7 @@ import os
 import shutil
 import sys
 import warnings
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import Any, Literal, TextIO, TypeVar, cast, overload
 
@@ -36,6 +36,7 @@ from fastmcp.client.auth.oauth import OAuth
 from fastmcp.mcp_config import MCPConfig, infer_transport_type_from_url
 from fastmcp.server.dependencies import get_http_headers
 from fastmcp.server.server import FastMCP
+from fastmcp.server.tasks.capabilities import get_task_capabilities
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.mcp_server_config.v1.environments.uv import UVEnvironment
 
@@ -254,6 +255,8 @@ class StreamableHttpTransport(ClientTransport):
             sse_read_timeout = datetime.timedelta(seconds=float(sse_read_timeout))
         self.sse_read_timeout = sse_read_timeout
 
+        self._get_session_id_cb: Callable[[], str | None] | None = None
+
     def _set_auth(self, auth: httpx.Auth | Literal["oauth"] | str | None):
         if auth == "oauth":
             auth = OAuth(self.url, httpx_client_factory=self.httpx_client_factory)
@@ -287,11 +290,24 @@ class StreamableHttpTransport(ClientTransport):
             auth=self.auth,
             **client_kwargs,
         ) as transport:
-            read_stream, write_stream, _ = transport
+            read_stream, write_stream, get_session_id = transport
+            self._get_session_id_cb = get_session_id
             async with ClientSession(
                 read_stream, write_stream, **session_kwargs
             ) as session:
                 yield session
+
+    def get_session_id(self) -> str | None:
+        if self._get_session_id_cb:
+            try:
+                return self._get_session_id_cb()
+            except Exception:
+                return None
+        return None
+
+    async def close(self):
+        # Reset the session id callback
+        self._get_session_id_cb = None
 
     def __repr__(self) -> str:
         return f"<StreamableHttpTransport(url='{self.url}')>"
@@ -375,7 +391,8 @@ class StdioTransport(ClientTransport):
                 env=self.env,
                 cwd=self.cwd,
                 log_file=self.log_file,
-                session_kwargs=session_kwargs,
+                # TODO(ty): remove when ty supports Unpack[TypedDict] inference
+                session_kwargs=session_kwargs,  # type: ignore[arg-type]
                 ready_event=self._ready_event,
                 stop_event=self._stop_event,
                 session_future=session_future,
@@ -854,11 +871,16 @@ class FastMCPTransport(ClientTransport):
                 anyio.create_task_group() as tg,
                 _enter_server_lifespan(server=self.server),
             ):
+                # Build experimental capabilities
+                experimental_capabilities = get_task_capabilities()
+
                 tg.start_soon(
                     lambda: self.server._mcp_server.run(
                         server_read,
                         server_write,
-                        self.server._mcp_server.create_initialization_options(),
+                        self.server._mcp_server.create_initialization_options(
+                            experimental_capabilities=experimental_capabilities
+                        ),
                         raise_exceptions=self.raise_exceptions,
                     )
                 )

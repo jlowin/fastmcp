@@ -8,9 +8,8 @@ from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
-from enum import Enum
 from logging import Logger
-from typing import Any, Literal, cast, get_origin, overload
+from typing import Any, overload
 
 import anyio
 from mcp import LoggingLevel, ServerSession
@@ -18,17 +17,16 @@ from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.lowlevel.server import request_ctx
 from mcp.shared.context import RequestContext
 from mcp.types import (
-    AudioContent,
     ClientCapabilities,
     CreateMessageResult,
     GetPromptResult,
-    ImageContent,
     IncludeContext,
     ModelHint,
     ModelPreferences,
     Root,
     SamplingCapability,
     SamplingMessage,
+    SamplingMessageContentBlock,
     TextContent,
 )
 from mcp.types import CreateMessageRequestParams as SamplingParams
@@ -42,12 +40,11 @@ from fastmcp.server.elicitation import (
     AcceptedElicitation,
     CancelledElicitation,
     DeclinedElicitation,
-    ScalarElicitationType,
-    get_elicitation_schema,
+    handle_elicit_accept,
+    parse_elicit_response_type,
 )
 from fastmcp.server.server import FastMCP
 from fastmcp.utilities.logging import _clamp_logger, get_logger
-from fastmcp.utilities.types import get_cached_typeadapter
 
 logger: Logger = get_logger(name=__name__)
 to_client_logger: Logger = logger.getChild(suffix="to_client")
@@ -59,6 +56,7 @@ _clamp_logger(logger=to_client_logger, max_level="DEBUG")
 
 
 T = TypeVar("T", default=Any)
+
 _current_context: ContextVar[Context | None] = ContextVar("context", default=None)  # type: ignore[assignment]
 _flush_lock = anyio.Lock()
 
@@ -166,6 +164,12 @@ class Context:
         # Always set this context and save the token
         token = _current_context.set(self)
         self._tokens.append(token)
+
+        # Set current server for dependency injection (use weakref to avoid reference cycles)
+        from fastmcp.server.dependencies import _current_server
+
+        self._server_token = _current_server.set(weakref.ref(self.fastmcp))
+
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
@@ -173,6 +177,14 @@ class Context:
         # Flush any remaining notifications before exiting
         await self._flush_notifications()
 
+        # Reset server token
+        if hasattr(self, "_server_token"):
+            from fastmcp.server.dependencies import _current_server
+
+            _current_server.reset(self._server_token)
+            delattr(self, "_server_token")
+
+        # Reset context token
         if self._tokens:
             token = self._tokens.pop()
             _current_context.reset(token)
@@ -272,7 +284,8 @@ class Context:
         Returns:
             The resource content as either text or bytes
         """
-        return await self.fastmcp._read_resource_mcp(uri)
+        # Context calls don't have task metadata, so always returns list
+        return await self.fastmcp._read_resource_mcp(uri)  # type: ignore[return-value]
 
     async def log(
         self,
@@ -373,7 +386,7 @@ class Context:
             session_id = str(uuid4())
 
         # Save the session id to the session attributes
-        session._fastmcp_id = session_id
+        session._fastmcp_id = session_id  # type: ignore[attr-defined]
         return session_id
 
     @property
@@ -471,6 +484,45 @@ class Context:
         """Send a prompt list changed notification to the client."""
         await self.session.send_prompt_list_changed()
 
+    async def close_sse_stream(self) -> None:
+        """Close the current response stream to trigger client reconnection.
+
+        When using StreamableHTTP transport with an EventStore configured, this
+        method gracefully closes the HTTP connection for the current request.
+        The client will automatically reconnect (after `retry_interval` milliseconds)
+        and resume receiving events from where it left off via the EventStore.
+
+        This is useful for long-running operations to avoid load balancer timeouts.
+        Instead of holding a connection open for minutes, you can periodically close
+        and let the client reconnect.
+
+        Example:
+            ```python
+            @mcp.tool
+            async def long_running_task(ctx: Context) -> str:
+                for i in range(100):
+                    await ctx.report_progress(i, 100)
+
+                    # Close connection every 30 iterations to avoid LB timeouts
+                    if i % 30 == 0 and i > 0:
+                        await ctx.close_sse_stream()
+
+                    await do_work()
+                return "Done"
+            ```
+
+        Note:
+            This is a no-op (with a debug log) if not using StreamableHTTP
+            transport with an EventStore configured.
+        """
+        if not self.request_context or not self.request_context.close_sse_stream:
+            logger.debug(
+                "close_sse_stream() called but not applicable "
+                "(requires StreamableHTTP transport with event_store)"
+            )
+            return
+        await self.request_context.close_sse_stream()
+
     async def sample(
         self,
         messages: str | Sequence[str | SamplingMessage],
@@ -479,7 +531,7 @@ class Context:
         temperature: float | None = None,
         max_tokens: int | None = None,
         model_preferences: ModelPreferences | str | list[str] | None = None,
-    ) -> TextContent | ImageContent | AudioContent:
+    ) -> SamplingMessageContentBlock | list[SamplingMessageContentBlock]:
         """
         Send a sampling request to the client and await the response.
 
@@ -525,7 +577,7 @@ class Context:
                     maxTokens=max_tokens,
                     modelPreferences=_parse_model_preferences(model_preferences),
                 ),
-                self.request_context,
+                self.request_context,  # type: ignore[arg-type]
             )
 
             if inspect.isawaitable(create_message_result):
@@ -620,61 +672,21 @@ class Context:
                 type or dataclass or BaseModel. If it is a primitive type, an
                 object schema with a single "value" field will be generated.
         """
-        if response_type is None:
-            schema = {"type": "object", "properties": {}}
-        else:
-            # if the user provided a list of strings, treat it as a Literal
-            if isinstance(response_type, list):
-                if not all(isinstance(item, str) for item in response_type):
-                    raise ValueError(
-                        "List of options must be a list of strings. Received: "
-                        f"{response_type}"
-                    )
-                # Convert list of options to Literal type and wrap
-                choice_literal = Literal[tuple(response_type)]  # type: ignore
-                response_type = ScalarElicitationType[choice_literal]  # type: ignore
-            # if the user provided a primitive scalar, wrap it in an object schema
-            elif (
-                response_type in {bool, int, float, str}
-                or get_origin(response_type) is Literal
-                or (isinstance(response_type, type) and issubclass(response_type, Enum))
-            ):
-                response_type = ScalarElicitationType[response_type]  # type: ignore
-
-            response_type = cast(type[T], response_type)
-
-            schema = get_elicitation_schema(response_type)
+        config = parse_elicit_response_type(response_type)
 
         result = await self.session.elicit(
             message=message,
-            requestedSchema=schema,
+            requestedSchema=config.schema,
             related_request_id=self.request_id,
         )
 
         if result.action == "accept":
-            if response_type is not None:
-                type_adapter = get_cached_typeadapter(response_type)
-                validated_data = cast(
-                    T | ScalarElicitationType[T],
-                    type_adapter.validate_python(result.content),
-                )
-                if isinstance(validated_data, ScalarElicitationType):
-                    return AcceptedElicitation[T](data=validated_data.value)
-                else:
-                    return AcceptedElicitation[T](data=cast(T, validated_data))
-            elif result.content:
-                raise ValueError(
-                    "Elicitation expected an empty response, but received: "
-                    f"{result.content}"
-                )
-            else:
-                return AcceptedElicitation[dict[str, Any]](data={})
+            return handle_elicit_accept(config, result.content)
         elif result.action == "decline":
             return DeclinedElicitation()
         elif result.action == "cancel":
             return CancelledElicitation()
         else:
-            # This should never happen, but handle it just in case
             raise ValueError(f"Unexpected elicitation action: {result.action}")
 
     def set_state(self, key: str, value: Any) -> None:

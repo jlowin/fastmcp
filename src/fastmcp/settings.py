@@ -3,6 +3,7 @@ from __future__ import annotations as _annotations
 import inspect
 import os
 import warnings
+from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
@@ -12,7 +13,6 @@ from pydantic_settings import (
     BaseSettings,
     SettingsConfigDict,
 )
-from typing_extensions import Self
 
 from fastmcp.utilities.logging import get_logger
 
@@ -28,6 +28,94 @@ TEN_MB_IN_BYTES = 1024 * 1024 * 10
 
 if TYPE_CHECKING:
     from fastmcp.server.auth.auth import AuthProvider
+
+
+class DocketSettings(BaseSettings):
+    """Docket worker configuration."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="FASTMCP_DOCKET_",
+        extra="ignore",
+    )
+
+    name: Annotated[
+        str,
+        Field(
+            description=inspect.cleandoc(
+                """
+                Name for the Docket queue. All servers/workers sharing the same name
+                and backend URL will share a task queue.
+                """
+            ),
+        ),
+    ] = "fastmcp"
+
+    url: Annotated[
+        str,
+        Field(
+            description=inspect.cleandoc(
+                """
+                URL for the Docket backend. Supports:
+                - memory:// - In-memory backend (single process only)
+                - redis://host:port/db - Redis/Valkey backend (distributed, multi-process)
+
+                Example: redis://localhost:6379/0
+
+                Default is memory:// for single-process scenarios. Use Redis or Valkey
+                when coordinating tasks across multiple processes (e.g., additional
+                workers via the fastmcp tasks CLI).
+                """
+            ),
+        ),
+    ] = "memory://"
+
+    worker_name: Annotated[
+        str | None,
+        Field(
+            description=inspect.cleandoc(
+                """
+                Name for the Docket worker. If None, Docket will auto-generate
+                a unique worker name.
+                """
+            ),
+        ),
+    ] = None
+
+    concurrency: Annotated[
+        int,
+        Field(
+            description=inspect.cleandoc(
+                """
+                Maximum number of tasks the worker can process concurrently.
+                """
+            ),
+        ),
+    ] = 10
+
+    redelivery_timeout: Annotated[
+        timedelta,
+        Field(
+            description=inspect.cleandoc(
+                """
+                Task redelivery timeout. If a worker doesn't complete
+                a task within this time, the task will be redelivered to another
+                worker.
+                """
+            ),
+        ),
+    ] = timedelta(seconds=300)
+
+    reconnection_delay: Annotated[
+        timedelta,
+        Field(
+            description=inspect.cleandoc(
+                """
+                Delay between reconnection attempts when the worker
+                loses connection to the Docket backend.
+                """
+            ),
+        ),
+    ] = timedelta(seconds=5)
 
 
 class ExperimentalSettings(BaseSettings):
@@ -92,18 +180,6 @@ class Settings(BaseSettings):
             settings = getattr(settings, parent_attr)
         setattr(settings, attr, value)
 
-    @property
-    def settings(self) -> Self:
-        """
-        This property is for backwards compatibility with FastMCP < 2.8.0,
-        which accessed fastmcp.settings.settings
-        """
-        # Deprecated in 2.8.0
-        logger.warning(
-            "Using fastmcp.settings.settings is deprecated. Use fastmcp.settings instead.",
-        )
-        return self
-
     home: Path = Path(user_data_dir("fastmcp", appauthor=False))
 
     test_mode: bool = False
@@ -119,6 +195,8 @@ class Settings(BaseSettings):
         return v
 
     experimental: ExperimentalSettings = ExperimentalSettings()
+
+    docket: DocketSettings = DocketSettings()
 
     enable_rich_tracebacks: Annotated[
         bool,
@@ -332,23 +410,3 @@ class Settings(BaseSettings):
         auth_class = type_adapter.validate_python(self.server_auth)
 
         return auth_class
-
-
-def __getattr__(name: str):
-    """
-    Used to deprecate the module-level Image class; can be removed once it is no longer imported to root.
-    """
-    if name == "settings":
-        import fastmcp
-
-        settings = fastmcp.settings
-        # Deprecated in 2.10.2
-        if settings.deprecation_warnings:
-            warnings.warn(
-                "`from fastmcp.settings import settings` is deprecated. use `fastmcp.settings` instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-        return settings
-
-    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")

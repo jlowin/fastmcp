@@ -36,10 +36,6 @@ from key_value.aio.adapters.pydantic import PydanticAdapter
 from key_value.aio.protocols import AsyncKeyValue
 from key_value.aio.stores.disk import DiskStore
 from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
-from mcp.server.auth.handlers.token import TokenErrorResponse, TokenSuccessResponse
-from mcp.server.auth.handlers.token import TokenHandler as _SDKTokenHandler
-from mcp.server.auth.json_response import PydanticJSONResponse
-from mcp.server.auth.middleware.client_auth import ClientAuthenticator
 from mcp.server.auth.provider import (
     AccessToken,
     AuthorizationCode,
@@ -48,7 +44,6 @@ from mcp.server.auth.provider import (
     RefreshToken,
     TokenError,
 )
-from mcp.server.auth.routes import cors_middleware
 from mcp.server.auth.settings import (
     ClientRegistrationOptions,
     RevocationOptions,
@@ -514,60 +509,6 @@ def create_error_html(
     )
 
 
-# -------------------------------------------------------------------------
-# Handler Classes
-# -------------------------------------------------------------------------
-
-
-class TokenHandler(_SDKTokenHandler):
-    """TokenHandler that returns OAuth 2.1 compliant error responses.
-
-    The MCP SDK always returns HTTP 400 for all client authentication issues.
-    However, OAuth 2.1 Section 5.3 and the MCP specification require that
-    invalid or expired tokens MUST receive a HTTP 401 response.
-
-    This handler extends the base MCP SDK TokenHandler to transform client
-    authentication failures into OAuth 2.1 compliant responses:
-    - Changes 'unauthorized_client' to 'invalid_client' error code
-    - Returns HTTP 401 status code instead of 400 for client auth failures
-
-    Per OAuth 2.1 Section 5.3: "The authorization server MAY return an HTTP 401
-    (Unauthorized) status code to indicate which HTTP authentication schemes
-    are supported."
-
-    Per MCP spec: "Invalid or expired tokens MUST receive a HTTP 401 response."
-    """
-
-    def response(self, obj: TokenSuccessResponse | TokenErrorResponse):
-        """Override response method to provide OAuth 2.1 compliant error handling."""
-        # Check if this is a client authentication failure (not just unauthorized for grant type)
-        # unauthorized_client can mean two things:
-        # 1. Client authentication failed (client_id not found or wrong credentials) -> invalid_client 401
-        # 2. Client not authorized for this grant type -> unauthorized_client 400 (correct per spec)
-        if (
-            isinstance(obj, TokenErrorResponse)
-            and obj.error == "unauthorized_client"
-            and obj.error_description
-            and "Invalid client_id" in obj.error_description
-        ):
-            # Transform client auth failure to OAuth 2.1 compliant response
-            return PydanticJSONResponse(
-                content=TokenErrorResponse(
-                    error="invalid_client",
-                    error_description=obj.error_description,
-                    error_uri=obj.error_uri,
-                ),
-                status_code=401,
-                headers={
-                    "Cache-Control": "no-store",
-                    "Pragma": "no-cache",
-                },
-            )
-
-        # Otherwise use default behavior from parent class
-        return super().response(obj)
-
-
 class OAuthProxy(OAuthProvider):
     """OAuth provider that presents a DCR-compliant interface while proxying to non-DCR IDPs.
 
@@ -993,9 +934,13 @@ class OAuthProxy(OAuthProvider):
         # Create a ProxyDCRClient with configured redirect URI validation
         if client_info.client_id is None:
             raise ValueError("client_id is required for client registration")
+        # We use token_endpoint_auth_method="none" because the proxy handles
+        # all upstream authentication. The client_secret must also be None
+        # because the SDK requires secrets to be provided if they're set,
+        # regardless of auth method.
         proxy_client: ProxyDCRClient = ProxyDCRClient(
             client_id=client_info.client_id,
-            client_secret=client_info.client_secret,
+            client_secret=None,
             redirect_uris=client_info.redirect_uris or [AnyUrl("http://localhost")],
             grant_types=client_info.grant_types
             or ["authorization_code", "refresh_token"],
@@ -1061,7 +1006,8 @@ class OAuthProxy(OAuthProvider):
         # Store transaction data for IdP callback processing
         if client.client_id is None:
             raise AuthorizeError(
-                error="invalid_client", error_description="Client ID is required"
+                error="invalid_client",  # type: ignore[arg-type]
+                error_description="Client ID is required",
             )
         transaction = OAuthTransaction(
             txn_id=txn_id,
@@ -1143,7 +1089,8 @@ class OAuthProxy(OAuthProvider):
         # Create authorization code object with PKCE challenge
         if client.client_id is None:
             raise AuthorizeError(
-                error="invalid_client", error_description="Client ID is required"
+                error="invalid_client",  # type: ignore[arg-type]
+                error_description="Client ID is required",
             )
         return AuthorizationCode(
             code=authorization_code,
@@ -1567,7 +1514,7 @@ class OAuthProxy(OAuthProvider):
     # Token Validation
     # -------------------------------------------------------------------------
 
-    async def load_access_token(self, token: str) -> AccessToken | None:
+    async def load_access_token(self, token: str) -> AccessToken | None:  # type: ignore[override]
         """Validate FastMCP JWT by swapping for upstream token.
 
         This implements the token swap pattern:
@@ -1671,10 +1618,9 @@ class OAuthProxy(OAuthProvider):
                 This is used to advertise the resource URL in metadata.
         """
         # Get standard OAuth routes from parent class
+        # Note: parent already replaces /token with TokenHandler for proper error codes
         routes = super().get_routes(mcp_path)
         custom_routes = []
-        token_route_found = False
-        authorize_route_found = False
 
         logger.debug(
             f"get_routes called - configuring OAuth routes in {len(routes)} routes"
@@ -1692,7 +1638,6 @@ class OAuthProxy(OAuthProvider):
                 and route.methods is not None
                 and ("GET" in route.methods or "POST" in route.methods)
             ):
-                authorize_route_found = True
                 # Replace with our enhanced authorization handler
                 # Note: self.base_url is guaranteed to be set in parent __init__
                 authorize_handler = AuthorizationHandler(
@@ -1706,27 +1651,6 @@ class OAuthProxy(OAuthProvider):
                         path="/authorize",
                         endpoint=authorize_handler.handle,
                         methods=["GET", "POST"],
-                    )
-                )
-            # Replace the token endpoint with our custom handler that returns proper OAuth 2.1 error codes
-            elif (
-                isinstance(route, Route)
-                and route.path == "/token"
-                and route.methods is not None
-                and "POST" in route.methods
-            ):
-                token_route_found = True
-                # Replace with our OAuth 2.1 compliant token handler
-                token_handler = TokenHandler(
-                    provider=self, client_authenticator=ClientAuthenticator(self)
-                )
-                custom_routes.append(
-                    Route(
-                        path="/token",
-                        endpoint=cors_middleware(
-                            token_handler.handle, ["POST", "OPTIONS"]
-                        ),
-                        methods=["POST", "OPTIONS"],
                     )
                 )
             else:
@@ -1750,9 +1674,6 @@ class OAuthProxy(OAuthProvider):
             )
         )
 
-        logger.debug(
-            f"✅ OAuth routes configured: authorize_endpoint={authorize_route_found}, token_endpoint={token_route_found}, total routes={len(custom_routes)} (includes OAuth callback + consent)"
-        )
         return custom_routes
 
     # -------------------------------------------------------------------------
