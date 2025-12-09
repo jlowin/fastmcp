@@ -643,6 +643,8 @@ class Context:
             schema = {"type": "object", "properties": {}}
         # Dict syntax: {"low": {"title": "Low"}} -> single-select titled
         elif isinstance(response_type, dict):
+            if not response_type:
+                raise ValueError("Dict response_type cannot be empty.")
             enum_schema = _dict_to_enum_schema(response_type, multi_select=False)
             schema = {
                 "type": "object",
@@ -656,6 +658,7 @@ class Context:
             if (
                 len(response_type) == 1
                 and isinstance(response_type[0], list)
+                and response_type[0]
                 and all(isinstance(item, str) for item in response_type[0])
             ):
                 schema = {
@@ -667,7 +670,11 @@ class Context:
                 }
                 _raw_schema = True
             # [{"low": {"title": "..."}}] -> multi-select titled
-            elif len(response_type) == 1 and isinstance(response_type[0], dict):
+            elif (
+                len(response_type) == 1
+                and isinstance(response_type[0], dict)
+                and response_type[0]
+            ):
                 enum_schema = _dict_to_enum_schema(response_type[0], multi_select=True)
                 schema = {
                     "type": "object",
@@ -707,8 +714,14 @@ class Context:
         if result.action == "accept":
             # For raw schemas (dict/nested-list syntax), extract value directly
             if _raw_schema:
-                content = result.content or {}
-                return AcceptedElicitation[Any](data=content.get("value"))
+                if (
+                    not isinstance(result.content, dict)
+                    or "value" not in result.content
+                ):
+                    raise ValueError(
+                        "Elicitation response missing required 'value' field."
+                    )
+                return AcceptedElicitation[Any](data=result.content["value"])
             elif response_type is not None:
                 type_adapter = get_cached_typeadapter(response_type)
                 validated_data = cast(
