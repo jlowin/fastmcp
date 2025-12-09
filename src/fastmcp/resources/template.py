@@ -5,7 +5,7 @@ from __future__ import annotations
 import inspect
 import re
 from collections.abc import Callable
-from typing import Any
+from typing import Annotated, Any
 from urllib.parse import parse_qs, unquote
 
 from mcp.types import Annotations, Icon
@@ -17,13 +17,11 @@ from pydantic import (
 )
 
 from fastmcp.resources.resource import Resource
-from fastmcp.server.dependencies import get_context
+from fastmcp.server.dependencies import get_context, without_injected_parameters
+from fastmcp.server.tasks.config import TaskConfig
 from fastmcp.utilities.components import FastMCPComponent
 from fastmcp.utilities.json_schema import compress_schema
-from fastmcp.utilities.types import (
-    find_kwarg_by_type,
-    get_cached_typeadapter,
-)
+from fastmcp.utilities.types import get_cached_typeadapter
 
 
 def extract_query_params(uri_template: str) -> set[str]:
@@ -139,6 +137,7 @@ class ResourceTemplate(FastMCPComponent):
         enabled: bool | None = None,
         annotations: Annotations | None = None,
         meta: dict[str, Any] | None = None,
+        task: bool | TaskConfig | None = None,
     ) -> FunctionResourceTemplate:
         return FunctionResourceTemplate.from_function(
             fn=fn,
@@ -152,6 +151,7 @@ class ResourceTemplate(FastMCPComponent):
             enabled=enabled,
             annotations=annotations,
             meta=meta,
+            task=task,
         )
 
     @field_validator("mime_type", mode="before")
@@ -173,21 +173,14 @@ class ResourceTemplate(FastMCPComponent):
         )
 
     async def create_resource(self, uri: str, params: dict[str, Any]) -> Resource:
-        """Create a resource from the template with the given parameters."""
+        """Create a resource from the template with the given parameters.
 
-        async def resource_read_fn() -> str | bytes:
-            # Call function and check if result is a coroutine
-            result = await self.read(arguments=params)
-            return result
-
-        return Resource.from_function(
-            fn=resource_read_fn,
-            uri=uri,
-            name=self.name,
-            description=self.description,
-            mime_type=self.mime_type,
-            tags=self.tags,
-            enabled=self.enabled,
+        The base implementation does not support background tasks.
+        Use FunctionResourceTemplate for task support.
+        """
+        raise NotImplementedError(
+            "Subclasses must implement create_resource(). "
+            "Use FunctionResourceTemplate for task support."
         )
 
     def to_mcp_template(
@@ -239,45 +232,59 @@ class FunctionResourceTemplate(ResourceTemplate):
     """A template for dynamically creating resources."""
 
     fn: Callable[..., Any]
+    task_config: Annotated[
+        TaskConfig,
+        Field(description="Background task execution configuration (SEP-1686)."),
+    ] = Field(default_factory=lambda: TaskConfig(mode="forbidden"))
+
+    async def create_resource(self, uri: str, params: dict[str, Any]) -> Resource:
+        """Create a resource from the template with the given parameters."""
+
+        async def resource_read_fn() -> str | bytes:
+            # Call function and check if result is a coroutine
+            result = await self.read(arguments=params)
+            return result
+
+        return Resource.from_function(
+            fn=resource_read_fn,
+            uri=uri,
+            name=self.name,
+            description=self.description,
+            mime_type=self.mime_type,
+            tags=self.tags,
+            enabled=self.enabled,
+            task=self.task_config,
+        )
 
     async def read(self, arguments: dict[str, Any]) -> str | bytes:
         """Read the resource content."""
-        from fastmcp.server.context import Context
-
-        # Add context to parameters if needed
-        kwargs = arguments.copy()
-        context_kwarg = find_kwarg_by_type(self.fn, kwarg_type=Context)
-        if context_kwarg and context_kwarg not in kwargs:
-            kwargs[context_kwarg] = get_context()
-
         # Type coercion for query parameters (which arrive as strings)
-        # Get function signature for type hints
+        kwargs = arguments.copy()
         sig = inspect.signature(self.fn)
         for param_name, param_value in list(kwargs.items()):
             if param_name in sig.parameters and isinstance(param_value, str):
                 param = sig.parameters[param_name]
                 annotation = param.annotation
 
-                # Skip if no annotation or annotation is str
                 if annotation is inspect.Parameter.empty or annotation is str:
                     continue
 
-                # Handle common type coercions
                 try:
                     if annotation is int:
                         kwargs[param_name] = int(param_value)
                     elif annotation is float:
                         kwargs[param_name] = float(param_value)
                     elif annotation is bool:
-                        # Handle boolean strings
                         kwargs[param_name] = param_value.lower() in ("true", "1", "yes")
                 except (ValueError, AttributeError):
-                    # Let validate_call handle the error
                     pass
 
+        # self.fn is wrapped by without_injected_parameters which handles
+        # dependency resolution internally, so we call it directly
         result = self.fn(**kwargs)
         if inspect.isawaitable(result):
             result = await result
+
         return result
 
     @classmethod
@@ -294,9 +301,9 @@ class FunctionResourceTemplate(ResourceTemplate):
         enabled: bool | None = None,
         annotations: Annotations | None = None,
         meta: dict[str, Any] | None = None,
+        task: bool | TaskConfig | None = None,
     ) -> FunctionResourceTemplate:
         """Create a template from a function."""
-        from fastmcp.server.context import Context
 
         func_name = name or getattr(fn, "__name__", None) or fn.__class__.__name__
         if func_name == "<lambda>":
@@ -311,10 +318,6 @@ class FunctionResourceTemplate(ResourceTemplate):
                     "Functions with *args are not supported as resource templates"
                 )
 
-        # Auto-detect context parameter if not provided
-
-        context_kwarg = find_kwarg_by_type(fn, kwarg_type=Context)
-
         # Extract path and query parameters from URI template
         path_params = set(re.findall(r"{(\w+)(?:\*)?}", uri_template))
         query_params = extract_query_params(uri_template)
@@ -323,24 +326,23 @@ class FunctionResourceTemplate(ResourceTemplate):
         if not all_uri_params:
             raise ValueError("URI template must contain at least one parameter")
 
-        func_params = set(sig.parameters.keys())
-        if context_kwarg:
-            func_params.discard(context_kwarg)
+        # Use wrapper to get user-facing parameters (excludes injected params)
+        wrapper_fn = without_injected_parameters(fn)
+        user_sig = inspect.signature(wrapper_fn)
+        func_params = set(user_sig.parameters.keys())
 
         # Get required and optional function parameters
         required_params = {
             p
             for p in func_params
-            if sig.parameters[p].default is inspect.Parameter.empty
-            and sig.parameters[p].kind != inspect.Parameter.VAR_KEYWORD
-            and p != context_kwarg
+            if user_sig.parameters[p].default is inspect.Parameter.empty
+            and user_sig.parameters[p].kind != inspect.Parameter.VAR_KEYWORD
         }
         optional_params = {
             p
             for p in func_params
-            if sig.parameters[p].default is not inspect.Parameter.empty
-            and sig.parameters[p].kind != inspect.Parameter.VAR_KEYWORD
-            and p != context_kwarg
+            if user_sig.parameters[p].default is not inspect.Parameter.empty
+            and user_sig.parameters[p].kind != inspect.Parameter.VAR_KEYWORD
         }
 
         # Validate RFC 6570 query parameters
@@ -370,6 +372,15 @@ class FunctionResourceTemplate(ResourceTemplate):
 
         description = description or inspect.getdoc(fn)
 
+        # Normalize task to TaskConfig and validate
+        if task is None:
+            task_config = TaskConfig(mode="forbidden")
+        elif isinstance(task, bool):
+            task_config = TaskConfig.from_bool(task)
+        else:
+            task_config = task
+        task_config.validate_function(fn, func_name)
+
         # if the fn is a callable class, we need to get the __call__ method from here out
         if not inspect.isroutine(fn):
             fn = fn.__call__
@@ -377,15 +388,13 @@ class FunctionResourceTemplate(ResourceTemplate):
         if isinstance(fn, staticmethod):
             fn = fn.__func__
 
-        type_adapter = get_cached_typeadapter(fn)
+        wrapper_fn = without_injected_parameters(fn)
+        type_adapter = get_cached_typeadapter(wrapper_fn)
         parameters = type_adapter.json_schema()
+        parameters = compress_schema(parameters, prune_titles=True)
 
-        # compress the schema
-        prune_params = [context_kwarg] if context_kwarg else None
-        parameters = compress_schema(parameters, prune_params=prune_params)
-
-        # ensure the arguments are properly cast
-        fn = validate_call(fn)
+        # Use validate_call on wrapper for runtime type coercion
+        fn = validate_call(wrapper_fn)
 
         return cls(
             uri_template=uri_template,
@@ -400,4 +409,5 @@ class FunctionResourceTemplate(ResourceTemplate):
             enabled=enabled if enabled is not None else True,
             annotations=annotations,
             meta=meta,
+            task_config=task_config,
         )

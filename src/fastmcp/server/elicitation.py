@@ -37,16 +37,16 @@ class ElicitationJsonSchema(GenerateJsonSchema):
     Optionally adds enumNames for better UI display when available.
     """
 
-    def generate_inner(self, schema: core_schema.CoreSchema) -> JsonSchemaValue:
+    def generate_inner(self, schema: core_schema.CoreSchema) -> JsonSchemaValue:  # type: ignore[override]
         """Override to prevent ref generation for enums and handle list schemas."""
         # For enum schemas, bypass the ref mechanism entirely
         if schema["type"] == "enum":
             # Directly call our custom enum_schema without going through handler
             # This prevents the ref/defs mechanism from being invoked
-            return self.enum_schema(schema)
+            return self.enum_schema(schema)  # type: ignore[arg-type]
         # For list schemas, check if items are enums
         if schema["type"] == "list":
-            return self.list_schema(schema)
+            return self.list_schema(schema)  # type: ignore[arg-type]
         # For all other types, use the default implementation
         return super().generate_inner(schema)
 
@@ -57,7 +57,7 @@ class ElicitationJsonSchema(GenerateJsonSchema):
         # Check if items are enum/Literal
         if items_schema and items_schema.get("type") == "enum":
             # Generate array with enum items
-            items = self.enum_schema(items_schema)
+            items = self.enum_schema(items_schema)  # type: ignore[arg-type]
             # If items have oneOf pattern, convert to anyOf for multi-select per SEP-1330
             if "oneOf" in items:
                 items = {"anyOf": items["oneOf"]}

@@ -12,6 +12,7 @@ from mcp.types import (
     ResourceLink,
     TextContent,
     TextResourceContents,
+    ToolExecution,
 )
 from pydantic import AnyUrl, BaseModel, Field, TypeAdapter
 from typing_extensions import TypedDict
@@ -53,6 +54,7 @@ class TestToolFromFunction:
                     "x-fastmcp-wrap-result": True,
                 },
                 "fn": HasName("add"),
+                "task_config": {"mode": "forbidden"},
             }
         )
 
@@ -100,6 +102,7 @@ class TestToolFromFunction:
                     "x-fastmcp-wrap-result": True,
                 },
                 "fn": HasName("fetch_data"),
+                "task_config": {"mode": "forbidden"},
             }
         )
 
@@ -133,6 +136,7 @@ class TestToolFromFunction:
                     "type": "object",
                     "x-fastmcp-wrap-result": True,
                 },
+                "task_config": {"mode": "forbidden"},
             }
         )
 
@@ -166,6 +170,7 @@ class TestToolFromFunction:
                     "type": "object",
                     "x-fastmcp-wrap-result": True,
                 },
+                "task_config": {"mode": "forbidden"},
             }
         )
 
@@ -208,6 +213,7 @@ class TestToolFromFunction:
                 },
                 "output_schema": {"additionalProperties": True, "type": "object"},
                 "fn": HasName("create_user"),
+                "task_config": {"mode": "forbidden"},
             }
         )
 
@@ -269,6 +275,7 @@ class TestToolFromFunction:
                     "required": ["x"],
                     "type": "object",
                 },
+                "task_config": {"mode": "forbidden"},
             }
         )
 
@@ -301,6 +308,7 @@ class TestToolFromFunction:
                     "required": ["_a", "_b"],
                     "type": "object",
                 },
+                "task_config": {"mode": "forbidden"},
             }
         )
 
@@ -355,6 +363,7 @@ class TestToolFromFunction:
                     "type": "object",
                     "x-fastmcp-wrap-result": True,
                 },
+                "task_config": {"mode": "forbidden"},
             }
         )
 
@@ -1805,3 +1814,84 @@ class TestToolNameValidation:
         assert tool.parameters is not None
         assert "a" in tool.parameters["properties"]
         assert "b" in tool.parameters["properties"]
+
+
+class TestToolExecutionField:
+    """Tests for the execution field on the base Tool class."""
+
+    def test_tool_with_execution_field(self):
+        """Test that Tool can store and return execution metadata."""
+        tool = Tool(
+            name="my_tool",
+            description="A tool with execution",
+            parameters={"type": "object", "properties": {}},
+            execution=ToolExecution(taskSupport="optional"),
+        )
+
+        mcp_tool = tool.to_mcp_tool()
+        assert mcp_tool.execution is not None
+        assert mcp_tool.execution.taskSupport == "optional"
+
+    def test_tool_without_execution_field(self):
+        """Test that Tool without execution returns None."""
+        tool = Tool(
+            name="my_tool",
+            description="A tool without execution",
+            parameters={"type": "object", "properties": {}},
+        )
+
+        mcp_tool = tool.to_mcp_tool()
+        assert mcp_tool.execution is None
+
+    def test_execution_override_takes_precedence(self):
+        """Test that explicit override takes precedence over field value."""
+        tool = Tool(
+            name="my_tool",
+            description="A tool",
+            parameters={"type": "object", "properties": {}},
+            execution=ToolExecution(taskSupport="optional"),
+        )
+
+        override_execution = ToolExecution(taskSupport="required")
+        mcp_tool = tool.to_mcp_tool(execution=override_execution)
+        assert mcp_tool.execution is not None
+        assert mcp_tool.execution.taskSupport == "required"
+
+    async def test_function_tool_task_config_still_works(self):
+        """FunctionTool should still derive execution from task_config."""
+
+        async def my_fn() -> str:
+            return "hello"
+
+        tool = Tool.from_function(my_fn, task=True)
+        mcp_tool = tool.to_mcp_tool()
+
+        # FunctionTool sets execution from task_config
+        assert mcp_tool.execution is not None
+        assert mcp_tool.execution.taskSupport == "optional"
+
+    def test_tool_execution_required_mode(self):
+        """Test that Tool can store required execution mode."""
+        tool = Tool(
+            name="my_tool",
+            description="A tool with required execution",
+            parameters={"type": "object", "properties": {}},
+            execution=ToolExecution(taskSupport="required"),
+        )
+
+        mcp_tool = tool.to_mcp_tool()
+        assert mcp_tool.execution is not None
+        assert mcp_tool.execution.taskSupport == "required"
+
+    def test_tool_execution_forbidden_mode(self):
+        """Test that Tool can store forbidden execution mode."""
+        tool = Tool(
+            name="my_tool",
+            description="A tool with forbidden execution",
+            parameters={"type": "object", "properties": {}},
+            execution=ToolExecution(taskSupport="forbidden"),
+        )
+
+        mcp_tool = tool.to_mcp_tool()
+        assert mcp_tool.execution is not None
+        assert mcp_tool.execution.taskSupport == "forbidden"
