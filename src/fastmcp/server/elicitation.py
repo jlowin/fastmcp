@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Generic, Literal
+from enum import Enum
+from typing import Any, Generic, Literal, get_origin
 
 from mcp.server.elicitation import (
     CancelledElicitation,
@@ -20,8 +21,11 @@ __all__ = [
     "AcceptedElicitation",
     "CancelledElicitation",
     "DeclinedElicitation",
+    "ElicitConfig",
     "ScalarElicitationType",
     "get_elicitation_schema",
+    "handle_elicit_accept",
+    "parse_elicit_response_type",
 ]
 
 logger = get_logger(__name__)
@@ -108,6 +112,186 @@ class AcceptedElicitation(BaseModel, Generic[T]):
 @dataclass
 class ScalarElicitationType(Generic[T]):
     value: T
+
+
+@dataclass
+class ElicitConfig:
+    """Configuration for an elicitation request.
+
+    Attributes:
+        schema: The JSON schema to send to the client
+        response_type: The type to validate responses with (None for raw schemas)
+        is_raw: True if schema was built directly (extract "value" from response)
+    """
+
+    schema: dict[str, Any]
+    response_type: type | None
+    is_raw: bool
+
+
+def parse_elicit_response_type(response_type: Any) -> ElicitConfig:
+    """Parse response_type into schema and handling configuration.
+
+    Supports multiple syntaxes:
+    - None: Empty object schema, expect empty response
+    - dict: {"low": {"title": "..."}} -> single-select titled enum
+    - list patterns:
+        - [["a", "b"]] -> multi-select untitled
+        - [{"low": {...}}] -> multi-select titled
+        - ["a", "b"] -> single-select untitled
+    - list[X] type annotation: multi-select with type
+    - Scalar types (bool, int, float, str, Literal, Enum): single value
+    - Other types (dataclass, BaseModel): use directly
+    """
+    if response_type is None:
+        return ElicitConfig(
+            schema={"type": "object", "properties": {}},
+            response_type=None,
+            is_raw=False,
+        )
+
+    if isinstance(response_type, dict):
+        return _parse_dict_syntax(response_type)
+
+    if isinstance(response_type, list):
+        return _parse_list_syntax(response_type)
+
+    if get_origin(response_type) is list:
+        return _parse_generic_list(response_type)
+
+    if _is_scalar_type(response_type):
+        return _parse_scalar_type(response_type)
+
+    # Other types (dataclass, BaseModel, etc.) - use directly
+    return ElicitConfig(
+        schema=get_elicitation_schema(response_type),
+        response_type=response_type,
+        is_raw=False,
+    )
+
+
+def _is_scalar_type(response_type: Any) -> bool:
+    """Check if response_type is a scalar type that needs wrapping."""
+    return (
+        response_type in {bool, int, float, str}
+        or get_origin(response_type) is Literal
+        or (isinstance(response_type, type) and issubclass(response_type, Enum))
+    )
+
+
+def _parse_dict_syntax(d: dict[str, Any]) -> ElicitConfig:
+    """Parse dict syntax: {"low": {"title": "..."}} -> single-select titled."""
+    if not d:
+        raise ValueError("Dict response_type cannot be empty.")
+    enum_schema = _dict_to_enum_schema(d, multi_select=False)
+    return ElicitConfig(
+        schema={
+            "type": "object",
+            "properties": {"value": enum_schema},
+            "required": ["value"],
+        },
+        response_type=None,
+        is_raw=True,
+    )
+
+
+def _parse_list_syntax(lst: list[Any]) -> ElicitConfig:
+    """Parse list patterns: [[...]], [{...}], or [...]."""
+    # [["a", "b", "c"]] -> multi-select untitled
+    if (
+        len(lst) == 1
+        and isinstance(lst[0], list)
+        and lst[0]
+        and all(isinstance(item, str) for item in lst[0])
+    ):
+        return ElicitConfig(
+            schema={
+                "type": "object",
+                "properties": {"value": {"type": "array", "items": {"enum": lst[0]}}},
+                "required": ["value"],
+            },
+            response_type=None,
+            is_raw=True,
+        )
+
+    # [{"low": {"title": "..."}}] -> multi-select titled
+    if len(lst) == 1 and isinstance(lst[0], dict) and lst[0]:
+        enum_schema = _dict_to_enum_schema(lst[0], multi_select=True)
+        return ElicitConfig(
+            schema={
+                "type": "object",
+                "properties": {"value": {"type": "array", "items": enum_schema}},
+                "required": ["value"],
+            },
+            response_type=None,
+            is_raw=True,
+        )
+
+    # ["a", "b", "c"] -> single-select untitled
+    if lst and all(isinstance(item, str) for item in lst):
+        choice_literal = Literal[tuple(lst)]  # type: ignore[valid-type]
+        wrapped = ScalarElicitationType[choice_literal]  # type: ignore[valid-type]
+        return ElicitConfig(
+            schema=get_elicitation_schema(wrapped),  # type: ignore[arg-type]
+            response_type=wrapped,  # type: ignore[assignment]
+            is_raw=False,
+        )
+
+    raise ValueError(f"Invalid list response_type format. Received: {lst}")
+
+
+def _parse_generic_list(response_type: Any) -> ElicitConfig:
+    """Parse list[X] type annotation -> multi-select."""
+    wrapped = ScalarElicitationType[response_type]  # type: ignore[valid-type]
+    return ElicitConfig(
+        schema=get_elicitation_schema(wrapped),  # type: ignore[arg-type]
+        response_type=wrapped,  # type: ignore[assignment]
+        is_raw=False,
+    )
+
+
+def _parse_scalar_type(response_type: Any) -> ElicitConfig:
+    """Parse scalar types (bool, int, float, str, Literal, Enum)."""
+    wrapped = ScalarElicitationType[response_type]  # type: ignore[valid-type]
+    return ElicitConfig(
+        schema=get_elicitation_schema(wrapped),  # type: ignore[arg-type]
+        response_type=wrapped,  # type: ignore[assignment]
+        is_raw=False,
+    )
+
+
+def handle_elicit_accept(
+    config: ElicitConfig, content: Any
+) -> AcceptedElicitation[Any]:
+    """Handle an accepted elicitation response.
+
+    Args:
+        config: The elicitation configuration from parse_elicit_response_type
+        content: The response content from the client
+
+    Returns:
+        AcceptedElicitation with the extracted/validated data
+    """
+    # For raw schemas (dict/nested-list syntax), extract value directly
+    if config.is_raw:
+        if not isinstance(content, dict) or "value" not in content:
+            raise ValueError("Elicitation response missing required 'value' field.")
+        return AcceptedElicitation[Any](data=content["value"])
+
+    # For typed schemas, validate with Pydantic
+    if config.response_type is not None:
+        type_adapter = get_cached_typeadapter(config.response_type)
+        validated_data = type_adapter.validate_python(content)
+        if isinstance(validated_data, ScalarElicitationType):
+            return AcceptedElicitation[Any](data=validated_data.value)
+        return AcceptedElicitation[Any](data=validated_data)
+
+    # For None response_type, expect empty response
+    if content:
+        raise ValueError(
+            f"Elicitation expected an empty response, but received: {content}"
+        )
+    return AcceptedElicitation[dict[str, Any]](data={})
 
 
 def _dict_to_enum_schema(
