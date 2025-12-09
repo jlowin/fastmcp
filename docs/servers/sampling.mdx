@@ -463,7 +463,7 @@ FastMCP provides an OpenAI-compatible sampling handler that supports both basic 
 import os
 from openai import OpenAI
 from fastmcp import FastMCP
-from fastmcp.experimental.sampling.handlers.openai import OpenAISamplingHandler
+from fastmcp.server.sampling.openai import OpenAISamplingHandler
 
 server = FastMCP(
     name="Sampling Server",
@@ -487,7 +487,7 @@ import os
 from openai import OpenAI
 
 from fastmcp import FastMCP, Context
-from fastmcp.experimental.sampling.handlers.openai import OpenAISamplingHandler
+from fastmcp.server.sampling.openai import OpenAISamplingHandler
 
 
 async def async_main():
@@ -545,7 +545,7 @@ The fallback handler fully supports sampling with tools:
 
 ```python
 from fastmcp import FastMCP, Context
-from fastmcp.experimental.sampling.handlers.openai import OpenAISamplingHandler
+from fastmcp.server.sampling.openai import OpenAISamplingHandler
 from openai import OpenAI
 import os
 

@@ -1,5 +1,7 @@
+"""OpenAI sampling handler for FastMCP servers."""
+
 import json
-from collections.abc import Iterator, Sequence
+from collections.abc import Awaitable, Callable, Iterator, Sequence
 from typing import Any, get_args
 
 from mcp import ClientSession, ServerSession
@@ -35,20 +37,30 @@ try:
     from openai.types.shared_params import FunctionDefinition
 except ImportError as e:
     raise ImportError(
-        "The `openai` package is not installed. Please install `fastmcp[openai]` or add `openai` to your dependencies manually."
+        "The `openai` package is not installed. "
+        "Please install `fastmcp[openai]` or add `openai` to your dependencies manually."
     ) from e
 
-from typing_extensions import override
 
-from fastmcp.experimental.sampling.handlers.base import BaseLLMSamplingHandler
+SamplingHandlerResult = str | CreateMessageResult | CreateMessageResultWithTools
+
+ServerSamplingHandler = Callable[
+    [
+        list[SamplingMessage],
+        SamplingParams,
+        RequestContext[ServerSession, LifespanContextT],
+    ],
+    SamplingHandlerResult | Awaitable[SamplingHandlerResult],
+]
 
 
-class OpenAISamplingHandler(BaseLLMSamplingHandler):
+class OpenAISamplingHandler:
+    """Sampling handler that uses the OpenAI API."""
+
     def __init__(self, default_model: ChatModel, client: OpenAI | None = None):
         self.client: OpenAI = client or OpenAI()
         self.default_model: ChatModel = default_model
 
-    @override
     async def __call__(
         self,
         messages: list[SamplingMessage],
