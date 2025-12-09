@@ -211,7 +211,8 @@ When running tools that take a long time to complete, you may encounter issues w
 To enable SSE polling, configure an `EventStore` when creating your HTTP application:
 
 ```python
-from fastmcp import FastMCP, Context, EventStore
+from fastmcp import FastMCP, Context
+from fastmcp.server.event_store import EventStore
 
 mcp = FastMCP("My Server")
 
@@ -256,7 +257,7 @@ The `retry_interval` parameter (in milliseconds) controls how long clients wait 
 By default, `EventStore` uses in-memory storage. For production deployments with multiple server instances, you can provide a custom storage backend using the `key_value` package:
 
 ```python
-from fastmcp import EventStore
+from fastmcp.server.event_store import EventStore
 from key_value.aio.stores.redis import RedisStore
 
 # Use Redis for distributed deployments

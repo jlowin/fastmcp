@@ -14,7 +14,6 @@ if settings.log_enabled:
 
 from fastmcp.server.server import FastMCP
 from fastmcp.server.context import Context
-from fastmcp.server.event_store import EventStore
 import fastmcp.server
 
 from fastmcp.client import Client
@@ -31,7 +30,6 @@ if settings.deprecation_warnings:
 __all__ = [
     "Client",
     "Context",
-    "EventStore",
     "FastMCP",
     "client",
     "settings",
