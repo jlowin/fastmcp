@@ -18,6 +18,7 @@ from pydantic import (
 
 from fastmcp.resources.resource import Resource
 from fastmcp.server.dependencies import get_context, without_injected_parameters
+from fastmcp.server.tasks.config import TaskConfig
 from fastmcp.utilities.components import FastMCPComponent
 from fastmcp.utilities.json_schema import compress_schema
 from fastmcp.utilities.types import get_cached_typeadapter
@@ -103,12 +104,6 @@ class ResourceTemplate(FastMCPComponent):
     annotations: Annotations | None = Field(
         default=None, description="Optional annotations about the resource's behavior"
     )
-    task: Annotated[
-        bool,
-        Field(
-            description="Whether this resource template supports background task execution (SEP-1686)"
-        ),
-    ] = False
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(uri_template={self.uri_template!r}, name={self.name!r}, description={self.description!r}, tags={self.tags})"
@@ -142,7 +137,7 @@ class ResourceTemplate(FastMCPComponent):
         enabled: bool | None = None,
         annotations: Annotations | None = None,
         meta: dict[str, Any] | None = None,
-        task: bool | None = None,
+        task: bool | TaskConfig | None = None,
     ) -> FunctionResourceTemplate:
         return FunctionResourceTemplate.from_function(
             fn=fn,
@@ -178,22 +173,14 @@ class ResourceTemplate(FastMCPComponent):
         )
 
     async def create_resource(self, uri: str, params: dict[str, Any]) -> Resource:
-        """Create a resource from the template with the given parameters."""
+        """Create a resource from the template with the given parameters.
 
-        async def resource_read_fn() -> str | bytes:
-            # Call function and check if result is a coroutine
-            result = await self.read(arguments=params)
-            return result
-
-        return Resource.from_function(
-            fn=resource_read_fn,
-            uri=uri,
-            name=self.name,
-            description=self.description,
-            mime_type=self.mime_type,
-            tags=self.tags,
-            enabled=self.enabled,
-            task=self.task,
+        The base implementation does not support background tasks.
+        Use FunctionResourceTemplate for task support.
+        """
+        raise NotImplementedError(
+            "Subclasses must implement create_resource(). "
+            "Use FunctionResourceTemplate for task support."
         )
 
     def to_mcp_template(
@@ -245,6 +232,29 @@ class FunctionResourceTemplate(ResourceTemplate):
     """A template for dynamically creating resources."""
 
     fn: Callable[..., Any]
+    task_config: Annotated[
+        TaskConfig,
+        Field(description="Background task execution configuration (SEP-1686)."),
+    ] = Field(default_factory=lambda: TaskConfig(mode="forbidden"))
+
+    async def create_resource(self, uri: str, params: dict[str, Any]) -> Resource:
+        """Create a resource from the template with the given parameters."""
+
+        async def resource_read_fn() -> str | bytes:
+            # Call function and check if result is a coroutine
+            result = await self.read(arguments=params)
+            return result
+
+        return Resource.from_function(
+            fn=resource_read_fn,
+            uri=uri,
+            name=self.name,
+            description=self.description,
+            mime_type=self.mime_type,
+            tags=self.tags,
+            enabled=self.enabled,
+            task=self.task_config,
+        )
 
     async def read(self, arguments: dict[str, Any]) -> str | bytes:
         """Read the resource content."""
@@ -291,7 +301,7 @@ class FunctionResourceTemplate(ResourceTemplate):
         enabled: bool | None = None,
         annotations: Annotations | None = None,
         meta: dict[str, Any] | None = None,
-        task: bool | None = None,
+        task: bool | TaskConfig | None = None,
     ) -> FunctionResourceTemplate:
         """Create a template from a function."""
 
@@ -362,6 +372,15 @@ class FunctionResourceTemplate(ResourceTemplate):
 
         description = description or inspect.getdoc(fn)
 
+        # Normalize task to TaskConfig and validate
+        if task is None:
+            task_config = TaskConfig(mode="forbidden")
+        elif isinstance(task, bool):
+            task_config = TaskConfig.from_bool(task)
+        else:
+            task_config = task
+        task_config.validate_function(fn, func_name)
+
         # if the fn is a callable class, we need to get the __call__ method from here out
         if not inspect.isroutine(fn):
             fn = fn.__call__
@@ -390,5 +409,5 @@ class FunctionResourceTemplate(ResourceTemplate):
             enabled=enabled if enabled is not None else True,
             annotations=annotations,
             meta=meta,
-            task=task if task is not None else False,
+            task_config=task_config,
         )

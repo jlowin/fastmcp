@@ -9,7 +9,6 @@ from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
-from enum import Enum
 from logging import Logger
 from typing import Any, Generic, Literal, cast, get_origin, overload
 
@@ -48,15 +47,14 @@ from fastmcp.server.elicitation import (
     AcceptedElicitation,
     CancelledElicitation,
     DeclinedElicitation,
-    ScalarElicitationType,
-    get_elicitation_schema,
+    handle_elicit_accept,
+    parse_elicit_response_type,
 )
 from fastmcp.server.sampling import SamplingTool
 from fastmcp.server.server import FastMCP
 from fastmcp.tools.tool import Tool as FastMCPTool
 from fastmcp.utilities.json_schema import compress_schema
 from fastmcp.utilities.logging import _clamp_logger, get_logger
-from fastmcp.utilities.types import get_cached_typeadapter
 
 logger: Logger = get_logger(name=__name__)
 to_client_logger: Logger = logger.getChild(suffix="to_client")
@@ -426,7 +424,7 @@ class Context:
             session_id = str(uuid4())
 
         # Save the session id to the session attributes
-        session._fastmcp_id = session_id
+        session._fastmcp_id = session_id  # type: ignore[attr-defined]
         return session_id
 
     @property
@@ -523,6 +521,45 @@ class Context:
     async def send_prompt_list_changed(self) -> None:
         """Send a prompt list changed notification to the client."""
         await self.session.send_prompt_list_changed()
+
+    async def close_sse_stream(self) -> None:
+        """Close the current response stream to trigger client reconnection.
+
+        When using StreamableHTTP transport with an EventStore configured, this
+        method gracefully closes the HTTP connection for the current request.
+        The client will automatically reconnect (after `retry_interval` milliseconds)
+        and resume receiving events from where it left off via the EventStore.
+
+        This is useful for long-running operations to avoid load balancer timeouts.
+        Instead of holding a connection open for minutes, you can periodically close
+        and let the client reconnect.
+
+        Example:
+            ```python
+            @mcp.tool
+            async def long_running_task(ctx: Context) -> str:
+                for i in range(100):
+                    await ctx.report_progress(i, 100)
+
+                    # Close connection every 30 iterations to avoid LB timeouts
+                    if i % 30 == 0 and i > 0:
+                        await ctx.close_sse_stream()
+
+                    await do_work()
+                return "Done"
+            ```
+
+        Note:
+            This is a no-op (with a debug log) if not using StreamableHTTP
+            transport with an EventStore configured.
+        """
+        if not self.request_context or not self.request_context.close_sse_stream:
+            logger.debug(
+                "close_sse_stream() called but not applicable "
+                "(requires StreamableHTTP transport with event_store)"
+            )
+            return
+        await self.request_context.close_sse_stream()
 
     @overload
     async def sample(
@@ -1148,80 +1185,21 @@ class Context:
                 type or dataclass or BaseModel. If it is a primitive type, an
                 object schema with a single "value" field will be generated.
         """
-        if response_type is None:
-            schema = {"type": "object", "properties": {}}
-        else:
-            # if the user provided a list of strings, treat it as a Literal
-            if isinstance(response_type, list):
-                if not all(isinstance(item, str) for item in response_type):
-                    raise ValueError(
-                        "List of options must be a list of strings. Received: "
-                        f"{response_type}"
-                    )
-                # Convert list of options to Literal type and wrap
-                choice_literal = Literal[tuple(response_type)]  # type: ignore
-                response_type = ScalarElicitationType[choice_literal]  # type: ignore
-            # if the user provided a primitive scalar, wrap it in an object schema
-            elif (
-                response_type in {bool, int, float, str}
-                or get_origin(response_type) is Literal
-                or (isinstance(response_type, type) and issubclass(response_type, Enum))
-            ):
-                response_type = ScalarElicitationType[response_type]  # type: ignore
-
-            response_type = cast(type[T], response_type)
-
-            schema = get_elicitation_schema(response_type)
+        config = parse_elicit_response_type(response_type)
 
         result = await self.session.elicit(
             message=message,
-            requestedSchema=schema,
+            requestedSchema=config.schema,
             related_request_id=self.request_id,
         )
 
         if result.action == "accept":
-            if response_type is not None:
-                # Handle dict-based enum responses (direct value extraction)
-                if isinstance(response_type, dict):
-                    # Single-select: result.content is {"value": "selected_value"}
-                    value = result.content.get("value") if result.content else None
-                    return AcceptedElicitation[str](data=cast(str, value))
-                elif isinstance(response_type, list) and len(response_type) == 1:
-                    if isinstance(response_type[0], dict):
-                        # Multi-select titled: result.content is {"value": ["selected1", "selected2"]}
-                        value = result.content.get("value") if result.content else None
-                        return AcceptedElicitation[list[str]](
-                            data=cast(list[str], value)
-                        )
-                    elif isinstance(response_type[0], list):
-                        # Multi-select untitled: result.content is {"value": ["selected1", "selected2"]}
-                        value = result.content.get("value") if result.content else None
-                        return AcceptedElicitation[list[str]](
-                            data=cast(list[str], value)
-                        )
-
-                type_adapter = get_cached_typeadapter(response_type)
-                validated_data = cast(
-                    T | ScalarElicitationType[T],
-                    type_adapter.validate_python(result.content),
-                )
-                if isinstance(validated_data, ScalarElicitationType):
-                    return AcceptedElicitation[T](data=validated_data.value)
-                else:
-                    return AcceptedElicitation[T](data=cast(T, validated_data))
-            elif result.content:
-                raise ValueError(
-                    "Elicitation expected an empty response, but received: "
-                    f"{result.content}"
-                )
-            else:
-                return AcceptedElicitation[dict[str, Any]](data={})
+            return handle_elicit_accept(config, result.content)
         elif result.action == "decline":
             return DeclinedElicitation()
         elif result.action == "cancel":
             return CancelledElicitation()
         else:
-            # This should never happen, but handle it just in case
             raise ValueError(f"Unexpected elicitation action: {result.action}")
 
     def set_state(self, key: str, value: Any) -> None:

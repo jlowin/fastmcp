@@ -31,6 +31,5 @@ __all__ = [
     "Client",
     "Context",
     "FastMCP",
-    "client",
     "settings",
 ]

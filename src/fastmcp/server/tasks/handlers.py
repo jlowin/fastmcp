@@ -61,7 +61,7 @@ async def handle_tool_as_task(
         raise McpError(
             ErrorData(
                 code=INTERNAL_ERROR,
-                message="Background tasks require Docket. Set FASTMCP_ENABLE_DOCKET=true",
+                message="Background tasks require a running FastMCP server context",
             )
         )
 
@@ -99,9 +99,10 @@ async def handle_tool_as_task(
         # Don't let notification failures break task creation
         await ctx.session.send_notification(notification)  # type: ignore[arg-type]
 
-    # Queue function to Docket (result storage via execution_ttl)
+    # Queue function to Docket by name (result storage via execution_ttl)
+    # Use tool.key which matches what was registered - prefixed for mounted tools
     await docket.add(
-        tool.fn,  # type: ignore[attr-defined]
+        tool.key,
         key=task_key,
     )(**arguments)
 
@@ -169,7 +170,7 @@ async def handle_prompt_as_task(
         raise McpError(
             ErrorData(
                 code=INTERNAL_ERROR,
-                message="Background tasks require Docket. Set FASTMCP_ENABLE_DOCKET=true",
+                message="Background tasks require a running FastMCP server context",
             )
         )
 
@@ -204,9 +205,10 @@ async def handle_prompt_as_task(
     with suppress(Exception):
         await ctx.session.send_notification(notification)  # type: ignore[arg-type]
 
-    # Queue function to Docket (result storage via execution_ttl)
+    # Queue function to Docket by name (result storage via execution_ttl)
+    # Use prompt.key which matches what was registered - prefixed for mounted prompts
     await docket.add(
-        prompt.fn,  # type: ignore[attr-defined]
+        prompt.key,
         key=task_key,
     )(**(arguments or {}))
 
@@ -307,11 +309,22 @@ async def handle_resource_as_task(
     with suppress(Exception):
         await ctx.session.send_notification(notification)  # type: ignore[arg-type]
 
-    # Queue function to Docket (result storage via execution_ttl)
-    await docket.add(
-        resource.fn,  # type: ignore[attr-defined]
-        key=task_key,
-    )()
+    # Queue function to Docket by name (result storage via execution_ttl)
+    # Use resource.name which matches what was registered - prefixed for mounted resources
+    # For templates, extract URI params and pass them to the function
+    from fastmcp.resources.template import FunctionResourceTemplate, match_uri_template
+
+    if isinstance(resource, FunctionResourceTemplate):
+        params = match_uri_template(uri, resource.uri_template) or {}
+        await docket.add(
+            resource.name,
+            key=task_key,
+        )(**params)
+    else:
+        await docket.add(
+            resource.name,
+            key=task_key,
+        )()
 
     # Spawn subscription task to send status notifications (SEP-1686 optional feature)
     from fastmcp.server.tasks.subscriptions import subscribe_to_task_updates

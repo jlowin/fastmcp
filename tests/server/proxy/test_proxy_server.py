@@ -14,6 +14,7 @@ from fastmcp.client import Client
 from fastmcp.client.transports import FastMCPTransport, StreamableHttpTransport
 from fastmcp.exceptions import ToolError
 from fastmcp.server.proxy import FastMCPProxy, ProxyClient
+from fastmcp.tools.tool import ToolResult
 from fastmcp.tools.tool_transform import (
     ToolTransformConfig,
 )
@@ -143,7 +144,7 @@ async def test_proxy_with_async_client_factory():
     proxy = FastMCPProxy(client_factory=async_factory)
     assert isinstance(proxy, FastMCPProxy)
     assert inspect.iscoroutinefunction(proxy.client_factory)
-    client = await proxy.client_factory()
+    client = await proxy.client_factory()  # type: ignore[misc]
     assert isinstance(client, Client)
     assert isinstance(client.transport, StreamableHttpTransport)
     assert client.transport.url == "http://example.com/mcp/"  # type: ignore[attr-defined]
@@ -215,6 +216,23 @@ class TestTools:
         with pytest.raises(ToolError, match="This is a test error"):
             async with Client(proxy_server) as client:
                 await client.call_tool("error_tool", {})
+
+    async def test_call_tool_forwards_meta(self, fastmcp_server, proxy_server):
+        """Test that metadata from proxied tool results is properly forwarded."""
+
+        @fastmcp_server.tool
+        def tool_with_meta(value: str) -> ToolResult:
+            """A tool that returns metadata in its result."""
+            return ToolResult(
+                content=f"Result: {value}",
+                meta={"custom_key": "custom_value", "processed": True},
+            )
+
+        async with Client(proxy_server) as client:
+            result = await client.call_tool("tool_with_meta", {"value": "test"})
+
+        assert result.content[0].text == "Result: test"  # type: ignore[attr-defined]
+        assert result.meta == {"custom_key": "custom_value", "processed": True}
 
     async def test_proxy_can_overwrite_proxied_tool(self, proxy_server):
         """

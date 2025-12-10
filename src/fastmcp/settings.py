@@ -13,7 +13,6 @@ from pydantic_settings import (
     BaseSettings,
     SettingsConfigDict,
 )
-from typing_extensions import Self
 
 from fastmcp.utilities.logging import get_logger
 
@@ -181,18 +180,6 @@ class Settings(BaseSettings):
             settings = getattr(settings, parent_attr)
         setattr(settings, attr, value)
 
-    @property
-    def settings(self) -> Self:
-        """
-        This property is for backwards compatibility with FastMCP < 2.8.0,
-        which accessed fastmcp.settings.settings
-        """
-        # Deprecated in 2.8.0
-        logger.warning(
-            "Using fastmcp.settings.settings is deprecated. Use fastmcp.settings instead.",
-        )
-        return self
-
     home: Path = Path(user_data_dir("fastmcp", appauthor=False))
 
     test_mode: bool = False
@@ -208,38 +195,6 @@ class Settings(BaseSettings):
         return v
 
     experimental: ExperimentalSettings = ExperimentalSettings()
-
-    # Docket/Tasks settings
-    enable_docket: Annotated[
-        bool,
-        Field(
-            description=inspect.cleandoc(
-                """
-                Enable Docket support for background task execution.
-                When enabled, FastMCP will create a Docket instance with a Worker
-                available via dependency injection. This allows tools, prompts, and
-                resources to schedule background work using CurrentDocket().
-                """
-            ),
-        ),
-    ] = False
-
-    enable_tasks: Annotated[
-        bool,
-        Field(
-            description=inspect.cleandoc(
-                """
-                Enable MCP SEP-1686 task protocol support for background execution.
-
-                Server-side: Requires enable_docket=True (validated at server startup).
-                Advertises task capabilities and handles task/* protocol methods.
-
-                Client-side: Advertises task capability to servers. No Docket needed
-                on client side.
-                """
-            ),
-        ),
-    ] = False
 
     docket: DocketSettings = DocketSettings()
 
@@ -455,23 +410,3 @@ class Settings(BaseSettings):
         auth_class = type_adapter.validate_python(self.server_auth)
 
         return auth_class
-
-
-def __getattr__(name: str):
-    """
-    Used to deprecate the module-level Image class; can be removed once it is no longer imported to root.
-    """
-    if name == "settings":
-        import fastmcp
-
-        settings = fastmcp.settings
-        # Deprecated in 2.10.2
-        if settings.deprecation_warnings:
-            warnings.warn(
-                "`from fastmcp.settings import settings` is deprecated. use `fastmcp.settings` instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-        return settings
-
-    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")

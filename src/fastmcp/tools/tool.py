@@ -30,6 +30,7 @@ from typing_extensions import TypeVar
 
 import fastmcp
 from fastmcp.server.dependencies import get_context, without_injected_parameters
+from fastmcp.server.tasks.config import TaskConfig
 from fastmcp.utilities.components import FastMCPComponent
 from fastmcp.utilities.json_schema import compress_schema
 from fastmcp.utilities.logging import get_logger
@@ -132,16 +133,14 @@ class Tool(FastMCPComponent):
         ToolAnnotations | None,
         Field(description="Additional annotations about the tool"),
     ] = None
+    execution: Annotated[
+        ToolExecution | None,
+        Field(description="Task execution configuration (SEP-1686)"),
+    ] = None
     serializer: Annotated[
         ToolResultSerializerType | None,
         Field(description="Optional custom serializer for tool results"),
     ] = None
-    task: Annotated[
-        bool,
-        Field(
-            description="Whether this tool supports background task execution (SEP-1686)"
-        ),
-    ] = False
 
     @model_validator(mode="after")
     def _validate_tool_name(self) -> Tool:
@@ -179,15 +178,6 @@ class Tool(FastMCPComponent):
         elif self.annotations and self.annotations.title:
             title = self.annotations.title
 
-        # Auto-populate task execution mode based on tool.task flag if not explicitly set
-        # Per SEP-1686: tools declare task support via execution.task
-        # task values: "never" (no task support), "optional" (supports both), "always" (requires task)
-        annotations = self.annotations
-        execution = None
-        if self.task:
-            # Tool supports background execution - use "optional" to allow both immediate and task execution
-            execution = ToolExecution(task="optional")
-
         return MCPTool(
             name=overrides.get("name", self.name),
             title=overrides.get("title", title),
@@ -195,8 +185,8 @@ class Tool(FastMCPComponent):
             inputSchema=overrides.get("inputSchema", self.parameters),
             outputSchema=overrides.get("outputSchema", self.output_schema),
             icons=overrides.get("icons", self.icons),
-            annotations=overrides.get("annotations", annotations),
-            execution=overrides.get("execution", execution),
+            annotations=overrides.get("annotations", self.annotations),
+            execution=overrides.get("execution", self.execution),
             _meta=overrides.get(
                 "_meta", self.get_meta(include_fastmcp_meta=include_fastmcp_meta)
             ),
@@ -216,7 +206,7 @@ class Tool(FastMCPComponent):
         serializer: ToolResultSerializerType | None = None,
         meta: dict[str, Any] | None = None,
         enabled: bool | None = None,
-        task: bool | None = None,
+        task: bool | TaskConfig | None = None,
     ) -> FunctionTool:
         """Create a Tool from a function."""
         return FunctionTool.from_function(
@@ -284,6 +274,32 @@ class Tool(FastMCPComponent):
 
 class FunctionTool(Tool):
     fn: Callable[..., Any]
+    task_config: Annotated[
+        TaskConfig,
+        Field(description="Background task execution configuration (SEP-1686)."),
+    ] = Field(default_factory=lambda: TaskConfig(mode="forbidden"))
+
+    def to_mcp_tool(
+        self,
+        *,
+        include_fastmcp_meta: bool | None = None,
+        **overrides: Any,
+    ) -> MCPTool:
+        """Convert the FastMCP tool to an MCP tool.
+
+        Extends the base implementation to add task execution mode if enabled.
+        """
+        # Get base MCP tool from parent
+        mcp_tool = super().to_mcp_tool(
+            include_fastmcp_meta=include_fastmcp_meta, **overrides
+        )
+
+        # Add task execution mode per SEP-1686
+        # Only set execution if not overridden and mode is not "forbidden"
+        if self.task_config.mode != "forbidden" and "execution" not in overrides:
+            mcp_tool.execution = ToolExecution(taskSupport=self.task_config.mode)
+
+        return mcp_tool
 
     @classmethod
     def from_function(
@@ -300,7 +316,7 @@ class FunctionTool(Tool):
         serializer: ToolResultSerializerType | None = None,
         meta: dict[str, Any] | None = None,
         enabled: bool | None = None,
-        task: bool | None = None,
+        task: bool | TaskConfig | None = None,
     ) -> FunctionTool:
         """Create a Tool from a function."""
         if exclude_args and fastmcp.settings.deprecation_warnings:
@@ -315,9 +331,19 @@ class FunctionTool(Tool):
             )
 
         parsed_fn = ParsedFunction.from_function(fn, exclude_args=exclude_args)
+        func_name = name or parsed_fn.name
 
-        if name is None and parsed_fn.name == "<lambda>":
+        if func_name == "<lambda>":
             raise ValueError("You must provide a name for lambda functions")
+
+        # Normalize task to TaskConfig and validate
+        if task is None:
+            task_config = TaskConfig(mode="forbidden")
+        elif isinstance(task, bool):
+            task_config = TaskConfig.from_bool(task)
+        else:
+            task_config = task
+        task_config.validate_function(fn, func_name)
 
         if isinstance(output_schema, NotSetT):
             final_output_schema = parsed_fn.output_schema
@@ -347,7 +373,7 @@ class FunctionTool(Tool):
             serializer=serializer,
             meta=meta,
             enabled=enabled if enabled is not None else True,
-            task=task if task is not None else False,
+            task_config=task_config,
         )
 
     async def run(self, arguments: dict[str, Any]) -> ToolResult:

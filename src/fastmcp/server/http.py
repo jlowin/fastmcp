@@ -19,9 +19,9 @@ from starlette.responses import Response
 from starlette.routing import BaseRoute, Mount, Route
 from starlette.types import Lifespan, Receive, Scope, Send
 
-import fastmcp
 from fastmcp.server.auth import AuthProvider
 from fastmcp.server.auth.middleware import RequireAuthMiddleware
+from fastmcp.server.tasks.capabilities import get_task_capabilities
 from fastmcp.utilities.logging import get_logger
 
 if TYPE_CHECKING:
@@ -117,7 +117,8 @@ def create_base_app(
         A Starlette application
     """
     # Always add RequestContextMiddleware as the outermost middleware
-    middleware.insert(0, Middleware(RequestContextMiddleware))
+    # TODO(ty): remove type ignore when ty supports Starlette Middleware typing
+    middleware.insert(0, Middleware(RequestContextMiddleware))  # type: ignore[arg-type]
 
     return StarletteWithLifespan(
         routes=routes,
@@ -160,19 +161,7 @@ def create_sse_app(
     async def handle_sse(scope: Scope, receive: Receive, send: Send) -> Response:
         async with sse.connect_sse(scope, receive, send) as streams:
             # Build experimental capabilities
-            experimental_capabilities = {}
-            if fastmcp.settings.enable_tasks:
-                # Declare SEP-1686 task support per final spec (lines 49-63)
-                # Nested structure: {list: {}, cancel: {}, requests: {tools: {call: {}}}}
-                experimental_capabilities["tasks"] = {
-                    "list": {},
-                    "cancel": {},
-                    "requests": {
-                        "tools": {"call": {}},
-                        "prompts": {"get": {}},
-                        "resources": {"read": {}},
-                    },
-                }
+            experimental_capabilities = get_task_capabilities()
 
             await server._mcp_server.run(
                 streams[0],
@@ -274,6 +263,7 @@ def create_streamable_http_app(
     server: FastMCP[LifespanResultT],
     streamable_http_path: str,
     event_store: EventStore | None = None,
+    retry_interval: int | None = None,
     auth: AuthProvider | None = None,
     json_response: bool = False,
     stateless_http: bool = False,
@@ -286,7 +276,10 @@ def create_streamable_http_app(
     Args:
         server: The FastMCP server instance
         streamable_http_path: Path for StreamableHTTP connections
-        event_store: Optional event store for session management
+        event_store: Optional event store for SSE polling/resumability
+        retry_interval: Optional retry interval in milliseconds for SSE polling.
+            Controls how quickly clients should reconnect after server-initiated
+            disconnections. Requires event_store to be set. Defaults to SDK default.
         auth: Optional authentication provider (AuthProvider)
         json_response: Whether to use JSON response format
         stateless_http: Whether to use stateless mode (new transport per request)
@@ -304,6 +297,7 @@ def create_streamable_http_app(
     session_manager = StreamableHTTPSessionManager(
         app=server._mcp_server,
         event_store=event_store,
+        retry_interval=retry_interval,
         json_response=json_response,
         stateless=stateless_http,
     )
