@@ -105,9 +105,6 @@ class MiddlewareServerSession(ServerSession):
                     fastmcp_context=fastmcp_ctx,
                 )
 
-                # return await self.fastmcp._apply_middleware(
-                #     mw_context, call_original_handler
-                # )
                 try:
                     return await self.fastmcp._apply_middleware(
                         mw_context, call_original_handler
