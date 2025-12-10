@@ -292,7 +292,7 @@ async def test_middleware_can_access_initialize_result():
 
 
 async def test_middleware_mcp_error_during_initialization():
-    """Test that McpError raised in middleware during initialization is sent to responder."""
+    """Test that McpError raised in middleware during initialization is sent to client."""
     server = FastMCP("TestServer")
 
     class ErrorThrowingMiddleware(Middleware):
@@ -309,11 +309,12 @@ async def test_middleware_mcp_error_during_initialization():
 
     server.add_middleware(ErrorThrowingMiddleware())
 
-    with pytest.raises(Exception) as exc_info:
+    with pytest.raises(McpError) as exc_info:
         async with Client(server):
             pass
 
-    assert "Invalid initialization parameters" in str(exc_info.value)
+    assert exc_info.value.error.message == "Invalid initialization parameters"
+    assert exc_info.value.error.code == mt.INVALID_PARAMS
 
 
 async def test_middleware_mcp_error_before_call_next():
@@ -332,11 +333,12 @@ async def test_middleware_mcp_error_before_call_next():
 
     server.add_middleware(EarlyErrorMiddleware())
 
-    with pytest.raises(Exception) as exc_info:
+    with pytest.raises(McpError) as exc_info:
         async with Client(server):
             pass
 
-    assert "Request validation failed" in str(exc_info.value)
+    assert exc_info.value.error.message == "Request validation failed"
+    assert exc_info.value.error.code == mt.INVALID_REQUEST
 
 
 async def test_middleware_mcp_error_after_call_next():
