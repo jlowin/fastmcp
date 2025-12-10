@@ -105,7 +105,7 @@ async def main():
     )
     console.print()
 
-    handler = LoggingAnthropicHandler(default_model="claude-sonnet-4-20250514")
+    handler = LoggingAnthropicHandler(default_model="claude-sonnet-4-5-20250929")
 
     async with Client(mcp, sampling_handler=handler) as client:
         # Example 1

@@ -49,7 +49,7 @@ class LoggingAnthropicHandler(AnthropicSamplingHandler):
 
 mcp = FastMCP(
     "Server with Fallback",
-    sampling_handler=LoggingAnthropicHandler(default_model="claude-sonnet-4-20250514"),
+    sampling_handler=LoggingAnthropicHandler(default_model="claude-sonnet-4-5-20250929"),
 )
 
 

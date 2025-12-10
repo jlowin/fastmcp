@@ -110,7 +110,7 @@ async def main():
     )
     console.print()
 
-    handler = LoggingAnthropicHandler(default_model="claude-sonnet-4-20250514")
+    handler = LoggingAnthropicHandler(default_model="claude-sonnet-4-5-20250929")
 
     test_texts = [
         ("I love this! Best purchase ever!", "😊"),

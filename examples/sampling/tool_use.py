@@ -133,7 +133,7 @@ async def main():
     )
     console.print()
 
-    handler = LoggingAnthropicHandler(default_model="claude-sonnet-4-20250514")
+    handler = LoggingAnthropicHandler(default_model="claude-sonnet-4-5-20250929")
 
     questions = [
         "What's 15% tip on a $47.50 bill?",
