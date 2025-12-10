@@ -455,12 +455,24 @@ However, you can provide a `sampling_handler` to the FastMCP server, which sends
 - **`"fallback"`** (default): Uses the handler only when the client doesn't support sampling. Requests go to the client first, falling back to the handler if needed.
 - **`"always"`**: Always uses the handler, bypassing the client entirely. Useful when you want full control over the LLM used for sampling.
 
-### OpenAI Handler
+### Using Pre-built Handlers
 
-FastMCP provides an OpenAI-compatible sampling handler that supports both basic sampling and tool use:
+The server fallback handler uses the same signature as client sampling handlers. FastMCP provides pre-built handlers for [Anthropic and OpenAI](/clients/sampling#pre-built-handlers) that work in both contexts:
 
 ```python
-import os
+from fastmcp import FastMCP
+from fastmcp.server.sampling.anthropic import AnthropicSamplingHandler
+
+server = FastMCP(
+    name="Sampling Server",
+    sampling_handler=AnthropicSamplingHandler(
+        default_model="claude-sonnet-4-20250514",
+    ),
+    sampling_handler_behavior="fallback",
+)
+```
+
+```python
 from openai import OpenAI
 from fastmcp import FastMCP
 from fastmcp.server.sampling.openai import OpenAISamplingHandler
@@ -469,107 +481,10 @@ server = FastMCP(
     name="Sampling Server",
     sampling_handler=OpenAISamplingHandler(
         default_model="gpt-4o-mini",
-        client=OpenAI(api_key=os.getenv("OPENAI_API_KEY")),
+        client=OpenAI(),
     ),
-    sampling_handler_behavior="fallback",
+    sampling_handler_behavior="always",  # Always use server's LLM
 )
-```
-
-The OpenAI handler automatically handles tool conversion - when you pass tools to `ctx.sample()`, they're converted to OpenAI's function calling format.
-
-### Fallback Mode (Default)
-
-Uses the handler only when the client doesn't support sampling:
-
-```python
-import asyncio
-import os
-from openai import OpenAI
-
-from fastmcp import FastMCP, Context
-from fastmcp.server.sampling.openai import OpenAISamplingHandler
-
-
-async def async_main():
-    server = FastMCP(
-        name="OpenAI Sampling Fallback Example",
-        sampling_handler=OpenAISamplingHandler(
-            default_model="gpt-4o-mini",
-            client=OpenAI(api_key=os.getenv("OPENAI_API_KEY")),
-        ),
-        sampling_handler_behavior="fallback",
-    )
-
-    @server.tool
-    async def summarize(text: str, ctx: Context) -> str:
-        # Uses client's LLM if available, falls back to OpenAI
-        result = await ctx.sample(
-            messages=f"Summarize: {text}",
-        )
-        return result.text
-
-    await server.run_http_async()
-
-
-if __name__ == "__main__":
-    asyncio.run(async_main())
-```
-
-### Always Mode
-
-Always uses the handler, bypassing the client:
-
-```python
-server = FastMCP(
-    name="Server-Controlled Sampling",
-    sampling_handler=OpenAISamplingHandler(
-        default_model="gpt-4o-mini",
-        client=OpenAI(api_key=os.getenv("API_KEY")),
-    ),
-    sampling_handler_behavior="always",
-)
-
-@server.tool
-async def analyze_data(data: str, ctx: Context) -> str:
-    # Always uses the server's configured LLM
-    result = await ctx.sample(
-        messages=f"Analyze this data: {data}",
-        system_prompt="You are a data analyst.",
-    )
-    return result.text
-```
-
-### Fallback with Tools
-
-The fallback handler fully supports sampling with tools:
-
-```python
-from fastmcp import FastMCP, Context
-from fastmcp.server.sampling.openai import OpenAISamplingHandler
-from openai import OpenAI
-import os
-
-def search(query: str) -> str:
-    """Search for information."""
-    return f"Results for: {query}"
-
-server = FastMCP(
-    name="Agentic Server",
-    sampling_handler=OpenAISamplingHandler(
-        default_model="gpt-4o-mini",
-        client=OpenAI(api_key=os.getenv("OPENAI_API_KEY")),
-    ),
-    sampling_handler_behavior="always",
-)
-
-@server.tool
-async def research(question: str, ctx: Context) -> str:
-    """Research a topic using tools."""
-    result = await ctx.sample(
-        messages=question,
-        tools=[search],
-    )
-    return result.text
 ```
 
 ## Client Requirements

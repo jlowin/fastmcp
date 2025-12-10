@@ -270,3 +270,92 @@ async def sampling_handler_with_tools(
 <Note>
 Tool execution happens on the server side. The client's role is to pass tools to the LLM and return the LLM's response (which may include tool use requests). The server then executes the tools and may send follow-up sampling requests with tool results.
 </Note>
+
+## Pre-built Handlers
+
+<VersionBadge version="2.14.0" />
+
+FastMCP provides ready-to-use sampling handlers for Anthropic and OpenAI that handle all the complexity of message conversion, tool formatting, and response parsing.
+
+### Anthropic Handler
+
+The Anthropic handler uses the Claude API:
+
+```python
+from anthropic import Anthropic
+from fastmcp import Client
+from fastmcp.server.sampling.anthropic import AnthropicSamplingHandler
+
+handler = AnthropicSamplingHandler(
+    default_model="claude-sonnet-4-20250514",
+    client=Anthropic(),  # Uses ANTHROPIC_API_KEY env var
+)
+
+async with Client("server.py", sampling_handler=handler) as client:
+    result = await client.call_tool("summarize", {"text": "..."})
+```
+
+The handler automatically:
+- Converts MCP messages to Anthropic's format
+- Translates tool definitions to Anthropic's tool format
+- Maps stop reasons (`tool_use` → `toolUse`, `end_turn` → `endTurn`)
+- Selects models based on server preferences (any model starting with `claude` is accepted)
+
+<Note>
+Requires the `anthropic` package. Install with `pip install fastmcp[anthropic]` or `pip install anthropic`.
+</Note>
+
+### OpenAI Handler
+
+The OpenAI handler works with the OpenAI API and compatible providers:
+
+```python
+from openai import OpenAI
+from fastmcp import Client
+from fastmcp.server.sampling.openai import OpenAISamplingHandler
+
+handler = OpenAISamplingHandler(
+    default_model="gpt-4o-mini",
+    client=OpenAI(),  # Uses OPENAI_API_KEY env var
+)
+
+async with Client("server.py", sampling_handler=handler) as client:
+    result = await client.call_tool("analyze", {"data": "..."})
+```
+
+The handler automatically:
+- Converts MCP messages to OpenAI's chat format
+- Translates tool definitions to OpenAI's function calling format
+- Maps stop reasons (`tool_calls` → `toolUse`, `stop` → `endTurn`)
+- Selects models based on server preferences
+
+<Note>
+Requires the `openai` package. Install with `pip install fastmcp[openai]` or `pip install openai`.
+</Note>
+
+### Using with Compatible Providers
+
+The OpenAI handler works with any OpenAI-compatible API:
+
+```python
+from openai import OpenAI
+from fastmcp.server.sampling.openai import OpenAISamplingHandler
+
+# Azure OpenAI
+handler = OpenAISamplingHandler(
+    default_model="gpt-4o",
+    client=OpenAI(
+        api_key=os.getenv("AZURE_OPENAI_API_KEY"),
+        base_url="https://your-resource.openai.azure.com/openai/deployments/your-deployment",
+    ),
+)
+
+# Local models (Ollama, vLLM, etc.)
+handler = OpenAISamplingHandler(
+    default_model="llama3",
+    client=OpenAI(
+        api_key="not-needed",
+        base_url="http://localhost:11434/v1",
+    ),
+)
+```
