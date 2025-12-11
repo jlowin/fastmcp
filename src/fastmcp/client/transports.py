@@ -969,14 +969,22 @@ class MCPConfigTransport(ClientTransport):
         ```
     """
 
-    def __init__(self, config: MCPConfig | dict, name_as_prefix: bool = True):
+    def __init__(
+        self,
+        config: MCPConfig | dict,
+        name_as_prefix: bool = True,
+        concurrent_startup: bool = False,
+    ):
         from fastmcp.utilities.mcp_config import mcp_config_to_servers_and_transports
 
         if isinstance(config, dict):
             config = MCPConfig.from_dict(config)
         self.config = config
+        self.concurrent_startup = concurrent_startup
 
         self._underlying_transports: list[ClientTransport] = []
+        self._server_names: list[str] = []
+        self._warmup_done = False
 
         # if there are no servers, raise an error
         if len(self.config.mcpServers) == 0:
@@ -986,6 +994,7 @@ class MCPConfigTransport(ClientTransport):
         elif len(self.config.mcpServers) == 1:
             self.transport = next(iter(self.config.mcpServers.values())).to_transport()
             self._underlying_transports.append(self.transport)
+            self._server_names.append(next(iter(self.config.mcpServers.keys())))
 
         # otherwise create a composite client
         else:
@@ -996,6 +1005,7 @@ class MCPConfigTransport(ClientTransport):
                 self.config
             ):
                 self._underlying_transports.append(transport)
+                self._server_names.append(name)
                 self._composite_server.mount(
                     server, prefix=name if name_as_prefix else None
                 )
@@ -1006,6 +1016,17 @@ class MCPConfigTransport(ClientTransport):
     async def connect_session(
         self, **session_kwargs: Unpack[SessionKwargs]
     ) -> AsyncIterator[ClientSession]:
+        # Warm up transports concurrently on first connection
+        if self.concurrent_startup and not self._warmup_done:
+            from fastmcp.utilities.mcp_config import warm_up_mcp_config_transports
+
+            await warm_up_mcp_config_transports(
+                self._underlying_transports,
+                server_names=self._server_names,
+                show_startup_logs=True,
+            )
+            self._warmup_done = True
+
         async with self.transport.connect_session(**session_kwargs) as session:
             yield session
 
@@ -1064,6 +1085,7 @@ def infer_transport(
     | MCPConfig
     | dict[str, Any]
     | str,
+    concurrent_startup: bool = False,
 ) -> ClientTransport:
     """
     Infer the appropriate transport type from the given transport argument.
@@ -1087,6 +1109,10 @@ def infer_transport(
     `servername_toolname` for tools and `protocol://servername/path` for resources.
     If the MCPConfig contains only one server, a direct connection is established without prefixing.
 
+    Args:
+        concurrent_startup: If True and transport is an MCPConfig with multiple servers,
+            all servers will be started concurrently for faster initialization.
+
     Examples:
         ```python
         # Connect to a local Python script
@@ -1095,14 +1121,14 @@ def infer_transport(
         # Connect to a remote server via HTTP
         transport = infer_transport("http://example.com/mcp")
 
-        # Connect to multiple servers using MCPConfig
+        # Connect to multiple servers using MCPConfig with concurrent startup
         config = {
             "mcpServers": {
                 "weather": {"url": "http://weather.example.com/mcp"},
                 "calendar": {"url": "http://calendar.example.com/mcp"}
             }
         }
-        transport = infer_transport(config)
+        transport = infer_transport(config, concurrent_startup=True)
         ```
     """
 
@@ -1140,7 +1166,8 @@ def infer_transport(
     # if the transport is a config dict or MCPConfig
     elif isinstance(transport, dict | MCPConfig):
         inferred_transport = MCPConfigTransport(
-            config=cast(dict | MCPConfig, transport)
+            config=cast(dict | MCPConfig, transport),
+            concurrent_startup=concurrent_startup,
         )
 
     # the transport is an unknown type

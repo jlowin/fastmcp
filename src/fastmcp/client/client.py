@@ -172,6 +172,9 @@ class Client(Generic[ClientTransportT]):
         timeout: Optional timeout for requests (seconds or timedelta)
         init_timeout: Optional timeout for initial connection (seconds or timedelta).
             Set to 0 to disable. If None, uses the value in the FastMCP global settings.
+        concurrent_startup: If True and transport is an MCPConfig with multiple servers,
+            starts all servers concurrently instead of sequentially. Significantly speeds
+            up initialization when dealing with many servers. Default is False.
 
     Examples:
         ```python
@@ -184,6 +187,17 @@ class Client(Generic[ClientTransportT]):
 
             # Call a tool
             result = await client.call_tool("my_tool", {"param": "value"})
+
+        # Connect to multiple MCP servers with concurrent startup
+        config = {
+            "mcpServers": {
+                "server1": {"command": "python", "args": ["server1.py"]},
+                "server2": {"command": "python", "args": ["server2.py"]},
+            }
+        }
+        client = Client(config, concurrent_startup=True)
+        async with client:
+            tools = await client.list_tools()  # All servers started concurrently
         ```
     """
 
@@ -259,10 +273,15 @@ class Client(Generic[ClientTransportT]):
         init_timeout: datetime.timedelta | float | int | None = None,
         client_info: mcp.types.Implementation | None = None,
         auth: httpx.Auth | Literal["oauth"] | str | None = None,
+        concurrent_startup: bool = False,
     ) -> None:
         self.name = name or self.generate_name()
 
-        self.transport = cast(ClientTransportT, infer_transport(transport))
+        # Pass concurrent_startup to infer_transport for MCPConfig
+        self.transport = cast(
+            ClientTransportT,
+            infer_transport(transport, concurrent_startup=concurrent_startup),
+        )
         if auth is not None:
             self.transport._set_auth(auth)
 
