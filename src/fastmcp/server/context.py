@@ -10,7 +10,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from logging import Logger
-from typing import Any, Generic, Literal, cast, get_origin, overload
+from typing import Any, Generic, Literal, cast, overload
 
 import anyio
 from mcp import LoggingLevel, ServerSession
@@ -52,9 +52,9 @@ from fastmcp.server.elicitation import (
 )
 from fastmcp.server.sampling import SamplingTool
 from fastmcp.server.server import FastMCP
-from fastmcp.tools.tool import Tool as FastMCPTool
 from fastmcp.utilities.json_schema import compress_schema
 from fastmcp.utilities.logging import _clamp_logger, get_logger
+from fastmcp.utilities.types import get_cached_typeadapter
 
 logger: Logger = get_logger(name=__name__)
 to_client_logger: Logger = logger.getChild(suffix="to_client")
@@ -571,7 +571,7 @@ class Context:
         temperature: float | None = None,
         max_tokens: int | None = None,
         model_preferences: ModelPreferences | str | list[str] | None = None,
-        tools: Sequence[SamplingTool | FastMCPTool | Callable[..., Any]] | None = None,
+        tools: Sequence[SamplingTool | Callable[..., Any]] | None = None,
         tool_choice: ToolChoiceOption | None = None,
         max_iterations: int = 10,
         result_type: type[ResultT],
@@ -588,7 +588,7 @@ class Context:
         temperature: float | None = None,
         max_tokens: int | None = None,
         model_preferences: ModelPreferences | str | list[str] | None = None,
-        tools: Sequence[SamplingTool | FastMCPTool | Callable[..., Any]] | None = None,
+        tools: Sequence[SamplingTool | Callable[..., Any]] | None = None,
         tool_choice: ToolChoiceOption | None = None,
         max_iterations: int = 10,
         result_type: None = None,
@@ -604,7 +604,7 @@ class Context:
         temperature: float | None = None,
         max_tokens: int | None = None,
         model_preferences: ModelPreferences | str | list[str] | None = None,
-        tools: Sequence[SamplingTool | FastMCPTool | Callable[..., Any]] | None = None,
+        tools: Sequence[SamplingTool | Callable[..., Any]] | None = None,
         tool_choice: ToolChoiceOption | None = None,
         max_iterations: int = 10,
         result_type: type[ResultT] | None = None,
@@ -634,9 +634,9 @@ class Context:
             max_tokens: Maximum tokens to generate. Defaults to 512.
             model_preferences: Optional model preferences.
             tools: Optional list of tools the LLM can use. Accepts plain
-                functions, SamplingTools, or FastMCP Tools (all are auto-converted).
-                When provided, the method automatically handles tool execution
-                and returns the final response after all tool calls complete.
+                functions or SamplingTools. When provided, the method automatically
+                handles tool execution and returns the final response after all
+                tool calls complete.
             tool_choice: Optional control over tool usage behavior. Only valid
                 when tools are provided.
             max_iterations: Maximum number of LLM calls before returning.
@@ -676,14 +676,10 @@ class Context:
             for t in tools:
                 if isinstance(t, SamplingTool):
                     sampling_tools.append(t)
-                elif isinstance(t, FastMCPTool):
-                    sampling_tools.append(SamplingTool.from_mcp_tool(t))
                 elif callable(t):
                     sampling_tools.append(SamplingTool.from_function(t))
                 else:
-                    raise TypeError(
-                        f"Expected SamplingTool, FastMCP Tool, or callable, got {type(t)}"
-                    )
+                    raise TypeError(f"Expected SamplingTool or callable, got {type(t)}")
 
         # Create synthetic final_response tool for structured output
         final_response_tool: SamplingTool | None = None

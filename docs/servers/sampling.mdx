@@ -82,7 +82,7 @@ async def analyze_sentiment(text: str, ctx: Context) -> dict:
       Optional model selection preferences (e.g., model hint string, list of hints, or ModelPreferences object)
     </ResponseField>
 
-    <ResponseField name="tools" type="list[SamplingTool | Tool] | None" default="None">
+    <ResponseField name="tools" type="list[SamplingTool | Callable] | None" default="None">
       Optional list of tools the LLM can use during sampling. See [Sampling with Tools](#sampling-with-tools).
     </ResponseField>
 
@@ -278,26 +278,6 @@ tool = SamplingTool.from_function(
 result = await ctx.sample(messages="...", tools=[tool])
 ```
 </Note>
-
-You can also pass existing FastMCP tools directly to `ctx.sample()`:
-
-```python
-mcp = FastMCP()
-
-@mcp.tool
-def get_weather(city: str) -> str:
-    """Get the current weather for a city."""
-    return f"Weather in {city}: 72°F, sunny"
-
-@mcp.tool
-async def weather_agent(question: str, ctx: Context) -> str:
-    """Answer weather questions using the weather tool."""
-    result = await ctx.sample(
-        messages=question,
-        tools=[get_weather],  # FastMCP tools work directly
-    )
-    return result.text
-```
 
 ### Using Tools in Sampling
 

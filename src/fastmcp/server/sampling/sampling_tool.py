@@ -4,15 +4,12 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from mcp.types import Tool as SDKTool
 from pydantic import BaseModel, ConfigDict
 
 from fastmcp.tools.tool import ParsedFunction
-
-if TYPE_CHECKING:
-    from fastmcp.tools.tool import Tool
 
 
 class SamplingTool(BaseModel):
@@ -36,10 +33,6 @@ class SamplingTool(BaseModel):
     Create a SamplingTool explicitly when you need custom name/description:
 
         tool = SamplingTool.from_function(search, name="web_search")
-
-    Or from an existing FastMCP Tool:
-
-        sampling_tool = SamplingTool.from_mcp_tool(existing_tool)
     """
 
     name: str
@@ -76,32 +69,6 @@ class SamplingTool(BaseModel):
             name=self.name,
             description=self.description,
             inputSchema=self.parameters,
-        )
-
-    @classmethod
-    def from_mcp_tool(cls, tool: Tool) -> SamplingTool:
-        """Create a SamplingTool from a FastMCP Tool.
-
-        Args:
-            tool: A FastMCP Tool instance (must have an fn attribute).
-
-        Returns:
-            A SamplingTool with the same schema and executor.
-
-        Raises:
-            ValueError: If the tool doesn't have an fn attribute.
-        """
-        if not hasattr(tool, "fn"):
-            raise ValueError(
-                f"Tool {tool.name!r} does not have an fn attribute. "
-                "Only FunctionTools can be converted to SamplingTools."
-            )
-
-        return cls(
-            name=tool.name,
-            description=tool.description,
-            parameters=tool.parameters,
-            fn=tool.fn,
         )
 
     @classmethod

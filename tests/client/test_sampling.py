@@ -268,21 +268,6 @@ class TestSamplingWithTools:
         result = await tool.run({"a": 4, "b": 7})
         assert result == 28
 
-    def test_sampling_tool_from_mcp_tool(self):
-        """Test creating SamplingTool from FastMCP Tool."""
-        from fastmcp.tools.tool import Tool
-
-        def original_fn(x: int, y: int) -> int:
-            """Add x and y."""
-            return x + y
-
-        mcp_tool = Tool.from_function(original_fn)
-        sampling = SamplingTool.from_mcp_tool(mcp_tool)
-
-        assert sampling.name == "original_fn"
-        assert sampling.description == "Add x and y."
-        assert sampling.fn is mcp_tool.fn
-
     def test_tool_choice_parameter(self):
         """Test that tool_choice parameter accepts string literals."""
         from fastmcp.server.context import ToolChoiceOption

@@ -3,7 +3,6 @@
 import pytest
 
 from fastmcp.server.sampling import SamplingTool
-from fastmcp.tools.tool import Tool
 
 
 class TestSamplingToolFromFunction:
@@ -64,34 +63,6 @@ class TestSamplingToolFromFunction:
         assert "query" in props
         assert "limit" in props
         assert "include_images" in props
-
-
-class TestSamplingToolFromMCPTool:
-    """Tests for SamplingTool.from_mcp_tool()."""
-
-    def test_from_function_tool(self):
-        def original(x: int) -> int:
-            """Double a number."""
-            return x * 2
-
-        mcp_tool = Tool.from_function(original)
-        sampling = SamplingTool.from_mcp_tool(mcp_tool)
-
-        assert sampling.name == "original"
-        assert sampling.description == "Double a number."
-        assert sampling.fn is mcp_tool.fn
-
-    def test_from_tool_without_fn_raises(self):
-        # Create a base Tool without fn (not a FunctionTool)
-        tool = Tool(
-            name="test",
-            description="Test tool",
-            parameters={"type": "object"},
-            tags=set(),
-        )
-
-        with pytest.raises(ValueError, match="does not have an fn attribute"):
-            SamplingTool.from_mcp_tool(tool)
 
 
 class TestSamplingToolRun:
