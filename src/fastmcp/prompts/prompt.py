@@ -106,6 +106,7 @@ class PromptResult(FastMCPBaseModel):
         return GetPromptResult(
             description=self.description,
             messages=self.messages,
+            _meta=self.meta,
         )
 
 
