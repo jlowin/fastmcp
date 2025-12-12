@@ -4,11 +4,14 @@ import warnings
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from mcp import GetPromptResult
-
 from fastmcp import settings
 from fastmcp.exceptions import NotFoundError, PromptError
-from fastmcp.prompts.prompt import FunctionPrompt, Prompt, PromptResult
+from fastmcp.prompts.prompt import (
+    FunctionPrompt,
+    Prompt,
+    PromptResult,
+    _PromptFnReturn,
+)
 from fastmcp.settings import DuplicateBehavior
 from fastmcp.utilities.logging import get_logger
 
@@ -58,7 +61,7 @@ class PromptManager:
 
     def add_prompt_from_fn(
         self,
-        fn: Callable[..., PromptResult | Awaitable[PromptResult]],
+        fn: Callable[..., _PromptFnReturn | Awaitable[_PromptFnReturn]],
         name: str | None = None,
         description: str | None = None,
         tags: set[str] | None = None,
@@ -98,15 +101,14 @@ class PromptManager:
         self,
         name: str,
         arguments: dict[str, Any] | None = None,
-    ) -> GetPromptResult:
+    ) -> PromptResult:
         """
         Internal API for servers: Finds and renders a prompt, respecting the
         filtered protocol path.
         """
         prompt = await self.get_prompt(name)
         try:
-            messages = await prompt.render(arguments)
-            return GetPromptResult(description=prompt.description, messages=messages)
+            return await prompt._render(arguments)
         except PromptError as e:
             logger.exception(f"Error rendering prompt {name!r}")
             raise e

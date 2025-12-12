@@ -795,7 +795,7 @@ class TestPromptDecorator:
         assert prompt.name == "fn"
         # Don't compare functions directly since validate_call wraps them
         content = await prompt.render()
-        assert content[0].content.text == "Hello, world!"  # type: ignore[attr-defined]
+        assert content.messages[0].content.text == "Hello, world!"  # type: ignore[attr-defined]
 
     async def test_prompt_decorator_without_parentheses(self):
         mcp = FastMCP()
@@ -827,7 +827,7 @@ class TestPromptDecorator:
         prompt = prompts_dict["custom_name"]
         assert prompt.name == "custom_name"
         content = await prompt.render()
-        assert content[0].content.text == "Hello, world!"  # type: ignore[attr-defined]
+        assert content.messages[0].content.text == "Hello, world!"  # type: ignore[attr-defined]
 
     async def test_prompt_decorator_with_description(self):
         mcp = FastMCP()
@@ -841,7 +841,7 @@ class TestPromptDecorator:
         prompt = prompts_dict["fn"]
         assert prompt.description == "A custom description"
         content = await prompt.render()
-        assert content[0].content.text == "Hello, world!"  # type: ignore[attr-defined]
+        assert content.messages[0].content.text == "Hello, world!"  # type: ignore[attr-defined]
 
     async def test_prompt_decorator_with_parameters(self):
         mcp = FastMCP()
