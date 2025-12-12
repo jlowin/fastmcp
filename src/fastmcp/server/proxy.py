@@ -31,6 +31,7 @@ from fastmcp.prompts import Prompt, PromptMessage
 from fastmcp.prompts.prompt import PromptArgument
 from fastmcp.prompts.prompt_manager import PromptManager
 from fastmcp.resources import Resource, ResourceTemplate
+from fastmcp.resources.resource import ResourceContent
 from fastmcp.resources.resource_manager import ResourceManager
 from fastmcp.server.context import Context
 from fastmcp.server.dependencies import get_context
@@ -184,7 +185,7 @@ class ProxyResourceManager(ResourceManager, ProxyManagerMixin):
         templates_dict = await self.get_resource_templates()
         return list(templates_dict.values())
 
-    async def read_resource(self, uri: AnyUrl | str) -> str | bytes:
+    async def read_resource(self, uri: AnyUrl | str) -> ResourceContent:
         """Reads a resource, trying local/mounted first, then proxy if not found."""
         try:
             # First try local and mounted resources
@@ -195,9 +196,17 @@ class ProxyResourceManager(ResourceManager, ProxyManagerMixin):
             async with client:
                 result = await client.read_resource(uri)
                 if isinstance(result[0], TextResourceContents):
-                    return result[0].text
+                    return ResourceContent(
+                        content=result[0].text,
+                        mime_type=result[0].mimeType,
+                        meta=result[0].meta,
+                    )
                 elif isinstance(result[0], BlobResourceContents):
-                    return result[0].blob
+                    return ResourceContent(
+                        content=result[0].blob,
+                        mime_type=result[0].mimeType,
+                        meta=result[0].meta,
+                    )
                 else:
                     raise ResourceError(
                         f"Unsupported content type: {type(result[0])}"
@@ -367,17 +376,25 @@ class ProxyResource(Resource, MirroredComponent):
             _mirrored=True,
         )
 
-    async def read(self) -> str | bytes:
+    async def read(self) -> ResourceContent:
         """Read the resource content from the remote server."""
         if self._value is not None:
-            return self._value
+            return ResourceContent(content=self._value, mime_type=self.mime_type)
 
         async with self._client:
             result = await self._client.read_resource(self.uri)
         if isinstance(result[0], TextResourceContents):
-            return result[0].text
+            return ResourceContent(
+                content=result[0].text,
+                mime_type=result[0].mimeType,
+                meta=result[0].meta,
+            )
         elif isinstance(result[0], BlobResourceContents):
-            return result[0].blob
+            return ResourceContent(
+                content=result[0].blob,
+                mime_type=result[0].mimeType,
+                meta=result[0].meta,
+            )
         else:
             raise ResourceError(f"Unsupported content type: {type(result[0])}")
 
