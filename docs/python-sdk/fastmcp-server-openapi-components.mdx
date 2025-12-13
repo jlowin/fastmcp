@@ -38,13 +38,13 @@ Resource implementation for OpenAPI endpoints.
 #### `read` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/openapi/components.py#L190" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 ```python
-read(self) -> str | bytes
+read(self) -> ResourceContent
 ```
 
 Fetch the resource data by making an HTTP request.
 
 
-### `OpenAPIResourceTemplate` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/openapi/components.py#L289" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+### `OpenAPIResourceTemplate` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/openapi/components.py#L293" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 
 Resource template implementation for OpenAPI endpoints.
@@ -52,7 +52,7 @@ Resource template implementation for OpenAPI endpoints.
 
 **Methods:**
 
-#### `create_resource` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/openapi/components.py#L322" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+#### `create_resource` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/openapi/components.py#L326" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 ```python
 create_resource(self, uri: str, params: dict[str, Any], context: 'Context | None' = None) -> Resource
