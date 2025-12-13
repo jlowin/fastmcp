@@ -1,26 +1,38 @@
+import json
 from collections.abc import Iterator, Sequence
-from typing import get_args
+from typing import Any, get_args
 
 from mcp import ClientSession, ServerSession
 from mcp.shared.context import LifespanContextT, RequestContext
 from mcp.types import CreateMessageRequestParams as SamplingParams
 from mcp.types import (
     CreateMessageResult,
+    CreateMessageResultWithTools,
     ModelPreferences,
     SamplingMessage,
+    StopReason,
     TextContent,
+    Tool,
+    ToolChoice,
+    ToolResultContent,
+    ToolUseContent,
 )
 
 try:
-    from openai import NOT_GIVEN, OpenAI
+    from openai import NOT_GIVEN, NotGiven, OpenAI
     from openai.types.chat import (
         ChatCompletion,
         ChatCompletionAssistantMessageParam,
         ChatCompletionMessageParam,
+        ChatCompletionMessageToolCallParam,
         ChatCompletionSystemMessageParam,
+        ChatCompletionToolChoiceOptionParam,
+        ChatCompletionToolMessageParam,
+        ChatCompletionToolParam,
         ChatCompletionUserMessageParam,
     )
     from openai.types.shared.chat_model import ChatModel
+    from openai.types.shared_params import FunctionDefinition
 except ImportError as e:
     raise ImportError(
         "The `openai` package is not installed. Please install `fastmcp[openai]` or add `openai` to your dependencies manually."
@@ -43,7 +55,7 @@ class OpenAISamplingHandler(BaseLLMSamplingHandler):
         params: SamplingParams,
         context: RequestContext[ServerSession, LifespanContextT]
         | RequestContext[ClientSession, LifespanContextT],
-    ) -> CreateMessageResult:
+    ) -> CreateMessageResult | CreateMessageResultWithTools:
         openai_messages: list[ChatCompletionMessageParam] = (
             self._convert_to_openai_messages(
                 system_prompt=params.systemPrompt,
@@ -53,14 +65,29 @@ class OpenAISamplingHandler(BaseLLMSamplingHandler):
 
         model: ChatModel = self._select_model_from_preferences(params.modelPreferences)
 
+        # Convert MCP tools to OpenAI format
+        openai_tools: list[ChatCompletionToolParam] | NotGiven = NOT_GIVEN
+        if params.tools:
+            openai_tools = self._convert_tools_to_openai(params.tools)
+
+        # Convert tool_choice to OpenAI format
+        openai_tool_choice: ChatCompletionToolChoiceOptionParam | NotGiven = NOT_GIVEN
+        if params.toolChoice:
+            openai_tool_choice = self._convert_tool_choice_to_openai(params.toolChoice)
+
         response = self.client.chat.completions.create(
             model=model,
             messages=openai_messages,
             temperature=params.temperature or NOT_GIVEN,
             max_tokens=params.maxTokens,
             stop=params.stopSequences or NOT_GIVEN,
+            tools=openai_tools,
+            tool_choice=openai_tool_choice,
         )
 
+        # Return appropriate result type based on whether tools were provided
+        if params.tools:
+            return self._chat_completion_to_result_with_tools(response)
         return self._chat_completion_to_create_message_result(response)
 
     @staticmethod
@@ -121,23 +148,130 @@ class OpenAISamplingHandler(BaseLLMSamplingHandler):
                     )
                     continue
 
-                if not isinstance(message.content, TextContent):
-                    raise ValueError("Only text content is supported")
+                content = message.content
 
-                if message.role == "user":
-                    openai_messages.append(
-                        ChatCompletionUserMessageParam(
-                            role="user",
-                            content=message.content.text,
-                        )
-                    )
-                else:
+                # Handle list content (from CreateMessageResultWithTools)
+                if isinstance(content, list):
+                    # Collect tool calls and text from the list
+                    tool_calls: list[ChatCompletionMessageToolCallParam] = []
+                    text_parts: list[str] = []
+
+                    for item in content:
+                        if isinstance(item, ToolUseContent):
+                            tool_calls.append(
+                                ChatCompletionMessageToolCallParam(
+                                    id=item.id,
+                                    type="function",
+                                    function={
+                                        "name": item.name,
+                                        "arguments": json.dumps(item.input),
+                                    },
+                                )
+                            )
+                        elif isinstance(item, TextContent):
+                            text_parts.append(item.text)
+                        elif isinstance(item, ToolResultContent):
+                            # Each tool result becomes a separate tool message
+                            content_parts: list[dict[str, str]] = []
+                            if item.content:
+                                for sub_item in item.content:
+                                    if isinstance(sub_item, TextContent):
+                                        content_parts.append(
+                                            {"type": "text", "text": sub_item.text}
+                                        )
+                            openai_messages.append(
+                                ChatCompletionToolMessageParam(
+                                    role="tool",
+                                    tool_call_id=item.toolUseId,
+                                    content=content_parts if content_parts else "",
+                                )
+                            )
+
+                    # Add assistant message with tool calls if present
+                    if tool_calls or text_parts:
+                        msg_content = "\n".join(text_parts) if text_parts else None
+                        if tool_calls:
+                            openai_messages.append(
+                                ChatCompletionAssistantMessageParam(
+                                    role="assistant",
+                                    content=msg_content,
+                                    tool_calls=tool_calls,
+                                )
+                            )
+                        elif msg_content:
+                            if message.role == "user":
+                                openai_messages.append(
+                                    ChatCompletionUserMessageParam(
+                                        role="user",
+                                        content=msg_content,
+                                    )
+                                )
+                            else:
+                                openai_messages.append(
+                                    ChatCompletionAssistantMessageParam(
+                                        role="assistant",
+                                        content=msg_content,
+                                    )
+                                )
+                    continue
+
+                # Handle ToolUseContent (assistant's tool calls)
+                if isinstance(content, ToolUseContent):
                     openai_messages.append(
                         ChatCompletionAssistantMessageParam(
                             role="assistant",
-                            content=message.content.text,
+                            tool_calls=[
+                                ChatCompletionMessageToolCallParam(
+                                    id=content.id,
+                                    type="function",
+                                    function={
+                                        "name": content.name,
+                                        "arguments": json.dumps(content.input),
+                                    },
+                                )
+                            ],
                         )
                     )
+                    continue
+
+                # Handle ToolResultContent (user's tool results)
+                if isinstance(content, ToolResultContent):
+                    # Extract text parts from the content list
+                    result_parts: list[dict[str, str]] = []
+                    if content.content:
+                        for item in content.content:
+                            if isinstance(item, TextContent):
+                                result_parts.append(
+                                    {"type": "text", "text": item.text}
+                                )
+                    openai_messages.append(
+                        ChatCompletionToolMessageParam(
+                            role="tool",
+                            tool_call_id=content.toolUseId,
+                            content=result_parts if result_parts else "",
+                        )
+                    )
+                    continue
+
+                # Handle TextContent
+                if isinstance(content, TextContent):
+                    if message.role == "user":
+                        openai_messages.append(
+                            ChatCompletionUserMessageParam(
+                                role="user",
+                                content=content.text,
+                            )
+                        )
+                    else:
+                        openai_messages.append(
+                            ChatCompletionAssistantMessageParam(
+                                role="assistant",
+                                content=content.text,
+                            )
+                        )
+                    continue
+
+                raise ValueError(f"Unsupported content type: {type(content)}")
 
         return openai_messages
 
@@ -168,3 +302,98 @@ class OpenAISamplingHandler(BaseLLMSamplingHandler):
                 return chosen_model
 
         return self.default_model
+
+    @staticmethod
+    def _convert_tools_to_openai(tools: list[Tool]) -> list[ChatCompletionToolParam]:
+        """Convert MCP tools to OpenAI tool format."""
+        openai_tools: list[ChatCompletionToolParam] = []
+        for tool in tools:
+            # Build parameters dict, ensuring required fields
+            parameters: dict[str, Any] = dict(tool.inputSchema)
+            if "type" not in parameters:
+                parameters["type"] = "object"
+
+            openai_tools.append(
+                ChatCompletionToolParam(
+                    type="function",
+                    function=FunctionDefinition(
+                        name=tool.name,
+                        description=tool.description or "",
+                        parameters=parameters,
+                    ),
+                )
+            )
+        return openai_tools
+
+    @staticmethod
+    def _convert_tool_choice_to_openai(
+        tool_choice: ToolChoice,
+    ) -> ChatCompletionToolChoiceOptionParam:
+        """Convert MCP tool_choice to OpenAI format."""
+        if tool_choice.mode == "auto":
+            return "auto"
+        elif tool_choice.mode == "required":
+            return "required"
+        elif tool_choice.mode == "none":
+            return "none"
+        else:
+            # Unknown mode, default to auto
+            return "auto"
+
+    @staticmethod
+    def _chat_completion_to_result_with_tools(
+        chat_completion: ChatCompletion,
+    ) -> CreateMessageResultWithTools:
+        """Convert OpenAI response to CreateMessageResultWithTools."""
+        if len(chat_completion.choices) == 0:
+            raise ValueError("No response for completion")
+
+        first_choice = chat_completion.choices[0]
+        message = first_choice.message
+
+        # Determine stop reason
+        stop_reason: StopReason
+        if first_choice.finish_reason == "tool_calls":
+            stop_reason = "toolUse"
+        elif first_choice.finish_reason == "stop":
+            stop_reason = "endTurn"
+        elif first_choice.finish_reason == "length":
+            stop_reason = "maxTokens"
+        else:
+            stop_reason = "endTurn"
+
+        # Build content list
+        content: list[TextContent | ToolUseContent] = []
+
+        # Add text content if present
+        if message.content:
+            content.append(TextContent(type="text", text=message.content))
+
+        # Add tool calls if present
+        if message.tool_calls:
+            for tool_call in message.tool_calls:
+                # Parse the arguments JSON string
+                try:
+                    arguments = json.loads(tool_call.function.arguments)
+                except json.JSONDecodeError:
+                    arguments = {}
+
+                content.append(
+                    ToolUseContent(
+                        type="tool_use",
+                        id=tool_call.id,
+                        name=tool_call.function.name,
+                        input=arguments,
+                    )
+                )
+
+        # Must have at least some content
+        if not content:
+            raise ValueError("No content in response from completion")
+
+        return CreateMessageResultWithTools(
+            content=content,
+            role="assistant",
+            model=chat_completion.model,
+            stopReason=stop_reason,
+        )
