@@ -7,10 +7,10 @@ import pytest
 from mcp import McpError
 from pydantic import Field
 
-from fastmcp import Client, FastMCP, ResourceContent
+from fastmcp import Client, FastMCP
 from fastmcp.exceptions import NotFoundError
 from fastmcp.prompts.prompt import FunctionPrompt, Prompt
-from fastmcp.resources import Resource, ResourceTemplate
+from fastmcp.resources import Resource, ResourceContent, ResourceTemplate
 from fastmcp.server.server import (
     add_resource_prefix,
     has_resource_prefix,

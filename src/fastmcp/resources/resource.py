@@ -41,7 +41,8 @@ class ResourceContent(pydantic.BaseModel):
 
     Example:
         ```python
-        from fastmcp import FastMCP, ResourceContent
+        from fastmcp import FastMCP
+        from fastmcp.resources import ResourceContent
 
         mcp = FastMCP()
 
@@ -350,13 +351,13 @@ class FunctionResource(Resource):
             task_config=task_config,
         )
 
-    async def read(self) -> ResourceContent:
+    async def read(self) -> str | bytes | ResourceContent:
         """Read the resource by calling the wrapped function.
 
         Returns:
-            ResourceContent: Always returns ResourceContent. If the user's
+            str | bytes | ResourceContent: The resource content. If the user's
             function returns str, bytes, dict, etc., it will be wrapped
-            automatically using ResourceContent.from_value().
+            in ResourceContent. Nested Resource reads may return raw types.
         """
         # self.fn is wrapped by without_injected_parameters which handles
         # dependency resolution internally

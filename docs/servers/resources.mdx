@@ -148,7 +148,8 @@ FastMCP automatically converts your function's return value into the appropriate
 For complete control over resource responses, return a `ResourceContent` object. This lets you include metadata alongside your resource content, which is useful for cases like Content Security Policy headers for HTML widgets.
 
 ```python
-from fastmcp import FastMCP, ResourceContent
+from fastmcp import FastMCP
+from fastmcp.resources import ResourceContent
 
 mcp = FastMCP(name="WidgetServer")
 

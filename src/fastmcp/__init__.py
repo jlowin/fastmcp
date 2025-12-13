@@ -19,8 +19,6 @@ import fastmcp.server
 from fastmcp.client import Client
 from . import client
 
-from fastmcp.resources.resource import ResourceContent
-
 __version__ = _version("fastmcp")
 
 
@@ -33,6 +31,5 @@ __all__ = [
     "Client",
     "Context",
     "FastMCP",
-    "ResourceContent",
     "settings",
 ]
