@@ -146,9 +146,13 @@ Get resource by URI, checking concrete resources first, then templates.
 #### `read_resource` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/resources/resource_manager.py#L289" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 ```python
-read_resource(self, uri: AnyUrl | str) -> str | bytes
+read_resource(self, uri: AnyUrl | str) -> ResourceContent
 ```
 
 Internal API for servers: Finds and reads a resource, respecting the
 filtered protocol path.
+
+**Returns:**
+- The canonical content wrapper. All Resource.read()
+- implementations now return ResourceContent.
 

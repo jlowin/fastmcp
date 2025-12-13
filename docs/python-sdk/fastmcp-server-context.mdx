@@ -166,7 +166,7 @@ Get a prompt by name with optional arguments.
 #### `read_resource` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/context.py#L278" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 ```python
-read_resource(self, uri: str | AnyUrl) -> list[ReadResourceContents]
+read_resource(self, uri: str | AnyUrl) -> list[ResourceContent]
 ```
 
 Read a resource by URI.
@@ -175,7 +175,7 @@ Read a resource by URI.
 - `uri`: Resource URI to read
 
 **Returns:**
-- The resource content as either text or bytes
+- List of ResourceContent objects
 
 
 #### `log` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/context.py#L290" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
