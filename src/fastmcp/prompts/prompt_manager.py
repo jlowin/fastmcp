@@ -27,7 +27,11 @@ class PromptManager:
         mask_error_details: bool | None = None,
     ):
         self._prompts: dict[str, Prompt] = {}
-        self.mask_error_details = mask_error_details or settings.mask_error_details
+        self.mask_error_details = (
+            settings.mask_error_details
+            if mask_error_details is None
+            else mask_error_details
+        )
 
         # Default to "warn" if None is provided
         if duplicate_behavior is None:
@@ -109,9 +113,9 @@ class PromptManager:
         prompt = await self.get_prompt(name)
         try:
             return await prompt._render(arguments)
-        except PromptError as e:
+        except PromptError:
             logger.exception(f"Error rendering prompt {name!r}")
-            raise e
+            raise
         except Exception as e:
             logger.exception(f"Error rendering prompt {name!r}")
             if self.mask_error_details:

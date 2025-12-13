@@ -27,7 +27,7 @@ from fastmcp.client.roots import RootsList
 from fastmcp.client.transports import ClientTransportT
 from fastmcp.exceptions import NotFoundError, ResourceError, ToolError
 from fastmcp.mcp_config import MCPConfig
-from fastmcp.prompts import Prompt, PromptMessage, PromptResult
+from fastmcp.prompts import Prompt, PromptResult
 from fastmcp.prompts.prompt import PromptArgument
 from fastmcp.prompts.prompt_manager import PromptManager
 from fastmcp.resources import Resource, ResourceTemplate
@@ -270,6 +270,7 @@ class ProxyPromptManager(PromptManager, ProxyManagerMixin):
                 return PromptResult(
                     messages=result.messages,
                     description=result.description,
+                    meta=result.meta,
                 )
 
 
@@ -527,11 +528,17 @@ class ProxyPrompt(Prompt, MirroredComponent):
             _mirrored=True,
         )
 
-    async def render(self, arguments: dict[str, Any]) -> list[PromptMessage]:  # type: ignore[override]
+    async def render(self, arguments: dict[str, Any]) -> PromptResult:  # type: ignore[override]
         """Render the prompt by making a call through the client."""
         async with self._client:
             result = await self._client.get_prompt(self.name, arguments)
-        return result.messages
+        # Convert GetPromptResult to PromptResult, preserving runtime meta from the result
+        # (not the static prompt meta which includes fastmcp tags)
+        return PromptResult(
+            messages=result.messages,
+            description=result.description,
+            meta=result.meta,
+        )
 
 
 class FastMCPProxy(FastMCP):
