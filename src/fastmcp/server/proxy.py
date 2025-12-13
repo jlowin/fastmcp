@@ -196,6 +196,10 @@ class ProxyResourceManager(ResourceManager, ProxyManagerMixin):
             client = await self._get_client()
             async with client:
                 result = await client.read_resource(uri)
+                if not result:
+                    raise ResourceError(
+                        f"Remote server returned empty content for {uri}"
+                    ) from None
                 if isinstance(result[0], TextResourceContents):
                     return ResourceContent(
                         content=result[0].text,
@@ -384,6 +388,8 @@ class ProxyResource(Resource, MirroredComponent):
 
         async with self._client:
             result = await self._client.read_resource(self.uri)
+        if not result:
+            raise ResourceError(f"Remote server returned empty content for {self.uri}")
         if isinstance(result[0], TextResourceContents):
             return ResourceContent(
                 content=result[0].text,
@@ -447,6 +453,10 @@ class ProxyTemplate(ResourceTemplate, MirroredComponent):
         async with self._client:
             result = await self._client.read_resource(parameterized_uri)
 
+        if not result:
+            raise ResourceError(
+                f"Remote server returned empty content for {parameterized_uri}"
+            )
         if isinstance(result[0], TextResourceContents):
             cached_content = ResourceContent(
                 content=result[0].text,
