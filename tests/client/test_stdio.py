@@ -2,6 +2,7 @@ import asyncio
 import gc
 import inspect
 import os
+import sys
 import weakref
 
 import psutil
@@ -324,6 +325,10 @@ class TestLogFile:
         content = log_file_path.read_text()
         assert "Test error message" in content
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="Windows ProactorEventLoop cleanup issues with TextIO log files",
+    )
     async def test_log_file_captures_stderr_output_with_textio(
         self, tmp_path, stdio_script_with_stderr
     ):
