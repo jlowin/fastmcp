@@ -48,7 +48,7 @@ class OpenAISamplingHandler(BaseLLMSamplingHandler):
         self,
         default_model: ChatModel,
         client: AsyncOpenAI | None = None,
-    ):
+    ) -> None:
         self.client: AsyncOpenAI = client or AsyncOpenAI()
         self.default_model: ChatModel = default_model
 
