@@ -111,7 +111,7 @@ The sampling handler receives three parameters:
     </ResponseField>
 
     <ResponseField name="tools" type="list[Tool] | None">
-      Optional list of tools the LLM can use during sampling. See [Handling Tool Requests](#handling-tool-requests).
+      Optional list of tools the LLM can use during sampling. See [Using the OpenAI Handler](#using-the-openai-handler).
     </ResponseField>
 
     <ResponseField name="toolChoice" type="ToolChoice | None">
@@ -163,110 +163,54 @@ client = Client(
 If the client doesn't provide a sampling handler, servers can optionally configure a fallback handler. See [Server Sampling](/servers/sampling#sampling-fallback-handler) for details.
 </Note>
 
-<Tip>
-When you provide a `sampling_handler`, FastMCP automatically advertises full sampling capabilities including tool support to the server.
-</Tip>
+## Sampling Capabilities
 
-## Handling Tool Requests
-
-<VersionBadge version="2.14.0" />
-
-Servers may request sampling with tools, allowing the LLM to make tool calls during generation. When tools are provided in `params.tools`, your handler should return a `CreateMessageResultWithTools` object instead of a simple string.
-
-### Checking for Tools
+When you provide a `sampling_handler`, FastMCP automatically advertises full sampling capabilities to the server, including tool support. To disable tool support (for simpler handlers that don't support tools), pass `sampling_capabilities` explicitly:
 
 ```python
-from fastmcp import Client
-from fastmcp.client.sampling import SamplingMessage, SamplingParams, RequestContext
-from mcp.types import (
-    CreateMessageResultWithTools,
-    TextContent,
-    ToolUseContent,
-    ToolChoice,
-)
-
-async def sampling_handler_with_tools(
-    messages: list[SamplingMessage],
-    params: SamplingParams,
-    context: RequestContext
-) -> str | CreateMessageResultWithTools:
-    # Check if tools were provided
-    if params.tools:
-        # Call your LLM with tool support
-        # Return CreateMessageResultWithTools with appropriate content
-        return CreateMessageResultWithTools(
-            role="assistant",
-            content=[TextContent(type="text", text="I'll help you with that.")],
-            model="gpt-4",
-            stopReason="endTurn",
-        )
-
-    # Standard text response when no tools
-    return "Generated response"
+from mcp.types import SamplingCapability
 
 client = Client(
     "my_mcp_server.py",
-    sampling_handler=sampling_handler_with_tools,
+    sampling_handler=basic_handler,
+    sampling_capabilities=SamplingCapability(),  # No tool support
 )
 ```
 
-### Returning Tool Use
+## Using the OpenAI Handler
 
-When the LLM wants to call a tool, return a `CreateMessageResultWithTools` with `stopReason="toolUse"` and `ToolUseContent` in the content:
+<VersionBadge version="2.14.0" />
+
+For full-featured sampling with tool support, use the built-in OpenAI handler. It handles message conversion, tool calls, and response formatting automatically:
 
 ```python
-from mcp.types import CreateMessageResultWithTools, ToolUseContent
+from fastmcp import Client
+from fastmcp.experimental.sampling.handlers.openai import OpenAISamplingHandler
 
-async def sampling_handler_with_tools(
-    messages: list[SamplingMessage],
-    params: SamplingParams,
-    context: RequestContext
-) -> str | CreateMessageResultWithTools:
-    if params.tools:
-        # Your LLM decided to call a tool
-        return CreateMessageResultWithTools(
-            role="assistant",
-            content=[
-                ToolUseContent(
-                    type="toolUse",
-                    id="call_123",
-                    name="search",
-                    input={"query": "Python tutorials"},
-                )
-            ],
-            model="gpt-4",
-            stopReason="toolUse",  # Indicates tool use
-        )
-
-    return "Response without tools"
+client = Client(
+    "my_mcp_server.py",
+    sampling_handler=OpenAISamplingHandler(default_model="gpt-4o"),
+)
 ```
 
-### Tool Choice
-
-The `params.toolChoice` field indicates how the server wants tools to be used:
-
-- **`auto`**: The LLM decides whether to use tools
-- **`required`**: The LLM must use at least one tool
-- **`none`**: The LLM should not use any tools
+The handler works with any OpenAI-compatible API by passing a custom client:
 
 ```python
-async def sampling_handler_with_tools(
-    messages: list[SamplingMessage],
-    params: SamplingParams,
-    context: RequestContext
-) -> str | CreateMessageResultWithTools:
-    if params.tools and params.toolChoice:
-        if params.toolChoice.mode == "required":
-            # Must return a tool call
-            pass
-        elif params.toolChoice.mode == "none":
-            # Should not return tool calls even though tools are available
-            pass
-        # "auto" - let the LLM decide
+from openai import AsyncOpenAI
 
-    return "Response"
+client = Client(
+    "my_mcp_server.py",
+    sampling_handler=OpenAISamplingHandler(
+        default_model="llama-3.1-70b",
+        client=AsyncOpenAI(base_url="http://localhost:8000/v1"),
+    ),
+)
 ```
 
 <Note>
 Tool execution happens on the server side. The client's role is to pass tools to the LLM and return the LLM's response (which may include tool use requests). The server then executes the tools and may send follow-up sampling requests with tool results.
 </Note>
+
+<Tip>
+To implement a custom sampling handler, see the [OpenAISamplingHandler source code](https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/experimental/sampling/handlers/openai.py) as a reference.
+</Tip>

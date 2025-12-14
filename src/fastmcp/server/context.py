@@ -20,7 +20,6 @@ from mcp.types import (
     CreateMessageResult,
     CreateMessageResultWithTools,
     GetPromptResult,
-    ModelHint,
     ModelPreferences,
     Root,
     SamplingMessage,
@@ -46,15 +45,15 @@ from fastmcp.server.elicitation import (
     handle_elicit_accept,
     parse_elicit_response_type,
 )
-from fastmcp.server.sampling import (
-    SampleStep,
-    SamplingResult,
-    SamplingTool,
-    call_client,
+from fastmcp.server.sampling import SampleStep, SamplingResult, SamplingTool
+from fastmcp.server.sampling.run import (
+    _parse_model_preferences,
     call_sampling_handler,
     determine_handler_mode,
 )
-from fastmcp.server.sampling import execute_tools as run_sampling_tools
+from fastmcp.server.sampling.run import (
+    execute_tools as run_sampling_tools,
+)
 from fastmcp.server.server import FastMCP
 from fastmcp.utilities.json_schema import compress_schema
 from fastmcp.utilities.logging import _clamp_logger, get_logger
@@ -571,7 +570,7 @@ class Context:
             max_tokens: Maximum tokens to generate. Defaults to 512.
             model_preferences: Optional model preferences.
             tools: Optional list of tools the LLM can use.
-            tool_choice: Tool choice mode ("auto", "required", "none", or tool name).
+            tool_choice: Tool choice mode ("auto", "required", or "none").
             execute_tools: If True (default), execute tool calls and append results
                 to history. If False, return immediately with tool_calls available
                 in the step for manual execution.
@@ -583,17 +582,17 @@ class Context:
             SampleStep containing:
             - .response: The raw LLM response
             - .history: Messages including input, assistant response, and tool results
-            - .is_tool_use / .is_text: Check what kind of response
+            - .is_tool_use: True if the LLM requested tool execution
             - .tool_calls: List of tool calls (if any)
             - .text: The text content (if any)
 
         Example:
-            messages = [SamplingMessage(role="user", content="Research X")]
+            messages = "Research X"
 
             while True:
                 step = await ctx.sample_step(messages, tools=[search])
 
-                if step.is_text:
+                if not step.is_tool_use:
                     print(step.text)
                     break
 
@@ -643,15 +642,15 @@ class Context:
                 tool_choice=effective_tool_choice,
             )
         else:
-            response = await call_client(
-                self,
-                current_messages,
+            response = await self.session.create_message(
+                messages=current_messages,
                 system_prompt=system_prompt,
                 temperature=temperature,
                 max_tokens=effective_max_tokens,
-                model_preferences=model_preferences,
-                sdk_tools=sdk_tools,
+                model_preferences=_parse_model_preferences(model_preferences),
+                tools=sdk_tools,
                 tool_choice=effective_tool_choice,
+                related_request_id=self.request_id,
             )
 
         # Check if this is a tool use response
@@ -774,7 +773,7 @@ class Context:
             - .history: All messages exchanged during sampling
         """
         # Safety limit to prevent infinite loops
-        max_iterations = 50
+        max_iterations = 100
 
         # Convert tools to SamplingTools
         sampling_tools = _prepare_tools(tools)
@@ -848,8 +847,8 @@ class Context:
                                 )
                             )
 
-            # If text response, we're done
-            if step.is_text:
+            # If not a tool use response, we're done
+            if not step.is_tool_use:
                 return SamplingResult(
                     text=step.text,
                     result=cast(ResultT, step.text if step.text else ""),
@@ -985,47 +984,6 @@ class Context:
             except Exception:
                 # Don't let notification failures break the request
                 pass
-
-
-def _parse_model_preferences(
-    model_preferences: ModelPreferences | str | list[str] | None,
-) -> ModelPreferences | None:
-    """
-    Validates and converts user input for model_preferences into a ModelPreferences object.
-
-    Args:
-        model_preferences (ModelPreferences | str | list[str] | None):
-            The model preferences to use. Accepts:
-            - ModelPreferences (returns as-is)
-            - str (single model hint)
-            - list[str] (multiple model hints)
-            - None (no preferences)
-
-    Returns:
-        ModelPreferences | None: The parsed ModelPreferences object, or None if not provided.
-
-    Raises:
-        ValueError: If the input is not a supported type or contains invalid values.
-    """
-    if model_preferences is None:
-        return None
-    elif isinstance(model_preferences, ModelPreferences):
-        return model_preferences
-    elif isinstance(model_preferences, str):
-        # Single model hint
-        return ModelPreferences(hints=[ModelHint(name=model_preferences)])
-    elif isinstance(model_preferences, list):
-        # List of model hints (strings)
-        if not all(isinstance(h, str) for h in model_preferences):
-            raise ValueError(
-                "All elements of model_preferences list must be"
-                " strings (model name hints)."
-            )
-        return ModelPreferences(hints=[ModelHint(name=h) for h in model_preferences])
-    else:
-        raise ValueError(
-            "model_preferences must be one of: ModelPreferences, str, list[str], or None."
-        )
 
 
 async def _log_to_server_and_client(

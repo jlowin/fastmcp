@@ -69,11 +69,6 @@ class SampleStep:
         return False
 
     @property
-    def is_text(self) -> bool:
-        """True if the LLM returned a text response (not tool use)."""
-        return not self.is_tool_use
-
-    @property
     def text(self) -> str | None:
         """Extract text from the response, if available."""
         content = self.response.content
@@ -226,30 +221,6 @@ async def call_sampling_handler(
         )
 
     return result
-
-
-async def call_client(
-    context: Context,
-    messages: list[SamplingMessage],
-    *,
-    system_prompt: str | None,
-    temperature: float | None,
-    max_tokens: int,
-    model_preferences: ModelPreferences | str | list[str] | None,
-    sdk_tools: list[SDKTool] | None,
-    tool_choice: ToolChoice | None,
-) -> CreateMessageResult | CreateMessageResultWithTools:
-    """Make LLM call using the client."""
-    return await context.session.create_message(
-        messages=messages,
-        system_prompt=system_prompt,
-        temperature=temperature,
-        max_tokens=max_tokens,
-        model_preferences=_parse_model_preferences(model_preferences),
-        tools=sdk_tools,
-        tool_choice=tool_choice,
-        related_request_id=context.request_id,
-    )
 
 
 async def execute_tools(

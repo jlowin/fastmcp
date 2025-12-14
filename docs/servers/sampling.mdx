@@ -90,7 +90,7 @@ By default, sampling requests are routed to the client's LLM. You can also confi
     <ResponseField name="SampleStep" type="dataclass">
       - `.response`: The raw LLM response
       - `.history`: Messages including input, assistant response, and tool results
-      - `.is_tool_use` / `.is_text`: Check what kind of response
+      - `.is_tool_use`: True if the LLM requested tool execution
       - `.tool_calls`: List of tool calls (if any)
       - `.text`: The text content (if any)
     </ResponseField>
@@ -111,7 +111,7 @@ mcp = FastMCP()
 async def summarize(content: str, ctx: Context) -> str:
     """Generate a summary of the provided content."""
     result = await ctx.sample(f"Please summarize this:\n\n{content}")
-    return result.text
+    return result.text or ""
 ```
 
 The `SamplingResult` also provides `.result` (identical to `.text` for plain text responses) and `.history` containing the full message exchange—useful if you need to continue the conversation or debug the interaction.
@@ -151,31 +151,37 @@ async def technical_analysis(data: str, ctx: Context) -> str:
         model_preferences=["claude-opus-4-5", "gpt-5-2"],
         temperature=0.2,
     )
-    return result.text
+    return result.text or ""
 ```
 
 Use model preferences when different tasks benefit from different model characteristics. Creative writing might prefer faster models with higher temperature, while complex analysis might benefit from larger reasoning-focused models.
 
 ### Multi-Turn Conversations
 
-For requests that need conversational context, construct a list of `SamplingMessage` objects representing the conversation history. Each message has a `role` ("user" or "assistant") and `content`.
+For requests that need conversational context, construct a list of `SamplingMessage` objects representing the conversation history. Each message has a `role` ("user" or "assistant") and `content` (a `TextContent` object).
 
 ```python
-from mcp.types import SamplingMessage
+from mcp.types import SamplingMessage, TextContent
 
 @mcp.tool
 async def contextual_analysis(query: str, data: str, ctx: Context) -> str:
     """Analyze data with conversational context."""
     messages = [
-        SamplingMessage(role="user", content=f"Here's my data: {data}"),
+        SamplingMessage(
+            role="user",
+            content=TextContent(type="text", text=f"Here's my data: {data}"),
+        ),
         SamplingMessage(
             role="assistant",
-            content="I see the data. What would you like to know?"
+            content=TextContent(type="text", text="I see the data. What would you like to know?"),
         ),
-        SamplingMessage(role="user", content=query)
+        SamplingMessage(
+            role="user",
+            content=TextContent(type="text", text=query),
+        ),
     ]
     result = await ctx.sample(messages=messages)
-    return result.text
+    return result.text or ""
 ```
 
 The LLM receives the full conversation thread and responds with awareness of the preceding context.
@@ -250,7 +256,7 @@ async def research(question: str, ctx: Context) -> str:
         messages=question,
         tools=[search, get_time],
     )
-    return result.text
+    return result.text or ""
 ```
 
 The LLM sees each function's signature and docstring, using this information to decide when and how to call them. Tool errors are caught and sent back to the LLM, allowing it to recover gracefully. An internal safety limit prevents infinite loops.
@@ -348,8 +354,8 @@ async def controlled_agent(question: str, ctx: Context) -> str:
             for call in step.tool_calls:
                 print(f"Called tool: {call.name}")
 
-        if step.is_text:
-            return step.text
+        if not step.is_tool_use:
+            return step.text or ""
 
         # Continue with updated history
         messages = step.history
@@ -360,7 +366,6 @@ async def controlled_agent(question: str, ctx: Context) -> str:
 Each `SampleStep` provides information about what the LLM returned:
 
 - `step.is_tool_use` — True if the LLM requested tool calls
-- `step.is_text` — True if the LLM returned a text response
 - `step.tool_calls` — List of tool calls requested (if any)
 - `step.text` — The text content (if any)
 - `step.history` — All messages exchanged so far
@@ -392,7 +397,7 @@ async def research(question: str, ctx: Context) -> str:
     # Map tool names to functions
     tools = {"search": search, "get_time": get_time}
 
-    messages = [SamplingMessage(role="user", content=question)]
+    messages: list[SamplingMessage] = [question]  # strings are converted automatically
 
     while True:
         step = await ctx.sample_step(
@@ -401,25 +406,24 @@ async def research(question: str, ctx: Context) -> str:
             execute_tools=False,
         )
 
-        if step.is_text:
-            return step.text
+        if not step.is_tool_use:
+            return step.text or ""
 
-        if step.is_tool_use:
-            tool_results = []
-            for call in step.tool_calls:
-                # Look up and execute the requested tool
-                fn = tools[call.name]
-                result = fn(**call.input)
-                tool_results.append(
-                    ToolResultContent(
-                        type="tool_result",
-                        toolUseId=call.id,
-                        content=[TextContent(type="text", text=result)],
-                    )
+        # Execute tools and collect results
+        tool_results = []
+        for call in step.tool_calls:
+            fn = tools[call.name]
+            result = fn(**call.input)
+            tool_results.append(
+                ToolResultContent(
+                    type="tool_result",
+                    toolUseId=call.id,
+                    content=[TextContent(type="text", text=result)],
                 )
+            )
 
-            messages = list(step.history)
-            messages.append(SamplingMessage(role="user", content=tool_results))
+        messages = list(step.history)
+        messages.append(SamplingMessage(role="user", content=tool_results))
 ```
 
 #### Error Handling

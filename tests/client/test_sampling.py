@@ -824,7 +824,6 @@ class TestSampleStep:
         @mcp.tool
         async def test_step(context: Context) -> str:
             step = await context.sample_step(messages="Hi")
-            assert step.is_text
             assert not step.is_tool_use
             assert step.text == "Hello from step"
             return step.text or ""
@@ -881,7 +880,7 @@ class TestSampleStep:
             while True:
                 step = await context.sample_step(messages=messages, tools=[my_tool])
 
-                if step.is_text:
+                if not step.is_tool_use:
                     return step.text or ""
 
                 # History should include tool results when execute_tools=True
