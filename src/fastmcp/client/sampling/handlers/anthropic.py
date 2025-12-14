@@ -54,7 +54,7 @@ class AnthropicSamplingHandler:
         from fastmcp.client.sampling.handlers.anthropic import AnthropicSamplingHandler
 
         handler = AnthropicSamplingHandler(
-            default_model="claude-haiku-4-5-20250514",
+            default_model="claude-sonnet-4-5",
             client=Anthropic(),
         )
 
