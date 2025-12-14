@@ -32,6 +32,7 @@ import httpx
 import mcp.types
 import uvicorn
 from docket import Docket, Worker
+from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.lowlevel.server import LifespanResultT, NotificationOptions
 from mcp.server.stdio import stdio_server
 from mcp.shared.exceptions import McpError
@@ -60,9 +61,9 @@ import fastmcp.server
 from fastmcp.exceptions import DisabledError, NotFoundError
 from fastmcp.mcp_config import MCPConfig
 from fastmcp.prompts import Prompt
-from fastmcp.prompts.prompt import FunctionPrompt, PromptResult
+from fastmcp.prompts.prompt import FunctionPrompt
 from fastmcp.prompts.prompt_manager import PromptManager
-from fastmcp.resources.resource import FunctionResource, Resource, ResourceContent
+from fastmcp.resources.resource import FunctionResource, Resource
 from fastmcp.resources.resource_manager import ResourceManager
 from fastmcp.resources.template import FunctionResourceTemplate, ResourceTemplate
 from fastmcp.server.auth import AuthProvider
@@ -735,7 +736,26 @@ class FastMCP(Generic[LifespanResultT]):
             # Graceful degradation: if we got here with task_meta, something went wrong
             # (This should be unreachable now that forbidden raises)
             if task_meta:
-                mcp_contents = [item.to_mcp_resource_contents(uri) for item in result]
+                mcp_contents = []
+                for item in result:
+                    if isinstance(item.content, str):
+                        mcp_contents.append(
+                            mcp.types.TextResourceContents(
+                                uri=uri,
+                                text=item.content,
+                                mimeType=item.mime_type or "text/plain",
+                            )
+                        )
+                    elif isinstance(item.content, bytes):
+                        import base64
+
+                        mcp_contents.append(
+                            mcp.types.BlobResourceContents(
+                                uri=uri,
+                                blob=base64.b64encode(item.content).decode(),
+                                mimeType=item.mime_type or "application/octet-stream",
+                            )
+                        )
                 return mcp.types.ServerResult(
                     mcp.types.ReadResourceResult(
                         contents=mcp_contents,
@@ -751,7 +771,27 @@ class FastMCP(Generic[LifespanResultT]):
             if isinstance(result, mcp.types.ServerResult):
                 return result
 
-            mcp_contents = [item.to_mcp_resource_contents(uri) for item in result]
+            mcp_contents = []
+            for item in result:
+                if isinstance(item.content, str):
+                    mcp_contents.append(
+                        mcp.types.TextResourceContents(
+                            uri=uri,
+                            text=item.content,
+                            mimeType=item.mime_type or "text/plain",
+                        )
+                    )
+                elif isinstance(item.content, bytes):
+                    import base64
+
+                    mcp_contents.append(
+                        mcp.types.BlobResourceContents(
+                            uri=uri,
+                            blob=base64.b64encode(item.content).decode(),
+                            mimeType=item.mime_type or "application/octet-stream",
+                        )
+                    )
+
             return mcp.types.ServerResult(
                 mcp.types.ReadResourceResult(contents=mcp_contents)
             )
@@ -1624,7 +1664,7 @@ class FastMCP(Generic[LifespanResultT]):
 
         raise NotFoundError(f"Unknown tool: {tool_name!r}")
 
-    async def _read_resource_mcp(self, uri: AnyUrl | str) -> list[ResourceContent]:
+    async def _read_resource_mcp(self, uri: AnyUrl | str) -> list[ReadResourceContents]:
         """
         Handle MCP 'readResource' requests.
 
@@ -1635,7 +1675,9 @@ class FastMCP(Generic[LifespanResultT]):
         async with fastmcp.server.context.Context(fastmcp=self):
             try:
                 # Task routing handled by custom handler
-                return list[ResourceContent](await self._read_resource_middleware(uri))
+                return list[ReadResourceContents](
+                    await self._read_resource_middleware(uri)
+                )
             except DisabledError as e:
                 # convert to NotFoundError to avoid leaking resource presence
                 raise NotFoundError(f"Unknown resource: {str(uri)!r}") from e
@@ -1646,7 +1688,7 @@ class FastMCP(Generic[LifespanResultT]):
     async def _read_resource_middleware(
         self,
         uri: AnyUrl | str,
-    ) -> list[ResourceContent]:
+    ) -> list[ReadResourceContents]:
         """
         Applies this server's middleware and delegates the filtered call to the manager.
         """
@@ -1670,7 +1712,7 @@ class FastMCP(Generic[LifespanResultT]):
     async def _read_resource(
         self,
         context: MiddlewareContext[mcp.types.ReadResourceRequestParams],
-    ) -> list[ResourceContent]:
+    ) -> list[ReadResourceContents]:
         """
         Read a resource
         """
@@ -1704,11 +1746,12 @@ class FastMCP(Generic[LifespanResultT]):
             resource = await self._resource_manager.get_resource(uri_str)
             if self._should_enable_component(resource):
                 content = await self._resource_manager.read_resource(uri_str)
-                # read_resource() always returns ResourceContent now
-                # Use mime_type from ResourceContent if set, otherwise from resource
-                if content.mime_type is None:
-                    content.mime_type = resource.mime_type
-                return [content]
+                return [
+                    ReadResourceContents(
+                        content=content,
+                        mime_type=resource.mime_type,
+                    )
+                ]
         except NotFoundError:
             pass
 
@@ -1744,18 +1787,8 @@ class FastMCP(Generic[LifespanResultT]):
     ) -> GetPromptResult:
         """
         Applies this server's middleware and delegates the filtered call to the manager.
-        Converts PromptResult to GetPromptResult for MCP protocol.
         """
-        result = await self._get_prompt_content_middleware(name, arguments)
-        return result.to_mcp_prompt_result()
 
-    async def _get_prompt_content_middleware(
-        self, name: str, arguments: dict[str, Any] | None = None
-    ) -> PromptResult:
-        """
-        Applies this server's middleware and returns PromptResult.
-        Used internally and by parent servers for mounted prompts.
-        """
         mw_context = MiddlewareContext(
             message=mcp.types.GetPromptRequestParams(name=name, arguments=arguments),
             source="client",
@@ -1770,7 +1803,7 @@ class FastMCP(Generic[LifespanResultT]):
     async def _get_prompt(
         self,
         context: MiddlewareContext[mcp.types.GetPromptRequestParams],
-    ) -> PromptResult:
+    ) -> GetPromptResult:
         name = context.message.name
 
         # Try mounted servers in reverse order (later wins)
@@ -1789,7 +1822,7 @@ class FastMCP(Generic[LifespanResultT]):
                 if not self._should_enable_component(prompt):
                     # Parent filter blocks this prompt, continue searching
                     continue
-                return await mounted.server._get_prompt_content_middleware(
+                return await mounted.server._get_prompt_middleware(
                     try_name, context.message.arguments
                 )
             except NotFoundError:
