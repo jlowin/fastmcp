@@ -24,7 +24,11 @@ from mcp.types import CreateMessageRequestParams as SamplingParams
 from mcp.types import Tool as SDKTool
 from typing_extensions import TypeVar
 
+from fastmcp.exceptions import ToolError
 from fastmcp.server.sampling.sampling_tool import SamplingTool
+from fastmcp.utilities.logging import get_logger
+
+logger = get_logger(__name__)
 
 if TYPE_CHECKING:
     from fastmcp.server.context import Context
@@ -75,11 +79,11 @@ class SampleStep:
         content = self.response.content
         if isinstance(content, list):
             for block in content:
-                if hasattr(block, "text"):
-                    return block.text  # type: ignore[return-value]
+                if isinstance(block, TextContent):
+                    return block.text
             return None
-        elif hasattr(content, "text"):
-            return content.text  # type: ignore[return-value]
+        elif isinstance(content, TextContent):
+            return content.text
         return None
 
     @property
@@ -179,9 +183,16 @@ async def call_sampling_handler(
     sdk_tools: list[SDKTool] | None,
     tool_choice: ToolChoice | None,
 ) -> CreateMessageResult | CreateMessageResultWithTools:
-    """Make LLM call using the fallback handler."""
-    assert context.fastmcp.sampling_handler is not None
-    assert context.request_context is not None
+    """Make LLM call using the fallback handler.
+
+    Note: This function expects the caller (sample_step) to have validated that
+    sampling_handler is set via determine_handler_mode(). The checks below are
+    safeguards against internal misuse.
+    """
+    if context.fastmcp.sampling_handler is None:
+        raise RuntimeError("sampling_handler is None")
+    if context.request_context is None:
+        raise RuntimeError("request_context is None")
 
     result = context.fastmcp.sampling_handler(
         messages,
@@ -239,12 +250,17 @@ async def call_client(
 async def execute_tools(
     tool_calls: list[ToolUseContent],
     tool_map: dict[str, SamplingTool],
+    mask_error_details: bool = False,
 ) -> list[ToolResultContent]:
     """Execute tool calls and return results.
 
     Args:
         tool_calls: List of tool use requests from the LLM.
         tool_map: Mapping from tool name to SamplingTool.
+        mask_error_details: If True, mask detailed error messages from tool execution.
+            When masked, only generic error messages are returned to the LLM.
+            Tools can explicitly raise ToolError to bypass masking when they want
+            to provide specific error messages to the LLM.
 
     Returns:
         List of tool result content blocks.
@@ -277,13 +293,29 @@ async def execute_tools(
                         content=[TextContent(type="text", text=str(result_value))],
                     )
                 )
-            except Exception as e:
-                # Catch all exceptions to report errors to the LLM for recovery
+            except ToolError as e:
+                # ToolError is the escape hatch - always pass message through
+                logger.exception(f"Error calling sampling tool '{tool_use.name}'")
                 tool_results.append(
                     ToolResultContent(
                         type="tool_result",
                         toolUseId=tool_use.id,
-                        content=[TextContent(type="text", text=f"Error: {e}")],
+                        content=[TextContent(type="text", text=str(e))],
+                        isError=True,
+                    )
+                )
+            except Exception as e:
+                # Generic exceptions - mask based on setting
+                logger.exception(f"Error calling sampling tool '{tool_use.name}'")
+                if mask_error_details:
+                    error_text = f"Error executing tool '{tool_use.name}'"
+                else:
+                    error_text = f"Error executing tool '{tool_use.name}': {e}"
+                tool_results.append(
+                    ToolResultContent(
+                        type="tool_result",
+                        toolUseId=tool_use.id,
+                        content=[TextContent(type="text", text=error_text)],
                         isError=True,
                     )
                 )

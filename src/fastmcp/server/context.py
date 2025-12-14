@@ -37,6 +37,7 @@ from pydantic.networks import AnyUrl
 from starlette.requests import Request
 from typing_extensions import TypeVar
 
+from fastmcp import settings
 from fastmcp.server.elicitation import (
     AcceptedElicitation,
     CancelledElicitation,
@@ -552,6 +553,7 @@ class Context:
         tools: Sequence[SamplingTool | Callable[..., Any]] | None = None,
         tool_choice: ToolChoiceOption | str | None = None,
         execute_tools: bool = True,
+        mask_error_details: bool | None = None,
     ) -> SampleStep:
         """
         Make a single LLM sampling call.
@@ -572,6 +574,9 @@ class Context:
             execute_tools: If True (default), execute tool calls and append results
                 to history. If False, return immediately with tool_calls available
                 in the step for manual execution.
+            mask_error_details: If True, mask detailed error messages from tool
+                execution. When None (default), uses the global settings value.
+                Tools can raise ToolError to bypass masking.
 
         Returns:
             SampleStep containing:
@@ -665,7 +670,14 @@ class Context:
         # Execute tools and add results to history
         step_tool_calls = _extract_tool_calls(response)
         if step_tool_calls:
-            tool_results = await run_sampling_tools(step_tool_calls, tool_map)
+            effective_mask = (
+                mask_error_details
+                if mask_error_details is not None
+                else settings.mask_error_details
+            )
+            tool_results = await run_sampling_tools(
+                step_tool_calls, tool_map, mask_error_details=effective_mask
+            )
 
             if tool_results:
                 current_messages.append(
@@ -688,6 +700,7 @@ class Context:
         model_preferences: ModelPreferences | str | list[str] | None = None,
         tools: Sequence[SamplingTool | Callable[..., Any]] | None = None,
         result_type: type[ResultT],
+        mask_error_details: bool | None = None,
     ) -> SamplingResult[ResultT]:
         """Overload: With result_type, returns SamplingResult[ResultT]."""
 
@@ -702,6 +715,7 @@ class Context:
         model_preferences: ModelPreferences | str | list[str] | None = None,
         tools: Sequence[SamplingTool | Callable[..., Any]] | None = None,
         result_type: None = None,
+        mask_error_details: bool | None = None,
     ) -> SamplingResult[str]:
         """Overload: Without result_type, returns SamplingResult[str]."""
 
@@ -715,6 +729,7 @@ class Context:
         model_preferences: ModelPreferences | str | list[str] | None = None,
         tools: Sequence[SamplingTool | Callable[..., Any]] | None = None,
         result_type: type[ResultT] | None = None,
+        mask_error_details: bool | None = None,
     ) -> SamplingResult[ResultT] | SamplingResult[str]:
         """
         Send a sampling request to the client and await the response.
@@ -742,6 +757,9 @@ class Context:
             result_type: Optional type for structured output. When specified,
                 a synthetic `final_response` tool is created and the LLM's
                 response is validated against this type.
+            mask_error_details: If True, mask detailed error messages from tool
+                execution. When None (default), uses the global settings value.
+                Tools can raise ToolError to bypass masking.
 
         Returns:
             SamplingResult[T] containing:
@@ -779,6 +797,7 @@ class Context:
                 model_preferences=model_preferences,
                 tools=sampling_tools,
                 tool_choice=tool_choice,
+                mask_error_details=mask_error_details,
             )
 
             # Check for final_response tool call for structured output
@@ -1066,11 +1085,11 @@ def _extract_text_from_content(
     """
     if isinstance(content, list):
         for block in content:
-            if hasattr(block, "text"):
-                return block.text  # type: ignore[return-value]
+            if isinstance(block, TextContent):
+                return block.text
         return None
-    elif hasattr(content, "text"):
-        return content.text  # type: ignore[return-value]
+    elif isinstance(content, TextContent):
+        return content.text
     return None
 
 

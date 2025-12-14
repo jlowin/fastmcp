@@ -78,9 +78,11 @@ class OpenAISamplingHandler(BaseLLMSamplingHandler):
         response = self.client.chat.completions.create(
             model=model,
             messages=openai_messages,
-            temperature=params.temperature or NOT_GIVEN,
+            temperature=(
+                params.temperature if params.temperature is not None else NOT_GIVEN
+            ),
             max_tokens=params.maxTokens,
-            stop=params.stopSequences or NOT_GIVEN,
+            stop=params.stopSequences if params.stopSequences else NOT_GIVEN,
             tools=openai_tools,
             tool_choice=openai_tool_choice,
         )
@@ -328,6 +330,12 @@ class OpenAISamplingHandler(BaseLLMSamplingHandler):
         tool_choice: ToolChoice,
     ) -> ChatCompletionToolChoiceOptionParam:
         """Convert MCP tool_choice to OpenAI format."""
+        # If a specific tool is requested via name (may be in extra_data)
+        tool_name = getattr(tool_choice, "name", None)
+        if tool_name:
+            return {"type": "function", "function": {"name": tool_name}}  # type: ignore[return-value]
+
+        # Mode-based selection
         if tool_choice.mode == "auto":
             return "auto"
         elif tool_choice.mode == "required":
@@ -335,7 +343,6 @@ class OpenAISamplingHandler(BaseLLMSamplingHandler):
         elif tool_choice.mode == "none":
             return "none"
         else:
-            # Unknown mode, default to auto
             return "auto"
 
     @staticmethod

@@ -49,6 +49,10 @@ By default, sampling requests are routed to the client's LLM. You can also confi
       A Pydantic model for validated structured output.
     </ResponseField>
 
+    <ResponseField name="mask_error_details" type="bool | None" default="None">
+      If True, mask detailed error messages from tool execution. When None (default), uses the global `settings.mask_error_details` value. Tools can raise `ToolError` to bypass masking and provide specific error messages to the LLM.
+    </ResponseField>
+
   </Expandable>
 
   <Expandable title="Response">
@@ -74,6 +78,10 @@ By default, sampling requests are routed to the client's LLM. You can also confi
 
     <ResponseField name="execute_tools" type="bool" default="True">
       If True, execute tool calls and append results to history. If False, return immediately with tool calls available for manual execution.
+    </ResponseField>
+
+    <ResponseField name="mask_error_details" type="bool | None" default="None">
+      If True, mask detailed error messages from tool execution. When None (default), uses the global `settings.mask_error_details` value. Tools can raise `ToolError` to bypass masking.
     </ResponseField>
 
   </Expandable>
@@ -247,6 +255,34 @@ async def research(question: str, ctx: Context) -> str:
 
 The LLM sees each function's signature and docstring, using this information to decide when and how to call them. Tool errors are caught and sent back to the LLM, allowing it to recover gracefully. An internal safety limit prevents infinite loops.
 
+### Tool Error Handling
+
+By default, when a sampling tool raises an exception, the error message (including details) is sent back to the LLM so it can attempt recovery. To prevent sensitive information from leaking to the LLM, use the `mask_error_details` parameter:
+
+```python
+result = await ctx.sample(
+    messages=question,
+    tools=[search],
+    mask_error_details=True,  # Generic error messages only
+)
+```
+
+When `mask_error_details=True`, tool errors become generic messages like `"Error executing tool 'search'"` instead of exposing stack traces or internal details.
+
+To intentionally provide specific error messages to the LLM regardless of masking, raise `ToolError`:
+
+```python
+from fastmcp.exceptions import ToolError
+
+def search(query: str) -> str:
+    """Search for information."""
+    if not query.strip():
+        raise ToolError("Search query cannot be empty")
+    return f"Results for: {query}"
+```
+
+`ToolError` messages always pass through to the LLM, making it the escape hatch for errors you want the LLM to see and handle.
+
 For custom names or descriptions, use `SamplingTool.from_function()`:
 
 ```python
@@ -406,6 +442,16 @@ Client support for sampling is optional—some clients may not implement it. To 
 ### OpenAI Handler
 
 FastMCP provides an OpenAI-compatible handler that works with OpenAI's API and compatible providers. It supports the full sampling API including tools, automatically converting your Python functions to OpenAI's function calling format.
+
+<Note>
+  The OpenAI handler requires the `openai` package. Install it with:
+  ```bash
+  pip install fastmcp[openai]
+  # or
+  pip install openai
+  ```
+  You'll also need to set the `OPENAI_API_KEY` environment variable or pass it directly to the client.
+</Note>
 
 ```python
 import os
