@@ -190,6 +190,7 @@ class AnthropicSamplingHandler:
                                 type="tool_result",
                                 tool_use_id=item.toolUseId,
                                 content=result_content,
+                                is_error=item.isError if item.isError else False,
                             )
                         )
 
@@ -242,6 +243,7 @@ class AnthropicSamplingHandler:
                                 type="tool_result",
                                 tool_use_id=content.toolUseId,
                                 content=result_content_str,
+                                is_error=content.isError if content.isError else False,
                             )
                         ],
                     )
@@ -269,16 +271,20 @@ class AnthropicSamplingHandler:
         if len(message.content) == 0:
             raise ValueError("No content in response from Anthropic")
 
-        first_block = message.content[0]
-
-        if isinstance(first_block, TextBlock):
+        # Join all text blocks to avoid dropping content
+        text = "".join(
+            block.text for block in message.content if isinstance(block, TextBlock)
+        )
+        if text:
             return CreateMessageResult(
-                content=TextContent(type="text", text=first_block.text),
+                content=TextContent(type="text", text=text),
                 role="assistant",
                 model=message.model,
             )
 
-        raise ValueError(f"Unexpected content type in response: {type(first_block)}")
+        raise ValueError(
+            f"No text content in response from Anthropic: {[type(b).__name__ for b in message.content]}"
+        )
 
     def _select_model_from_preferences(
         self, model_preferences: ModelPreferences | str | list[str] | None

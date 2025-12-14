@@ -242,5 +242,6 @@ def test_convert_messages_with_tool_result_content():
             "type": "tool_result",
             "tool_use_id": "toolu_123",
             "content": "72F and sunny",
+            "is_error": False,
         }
     ]

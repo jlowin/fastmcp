@@ -240,7 +240,7 @@ client = Client(
     "my_mcp_server.py",
     sampling_handler=AnthropicSamplingHandler(
         default_model="claude-sonnet-4-5",
-        client=AsyncAnthropic(api_key="your-key"),
+        client=AsyncAnthropic(),  # Uses ANTHROPIC_API_KEY env var
     ),
 )
 ```
