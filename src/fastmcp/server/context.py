@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import copy
-import inspect
 import json
 import logging
 import weakref
@@ -10,7 +9,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from logging import Logger
-from typing import Any, Generic, Literal, cast, overload
+from typing import Any, Literal, cast, overload
 
 import anyio
 from mcp import LoggingLevel, ServerSession
@@ -18,24 +17,19 @@ from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.lowlevel.server import request_ctx
 from mcp.shared.context import RequestContext
 from mcp.types import (
-    ClientCapabilities,
     CreateMessageResult,
     CreateMessageResultWithTools,
     GetPromptResult,
-    IncludeContext,
     ModelHint,
     ModelPreferences,
     Root,
-    SamplingCapability,
     SamplingMessage,
     SamplingMessageContentBlock,
-    SamplingToolsCapability,
     TextContent,
     ToolChoice,
     ToolResultContent,
     ToolUseContent,
 )
-from mcp.types import CreateMessageRequestParams as SamplingParams
 from mcp.types import Prompt as SDKPrompt
 from mcp.types import Resource as SDKResource
 from mcp.types import Tool as SDKTool
@@ -50,7 +44,15 @@ from fastmcp.server.elicitation import (
     handle_elicit_accept,
     parse_elicit_response_type,
 )
-from fastmcp.server.sampling import SamplingTool
+from fastmcp.server.sampling import (
+    SampleStep,
+    SamplingResult,
+    SamplingTool,
+    call_client,
+    call_sampling_handler,
+    determine_handler_mode,
+)
+from fastmcp.server.sampling import execute_tools as run_sampling_tools
 from fastmcp.server.server import FastMCP
 from fastmcp.utilities.json_schema import compress_schema
 from fastmcp.utilities.logging import _clamp_logger, get_logger
@@ -72,28 +74,6 @@ ResultT = TypeVar("ResultT", default=str)
 ToolChoiceOption = Literal["auto", "required", "none"]
 
 _current_context: ContextVar[Context | None] = ContextVar("context", default=None)  # type: ignore[assignment]
-
-
-@dataclass
-class SamplingResult(Generic[ResultT]):
-    """Result from ctx.sample() containing the response and history.
-
-    This is a generic class where ResultT defaults to str for text responses.
-    When a result_type is specified, ResultT is that type.
-
-    Attributes:
-        text: The text representation of the result. For text responses, this is
-            the raw text. For structured responses, this is the JSON representation.
-            None if the response was a tool use (for manual loop building).
-        result: The typed result. When ResultT is str, this equals text. When ResultT
-            is a custom type, this is the validated/parsed object.
-        history: List of all messages exchanged during sampling, including tool calls
-            and results. Useful for continuing conversations or debugging.
-    """
-
-    text: str | None
-    result: ResultT
-    history: list[SamplingMessage]
 
 
 _flush_lock = anyio.Lock()
@@ -561,19 +541,152 @@ class Context:
             return
         await self.request_context.close_sse_stream()
 
+    async def sample_step(
+        self,
+        messages: str | Sequence[str | SamplingMessage],
+        *,
+        system_prompt: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        model_preferences: ModelPreferences | str | list[str] | None = None,
+        tools: Sequence[SamplingTool | Callable[..., Any]] | None = None,
+        tool_choice: ToolChoiceOption | str | None = None,
+        execute_tools: bool = True,
+    ) -> SampleStep:
+        """
+        Make a single LLM sampling call.
+
+        This is a stateless function that makes exactly one LLM call and optionally
+        executes any requested tools. Use this for fine-grained control over the
+        sampling loop.
+
+        Args:
+            messages: The message(s) to send. Can be a string, list of strings,
+                or list of SamplingMessage objects.
+            system_prompt: Optional system prompt for the LLM.
+            temperature: Optional sampling temperature.
+            max_tokens: Maximum tokens to generate. Defaults to 512.
+            model_preferences: Optional model preferences.
+            tools: Optional list of tools the LLM can use.
+            tool_choice: Tool choice mode ("auto", "required", "none", or tool name).
+            execute_tools: If True (default), execute tool calls and append results
+                to history. If False, return immediately with tool_calls available
+                in the step for manual execution.
+
+        Returns:
+            SampleStep containing:
+            - .response: The raw LLM response
+            - .history: Messages including input, assistant response, and tool results
+            - .is_tool_use / .is_text: Check what kind of response
+            - .tool_calls: List of tool calls (if any)
+            - .text: The text content (if any)
+
+        Example:
+            messages = [SamplingMessage(role="user", content="Research X")]
+
+            while True:
+                step = await ctx.sample_step(messages, tools=[search])
+
+                if step.is_text:
+                    print(step.text)
+                    break
+
+                # Continue with tool results
+                messages = step.history
+        """
+        # Convert messages to SamplingMessage objects
+        current_messages = _prepare_messages(messages)
+
+        # Convert tools to SamplingTools
+        sampling_tools = _prepare_tools(tools)
+        sdk_tools: list[SDKTool] | None = (
+            [t._to_sdk_tool() for t in sampling_tools] if sampling_tools else None
+        )
+        tool_map: dict[str, SamplingTool] = (
+            {t.name: t for t in sampling_tools} if sampling_tools else {}
+        )
+
+        # Determine whether to use fallback handler or client
+        use_fallback = determine_handler_mode(self, bool(sampling_tools))
+
+        # Build tool choice
+        effective_tool_choice: ToolChoice | None = None
+        if tool_choice is not None:
+            effective_tool_choice = ToolChoice(
+                mode=cast(Literal["auto", "required", "none"], tool_choice)
+            )
+
+        # Effective max_tokens
+        effective_max_tokens = max_tokens if max_tokens is not None else 512
+
+        # Make the LLM call
+        if use_fallback:
+            response = await call_sampling_handler(
+                self,
+                current_messages,
+                system_prompt=system_prompt,
+                temperature=temperature,
+                max_tokens=effective_max_tokens,
+                model_preferences=model_preferences,
+                sdk_tools=sdk_tools,
+                tool_choice=effective_tool_choice,
+            )
+        else:
+            response = await call_client(
+                self,
+                current_messages,
+                system_prompt=system_prompt,
+                temperature=temperature,
+                max_tokens=effective_max_tokens,
+                model_preferences=model_preferences,
+                sdk_tools=sdk_tools,
+                tool_choice=effective_tool_choice,
+            )
+
+        # Check if this is a tool use response
+        is_tool_use_response = (
+            isinstance(response, CreateMessageResultWithTools)
+            and response.stopReason == "toolUse"
+        )
+
+        # If not a tool use, return immediately
+        if not is_tool_use_response:
+            return SampleStep(response=response, history=current_messages)
+
+        # Add assistant's response to messages
+        current_messages.append(
+            SamplingMessage(role="assistant", content=response.content)
+        )
+
+        # If not executing tools, return with assistant message but no tool results
+        if not execute_tools:
+            return SampleStep(response=response, history=current_messages)
+
+        # Execute tools and add results to history
+        step_tool_calls = _extract_tool_calls(response)
+        if step_tool_calls:
+            tool_results = await run_sampling_tools(step_tool_calls, tool_map)
+
+            if tool_results:
+                current_messages.append(
+                    SamplingMessage(
+                        role="user",
+                        content=tool_results,  # type: ignore[arg-type]
+                    )
+                )
+
+        return SampleStep(response=response, history=current_messages)
+
     @overload
     async def sample(
         self,
         messages: str | Sequence[str | SamplingMessage],
         *,
         system_prompt: str | None = None,
-        include_context: IncludeContext | None = None,
         temperature: float | None = None,
         max_tokens: int | None = None,
         model_preferences: ModelPreferences | str | list[str] | None = None,
         tools: Sequence[SamplingTool | Callable[..., Any]] | None = None,
-        tool_choice: ToolChoiceOption | None = None,
-        max_iterations: int = 10,
         result_type: type[ResultT],
     ) -> SamplingResult[ResultT]:
         """Overload: With result_type, returns SamplingResult[ResultT]."""
@@ -584,13 +697,10 @@ class Context:
         messages: str | Sequence[str | SamplingMessage],
         *,
         system_prompt: str | None = None,
-        include_context: IncludeContext | None = None,
         temperature: float | None = None,
         max_tokens: int | None = None,
         model_preferences: ModelPreferences | str | list[str] | None = None,
         tools: Sequence[SamplingTool | Callable[..., Any]] | None = None,
-        tool_choice: ToolChoiceOption | None = None,
-        max_iterations: int = 10,
         result_type: None = None,
     ) -> SamplingResult[str]:
         """Overload: Without result_type, returns SamplingResult[str]."""
@@ -600,48 +710,35 @@ class Context:
         messages: str | Sequence[str | SamplingMessage],
         *,
         system_prompt: str | None = None,
-        include_context: IncludeContext | None = None,
         temperature: float | None = None,
         max_tokens: int | None = None,
         model_preferences: ModelPreferences | str | list[str] | None = None,
         tools: Sequence[SamplingTool | Callable[..., Any]] | None = None,
-        tool_choice: ToolChoiceOption | None = None,
-        max_iterations: int = 10,
         result_type: type[ResultT] | None = None,
     ) -> SamplingResult[ResultT] | SamplingResult[str]:
         """
         Send a sampling request to the client and await the response.
 
-        Call this method at any time to have the server request an LLM
-        completion from the client. The client must be appropriately configured,
-        or the request will error.
+        This method runs to completion automatically. When tools are provided,
+        it executes a tool loop: if the LLM returns a tool use request, the tools
+        are executed and the results are sent back to the LLM. This continues
+        until the LLM provides a final text response.
 
-        When tools are provided, the method automatically executes a tool loop:
-        if the LLM returns a tool use request, the tools are executed and the
-        results are sent back to the LLM. This continues until the LLM provides
-        a final response or max_iterations is reached.
-
-        When result_type is specified (not str), a synthetic `final_response` tool
-        is created. The LLM calls this tool to provide the structured response,
+        When result_type is specified, a synthetic `final_response` tool is
+        created. The LLM calls this tool to provide the structured response,
         which is validated against the result_type and returned as `.result`.
+
+        For fine-grained control over the sampling loop, use sample_step() instead.
 
         Args:
             messages: The message(s) to send. Can be a string, list of strings,
                 or list of SamplingMessage objects.
             system_prompt: Optional system prompt for the LLM.
-            include_context: Optional context inclusion setting.
             temperature: Optional sampling temperature.
             max_tokens: Maximum tokens to generate. Defaults to 512.
             model_preferences: Optional model preferences.
             tools: Optional list of tools the LLM can use. Accepts plain
-                functions or SamplingTools. When provided, the method automatically
-                handles tool execution and returns the final response after all
-                tool calls complete.
-            tool_choice: Optional control over tool usage behavior. Only valid
-                when tools are provided.
-            max_iterations: Maximum number of LLM calls before returning.
-                Defaults to 10. Set to 1 for single-iteration mode where you
-                can build your own loop using the history.
+                functions or SamplingTools.
             result_type: Optional type for structured output. When specified,
                 a synthetic `final_response` tool is created and the LLM's
                 response is validated against this type.
@@ -652,467 +749,95 @@ class Context:
             - .result: The typed result (str for text, parsed object for structured)
             - .history: All messages exchanged during sampling
         """
+        # Safety limit to prevent infinite loops
+        max_iterations = 50
 
-        if max_tokens is None:
-            max_tokens = 512
+        # Convert tools to SamplingTools
+        sampling_tools = _prepare_tools(tools)
+        has_user_tools = bool(sampling_tools)
 
-        if isinstance(messages, str):
-            sampling_messages = [
-                SamplingMessage(
-                    content=TextContent(text=messages, type="text"), role="user"
-                )
-            ]
-        elif isinstance(messages, Sequence):
-            sampling_messages = [
-                SamplingMessage(content=TextContent(text=m, type="text"), role="user")
-                if isinstance(m, str)
-                else m
-                for m in messages
-            ]
-
-        # Convert tools to SamplingTools, then to SDK tools
-        sampling_tools: list[SamplingTool] = []
-        if tools is not None:
-            for t in tools:
-                if isinstance(t, SamplingTool):
-                    sampling_tools.append(t)
-                elif callable(t):
-                    sampling_tools.append(SamplingTool.from_function(t))
-                else:
-                    raise TypeError(f"Expected SamplingTool or callable, got {type(t)}")
-
-        # Create synthetic final_response tool for structured output
-        final_response_tool: SamplingTool | None = None
+        # Handle structured output with result_type
+        tool_choice: str | None = None
         if result_type is not None and result_type is not str:
             final_response_tool = _create_final_response_tool(result_type)
+            sampling_tools = list(sampling_tools) if sampling_tools else []
             sampling_tools.append(final_response_tool)
 
-            # Add hint to system prompt
-            hint = "Call final_response when you have completed the task."
-            system_prompt = f"{system_prompt}\n\n{hint}" if system_prompt else hint
+            # If no user tools, force the LLM to call a tool (which is final_response)
+            if not has_user_tools:
+                tool_choice = "required"
 
-        sdk_tools: list[SDKTool] | None = None
-        if sampling_tools:
-            sdk_tools = [t._to_sdk_tool() for t in sampling_tools]
+        # Convert messages for the loop
+        current_messages: str | Sequence[str | SamplingMessage] = messages
 
-        # Build a tool lookup for execution
-        tool_map: dict[str, SamplingTool] = {}
-        if sampling_tools:
-            tool_map = {t.name: t for t in sampling_tools}
-
-        should_fallback = (
-            self.fastmcp.sampling_handler_behavior == "fallback"
-            and not self.session.check_client_capability(
-                capability=ClientCapabilities(sampling=SamplingCapability())
-            )
-        )
-
-        if self.fastmcp.sampling_handler_behavior == "always" or should_fallback:
-            if self.fastmcp.sampling_handler is None:
-                raise ValueError("Client does not support sampling")
-
-            return await self._sample_with_fallback_handler(
-                sampling_messages=sampling_messages,
-                system_prompt=system_prompt,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                model_preferences=model_preferences,
-                sdk_tools=sdk_tools,
-                tool_choice=tool_choice,
-                tool_map=tool_map,
-                max_iterations=max_iterations,
-                result_type=result_type,
-                final_response_tool=final_response_tool,
-            )
-
-        # When tools are provided, we need the client to support sampling.tools
-        if sampling_tools:
-            has_tools_capability = self.session.check_client_capability(
-                capability=ClientCapabilities(
-                    sampling=SamplingCapability(tools=SamplingToolsCapability())
-                )
-            )
-            if not has_tools_capability:
-                raise ValueError(
-                    "Client does not support sampling with tools. "
-                    "The client must advertise the sampling.tools capability."
-                )
-
-            return await self._sample_with_client(
-                sampling_messages=sampling_messages,
-                system_prompt=system_prompt,
-                include_context=include_context,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                model_preferences=model_preferences,
-                sdk_tools=sdk_tools,
-                tool_choice=tool_choice,
-                tool_map=tool_map,
-                max_iterations=max_iterations,
-                result_type=result_type,
-                final_response_tool=final_response_tool,
-            )
-
-        # Simple case: no tools, no structured output
-        result = await self.session.create_message(
-            messages=sampling_messages,
-            system_prompt=system_prompt,
-            include_context=include_context,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            model_preferences=_parse_model_preferences(model_preferences),
-            related_request_id=self.request_id,
-        )
-
-        # Extract text from content
-        text = _extract_text_from_content(result.content)
-
-        return SamplingResult(
-            text=text,
-            result=cast(ResultT, text),
-            history=list(sampling_messages),
-        )
-
-    async def _sample_with_fallback_handler(
-        self,
-        sampling_messages: list[SamplingMessage],
-        system_prompt: str | None,
-        temperature: float | None,
-        max_tokens: int,
-        model_preferences: ModelPreferences | str | list[str] | None,
-        sdk_tools: list[SDKTool] | None,
-        tool_choice: ToolChoiceOption | None,
-        tool_map: dict[str, SamplingTool],
-        max_iterations: int,
-        result_type: type[ResultT] | None,
-        final_response_tool: SamplingTool | None,
-    ) -> SamplingResult[ResultT] | SamplingResult[str]:
-        """Execute sampling with fallback handler, including automatic tool loop."""
-        assert self.fastmcp.sampling_handler is not None
-
-        current_messages = list(sampling_messages)
-        iteration = 0
-        has_tools = bool(sdk_tools)
-        has_result_type = result_type is not None and result_type is not str
-
-        while True:
-            # On last iteration, force completion
-            effective_tool_choice: ToolChoice | None = (
-                ToolChoice(mode=tool_choice) if tool_choice else None
-            )
-            if iteration == max_iterations - 1:
-                if has_result_type and final_response_tool is not None:
-                    # Force final_response tool on last iteration
-                    effective_tool_choice = ToolChoice(
-                        mode="required", name="final_response"
-                    )
-                elif has_tools:
-                    # Force text response (no tools) on last iteration
-                    effective_tool_choice = ToolChoice(mode="none")
-
-            create_message_result = self.fastmcp.sampling_handler(
-                current_messages,
-                SamplingParams(
-                    systemPrompt=system_prompt,
-                    messages=current_messages,
-                    temperature=temperature,
-                    maxTokens=max_tokens,
-                    modelPreferences=_parse_model_preferences(model_preferences),
-                    tools=sdk_tools,
-                    toolChoice=effective_tool_choice,
-                ),
-                self.request_context,
-            )
-
-            if inspect.isawaitable(create_message_result):
-                create_message_result = await create_message_result
-
-            iteration += 1
-
-            # Handle simple string/content responses
-            if isinstance(create_message_result, str):
-                if has_tools:
-                    raise ValueError(
-                        "Sampling handler returned a string, but tools were provided. "
-                        "Handler must return CreateMessageResultWithTools when tools are used."
-                    )
-                return SamplingResult(
-                    text=create_message_result,
-                    result=cast(ResultT, create_message_result),
-                    history=current_messages,
-                )
-
-            if isinstance(create_message_result, CreateMessageResult):
-                if has_tools:
-                    raise ValueError(
-                        "Sampling handler returned CreateMessageResult, but tools were provided. "
-                        "Handler must return CreateMessageResultWithTools when tools are used."
-                    )
-                text = _extract_text_from_content(create_message_result.content)
-                return SamplingResult(
-                    text=text,
-                    result=cast(ResultT, text),
-                    history=current_messages,
-                )
-
-            if isinstance(create_message_result, CreateMessageResultWithTools):
-                # If not a tool use, this is the final response
-                if create_message_result.stopReason != "toolUse" or not tool_map:
-                    text = _extract_text_from_content(create_message_result.content)
-                    return SamplingResult(
-                        text=text,
-                        result=cast(ResultT, text),
-                        history=current_messages,
-                    )
-
-                # Check if we've hit max iterations
-                if iteration >= max_iterations:
-                    # Return what we have with None text (tool use without completion)
-                    return SamplingResult(
-                        text=None,
-                        result=cast(ResultT, None),
-                        history=current_messages,
-                    )
-
-                # Execute tool calls
-                result = await self._execute_tool_calls(
-                    result=create_message_result,
-                    current_messages=current_messages,
-                    tool_map=tool_map,
-                    result_type=result_type,
-                    final_response_tool=final_response_tool,
-                )
-
-                if isinstance(result, SamplingResult):
-                    # final_response was called, return the structured result
-                    return result
-
-                # result is a tuple of (messages, should_continue)
-                current_messages = cast(list[SamplingMessage], result[0])
-                should_continue = result[1]
-                if not should_continue:
-                    text = _extract_text_from_content(create_message_result.content)
-                    return SamplingResult(
-                        text=text,
-                        result=cast(ResultT, text),
-                        history=current_messages,
-                    )
-                continue
-
-            raise ValueError(
-                f"Unexpected sampling handler result: {create_message_result}"
-            )
-
-    async def _sample_with_client(
-        self,
-        sampling_messages: list[SamplingMessage],
-        system_prompt: str | None,
-        include_context: IncludeContext | None,
-        temperature: float | None,
-        max_tokens: int,
-        model_preferences: ModelPreferences | str | list[str] | None,
-        sdk_tools: list[SDKTool] | None,
-        tool_choice: ToolChoiceOption | None,
-        tool_map: dict[str, SamplingTool],
-        max_iterations: int,
-        result_type: type[ResultT] | None,
-        final_response_tool: SamplingTool | None,
-    ) -> SamplingResult[ResultT] | SamplingResult[str]:
-        """Execute sampling with client, including automatic tool loop."""
-        current_messages = list(sampling_messages)
-        iteration = 0
-        has_tools = bool(sdk_tools)
-        has_result_type = result_type is not None and result_type is not str
-
-        while True:
-            # On last iteration, force completion
-            effective_tool_choice: ToolChoice | None = (
-                ToolChoice(mode=tool_choice) if tool_choice else None
-            )
-            if iteration == max_iterations - 1:
-                if has_result_type and final_response_tool is not None:
-                    # Force final_response tool on last iteration
-                    effective_tool_choice = ToolChoice(
-                        mode="required", name="final_response"
-                    )
-                elif has_tools:
-                    # Force text response (no tools) on last iteration
-                    effective_tool_choice = ToolChoice(mode="none")
-
-            result = await self.session.create_message(
+        for _iteration in range(max_iterations):
+            step = await self.sample_step(
                 messages=current_messages,
                 system_prompt=system_prompt,
-                include_context=include_context,
                 temperature=temperature,
                 max_tokens=max_tokens,
-                model_preferences=_parse_model_preferences(model_preferences),
-                tools=sdk_tools,
-                tool_choice=effective_tool_choice,
-                related_request_id=self.request_id,
-            )
-            iteration += 1
-
-            # If not a tool use or no tools to execute, return text result
-            if result.stopReason != "toolUse" or not tool_map:
-                text = _extract_text_from_content(result.content)
-                return SamplingResult(
-                    text=text,
-                    result=cast(ResultT, text),
-                    history=current_messages,
-                )
-
-            # Check if we've hit max iterations
-            if iteration >= max_iterations:
-                # Return what we have with None text (tool use without completion)
-                return SamplingResult(
-                    text=None,
-                    result=cast(ResultT, None),
-                    history=current_messages,
-                )
-
-            # Execute tool calls
-            tool_result = await self._execute_tool_calls(
-                result=result,
-                current_messages=current_messages,
-                tool_map=tool_map,
-                result_type=result_type,
-                final_response_tool=final_response_tool,
+                model_preferences=model_preferences,
+                tools=sampling_tools,
+                tool_choice=tool_choice,
             )
 
-            if isinstance(tool_result, SamplingResult):
-                # final_response was called, return the structured result
-                return tool_result
-
-            # tool_result is a tuple of (messages, should_continue)
-            current_messages = cast(list[SamplingMessage], tool_result[0])
-            should_continue = tool_result[1]
-            if not should_continue:
-                text = _extract_text_from_content(result.content)
-                return SamplingResult(
-                    text=text,
-                    result=cast(ResultT, text),
-                    history=current_messages,
-                )
-
-    async def _execute_tool_calls(
-        self,
-        result: CreateMessageResultWithTools,
-        current_messages: list[SamplingMessage],
-        tool_map: dict[str, SamplingTool],
-        result_type: type[ResultT] | None,
-        final_response_tool: SamplingTool | None,
-    ) -> (
-        tuple[list[SamplingMessage], bool]
-        | SamplingResult[ResultT]
-        | SamplingResult[str]
-    ):
-        """Execute tool calls from an LLM response and return updated messages.
-
-        Returns:
-            - Tuple of (updated_messages, should_continue) for normal tool calls
-            - SamplingResult when final_response tool is called with valid input
-        """
-        # Find all tool use content blocks
-        content_list = (
-            result.content if isinstance(result.content, list) else [result.content]
-        )
-        tool_use_blocks = [c for c in content_list if isinstance(c, ToolUseContent)]
-
-        if not tool_use_blocks:
-            return current_messages, False
-
-        # Add the assistant's response to messages
-        current_messages.append(
-            SamplingMessage(role="assistant", content=result.content)
-        )
-
-        # Execute each tool and collect results into a single list
-        tool_results: list[ToolResultContent] = []
-
-        for tool_use in tool_use_blocks:
-            # Check if this is the final_response tool
-            if (
-                tool_use.name == "final_response"
-                and final_response_tool is not None
-                and result_type is not None
-                and result_type is not str
-            ):
-                # Validate and parse the input as the result type
-                try:
-                    type_adapter = get_cached_typeadapter(result_type)
-                    validated_result = type_adapter.validate_python(tool_use.input)
-                    # Convert to JSON for .text
-                    text = json.dumps(
-                        type_adapter.dump_python(validated_result, mode="json")
-                    )
-                    return SamplingResult(
-                        text=text,
-                        result=validated_result,
-                        history=current_messages,
-                    )
-                except Exception as e:
-                    # Validation failed - add error and continue the loop
-                    tool_results.append(
-                        ToolResultContent(
-                            type="tool_result",
-                            toolUseId=tool_use.id,
-                            content=[
-                                TextContent(
-                                    type="text",
-                                    text=f"Validation error: {e}. Please try again.",
-                                )
-                            ],
-                            isError=True,
-                        )
-                    )
-                    continue
-
-            tool = tool_map.get(tool_use.name)
-            if tool is None:
-                # Tool not found - add error result
-                tool_results.append(
-                    ToolResultContent(
-                        type="tool_result",
-                        toolUseId=tool_use.id,
-                        content=[
-                            TextContent(
-                                type="text",
-                                text=f"Error: Unknown tool '{tool_use.name}'",
+            # Check for final_response tool call for structured output
+            if result_type is not None and result_type is not str and step.is_tool_use:
+                for tool_call in step.tool_calls:
+                    if tool_call.name == "final_response":
+                        # Validate and return the structured result
+                        type_adapter = get_cached_typeadapter(result_type)
+                        try:
+                            validated_result = type_adapter.validate_python(
+                                tool_call.input
                             )
-                        ],
-                        isError=True,
-                    )
-                )
-            else:
-                try:
-                    result_value = await tool.run(tool_use.input)
-                    tool_results.append(
-                        ToolResultContent(
-                            type="tool_result",
-                            toolUseId=tool_use.id,
-                            content=[TextContent(type="text", text=str(result_value))],
-                        )
-                    )
-                except Exception as e:
-                    tool_results.append(
-                        ToolResultContent(
-                            type="tool_result",
-                            toolUseId=tool_use.id,
-                            content=[TextContent(type="text", text=f"Error: {e}")],
-                            isError=True,
-                        )
-                    )
+                            text = json.dumps(
+                                type_adapter.dump_python(validated_result, mode="json")
+                            )
+                            return SamplingResult(
+                                text=text,
+                                result=validated_result,
+                                history=step.history,
+                            )
+                        except Exception as e:
+                            # Validation failed - add error as tool result
+                            step.history.append(
+                                SamplingMessage(
+                                    role="user",
+                                    content=[
+                                        ToolResultContent(
+                                            type="tool_result",
+                                            toolUseId=tool_call.id,
+                                            content=[
+                                                TextContent(
+                                                    type="text",
+                                                    text=(
+                                                        f"Validation error: {e}. "
+                                                        "Please try again with valid data."
+                                                    ),
+                                                )
+                                            ],
+                                            isError=True,
+                                        )
+                                    ],  # type: ignore[arg-type]
+                                )
+                            )
 
-        # Add all tool results as a single user message with list content
-        if tool_results:
-            current_messages.append(
-                SamplingMessage(
-                    role="user",
-                    content=tool_results,  # type: ignore[arg-type]
+            # If text response, we're done
+            if step.is_text:
+                return SamplingResult(
+                    text=step.text,
+                    result=cast(ResultT, step.text if step.text else ""),
+                    history=step.history,
                 )
-            )
 
-        return current_messages, True
+            # Continue with the updated history
+            current_messages = step.history
+
+            # After first iteration, reset tool_choice to auto
+            tool_choice = None
+
+        raise RuntimeError(f"Sampling exceeded maximum iterations ({max_iterations})")
 
     @overload
     async def elicit(
@@ -1342,8 +1067,58 @@ def _extract_text_from_content(
     if isinstance(content, list):
         for block in content:
             if hasattr(block, "text"):
-                return block.text
+                return block.text  # type: ignore[return-value]
         return None
     elif hasattr(content, "text"):
-        return content.text
+        return content.text  # type: ignore[return-value]
     return None
+
+
+def _prepare_messages(
+    messages: str | Sequence[str | SamplingMessage],
+) -> list[SamplingMessage]:
+    """Convert various message formats to a list of SamplingMessage objects."""
+    if isinstance(messages, str):
+        return [
+            SamplingMessage(
+                content=TextContent(text=messages, type="text"), role="user"
+            )
+        ]
+    else:
+        return [
+            SamplingMessage(content=TextContent(text=m, type="text"), role="user")
+            if isinstance(m, str)
+            else m
+            for m in messages
+        ]
+
+
+def _prepare_tools(
+    tools: Sequence[SamplingTool | Callable[..., Any]] | None,
+) -> list[SamplingTool] | None:
+    """Convert tools to SamplingTool objects."""
+    if tools is None:
+        return None
+
+    sampling_tools: list[SamplingTool] = []
+    for t in tools:
+        if isinstance(t, SamplingTool):
+            sampling_tools.append(t)
+        elif callable(t):
+            sampling_tools.append(SamplingTool.from_function(t))
+        else:
+            raise TypeError(f"Expected SamplingTool or callable, got {type(t)}")
+
+    return sampling_tools if sampling_tools else None
+
+
+def _extract_tool_calls(
+    response: CreateMessageResult | CreateMessageResultWithTools,
+) -> list[ToolUseContent]:
+    """Extract tool calls from a response."""
+    content = response.content
+    if isinstance(content, list):
+        return [c for c in content if isinstance(c, ToolUseContent)]
+    elif isinstance(content, ToolUseContent):
+        return [content]
+    return []

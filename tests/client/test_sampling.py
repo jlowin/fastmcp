@@ -204,14 +204,15 @@ class TestSamplingWithTools:
             with pytest.raises(ToolError, match="sampling.tools capability"):
                 await client.call_tool("sample_with_tool", {})
 
-    async def test_sampling_with_tools_fallback_handler_must_return_correct_type(self):
-        """Test that fallback handler must return CreateMessageResultWithTools when tools provided."""
-        from fastmcp.exceptions import ToolError
+    async def test_sampling_with_tools_fallback_handler_can_return_string(self):
+        """Test that fallback handler can return a string even when tools are provided.
 
-        # This handler returns a string, which is invalid when tools are provided
-        invalid_handler = AsyncMock(return_value="Fallback response")
+        The LLM might choose not to use any tools and just return a text response.
+        """
+        # This handler returns a string - valid even when tools are provided
+        simple_handler = AsyncMock(return_value="Direct response without tools")
 
-        mcp = FastMCP(sampling_handler=invalid_handler)
+        mcp = FastMCP(sampling_handler=simple_handler)
 
         def search(query: str) -> str:
             """Search the web."""
@@ -223,15 +224,14 @@ class TestSamplingWithTools:
                 messages="Search for Python tutorials",
                 tools=[search],
             )
-            return str(result)
+            return result.text or "no text"
 
         # Client without sampling handler - will use server's fallback
         async with Client(mcp) as client:
-            # Handler returns string but tools were provided - should error
-            with pytest.raises(
-                ToolError, match="must return CreateMessageResultWithTools"
-            ):
-                await client.call_tool("sample_with_tool", {})
+            result = await client.call_tool("sample_with_tool", {})
+
+        # Handler returned string directly, which is treated as final text response
+        assert result.data == "Direct response without tools"
 
     def test_sampling_tool_schema(self):
         """Test that SamplingTool generates correct schema."""
@@ -406,69 +406,6 @@ class TestAutomaticToolLoop:
         assert executed_tools == ["tool_a(5)", "tool_b(3)"]
         assert result.data == "Done!"
 
-    async def test_automatic_tool_loop_max_iterations(self):
-        """Test that max_iterations prevents infinite loops.
-
-        On the last iteration, tool_choice is set to 'none' to force text response.
-        """
-        from mcp.types import CreateMessageResultWithTools, ToolUseContent
-
-        call_count = 0
-        received_tool_choices: list = []
-
-        def looping_tool() -> str:
-            """A tool that always gets called again."""
-            return "keep going"
-
-        def sampling_handler(
-            messages: list[SamplingMessage], params: SamplingParams, ctx: RequestContext
-        ) -> CreateMessageResultWithTools:
-            nonlocal call_count
-            call_count += 1
-            received_tool_choices.append(params.toolChoice)
-
-            # On last iteration (when tool_choice=none), return text
-            if params.toolChoice and params.toolChoice.mode == "none":
-                return CreateMessageResultWithTools(
-                    role="assistant",
-                    content=[TextContent(type="text", text="Forced to stop")],
-                    model="test-model",
-                    stopReason="endTurn",
-                )
-
-            # Otherwise keep returning tool use
-            return CreateMessageResultWithTools(
-                role="assistant",
-                content=[
-                    ToolUseContent(
-                        type="tool_use",
-                        id=f"call_{call_count}",
-                        name="looping_tool",
-                        input={},
-                    )
-                ],
-                model="test-model",
-                stopReason="toolUse",
-            )
-
-        mcp = FastMCP(sampling_handler=sampling_handler)
-
-        @mcp.tool
-        async def infinite_loop(context: Context) -> str:
-            result = await context.sample(
-                messages="Start", tools=[looping_tool], max_iterations=3
-            )
-            return result.text or "no text"
-
-        async with Client(mcp) as client:
-            result = await client.call_tool("infinite_loop", {})
-
-        # Should complete after 3 iterations with forced text response
-        assert call_count == 3
-        assert result.data == "Forced to stop"
-        # Last call should have tool_choice=none
-        assert received_tool_choices[-1].mode == "none"
-
     async def test_automatic_tool_loop_handles_unknown_tool(self):
         """Test that unknown tool names result in error being passed to LLM."""
         from mcp.types import (
@@ -615,64 +552,6 @@ class TestAutomaticToolLoop:
         error_text = tool_result.content[0].text  # type: ignore[union-attr]
         assert "Tool failed intentionally" in error_text
         assert result.data == "Handled error"
-
-    async def test_max_iterations_one_for_manual_loop(self):
-        """Test that max_iterations=1 forces text on first call for manual loop building.
-
-        With max_iterations=1, tool_choice is set to 'none' on the first (and only) call,
-        forcing a text response so users can build their own loop using history.
-        """
-        from mcp.types import CreateMessageResultWithTools, ToolUseContent
-
-        received_tool_choices: list = []
-
-        def my_tool() -> str:
-            """A tool."""
-            return "result"
-
-        def sampling_handler(
-            messages: list[SamplingMessage], params: SamplingParams, ctx: RequestContext
-        ) -> CreateMessageResultWithTools:
-            received_tool_choices.append(params.toolChoice)
-
-            # With tool_choice=none, return text response
-            if params.toolChoice and params.toolChoice.mode == "none":
-                return CreateMessageResultWithTools(
-                    role="assistant",
-                    content=[TextContent(type="text", text="Forced text response")],
-                    model="test-model",
-                    stopReason="endTurn",
-                )
-
-            # Otherwise return tool use (shouldn't happen with max_iterations=1)
-            return CreateMessageResultWithTools(
-                role="assistant",
-                content=[
-                    ToolUseContent(
-                        type="tool_use", id="call_1", name="my_tool", input={}
-                    )
-                ],
-                model="test-model",
-                stopReason="toolUse",
-            )
-
-        mcp = FastMCP(sampling_handler=sampling_handler)
-
-        @mcp.tool
-        async def single_iteration(context: Context) -> str:
-            result = await context.sample(
-                messages="Test", tools=[my_tool], max_iterations=1
-            )
-            return result.text or "no text"
-
-        async with Client(mcp) as client:
-            result = await client.call_tool("single_iteration", {})
-
-        # Should get forced text response
-        assert result.data == "Forced text response"
-        # First and only call should have tool_choice=none
-        assert len(received_tool_choices) == 1
-        assert received_tool_choices[0].mode == "none"
 
 
 class TestSamplingResultType:
@@ -919,5 +798,192 @@ class TestSamplingResultType:
 
         async with Client(mcp) as client:
             result = await client.call_tool("check_result", {})
+
+        assert result.data == "ok"
+
+
+class TestSampleStep:
+    """Tests for ctx.sample_step() - single LLM call with manual control."""
+
+    async def test_sample_step_basic(self):
+        """Test basic sample_step returns text response."""
+        from mcp.types import CreateMessageResultWithTools
+
+        def sampling_handler(
+            messages: list[SamplingMessage], params: SamplingParams, ctx: RequestContext
+        ) -> CreateMessageResultWithTools:
+            return CreateMessageResultWithTools(
+                role="assistant",
+                content=[TextContent(type="text", text="Hello from step")],
+                model="test-model",
+                stopReason="endTurn",
+            )
+
+        mcp = FastMCP(sampling_handler=sampling_handler)
+
+        @mcp.tool
+        async def test_step(context: Context) -> str:
+            step = await context.sample_step(messages="Hi")
+            assert step.is_text
+            assert not step.is_tool_use
+            assert step.text == "Hello from step"
+            return step.text or ""
+
+        async with Client(mcp) as client:
+            result = await client.call_tool("test_step", {})
+
+        assert result.data == "Hello from step"
+
+    async def test_sample_step_with_tool_execution(self):
+        """Test sample_step executes tools by default."""
+        from mcp.types import CreateMessageResultWithTools, ToolUseContent
+
+        call_count = 0
+
+        def my_tool(x: int) -> str:
+            """A test tool."""
+            return f"result:{x}"
+
+        def sampling_handler(
+            messages: list[SamplingMessage], params: SamplingParams, ctx: RequestContext
+        ) -> CreateMessageResultWithTools:
+            nonlocal call_count
+            call_count += 1
+
+            if call_count == 1:
+                return CreateMessageResultWithTools(
+                    role="assistant",
+                    content=[
+                        ToolUseContent(
+                            type="tool_use",
+                            id="call_1",
+                            name="my_tool",
+                            input={"x": 42},
+                        )
+                    ],
+                    model="test-model",
+                    stopReason="toolUse",
+                )
+            else:
+                return CreateMessageResultWithTools(
+                    role="assistant",
+                    content=[TextContent(type="text", text="Done")],
+                    model="test-model",
+                    stopReason="endTurn",
+                )
+
+        mcp = FastMCP(sampling_handler=sampling_handler)
+
+        @mcp.tool
+        async def test_step(context: Context) -> str:
+            messages: str | list[SamplingMessage] = "Run tool"
+
+            while True:
+                step = await context.sample_step(messages=messages, tools=[my_tool])
+
+                if step.is_text:
+                    return step.text or ""
+
+                # History should include tool results when execute_tools=True
+                messages = step.history
+
+        async with Client(mcp) as client:
+            result = await client.call_tool("test_step", {})
+
+        assert result.data == "Done"
+        assert call_count == 2
+
+    async def test_sample_step_execute_tools_false(self):
+        """Test sample_step with execute_tools=False doesn't execute tools."""
+        from mcp.types import CreateMessageResultWithTools, ToolUseContent
+
+        tool_executed = False
+
+        def my_tool() -> str:
+            """A test tool."""
+            nonlocal tool_executed
+            tool_executed = True
+            return "executed"
+
+        def sampling_handler(
+            messages: list[SamplingMessage], params: SamplingParams, ctx: RequestContext
+        ) -> CreateMessageResultWithTools:
+            return CreateMessageResultWithTools(
+                role="assistant",
+                content=[
+                    ToolUseContent(
+                        type="tool_use",
+                        id="call_1",
+                        name="my_tool",
+                        input={},
+                    )
+                ],
+                model="test-model",
+                stopReason="toolUse",
+            )
+
+        mcp = FastMCP(sampling_handler=sampling_handler)
+
+        @mcp.tool
+        async def test_step(context: Context) -> str:
+            step = await context.sample_step(
+                messages="Run tool",
+                tools=[my_tool],
+                execute_tools=False,
+            )
+            assert step.is_tool_use
+            assert len(step.tool_calls) == 1
+            assert step.tool_calls[0].name == "my_tool"
+            # History should include assistant message but no tool results
+            assert len(step.history) == 2  # user + assistant
+            return "ok"
+
+        async with Client(mcp) as client:
+            result = await client.call_tool("test_step", {})
+
+        assert result.data == "ok"
+        assert not tool_executed  # Tool should not have been executed
+
+    async def test_sample_step_history_includes_assistant_message(self):
+        """Test that history includes assistant message when execute_tools=False."""
+        from mcp.types import CreateMessageResultWithTools, ToolUseContent
+
+        def sampling_handler(
+            messages: list[SamplingMessage], params: SamplingParams, ctx: RequestContext
+        ) -> CreateMessageResultWithTools:
+            return CreateMessageResultWithTools(
+                role="assistant",
+                content=[
+                    ToolUseContent(
+                        type="tool_use",
+                        id="call_1",
+                        name="my_tool",
+                        input={"query": "test"},
+                    )
+                ],
+                model="test-model",
+                stopReason="toolUse",
+            )
+
+        mcp = FastMCP(sampling_handler=sampling_handler)
+
+        def my_tool(query: str) -> str:
+            return f"result for {query}"
+
+        @mcp.tool
+        async def test_step(context: Context) -> str:
+            step = await context.sample_step(
+                messages="Search",
+                tools=[my_tool],
+                execute_tools=False,
+            )
+            # History should have: user message + assistant message
+            assert len(step.history) == 2
+            assert step.history[0].role == "user"
+            assert step.history[1].role == "assistant"
+            return "ok"
+
+        async with Client(mcp) as client:
+            result = await client.call_tool("test_step", {})
 
         assert result.data == "ok"

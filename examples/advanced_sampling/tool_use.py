@@ -60,7 +60,6 @@ async def research(question: str, ctx: Context) -> dict:
         system_prompt="You are a research assistant. Use the available tools to gather information, then call final_response with your structured report.",
         tools=[search_web, get_word_count],
         result_type=ResearchReport,
-        max_iterations=5,
     )
 
     return result.result.model_dump()  # type: ignore[attr-defined]

@@ -6,205 +6,177 @@ icon: robot
 tag: NEW
 ---
 
-import { VersionBadge } from '/snippets/version-badge.mdx'
+import { VersionBadge } from "/snippets/version-badge.mdx";
 
 <VersionBadge version="2.0.0" />
 
-LLM sampling allows MCP tools to request LLM completions based on provided messages. By default, sampling requests are sent to the client's LLM, but you can also configure a fallback handler or always use a specific LLM provider.
+LLM sampling allows your MCP tools to request text generation from an LLM during execution. This enables tools to leverage AI capabilities for analysis, generation, reasoning, and more—without the client needing to orchestrate multiple calls.
 
-## Why Use LLM Sampling?
+By default, sampling requests are routed to the client's LLM. You can also configure a fallback handler to use a specific provider (like OpenAI) when the client doesn't support sampling, or to always use your own LLM regardless of client capabilities.
 
-LLM sampling enables tools to:
+## Method Reference
 
-- **Leverage AI capabilities**: Use the client's LLM for text generation and analysis
-- **Offload complex reasoning**: Let the LLM handle tasks requiring natural language understanding
-- **Execute agentic workflows**: Let the LLM call tools during sampling to accomplish complex tasks
-- **Get structured output**: Request validated, typed responses using `result_type`
-- **Generate dynamic content**: Create responses, summaries, or transformations based on data
-
-## Basic Usage
-
-Use `ctx.sample()` to request text generation from the client's LLM. The method returns a `SamplingResult` with `.text`, `.result`, and `.history` attributes:
-
-```python
-from fastmcp import FastMCP, Context
-
-mcp = FastMCP("SamplingDemo")
-
-@mcp.tool
-async def analyze_sentiment(text: str, ctx: Context) -> dict:
-    """Analyze the sentiment of text using the client's LLM."""
-    prompt = f"""Analyze the sentiment of the following text as positive, negative, or neutral.
-    Just output a single word - 'positive', 'negative', or 'neutral'.
-
-    Text to analyze: {text}"""
-
-    # Request LLM analysis - returns SamplingResult
-    response = await ctx.sample(prompt)
-
-    # Access the text via .text or .result (same for text responses)
-    sentiment = response.text.strip().lower()
-
-    if "positive" in sentiment:
-        sentiment = "positive"
-    elif "negative" in sentiment:
-        sentiment = "negative"
-    else:
-        sentiment = "neutral"
-
-    return {"text": text, "sentiment": sentiment}
-```
-
-## Method Signature
-
-<Card icon="code" title="Context Sampling Method">
+<Card icon="code" title="ctx.sample()">
 <ResponseField name="ctx.sample" type="async method">
-  Request text generation from the client's LLM
+  Request text generation from the LLM, running to completion automatically.
 
   <Expandable title="Parameters">
     <ResponseField name="messages" type="str | list[str | SamplingMessage]">
-      A string or list of strings/message objects to send to the LLM
+      The prompt to send. Can be a simple string or a list of messages for multi-turn conversations.
     </ResponseField>
 
     <ResponseField name="system_prompt" type="str | None" default="None">
-      Optional system prompt to guide the LLM's behavior
+      Instructions that establish the LLM's role and behavior.
     </ResponseField>
 
     <ResponseField name="temperature" type="float | None" default="None">
-      Optional sampling temperature (controls randomness, typically 0.0-1.0)
+      Controls randomness (0.0 = deterministic, 1.0 = creative).
     </ResponseField>
 
     <ResponseField name="max_tokens" type="int | None" default="512">
-      Optional maximum number of tokens to generate
+      Maximum tokens to generate.
     </ResponseField>
 
-    <ResponseField name="model_preferences" type="ModelPreferences | str | list[str] | None" default="None">
-      Optional model selection preferences (e.g., model hint string, list of hints, or ModelPreferences object)
+    <ResponseField name="model_preferences" type="str | list[str] | None" default="None">
+      Hints for which model the client should use.
     </ResponseField>
 
-    <ResponseField name="tools" type="list[SamplingTool | Callable] | None" default="None">
-      Optional list of tools the LLM can use during sampling. See [Sampling with Tools](#sampling-with-tools).
-    </ResponseField>
-
-    <ResponseField name="tool_choice" type="str | None" default="None">
-      Optional control over tool usage behavior: `"auto"`, `"required"`, or `"none"`
-    </ResponseField>
-
-    <ResponseField name="max_iterations" type="int" default="10">
-      Maximum number of LLM calls before returning. When tools are provided, FastMCP automatically executes tool calls and continues the conversation. On the last iteration, forces a text response (or `final_response` if using `result_type`).
+    <ResponseField name="tools" type="list[Callable] | None" default="None">
+      Functions the LLM can call during sampling.
     </ResponseField>
 
     <ResponseField name="result_type" type="type[T] | None" default="None">
-      Optional type for structured output. When specified, creates a synthetic `final_response` tool and validates the LLM's response against this type. See [Structured Output](#structured-output).
+      A Pydantic model for validated structured output.
     </ResponseField>
+
   </Expandable>
 
   <Expandable title="Response">
     <ResponseField name="SamplingResult[T]" type="dataclass">
-      Always returns a `SamplingResult` with:
-      - `.text`: The text representation (raw text, or JSON for structured output). `None` if the LLM requested a tool on the last iteration.
-      - `.result`: The typed result. For text responses, equals `.text`. For structured output, the validated object.
-      - `.history`: List of all messages exchanged during sampling, useful for continuing conversations.
+      - `.text`: The raw text response (or JSON for structured output)
+      - `.result`: The typed result—same as `.text` for plain text, or a validated Pydantic object for structured output
+      - `.history`: All messages exchanged during sampling
     </ResponseField>
   </Expandable>
 </ResponseField>
 </Card>
 
-## Simple Text Generation
+<Card icon="code" title="ctx.sample_step()">
+<ResponseField name="ctx.sample_step" type="async method">
+  Make a single LLM sampling call. Use this for fine-grained control over the sampling loop.
 
-### Basic Prompting
+  <Expandable title="Parameters">
+    Same as `sample()`, plus:
 
-Generate text with simple string prompts:
+    <ResponseField name="tool_choice" type="str | None" default="None">
+      Controls tool usage: `"auto"`, `"required"`, or `"none"`.
+    </ResponseField>
+
+    <ResponseField name="execute_tools" type="bool" default="True">
+      If True, execute tool calls and append results to history. If False, return immediately with tool calls available for manual execution.
+    </ResponseField>
+
+  </Expandable>
+
+  <Expandable title="Response">
+    <ResponseField name="SampleStep" type="dataclass">
+      - `.response`: The raw LLM response
+      - `.history`: Messages including input, assistant response, and tool results
+      - `.is_tool_use` / `.is_text`: Check what kind of response
+      - `.tool_calls`: List of tool calls (if any)
+      - `.text`: The text content (if any)
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+</Card>
+
+## Basic Sampling
+
+The simplest use of sampling is passing a prompt string to `ctx.sample()`. The method sends the prompt to the LLM, waits for the complete response, and returns a `SamplingResult`. You can access the generated text through the `.text` attribute.
 
 ```python
-@mcp.tool
-async def generate_summary(content: str, ctx: Context) -> str:
-    """Generate a summary of the provided content."""
-    prompt = f"Please provide a concise summary of the following content:\n\n{content}"
+from fastmcp import FastMCP, Context
 
-    response = await ctx.sample(prompt)
-    return response.text
+mcp = FastMCP()
+
+@mcp.tool
+async def summarize(content: str, ctx: Context) -> str:
+    """Generate a summary of the provided content."""
+    result = await ctx.sample(f"Please summarize this:\n\n{content}")
+    return result.text
 ```
 
-### System Prompt
+The `SamplingResult` also provides `.result` (identical to `.text` for plain text responses) and `.history` containing the full message exchange—useful if you need to continue the conversation or debug the interaction.
 
-Use system prompts to guide the LLM's behavior:
+### System Prompts
 
-```python
+System prompts let you establish the LLM's role and behavioral guidelines before it processes your request. This is useful for controlling tone, enforcing constraints, or providing context that shouldn't clutter the user-facing prompt.
+
+````python
 @mcp.tool
-async def generate_code_example(concept: str, ctx: Context) -> str:
-    """Generate a Python code example for a given concept."""
-    response = await ctx.sample(
-        messages=f"Write a simple Python code example demonstrating '{concept}'.",
-        system_prompt="You are an expert Python programmer. Provide concise, working code examples without explanations.",
+async def generate_code(concept: str, ctx: Context) -> str:
+    """Generate a Python code example for a concept."""
+    result = await ctx.sample(
+        messages=f"Write a Python example demonstrating '{concept}'.",
+        system_prompt=(
+            "You are an expert Python programmer. "
+            "Provide concise, working code without explanations."
+        ),
         temperature=0.7,
         max_tokens=300
     )
+    return f"```python\n{result.text}\n```"
+````
 
-    return f"```python\n{response.text}\n```"
-```
-
+The `temperature` parameter controls randomness—higher values (up to 1.0) produce more varied outputs, while lower values make responses more deterministic. The `max_tokens` parameter limits response length.
 
 ### Model Preferences
 
-Specify model preferences for different use cases:
+Model preferences let you hint at which LLM the client should use for a request. You can pass a single model name or a list of preferences in priority order. These are hints rather than requirements—the actual model used depends on what the client has available.
 
 ```python
 @mcp.tool
-async def creative_writing(topic: str, ctx: Context) -> str:
-    """Generate creative content using a specific model."""
-    response = await ctx.sample(
-        messages=f"Write a creative short story about {topic}",
-        model_preferences="claude-haiku-4-5",  # Prefer a specific model
-        temperature=0.9,  # High creativity
-        max_tokens=1000
-    )
-
-    return response.text
-
-@mcp.tool
 async def technical_analysis(data: str, ctx: Context) -> str:
-    """Perform technical analysis with a reasoning-focused model."""
-    response = await ctx.sample(
-        messages=f"Analyze this technical data and provide insights: {data}",
-        model_preferences=["claude-3-opus", "gpt-4"],  # Prefer reasoning models
-        temperature=0.2,  # Low randomness for consistency
-        max_tokens=800
+    """Analyze data using a reasoning-focused model."""
+    result = await ctx.sample(
+        messages=f"Analyze this data:\n\n{data}",
+        model_preferences=["claude-opus-4-5", "gpt-5-2"],
+        temperature=0.2,
     )
-
-    return response.text
+    return result.text
 ```
 
-### Complex Message Structures
+Use model preferences when different tasks benefit from different model characteristics. Creative writing might prefer faster models with higher temperature, while complex analysis might benefit from larger reasoning-focused models.
 
-Use structured messages for more complex interactions:
+### Multi-Turn Conversations
+
+For requests that need conversational context, construct a list of `SamplingMessage` objects representing the conversation history. Each message has a `role` ("user" or "assistant") and `content`.
 
 ```python
 from fastmcp.client.sampling import SamplingMessage
 
 @mcp.tool
-async def multi_turn_analysis(user_query: str, context_data: str, ctx: Context) -> str:
-    """Perform analysis using multi-turn conversation structure."""
+async def contextual_analysis(query: str, data: str, ctx: Context) -> str:
+    """Analyze data with conversational context."""
     messages = [
-        SamplingMessage(role="user", content=f"I have this data: {context_data}"),
-        SamplingMessage(role="assistant", content="I can see your data. What would you like me to analyze?"),
-        SamplingMessage(role="user", content=user_query)
+        SamplingMessage(role="user", content=f"Here's my data: {data}"),
+        SamplingMessage(
+            role="assistant",
+            content="I see the data. What would you like to know?"
+        ),
+        SamplingMessage(role="user", content=query)
     ]
-
-    response = await ctx.sample(
-        messages=messages,
-        system_prompt="You are a data analyst. Provide detailed insights based on the conversation context.",
-        temperature=0.3
-    )
-
-    return response.text
+    result = await ctx.sample(messages=messages)
+    return result.text
 ```
+
+The LLM receives the full conversation thread and responds with awareness of the preceding context.
 
 ## Structured Output
 
-<VersionBadge version="2.14.0" />
+<VersionBadge version="2.14.1" />
 
-Use `result_type` to get validated, typed responses from the LLM. When you specify a `result_type`, FastMCP creates a synthetic `final_response` tool that the LLM calls to provide its structured response.
+When you need validated, typed data instead of free-form text, use the `result_type` parameter with a Pydantic model. FastMCP ensures the LLM returns data matching your schema, handling validation and retries automatically.
 
 ```python
 from pydantic import BaseModel
@@ -219,75 +191,41 @@ class SentimentResult(BaseModel):
 
 @mcp.tool
 async def analyze_sentiment(text: str, ctx: Context) -> SentimentResult:
-    """Analyze sentiment with structured output."""
+    """Analyze text sentiment with structured output."""
     result = await ctx.sample(
         messages=f"Analyze the sentiment of: {text}",
         result_type=SentimentResult,
     )
-
-    # result.result is a validated SentimentResult object
-    return result.result
+    return result.result  # A validated SentimentResult object
 ```
 
-### How Structured Output Works
+When you call this tool, the LLM returns a structured response that FastMCP validates against your Pydantic model. You access the validated object through `result.result`, while `result.text` contains the JSON representation.
 
-When you pass `result_type`:
-
-1. FastMCP creates a synthetic `final_response` tool with a schema derived from your type
-2. A hint is added to the system prompt: "Call final_response when you have completed the task."
-3. The LLM calls `final_response` with its structured response
-4. FastMCP validates the input against your type
-5. If validation fails, the error is sent back to the LLM for retry
-6. On success, `result.result` contains the validated object and `result.text` contains the JSON
+<Note>
+  When you pass `result_type`, `sample()` automatically creates a
+  `final_response` tool that the LLM calls to provide its response. If
+  validation fails, the error is sent back to the LLM for retry. This automatic
+  handling only applies to `sample()`—with `sample_step()`, you must manage
+  structured output yourself.
+</Note>
 
 ## Sampling with Tools
 
-<VersionBadge version="2.14.0" />
+<VersionBadge version="2.14.1" />
 
-Sampling with tools enables agentic workflows where the LLM can request tool calls during sampling. FastMCP automatically executes the tools and continues the conversation until the LLM provides a final response.
+Sampling with tools enables agentic workflows where the LLM can call functions to gather information before responding. This implements [SEP-1577](https://github.com/modelcontextprotocol/modelcontextprotocol/issues/1577), allowing the LLM to autonomously orchestrate multi-step operations.
 
-### Creating Sampling Tools
+Pass Python functions to the `tools` parameter, and FastMCP handles the execution loop automatically—calling tools, returning results to the LLM, and continuing until the LLM provides a final response.
 
-Define regular Python functions and pass them directly to `ctx.sample()`:
+### Defining Tools
+
+Define regular Python functions with type hints and docstrings. FastMCP extracts the function's name, docstring, and parameter types to create tool schemas that the LLM can understand.
 
 ```python
 from fastmcp import FastMCP, Context
 
 def search(query: str) -> str:
     """Search the web for information."""
-    return f"Search results for: {query}"
-
-def get_current_time() -> str:
-    """Get the current time."""
-    from datetime import datetime
-    return datetime.now().strftime("%H:%M:%S")
-```
-
-<Note>
-To create a tool with a custom name or description, use `SamplingTool.from_function()`:
-
-```python
-from fastmcp.server.sampling import SamplingTool
-
-tool = SamplingTool.from_function(
-    my_search_function,
-    name="web_search",
-    description="Search the web for information"
-)
-
-result = await ctx.sample(messages="...", tools=[tool])
-```
-</Note>
-
-### Using Tools in Sampling
-
-Pass tools to `ctx.sample()` to enable agentic tool use. FastMCP automatically handles the tool execution loop:
-
-```python
-from fastmcp import FastMCP, Context
-
-def search(query: str) -> str:
-    """Search the web."""
     return f"Results for: {query}"
 
 def get_time() -> str:
@@ -298,155 +236,187 @@ def get_time() -> str:
 mcp = FastMCP()
 
 @mcp.tool
-async def research_assistant(question: str, ctx: Context) -> str:
-    """Answer questions using search and calculation tools."""
+async def research(question: str, ctx: Context) -> str:
+    """Answer questions using available tools."""
     result = await ctx.sample(
         messages=question,
-        system_prompt="You are a research assistant. Use the available tools to answer questions.",
         tools=[search, get_time],
     )
-
     return result.text
 ```
 
-### Tool Loop
+The LLM sees each function's signature and docstring, using this information to decide when and how to call them. Tool errors are caught and sent back to the LLM, allowing it to recover gracefully. An internal safety limit prevents infinite loops.
 
-When you call `ctx.sample()` with tools, FastMCP automatically handles the execution loop:
-
-1. The LLM receives your prompt and the available tools
-2. If the LLM calls a tool, FastMCP executes it and sends the result back
-3. This continues until the LLM provides a final text response
-
-Tool errors are automatically caught and sent back to the LLM, allowing it to handle failures gracefully.
-
-Use `max_iterations` to limit the number of LLM calls (default is 10). On the last iteration, FastMCP forces the LLM to return a final response rather than continuing to call tools:
+For custom names or descriptions, use `SamplingTool.from_function()`:
 
 ```python
-# Allow up to 5 tool-use cycles
-result = await ctx.sample(
-    messages=prompt,
-    tools=[search, get_time],
-    max_iterations=5,
+from fastmcp.server.sampling import SamplingTool
+
+tool = SamplingTool.from_function(
+    my_func,
+    name="custom_name",
+    description="Custom description"
 )
 
-# Single iteration mode - forces text on first call
-# Useful for building your own loop with result.history
+result = await ctx.sample(messages="...", tools=[tool])
+```
+
+### Combining with Structured Output
+
+Combine tools with `result_type` for agentic workflows that return validated, structured data. The LLM uses your tools to gather information, then returns a response matching your Pydantic schema.
+
+```python
 result = await ctx.sample(
-    messages=prompt,
-    tools=[search, get_time],
-    max_iterations=1,
+    messages="Research Python async patterns",
+    tools=[search, fetch_url],
+    result_type=ResearchResult,
 )
 ```
 
-### Tool Choice Options
+## Loop Control
 
-Control how the LLM uses tools with `tool_choice`:
+<VersionBadge version="2.14.1" />
+
+While `sample()` handles the tool execution loop automatically, some scenarios require fine-grained control over each step. The `sample_step()` method makes a single LLM call and returns a `SampleStep` containing the response and updated history.
+
+Unlike `sample()`, `sample_step()` is stateless—it doesn't remember previous calls. You control the conversation by passing the full message history each time. The returned `step.history` includes all messages up through the current response, making it easy to continue the loop.
+
+Use `sample_step()` when you need to:
+
+- Inspect tool calls before they execute
+- Implement custom termination conditions
+- Add logging, metrics, or checkpointing between steps
+- Build custom agentic loops with domain-specific logic
+
+### Using sample_step()
+
+By default, `sample_step()` executes any tool calls and includes the results in the history. Call it in a loop, passing the updated history each time, until a stop condition is met.
 
 ```python
-# Let the LLM decide (default)
-result = await ctx.sample(messages=prompt, tools=tools, tool_choice="auto")
+from mcp.types import SamplingMessage
 
-# Force the LLM to use a tool
-result = await ctx.sample(messages=prompt, tools=tools, tool_choice="required")
+@mcp.tool
+async def controlled_agent(question: str, ctx: Context) -> str:
+    """Agent with manual loop control."""
+    messages = [SamplingMessage(role="user", content=question)]
 
-# Prevent tool use (useful for final response)
-result = await ctx.sample(messages=prompt, tools=tools, tool_choice="none")
+    while True:
+        step = await ctx.sample_step(
+            messages=messages,
+            tools=[search, get_time],
+        )
+
+        if step.is_tool_use:
+            # Tools already executed (execute_tools=True by default)
+            # Log what was called before continuing
+            for call in step.tool_calls:
+                print(f"Called tool: {call.name}")
+
+        if step.is_text:
+            return step.text
+
+        # Continue with updated history
+        messages = step.history
 ```
 
-### Structured Output
+### SampleStep Properties
 
-Combine `result_type` with tools for agentic workflows that return structured data:
+Each `SampleStep` provides information about what the LLM returned:
+
+- `step.is_tool_use` — True if the LLM requested tool calls
+- `step.is_text` — True if the LLM returned a text response
+- `step.tool_calls` — List of tool calls requested (if any)
+- `step.text` — The text content (if any)
+- `step.history` — All messages exchanged so far
+
+The contents of `step.history` depend on `execute_tools`:
+- **`execute_tools=True`** (default): Includes tool results, ready for the next iteration
+- **`execute_tools=False`**: Includes the assistant's tool request, but you add results yourself
+
+### Manual Tool Execution
+
+Set `execute_tools=False` to handle tool execution yourself. When disabled, `step.history` contains the user message and the assistant's response with tool calls—but no tool results. You execute the tools and append the results as a user message.
 
 ```python
-from pydantic import BaseModel
+from mcp.types import SamplingMessage, ToolResultContent, TextContent
 from fastmcp import FastMCP, Context
-
-class ResearchResult(BaseModel):
-    summary: str
-    sources: list[str]
-    confidence: float
-
-def search(query: str) -> str:
-    """Search for information."""
-    return f"Found information about: {query}"
-
-def fetch_url(url: str) -> str:
-    """Fetch content from a URL."""
-    return f"Content from {url}"
 
 mcp = FastMCP()
 
 @mcp.tool
-async def research(topic: str, ctx: Context) -> ResearchResult:
-    """Research a topic and return structured results."""
-    result = await ctx.sample(
-        messages=f"Research this topic thoroughly: {topic}",
-        tools=[search, fetch_url],
-        result_type=ResearchResult,
-    )
+async def research(question: str, ctx: Context) -> str:
+    """Research with manual tool handling."""
 
-    # The LLM uses search/fetch_url as needed, then calls final_response
-    # result.result is the validated ResearchResult
-    return result.result
-```
+    def search(query: str) -> str:
+        return f"Results for: {query}"
 
-The LLM can call your tools as many times as needed, and when it's ready to provide the final answer, it calls `final_response` with the structured data.
+    def get_time() -> str:
+        return "12:00 PM"
 
-### Building Custom Loops
+    # Map tool names to functions
+    tools = {"search": search, "get_time": get_time}
 
-The automatic tool loop handles most use cases, but sometimes you need finer control. Setting `max_iterations=1` runs a single sampling iteration and returns immediately, giving you access to `result.history` so you can continue the conversation yourself.
-
-This is useful when you need to:
-- Dynamically change which tools are available based on intermediate results
-- Inject additional context or instructions mid-conversation
-- Implement custom termination conditions beyond "LLM stopped calling tools"
-- Add logging, metrics, or checkpointing between iterations
-
-```python
-@mcp.tool
-async def custom_agent(question: str, ctx: Context) -> str:
-    """Agent with custom loop logic."""
-    history = []
-    tools = [search, get_time]
+    messages = [SamplingMessage(role="user", content=question)]
 
     while True:
-        result = await ctx.sample(
-            messages=history or question,
-            tools=tools,
-            max_iterations=1,
+        step = await ctx.sample_step(
+            messages=messages,
+            tools=list(tools.values()),
+            execute_tools=False,
         )
-        history = result.history
 
-        # Custom logic: check conditions, change tools, etc.
-        if some_condition:
-            tools = [different_tool]
+        if step.is_text:
+            return step.text
 
-        # When we get a text response, we're done
-        if result.text:
-            return result.text
+        if step.is_tool_use:
+            tool_results = []
+            for call in step.tool_calls:
+                # Look up and execute the requested tool
+                fn = tools[call.name]
+                result = fn(**call.input)
+                tool_results.append(
+                    ToolResultContent(
+                        type="tool_result",
+                        toolUseId=call.id,
+                        content=[TextContent(type="text", text=result)],
+                    )
+                )
+
+            messages = list(step.history)
+            messages.append(SamplingMessage(role="user", content=tool_results))
 ```
 
-## Sampling Fallback Handler
+#### Error Handling
 
-Client support for sampling is optional. If the client does not support sampling, the server will report an error indicating that the client does not support sampling.
+To report an error, set `isError=True`. The LLM will see the error and can decide how to proceed:
 
-However, you can provide a `sampling_handler` to the FastMCP server, which sends sampling requests directly to an LLM provider instead of routing through the client. The `sampling_handler_behavior` parameter controls when this handler is used:
+```python
+tool_result = ToolResultContent(
+    type="tool_result",
+    toolUseId=call.id,
+    content=[TextContent(type="text", text="Permission denied")],
+    isError=True,
+)
+```
 
-- **`"fallback"`** (default): Uses the handler only when the client doesn't support sampling. Requests go to the client first, falling back to the handler if needed.
-- **`"always"`**: Always uses the handler, bypassing the client entirely. Useful when you want full control over the LLM used for sampling.
+## Fallback Handlers
+
+Client support for sampling is optional—some clients may not implement it. To ensure your tools work regardless of client capabilities, configure a `sampling_handler` that sends requests directly to an LLM provider.
 
 ### OpenAI Handler
 
-FastMCP provides an OpenAI-compatible sampling handler that supports both basic sampling and tool use:
+FastMCP provides an OpenAI-compatible handler that works with OpenAI's API and compatible providers. It supports the full sampling API including tools, automatically converting your Python functions to OpenAI's function calling format.
 
 ```python
 import os
 from openai import OpenAI
 from fastmcp import FastMCP
-from fastmcp.experimental.sampling.handlers.openai import OpenAISamplingHandler
+from fastmcp.experimental.sampling.handlers.openai import (
+    OpenAISamplingHandler,
+)
 
 server = FastMCP(
-    name="Sampling Server",
+    name="My Server",
     sampling_handler=OpenAISamplingHandler(
         default_model="gpt-4o-mini",
         client=OpenAI(api_key=os.getenv("OPENAI_API_KEY")),
@@ -455,112 +425,16 @@ server = FastMCP(
 )
 ```
 
-The OpenAI handler automatically handles tool conversion - when you pass tools to `ctx.sample()`, they're converted to OpenAI's function calling format.
+### Behavior Modes
 
-### Fallback Mode (Default)
+The `sampling_handler_behavior` parameter controls when the handler is used:
 
-Uses the handler only when the client doesn't support sampling:
-
-```python
-import asyncio
-import os
-from openai import OpenAI
-
-from fastmcp import FastMCP, Context
-from fastmcp.experimental.sampling.handlers.openai import OpenAISamplingHandler
-
-
-async def async_main():
-    server = FastMCP(
-        name="OpenAI Sampling Fallback Example",
-        sampling_handler=OpenAISamplingHandler(
-            default_model="gpt-4o-mini",
-            client=OpenAI(api_key=os.getenv("OPENAI_API_KEY")),
-        ),
-        sampling_handler_behavior="fallback",
-    )
-
-    @server.tool
-    async def summarize(text: str, ctx: Context) -> str:
-        # Uses client's LLM if available, falls back to OpenAI
-        result = await ctx.sample(
-            messages=f"Summarize: {text}",
-        )
-        return result.text
-
-    await server.run_http_async()
-
-
-if __name__ == "__main__":
-    asyncio.run(async_main())
-```
-
-### Always Mode
-
-Always uses the handler, bypassing the client:
-
-```python
-server = FastMCP(
-    name="Server-Controlled Sampling",
-    sampling_handler=OpenAISamplingHandler(
-        default_model="gpt-4o-mini",
-        client=OpenAI(api_key=os.getenv("API_KEY")),
-    ),
-    sampling_handler_behavior="always",
-)
-
-@server.tool
-async def analyze_data(data: str, ctx: Context) -> str:
-    # Always uses the server's configured LLM
-    result = await ctx.sample(
-        messages=f"Analyze this data: {data}",
-        system_prompt="You are a data analyst.",
-    )
-    return result.text
-```
-
-### Fallback with Tools
-
-The fallback handler fully supports sampling with tools:
-
-```python
-from fastmcp import FastMCP, Context
-from fastmcp.experimental.sampling.handlers.openai import OpenAISamplingHandler
-from openai import OpenAI
-import os
-
-def search(query: str) -> str:
-    """Search for information."""
-    return f"Results for: {query}"
-
-server = FastMCP(
-    name="Agentic Server",
-    sampling_handler=OpenAISamplingHandler(
-        default_model="gpt-4o-mini",
-        client=OpenAI(api_key=os.getenv("OPENAI_API_KEY")),
-    ),
-    sampling_handler_behavior="always",
-)
-
-@server.tool
-async def research(question: str, ctx: Context) -> str:
-    """Research a topic using tools."""
-    result = await ctx.sample(
-        messages=question,
-        tools=[search],
-    )
-    return result.text
-```
-
-## Client Requirements
-
-By default, LLM sampling requires client support:
-
-- Clients must implement sampling handlers to process requests (see [Client Sampling](/clients/sampling))
-- If the client doesn't support sampling and no fallback handler is configured, `ctx.sample()` will raise an error
-- Configure a `sampling_handler` with `sampling_handler_behavior="fallback"` to automatically handle clients that don't support sampling
-- Use `sampling_handler_behavior="always"` to completely bypass the client and control which LLM is used
+- **`"fallback"`** (default): Use the handler only when the client doesn't support sampling. This lets capable clients use their own LLM while ensuring your tools still work with clients that lack sampling support.
+- **`"always"`**: Always use the handler, bypassing the client entirely. Use this when you need guaranteed control over which LLM processes requests—for cost control, compliance requirements, or when specific model characteristics are essential.
 
 <Note>
-Sampling with tools requires a client that advertises the `sampling.tools` capability. FastMCP clients automatically advertise this capability when a `sampling_handler` is provided. For external clients that don't support tool-enabled sampling, configure a fallback handler with `sampling_handler_behavior="always"`.
+  Sampling with tools requires the client to advertise the `sampling.tools`
+  capability. FastMCP clients do this automatically. For external clients that
+  don't support tool-enabled sampling, configure a fallback handler with
+  `sampling_handler_behavior="always"`.
 </Note>

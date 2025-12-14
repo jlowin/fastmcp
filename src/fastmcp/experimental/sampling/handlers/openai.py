@@ -172,18 +172,18 @@ class OpenAISamplingHandler(BaseLLMSamplingHandler):
                             text_parts.append(item.text)
                         elif isinstance(item, ToolResultContent):
                             # Each tool result becomes a separate tool message
-                            content_parts: list[dict[str, str]] = []
+                            content_text = ""
                             if item.content:
+                                result_texts = []
                                 for sub_item in item.content:
                                     if isinstance(sub_item, TextContent):
-                                        content_parts.append(
-                                            {"type": "text", "text": sub_item.text}
-                                        )
+                                        result_texts.append(sub_item.text)
+                                content_text = "\n".join(result_texts)
                             openai_messages.append(
                                 ChatCompletionToolMessageParam(
                                     role="tool",
                                     tool_call_id=item.toolUseId,
-                                    content=content_parts if content_parts else "",
+                                    content=content_text,
                                 )
                             )
 
@@ -237,18 +237,16 @@ class OpenAISamplingHandler(BaseLLMSamplingHandler):
                 # Handle ToolResultContent (user's tool results)
                 if isinstance(content, ToolResultContent):
                     # Extract text parts from the content list
-                    result_parts: list[dict[str, str]] = []
+                    result_texts: list[str] = []
                     if content.content:
                         for item in content.content:
                             if isinstance(item, TextContent):
-                                result_parts.append(
-                                    {"type": "text", "text": item.text}
-                                )
+                                result_texts.append(item.text)
                     openai_messages.append(
                         ChatCompletionToolMessageParam(
                             role="tool",
                             tool_call_id=content.toolUseId,
-                            content=result_parts if result_parts else "",
+                            content="\n".join(result_texts),
                         )
                     )
                     continue
@@ -372,9 +370,13 @@ class OpenAISamplingHandler(BaseLLMSamplingHandler):
         # Add tool calls if present
         if message.tool_calls:
             for tool_call in message.tool_calls:
+                # Skip non-function tool calls
+                if not hasattr(tool_call, "function"):
+                    continue
+                func = tool_call.function  # type: ignore[union-attr]
                 # Parse the arguments JSON string
                 try:
-                    arguments = json.loads(tool_call.function.arguments)
+                    arguments = json.loads(func.arguments)  # type: ignore[union-attr]
                 except json.JSONDecodeError:
                     arguments = {}
 
@@ -382,7 +384,7 @@ class OpenAISamplingHandler(BaseLLMSamplingHandler):
                     ToolUseContent(
                         type="tool_use",
                         id=tool_call.id,
-                        name=tool_call.function.name,
+                        name=func.name,  # type: ignore[union-attr]
                         input=arguments,
                     )
                 )
@@ -392,7 +394,7 @@ class OpenAISamplingHandler(BaseLLMSamplingHandler):
             raise ValueError("No content in response from completion")
 
         return CreateMessageResultWithTools(
-            content=content,
+            content=content,  # type: ignore[arg-type]
             role="assistant",
             model=chat_completion.model,
             stopReason=stop_reason,

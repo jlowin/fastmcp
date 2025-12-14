@@ -1,0 +1,290 @@
+"""Sampling types and helper functions for FastMCP servers."""
+
+from __future__ import annotations
+
+import inspect
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Generic
+
+from mcp.types import (
+    ClientCapabilities,
+    CreateMessageResult,
+    CreateMessageResultWithTools,
+    ModelHint,
+    ModelPreferences,
+    SamplingCapability,
+    SamplingMessage,
+    SamplingToolsCapability,
+    TextContent,
+    ToolChoice,
+    ToolResultContent,
+    ToolUseContent,
+)
+from mcp.types import CreateMessageRequestParams as SamplingParams
+from mcp.types import Tool as SDKTool
+from typing_extensions import TypeVar
+
+from fastmcp.server.sampling.sampling_tool import SamplingTool
+
+if TYPE_CHECKING:
+    from fastmcp.server.context import Context
+
+ResultT = TypeVar("ResultT", default=str)
+
+
+@dataclass
+class SamplingResult(Generic[ResultT]):
+    """Result of a sampling operation.
+
+    Attributes:
+        text: The text representation of the result (raw text or JSON for structured).
+        result: The typed result (str for text, parsed object for structured output).
+        history: All messages exchanged during sampling.
+    """
+
+    text: str | None
+    result: ResultT
+    history: list[SamplingMessage]
+
+
+@dataclass
+class SampleStep:
+    """Result of a single sampling call.
+
+    Represents what the LLM returned in this step plus the message history.
+    """
+
+    response: CreateMessageResult | CreateMessageResultWithTools
+    history: list[SamplingMessage]
+
+    @property
+    def is_tool_use(self) -> bool:
+        """True if the LLM is requesting tool execution."""
+        if isinstance(self.response, CreateMessageResultWithTools):
+            return self.response.stopReason == "toolUse"
+        return False
+
+    @property
+    def is_text(self) -> bool:
+        """True if the LLM returned a text response (not tool use)."""
+        return not self.is_tool_use
+
+    @property
+    def text(self) -> str | None:
+        """Extract text from the response, if available."""
+        content = self.response.content
+        if isinstance(content, list):
+            for block in content:
+                if hasattr(block, "text"):
+                    return block.text  # type: ignore[return-value]
+            return None
+        elif hasattr(content, "text"):
+            return content.text  # type: ignore[return-value]
+        return None
+
+    @property
+    def tool_calls(self) -> list[ToolUseContent]:
+        """Get the list of tool calls from the response."""
+        content = self.response.content
+        if isinstance(content, list):
+            return [c for c in content if isinstance(c, ToolUseContent)]
+        elif isinstance(content, ToolUseContent):
+            return [content]
+        return []
+
+
+def _parse_model_preferences(
+    model_preferences: ModelPreferences | str | list[str] | None,
+) -> ModelPreferences | None:
+    """Convert model preferences to ModelPreferences object."""
+    if model_preferences is None:
+        return None
+    elif isinstance(model_preferences, ModelPreferences):
+        return model_preferences
+    elif isinstance(model_preferences, str):
+        return ModelPreferences(hints=[ModelHint(name=model_preferences)])
+    elif isinstance(model_preferences, list):
+        if not all(isinstance(h, str) for h in model_preferences):
+            raise ValueError("All elements of model_preferences list must be strings.")
+        return ModelPreferences(hints=[ModelHint(name=h) for h in model_preferences])
+    else:
+        raise ValueError(
+            "model_preferences must be one of: ModelPreferences, str, list[str], or None."
+        )
+
+
+# --- Standalone functions for sample_step() ---
+
+
+def determine_handler_mode(context: Context, needs_tools: bool) -> bool:
+    """Determine whether to use fallback handler or client for sampling.
+
+    Args:
+        context: The MCP context.
+        needs_tools: Whether the sampling request requires tool support.
+
+    Returns:
+        True if fallback handler should be used, False to use client.
+
+    Raises:
+        ValueError: If client lacks required capability and no fallback configured.
+    """
+    fastmcp = context.fastmcp
+    session = context.session
+
+    # Check what capabilities the client has
+    has_sampling = session.check_client_capability(
+        capability=ClientCapabilities(sampling=SamplingCapability())
+    )
+    has_tools_capability = session.check_client_capability(
+        capability=ClientCapabilities(
+            sampling=SamplingCapability(tools=SamplingToolsCapability())
+        )
+    )
+
+    if fastmcp.sampling_handler_behavior == "always":
+        if fastmcp.sampling_handler is None:
+            raise ValueError(
+                "sampling_handler_behavior is 'always' but no handler configured"
+            )
+        return True
+    elif fastmcp.sampling_handler_behavior == "fallback":
+        client_sufficient = has_sampling and (not needs_tools or has_tools_capability)
+        if not client_sufficient:
+            if fastmcp.sampling_handler is None:
+                if needs_tools and has_sampling and not has_tools_capability:
+                    raise ValueError(
+                        "Client does not support sampling with tools. "
+                        "The client must advertise the sampling.tools capability."
+                    )
+                raise ValueError("Client does not support sampling")
+            return True
+    elif needs_tools and not has_tools_capability:
+        raise ValueError(
+            "Client does not support sampling with tools. "
+            "The client must advertise the sampling.tools capability."
+        )
+
+    return False
+
+
+async def call_sampling_handler(
+    context: Context,
+    messages: list[SamplingMessage],
+    *,
+    system_prompt: str | None,
+    temperature: float | None,
+    max_tokens: int,
+    model_preferences: ModelPreferences | str | list[str] | None,
+    sdk_tools: list[SDKTool] | None,
+    tool_choice: ToolChoice | None,
+) -> CreateMessageResult | CreateMessageResultWithTools:
+    """Make LLM call using the fallback handler."""
+    assert context.fastmcp.sampling_handler is not None
+    assert context.request_context is not None
+
+    result = context.fastmcp.sampling_handler(
+        messages,
+        SamplingParams(
+            systemPrompt=system_prompt,
+            messages=messages,
+            temperature=temperature,
+            maxTokens=max_tokens,
+            modelPreferences=_parse_model_preferences(model_preferences),
+            tools=sdk_tools,
+            toolChoice=tool_choice,
+        ),
+        context.request_context,
+    )
+
+    if inspect.isawaitable(result):
+        result = await result
+
+    # Convert string to CreateMessageResult
+    if isinstance(result, str):
+        return CreateMessageResult(
+            role="assistant",
+            content=TextContent(type="text", text=result),
+            model="unknown",
+            stopReason="endTurn",
+        )
+
+    return result
+
+
+async def call_client(
+    context: Context,
+    messages: list[SamplingMessage],
+    *,
+    system_prompt: str | None,
+    temperature: float | None,
+    max_tokens: int,
+    model_preferences: ModelPreferences | str | list[str] | None,
+    sdk_tools: list[SDKTool] | None,
+    tool_choice: ToolChoice | None,
+) -> CreateMessageResult | CreateMessageResultWithTools:
+    """Make LLM call using the client."""
+    return await context.session.create_message(
+        messages=messages,
+        system_prompt=system_prompt,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        model_preferences=_parse_model_preferences(model_preferences),
+        tools=sdk_tools,
+        tool_choice=tool_choice,
+        related_request_id=context.request_id,
+    )
+
+
+async def execute_tools(
+    tool_calls: list[ToolUseContent],
+    tool_map: dict[str, SamplingTool],
+) -> list[ToolResultContent]:
+    """Execute tool calls and return results.
+
+    Args:
+        tool_calls: List of tool use requests from the LLM.
+        tool_map: Mapping from tool name to SamplingTool.
+
+    Returns:
+        List of tool result content blocks.
+    """
+    tool_results: list[ToolResultContent] = []
+
+    for tool_use in tool_calls:
+        tool = tool_map.get(tool_use.name)
+        if tool is None:
+            tool_results.append(
+                ToolResultContent(
+                    type="tool_result",
+                    toolUseId=tool_use.id,
+                    content=[
+                        TextContent(
+                            type="text",
+                            text=f"Error: Unknown tool '{tool_use.name}'",
+                        )
+                    ],
+                    isError=True,
+                )
+            )
+        else:
+            try:
+                result_value = await tool.run(tool_use.input)
+                tool_results.append(
+                    ToolResultContent(
+                        type="tool_result",
+                        toolUseId=tool_use.id,
+                        content=[TextContent(type="text", text=str(result_value))],
+                    )
+                )
+            except Exception as e:
+                tool_results.append(
+                    ToolResultContent(
+                        type="tool_result",
+                        toolUseId=tool_use.id,
+                        content=[TextContent(type="text", text=f"Error: {e}")],
+                        isError=True,
+                    )
+                )
+
+    return tool_results
