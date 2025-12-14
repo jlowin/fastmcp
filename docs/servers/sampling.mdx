@@ -153,7 +153,7 @@ Use model preferences when different tasks benefit from different model characte
 For requests that need conversational context, construct a list of `SamplingMessage` objects representing the conversation history. Each message has a `role` ("user" or "assistant") and `content`.
 
 ```python
-from fastmcp.client.sampling import SamplingMessage
+from mcp.types import SamplingMessage
 
 @mcp.tool
 async def contextual_analysis(query: str, data: str, ctx: Context) -> str:

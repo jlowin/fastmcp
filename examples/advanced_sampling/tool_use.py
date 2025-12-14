@@ -15,7 +15,7 @@ Run:
 
 import asyncio
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from fastmcp import Client, Context, FastMCP
 from fastmcp.experimental.sampling.handlers.openai import OpenAISamplingHandler
@@ -45,7 +45,7 @@ def get_word_count(text: str) -> str:
 class ResearchReport(BaseModel):
     summary: str
     sources_used: list[str]
-    confidence: float
+    confidence: float = Field(ge=0.0, le=1.0)
 
 
 # Create the MCP server
@@ -77,7 +77,7 @@ async def main():
         print("Research Report:")
         print(f"  Summary: {result.data['summary']}")
         print(f"  Sources: {', '.join(result.data['sources_used'])}")
-        print(f"  Confidence: {result.data['confidence']}%")
+        print(f"  Confidence: {result.data['confidence'] * 100:.0f}%")
 
 
 if __name__ == "__main__":

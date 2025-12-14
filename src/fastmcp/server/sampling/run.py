@@ -278,6 +278,7 @@ async def execute_tools(
                     )
                 )
             except Exception as e:
+                # Catch all exceptions to report errors to the LLM for recovery
                 tool_results.append(
                     ToolResultContent(
                         type="tool_result",
