@@ -659,14 +659,14 @@ class Context:
             and response.stopReason == "toolUse"
         )
 
-        # If not a tool use, return immediately
-        if not is_tool_use_response:
-            return SampleStep(response=response, history=current_messages)
-
-        # Add assistant's response to messages
+        # Always include the assistant response in history
         current_messages.append(
             SamplingMessage(role="assistant", content=response.content)
         )
+
+        # If not a tool use, return immediately
+        if not is_tool_use_response:
+            return SampleStep(response=response, history=current_messages)
 
         # If not executing tools, return with assistant message but no tool results
         if not execute_tools:
@@ -811,10 +811,21 @@ class Context:
                     if tool_call.name == "final_response":
                         # Validate and return the structured result
                         type_adapter = get_cached_typeadapter(result_type)
+
+                        # Unwrap if we wrapped primitives (non-object schemas)
+                        input_data = tool_call.input
+                        original_schema = compress_schema(
+                            type_adapter.json_schema(), prune_titles=True
+                        )
+                        if (
+                            original_schema.get("type") != "object"
+                            and isinstance(input_data, dict)
+                            and "value" in input_data
+                        ):
+                            input_data = input_data["value"]
+
                         try:
-                            validated_result = type_adapter.validate_python(
-                                tool_call.input
-                            )
+                            validated_result = type_adapter.validate_python(input_data)
                             text = json.dumps(
                                 type_adapter.dump_python(validated_result, mode="json")
                             )
@@ -849,6 +860,13 @@ class Context:
 
             # If not a tool use response, we're done
             if not step.is_tool_use:
+                # For structured output, the LLM must use the final_response tool
+                if result_type is not None and result_type is not str:
+                    raise RuntimeError(
+                        f"Expected structured output of type {result_type.__name__}, "
+                        "but the LLM returned a text response instead of calling "
+                        "the final_response tool."
+                    )
                 return SamplingResult(
                     text=step.text,
                     result=cast(ResultT, step.text if step.text else ""),
@@ -1023,6 +1041,14 @@ def _create_final_response_tool(result_type: type) -> SamplingTool:
     type_adapter = get_cached_typeadapter(result_type)
     schema = type_adapter.json_schema()
     schema = compress_schema(schema, prune_titles=True)
+
+    # Tool parameters must be object-shaped. Wrap primitives in {"value": <schema>}
+    if schema.get("type") != "object":
+        schema = {
+            "type": "object",
+            "properties": {"value": schema},
+            "required": ["value"],
+        }
 
     # The fn just returns the input as-is (validation happens in the loop)
     def final_response(**kwargs: Any) -> dict[str, Any]:

@@ -340,7 +340,7 @@ from mcp.types import SamplingMessage
 @mcp.tool
 async def controlled_agent(question: str, ctx: Context) -> str:
     """Agent with manual loop control."""
-    messages = [SamplingMessage(role="user", content=question)]
+    messages: list[str | SamplingMessage] = [question]  # strings auto-convert
 
     while True:
         step = await ctx.sample_step(

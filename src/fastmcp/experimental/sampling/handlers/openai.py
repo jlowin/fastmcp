@@ -161,6 +161,8 @@ class OpenAISamplingHandler(BaseLLMSamplingHandler):
                     # Collect tool calls and text from the list
                     tool_calls: list[ChatCompletionMessageToolCallParam] = []
                     text_parts: list[str] = []
+                    # Collect tool results separately to maintain correct ordering
+                    tool_messages: list[ChatCompletionToolMessageParam] = []
 
                     for item in content:
                         if isinstance(item, ToolUseContent):
@@ -177,7 +179,7 @@ class OpenAISamplingHandler(BaseLLMSamplingHandler):
                         elif isinstance(item, TextContent):
                             text_parts.append(item.text)
                         elif isinstance(item, ToolResultContent):
-                            # Each tool result becomes a separate tool message
+                            # Collect tool results (added after assistant message)
                             content_text = ""
                             if item.content:
                                 result_texts = []
@@ -185,7 +187,7 @@ class OpenAISamplingHandler(BaseLLMSamplingHandler):
                                     if isinstance(sub_item, TextContent):
                                         result_texts.append(sub_item.text)
                                 content_text = "\n".join(result_texts)
-                            openai_messages.append(
+                            tool_messages.append(
                                 ChatCompletionToolMessageParam(
                                     role="tool",
                                     tool_call_id=item.toolUseId,
@@ -194,6 +196,7 @@ class OpenAISamplingHandler(BaseLLMSamplingHandler):
                             )
 
                     # Add assistant message with tool calls if present
+                    # OpenAI requires: assistant (with tool_calls) -> tool messages
                     if tool_calls or text_parts:
                         msg_content = "\n".join(text_parts) if text_parts else None
                         if tool_calls:
@@ -204,6 +207,8 @@ class OpenAISamplingHandler(BaseLLMSamplingHandler):
                                     tool_calls=tool_calls,
                                 )
                             )
+                            # Add tool messages AFTER assistant message
+                            openai_messages.extend(tool_messages)
                         elif msg_content:
                             if message.role == "user":
                                 openai_messages.append(
@@ -219,6 +224,9 @@ class OpenAISamplingHandler(BaseLLMSamplingHandler):
                                         content=msg_content,
                                     )
                                 )
+                    elif tool_messages:
+                        # Tool results only (assistant message was in previous message)
+                        openai_messages.extend(tool_messages)
                     continue
 
                 # Handle ToolUseContent (assistant's tool calls)
@@ -382,8 +390,11 @@ class OpenAISamplingHandler(BaseLLMSamplingHandler):
                 # Parse the arguments JSON string
                 try:
                     arguments = json.loads(func.arguments)  # type: ignore[union-attr]
-                except json.JSONDecodeError:
-                    arguments = {}
+                except json.JSONDecodeError as e:
+                    raise ValueError(
+                        f"Invalid JSON in tool arguments for "
+                        f"'{func.name}': {func.arguments}"  # type: ignore[union-attr]
+                    ) from e
 
                 content.append(
                     ToolUseContent(

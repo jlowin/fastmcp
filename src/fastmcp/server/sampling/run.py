@@ -163,6 +163,8 @@ def determine_handler_mode(context: Context, needs_tools: bool) -> bool:
             f"Invalid sampling_handler_behavior: {fastmcp.sampling_handler_behavior!r}. "
             "Must be 'always', 'fallback', or None."
         )
+    elif not has_sampling:
+        raise ValueError("Client does not support sampling")
     elif needs_tools and not has_tools_capability:
         raise ValueError(
             "Client does not support sampling with tools. "
