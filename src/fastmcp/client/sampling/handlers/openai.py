@@ -1,4 +1,4 @@
-"""OpenAI sampling handler for FastMCP servers."""
+"""OpenAI sampling handler for FastMCP."""
 
 import json
 from collections.abc import Iterator, Sequence
@@ -108,10 +108,10 @@ class OpenAISamplingHandler:
         ):
             yield model_preferences
 
-        if isinstance(model_preferences, list):
+        elif isinstance(model_preferences, list):
             yield from model_preferences
 
-        if isinstance(model_preferences, ModelPreferences):
+        elif isinstance(model_preferences, ModelPreferences):
             if not (hints := model_preferences.hints):
                 return
 
