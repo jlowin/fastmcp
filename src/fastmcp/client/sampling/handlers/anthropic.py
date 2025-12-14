@@ -19,7 +19,7 @@ from mcp.types import (
 )
 
 try:
-    from anthropic import Anthropic, NotGiven
+    from anthropic import AsyncAnthropic, NotGiven
     from anthropic._types import NOT_GIVEN
     from anthropic.types import (
         Message,
@@ -49,13 +49,13 @@ class AnthropicSamplingHandler:
 
     Example:
         ```python
-        from anthropic import Anthropic
+        from anthropic import AsyncAnthropic
         from fastmcp import FastMCP
         from fastmcp.client.sampling.handlers.anthropic import AnthropicSamplingHandler
 
         handler = AnthropicSamplingHandler(
             default_model="claude-sonnet-4-5",
-            client=Anthropic(),
+            client=AsyncAnthropic(),
         )
 
         server = FastMCP(sampling_handler=handler)
@@ -63,9 +63,9 @@ class AnthropicSamplingHandler:
     """
 
     def __init__(
-        self, default_model: ModelParam, client: Anthropic | None = None
+        self, default_model: ModelParam, client: AsyncAnthropic | None = None
     ) -> None:
-        self.client: Anthropic = client or Anthropic()
+        self.client: AsyncAnthropic = client or AsyncAnthropic()
         self.default_model: ModelParam = default_model
 
     async def __call__(
@@ -86,19 +86,29 @@ class AnthropicSamplingHandler:
             anthropic_tools = self._convert_tools_to_anthropic(params.tools)
 
         # Convert tool_choice to Anthropic format
+        # Returns None if mode is "none", signaling tools should be omitted
         anthropic_tool_choice: ToolChoiceParam | NotGiven = NOT_GIVEN
         if params.toolChoice:
-            anthropic_tool_choice = self._convert_tool_choice_to_anthropic(
-                params.toolChoice
-            )
+            converted = self._convert_tool_choice_to_anthropic(params.toolChoice)
+            if converted is None:
+                # tool_choice="none" means don't use tools
+                anthropic_tools = NOT_GIVEN
+            else:
+                anthropic_tool_choice = converted
 
-        response = self.client.messages.create(
+        response = await self.client.messages.create(
             model=model,
             messages=anthropic_messages,
-            system=params.systemPrompt or NOT_GIVEN,
-            temperature=params.temperature or NOT_GIVEN,
+            system=(
+                params.systemPrompt if params.systemPrompt is not None else NOT_GIVEN
+            ),
+            temperature=(
+                params.temperature if params.temperature is not None else NOT_GIVEN
+            ),
             max_tokens=params.maxTokens,
-            stop_sequences=params.stopSequences or NOT_GIVEN,
+            stop_sequences=(
+                params.stopSequences if params.stopSequences is not None else NOT_GIVEN
+            ),
             tools=anthropic_tools,
             tool_choice=anthropic_tool_choice,
         )
@@ -302,17 +312,22 @@ class AnthropicSamplingHandler:
     @staticmethod
     def _convert_tool_choice_to_anthropic(
         tool_choice: ToolChoice,
-    ) -> ToolChoiceParam:
-        """Convert MCP tool_choice to Anthropic format."""
+    ) -> ToolChoiceParam | None:
+        """Convert MCP tool_choice to Anthropic format.
+
+        Returns None for "none" mode, signaling that tools should be omitted
+        from the request entirely (Anthropic doesn't have an explicit "none" option).
+        """
         if tool_choice.mode == "auto":
             return ToolChoiceAutoParam(type="auto")
         elif tool_choice.mode == "required":
             return ToolChoiceAnyParam(type="any")
         elif tool_choice.mode == "none":
-            # Anthropic doesn't have a "none" option, use auto
-            return ToolChoiceAutoParam(type="auto")
+            # Anthropic doesn't have a "none" option - return None to signal
+            # that tools should be omitted from the request entirely
+            return None
         else:
-            return ToolChoiceAutoParam(type="auto")
+            raise ValueError(f"Unsupported tool_choice mode: {tool_choice.mode!r}")
 
     @staticmethod
     def _message_to_result_with_tools(

@@ -179,11 +179,11 @@ client = Client(
 
 ## Built-in Handlers
 
-<VersionBadge version="2.14.0" />
-
 FastMCP provides built-in sampling handlers for OpenAI and Anthropic APIs. These handlers support the full sampling API including tool use, handling message conversion and response formatting automatically.
 
 ### OpenAI Handler
+
+<VersionBadge version="2.11.0" />
 
 The OpenAI handler works with OpenAI's API and any OpenAI-compatible provider:
 
@@ -217,6 +217,8 @@ Install the OpenAI handler with `pip install fastmcp[openai]`.
 
 ### Anthropic Handler
 
+<VersionBadge version="2.14.1" />
+
 The Anthropic handler uses Claude models via the Anthropic API:
 
 ```python
@@ -232,13 +234,13 @@ client = Client(
 You can pass a custom client for advanced configuration:
 
 ```python
-from anthropic import Anthropic
+from anthropic import AsyncAnthropic
 
 client = Client(
     "my_mcp_server.py",
     sampling_handler=AnthropicSamplingHandler(
         default_model="claude-sonnet-4-5",
-        client=Anthropic(api_key="your-key"),
+        client=AsyncAnthropic(api_key="your-key"),
     ),
 )
 ```

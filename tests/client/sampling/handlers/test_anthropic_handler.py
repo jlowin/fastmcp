@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock
 
 import pytest
-from anthropic import Anthropic
+from anthropic import AsyncAnthropic
 from anthropic.types import Message, TextBlock, ToolUseBlock, Usage
 from mcp.types import (
     CreateMessageResult,
@@ -62,7 +62,7 @@ def test_convert_to_anthropic_messages_raises_on_non_text():
     ],
 )
 def test_select_model_from_preferences(prefs, expected):
-    mock_client = MagicMock(spec=Anthropic)
+    mock_client = MagicMock(spec=AsyncAnthropic)
     handler = AnthropicSamplingHandler(
         default_model="fallback-model", client=mock_client
     )
@@ -70,7 +70,7 @@ def test_select_model_from_preferences(prefs, expected):
 
 
 def test_message_to_create_message_result():
-    mock_client = MagicMock(spec=Anthropic)
+    mock_client = MagicMock(spec=AsyncAnthropic)
     handler = AnthropicSamplingHandler(
         default_model="fallback-model", client=mock_client
     )
@@ -136,6 +136,7 @@ def test_convert_tool_choice_auto():
     result = AnthropicSamplingHandler._convert_tool_choice_to_anthropic(
         MagicMock(mode="auto")
     )
+    assert result is not None
     assert result["type"] == "auto"
 
 
@@ -143,6 +144,7 @@ def test_convert_tool_choice_required():
     result = AnthropicSamplingHandler._convert_tool_choice_to_anthropic(
         MagicMock(mode="required")
     )
+    assert result is not None
     assert result["type"] == "any"
 
 
@@ -150,8 +152,15 @@ def test_convert_tool_choice_none():
     result = AnthropicSamplingHandler._convert_tool_choice_to_anthropic(
         MagicMock(mode="none")
     )
-    # Anthropic doesn't have "none", falls back to "auto"
-    assert result["type"] == "auto"
+    # Anthropic doesn't have "none", returns None to signal tools should be omitted
+    assert result is None
+
+
+def test_convert_tool_choice_unknown_raises():
+    with pytest.raises(ValueError, match="Unsupported tool_choice mode"):
+        AnthropicSamplingHandler._convert_tool_choice_to_anthropic(
+            MagicMock(mode="unknown")
+        )
 
 
 def test_convert_tools_to_anthropic():
