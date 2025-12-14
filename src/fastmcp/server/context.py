@@ -33,6 +33,7 @@ from mcp.types import (
 from mcp.types import Prompt as SDKPrompt
 from mcp.types import Resource as SDKResource
 from mcp.types import Tool as SDKTool
+from pydantic import ValidationError
 from pydantic.networks import AnyUrl
 from starlette.requests import Request
 from typing_extensions import TypeVar
@@ -617,6 +618,11 @@ class Context:
         # Build tool choice
         effective_tool_choice: ToolChoice | None = None
         if tool_choice is not None:
+            if tool_choice not in ("auto", "required", "none"):
+                raise ValueError(
+                    f"Invalid tool_choice: {tool_choice!r}. "
+                    "Must be 'auto', 'required', or 'none'."
+                )
             effective_tool_choice = ToolChoice(
                 mode=cast(Literal["auto", "required", "none"], tool_choice)
             )
@@ -818,7 +824,7 @@ class Context:
                                 result=validated_result,
                                 history=step.history,
                             )
-                        except Exception as e:
+                        except ValidationError as e:
                             # Validation failed - add error as tool result
                             step.history.append(
                                 SamplingMessage(

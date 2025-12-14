@@ -330,12 +330,6 @@ class OpenAISamplingHandler(BaseLLMSamplingHandler):
         tool_choice: ToolChoice,
     ) -> ChatCompletionToolChoiceOptionParam:
         """Convert MCP tool_choice to OpenAI format."""
-        # If a specific tool is requested via name (may be in extra_data)
-        tool_name = getattr(tool_choice, "name", None)
-        if tool_name:
-            return {"type": "function", "function": {"name": tool_name}}  # type: ignore[return-value]
-
-        # Mode-based selection
         if tool_choice.mode == "auto":
             return "auto"
         elif tool_choice.mode == "required":
@@ -343,7 +337,7 @@ class OpenAISamplingHandler(BaseLLMSamplingHandler):
         elif tool_choice.mode == "none":
             return "none"
         else:
-            return "auto"
+            raise ValueError(f"Unsupported tool_choice mode: {tool_choice.mode!r}")
 
     @staticmethod
     def _chat_completion_to_result_with_tools(

@@ -46,7 +46,7 @@ By default, sampling requests are routed to the client's LLM. You can also confi
     </ResponseField>
 
     <ResponseField name="result_type" type="type[T] | None" default="None">
-      A Pydantic model for validated structured output.
+      A type for validated structured output. Supports Pydantic models, dataclasses, and basic types like `int`, `list[str]`, or `dict[str, int]`.
     </ResponseField>
 
     <ResponseField name="mask_error_details" type="bool | None" default="None">
@@ -184,7 +184,7 @@ The LLM receives the full conversation thread and responds with awareness of the
 
 <VersionBadge version="2.14.1" />
 
-When you need validated, typed data instead of free-form text, use the `result_type` parameter with a Pydantic model. FastMCP ensures the LLM returns data matching your schema, handling validation and retries automatically.
+When you need validated, typed data instead of free-form text, use the `result_type` parameter. FastMCP ensures the LLM returns data matching your type, handling validation and retries automatically. The `result_type` parameter accepts Pydantic models, dataclasses, and basic types like `int`, `list[str]`, or `dict[str, int]`.
 
 ```python
 from pydantic import BaseModel
@@ -299,7 +299,7 @@ result = await ctx.sample(messages="...", tools=[tool])
 
 ### Combining with Structured Output
 
-Combine tools with `result_type` for agentic workflows that return validated, structured data. The LLM uses your tools to gather information, then returns a response matching your Pydantic schema.
+Combine tools with `result_type` for agentic workflows that return validated, structured data. The LLM uses your tools to gather information, then returns a response matching your type.
 
 ```python
 result = await ctx.sample(
