@@ -19,7 +19,7 @@ from mcp.types import (
 )
 
 try:
-    from openai import NOT_GIVEN, AsyncOpenAI, NotGiven, OpenAI
+    from openai import NOT_GIVEN, AsyncOpenAI, NotGiven
     from openai.types.chat import (
         ChatCompletion,
         ChatCompletionAssistantMessageParam,
@@ -47,21 +47,9 @@ class OpenAISamplingHandler(BaseLLMSamplingHandler):
     def __init__(
         self,
         default_model: ChatModel,
-        client: AsyncOpenAI | OpenAI | None = None,
+        client: AsyncOpenAI | None = None,
     ):
-        # Accept either sync or async client, convert sync to async if needed
-        if client is None:
-            self.client: AsyncOpenAI = AsyncOpenAI()
-        elif isinstance(client, AsyncOpenAI):
-            self.client = client
-        else:
-            # Wrap sync client by creating async client with same config
-            self.client = AsyncOpenAI(
-                api_key=client.api_key,
-                base_url=str(client.base_url) if client.base_url else None,
-                organization=client.organization,
-                timeout=client.timeout,
-            )
+        self.client: AsyncOpenAI = client or AsyncOpenAI()
         self.default_model: ChatModel = default_model
 
     @override
