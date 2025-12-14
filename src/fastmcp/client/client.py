@@ -310,7 +310,8 @@ class Client(Generic[ClientTransportT]):
             # Default to tools-enabled capabilities unless explicitly overridden
             self._session_kwargs["sampling_capabilities"] = (
                 sampling_capabilities
-                or mcp.types.SamplingCapability(
+                if sampling_capabilities is not None
+                else mcp.types.SamplingCapability(
                     tools=mcp.types.SamplingToolsCapability()
                 )
             )
@@ -377,7 +378,8 @@ class Client(Generic[ClientTransportT]):
         # Default to tools-enabled capabilities unless explicitly overridden
         self._session_kwargs["sampling_capabilities"] = (
             sampling_capabilities
-            or mcp.types.SamplingCapability(tools=mcp.types.SamplingToolsCapability())
+            if sampling_capabilities is not None
+            else mcp.types.SamplingCapability(tools=mcp.types.SamplingToolsCapability())
         )
 
     def set_elicitation_callback(
