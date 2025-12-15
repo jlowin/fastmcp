@@ -290,9 +290,12 @@ class StreamableHttpTransport(ClientTransport):
             "auth": self.auth,
         }
 
-        # Configure timeout if provided
+        # Configure timeout if provided (convert timedelta to seconds for httpx)
         if session_kwargs.get("read_timeout_seconds") is not None:
-            httpx_client_kwargs["timeout"] = session_kwargs.get("read_timeout_seconds")
+            read_timeout_seconds = cast(
+                datetime.timedelta, session_kwargs.get("read_timeout_seconds")
+            )
+            httpx_client_kwargs["timeout"] = read_timeout_seconds.total_seconds()
 
         # Create httpx client from factory or use default
         if self.httpx_client_factory is not None:
