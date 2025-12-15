@@ -47,7 +47,6 @@ from fastmcp.client.roots import (
     create_roots_callback,
 )
 from fastmcp.client.sampling import (
-    ClientSamplingHandler,
     SamplingHandler,
     create_sampling_callback,
 )
@@ -56,7 +55,6 @@ from fastmcp.client.tasks import (
     ResourceTask,
     TaskNotificationHandler,
     ToolTask,
-    _task_capable_initialize,
 )
 from fastmcp.exceptions import ToolError
 from fastmcp.mcp_config import MCPConfig
@@ -83,7 +81,6 @@ from .transports import (
 
 __all__ = [
     "Client",
-    "ClientSamplingHandler",
     "ElicitationHandler",
     "LogHandler",
     "MessageHandler",
@@ -249,7 +246,8 @@ class Client(Generic[ClientTransportT]):
         ),
         name: str | None = None,
         roots: RootsList | RootsHandler | None = None,
-        sampling_handler: ClientSamplingHandler | None = None,
+        sampling_handler: SamplingHandler | None = None,
+        sampling_capabilities: mcp.types.SamplingCapability | None = None,
         elicitation_handler: ElicitationHandler | None = None,
         log_handler: LogHandler | None = None,
         message_handler: MessageHandlerT | MessageHandler | None = None,
@@ -307,6 +305,14 @@ class Client(Generic[ClientTransportT]):
             self._session_kwargs["sampling_callback"] = create_sampling_callback(
                 sampling_handler
             )
+            # Default to tools-enabled capabilities unless explicitly overridden
+            self._session_kwargs["sampling_capabilities"] = (
+                sampling_capabilities
+                if sampling_capabilities is not None
+                else mcp.types.SamplingCapability(
+                    tools=mcp.types.SamplingToolsCapability()
+                )
+            )
 
         if elicitation_handler is not None:
             self._session_kwargs["elicitation_callback"] = create_elicitation_callback(
@@ -324,6 +330,20 @@ class Client(Generic[ClientTransportT]):
         self._task_registry: dict[
             str, weakref.ref[ToolTask | PromptTask | ResourceTask]
         ] = {}
+
+    def _reset_session_state(self, full: bool = False) -> None:
+        """Reset session state after disconnect or cancellation.
+
+        Args:
+            full: If True, also resets session_task and nesting_counter.
+                  Use full=True for cancellation cleanup where the session
+                  task was started but never completed normally.
+        """
+        self._session_state.session = None
+        self._session_state.initialize_result = None
+        if full:
+            self._session_state.session_task = None
+            self._session_state.nesting_counter = 0
 
     @property
     def session(self) -> ClientSession:
@@ -344,10 +364,20 @@ class Client(Generic[ClientTransportT]):
         """Set the roots for the client. This does not automatically call `send_roots_list_changed`."""
         self._session_kwargs["list_roots_callback"] = create_roots_callback(roots)
 
-    def set_sampling_callback(self, sampling_callback: ClientSamplingHandler) -> None:
+    def set_sampling_callback(
+        self,
+        sampling_callback: SamplingHandler,
+        sampling_capabilities: mcp.types.SamplingCapability | None = None,
+    ) -> None:
         """Set the sampling callback for the client."""
         self._session_kwargs["sampling_callback"] = create_sampling_callback(
             sampling_callback
+        )
+        # Default to tools-enabled capabilities unless explicitly overridden
+        self._session_kwargs["sampling_capabilities"] = (
+            sampling_capabilities
+            if sampling_capabilities is not None
+            else mcp.types.SamplingCapability(tools=mcp.types.SamplingToolsCapability())
         )
 
     def set_elicitation_callback(
@@ -405,8 +435,7 @@ class Client(Generic[ClientTransportT]):
                 except anyio.ClosedResourceError as e:
                     raise RuntimeError("Server session was closed unexpectedly") from e
                 finally:
-                    self._session_state.session = None
-                    self._session_state.initialize_result = None
+                    self._reset_session_state()
 
     async def initialize(
         self,
@@ -458,10 +487,7 @@ class Client(Generic[ClientTransportT]):
 
         try:
             with anyio.fail_after(timeout):
-                self._session_state.initialize_result = await _task_capable_initialize(
-                    self.session
-                )
-
+                self._session_state.initialize_result = await self.session.initialize()
                 return self._session_state.initialize_result
         except TimeoutError as e:
             raise RuntimeError("Failed to initialize server session") from e
@@ -506,7 +532,48 @@ class Client(Generic[ClientTransportT]):
                 self._session_state.session_task = asyncio.create_task(
                     self._session_runner()
                 )
-                await self._session_state.ready_event.wait()
+                try:
+                    await self._session_state.ready_event.wait()
+                except asyncio.CancelledError:
+                    # Cancellation during initial connection startup can leave the
+                    # background session task running because __aexit__ is never invoked
+                    # when __aenter__ is cancelled. Since we hold the session lock here
+                    # and we know we started the session task, it's safe to tear it down
+                    # without impacting other active contexts.
+                    #
+                    # Note: session_task is an asyncio.Task (not anyio) because it needs
+                    # to outlive individual context manager scopes - anyio's structured
+                    # concurrency doesn't allow tasks to escape their task group.
+                    session_task = self._session_state.session_task
+                    if session_task is not None:
+                        # Request a graceful stop if the runner has already reached
+                        # its stop_event wait.
+                        self._session_state.stop_event.set()
+                        session_task.cancel()
+                        with anyio.CancelScope(shield=True):
+                            with anyio.move_on_after(3):
+                                try:
+                                    await session_task
+                                except asyncio.CancelledError:
+                                    pass
+                                except Exception as e:
+                                    logger.debug(
+                                        f"Error during cancelled session cleanup: {e}"
+                                    )
+
+                    # Reset session state so future callers can reconnect cleanly.
+                    self._reset_session_state(full=True)
+
+                    with anyio.CancelScope(shield=True):
+                        with anyio.move_on_after(3):
+                            try:
+                                await self.transport.close()
+                            except Exception as e:
+                                logger.debug(
+                                    f"Error closing transport after cancellation: {e}"
+                                )
+
+                    raise
 
                 if self._session_state.session_task.done():
                     exception = self._session_state.session_task.exception()
