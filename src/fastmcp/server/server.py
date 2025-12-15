@@ -465,7 +465,7 @@ class FastMCP(Generic[LifespanResultT]):
                 # execute in the parent's Docket context
                 for mounted in self._mounted_servers:
                     await self._register_mounted_server_functions(
-                        mounted.server, docket, mounted.prefix
+                        mounted.server, docket, mounted.prefix, mounted.tool_names
                     )
 
                 # Set Docket in ContextVar so CurrentDocket can access it
@@ -507,7 +507,11 @@ class FastMCP(Generic[LifespanResultT]):
             _current_server.reset(server_token)
 
     async def _register_mounted_server_functions(
-        self, server: FastMCP, docket: Docket, prefix: str | None
+        self,
+        server: FastMCP,
+        docket: Docket,
+        prefix: str | None,
+        tool_names: dict[str, str] | None = None,
     ) -> None:
         """Register task-enabled functions from a mounted server with Docket.
 
@@ -519,12 +523,18 @@ class FastMCP(Generic[LifespanResultT]):
             docket: The Docket instance to register with
             prefix: The mount prefix to prepend to function names (matches
                     client-facing tool/prompt names)
+            tool_names: Optional mapping of original tool names to custom names
         """
         # Register tools with prefixed names to avoid collisions
         for tool in server._tool_manager._tools.values():
             if isinstance(tool, FunctionTool) and tool.task_config.mode != "forbidden":
-                # Use same naming as client-facing tool keys
-                fn_name = f"{prefix}_{tool.key}" if prefix else tool.key
+                # Apply tool_names override first, then prefix (matches get_tools logic)
+                if tool_names and tool.key in tool_names:
+                    fn_name = tool_names[tool.key]
+                elif prefix:
+                    fn_name = f"{prefix}_{tool.key}"
+                else:
+                    fn_name = tool.key
                 named_fn = _create_named_fn_wrapper(tool.fn, fn_name)
                 docket.register(named_fn)
 
@@ -568,7 +578,7 @@ class FastMCP(Generic[LifespanResultT]):
                 else (prefix or nested.prefix)
             )
             await self._register_mounted_server_functions(
-                nested.server, docket, nested_prefix
+                nested.server, docket, nested_prefix, nested.tool_names
             )
 
     @asynccontextmanager
