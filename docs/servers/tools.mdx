@@ -343,6 +343,8 @@ Field provides several validation and documentation features:
 
 ### Hiding Parameters from the LLM
 
+<VersionBadge version="2.14.0" />
+
 To inject values at runtime without exposing them to the LLM (such as `user_id`, credentials, or database connections), use dependency injection with `Depends()`. Parameters using `Depends()` are automatically excluded from the tool schema:
 
 ```python
