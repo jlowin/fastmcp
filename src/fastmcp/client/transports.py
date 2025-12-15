@@ -304,10 +304,11 @@ class StreamableHttpTransport(ClientTransport):
         else:
             http_client = httpx.AsyncClient(**httpx_client_kwargs)
 
-        async with streamable_http_client(
-            self.url,
-            http_client=http_client,
-        ) as transport:
+        # Ensure httpx client is closed after use
+        async with (
+            http_client,
+            streamable_http_client(self.url, http_client=http_client) as transport,
+        ):
             read_stream, write_stream, get_session_id = transport
             self._get_session_id_cb = get_session_id
             async with ClientSession(
