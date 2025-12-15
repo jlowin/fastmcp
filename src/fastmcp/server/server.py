@@ -45,10 +45,10 @@ from mcp.types import (
     GetPromptResult,
     ToolAnnotations,
 )
-from mcp.types import Prompt as MCPPrompt
-from mcp.types import Resource as MCPResource
-from mcp.types import ResourceTemplate as MCPResourceTemplate
-from mcp.types import Tool as MCPTool
+from mcp.types import Prompt as SDKPrompt
+from mcp.types import Resource as SDKResource
+from mcp.types import ResourceTemplate as SDKResourceTemplate
+from mcp.types import Tool as SDKTool
 from pydantic import AnyUrl
 from starlette.middleware import Middleware as ASGIMiddleware
 from starlette.requests import Request
@@ -93,12 +93,12 @@ from fastmcp.utilities.types import NotSet, NotSetT
 if TYPE_CHECKING:
     from fastmcp.client import Client
     from fastmcp.client.client import FastMCP1Server
+    from fastmcp.client.sampling import SamplingHandler
     from fastmcp.client.transports import ClientTransport, ClientTransportT
     from fastmcp.server.openapi import ComponentFn as OpenAPIComponentFn
     from fastmcp.server.openapi import FastMCPOpenAPI, RouteMap
     from fastmcp.server.openapi import RouteMapFn as OpenAPIRouteMapFn
     from fastmcp.server.proxy import FastMCPProxy
-    from fastmcp.server.sampling.handler import ServerSamplingHandler
     from fastmcp.tools.tool import ToolResultSerializerType
 
 logger = get_logger(__name__)
@@ -207,7 +207,7 @@ class FastMCP(Generic[LifespanResultT]):
         streamable_http_path: str | None = None,
         json_response: bool | None = None,
         stateless_http: bool | None = None,
-        sampling_handler: ServerSamplingHandler[LifespanResultT] | None = None,
+        sampling_handler: SamplingHandler | None = None,
         sampling_handler_behavior: Literal["always", "fallback"] | None = None,
     ):
         # Resolve server default for background task support
@@ -287,9 +287,7 @@ class FastMCP(Generic[LifespanResultT]):
         # Set up MCP protocol handlers
         self._setup_handlers()
 
-        self.sampling_handler: ServerSamplingHandler[LifespanResultT] | None = (
-            sampling_handler
-        )
+        self.sampling_handler: SamplingHandler | None = sampling_handler
         self.sampling_handler_behavior: Literal["always", "fallback"] = (
             sampling_handler_behavior or "fallback"
         )
@@ -466,7 +464,7 @@ class FastMCP(Generic[LifespanResultT]):
                 # execute in the parent's Docket context
                 for mounted in self._mounted_servers:
                     await self._register_mounted_server_functions(
-                        mounted.server, docket, mounted.prefix
+                        mounted.server, docket, mounted.prefix, mounted.tool_names
                     )
 
                 # Set Docket in ContextVar so CurrentDocket can access it
@@ -508,7 +506,11 @@ class FastMCP(Generic[LifespanResultT]):
             _current_server.reset(server_token)
 
     async def _register_mounted_server_functions(
-        self, server: FastMCP, docket: Docket, prefix: str | None
+        self,
+        server: FastMCP,
+        docket: Docket,
+        prefix: str | None,
+        tool_names: dict[str, str] | None = None,
     ) -> None:
         """Register task-enabled functions from a mounted server with Docket.
 
@@ -520,12 +522,18 @@ class FastMCP(Generic[LifespanResultT]):
             docket: The Docket instance to register with
             prefix: The mount prefix to prepend to function names (matches
                     client-facing tool/prompt names)
+            tool_names: Optional mapping of original tool names to custom names
         """
         # Register tools with prefixed names to avoid collisions
         for tool in server._tool_manager._tools.values():
             if isinstance(tool, FunctionTool) and tool.task_config.mode != "forbidden":
-                # Use same naming as client-facing tool keys
-                fn_name = f"{prefix}_{tool.key}" if prefix else tool.key
+                # Apply tool_names override first, then prefix (matches get_tools logic)
+                if tool_names and tool.key in tool_names:
+                    fn_name = tool_names[tool.key]
+                elif prefix:
+                    fn_name = f"{prefix}_{tool.key}"
+                else:
+                    fn_name = tool.key
                 named_fn = _create_named_fn_wrapper(tool.fn, fn_name)
                 docket.register(named_fn)
 
@@ -569,7 +577,7 @@ class FastMCP(Generic[LifespanResultT]):
                 else (prefix or nested.prefix)
             )
             await self._register_mounted_server_functions(
-                nested.server, docket, nested_prefix
+                nested.server, docket, nested_prefix, nested.tool_names
             )
 
     @asynccontextmanager
@@ -898,7 +906,13 @@ class FastMCP(Generic[LifespanResultT]):
             try:
                 child_tools = await mounted.server.get_tools()
                 for key, tool in child_tools.items():
-                    new_key = f"{mounted.prefix}_{key}" if mounted.prefix else key
+                    # Check for manual override first, then apply prefix
+                    if mounted.tool_names and key in mounted.tool_names:
+                        new_key = mounted.tool_names[key]
+                    elif mounted.prefix:
+                        new_key = f"{mounted.prefix}_{key}"
+                    else:
+                        new_key = key
                     all_tools[new_key] = tool.model_copy(key=new_key)
             except Exception as e:
                 logger.warning(
@@ -1113,7 +1127,7 @@ class FastMCP(Generic[LifespanResultT]):
 
         return routes
 
-    async def _list_tools_mcp(self) -> list[MCPTool]:
+    async def _list_tools_mcp(self) -> list[SDKTool]:
         """
         List all available tools, in the format expected by the low-level MCP
         server.
@@ -1178,9 +1192,15 @@ class FastMCP(Generic[LifespanResultT]):
                     if not self._should_enable_component(tool):
                         continue
 
-                    key = tool.key
-                    if mounted.prefix:
+                    # Check for manual override first, then apply prefix
+                    if mounted.tool_names and tool.key in mounted.tool_names:
+                        key = mounted.tool_names[tool.key]
+                    elif mounted.prefix:
                         key = f"{mounted.prefix}_{tool.key}"
+                    else:
+                        key = tool.key
+
+                    if key != tool.key:
                         tool = tool.model_copy(key=key)
                     # Later mounted servers override earlier ones
                     all_tools[key] = tool
@@ -1197,7 +1217,7 @@ class FastMCP(Generic[LifespanResultT]):
 
         return list(all_tools.values())
 
-    async def _list_resources_mcp(self) -> list[MCPResource]:
+    async def _list_resources_mcp(self) -> list[SDKResource]:
         """
         List all available resources, in the format expected by the low-level MCP
         server.
@@ -1286,7 +1306,7 @@ class FastMCP(Generic[LifespanResultT]):
 
         return list(all_resources.values())
 
-    async def _list_resource_templates_mcp(self) -> list[MCPResourceTemplate]:
+    async def _list_resource_templates_mcp(self) -> list[SDKResourceTemplate]:
         """
         List all available resource templates, in the format expected by the low-level MCP
         server.
@@ -1380,7 +1400,7 @@ class FastMCP(Generic[LifespanResultT]):
 
         return list(all_templates.values())
 
-    async def _list_prompts_mcp(self) -> list[MCPPrompt]:
+    async def _list_prompts_mcp(self) -> list[SDKPrompt]:
         """
         List all available prompts, in the format expected by the low-level MCP
         server.
@@ -1450,9 +1470,13 @@ class FastMCP(Generic[LifespanResultT]):
                     if not self._should_enable_component(prompt):
                         continue
 
-                    key = prompt.key
+                    # Apply prefix to prompt key
                     if mounted.prefix:
                         key = f"{mounted.prefix}_{prompt.key}"
+                    else:
+                        key = prompt.key
+
+                    if key != prompt.key:
                         prompt = prompt.model_copy(key=key)
                     # Later mounted servers override earlier ones
                     all_prompts[key] = prompt
@@ -1592,7 +1616,20 @@ class FastMCP(Generic[LifespanResultT]):
         # Try mounted servers in reverse order (later wins)
         for mounted in reversed(self._mounted_servers):
             try_name = tool_name
-            if mounted.prefix:
+
+            # First check if tool_name is an overridden name (reverse lookup)
+            if mounted.tool_names:
+                for orig_key, override_name in mounted.tool_names.items():
+                    if override_name == tool_name:
+                        try_name = orig_key
+                        break
+                else:
+                    # Not an override, try standard prefix stripping
+                    if mounted.prefix:
+                        if not tool_name.startswith(f"{mounted.prefix}_"):
+                            continue
+                        try_name = tool_name[len(mounted.prefix) + 1 :]
+            elif mounted.prefix:
                 if not tool_name.startswith(f"{mounted.prefix}_"):
                     continue
                 try_name = tool_name[len(mounted.prefix) + 1 :]
@@ -1935,8 +1972,7 @@ class FastMCP(Generic[LifespanResultT]):
             output_schema: Optional JSON schema for the tool's output
             annotations: Optional annotations about the tool's behavior
             exclude_args: Optional list of argument names to exclude from the tool schema.
-                Note: `exclude_args` will be deprecated in FastMCP 2.14 in favor of dependency
-                injection with `Depends()` for better lifecycle management.
+                Deprecated: Use `Depends()` for dependency injection instead.
             meta: Optional meta information about the tool
             enabled: Optional boolean to enable or disable the tool
 
@@ -2618,6 +2654,7 @@ class FastMCP(Generic[LifespanResultT]):
         server: FastMCP[LifespanResultT],
         prefix: str | None = None,
         as_proxy: bool | None = None,
+        tool_names: dict[str, str] | None = None,
     ) -> None:
         """Mount another FastMCP server on this server with an optional prefix.
 
@@ -2662,6 +2699,9 @@ class FastMCP(Generic[LifespanResultT]):
             as_proxy: Whether to treat the mounted server as a proxy. If None (default),
                 automatically determined based on whether the server has a custom lifespan
                 (True if it has a custom lifespan, False otherwise).
+            tool_names: Optional mapping of original tool names to custom names. Use this
+                to override prefixed names. Keys are the original tool names from the
+                mounted server.
         """
         from fastmcp.server.proxy import FastMCPProxy
 
@@ -2682,6 +2722,7 @@ class FastMCP(Generic[LifespanResultT]):
         mounted_server = MountedServer(
             prefix=prefix,
             server=server,
+            tool_names=tool_names,
         )
         self._mounted_servers.append(mounted_server)
 
@@ -2941,6 +2982,7 @@ class FastMCP(Generic[LifespanResultT]):
 class MountedServer:
     prefix: str | None
     server: FastMCP[Any]
+    tool_names: dict[str, str] | None = None
 
 
 def add_resource_prefix(uri: str, prefix: str) -> str:
