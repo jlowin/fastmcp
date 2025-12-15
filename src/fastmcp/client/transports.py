@@ -288,6 +288,7 @@ class StreamableHttpTransport(ClientTransport):
         httpx_client_kwargs: dict[str, Any] = {
             "headers": headers,
             "auth": self.auth,
+            "follow_redirects": True,
         }
 
         # Configure timeout if provided (convert timedelta to seconds for httpx)
