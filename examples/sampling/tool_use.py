@@ -37,15 +37,18 @@ class LoggingAnthropicHandler(AnthropicSamplingHandler):
 
 
 # Define tools available to the LLM during sampling
-def calculate(expression: str) -> str:
-    """Evaluate a mathematical expression. Example: '2 + 2' or '10 * 5'"""
-    console.print(f"        [bold magenta]TOOL[/] calculate({expression})")
-    try:
-        # Safe eval for simple math
-        result = eval(expression, {"__builtins__": {}}, {})
-        return str(result)
-    except Exception as e:
-        return f"Error: {e}"
+def add(a: float, b: float) -> str:
+    """Add two numbers together."""
+    result = a + b
+    console.print(f"        [bold magenta]TOOL[/] add({a}, {b}) = {result}")
+    return str(result)
+
+
+def multiply(a: float, b: float) -> str:
+    """Multiply two numbers together."""
+    result = a * b
+    console.print(f"        [bold magenta]TOOL[/] multiply({a}, {b}) = {result}")
+    return str(result)
 
 
 def get_current_time() -> str:
@@ -82,7 +85,7 @@ async def ask_assistant(question: str, ctx: Context) -> dict:
     result = await ctx.sample(
         messages=question,
         system_prompt="You are a helpful assistant with access to tools. Use them when needed to answer questions accurately.",
-        tools=[calculate, get_current_time, roll_dice],
+        tools=[add, multiply, get_current_time, roll_dice],
         result_type=AssistantResponse,
     )
 
@@ -98,7 +101,7 @@ async def main():
 
     async with Client(mcp, sampling_handler=handler) as client:
         questions = [
-            "What is 15 * 7 + 23?",
+            "What is 15 times 7, plus 23?",
             "Roll a 20-sided dice for me",
             "What time is it right now?",
         ]
