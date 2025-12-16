@@ -150,6 +150,28 @@ class TestSupabaseProvider:
 
             assert provider.token_verifier.algorithm == "RS256"  # type: ignore[attr-defined]
 
+    def test_custom_auth_route(self):
+        provider = SupabaseProvider(
+            project_url="https://abc123.supabase.co",
+            base_url="https://myserver.com",
+            auth_route="/custom/auth/route",
+        )
+
+        assert provider.auth_route == "/custom/auth/route"
+        assert (
+            provider.token_verifier.jwks_uri
+            == "https://abc123.supabase.co/custom/auth/route/.well-known/jwks.json"
+        )  # type: ignore[attr-defined]
+
+    def test_custom_auth_route_trailing_slash(self):
+        provider = SupabaseProvider(
+            project_url="https://abc123.supabase.co",
+            base_url="https://myserver.com",
+            auth_route="/custom/auth/route/",
+        )
+
+        assert provider.auth_route == "/custom/auth/route"
+
 
 def run_mcp_server(host: str, port: int) -> None:
     mcp = FastMCP(
