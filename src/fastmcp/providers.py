@@ -28,11 +28,12 @@ Example:
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from fastmcp.prompts.prompt import Prompt
-from fastmcp.resources.resource import Resource
-from fastmcp.tools.tool import Tool
+from fastmcp.prompts.prompt import Prompt, PromptResult
+from fastmcp.resources.resource import Resource, ResourceContent
+from fastmcp.resources.template import ResourceTemplate
+from fastmcp.tools.tool import Tool, ToolResult
 
 if TYPE_CHECKING:
     from fastmcp.server.context import Context
@@ -78,6 +79,22 @@ class Provider:
         tools = await self.list_tools(context)
         return next((t for t in tools if t.name == name), None)
 
+    async def call_tool(
+        self, context: Context, name: str, arguments: dict[str, Any]
+    ) -> ToolResult | None:
+        """Execute a tool by name.
+
+        Default implementation gets the tool and runs it.
+        Override for custom execution logic (e.g., middleware, error handling).
+
+        Returns:
+            The ToolResult if found and executed, or None if tool not found.
+        """
+        tool = await self.get_tool(context, name)
+        if tool is None:
+            return None
+        return await tool.run(arguments)
+
     async def list_resources(self, context: Context) -> Sequence[Resource]:
         """Return all available resources.
 
@@ -97,6 +114,72 @@ class Provider:
         resources = await self.list_resources(context)
         return next((r for r in resources if str(r.uri) == uri), None)
 
+    async def list_resource_templates(
+        self, context: Context
+    ) -> Sequence[ResourceTemplate]:
+        """Return all available resource templates.
+
+        Override to provide resource templates dynamically.
+        """
+        return []
+
+    async def get_resource_template(
+        self, context: Context, uri: str
+    ) -> ResourceTemplate | None:
+        """Get a resource template that matches the given URI.
+
+        Default implementation lists all templates and finds one whose pattern
+        matches the URI.
+        Override for more efficient lookup.
+
+        Returns:
+            The ResourceTemplate if a matching one is found, or None to continue searching.
+        """
+        templates = await self.list_resource_templates(context)
+        return next(
+            (t for t in templates if t.matches(uri) is not None),
+            None,
+        )
+
+    async def read_resource(self, context: Context, uri: str) -> ResourceContent | None:
+        """Read a concrete resource by URI.
+
+        Default implementation gets the resource and reads it.
+        Override for custom read logic (e.g., middleware, caching).
+
+        Note: This only handles concrete resources. For template-based resources,
+        use read_resource_template().
+
+        Returns:
+            The ResourceContent if found and read, or None if not found.
+        """
+        resource = await self.get_resource(context, uri)
+        if resource is None:
+            return None
+        return await resource._read()
+
+    async def read_resource_template(
+        self, context: Context, uri: str
+    ) -> ResourceContent | None:
+        """Read a resource via a matching template.
+
+        Default implementation finds a matching template, creates a resource
+        from it, and reads the content.
+        Override for custom read logic (e.g., middleware, caching).
+
+        Returns:
+            The ResourceContent if a matching template is found and read,
+            or None if no template matches.
+        """
+        template = await self.get_resource_template(context, uri)
+        if template is None:
+            return None
+        params = template.matches(uri)
+        if params is None:
+            return None
+        resource = await template.create_resource(uri, params)
+        return await resource._read()
+
     async def list_prompts(self, context: Context) -> Sequence[Prompt]:
         """Return all available prompts.
 
@@ -115,3 +198,19 @@ class Provider:
         """
         prompts = await self.list_prompts(context)
         return next((p for p in prompts if p.name == name), None)
+
+    async def render_prompt(
+        self, context: Context, name: str, arguments: dict[str, Any] | None
+    ) -> PromptResult | None:
+        """Render a prompt by name.
+
+        Default implementation gets the prompt and renders it.
+        Override for custom render logic (e.g., middleware, templating).
+
+        Returns:
+            The PromptResult if found and rendered, or None if not found.
+        """
+        prompt = await self.get_prompt(context, name)
+        if prompt is None:
+            return None
+        return await prompt._render(arguments)
