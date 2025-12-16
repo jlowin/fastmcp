@@ -37,7 +37,7 @@ from fastmcp.server.auth.providers.supabase import SupabaseProvider
 # Configure Supabase Auth
 auth = SupabaseProvider(
     project_url="https://abc123.supabase.co",
-    base_url="http://localhost:8000"
+    base_url="http://localhost:8000",
     auth_route="/my/auth/route" # if self-hosting and using custom routes
 )
 
