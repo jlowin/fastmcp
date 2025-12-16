@@ -40,12 +40,14 @@ class TestSupabaseProvider:
             {
                 "FASTMCP_SERVER_AUTH_SUPABASE_PROJECT_URL": "https://env123.supabase.co",
                 "FASTMCP_SERVER_AUTH_SUPABASE_BASE_URL": "https://envserver.com",
+                "FASTMCP_SERVER_AUTH_SUPABASE_AUTH_ROUTE": "/custom/auth/route",
             },
         ):
             provider = SupabaseProvider()
 
             assert provider.project_url == "https://env123.supabase.co"
             assert str(provider.base_url) == "https://envserver.com/"
+            assert provider.auth_route == "/custom/auth/route"
 
     def test_environment_variable_loading(self):
         """Test that environment variables are loaded correctly."""

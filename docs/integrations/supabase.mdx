@@ -17,7 +17,7 @@ This guide shows you how to secure your FastMCP server using **Supabase Auth**. 
 ### Prerequisites
 
 Before you begin, you will need:
-1. A **[Supabase Account](https://supabase.com/)** with a project
+1. A **[Supabase Account](https://supabase.com/)** with a project or a self-hosted **Supabase Auth** instance
 2. Your FastMCP server's URL (can be localhost for development, e.g., `http://localhost:8000`)
 
 ### Step 1: Get Supabase Project URL
@@ -38,6 +38,7 @@ from fastmcp.server.auth.providers.supabase import SupabaseProvider
 auth = SupabaseProvider(
     project_url="https://abc123.supabase.co",
     base_url="http://localhost:8000"
+    auth_route="/my/auth/route" # if self-hosting and using custom routes
 )
 
 mcp = FastMCP("Supabase Protected Server", auth=auth)
@@ -115,6 +116,10 @@ Your Supabase project URL (e.g., `https://abc123.supabase.co`)
 
 <ParamField path="FASTMCP_SERVER_AUTH_SUPABASE_BASE_URL" required>
 Public URL of your FastMCP server (e.g., `https://your-server.com` or `http://localhost:8000` for development)
+</ParamField>
+
+<ParamField path="FASTMCP_SERVER_AUTH_SUPABASE_AUTH_ROUTE" default="/auth/v1">
+Your Supabase auth route (e.g., `/auth/v1`)
 </ParamField>
 
 <ParamField path="FASTMCP_SERVER_AUTH_SUPABASE_REQUIRED_SCOPES" default="[]">
