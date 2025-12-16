@@ -1765,9 +1765,18 @@ class FastMCP(Generic[LifespanResultT]):
                         )
                         if result is not None:
                             return result
-                except Exception:
-                    logger.exception(f"Error calling tool '{tool_name}' from provider")
+                except (ValidationError, PydanticValidationError):
+                    # Validation errors are never masked
+                    logger.exception(f"Error validating tool {tool_name!r}")
                     raise
+                except ToolError:
+                    logger.exception(f"Error calling tool {tool_name!r}")
+                    raise
+                except Exception as e:
+                    logger.exception(f"Error calling tool {tool_name!r} from provider")
+                    if self._mask_error_details:
+                        raise ToolError(f"Error calling tool {tool_name!r}") from e
+                    raise ToolError(f"Error calling tool {tool_name!r}: {e}") from e
 
         raise NotFoundError(f"Unknown tool: {tool_name!r}")
 
@@ -1897,11 +1906,20 @@ class FastMCP(Generic[LifespanResultT]):
                         content = await provider.read_resource(ctx, uri_str)
                         if content is not None:
                             return [content]
-                except Exception:
-                    logger.exception(
-                        f"Error reading resource '{uri_str}' from provider"
-                    )
+                except ResourceError:
+                    logger.exception(f"Error reading resource {uri_str!r}")
                     raise
+                except Exception as e:
+                    logger.exception(
+                        f"Error reading resource {uri_str!r} from provider"
+                    )
+                    if self._mask_error_details:
+                        raise ResourceError(
+                            f"Error reading resource {uri_str!r}"
+                        ) from e
+                    raise ResourceError(
+                        f"Error reading resource {uri_str!r}: {e}"
+                    ) from e
 
         # Try component providers (templates)
         if ctx is not None:
@@ -1912,11 +1930,20 @@ class FastMCP(Generic[LifespanResultT]):
                         content = await provider.read_resource_template(ctx, uri_str)
                         if content is not None:
                             return [content]
-                except Exception:
-                    logger.exception(
-                        f"Error reading resource '{uri_str}' from provider template"
-                    )
+                except ResourceError:
+                    logger.exception(f"Error reading resource {uri_str!r}")
                     raise
+                except Exception as e:
+                    logger.exception(
+                        f"Error reading resource {uri_str!r} from provider template"
+                    )
+                    if self._mask_error_details:
+                        raise ResourceError(
+                            f"Error reading resource {uri_str!r}"
+                        ) from e
+                    raise ResourceError(
+                        f"Error reading resource {uri_str!r}: {e}"
+                    ) from e
 
         raise NotFoundError(f"Unknown resource: {uri_str!r}")
 
@@ -2038,9 +2065,14 @@ class FastMCP(Generic[LifespanResultT]):
                         )
                         if result is not None:
                             return result
-                except Exception:
-                    logger.exception(f"Error rendering prompt '{name}' from provider")
+                except PromptError:
+                    logger.exception(f"Error rendering prompt {name!r}")
                     raise
+                except Exception as e:
+                    logger.exception(f"Error rendering prompt {name!r} from provider")
+                    if self._mask_error_details:
+                        raise PromptError(f"Error rendering prompt {name!r}") from e
+                    raise PromptError(f"Error rendering prompt {name!r}: {e}") from e
 
         raise NotFoundError(f"Unknown prompt: {name!r}")
 

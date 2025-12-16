@@ -55,9 +55,15 @@ class Provider:
 
     Provider semantics:
         - Return `None` from `get_*` methods to indicate "I don't have it" (search continues)
-        - Raise an exception for actual errors (propagates to caller)
         - Static components (registered via decorators) always take precedence over providers
         - Providers are queried in registration order; first non-None wins
+
+    Error handling:
+        - `list_*` methods: Errors are logged and the provider returns empty (graceful degradation).
+          This allows other providers to still contribute their components.
+        - Execution methods (`call_tool`, `read_resource`, `render_prompt`): Errors propagate
+          with unified handling. ToolError/ResourceError/PromptError pass through; other
+          exceptions are wrapped with optional detail masking.
     """
 
     async def list_tools(self, context: Context) -> Sequence[Tool]:
