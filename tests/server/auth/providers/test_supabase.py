@@ -47,7 +47,7 @@ class TestSupabaseProvider:
 
             assert provider.project_url == "https://env123.supabase.co"
             assert str(provider.base_url) == "https://envserver.com/"
-            assert provider.auth_route == "/custom/auth/route"
+            assert provider.auth_route == "custom/auth/route"
 
     def test_environment_variable_loading(self):
         """Test that environment variables are loaded correctly."""
@@ -159,7 +159,7 @@ class TestSupabaseProvider:
             auth_route="/custom/auth/route",
         )
 
-        assert provider.auth_route == "/custom/auth/route"
+        assert provider.auth_route == "custom/auth/route"
         assert (
             provider.token_verifier.jwks_uri
             == "https://abc123.supabase.co/custom/auth/route/.well-known/jwks.json"
@@ -172,7 +172,7 @@ class TestSupabaseProvider:
             auth_route="/custom/auth/route/",
         )
 
-        assert provider.auth_route == "/custom/auth/route"
+        assert provider.auth_route == "custom/auth/route"
 
 
 def run_mcp_server(host: str, port: int) -> None:

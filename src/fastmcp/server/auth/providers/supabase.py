@@ -128,13 +128,13 @@ class SupabaseProvider(RemoteAuthProvider):
 
         self.project_url = str(settings.project_url).rstrip("/")
         self.base_url = AnyHttpUrl(str(settings.base_url).rstrip("/"))
-        self.auth_route = settings.auth_route.rstrip("/")
+        self.auth_route = settings.auth_route.strip("/")
 
         # Create default JWT verifier if none provided
         if token_verifier is None:
             token_verifier = JWTVerifier(
-                jwks_uri=f"{self.project_url}{self.auth_route}/.well-known/jwks.json",
-                issuer=f"{self.project_url}{self.auth_route}",
+                jwks_uri=f"{self.project_url}/{self.auth_route}/.well-known/jwks.json",
+                issuer=f"{self.project_url}/{self.auth_route}",
                 algorithm=settings.algorithm,
                 required_scopes=settings.required_scopes,
             )
@@ -142,7 +142,7 @@ class SupabaseProvider(RemoteAuthProvider):
         # Initialize RemoteAuthProvider with Supabase as the authorization server
         super().__init__(
             token_verifier=token_verifier,
-            authorization_servers=[AnyHttpUrl(f"{self.project_url}{self.auth_route}")],
+            authorization_servers=[AnyHttpUrl(f"{self.project_url}/{self.auth_route}")],
             base_url=self.base_url,
         )
 
@@ -167,7 +167,7 @@ class SupabaseProvider(RemoteAuthProvider):
             try:
                 async with httpx.AsyncClient() as client:
                     response = await client.get(
-                        f"{self.project_url}{self.auth_route}/.well-known/oauth-authorization-server"
+                        f"{self.project_url}/{self.auth_route}/.well-known/oauth-authorization-server"
                     )
                     response.raise_for_status()
                     metadata = response.json()
