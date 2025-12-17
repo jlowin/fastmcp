@@ -116,8 +116,8 @@ class ComponentService:
                             Resource | ResourceTemplate
                         ) = await mounted_service._enable_resource(resource_key)
                         return mounted_resource
-                else:
-                    continue
+                    else:
+                        continue
         raise NotFoundError(f"Unknown resource: {key}")
 
     async def _disable_resource(self, key: str) -> Resource | ResourceTemplate:
@@ -152,8 +152,8 @@ class ComponentService:
                             Resource | ResourceTemplate
                         ) = await mounted_service._disable_resource(resource_key)
                         return mounted_resource
-                else:
-                    continue
+                    else:
+                        continue
         raise NotFoundError(f"Unknown resource: {key}")
 
     async def _enable_prompt(self, key: str) -> Prompt:
