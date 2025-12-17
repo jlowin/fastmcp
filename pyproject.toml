@@ -149,6 +149,30 @@ call-non-callable = "ignore" # 7 errors
 # Some code uses `# ty: ignore[invalid-argument-type]` for this limitation.
 # TODO: Remove these ignores once ty supports union narrowing
 
+# ty 0.0.2 introduced stricter checking - these need incremental fixes:
+
+# invalid-parameter-default: ty doesn't understand Depends() dependency injection pattern
+# where default values are dependency markers resolved at runtime, not actual defaults.
+# Affects: tests/server/test_dependencies.py, tests/server/tasks/test_task_dependencies.py
+# TODO: Investigate if ty will add support for FastAPI/Depends-style DI patterns
+invalid-parameter-default = "ignore" # 13 errors
+
+# invalid-return-type: ty doesn't understand functools.partial preserves callable signatures.
+# partial(self.tool, ...) returns a callable with same return type as self.tool.
+# Affects: src/fastmcp/server/server.py (tool/prompt decorator partials)
+# TODO: Check if ty improves partial() type inference
+invalid-return-type = "ignore" # 2 errors
+
+# invalid-argument-type: Multiple causes needing individual investigation:
+# 1. Auth providers pass settings.base_url (Optional) to parent expecting non-Optional
+#    - Could add validation, but tests rely on base_url being optional for some scenarios
+# 2. PydanticAdapter accepts list[Model] via TypeAdapter but ty expects type[T]
+# 3. Client.new() generic Self bound not understood for ProxyClient
+# 4. createdAt expects datetime but code passes ISO string (pydantic coerces)
+# Affects: auth/providers/*.py, middleware/caching.py, server.py, tasks/protocol.py
+# TODO: Fix individually - some may need code changes, others ty improvements
+invalid-argument-type = "ignore" # 14 errors
+
 [tool.ruff.lint]
 fixable = ["ALL"]
 ignore = [
