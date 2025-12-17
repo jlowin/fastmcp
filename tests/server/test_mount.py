@@ -7,7 +7,7 @@ import pytest
 from fastmcp import FastMCP
 from fastmcp.client import Client
 from fastmcp.client.transports import FastMCPTransport, SSETransport
-from fastmcp.providers import MountedProvider
+from fastmcp.server.providers import MountedProvider
 from fastmcp.server.proxy import FastMCPProxy
 from fastmcp.tools.tool import Tool
 from fastmcp.tools.tool_transform import TransformedTool

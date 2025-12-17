@@ -5,9 +5,9 @@ Handles enabling/disabling components both locally and across mounted servers.
 
 from fastmcp.exceptions import NotFoundError
 from fastmcp.prompts.prompt import Prompt
-from fastmcp.providers import MountedProvider
 from fastmcp.resources.resource import Resource
 from fastmcp.resources.template import ResourceTemplate
+from fastmcp.server.providers import MountedProvider
 from fastmcp.server.server import FastMCP, has_resource_prefix, remove_resource_prefix
 from fastmcp.tools.tool import Tool
 from fastmcp.utilities.logging import get_logger

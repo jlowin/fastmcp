@@ -69,7 +69,6 @@ from fastmcp.mcp_config import MCPConfig
 from fastmcp.prompts import Prompt
 from fastmcp.prompts.prompt import FunctionPrompt, PromptResult
 from fastmcp.prompts.prompt_manager import PromptManager
-from fastmcp.providers import Provider
 from fastmcp.resources.resource import FunctionResource, Resource, ResourceContent
 from fastmcp.resources.resource_manager import ResourceManager
 from fastmcp.resources.template import FunctionResourceTemplate, ResourceTemplate
@@ -82,6 +81,7 @@ from fastmcp.server.http import (
 )
 from fastmcp.server.low_level import LowLevelServer
 from fastmcp.server.middleware import Middleware, MiddlewareContext
+from fastmcp.server.providers import Provider
 from fastmcp.server.tasks.capabilities import get_task_capabilities
 from fastmcp.server.tasks.config import TaskConfig
 from fastmcp.server.tasks.handlers import (
@@ -2698,7 +2698,7 @@ class FastMCP(Generic[LifespanResultT]):
         """
         import warnings
 
-        from fastmcp.providers import MountedProvider
+        from fastmcp.server.providers import MountedProvider
 
         if as_proxy is not None:
             warnings.warn(

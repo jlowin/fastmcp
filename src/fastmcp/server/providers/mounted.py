@@ -13,9 +13,9 @@ from typing import TYPE_CHECKING, Any
 
 from fastmcp.exceptions import NotFoundError
 from fastmcp.prompts.prompt import Prompt, PromptResult
-from fastmcp.providers.base import Components, Provider
 from fastmcp.resources.resource import Resource, ResourceContent
 from fastmcp.resources.template import ResourceTemplate
+from fastmcp.server.providers.base import Components, Provider
 from fastmcp.tools.tool import Tool, ToolResult
 
 if TYPE_CHECKING:
@@ -36,7 +36,7 @@ class MountedProvider(Provider):
     Example:
         ```python
         from fastmcp import FastMCP
-        from fastmcp.providers import MountedProvider
+        from fastmcp.server.providers import MountedProvider
 
         main = FastMCP("Main")
         sub = FastMCP("Sub")

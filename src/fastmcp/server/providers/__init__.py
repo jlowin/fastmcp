@@ -5,7 +5,8 @@ resources, and prompts dynamically at runtime.
 
 Example:
     ```python
-    from fastmcp import FastMCP, Provider
+    from fastmcp import FastMCP
+    from fastmcp.server.providers import Provider
     from fastmcp.tools import Tool
 
     class DatabaseProvider(Provider):
@@ -24,8 +25,8 @@ Example:
     ```
 """
 
-from fastmcp.providers.base import Components, Provider
-from fastmcp.providers.mounted import MountedProvider
+from fastmcp.server.providers.base import Components, Provider
+from fastmcp.server.providers.mounted import MountedProvider
 
 __all__ = [
     "Components",
