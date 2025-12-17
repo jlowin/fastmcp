@@ -208,28 +208,18 @@ class MountedProvider(Provider):
         return [self._prefix_resource(resource) for resource in resources]
 
     async def get_resource(self, uri: str) -> Resource | None:
-        """Get a resource by URI, going through middleware.
+        """Get a concrete resource by URI, going through middleware.
 
-        Checks concrete resources first, then templates.
+        Only returns concrete resources, not resources created from templates.
+        This preserves the original template for task execution.
         """
         # Early exit if URI doesn't match our prefix pattern
         if self._strip_resource_prefix(uri) is None:
             return None
 
-        # Check concrete resources first
+        # Only check concrete resources (not templates)
         resources = await self.list_resources()
-        resource = next((r for r in resources if r.key == uri), None)
-        if resource:
-            return resource
-
-        # Also check templates
-        template = await self.get_resource_template(uri)
-        if template is None:
-            return None
-        params = template.matches(uri)
-        if params is None:
-            return None
-        return await template.create_resource(uri, params)
+        return next((r for r in resources if r.key == uri), None)
 
     async def read_resource(self, uri: str) -> ResourceContent | None:
         """Read a resource through the mounted server's middleware chain."""
