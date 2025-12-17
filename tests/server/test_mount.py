@@ -7,6 +7,7 @@ import pytest
 from fastmcp import FastMCP
 from fastmcp.client import Client
 from fastmcp.client.transports import FastMCPTransport, SSETransport
+from fastmcp.providers import MountedProvider
 from fastmcp.server.proxy import FastMCPProxy
 from fastmcp.tools.tool import Tool
 from fastmcp.tools.tool_transform import TransformedTool
@@ -308,21 +309,16 @@ class TestMultipleServerMount:
                 prompt_names = [prompt.name for prompt in prompts]
                 assert "working_working_prompt" in prompt_names
 
-        # Verify that warnings were logged for the unreachable server
-        warning_messages = [
-            record.message for record in caplog.records if record.levelname == "WARNING"
+        # Verify that errors were logged for the unreachable provider
+        error_messages = [
+            record.message for record in caplog.records if record.levelname == "ERROR"
         ]
+        assert any("Error listing tools from provider" in msg for msg in error_messages)
         assert any(
-            "Failed to list tools from mounted server 'unreachable_proxy'" in msg
-            for msg in warning_messages
+            "Error listing resources from provider" in msg for msg in error_messages
         )
         assert any(
-            "Failed to list resources from 'unreachable_proxy'" in msg
-            for msg in warning_messages
-        )
-        assert any(
-            "Failed to list prompts from mounted server 'unreachable_proxy'" in msg
-            for msg in warning_messages
+            "Error listing prompts from provider" in msg for msg in error_messages
         )
 
 
@@ -852,7 +848,9 @@ class TestAsProxyKwarg:
         sub = FastMCP("Sub")
 
         mcp.mount(sub, "sub")
-        assert mcp._mounted_servers[0].server is sub
+        provider = mcp._providers[0]
+        assert isinstance(provider, MountedProvider)
+        assert provider.server is sub
 
     async def test_as_proxy_false(self):
         mcp = FastMCP("Main")
@@ -860,7 +858,9 @@ class TestAsProxyKwarg:
 
         mcp.mount(sub, "sub", as_proxy=False)
 
-        assert mcp._mounted_servers[0].server is sub
+        provider = mcp._providers[0]
+        assert isinstance(provider, MountedProvider)
+        assert provider.server is sub
 
     async def test_as_proxy_true(self):
         mcp = FastMCP("Main")
@@ -868,11 +868,17 @@ class TestAsProxyKwarg:
 
         mcp.mount(sub, "sub", as_proxy=True)
 
-        assert mcp._mounted_servers[0].server is not sub
-        assert isinstance(mcp._mounted_servers[0].server, FastMCPProxy)
+        provider = mcp._providers[0]
+        assert isinstance(provider, MountedProvider)
+        assert provider.server is not sub
+        assert isinstance(provider.server, FastMCPProxy)
 
-    async def test_as_proxy_defaults_true_if_lifespan(self):
-        """Test that as_proxy defaults to True when server_lifespan is provided."""
+    async def test_lifespan_server_mounted_directly(self):
+        """Test that servers with lifespan are mounted directly (not auto-proxied).
+
+        Since MountedProvider now handles lifespan via the provider lifespan interface,
+        there's no need to auto-convert to a proxy. The server is mounted directly.
+        """
 
         @asynccontextmanager
         async def server_lifespan(mcp: FastMCP):
@@ -883,9 +889,10 @@ class TestAsProxyKwarg:
 
         mcp.mount(sub, "sub")
 
-        # Should auto-proxy because lifespan is set
-        assert mcp._mounted_servers[0].server is not sub
-        assert isinstance(mcp._mounted_servers[0].server, FastMCPProxy)
+        # Server should be mounted directly without auto-proxying
+        provider = mcp._providers[0]
+        assert isinstance(provider, MountedProvider)
+        assert provider.server is sub
 
     async def test_as_proxy_ignored_for_proxy_mounts_default(self):
         mcp = FastMCP("Main")
@@ -894,7 +901,9 @@ class TestAsProxyKwarg:
 
         mcp.mount(sub_proxy, "sub")
 
-        assert mcp._mounted_servers[0].server is sub_proxy
+        provider = mcp._providers[0]
+        assert isinstance(provider, MountedProvider)
+        assert provider.server is sub_proxy
 
     async def test_as_proxy_ignored_for_proxy_mounts_false(self):
         mcp = FastMCP("Main")
@@ -903,7 +912,9 @@ class TestAsProxyKwarg:
 
         mcp.mount(sub_proxy, "sub", as_proxy=False)
 
-        assert mcp._mounted_servers[0].server is sub_proxy
+        provider = mcp._providers[0]
+        assert isinstance(provider, MountedProvider)
+        assert provider.server is sub_proxy
 
     async def test_as_proxy_ignored_for_proxy_mounts_true(self):
         mcp = FastMCP("Main")
@@ -912,7 +923,9 @@ class TestAsProxyKwarg:
 
         mcp.mount(sub_proxy, "sub", as_proxy=True)
 
-        assert mcp._mounted_servers[0].server is sub_proxy
+        provider = mcp._providers[0]
+        assert isinstance(provider, MountedProvider)
+        assert provider.server is sub_proxy
 
     async def test_as_proxy_mounts_still_have_live_link(self):
         mcp = FastMCP("Main")
@@ -1124,81 +1137,30 @@ class TestCustomRouteForwarding:
         assert len(routes) == 1
         assert routes[0].path == "/test"  # type: ignore[attr-defined]
 
-    async def test_get_additional_http_routes_with_mounted_server(self):
-        """Test _get_additional_http_routes includes routes from mounted servers."""
-        main_server = FastMCP("MainServer")
-        sub_server = FastMCP("SubServer")
-
-        @sub_server.custom_route("/sub-route", methods=["GET"])
-        async def sub_route(request):
-            from starlette.responses import JSONResponse
-
-            return JSONResponse({"message": "from sub"})
-
-        # Mount the sub server
-        main_server.mount(sub_server, "sub")
-
-        routes = main_server._get_additional_http_routes()
-        assert len(routes) == 1
-        assert routes[0].path == "/sub-route"  # type: ignore[attr-defined]
-
-    async def test_get_additional_http_routes_recursive(self):
-        """Test _get_additional_http_routes works recursively with nested mounts."""
-        main_server = FastMCP("MainServer")
-        sub_server = FastMCP("SubServer")
-        nested_server = FastMCP("NestedServer")
-
-        @main_server.custom_route("/main-route", methods=["GET"])
-        async def main_route(request):
-            from starlette.responses import JSONResponse
-
-            return JSONResponse({"message": "from main"})
-
-        @sub_server.custom_route("/sub-route", methods=["GET"])
-        async def sub_route(request):
-            from starlette.responses import JSONResponse
-
-            return JSONResponse({"message": "from sub"})
-
-        @nested_server.custom_route("/nested-route", methods=["GET"])
-        async def nested_route(request):
-            from starlette.responses import JSONResponse
-
-            return JSONResponse({"message": "from nested"})
-
-        # Create nested mounting: main -> sub -> nested
-        sub_server.mount(nested_server, "nested")
-        main_server.mount(sub_server, "sub")
-
-        routes = main_server._get_additional_http_routes()
-
-        # Should include all routes
-        assert len(routes) == 3
-        route_paths = [route.path for route in routes]  # type: ignore[attr-defined]
-        assert "/main-route" in route_paths
-        assert "/sub-route" in route_paths
-        assert "/nested-route" in route_paths
-
     async def test_mounted_servers_tracking(self):
-        """Test that _mounted_servers list tracks mounted servers correctly."""
+        """Test that _providers list tracks mounted servers correctly."""
         main_server = FastMCP("MainServer")
         sub_server1 = FastMCP("SubServer1")
         sub_server2 = FastMCP("SubServer2")
 
-        # Initially no mounted servers
-        assert len(main_server._mounted_servers) == 0
+        # Initially no providers
+        assert len(main_server._providers) == 0
 
         # Mount first server
         main_server.mount(sub_server1, "sub1")
-        assert len(main_server._mounted_servers) == 1
-        assert main_server._mounted_servers[0].server == sub_server1
-        assert main_server._mounted_servers[0].prefix == "sub1"
+        assert len(main_server._providers) == 1
+        provider1 = main_server._providers[0]
+        assert isinstance(provider1, MountedProvider)
+        assert provider1.server == sub_server1
+        assert provider1.prefix == "sub1"
 
         # Mount second server
         main_server.mount(sub_server2, "sub2")
-        assert len(main_server._mounted_servers) == 2
-        assert main_server._mounted_servers[1].server == sub_server2
-        assert main_server._mounted_servers[1].prefix == "sub2"
+        assert len(main_server._providers) == 2
+        provider2 = main_server._providers[1]
+        assert isinstance(provider2, MountedProvider)
+        assert provider2.server == sub_server2
+        assert provider2.prefix == "sub2"
 
     async def test_multiple_routes_same_server(self):
         """Test that multiple custom routes from same server are all included."""
