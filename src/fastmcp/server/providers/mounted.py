@@ -181,20 +181,12 @@ class MountedProvider(Provider):
         return [self._prefix_tool(tool) for tool in tools]
 
     async def get_tool(self, name: str) -> Tool | None:
-        """Get a tool by name, checking if it matches our prefix pattern."""
-        unprefixed = self._strip_tool_prefix(name)
-        if unprefixed is None:
-            return None  # Doesn't match this provider
-
-        try:
-            tool = await self.server.get_tool(unprefixed)
-            # Return with prefixed key for parent's filter checking
-            prefixed_key = name  # The name we received is already the prefixed form
-            if tool.key != prefixed_key:
-                tool = tool.model_copy(key=prefixed_key)
-            return tool
-        except NotFoundError:
+        """Get a tool by name, going through middleware."""
+        # Early exit if name doesn't match our prefix pattern
+        if self._strip_tool_prefix(name) is None:
             return None
+        tools = await self.list_tools()
+        return next((t for t in tools if t.key == name), None)
 
     async def call_tool(
         self, name: str, arguments: dict[str, Any]
@@ -216,24 +208,28 @@ class MountedProvider(Provider):
         return [self._prefix_resource(resource) for resource in resources]
 
     async def get_resource(self, uri: str) -> Resource | None:
-        """Get a concrete resource by URI, checking if it matches our prefix pattern.
+        """Get a resource by URI, going through middleware.
 
-        This only returns concrete resources, not resources created from templates.
-        For templates, use get_resource_template() instead.
+        Checks concrete resources first, then templates.
         """
-        unprefixed = self._strip_resource_prefix(uri)
-        if unprefixed is None:
-            return None  # Doesn't match this provider
-
-        # Only check concrete resources (not templates that match the URI)
-        # This preserves the original template for task execution
-        resources = await self.server.get_resources()
-        if unprefixed not in resources:
+        # Early exit if URI doesn't match our prefix pattern
+        if self._strip_resource_prefix(uri) is None:
             return None
-        resource = resources[unprefixed]
 
-        # Return with prefixed key for parent's filter checking
-        return self._prefix_resource(resource)
+        # Check concrete resources first
+        resources = await self.list_resources()
+        resource = next((r for r in resources if r.key == uri), None)
+        if resource:
+            return resource
+
+        # Also check templates
+        template = await self.get_resource_template(uri)
+        if template is None:
+            return None
+        params = template.matches(uri)
+        if params is None:
+            return None
+        return await template.create_resource(uri, params)
 
     async def read_resource(self, uri: str) -> ResourceContent | None:
         """Read a resource through the mounted server's middleware chain."""
@@ -285,20 +281,12 @@ class MountedProvider(Provider):
         return [self._prefix_prompt(prompt) for prompt in prompts]
 
     async def get_prompt(self, name: str) -> Prompt | None:
-        """Get a prompt by name, checking if it matches our prefix pattern."""
-        unprefixed = self._strip_tool_prefix(name)
-        if unprefixed is None:
-            return None  # Doesn't match this provider
-
-        try:
-            prompt = await self.server.get_prompt(unprefixed)
-            # Return with prefixed key for parent's filter checking
-            prefixed_key = name
-            if prompt.key != prefixed_key:
-                prompt = prompt.model_copy(key=prefixed_key)
-            return prompt
-        except NotFoundError:
+        """Get a prompt by name, going through middleware."""
+        # Early exit if name doesn't match our prefix pattern
+        if self._strip_tool_prefix(name) is None:
             return None
+        prompts = await self.list_prompts()
+        return next((p for p in prompts if p.key == name), None)
 
     async def render_prompt(
         self, name: str, arguments: dict[str, Any] | None
