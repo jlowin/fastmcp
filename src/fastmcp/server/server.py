@@ -945,8 +945,11 @@ class FastMCP(Generic[LifespanResultT]):
                     return resource
             except NotFoundError:
                 continue
-            except RuntimeError:
+            except RuntimeError as e:
                 # Connection failures (e.g., dead proxy) - continue to next provider
+                logger.warning(
+                    f"Provider unavailable when getting resource {uri!r}: {e}"
+                )
                 continue
 
         # Check provider templates
@@ -957,8 +960,11 @@ class FastMCP(Generic[LifespanResultT]):
                     return template
             except NotFoundError:
                 continue
-            except RuntimeError:
+            except RuntimeError as e:
                 # Connection failures (e.g., dead proxy) - continue to next provider
+                logger.warning(
+                    f"Provider unavailable when getting resource template {uri!r}: {e}"
+                )
                 continue
 
         return None
