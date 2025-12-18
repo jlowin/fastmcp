@@ -442,14 +442,14 @@ class FastMCP(Generic[LifespanResultT]):
                         isinstance(resource, FunctionResource)
                         and resource.task_config.mode != "forbidden"
                     ):
-                        docket.register(resource.fn, names=[resource.name])
+                        docket.register(resource.fn, names=[resource.key])
 
                 for template in self._resource_manager._templates.values():
                     if (
                         isinstance(template, FunctionResourceTemplate)
                         and template.task_config.mode != "forbidden"
                     ):
-                        docket.register(template.fn, names=[template.name])
+                        docket.register(template.fn, names=[template.key])
 
                 # Register provider components
                 for provider in self._providers:
@@ -458,9 +458,9 @@ class FastMCP(Generic[LifespanResultT]):
                         for tool in tasks.tools:
                             docket.register(tool.fn, names=[tool.key])
                         for resource in tasks.resources:
-                            docket.register(resource.fn, names=[resource.name])
+                            docket.register(resource.fn, names=[resource.key])
                         for template in tasks.templates:
-                            docket.register(template.fn, names=[template.name])
+                            docket.register(template.fn, names=[template.key])
                         for prompt in tasks.prompts:
                             docket.register(
                                 cast(Callable[..., Awaitable[Any]], prompt.fn),
@@ -1127,7 +1127,7 @@ class FastMCP(Generic[LifespanResultT]):
             tools = await self._list_tools_middleware()
             return [
                 tool.to_mcp_tool(
-                    name=tool.name,
+                    name=tool.key,
                     include_fastmcp_meta=self.include_fastmcp_meta,
                 )
                 for tool in tools
@@ -1203,7 +1203,7 @@ class FastMCP(Generic[LifespanResultT]):
             resources = await self._list_resources_middleware()
             return [
                 resource.to_mcp_resource(
-                    uri=str(resource.uri),
+                    uri=resource.key,
                     include_fastmcp_meta=self.include_fastmcp_meta,
                 )
                 for resource in resources
@@ -1281,7 +1281,7 @@ class FastMCP(Generic[LifespanResultT]):
             templates = await self._list_resource_templates_middleware()
             return [
                 template.to_mcp_template(
-                    uriTemplate=template.uri_template,
+                    uriTemplate=template.key,
                     include_fastmcp_meta=self.include_fastmcp_meta,
                 )
                 for template in templates
@@ -1358,7 +1358,7 @@ class FastMCP(Generic[LifespanResultT]):
             prompts = await self._list_prompts_middleware()
             return [
                 prompt.to_mcp_prompt(
-                    name=prompt.name,
+                    name=prompt.key,
                     include_fastmcp_meta=self.include_fastmcp_meta,
                 )
                 for prompt in prompts
@@ -2757,33 +2757,30 @@ class FastMCP(Generic[LifespanResultT]):
         # Import tools from the server
         for key, tool in (await server.get_tools()).items():
             if prefix:
-                tool = tool.model_copy(update={"name": f"{prefix}_{key}"})
+                tool = tool.model_copy(key=f"{prefix}_{key}")
             self._tool_manager.add_tool(tool)
 
         # Import resources and templates from the server
         for key, resource in (await server.get_resources()).items():
             if prefix:
-                resource_uri = add_resource_prefix(key, prefix)
+                resource_key = add_resource_prefix(key, prefix)
                 resource = resource.model_copy(
-                    update={"name": f"{prefix}_{resource.name}", "uri": resource_uri}
+                    update={"name": f"{prefix}_{resource.name}"}, key=resource_key
                 )
             self._resource_manager.add_resource(resource)
 
         for key, template in (await server.get_resource_templates()).items():
             if prefix:
-                template_uri_template = add_resource_prefix(key, prefix)
+                template_key = add_resource_prefix(key, prefix)
                 template = template.model_copy(
-                    update={
-                        "name": f"{prefix}_{template.name}",
-                        "uri_template": template_uri_template,
-                    }
+                    update={"name": f"{prefix}_{template.name}"}, key=template_key
                 )
             self._resource_manager.add_template(template)
 
         # Import prompts from the server
         for key, prompt in (await server.get_prompts()).items():
             if prefix:
-                prompt = prompt.model_copy(update={"name": f"{prefix}_{key}"})
+                prompt = prompt.model_copy(key=f"{prefix}_{key}")
             self._prompt_manager.add_prompt(prompt)
 
         if server._lifespan != default_lifespan:

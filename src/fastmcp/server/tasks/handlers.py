@@ -309,20 +309,19 @@ async def handle_resource_as_task(
     with suppress(Exception):
         await ctx.session.send_notification(notification)  # type: ignore[arg-type]
 
-    # Queue function to Docket by name (result storage via execution_ttl)
-    # Use resource.name which matches what was registered - Docket uses fn.__name__
+    # Queue function to Docket by key (result storage via execution_ttl)
     # For templates, extract URI params and pass them to the function
     from fastmcp.resources.template import FunctionResourceTemplate, match_uri_template
 
     if isinstance(resource, FunctionResourceTemplate):
         params = match_uri_template(uri, resource.uri_template) or {}
         await docket.add(
-            resource.name,
+            resource.key,
             key=task_key,
         )(**params)
     else:
         await docket.add(
-            resource.name,
+            resource.key,
             key=task_key,
         )()
 

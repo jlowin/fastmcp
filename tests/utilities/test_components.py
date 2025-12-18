@@ -48,7 +48,7 @@ class TestFastMCPComponent:
             name="test_component",
             title="Test Component",
             description="A test component",
-            tags={"test", "component"},
+            tags=["test", "component"],
         )
 
     def test_initialization_with_minimal_params(self):
@@ -68,7 +68,7 @@ class TestFastMCPComponent:
             name="full",
             title="Full Component",
             description="A fully configured component",
-            tags={"tag1", "tag2"},
+            tags=["tag1", "tag2"],
             meta=meta,
             enabled=False,
         )
@@ -79,9 +79,15 @@ class TestFastMCPComponent:
         assert component.meta == meta
         assert component.enabled is False
 
-    def test_key_property_returns_name(self, basic_component):
-        """Test that key property returns name."""
+    def test_key_property_without_custom_key(self, basic_component):
+        """Test that key property returns name when no custom key is set."""
         assert basic_component.key == "test_component"
+
+    def test_key_property_with_custom_key(self):
+        """Test that key property returns custom key when set."""
+        component = FastMCPComponent(name="test", key="custom_key")
+        assert component.key == "custom_key"
+        assert component.name == "test"
 
     def test_get_meta_without_fastmcp_meta(self, basic_component):
         """Test get_meta without including fastmcp meta."""
@@ -104,7 +110,7 @@ class TestFastMCPComponent:
         component = FastMCPComponent(
             name="test",
             meta={"_fastmcp": {"existing": "value"}},
-            tags={"new_tag"},
+            tags=["new_tag"],
         )
         result = component.get_meta(include_fastmcp_meta=True)
         assert result is not None
@@ -117,12 +123,13 @@ class TestFastMCPComponent:
         result = component.get_meta(include_fastmcp_meta=False)
         assert result is None
 
-    def test_model_copy_with_name_update(self, basic_component):
-        """Test that model_copy with name update creates a copy with new name."""
-        new_component = basic_component.model_copy(update={"name": "new_name"})
-        assert new_component.name == "new_name"
+    def test_model_copy_creates_copy_with_new_key(self, basic_component):
+        """Test that model_copy with key creates a copy with a new key."""
+        new_component = basic_component.model_copy(key="new_key")
+        assert new_component.key == "new_key"
+        assert new_component.name == basic_component.name
         assert new_component is not basic_component  # Should be a copy
-        assert basic_component.name == "test_component"  # Original unchanged
+        assert basic_component.key == "test_component"  # Original unchanged
 
     def test_equality_same_components(self):
         """Test that identical components are equal."""
@@ -178,14 +185,14 @@ class TestFastMCPComponent:
         """Test that tags are deduplicated."""
         component = FastMCPComponent(
             name="test",
-            tags={"tag1", "tag2"},
+            tags=["tag1", "tag2", "tag1", "tag2"],
         )
         assert component.tags == {"tag1", "tag2"}
 
     def test_validation_error_for_invalid_data(self):
         """Test that validation errors are raised for invalid data."""
         with pytest.raises(ValidationError):
-            FastMCPComponent()  # type: ignore[call-arg]
+            FastMCPComponent()  # Missing required name field
 
     def test_extra_fields_forbidden(self):
         """Test that extra fields are not allowed."""
@@ -280,12 +287,12 @@ class TestMirroredComponent:
 
     def test_all_fastmcp_component_features_work(self, mirrored_component):
         """Test that all FastMCPComponent features work except enable/disable."""
-        # Test name property
-        assert mirrored_component.name == "mirrored"
+        # Test key property
+        assert mirrored_component.key == "mirrored"
 
-        # Test model_copy with update
-        with_new_name = mirrored_component.model_copy(update={"name": "new_name"})
-        assert with_new_name.name == "new_name"
+        # Test model_copy with key
+        with_key = mirrored_component.model_copy(key="new_key")
+        assert with_key.key == "new_key"
 
         # Test get_meta
         mirrored_component.tags = {"tag1"}
@@ -316,7 +323,7 @@ class TestEdgeCasesAndIntegration:
 
     def test_empty_tags_conversion(self):
         """Test that empty tags are handled correctly."""
-        component = FastMCPComponent(name="test", tags=set())
+        component = FastMCPComponent(name="test", tags=[])
         assert component.tags == set()
 
     def test_tags_with_none_values(self):
@@ -346,24 +353,25 @@ class TestEdgeCasesAndIntegration:
         component = FastMCPComponent(name="test", meta=complex_meta)
         assert component.meta == complex_meta
 
-    def test_model_copy_preserves_all_attributes(self):
-        """Test that model_copy preserves all component attributes."""
+    def test_model_copy_with_key_preserves_all_attributes(self):
+        """Test that model_copy with key preserves all component attributes."""
         component = FastMCPComponent(
             name="test",
             title="Title",
             description="Description",
-            tags={"tag1", "tag2"},
+            tags=["tag1", "tag2"],
             meta={"key": "value"},
             enabled=False,
         )
-        new_component = component.model_copy(update={"name": "new_name"})
+        new_component = component.model_copy(key="new_key")
 
-        assert new_component.name == "new_name"
+        assert new_component.name == component.name
         assert new_component.title == component.title
         assert new_component.description == component.description
         assert new_component.tags == component.tags
         assert new_component.meta == component.meta
         assert new_component.enabled == component.enabled
+        assert new_component.key == "new_key"
 
     def test_mirrored_component_copy_chain(self):
         """Test creating copies of copies for mirrored components."""
@@ -382,35 +390,33 @@ class TestEdgeCasesAndIntegration:
         assert copy1.name == "copy1"
         assert copy2.name == "copy2"
 
-    def test_model_copy_with_multiple_updates(self):
-        """Test that model_copy works with multiple fields in update dict."""
+    def test_model_copy_with_update_and_key(self):
+        """Test that model_copy works with both update dict and key parameter."""
         component = FastMCPComponent(
             name="test",
             title="Original Title",
             description="Original Description",
-            tags={"tag1"},
+            tags=["tag1"],
             enabled=True,
         )
 
-        # Test with multiple updates
+        # Test with both update and key
         updated_component = component.model_copy(
-            update={
-                "name": "new_name",
-                "title": "New Title",
-                "description": "New Description",
-            },
+            update={"title": "New Title", "description": "New Description"},
+            key="new_key",
         )
 
-        assert updated_component.name == "new_name"  # Updated
+        assert updated_component.name == "test"  # Not in update, unchanged
         assert updated_component.title == "New Title"  # Updated
         assert updated_component.description == "New Description"  # Updated
         assert updated_component.tags == {"tag1"}  # Not in update, unchanged
         assert updated_component.enabled is True  # Not in update, unchanged
+        assert updated_component.key == "new_key"  # Custom key set
 
         # Original should be unchanged
-        assert component.name == "test"
         assert component.title == "Original Title"
         assert component.description == "Original Description"
+        assert component.key == "test"  # Uses name as key
 
     def test_model_copy_deep_parameter(self):
         """Test that model_copy respects the deep parameter."""

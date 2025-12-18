@@ -28,7 +28,7 @@ async def test_import_basic_functionality():
     # Verify the original tool still exists in the sub-app
     tool = await main_app._tool_manager.get_tool("sub_sub_tool")
     assert tool is not None
-    assert tool.name == "sub_sub_tool"  # name is now prefixed
+    assert tool.name == "sub_tool"
     assert isinstance(tool, FunctionTool)
     assert callable(tool.fn)
 
