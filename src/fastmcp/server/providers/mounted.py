@@ -181,37 +181,35 @@ class MountedProvider(Provider):
     def _prefix_tool(self, tool: Tool) -> Tool:
         """Apply prefix to a tool."""
         if self.tool_names and tool.name in self.tool_names:
-            new_key = self.tool_names[tool.name]
+            new_name = self.tool_names[tool.name]
         else:
-            new_key = self._add_tool_prefix(tool.key)
-        return tool.model_copy(key=new_key) if new_key != tool.key else tool
+            new_name = self._add_tool_prefix(tool.name)
+        if new_name != tool.name:
+            return tool.model_copy(update={"name": new_name})
+        return tool
 
     def _prefix_resource(self, resource: Resource) -> Resource:
-        """Apply prefix to a resource."""
-        new_key = self._add_resource_prefix(resource.key)
-        update: dict[str, Any] = {}
-        if self.prefix and resource.name:
-            update["name"] = f"{self.prefix}_{resource.name}"
-        if new_key != resource.key or update:
-            return resource.model_copy(key=new_key, update=update)
+        """Apply prefix to a resource URI (name is NOT prefixed)."""
+        if self.prefix:
+            new_uri = self._add_resource_prefix(str(resource.uri))
+            if new_uri != str(resource.uri):
+                return resource.model_copy(update={"uri": new_uri})
         return resource
 
     def _prefix_template(self, template: ResourceTemplate) -> ResourceTemplate:
-        """Apply prefix to a resource template."""
-        new_key = self._add_resource_prefix(template.key)
-        update: dict[str, Any] = {}
-        if self.prefix and template.name:
-            update["name"] = f"{self.prefix}_{template.name}"
+        """Apply prefix to a resource template URI (name is NOT prefixed)."""
         if self.prefix and template.uri_template:
-            update["uri_template"] = self._add_resource_prefix(template.uri_template)
-        if new_key != template.key or update:
-            return template.model_copy(key=new_key, update=update)
+            new_template = self._add_resource_prefix(template.uri_template)
+            if new_template != template.uri_template:
+                return template.model_copy(update={"uri_template": new_template})
         return template
 
     def _prefix_prompt(self, prompt: Prompt) -> Prompt:
         """Apply prefix to a prompt."""
-        new_key = self._add_tool_prefix(prompt.key)
-        return prompt.model_copy(key=new_key) if new_key != prompt.key else prompt
+        new_name = self._add_tool_prefix(prompt.name)
+        if new_name != prompt.name:
+            return prompt.model_copy(update={"name": new_name})
+        return prompt
 
     # -------------------------------------------------------------------------
     # Tool methods
@@ -223,7 +221,7 @@ class MountedProvider(Provider):
         return [self._prefix_tool(tool) for tool in tools]
 
     async def get_tool(self, name: str) -> Tool | None:
-        """Get a tool by name, going through middleware."""
+        """Get a tool by key, going through middleware."""
         # Early exit if name doesn't match our prefix pattern
         if self._strip_tool_prefix(name) is None:
             return None
@@ -250,7 +248,7 @@ class MountedProvider(Provider):
         return [self._prefix_resource(resource) for resource in resources]
 
     async def get_resource(self, uri: str) -> Resource | None:
-        """Get a concrete resource by URI, going through middleware.
+        """Get a concrete resource by key (URI), going through middleware.
 
         Only returns concrete resources, not resources created from templates.
         This preserves the original template for task execution.
@@ -313,7 +311,7 @@ class MountedProvider(Provider):
         return [self._prefix_prompt(prompt) for prompt in prompts]
 
     async def get_prompt(self, name: str) -> Prompt | None:
-        """Get a prompt by name, going through middleware."""
+        """Get a prompt by key, going through middleware."""
         # Early exit if name doesn't match our prefix pattern
         if self._strip_tool_prefix(name) is None:
             return None
