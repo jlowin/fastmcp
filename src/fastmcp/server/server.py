@@ -1002,7 +1002,9 @@ class FastMCP(Generic[LifespanResultT]):
                 continue
             except RuntimeError as e:
                 # Connection failures (e.g., dead proxy) - continue to next provider
-                logger.warning(f"Provider unavailable when getting resource {key!r}: {e}")
+                logger.warning(
+                    f"Provider unavailable when getting resource {key!r}: {e}"
+                )
                 continue
 
         raise NotFoundError(f"Unknown resource: {key}")
