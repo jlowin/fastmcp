@@ -5,8 +5,22 @@ prefix (or have no prefix), the system gracefully falls back to the working
 server instead of failing.
 """
 
+from typing import cast
+
+import httpx
+from mcp.shared._httpx_utils import McpHttpClientFactory
+
 from fastmcp import Client, FastMCP
 from fastmcp.client.transports import SSETransport
+
+
+def _short_timeout_client_factory(**kwargs) -> httpx.AsyncClient:  # type: ignore[type-arg]
+    """Create httpx client with short timeout for faster test failures."""
+    return httpx.AsyncClient(timeout=httpx.Timeout(1.0), **kwargs)
+
+
+# Cast to satisfy type checker
+_factory = cast(McpHttpClientFactory, _short_timeout_client_factory)
 
 
 class TestDeadProxySharedPrefix:
@@ -22,8 +36,12 @@ class TestDeadProxySharedPrefix:
             return "Working tool"
 
         # Mount unreachable proxy FIRST with prefix "shared"
+        # Use short timeout to fail fast on Windows
         unreachable_client = Client(
-            transport=SSETransport("http://127.0.0.1:9999/sse/"),
+            transport=SSETransport(
+                "http://127.0.0.1:9999/sse/",
+                httpx_client_factory=_factory,
+            ),
             name="unreachable_client",
         )
         unreachable_proxy = FastMCP.as_proxy(
@@ -54,8 +72,12 @@ class TestDeadProxySharedPrefix:
             return "Working tool"
 
         # Mount unreachable proxy FIRST without prefix
+        # Use short timeout to fail fast on Windows
         unreachable_client = Client(
-            transport=SSETransport("http://127.0.0.1:9999/sse/"),
+            transport=SSETransport(
+                "http://127.0.0.1:9999/sse/",
+                httpx_client_factory=_factory,
+            ),
             name="unreachable_client",
         )
         unreachable_proxy = FastMCP.as_proxy(
@@ -87,7 +109,10 @@ class TestDeadProxySharedPrefix:
 
         # Mount unreachable proxy FIRST
         unreachable_client = Client(
-            transport=SSETransport("http://127.0.0.1:9999/sse/"),
+            transport=SSETransport(
+                "http://127.0.0.1:9999/sse/",
+                httpx_client_factory=_factory,
+            ),
             name="unreachable_client",
         )
         unreachable_proxy = FastMCP.as_proxy(
@@ -119,7 +144,10 @@ class TestDeadProxySharedPrefix:
 
         # Mount unreachable proxy FIRST
         unreachable_client = Client(
-            transport=SSETransport("http://127.0.0.1:9999/sse/"),
+            transport=SSETransport(
+                "http://127.0.0.1:9999/sse/",
+                httpx_client_factory=_factory,
+            ),
             name="unreachable_client",
         )
         unreachable_proxy = FastMCP.as_proxy(
@@ -151,7 +179,10 @@ class TestDeadProxySharedPrefix:
 
         # Mount unreachable proxy FIRST without prefix
         unreachable_client = Client(
-            transport=SSETransport("http://127.0.0.1:9999/sse/"),
+            transport=SSETransport(
+                "http://127.0.0.1:9999/sse/",
+                httpx_client_factory=_factory,
+            ),
             name="unreachable_client",
         )
         unreachable_proxy = FastMCP.as_proxy(
@@ -183,7 +214,10 @@ class TestDeadProxySharedPrefix:
 
         # Mount unreachable proxy FIRST without prefix
         unreachable_client = Client(
-            transport=SSETransport("http://127.0.0.1:9999/sse/"),
+            transport=SSETransport(
+                "http://127.0.0.1:9999/sse/",
+                httpx_client_factory=_factory,
+            ),
             name="unreachable_client",
         )
         unreachable_proxy = FastMCP.as_proxy(
