@@ -227,9 +227,6 @@ class FastMCP(Generic[LifespanResultT]):
 
         self._additional_http_routes: list[BaseRoute] = []
         self._providers: list[Provider] = list(providers or [])
-        self._is_mounted: bool = (
-            False  # Set to True when this server is mounted on another
-        )
         self._tool_manager: ToolManager = ToolManager(
             duplicate_behavior=on_duplicate_tools,
             mask_error_details=mask_error_details,
@@ -428,13 +425,6 @@ class FastMCP(Generic[LifespanResultT]):
         server_token = _current_server.set(weakref.ref(self))
 
         try:
-            # For directly mounted servers, the parent's Docket/Worker handles all
-            # task execution. Skip creating our own to avoid race conditions with
-            # multiple workers competing for tasks from the same queue.
-            if self._is_mounted:
-                yield
-                return
-
             # Create Docket instance using configured name and URL
             async with Docket(
                 name=settings.docket.name,
@@ -1569,8 +1559,8 @@ class FastMCP(Generic[LifespanResultT]):
         except NotFoundError:
             pass
 
-        # Try component providers in reverse order (later providers win)
-        for provider in reversed(self._providers):
+        # Try component providers (first registered wins)
+        for provider in self._providers:
             try:
                 tool = await provider.get_tool(tool_name)
                 if tool is not None and self._should_enable_component(tool):
@@ -1687,8 +1677,8 @@ class FastMCP(Generic[LifespanResultT]):
                     content = await self._execute_resource(resource, uri_str)
                     return [content]
 
-        # Try component providers in reverse order (later providers win) - concrete resources
-        for provider in reversed(self._providers):
+        # Try component providers (first registered wins) - concrete resources
+        for provider in self._providers:
             try:
                 resource = await provider.get_resource(uri_str)
                 if resource is not None and self._should_enable_component(resource):
@@ -1704,8 +1694,8 @@ class FastMCP(Generic[LifespanResultT]):
                     raise ResourceError(f"Error reading resource {uri_str!r}") from e
                 raise ResourceError(f"Error reading resource {uri_str!r}: {e}") from e
 
-        # Try component providers in reverse order (templates)
-        for provider in reversed(self._providers):
+        # Try component providers (first registered wins) - templates
+        for provider in self._providers:
             try:
                 template = await provider.get_resource_template(uri_str)
                 if template is not None and self._should_enable_component(template):
@@ -1809,8 +1799,8 @@ class FastMCP(Generic[LifespanResultT]):
         except NotFoundError:
             pass
 
-        # Try providers in reverse order (later providers win)
-        for provider in reversed(self._providers):
+        # Try component providers (first registered wins)
+        for provider in self._providers:
             try:
                 prompt = await provider.get_prompt(name)
                 if prompt is not None and self._should_enable_component(prompt):

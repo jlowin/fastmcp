@@ -323,10 +323,13 @@ class TestMultipleServerMount:
 
 
 class TestPrefixConflictResolution:
-    """Test that later mounted servers win when there are conflicts."""
+    """Test that first registered provider wins when there are conflicts.
 
-    async def test_later_server_wins_tools_no_prefix(self):
-        """Test that later mounted server wins for tools when no prefix is used."""
+    Provider semantics: 'Providers are queried in registration order; first non-None wins'
+    """
+
+    async def test_first_server_wins_tools_no_prefix(self):
+        """Test that first mounted server wins for tools when no prefix is used."""
         main_app = FastMCP("MainApp")
         first_app = FastMCP("FirstApp")
         second_app = FastMCP("SecondApp")
@@ -344,18 +347,18 @@ class TestPrefixConflictResolution:
         main_app.mount(second_app)
 
         async with Client(main_app) as client:
-            # Test that list_tools shows the tool from later server
+            # Test that list_tools shows the tool
             tools = await client.list_tools()
             tool_names = [t.name for t in tools]
             assert "shared_tool" in tool_names
             assert tool_names.count("shared_tool") == 1  # Should only appear once
 
-            # Test that calling the tool uses the later server's implementation
+            # Test that calling the tool uses the first server's implementation
             result = await client.call_tool("shared_tool", {})
-            assert result.data == "Second app tool"
+            assert result.data == "First app tool"
 
-    async def test_later_server_wins_tools_same_prefix(self):
-        """Test that later mounted server wins for tools when same prefix is used."""
+    async def test_first_server_wins_tools_same_prefix(self):
+        """Test that first mounted server wins for tools when same prefix is used."""
         main_app = FastMCP("MainApp")
         first_app = FastMCP("FirstApp")
         second_app = FastMCP("SecondApp")
@@ -373,18 +376,18 @@ class TestPrefixConflictResolution:
         main_app.mount(second_app, "api")
 
         async with Client(main_app) as client:
-            # Test that list_tools shows the tool from later server
+            # Test that list_tools shows the tool
             tools = await client.list_tools()
             tool_names = [t.name for t in tools]
             assert "api_shared_tool" in tool_names
             assert tool_names.count("api_shared_tool") == 1  # Should only appear once
 
-            # Test that calling the tool uses the later server's implementation
+            # Test that calling the tool uses the first server's implementation
             result = await client.call_tool("api_shared_tool", {})
-            assert result.data == "Second app tool"
+            assert result.data == "First app tool"
 
-    async def test_later_server_wins_resources_no_prefix(self):
-        """Test that later mounted server wins for resources when no prefix is used."""
+    async def test_first_server_wins_resources_no_prefix(self):
+        """Test that first mounted server wins for resources when no prefix is used."""
         main_app = FastMCP("MainApp")
         first_app = FastMCP("FirstApp")
         second_app = FastMCP("SecondApp")
@@ -402,18 +405,18 @@ class TestPrefixConflictResolution:
         main_app.mount(second_app)
 
         async with Client(main_app) as client:
-            # Test that list_resources shows the resource from later server
+            # Test that list_resources shows the resource
             resources = await client.list_resources()
             resource_uris = [str(r.uri) for r in resources]
             assert "shared://data" in resource_uris
             assert resource_uris.count("shared://data") == 1  # Should only appear once
 
-            # Test that reading the resource uses the later server's implementation
+            # Test that reading the resource uses the first server's implementation
             result = await client.read_resource("shared://data")
-            assert result[0].text == "Second app data"  # type: ignore[attr-defined]
+            assert result[0].text == "First app data"  # type: ignore[attr-defined]
 
-    async def test_later_server_wins_resources_same_prefix(self):
-        """Test that later mounted server wins for resources when same prefix is used."""
+    async def test_first_server_wins_resources_same_prefix(self):
+        """Test that first mounted server wins for resources when same prefix is used."""
         main_app = FastMCP("MainApp")
         first_app = FastMCP("FirstApp")
         second_app = FastMCP("SecondApp")
@@ -431,7 +434,7 @@ class TestPrefixConflictResolution:
         main_app.mount(second_app, "api")
 
         async with Client(main_app) as client:
-            # Test that list_resources shows the resource from later server
+            # Test that list_resources shows the resource
             resources = await client.list_resources()
             resource_uris = [str(r.uri) for r in resources]
             assert "shared://api/data" in resource_uris
@@ -439,12 +442,12 @@ class TestPrefixConflictResolution:
                 resource_uris.count("shared://api/data") == 1
             )  # Should only appear once
 
-            # Test that reading the resource uses the later server's implementation
+            # Test that reading the resource uses the first server's implementation
             result = await client.read_resource("shared://api/data")
-            assert result[0].text == "Second app data"  # type: ignore[attr-defined]
+            assert result[0].text == "First app data"  # type: ignore[attr-defined]
 
-    async def test_later_server_wins_resource_templates_no_prefix(self):
-        """Test that later mounted server wins for resource templates when no prefix is used."""
+    async def test_first_server_wins_resource_templates_no_prefix(self):
+        """Test that first mounted server wins for resource templates when no prefix is used."""
         main_app = FastMCP("MainApp")
         first_app = FastMCP("FirstApp")
         second_app = FastMCP("SecondApp")
@@ -462,7 +465,7 @@ class TestPrefixConflictResolution:
         main_app.mount(second_app)
 
         async with Client(main_app) as client:
-            # Test that list_resource_templates shows the template from later server
+            # Test that list_resource_templates shows the template
             templates = await client.list_resource_templates()
             template_uris = [t.uriTemplate for t in templates]
             assert "users://{user_id}/profile" in template_uris
@@ -470,12 +473,12 @@ class TestPrefixConflictResolution:
                 template_uris.count("users://{user_id}/profile") == 1
             )  # Should only appear once
 
-            # Test that reading the resource uses the later server's implementation
+            # Test that reading the resource uses the first server's implementation
             result = await client.read_resource("users://123/profile")
-            assert result[0].text == "Second app user 123"  # type: ignore[attr-defined]
+            assert result[0].text == "First app user 123"  # type: ignore[attr-defined]
 
-    async def test_later_server_wins_resource_templates_same_prefix(self):
-        """Test that later mounted server wins for resource templates when same prefix is used."""
+    async def test_first_server_wins_resource_templates_same_prefix(self):
+        """Test that first mounted server wins for resource templates when same prefix is used."""
         main_app = FastMCP("MainApp")
         first_app = FastMCP("FirstApp")
         second_app = FastMCP("SecondApp")
@@ -493,7 +496,7 @@ class TestPrefixConflictResolution:
         main_app.mount(second_app, "api")
 
         async with Client(main_app) as client:
-            # Test that list_resource_templates shows the template from later server
+            # Test that list_resource_templates shows the template
             templates = await client.list_resource_templates()
             template_uris = [t.uriTemplate for t in templates]
             assert "users://api/{user_id}/profile" in template_uris
@@ -501,12 +504,12 @@ class TestPrefixConflictResolution:
                 template_uris.count("users://api/{user_id}/profile") == 1
             )  # Should only appear once
 
-            # Test that reading the resource uses the later server's implementation
+            # Test that reading the resource uses the first server's implementation
             result = await client.read_resource("users://api/123/profile")
-            assert result[0].text == "Second app user 123"  # type: ignore[attr-defined]
+            assert result[0].text == "First app user 123"  # type: ignore[attr-defined]
 
-    async def test_later_server_wins_prompts_no_prefix(self):
-        """Test that later mounted server wins for prompts when no prefix is used."""
+    async def test_first_server_wins_prompts_no_prefix(self):
+        """Test that first mounted server wins for prompts when no prefix is used."""
         main_app = FastMCP("MainApp")
         first_app = FastMCP("FirstApp")
         second_app = FastMCP("SecondApp")
@@ -524,19 +527,19 @@ class TestPrefixConflictResolution:
         main_app.mount(second_app)
 
         async with Client(main_app) as client:
-            # Test that list_prompts shows the prompt from later server
+            # Test that list_prompts shows the prompt
             prompts = await client.list_prompts()
             prompt_names = [p.name for p in prompts]
             assert "shared_prompt" in prompt_names
             assert prompt_names.count("shared_prompt") == 1  # Should only appear once
 
-            # Test that getting the prompt uses the later server's implementation
+            # Test that getting the prompt uses the first server's implementation
             result = await client.get_prompt("shared_prompt", {})
             assert result.messages is not None
-            assert result.messages[0].content.text == "Second app prompt"  # type: ignore[attr-defined]
+            assert result.messages[0].content.text == "First app prompt"  # type: ignore[attr-defined]
 
-    async def test_later_server_wins_prompts_same_prefix(self):
-        """Test that later mounted server wins for prompts when same prefix is used."""
+    async def test_first_server_wins_prompts_same_prefix(self):
+        """Test that first mounted server wins for prompts when same prefix is used."""
         main_app = FastMCP("MainApp")
         first_app = FastMCP("FirstApp")
         second_app = FastMCP("SecondApp")
@@ -554,7 +557,7 @@ class TestPrefixConflictResolution:
         main_app.mount(second_app, "api")
 
         async with Client(main_app) as client:
-            # Test that list_prompts shows the prompt from later server
+            # Test that list_prompts shows the prompt
             prompts = await client.list_prompts()
             prompt_names = [p.name for p in prompts]
             assert "api_shared_prompt" in prompt_names
@@ -562,10 +565,10 @@ class TestPrefixConflictResolution:
                 prompt_names.count("api_shared_prompt") == 1
             )  # Should only appear once
 
-            # Test that getting the prompt uses the later server's implementation
+            # Test that getting the prompt uses the first server's implementation
             result = await client.get_prompt("api_shared_prompt", {})
             assert result.messages is not None
-            assert result.messages[0].content.text == "Second app prompt"  # type: ignore[attr-defined]
+            assert result.messages[0].content.text == "First app prompt"  # type: ignore[attr-defined]
 
 
 class TestDynamicChanges:
@@ -1386,3 +1389,117 @@ class TestToolNameOverrides:
         async with Client(main) as client:
             result = await client.call_tool("renamed", {})
             assert result.data == "success"
+
+
+class TestMountedServerDocketBehavior:
+    """Regression tests for mounted server lifecycle behavior.
+
+    These tests guard against architectural changes that could accidentally
+    start Docket instances for mounted servers. Mounted servers should only
+    run their user-defined lifespan, not the full _lifespan_manager which
+    includes Docket creation.
+    """
+
+    async def test_mounted_server_does_not_have_docket(self):
+        """Test that a mounted server doesn't create its own Docket.
+
+        MountedProvider.lifespan() should call only the server's _lifespan
+        (user-defined lifespan), not _lifespan_manager (which includes Docket).
+        """
+        main_app = FastMCP("MainApp")
+        sub_app = FastMCP("SubApp")
+
+        @sub_app.tool
+        def my_tool() -> str:
+            return "test"
+
+        main_app.mount(sub_app, "sub")
+
+        # After running the main app's lifespan, the sub app should not have
+        # its own Docket instance
+        async with Client(main_app) as client:
+            # The main app should have a docket (created by _lifespan_manager)
+            assert main_app.docket is not None
+
+            # The mounted sub app should NOT have its own docket
+            # It uses the parent's docket for background tasks
+            assert sub_app.docket is None
+
+            # But the tool should still work (prefixed as sub_my_tool)
+            result = await client.call_tool("sub_my_tool", {})
+            assert result.data == "test"
+
+
+class TestComponentServicePrefixLess:
+    """Test that ComponentService works with prefix-less mounted servers."""
+
+    async def test_enable_tool_prefixless_mount(self):
+        """Test enabling a tool on a prefix-less mounted server."""
+        from fastmcp.contrib.component_manager.component_service import ComponentService
+
+        main_app = FastMCP("MainApp")
+        sub_app = FastMCP("SubApp")
+
+        @sub_app.tool
+        def my_tool() -> str:
+            return "test"
+
+        # Mount without prefix
+        main_app.mount(sub_app)
+
+        # Initially the tool is enabled
+        tools = await main_app.get_tools()
+        assert "my_tool" in tools
+        assert tools["my_tool"].enabled
+
+        # Disable and re-enable via ComponentService
+        service = ComponentService(main_app)
+        tool = await service._disable_tool("my_tool")
+        assert not tool.enabled
+
+        tool = await service._enable_tool("my_tool")
+        assert tool.enabled
+
+    async def test_enable_resource_prefixless_mount(self):
+        """Test enabling a resource on a prefix-less mounted server."""
+        from fastmcp.contrib.component_manager.component_service import ComponentService
+
+        main_app = FastMCP("MainApp")
+        sub_app = FastMCP("SubApp")
+
+        @sub_app.resource(uri="data://test")
+        def my_resource() -> str:
+            return "test data"
+
+        # Mount without prefix
+        main_app.mount(sub_app)
+
+        # Disable and re-enable via ComponentService
+        service = ComponentService(main_app)
+        resource = await service._disable_resource("data://test")
+        assert not resource.enabled
+
+        resource = await service._enable_resource("data://test")
+        assert resource.enabled
+
+    async def test_enable_prompt_prefixless_mount(self):
+        """Test enabling a prompt on a prefix-less mounted server."""
+        from fastmcp.contrib.component_manager.component_service import ComponentService
+
+        main_app = FastMCP("MainApp")
+        sub_app = FastMCP("SubApp")
+
+        @sub_app.prompt
+        def my_prompt() -> str:
+            return "test prompt"
+
+        # Mount without prefix
+        main_app.mount(sub_app)
+
+        # Disable and re-enable via ComponentService
+        service = ComponentService(main_app)
+        prompt = await service._disable_prompt("my_prompt")
+        assert not prompt.enabled
+
+        prompt = await service._enable_prompt("my_prompt")
+        assert prompt.enabled

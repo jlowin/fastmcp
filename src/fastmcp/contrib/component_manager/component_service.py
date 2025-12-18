@@ -8,7 +8,6 @@ from fastmcp.prompts.prompt import Prompt
 from fastmcp.resources.resource import Resource
 from fastmcp.resources.template import ResourceTemplate
 from fastmcp.server.providers import MountedProvider
-from fastmcp.server.providers.mounted import has_resource_prefix, remove_resource_prefix
 from fastmcp.server.server import FastMCP
 from fastmcp.tools.tool import Tool
 from fastmcp.utilities.logging import get_logger
@@ -43,16 +42,13 @@ class ComponentService:
             return tool
 
         # 2. Check mounted servers via MountedProvider
-        for provider in reversed(self._server._providers):
+        for provider in self._server._providers:
             if isinstance(provider, MountedProvider):
-                if provider.prefix:
-                    if key.startswith(f"{provider.prefix}_"):
-                        tool_key = key.removeprefix(f"{provider.prefix}_")
-                        mounted_service = ComponentService(provider.server)
-                        tool = await mounted_service._enable_tool(tool_key)
-                        return tool
-                    else:
-                        continue
+                unprefixed = provider._strip_tool_prefix(key)
+                if unprefixed is not None:
+                    mounted_service = ComponentService(provider.server)
+                    tool = await mounted_service._enable_tool(unprefixed)
+                    return tool
         raise NotFoundError(f"Unknown tool: {key}")
 
     async def _disable_tool(self, key: str) -> Tool:
@@ -73,16 +69,13 @@ class ComponentService:
             return tool
 
         # 2. Check mounted servers via MountedProvider
-        for provider in reversed(self._server._providers):
+        for provider in self._server._providers:
             if isinstance(provider, MountedProvider):
-                if provider.prefix:
-                    if key.startswith(f"{provider.prefix}_"):
-                        tool_key = key.removeprefix(f"{provider.prefix}_")
-                        mounted_service = ComponentService(provider.server)
-                        tool = await mounted_service._disable_tool(tool_key)
-                        return tool
-                    else:
-                        continue
+                unprefixed = provider._strip_tool_prefix(key)
+                if unprefixed is not None:
+                    mounted_service = ComponentService(provider.server)
+                    tool = await mounted_service._disable_tool(unprefixed)
+                    return tool
         raise NotFoundError(f"Unknown tool: {key}")
 
     async def _enable_resource(self, key: str) -> Resource | ResourceTemplate:
@@ -107,18 +100,15 @@ class ComponentService:
             return template
 
         # 2. Check mounted servers via MountedProvider
-        for provider in reversed(self._server._providers):
+        for provider in self._server._providers:
             if isinstance(provider, MountedProvider):
-                if provider.prefix:
-                    if has_resource_prefix(key, provider.prefix):
-                        resource_key = remove_resource_prefix(key, provider.prefix)
-                        mounted_service = ComponentService(provider.server)
-                        mounted_resource: (
-                            Resource | ResourceTemplate
-                        ) = await mounted_service._enable_resource(resource_key)
-                        return mounted_resource
-                    else:
-                        continue
+                unprefixed = provider._strip_resource_prefix(key)
+                if unprefixed is not None:
+                    mounted_service = ComponentService(provider.server)
+                    mounted_resource: (
+                        Resource | ResourceTemplate
+                    ) = await mounted_service._enable_resource(unprefixed)
+                    return mounted_resource
         raise NotFoundError(f"Unknown resource: {key}")
 
     async def _disable_resource(self, key: str) -> Resource | ResourceTemplate:
@@ -143,18 +133,15 @@ class ComponentService:
             return template
 
         # 2. Check mounted servers via MountedProvider
-        for provider in reversed(self._server._providers):
+        for provider in self._server._providers:
             if isinstance(provider, MountedProvider):
-                if provider.prefix:
-                    if has_resource_prefix(key, provider.prefix):
-                        resource_key = remove_resource_prefix(key, provider.prefix)
-                        mounted_service = ComponentService(provider.server)
-                        mounted_resource: (
-                            Resource | ResourceTemplate
-                        ) = await mounted_service._disable_resource(resource_key)
-                        return mounted_resource
-                    else:
-                        continue
+                unprefixed = provider._strip_resource_prefix(key)
+                if unprefixed is not None:
+                    mounted_service = ComponentService(provider.server)
+                    mounted_resource: (
+                        Resource | ResourceTemplate
+                    ) = await mounted_service._disable_resource(unprefixed)
+                    return mounted_resource
         raise NotFoundError(f"Unknown resource: {key}")
 
     async def _enable_prompt(self, key: str) -> Prompt:
@@ -175,16 +162,13 @@ class ComponentService:
             return prompt
 
         # 2. Check mounted servers via MountedProvider
-        for provider in reversed(self._server._providers):
+        for provider in self._server._providers:
             if isinstance(provider, MountedProvider):
-                if provider.prefix:
-                    if key.startswith(f"{provider.prefix}_"):
-                        prompt_key = key.removeprefix(f"{provider.prefix}_")
-                        mounted_service = ComponentService(provider.server)
-                        prompt = await mounted_service._enable_prompt(prompt_key)
-                        return prompt
-                    else:
-                        continue
+                unprefixed = provider._strip_tool_prefix(key)
+                if unprefixed is not None:
+                    mounted_service = ComponentService(provider.server)
+                    prompt = await mounted_service._enable_prompt(unprefixed)
+                    return prompt
         raise NotFoundError(f"Unknown prompt: {key}")
 
     async def _disable_prompt(self, key: str) -> Prompt:
@@ -204,14 +188,11 @@ class ComponentService:
             return prompt
 
         # 2. Check mounted servers via MountedProvider
-        for provider in reversed(self._server._providers):
+        for provider in self._server._providers:
             if isinstance(provider, MountedProvider):
-                if provider.prefix:
-                    if key.startswith(f"{provider.prefix}_"):
-                        prompt_key = key.removeprefix(f"{provider.prefix}_")
-                        mounted_service = ComponentService(provider.server)
-                        prompt = await mounted_service._disable_prompt(prompt_key)
-                        return prompt
-                    else:
-                        continue
+                unprefixed = provider._strip_tool_prefix(key)
+                if unprefixed is not None:
+                    mounted_service = ComponentService(provider.server)
+                    prompt = await mounted_service._disable_prompt(unprefixed)
+                    return prompt
         raise NotFoundError(f"Unknown prompt: {key}")
