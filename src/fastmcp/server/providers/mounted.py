@@ -7,6 +7,7 @@ resources, and prompts through the parent server with optional prefixing.
 
 from __future__ import annotations
 
+import re
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
@@ -20,6 +21,47 @@ from fastmcp.tools.tool import Tool, ToolResult
 
 if TYPE_CHECKING:
     from fastmcp.server.server import FastMCP
+
+# Pattern for matching URIs: protocol://path
+_URI_PATTERN = re.compile(r"^([^:]+://)(.*?)$")
+
+
+def add_resource_prefix(uri: str, prefix: str) -> str:
+    """Add a prefix to a resource URI using path formatting (resource://prefix/path)."""
+    if not prefix:
+        return uri
+    match = _URI_PATTERN.match(uri)
+    if not match:
+        raise ValueError(f"Invalid URI format: {uri}. Expected protocol://path format.")
+    protocol, path = match.groups()
+    return f"{protocol}{prefix}/{path}"
+
+
+def remove_resource_prefix(uri: str, prefix: str) -> str:
+    """Remove a prefix from a resource URI."""
+    if not prefix:
+        return uri
+    match = _URI_PATTERN.match(uri)
+    if not match:
+        raise ValueError(f"Invalid URI format: {uri}. Expected protocol://path format.")
+    protocol, path = match.groups()
+    prefix_pattern = f"^{re.escape(prefix)}/(.*?)$"
+    path_match = re.match(prefix_pattern, path)
+    if not path_match:
+        return uri
+    return f"{protocol}{path_match.group(1)}"
+
+
+def has_resource_prefix(uri: str, prefix: str) -> bool:
+    """Check if a resource URI has a specific prefix."""
+    if not prefix:
+        return False
+    match = _URI_PATTERN.match(uri)
+    if not match:
+        raise ValueError(f"Invalid URI format: {uri}. Expected protocol://path format.")
+    _, path = match.groups()
+    prefix_pattern = f"^{re.escape(prefix)}/"
+    return bool(re.match(prefix_pattern, path))
 
 
 class MountedProvider(Provider):
@@ -74,6 +116,8 @@ class MountedProvider(Provider):
         self.server = server
         self.prefix = prefix
         self.tool_names = tool_names or {}
+        if len(self.tool_names) != len(set(self.tool_names.values())):
+            raise ValueError("tool_names values must be unique")
         self._reverse_tool_names = {v: k for k, v in self.tool_names.items()}
 
     # -------------------------------------------------------------------------
@@ -111,9 +155,6 @@ class MountedProvider(Provider):
         """Add prefix to a resource URI."""
         if not self.prefix:
             return uri
-        # Import here to avoid circular dependency
-        from fastmcp.server.server import add_resource_prefix
-
         return add_resource_prefix(uri, self.prefix)
 
     def _strip_resource_prefix(self, uri: str) -> str | None:
@@ -125,9 +166,6 @@ class MountedProvider(Provider):
         """
         if not self.prefix:
             return uri
-        # Import here to avoid circular dependency
-        from fastmcp.server.server import has_resource_prefix, remove_resource_prefix
-
         if not has_resource_prefix(uri, self.prefix):
             return None
         return remove_resource_prefix(uri, self.prefix)

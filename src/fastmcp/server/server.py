@@ -2728,6 +2728,10 @@ class FastMCP(Generic[LifespanResultT]):
         Import the MCP objects from another FastMCP server into this one,
         optionally with a given prefix.
 
+        .. deprecated::
+            Use :meth:`mount` instead. ``import_server`` will be removed in a
+            future version.
+
         Note that when a server is *imported*, its objects are immediately
         registered to the importing server. This is a one-time operation and
         future changes to the imported server will not be reflected in the
@@ -2755,6 +2759,16 @@ class FastMCP(Generic[LifespanResultT]):
             prefix: Optional prefix to use for the imported server's objects. If None,
                 objects are imported with their original names.
         """
+        import warnings
+
+        from fastmcp.server.providers.mounted import add_resource_prefix
+
+        warnings.warn(
+            "import_server is deprecated, use mount() instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
         # Import tools from the server
         for key, tool in (await server.get_tools()).items():
             if prefix:
@@ -2969,124 +2983,3 @@ class FastMCP(Generic[LifespanResultT]):
             return f"{class_name}-{secrets.token_hex(2)}"
         else:
             return f"{class_name}-{name}-{secrets.token_hex(2)}"
-
-
-def add_resource_prefix(uri: str, prefix: str) -> str:
-    """Add a prefix to a resource URI using path formatting (resource://prefix/path).
-
-    Args:
-        uri: The original resource URI
-        prefix: The prefix to add
-
-    Returns:
-        The resource URI with the prefix added
-
-    Examples:
-        ```python
-        add_resource_prefix("resource://path/to/resource", "prefix")
-        "resource://prefix/path/to/resource"
-        ```
-        With absolute path:
-        ```python
-        add_resource_prefix("resource:///absolute/path", "prefix")
-        "resource://prefix//absolute/path"
-        ```
-
-    Raises:
-        ValueError: If the URI doesn't match the expected protocol://path format
-    """
-    if not prefix:
-        return uri
-
-    # Split the URI into protocol and path
-    match = URI_PATTERN.match(uri)
-    if not match:
-        raise ValueError(f"Invalid URI format: {uri}. Expected protocol://path format.")
-
-    protocol, path = match.groups()
-
-    # Add the prefix to the path
-    return f"{protocol}{prefix}/{path}"
-
-
-def remove_resource_prefix(uri: str, prefix: str) -> str:
-    """Remove a prefix from a resource URI.
-
-    Args:
-        uri: The resource URI with a prefix
-        prefix: The prefix to remove
-
-    Returns:
-        The resource URI with the prefix removed
-
-    Examples:
-        ```python
-        remove_resource_prefix("resource://prefix/path/to/resource", "prefix")
-        "resource://path/to/resource"
-        ```
-        With absolute path:
-        ```python
-        remove_resource_prefix("resource://prefix//absolute/path", "prefix")
-        "resource:///absolute/path"
-        ```
-
-    Raises:
-        ValueError: If the URI doesn't match the expected protocol://path format
-    """
-    if not prefix:
-        return uri
-
-    # Split the URI into protocol and path
-    match = URI_PATTERN.match(uri)
-    if not match:
-        raise ValueError(f"Invalid URI format: {uri}. Expected protocol://path format.")
-
-    protocol, path = match.groups()
-
-    # Check if the path starts with the prefix followed by a /
-    prefix_pattern = f"^{re.escape(prefix)}/(.*?)$"
-    path_match = re.match(prefix_pattern, path)
-    if not path_match:
-        return uri
-
-    # Return the URI without the prefix
-    return f"{protocol}{path_match.group(1)}"
-
-
-def has_resource_prefix(uri: str, prefix: str) -> bool:
-    """Check if a resource URI has a specific prefix.
-
-    Args:
-        uri: The resource URI to check
-        prefix: The prefix to look for
-
-    Returns:
-        True if the URI has the specified prefix, False otherwise
-
-    Examples:
-        ```python
-        has_resource_prefix("resource://prefix/path/to/resource", "prefix")
-        True
-        ```
-        With other path:
-        ```python
-        has_resource_prefix("resource://other/path/to/resource", "prefix")
-        False
-        ```
-
-    Raises:
-        ValueError: If the URI doesn't match the expected protocol://path format
-    """
-    if not prefix:
-        return False
-
-    # Split the URI into protocol and path
-    match = URI_PATTERN.match(uri)
-    if not match:
-        raise ValueError(f"Invalid URI format: {uri}. Expected protocol://path format.")
-
-    _, path = match.groups()
-
-    # Check if the path starts with the prefix followed by a /
-    prefix_pattern = f"^{re.escape(prefix)}/"
-    return bool(re.match(prefix_pattern, path))

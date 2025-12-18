@@ -8,7 +8,8 @@ from fastmcp.prompts.prompt import Prompt
 from fastmcp.resources.resource import Resource
 from fastmcp.resources.template import ResourceTemplate
 from fastmcp.server.providers import MountedProvider
-from fastmcp.server.server import FastMCP, has_resource_prefix, remove_resource_prefix
+from fastmcp.server.providers.mounted import has_resource_prefix, remove_resource_prefix
+from fastmcp.server.server import FastMCP
 from fastmcp.tools.tool import Tool
 from fastmcp.utilities.logging import get_logger
 
