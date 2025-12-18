@@ -901,6 +901,9 @@ class FastMCP(Generic[LifespanResultT]):
                     return tool
             except NotFoundError:
                 continue
+            except RuntimeError as e:
+                logger.warning(f"Provider unavailable when getting tool {key!r}: {e}")
+                continue
 
         raise NotFoundError(f"Unknown tool: {key}")
 
@@ -942,6 +945,9 @@ class FastMCP(Generic[LifespanResultT]):
                     return resource
             except NotFoundError:
                 continue
+            except RuntimeError:
+                # Connection failures (e.g., dead proxy) - continue to next provider
+                continue
 
         # Check provider templates
         for provider in self._providers:
@@ -950,6 +956,9 @@ class FastMCP(Generic[LifespanResultT]):
                 if template is not None:
                     return template
             except NotFoundError:
+                continue
+            except RuntimeError:
+                # Connection failures (e.g., dead proxy) - continue to next provider
                 continue
 
         return None
@@ -991,6 +1000,10 @@ class FastMCP(Generic[LifespanResultT]):
                     return resource
             except NotFoundError:
                 continue
+            except RuntimeError as e:
+                # Connection failures (e.g., dead proxy) - continue to next provider
+                logger.warning(f"Provider unavailable when getting resource {key!r}: {e}")
+                continue
 
         raise NotFoundError(f"Unknown resource: {key}")
 
@@ -1031,6 +1044,12 @@ class FastMCP(Generic[LifespanResultT]):
                     return template
             except NotFoundError:
                 continue
+            except RuntimeError as e:
+                # Connection failures (e.g., dead proxy) - continue to next provider
+                logger.warning(
+                    f"Provider unavailable when getting resource template {key!r}: {e}"
+                )
+                continue
 
         raise NotFoundError(f"Unknown resource template: {key}")
 
@@ -1070,6 +1089,10 @@ class FastMCP(Generic[LifespanResultT]):
                 if prompt is not None:
                     return prompt
             except NotFoundError:
+                continue
+            except RuntimeError as e:
+                # Connection failures (e.g., dead proxy) - continue to next provider
+                logger.warning(f"Provider unavailable when getting prompt {key!r}: {e}")
                 continue
 
         raise NotFoundError(f"Unknown prompt: {key}")
@@ -1590,6 +1613,10 @@ class FastMCP(Generic[LifespanResultT]):
             except ToolError:
                 logger.exception(f"Error calling tool {tool_name!r}")
                 raise
+            except RuntimeError as e:
+                # Connection failures (e.g., dead proxy) - continue to next provider
+                logger.warning(f"Provider unavailable for tool {tool_name!r}: {e}")
+                continue
             except Exception as e:
                 logger.exception(f"Error calling tool {tool_name!r} from provider")
                 if self._mask_error_details:
@@ -1702,6 +1729,10 @@ class FastMCP(Generic[LifespanResultT]):
             except ResourceError:
                 logger.exception(f"Error reading resource {uri_str!r}")
                 raise
+            except RuntimeError as e:
+                # Connection failures (e.g., dead proxy) - continue to next provider
+                logger.warning(f"Provider unavailable for resource {uri_str!r}: {e}")
+                continue
             except Exception as e:
                 logger.exception(f"Error reading resource {uri_str!r} from provider")
                 if self._mask_error_details:
@@ -1719,6 +1750,12 @@ class FastMCP(Generic[LifespanResultT]):
             except ResourceError:
                 logger.exception(f"Error reading resource {uri_str!r}")
                 raise
+            except RuntimeError as e:
+                # Connection failures (e.g., dead proxy) - continue to next provider
+                logger.warning(
+                    f"Provider unavailable for resource template {uri_str!r}: {e}"
+                )
+                continue
             except Exception as e:
                 logger.exception(
                     f"Error reading resource {uri_str!r} from provider template"
@@ -1826,6 +1863,10 @@ class FastMCP(Generic[LifespanResultT]):
             except PromptError:
                 logger.exception(f"Error rendering prompt {name!r}")
                 raise
+            except RuntimeError as e:
+                # Connection failures (e.g., dead proxy) - continue to next provider
+                logger.warning(f"Provider unavailable for prompt {name!r}: {e}")
+                continue
             except Exception as e:
                 logger.exception(f"Error rendering prompt {name!r} from provider")
                 if self._mask_error_details:
