@@ -16,11 +16,15 @@ from fastmcp.exceptions import NotFoundError
 from fastmcp.prompts.prompt import Prompt, PromptResult
 from fastmcp.resources.resource import Resource, ResourceContent
 from fastmcp.resources.template import ResourceTemplate
-from fastmcp.server.providers.base import Components, Provider
+from fastmcp.server.providers.base import Provider, TaskComponents
 from fastmcp.tools.tool import Tool, ToolResult
 
 if TYPE_CHECKING:
+    from fastmcp.prompts.prompt import FunctionPrompt
+    from fastmcp.resources.resource import FunctionResource
+    from fastmcp.resources.template import FunctionResourceTemplate
     from fastmcp.server.server import FastMCP
+    from fastmcp.tools.tool import FunctionTool
 
 # Pattern for matching URIs: protocol://path
 _URI_PATTERN = re.compile(r"^([^:]+://)(.*?)$")
@@ -330,7 +334,7 @@ class MountedProvider(Provider):
     # Task registration
     # -------------------------------------------------------------------------
 
-    async def get_tasks(self) -> Components:
+    async def get_tasks(self) -> TaskComponents:
         """Return task-eligible components, bypassing middleware and applying prefixes.
 
         This override accesses the wrapped server's managers directly to avoid
@@ -342,46 +346,46 @@ class MountedProvider(Provider):
         from fastmcp.resources.template import FunctionResourceTemplate
         from fastmcp.tools.tool import FunctionTool
 
-        tools: list[Tool] = []
-        resources: list[Resource] = []
-        templates: list[ResourceTemplate] = []
-        prompts: list[Prompt] = []
+        tools: list[FunctionTool] = []
+        resources: list[FunctionResource] = []
+        templates: list[FunctionResourceTemplate] = []
+        prompts: list[FunctionPrompt] = []
 
         # Direct manager access (bypasses middleware)
         for tool in self.server._tool_manager._tools.values():
             if isinstance(tool, FunctionTool) and tool.task_config.mode != "forbidden":
-                tools.append(self._prefix_tool(tool))
+                tools.append(self._prefix_tool(tool))  # type: ignore[arg-type]
 
         for resource in self.server._resource_manager._resources.values():
             if (
                 isinstance(resource, FunctionResource)
                 and resource.task_config.mode != "forbidden"
             ):
-                resources.append(self._prefix_resource(resource))
+                resources.append(self._prefix_resource(resource))  # type: ignore[arg-type]
 
         for template in self.server._resource_manager._templates.values():
             if (
                 isinstance(template, FunctionResourceTemplate)
                 and template.task_config.mode != "forbidden"
             ):
-                templates.append(self._prefix_template(template))
+                templates.append(self._prefix_template(template))  # type: ignore[arg-type]
 
         for prompt in self.server._prompt_manager._prompts.values():
             if (
                 isinstance(prompt, FunctionPrompt)
                 and prompt.task_config.mode != "forbidden"
             ):
-                prompts.append(self._prefix_prompt(prompt))
+                prompts.append(self._prefix_prompt(prompt))  # type: ignore[arg-type]
 
         # Recursively get tasks from nested providers and apply our prefix
         for provider in self.server._providers:
             nested = await provider.get_tasks()
-            tools.extend(self._prefix_tool(t) for t in nested.tools)
-            resources.extend(self._prefix_resource(r) for r in nested.resources)
-            templates.extend(self._prefix_template(t) for t in nested.templates)
-            prompts.extend(self._prefix_prompt(p) for p in nested.prompts)
+            tools.extend(self._prefix_tool(t) for t in nested.tools)  # type: ignore[arg-type]
+            resources.extend(self._prefix_resource(r) for r in nested.resources)  # type: ignore[arg-type]
+            templates.extend(self._prefix_template(t) for t in nested.templates)  # type: ignore[arg-type]
+            prompts.extend(self._prefix_prompt(p) for p in nested.prompts)  # type: ignore[arg-type]
 
-        return Components(
+        return TaskComponents(
             tools=tools, resources=resources, templates=templates, prompts=prompts
         )
 

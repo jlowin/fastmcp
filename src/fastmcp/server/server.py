@@ -467,19 +467,33 @@ class FastMCP(Generic[LifespanResultT]):
 
                 # Register provider components
                 for provider in self._providers:
-                    tasks = await provider.get_tasks()
-                    for tool in tasks.tools:
-                        named_fn = _create_named_fn_wrapper(tool.fn, tool.key)  # type: ignore[attr-defined]
-                        docket.register(named_fn)
-                    for resource in tasks.resources:
-                        named_fn = _create_named_fn_wrapper(resource.fn, resource.name)  # type: ignore[attr-defined]
-                        docket.register(named_fn)
-                    for template in tasks.templates:
-                        named_fn = _create_named_fn_wrapper(template.fn, template.name)  # type: ignore[attr-defined]
-                        docket.register(named_fn)
-                    for prompt in tasks.prompts:
-                        named_fn = _create_named_fn_wrapper(prompt.fn, prompt.key)  # type: ignore[attr-defined]
-                        docket.register(named_fn)
+                    try:
+                        tasks = await provider.get_tasks()
+                        for tool in tasks.tools:
+                            named_fn = _create_named_fn_wrapper(tool.fn, tool.key)
+                            docket.register(named_fn)
+                        for resource in tasks.resources:
+                            named_fn = _create_named_fn_wrapper(
+                                resource.fn, resource.name
+                            )
+                            docket.register(named_fn)
+                        for template in tasks.templates:
+                            named_fn = _create_named_fn_wrapper(
+                                template.fn, template.name
+                            )
+                            docket.register(named_fn)
+                        for prompt in tasks.prompts:
+                            named_fn = _create_named_fn_wrapper(prompt.fn, prompt.key)
+                            docket.register(named_fn)
+                    except Exception as e:
+                        provider_name = getattr(
+                            provider, "server", provider
+                        ).__class__.__name__
+                        logger.warning(
+                            f"Failed to register tasks from provider {provider_name!r}: {e}"
+                        )
+                        if fastmcp.settings.mounted_components_raise_on_load_error:
+                            raise
 
                 # Set Docket in ContextVar so CurrentDocket can access it
                 docket_token = _current_docket.set(docket)

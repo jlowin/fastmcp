@@ -31,25 +31,42 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastmcp.prompts.prompt import Prompt, PromptResult
 from fastmcp.resources.resource import Resource, ResourceContent
 from fastmcp.resources.template import ResourceTemplate
 from fastmcp.tools.tool import Tool, ToolResult
 
+if TYPE_CHECKING:
+    from fastmcp.prompts.prompt import FunctionPrompt
+    from fastmcp.resources.resource import FunctionResource
+    from fastmcp.resources.template import FunctionResourceTemplate
+    from fastmcp.tools.tool import FunctionTool
+
 
 @dataclass
 class Components:
-    """Collection of MCP components.
-
-    Used by get_tasks() to return task-eligible components for Docket registration.
-    """
+    """Collection of MCP components."""
 
     tools: Sequence[Tool] = ()
     resources: Sequence[Resource] = ()
     templates: Sequence[ResourceTemplate] = ()
     prompts: Sequence[Prompt] = ()
+
+
+@dataclass
+class TaskComponents:
+    """Collection of function-based components eligible for background task execution.
+
+    Used by get_tasks() to return components for Docket registration.
+    All components have a `.fn` attribute pointing to the underlying callable.
+    """
+
+    tools: Sequence[FunctionTool] = ()
+    resources: Sequence[FunctionResource] = ()
+    templates: Sequence[FunctionResourceTemplate] = ()
+    prompts: Sequence[FunctionPrompt] = ()
 
 
 class Provider:
@@ -225,7 +242,7 @@ class Provider:
     # Task registration
     # -------------------------------------------------------------------------
 
-    async def get_tasks(self) -> Components:
+    async def get_tasks(self) -> TaskComponents:
         """Return components that should be registered as background tasks.
 
         Override to customize which components are task-eligible.
@@ -244,7 +261,7 @@ class Provider:
         all_templates = await self.list_resource_templates()
         all_prompts = await self.list_prompts()
 
-        return Components(
+        return TaskComponents(
             tools=[
                 t
                 for t in all_tools
