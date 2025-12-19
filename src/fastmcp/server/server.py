@@ -2762,7 +2762,6 @@ class FastMCP(Generic[LifespanResultT]):
             prefix: Optional prefix to use for the imported server's objects. If None,
                 objects are imported with their original names.
         """
-        import re
         import warnings
 
         warnings.warn(
@@ -2773,7 +2772,7 @@ class FastMCP(Generic[LifespanResultT]):
 
         def add_resource_prefix(uri: str, prefix: str) -> str:
             """Add prefix to resource URI: protocol://path → protocol://prefix/path."""
-            match = re.match(r"^([^:]+://)(.*?)$", uri)
+            match = URI_PATTERN.match(uri)
             if match:
                 protocol, path = match.groups()
                 return f"{protocol}{prefix}/{path}"
