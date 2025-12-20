@@ -29,7 +29,7 @@ async def handle_tool_as_task(
     tool_name: str,
     arguments: dict[str, Any],
     task_meta: dict[str, Any],
-) -> mcp.types.CallToolResult:
+) -> mcp.types.CreateTaskResult:
     """Handle tool execution as background task (SEP-1686).
 
     Queues the user's actual function to Docket (preserving signature for DI),
@@ -42,15 +42,14 @@ async def handle_tool_as_task(
         task_meta: Task metadata from request (contains ttl)
 
     Returns:
-        CallToolResult: Task stub with task metadata in _meta
+        CreateTaskResult: Task stub with proper Task object
     """
     # Generate server-side task ID per SEP-1686 final spec (line 375-377)
     # Server MUST generate task IDs, clients no longer provide them
     server_task_id = str(uuid.uuid4())
 
     # Record creation timestamp per SEP-1686 final spec (line 430)
-    # Format as ISO 8601 / RFC 3339 timestamp
-    created_at = datetime.now(timezone.utc).isoformat()
+    created_at = datetime.now(timezone.utc)
 
     # Get session ID and Docket
     ctx = get_context()
@@ -79,7 +78,7 @@ async def handle_tool_as_task(
     )
     async with docket.redis() as redis:
         await redis.set(redis_key, task_key, ex=ttl_seconds)
-        await redis.set(created_at_key, created_at, ex=ttl_seconds)
+        await redis.set(created_at_key, created_at.isoformat(), ex=ttl_seconds)
 
     # Send notifications/tasks/created per SEP-1686 (mandatory)
     # Send BEFORE queuing to avoid race where task completes before notification
@@ -118,16 +117,17 @@ async def handle_tool_as_task(
                 docket,
             )
 
-    # Return task stub
+    # Return CreateTaskResult with proper Task object
     # Tasks MUST begin in "working" status per SEP-1686 final spec (line 381)
-    return mcp.types.CallToolResult(
-        content=[],
-        _meta={
-            "modelcontextprotocol.io/task": {
-                "taskId": server_task_id,
-                "status": "working",
-            }
-        },
+    return mcp.types.CreateTaskResult(
+        task=mcp.types.Task(
+            taskId=server_task_id,
+            status="working",
+            createdAt=created_at,
+            lastUpdatedAt=created_at,
+            ttl=int(docket.execution_ttl.total_seconds() * 1000),
+            pollInterval=1000,
+        )
     )
 
 
@@ -136,7 +136,7 @@ async def handle_prompt_as_task(
     prompt_name: str,
     arguments: dict[str, Any] | None,
     task_meta: dict[str, Any],
-) -> mcp.types.GetPromptResult:
+) -> mcp.types.CreateTaskResult:
     """Handle prompt execution as background task (SEP-1686).
 
     Queues the user's actual function to Docket (preserving signature for DI).
@@ -148,15 +148,14 @@ async def handle_prompt_as_task(
         task_meta: Task metadata from request (contains ttl)
 
     Returns:
-        GetPromptResult: Task stub with task metadata in _meta
+        CreateTaskResult: Task stub with proper Task object
     """
     # Generate server-side task ID per SEP-1686 final spec (line 375-377)
     # Server MUST generate task IDs, clients no longer provide them
     server_task_id = str(uuid.uuid4())
 
     # Record creation timestamp per SEP-1686 final spec (line 430)
-    # Format as ISO 8601 / RFC 3339 timestamp
-    created_at = datetime.now(timezone.utc).isoformat()
+    created_at = datetime.now(timezone.utc)
 
     # Get session ID and Docket
     ctx = get_context()
@@ -185,7 +184,7 @@ async def handle_prompt_as_task(
     )
     async with docket.redis() as redis:
         await redis.set(redis_key, task_key, ex=ttl_seconds)
-        await redis.set(created_at_key, created_at, ex=ttl_seconds)
+        await redis.set(created_at_key, created_at.isoformat(), ex=ttl_seconds)
 
     # Send notifications/tasks/created per SEP-1686 (mandatory)
     # Send BEFORE queuing to avoid race where task completes before notification
@@ -221,17 +220,17 @@ async def handle_prompt_as_task(
                 docket,
             )
 
-    # Return task stub
+    # Return CreateTaskResult with proper Task object
     # Tasks MUST begin in "working" status per SEP-1686 final spec (line 381)
-    return mcp.types.GetPromptResult(
-        description="",
-        messages=[],
-        _meta={
-            "modelcontextprotocol.io/task": {
-                "taskId": server_task_id,
-                "status": "working",
-            }
-        },
+    return mcp.types.CreateTaskResult(
+        task=mcp.types.Task(
+            taskId=server_task_id,
+            status="working",
+            createdAt=created_at,
+            lastUpdatedAt=created_at,
+            ttl=int(docket.execution_ttl.total_seconds() * 1000),
+            pollInterval=1000,
+        )
     )
 
 
@@ -240,7 +239,7 @@ async def handle_resource_as_task(
     uri: str,
     resource,  # Resource or ResourceTemplate
     task_meta: dict[str, Any],
-) -> mcp.types.ServerResult:
+) -> mcp.types.CreateTaskResult:
     """Handle resource read as background task (SEP-1686).
 
     Queues the user's actual function to Docket.
@@ -252,15 +251,14 @@ async def handle_resource_as_task(
         task_meta: Task metadata from request (contains ttl)
 
     Returns:
-        ServerResult with ReadResourceResult stub
+        CreateTaskResult: Task stub with proper Task object
     """
     # Generate server-side task ID per SEP-1686 final spec (line 375-377)
     # Server MUST generate task IDs, clients no longer provide them
     server_task_id = str(uuid.uuid4())
 
     # Record creation timestamp per SEP-1686 final spec (line 430)
-    # Format as ISO 8601 / RFC 3339 timestamp
-    created_at = datetime.now(timezone.utc).isoformat()
+    created_at = datetime.now(timezone.utc)
 
     # Get session ID and Docket
     ctx = get_context()
@@ -286,7 +284,7 @@ async def handle_resource_as_task(
     )
     async with docket.redis() as redis:
         await redis.set(redis_key, task_key, ex=ttl_seconds)
-        await redis.set(created_at_key, created_at, ex=ttl_seconds)
+        await redis.set(created_at_key, created_at.isoformat(), ex=ttl_seconds)
 
     # Send notifications/tasks/created per SEP-1686 (mandatory)
     # Send BEFORE queuing to avoid race where task completes before notification
@@ -328,16 +326,15 @@ async def handle_resource_as_task(
                 docket,
             )
 
-    # Return task stub
+    # Return CreateTaskResult with proper Task object
     # Tasks MUST begin in "working" status per SEP-1686 final spec (line 381)
-    return mcp.types.ServerResult(
-        mcp.types.ReadResourceResult(
-            contents=[],
-            _meta={
-                "modelcontextprotocol.io/task": {
-                    "taskId": server_task_id,
-                    "status": "working",
-                }
-            },
+    return mcp.types.CreateTaskResult(
+        task=mcp.types.Task(
+            taskId=server_task_id,
+            status="working",
+            createdAt=created_at,
+            lastUpdatedAt=created_at,
+            ttl=int(docket.execution_ttl.total_seconds() * 1000),
+            pollInterval=1000,
         )
     )
