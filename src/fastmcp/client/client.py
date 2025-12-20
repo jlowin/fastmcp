@@ -30,7 +30,7 @@ from mcp.types import (
     PaginatedRequestParams,
     TaskStatusNotification,
 )
-from pydantic import AnyUrl
+from pydantic import AnyUrl, RootModel
 
 import fastmcp
 from fastmcp.client.elicitation import ElicitationHandler, create_elicitation_callback
@@ -906,8 +906,6 @@ class Client(Generic[ClientTransportT]):
         Returns:
             ResourceTask: Future-like object for accessing task status and results
         """
-        from pydantic import RootModel
-
         # Per SEP-1686 final spec: client sends only ttl, server generates taskId
         if isinstance(uri, str):
             uri = AnyUrl(uri)
@@ -1123,8 +1121,6 @@ class Client(Generic[ClientTransportT]):
         Returns:
             PromptTask: Future-like object for accessing task status and results
         """
-        from pydantic import RootModel
-
         # Per SEP-1686 final spec: client sends only ttl, server generates taskId
         # Serialize arguments for MCP protocol
         serialized_arguments: dict[str, str] | None = None
@@ -1477,8 +1473,6 @@ class Client(Generic[ClientTransportT]):
 
         # Server returns CreateTaskResult (task accepted) or CallToolResult (graceful degradation)
         # Use RootModel with Union to handle both response types (SDK calls model_validate)
-        from pydantic import RootModel
-
         TaskResponseUnion = RootModel[
             mcp.types.CreateTaskResult | mcp.types.CallToolResult
         ]

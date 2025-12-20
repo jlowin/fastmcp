@@ -18,6 +18,8 @@ from fastmcp.server.dependencies import _current_docket, get_context
 from fastmcp.server.tasks.keys import build_task_key
 
 if TYPE_CHECKING:
+    from fastmcp.resources.resource import Resource
+    from fastmcp.resources.template import ResourceTemplate
     from fastmcp.server.server import FastMCP
 
 # Redis mapping TTL buffer: Add 15 minutes to Docket's execution_ttl
@@ -237,7 +239,7 @@ async def handle_prompt_as_task(
 async def handle_resource_as_task(
     server: FastMCP,
     uri: str,
-    resource,  # Resource or ResourceTemplate
+    resource: Resource | ResourceTemplate,
     task_meta: dict[str, Any],
 ) -> mcp.types.CreateTaskResult:
     """Handle resource read as background task (SEP-1686).
