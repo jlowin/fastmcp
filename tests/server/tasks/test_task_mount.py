@@ -89,7 +89,7 @@ def parent_server(child_server):
         return value * 10
 
     # Mount child with prefix
-    parent.mount(child_server, prefix="child")
+    parent.mount(child_server, namespace="child")
 
     return parent
 
@@ -309,7 +309,7 @@ class TestMountedTaskDependencies:
             return f"docket available: {docket is not None}"
 
         parent = FastMCP("dep-parent")
-        parent.mount(child, prefix="child")
+        parent.mount(child, namespace="child")
 
         async with Client(parent) as client:
             task = await client.call_tool("child_tool_with_docket", {}, task=True)
@@ -330,7 +330,7 @@ class TestMountedTaskDependencies:
             return f"server name: {server.name}"
 
         parent = FastMCP("server-dep-parent")
-        parent.mount(child, prefix="child")
+        parent.mount(child, namespace="child")
 
         async with Client(parent) as client:
             task = await client.call_tool("child_tool_with_server", {}, task=True)
@@ -359,8 +359,8 @@ class TestMultipleMounts:
             return a - b
 
         parent = FastMCP("multi-parent")
-        parent.mount(child1, prefix="math1")
-        parent.mount(child2, prefix="math2")
+        parent.mount(child1, namespace="math1")
+        parent.mount(child2, namespace="math2")
 
         async with Client(parent) as client:
             task1 = await client.call_tool("math1_add", {"a": 10, "b": 5}, task=True)
@@ -392,8 +392,8 @@ class TestMountedFunctionNameCollisions:
             return value * 3  # Triple
 
         parent = FastMCP("parent")
-        parent.mount(child1, prefix="c1")
-        parent.mount(child2, prefix="c2")
+        parent.mount(child1, namespace="c1")
+        parent.mount(child2, namespace="c2")
 
         async with Client(parent) as client:
             # Both should execute their own implementation
@@ -439,8 +439,8 @@ class TestMountedFunctionNameCollisions:
         async def deep_tool() -> str:
             return "deep"
 
-        child.mount(grandchild, prefix="gc")
-        parent.mount(child, prefix="child")
+        child.mount(grandchild, namespace="gc")
+        parent.mount(child, namespace="child")
 
         async with Client(parent) as client:
             # Tool should be accessible and execute correctly
@@ -502,7 +502,7 @@ class TestMountedTaskConfigModes:
     def parent_with_modes(self, child_with_modes):
         """Create a parent server with the child mounted."""
         parent = FastMCP("parent-modes")
-        parent.mount(child_with_modes, prefix="child")
+        parent.mount(child_with_modes, namespace="child")
         return parent
 
     async def test_optional_mode_sync_through_mount(self, parent_with_modes):
