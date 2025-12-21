@@ -288,10 +288,25 @@ class Resource(FastMCPComponent):
         docket.register(self.read, names=[self.key])
 
     async def add_to_docket(  # type: ignore[override]
-        self, docket: Docket, **kwargs: Any
+        self,
+        docket: Docket,
+        *,
+        fn_key: str | None = None,
+        task_key: str | None = None,
+        **kwargs: Any,
     ) -> Execution:
-        """Schedule this resource for background execution via docket."""
-        return await docket.add(self.key, **kwargs)()
+        """Schedule this resource for background execution via docket.
+
+        Args:
+            docket: The Docket instance
+            fn_key: Function lookup key in Docket registry (defaults to self.key)
+            task_key: Redis storage key for the result
+            **kwargs: Additional kwargs passed to docket.add()
+        """
+        lookup_key = fn_key or self.key
+        if task_key:
+            kwargs["key"] = task_key
+        return await docket.add(lookup_key, **kwargs)()
 
 
 class FunctionResource(Resource):

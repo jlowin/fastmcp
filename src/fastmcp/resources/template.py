@@ -233,10 +233,27 @@ class ResourceTemplate(FastMCPComponent):
         docket.register(self.read, names=[self.key])
 
     async def add_to_docket(  # type: ignore[override]
-        self, docket: Docket, params: dict[str, Any], **kwargs: Any
+        self,
+        docket: Docket,
+        params: dict[str, Any],
+        *,
+        fn_key: str | None = None,
+        task_key: str | None = None,
+        **kwargs: Any,
     ) -> Execution:
-        """Schedule this template for background execution via docket."""
-        return await docket.add(self.key, **kwargs)(params)
+        """Schedule this template for background execution via docket.
+
+        Args:
+            docket: The Docket instance
+            params: Template parameters
+            fn_key: Function lookup key in Docket registry (defaults to self.key)
+            task_key: Redis storage key for the result
+            **kwargs: Additional kwargs passed to docket.add()
+        """
+        lookup_key = fn_key or self.key
+        if task_key:
+            kwargs["key"] = task_key
+        return await docket.add(lookup_key, **kwargs)(params)
 
 
 class FunctionResourceTemplate(ResourceTemplate):
@@ -305,13 +322,29 @@ class FunctionResourceTemplate(ResourceTemplate):
         docket.register(self.fn, names=[self.key])
 
     async def add_to_docket(  # type: ignore[override]
-        self, docket: Docket, params: dict[str, Any], **kwargs: Any
+        self,
+        docket: Docket,
+        params: dict[str, Any],
+        *,
+        fn_key: str | None = None,
+        task_key: str | None = None,
+        **kwargs: Any,
     ) -> Execution:
         """Schedule this template for background execution via docket.
 
         FunctionResourceTemplate splats the params dict since .fn expects **kwargs.
+
+        Args:
+            docket: The Docket instance
+            params: Template parameters
+            fn_key: Function lookup key in Docket registry (defaults to self.key)
+            task_key: Redis storage key for the result
+            **kwargs: Additional kwargs passed to docket.add()
         """
-        return await docket.add(self.key, **kwargs)(**params)
+        lookup_key = fn_key or self.key
+        if task_key:
+            kwargs["key"] = task_key
+        return await docket.add(lookup_key, **kwargs)(**params)
 
     @classmethod
     def from_function(

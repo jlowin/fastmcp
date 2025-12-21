@@ -299,11 +299,22 @@ class Tool(FastMCPComponent):
         docket: Docket,
         arguments: dict[str, Any],
         *,
-        name: str | None = None,
+        fn_key: str | None = None,
+        task_key: str | None = None,
         **kwargs: Any,
     ) -> Execution:
-        """Schedule this tool for background execution via docket."""
-        lookup_key = name or self.key
+        """Schedule this tool for background execution via docket.
+
+        Args:
+            docket: The Docket instance
+            arguments: Tool arguments
+            fn_key: Function lookup key in Docket registry (defaults to self.key)
+            task_key: Redis storage key for the result
+            **kwargs: Additional kwargs passed to docket.add()
+        """
+        lookup_key = fn_key or self.key
+        if task_key:
+            kwargs["key"] = task_key
         return await docket.add(lookup_key, **kwargs)(arguments)
 
     @classmethod
@@ -464,14 +475,24 @@ class FunctionTool(Tool):
         docket: Docket,
         arguments: dict[str, Any],
         *,
-        name: str | None = None,
+        fn_key: str | None = None,
+        task_key: str | None = None,
         **kwargs: Any,
     ) -> Execution:
         """Schedule this tool for background execution via docket.
 
         FunctionTool splats the arguments dict since .fn expects **kwargs.
+
+        Args:
+            docket: The Docket instance
+            arguments: Tool arguments
+            fn_key: Function lookup key in Docket registry (defaults to self.key)
+            task_key: Redis storage key for the result
+            **kwargs: Additional kwargs passed to docket.add()
         """
-        lookup_key = name or self.key
+        lookup_key = fn_key or self.key
+        if task_key:
+            kwargs["key"] = task_key
         return await docket.add(lookup_key, **kwargs)(**arguments)
 
 

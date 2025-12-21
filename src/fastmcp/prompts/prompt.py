@@ -250,10 +250,27 @@ class Prompt(FastMCPComponent):
         docket.register(self.render, names=[self.key])
 
     async def add_to_docket(  # type: ignore[override]
-        self, docket: Docket, arguments: dict[str, Any] | None, **kwargs: Any
+        self,
+        docket: Docket,
+        arguments: dict[str, Any] | None,
+        *,
+        fn_key: str | None = None,
+        task_key: str | None = None,
+        **kwargs: Any,
     ) -> Execution:
-        """Schedule this prompt for background execution via docket."""
-        return await docket.add(self.key, **kwargs)(arguments)
+        """Schedule this prompt for background execution via docket.
+
+        Args:
+            docket: The Docket instance
+            arguments: Prompt arguments
+            fn_key: Function lookup key in Docket registry (defaults to self.key)
+            task_key: Redis storage key for the result
+            **kwargs: Additional kwargs passed to docket.add()
+        """
+        lookup_key = fn_key or self.key
+        if task_key:
+            kwargs["key"] = task_key
+        return await docket.add(lookup_key, **kwargs)(arguments)
 
 
 class FunctionPrompt(Prompt):
@@ -498,13 +515,29 @@ class FunctionPrompt(Prompt):
         docket.register(self.fn, names=[self.key])  # type: ignore[arg-type]
 
     async def add_to_docket(  # type: ignore[override]
-        self, docket: Docket, arguments: dict[str, Any] | None, **kwargs: Any
+        self,
+        docket: Docket,
+        arguments: dict[str, Any] | None,
+        *,
+        fn_key: str | None = None,
+        task_key: str | None = None,
+        **kwargs: Any,
     ) -> Execution:
         """Schedule this prompt for background execution via docket.
 
         FunctionPrompt splats the arguments dict since .fn expects **kwargs.
+
+        Args:
+            docket: The Docket instance
+            arguments: Prompt arguments
+            fn_key: Function lookup key in Docket registry (defaults to self.key)
+            task_key: Redis storage key for the result
+            **kwargs: Additional kwargs passed to docket.add()
         """
-        return await docket.add(self.key, **kwargs)(**(arguments or {}))
+        lookup_key = fn_key or self.key
+        if task_key:
+            kwargs["key"] = task_key
+        return await docket.add(lookup_key, **kwargs)(**(arguments or {}))
 
 
 def convert_to_prompt_result(

@@ -25,6 +25,9 @@ from fastmcp.server.providers.base import Provider, TaskComponents
 from fastmcp.tools.tool import Tool, ToolResult
 
 if TYPE_CHECKING:
+    from docket import Docket
+    from docket.execution import Execution
+
     from fastmcp.server.server import FastMCP
 
 
@@ -304,6 +307,24 @@ class FastMCPProviderResourceTemplate(ResourceTemplate):
         if hasattr(result, "content"):
             return result.content  # type: ignore[return-value]
         return result  # type: ignore[return-value]
+
+    async def add_to_docket(  # type: ignore[override]
+        self,
+        docket: Docket,
+        params: dict[str, Any],
+        *,
+        fn_key: str | None = None,
+        task_key: str | None = None,
+        **kwargs: Any,
+    ) -> Execution:
+        """Schedule this template for background execution via docket.
+
+        FastMCPProviderResourceTemplate splats the params dict since read() expects **kwargs.
+        """
+        lookup_key = fn_key or self.key
+        if task_key:
+            kwargs["key"] = task_key
+        return await docket.add(lookup_key, **kwargs)(**params)
 
 
 # -----------------------------------------------------------------------------
