@@ -138,7 +138,7 @@ class TestAddTools:
         with pytest.raises(TypeError, match="not a callable object"):
             assert isinstance(1, int)  # Intentionally passing invalid type
             # Intentionally passing invalid type to test error handling
-            tool = Tool.from_function(1)
+            tool = Tool.from_function(1)  # type: ignore[arg-type]
             manager.add_tool(tool)
 
     def test_add_lambda(self):
@@ -1052,7 +1052,7 @@ class TestMountedComponentsRaiseOnLoadError:
         parent_mcp.mount(child_mcp, namespace="child")
         # Corrupt the parent's providers to make it fail during loading
         assert isinstance(parent_mcp._providers, list)
-        parent_mcp._providers.append("invalid")
+        parent_mcp._providers.append("invalid")  # type: ignore[arg-type]
 
         # Should not raise, just warn; use server middleware path now
         tools = await parent_mcp._list_tools_middleware()
@@ -1067,7 +1067,7 @@ class TestMountedComponentsRaiseOnLoadError:
         parent_mcp.mount(child_mcp, namespace="child")
         # Corrupt the parent's providers to make it fail during loading
         assert isinstance(parent_mcp._providers, list)
-        parent_mcp._providers.append("invalid")
+        parent_mcp._providers.append("invalid")  # type: ignore[arg-type]
 
         # Use temporary settings context manager
         with temporary_settings(mounted_components_raise_on_load_error=True):

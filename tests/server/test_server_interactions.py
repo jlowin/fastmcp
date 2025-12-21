@@ -26,7 +26,7 @@ from fastmcp import Client, Context, FastMCP
 from fastmcp.client.client import CallToolResult
 from fastmcp.client.transports import FastMCPTransport
 from fastmcp.exceptions import ToolError
-from fastmcp.prompts.prompt import Prompt, PromptMessage
+from fastmcp.prompts.prompt import Prompt, PromptMessage, PromptResult
 from fastmcp.resources import FileResource, ResourceTemplate
 from fastmcp.resources.resource import FunctionResource
 from fastmcp.tools.tool import Tool, ToolResult
@@ -2229,6 +2229,8 @@ class TestPrompts:
         assert prompt.name == "fn"
         # Don't compare functions directly since validate_call wraps them
         content = await prompt.render()
+        if not isinstance(content, PromptResult):
+            content = PromptResult.from_value(content)
         assert isinstance(content.messages[0].content, TextContent)
         assert content.messages[0].content.text == "Hello, world!"
 
@@ -2245,6 +2247,8 @@ class TestPrompts:
         prompt = prompts_dict["custom_name"]
         assert prompt.name == "custom_name"
         content = await prompt.render()
+        if not isinstance(content, PromptResult):
+            content = PromptResult.from_value(content)
         assert isinstance(content.messages[0].content, TextContent)
         assert content.messages[0].content.text == "Hello, world!"
 
@@ -2261,6 +2265,8 @@ class TestPrompts:
         prompt = prompts_dict["fn"]
         assert prompt.description == "A custom description"
         content = await prompt.render()
+        if not isinstance(content, PromptResult):
+            content = PromptResult.from_value(content)
         assert isinstance(content.messages[0].content, TextContent)
         assert content.messages[0].content.text == "Hello, world!"
 

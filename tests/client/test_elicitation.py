@@ -176,8 +176,10 @@ class TestScalarResponseTypes:
         async def my_tool(context: Context) -> dict[str, Any]:
             result = await context.elicit(message="", response_type=None)
             assert result.action == "accept"
-            assert isinstance(result.data, dict)
-            return result.data
+            assert isinstance(result, AcceptedElicitation)
+            accepted = cast(AcceptedElicitation[dict[str, Any]], result)
+            assert isinstance(accepted.data, dict)
+            return accepted.data
 
         async def elicitation_handler(
             message, response_type, params: ElicitRequestParams, ctx
@@ -196,8 +198,10 @@ class TestScalarResponseTypes:
         async def my_tool(context: Context) -> dict[str, Any]:
             result = await context.elicit(message="", response_type=None)
             assert result.action == "accept"
-            assert isinstance(result.data, dict)
-            return result.data
+            assert isinstance(result, AcceptedElicitation)
+            accepted = cast(AcceptedElicitation[dict[str, Any]], result)
+            assert isinstance(accepted.data, dict)
+            return accepted.data
 
         async def elicitation_handler(message, response_type, params, ctx):
             return ElicitResult(action="accept", content={"value": "hello"})
@@ -289,8 +293,9 @@ class TestScalarResponseTypes:
             # Literal types work at runtime but type checker doesn't recognize them in overloads
             result = await context.elicit(message="", response_type=Literal["x", "y"])  # type: ignore[arg-type]
             assert isinstance(result, AcceptedElicitation)
-            assert isinstance(result.data, str)
-            return result.data  # type: ignore[return-value]
+            accepted = cast(AcceptedElicitation[Literal["x", "y"]], result)
+            assert isinstance(accepted.data, str)
+            return accepted.data
 
         async def elicitation_handler(message, response_type, params, ctx):
             return ElicitResult(action="accept", content={"value": "x"})

@@ -439,15 +439,19 @@ class TestMiddlewareHooks:
             ):
                 # modify argument
                 if context.message.name == "add":
-                    assert isinstance(context.message.arguments["a"], int)
-                    context.message.arguments["a"] += 100
+                    assert context.message.arguments is not None
+                    args = context.message.arguments
+                    assert isinstance(args["a"], int)
+                    args["a"] += 100
 
                 result = await call_next(context)
 
                 # modify result
                 if context.message.name == "add":
-                    assert isinstance(result.structured_content["result"], int)
-                    result.structured_content["result"] += 5
+                    assert result.structured_content is not None
+                    content = result.structured_content
+                    assert isinstance(content["result"], int)
+                    content["result"] += 5
 
                 return result
 

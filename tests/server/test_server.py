@@ -10,7 +10,7 @@ from pydantic import Field
 
 from fastmcp import Client, FastMCP
 from fastmcp.exceptions import NotFoundError
-from fastmcp.prompts.prompt import FunctionPrompt, Prompt
+from fastmcp.prompts.prompt import FunctionPrompt, Prompt, PromptResult
 from fastmcp.resources import Resource, ResourceContent, ResourceTemplate
 from fastmcp.tools import FunctionTool
 from fastmcp.tools.tool import Tool
@@ -862,6 +862,8 @@ class TestPromptDecorator:
         assert prompt.name == "fn"
         # Don't compare functions directly since validate_call wraps them
         content = await prompt.render()
+        if not isinstance(content, PromptResult):
+            content = PromptResult.from_value(content)
         assert isinstance(content.messages[0].content, TextContent)
         assert content.messages[0].content.text == "Hello, world!"
 
@@ -896,6 +898,8 @@ class TestPromptDecorator:
         prompt = prompts_dict["custom_name"]
         assert prompt.name == "custom_name"
         content = await prompt.render()
+        if not isinstance(content, PromptResult):
+            content = PromptResult.from_value(content)
         assert isinstance(content.messages[0].content, TextContent)
         assert content.messages[0].content.text == "Hello, world!"
 
@@ -911,6 +915,8 @@ class TestPromptDecorator:
         prompt = prompts_dict["fn"]
         assert prompt.description == "A custom description"
         content = await prompt.render()
+        if not isinstance(content, PromptResult):
+            content = PromptResult.from_value(content)
         assert isinstance(content.messages[0].content, TextContent)
         assert content.messages[0].content.text == "Hello, world!"
 

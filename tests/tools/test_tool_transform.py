@@ -952,7 +952,7 @@ async def test_arg_transform_required_false():
         # Intentionally passing invalid argument to test error handling
         Tool.from_tool(
             base_tool,
-            transform_args={"required_param": ArgTransform(required=False, default=99)},
+            transform_args={"required_param": ArgTransform(required=False, default=99)},  # type: ignore[arg-type]
         )
 
 
