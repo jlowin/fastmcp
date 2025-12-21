@@ -212,12 +212,44 @@ class Prompt(FastMCPComponent):
     def convert_result(self, raw_value: Any) -> PromptResult:
         """Convert a raw return value to PromptResult.
 
-        Default implementation handles PromptResult pass-through.
-        Subclasses should override for other conversion logic.
+        Handles PromptResult passthrough and converts raw values to messages.
         """
         if isinstance(raw_value, PromptResult):
             return raw_value
-        raise NotImplementedError("Subclasses must implement convert_result()")
+
+        # Normalize to list
+        if not isinstance(raw_value, list | tuple):
+            raw_value = [raw_value]
+
+        # Convert result to messages
+        messages: list[PromptMessage] = []
+        for msg in raw_value:
+            try:
+                if isinstance(msg, PromptMessage):
+                    messages.append(msg)
+                elif isinstance(msg, str):
+                    messages.append(
+                        PromptMessage(
+                            role="user",
+                            content=TextContent(type="text", text=msg),
+                        )
+                    )
+                else:
+                    content = pydantic_core.to_json(msg, fallback=str).decode()
+                    messages.append(
+                        PromptMessage(
+                            role="user",
+                            content=TextContent(type="text", text=content),
+                        )
+                    )
+            except Exception as e:
+                raise PromptError("Could not convert prompt result to message.") from e
+
+        return PromptResult(
+            messages=messages,
+            description=self.description,
+            meta=self.meta,
+        )
 
     async def _render(
         self,
@@ -233,41 +265,15 @@ class Prompt(FastMCPComponent):
         For example, FastMCPProviderPrompt overrides to delegate to child
         middleware without submitting to Docket.
         """
+        from fastmcp.server.dependencies import _docket_fn_key
+        from fastmcp.server.tasks.routing import check_background_task
 
-        from fastmcp.server.dependencies import _docket_fn_key, get_task_metadata
-        from fastmcp.server.tasks.handlers import submit_to_docket
-
-        task_meta = get_task_metadata()
-
-        # Enforce mode="required" - must have task metadata
-        if self.task_config.mode == "required" and not task_meta:
-            from mcp.shared.exceptions import McpError
-            from mcp.types import METHOD_NOT_FOUND, ErrorData
-
-            raise McpError(
-                ErrorData(
-                    code=METHOD_NOT_FOUND,
-                    message=f"Prompt '{self.name}' requires task-augmented execution",
-                )
-            )
-
-        # Enforce mode="forbidden" - cannot be called with task metadata
-        if self.task_config.mode == "forbidden" and task_meta:
-            from mcp.shared.exceptions import McpError
-            from mcp.types import METHOD_NOT_FOUND, ErrorData
-
-            raise McpError(
-                ErrorData(
-                    code=METHOD_NOT_FOUND,
-                    message=f"Prompt '{self.name}' does not support task-augmented execution",
-                )
-            )
-
-        # Route to background if task metadata present
-        if task_meta:
-            # Use the key from contextvar (preserves namespace from parent)
-            key = _docket_fn_key.get() or self.name
-            return await submit_to_docket("prompt", key, self, arguments)
+        key = _docket_fn_key.get() or self.key
+        task_result = await check_background_task(
+            component=self, task_type="prompt", key=key, arguments=arguments
+        )
+        if task_result:
+            return task_result
 
         # Synchronous execution
         result = await self.render(arguments)
@@ -507,46 +513,6 @@ class FunctionPrompt(Prompt):
             logger.exception(f"Error rendering prompt {self.name}")
             raise PromptError(f"Error rendering prompt {self.name}.") from e
 
-    def convert_result(self, raw_value: Any) -> PromptResult:
-        """Convert a raw return value to PromptResult.
-
-        This handles the same conversion logic as render(), but works on
-        already-executed raw values (e.g., from Docket background execution).
-        """
-        # Normalize to list
-        if not isinstance(raw_value, list | tuple):
-            raw_value = [raw_value]
-
-        # Convert result to messages
-        messages: list[PromptMessage] = []
-        for msg in raw_value:
-            try:
-                if isinstance(msg, PromptMessage):
-                    messages.append(msg)
-                elif isinstance(msg, str):
-                    messages.append(
-                        PromptMessage(
-                            role="user",
-                            content=TextContent(type="text", text=msg),
-                        )
-                    )
-                else:
-                    content = pydantic_core.to_json(msg, fallback=str).decode()
-                    messages.append(
-                        PromptMessage(
-                            role="user",
-                            content=TextContent(type="text", text=content),
-                        )
-                    )
-            except Exception as e:
-                raise PromptError("Could not convert prompt result to message.") from e
-
-        return PromptResult(
-            messages=messages,
-            description=self.description,
-            meta=self.meta,
-        )
-
     def register_with_docket(self, docket: Docket) -> None:
         """Register this prompt with docket for background execution.
 
@@ -581,50 +547,3 @@ class FunctionPrompt(Prompt):
         if task_key:
             kwargs["key"] = task_key
         return await docket.add(lookup_key, **kwargs)(**(arguments or {}))
-
-
-def convert_to_prompt_result(raw_value: Any, prompt: Prompt) -> PromptResult:
-    """Convert any result to PromptResult.
-
-    Handles PromptResult passthrough and converts raw values to messages.
-
-    Args:
-        raw_value: Raw return value or PromptResult
-        prompt: The Prompt instance (provides description, meta, etc.)
-    """
-    if isinstance(raw_value, PromptResult):
-        return raw_value
-
-    # Normalize to list
-    if not isinstance(raw_value, list | tuple):
-        raw_value = [raw_value]
-
-    # Convert result to messages
-    messages: list[PromptMessage] = []
-    for msg in raw_value:
-        try:
-            if isinstance(msg, PromptMessage):
-                messages.append(msg)
-            elif isinstance(msg, str):
-                messages.append(
-                    PromptMessage(
-                        role="user",
-                        content=TextContent(type="text", text=msg),
-                    )
-                )
-            else:
-                content = pydantic_core.to_json(msg, fallback=str).decode()
-                messages.append(
-                    PromptMessage(
-                        role="user",
-                        content=TextContent(type="text", text=content),
-                    )
-                )
-        except Exception as e:
-            raise PromptError("Could not convert prompt result to message.") from e
-
-    return PromptResult(
-        messages=messages,
-        description=prompt.description,
-        meta=prompt.meta,
-    )

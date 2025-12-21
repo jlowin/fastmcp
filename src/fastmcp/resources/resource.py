@@ -231,6 +231,13 @@ class Resource(FastMCPComponent):
         """
         raise NotImplementedError("Subclasses must implement read()")
 
+    def convert_result(self, raw_value: Any) -> ResourceContent:
+        """Convert a raw return value to ResourceContent.
+
+        Handles ResourceContent passthrough and converts raw values using mime_type.
+        """
+        return ResourceContent.from_value(raw_value, mime_type=self.mime_type)
+
     async def _read(self) -> ResourceContent | mcp.types.CreateTaskResult:
         """Server entry point that handles task routing.
 
@@ -242,40 +249,15 @@ class Resource(FastMCPComponent):
         For example, FastMCPProviderResource overrides to delegate to child
         middleware without submitting to Docket.
         """
-        from fastmcp.server.dependencies import _docket_fn_key, get_task_metadata
-        from fastmcp.server.tasks.handlers import submit_to_docket
+        from fastmcp.server.dependencies import _docket_fn_key
+        from fastmcp.server.tasks.routing import check_background_task
 
-        task_meta = get_task_metadata()
-
-        # Enforce mode="required" - must have task metadata
-        if self.task_config.mode == "required" and not task_meta:
-            from mcp.shared.exceptions import McpError
-            from mcp.types import METHOD_NOT_FOUND, ErrorData
-
-            raise McpError(
-                ErrorData(
-                    code=METHOD_NOT_FOUND,
-                    message=f"Resource '{self.uri}' requires task-augmented execution",
-                )
-            )
-
-        # Enforce mode="forbidden" - cannot be called with task metadata
-        if self.task_config.mode == "forbidden" and task_meta:
-            from mcp.shared.exceptions import McpError
-            from mcp.types import METHOD_NOT_FOUND, ErrorData
-
-            raise McpError(
-                ErrorData(
-                    code=METHOD_NOT_FOUND,
-                    message=f"Resource '{self.uri}' does not support task-augmented execution",
-                )
-            )
-
-        # Route to background if task metadata present
-        if task_meta:
-            # Use the key from contextvar (preserves namespace from parent)
-            key = _docket_fn_key.get() or str(self.uri)
-            return await submit_to_docket("resource", key, self)
+        key = _docket_fn_key.get() or self.key
+        task_result = await check_background_task(
+            component=self, task_type="resource", key=key
+        )
+        if task_result:
+            return task_result
 
         # Synchronous execution
         result = await self.read()
@@ -290,7 +272,7 @@ class Resource(FastMCPComponent):
                 DeprecationWarning,
                 stacklevel=2,
             )
-        return ResourceContent.from_value(result, mime_type=self.mime_type)
+        return self.convert_result(result)
 
     def to_mcp_resource(
         self,
@@ -432,14 +414,6 @@ class FunctionResource(Resource):
             return await result.read()
 
         return self.convert_result(result)
-
-    def convert_result(self, raw_value: Any) -> ResourceContent:
-        """Convert a raw return value to ResourceContent.
-
-        This handles the same conversion logic as read(), but works on
-        already-executed raw values (e.g., from Docket background execution).
-        """
-        return ResourceContent.from_value(raw_value, mime_type=self.mime_type)
 
     def register_with_docket(self, docket: Docket) -> None:
         """Register this resource with docket for background execution.

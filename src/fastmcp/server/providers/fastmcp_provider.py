@@ -150,7 +150,7 @@ class FastMCPProviderResource(Resource):
         """
         return await self.read()
 
-    async def read(self) -> ResourceContent:
+    async def read(self) -> ResourceContent | mcp.types.CreateTaskResult:  # type: ignore[override]
         """Delegate to child server's middleware.
 
         When called from a Docket worker (background task), there's no FastMCP
@@ -170,7 +170,7 @@ class FastMCPProviderResource(Resource):
             get_context()  # Will raise if no context
             result = await self._server._read_resource_middleware(self._original_uri)
             if isinstance(result, mcp.types.CreateTaskResult):
-                return result  # type: ignore[return-value]
+                return result
             return result[0]
         except RuntimeError:
             # No context (e.g., Docket worker) - create one for the child server
@@ -179,7 +179,7 @@ class FastMCPProviderResource(Resource):
                     self._original_uri
                 )
                 if isinstance(result, mcp.types.CreateTaskResult):
-                    return result  # type: ignore[return-value]
+                    return result
                 return result[0]
 
 
@@ -228,7 +228,9 @@ class FastMCPProviderPrompt(Prompt):
         """
         return await self.render(arguments)
 
-    async def render(self, arguments: dict[str, Any] | None = None) -> PromptResult:
+    async def render(
+        self, arguments: dict[str, Any] | None = None
+    ) -> PromptResult | mcp.types.CreateTaskResult:  # type: ignore[override]
         """Delegate to child server's middleware.
 
         When called from a Docket worker (background task), there's no FastMCP
@@ -250,7 +252,7 @@ class FastMCPProviderPrompt(Prompt):
                 self._original_name, arguments
             )
             if isinstance(result, mcp.types.CreateTaskResult):
-                return result  # type: ignore[return-value]
+                return result
             return result
         except RuntimeError:
             # No context (e.g., Docket worker) - create one for the child server
@@ -259,7 +261,7 @@ class FastMCPProviderPrompt(Prompt):
                     self._original_name, arguments
                 )
                 if isinstance(result, mcp.types.CreateTaskResult):
-                    return result  # type: ignore[return-value]
+                    return result
                 return result
 
 
