@@ -231,13 +231,53 @@ class Resource(FastMCPComponent):
         """
         raise NotImplementedError("Subclasses must implement read()")
 
-    async def _read(self) -> ResourceContent:
-        """Internal API that always returns ResourceContent.
+    async def _read(self) -> ResourceContent | mcp.types.CreateTaskResult:
+        """Server entry point that handles task routing.
 
-        This method calls read() and wraps str/bytes results in ResourceContent.
-        ResourceManager and other internal code should call this method instead
-        of read() directly.
+        This allows ANY Resource subclass to support background execution by setting
+        task_config.mode to "supported" or "required". The server calls this
+        method instead of read() directly.
+
+        Subclasses can override this to customize task routing behavior.
+        For example, FastMCPProviderResource overrides to delegate to child
+        middleware without submitting to Docket.
         """
+        from fastmcp.server.dependencies import _docket_fn_key, get_task_metadata
+        from fastmcp.server.tasks.handlers import submit_to_docket
+
+        task_meta = get_task_metadata()
+
+        # Enforce mode="required" - must have task metadata
+        if self.task_config.mode == "required" and not task_meta:
+            from mcp.shared.exceptions import McpError
+            from mcp.types import METHOD_NOT_FOUND, ErrorData
+
+            raise McpError(
+                ErrorData(
+                    code=METHOD_NOT_FOUND,
+                    message=f"Resource '{self.uri}' requires task-augmented execution",
+                )
+            )
+
+        # Enforce mode="forbidden" - cannot be called with task metadata
+        if self.task_config.mode == "forbidden" and task_meta:
+            from mcp.shared.exceptions import McpError
+            from mcp.types import METHOD_NOT_FOUND, ErrorData
+
+            raise McpError(
+                ErrorData(
+                    code=METHOD_NOT_FOUND,
+                    message=f"Resource '{self.uri}' does not support task-augmented execution",
+                )
+            )
+
+        # Route to background if task metadata present
+        if task_meta:
+            # Use the key from contextvar (preserves namespace from parent)
+            key = _docket_fn_key.get() or str(self.uri)
+            return await submit_to_docket("resource", key, self)
+
+        # Synchronous execution
         result = await self.read()
         if isinstance(result, ResourceContent):
             return result

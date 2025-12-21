@@ -256,8 +256,8 @@ class Tool(FastMCPComponent):
         For example, FastMCPProviderTool overrides to delegate to child
         middleware without submitting to Docket.
         """
-        from fastmcp.server.dependencies import _tool_call_key, get_task_metadata
-        from fastmcp.server.tasks.handlers import submit_tool_to_docket
+        from fastmcp.server.dependencies import _docket_fn_key, get_task_metadata
+        from fastmcp.server.tasks.handlers import submit_to_docket
 
         task_meta = get_task_metadata()
 
@@ -282,8 +282,8 @@ class Tool(FastMCPComponent):
         # Route to background if task metadata present
         if task_meta:
             # Use the key from contextvar (preserves namespace from parent)
-            key = _tool_call_key.get() or self.name
-            return await submit_tool_to_docket(key, self, arguments, task_meta)
+            key = _docket_fn_key.get() or self.name
+            return await submit_to_docket("tool", key, self, arguments)
 
         # Synchronous execution
         return await self.run(arguments)

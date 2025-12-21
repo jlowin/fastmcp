@@ -33,14 +33,11 @@ import uvicorn
 from docket import Docket, Worker
 from mcp.server.lowlevel.server import LifespanResultT, NotificationOptions
 from mcp.server.stdio import stdio_server
-from mcp.shared.exceptions import McpError
 from mcp.types import (
-    METHOD_NOT_FOUND,
     Annotations,
     AnyFunction,
     CallToolRequestParams,
     ContentBlock,
-    ErrorData,
     GetPromptResult,
     ToolAnnotations,
 )
@@ -1276,7 +1273,7 @@ class FastMCP(Generic[LifespanResultT]):
         Returns:
             Tool result or CreateTaskResult for background execution
         """
-        from fastmcp.server.dependencies import _task_metadata, _tool_call_key
+        from fastmcp.server.dependencies import _docket_fn_key, _task_metadata
 
         logger.debug(
             f"[{self.name}] Handler called: call_tool %s with %s", key, arguments
@@ -1296,7 +1293,7 @@ class FastMCP(Generic[LifespanResultT]):
 
                 # Set contextvars so tool._run() can access them
                 task_token = _task_metadata.set(task_meta_dict)
-                key_token = _tool_call_key.set(key)
+                key_token = _docket_fn_key.set(key)
                 try:
                     # Middleware always runs - tool._run() handles backgrounding
                     result = await self._call_tool_middleware(key, arguments)
@@ -1307,7 +1304,7 @@ class FastMCP(Generic[LifespanResultT]):
                     return result.to_mcp_result()
                 finally:
                     _task_metadata.reset(task_token)
-                    _tool_call_key.reset(key_token)
+                    _docket_fn_key.reset(key_token)
 
             except DisabledError as e:
                 raise NotFoundError(f"Unknown tool: {key}") from e
@@ -1322,61 +1319,48 @@ class FastMCP(Generic[LifespanResultT]):
         This is a custom handler because the SDK's read_resource decorator
         does not support returning CreateTaskResult for background tasks.
         """
-        from fastmcp.server.tasks.handlers import handle_resource_as_task
+        from fastmcp.server.dependencies import _docket_fn_key, _task_metadata
 
         uri = req.params.uri
 
         # Check for task metadata via SDK's request context
-        task_meta = None
+        task_meta_dict: dict[str, Any] | None = None
         try:
             ctx = self._mcp_server.request_context
             if ctx.experimental.is_task:
                 task_meta = ctx.experimental.task_metadata
+                task_meta_dict = task_meta.model_dump(exclude_none=True)
         except (AttributeError, LookupError):
             pass
 
         async with fastmcp.server.context.Context(fastmcp=self):
-            # Get resource including from mounted servers
-            resource = await self._get_resource_or_template_or_none(str(uri))
-            if (
-                resource
-                and self._should_enable_component(resource)
-                and hasattr(resource, "task_config")
-            ):
-                task_mode = resource.task_config.mode  # type: ignore[union-attr]
+            try:
+                # Set contextvars so Resource._read() can access them
+                task_token = _task_metadata.set(task_meta_dict)
+                key_token = _docket_fn_key.set(str(uri))
+                try:
+                    # Middleware always runs - Resource._read() handles backgrounding
+                    result = await self._read_resource_middleware(uri)
 
-                # Enforce mode="required" - must have task metadata
-                if task_mode == "required" and not task_meta:
-                    raise McpError(
-                        ErrorData(
-                            code=METHOD_NOT_FOUND,
-                            message=f"Resource '{uri}' requires task-augmented execution",
-                        )
+                    # Result could be CreateTaskResult (from nested Resource._read())
+                    if isinstance(result, mcp.types.CreateTaskResult):
+                        return mcp.types.ServerResult(result)
+
+                    # Normal synchronous result
+                    mcp_contents = [
+                        item.to_mcp_resource_contents(uri) for item in result
+                    ]
+                    return mcp.types.ServerResult(
+                        mcp.types.ReadResourceResult(contents=mcp_contents)
                     )
+                finally:
+                    _task_metadata.reset(task_token)
+                    _docket_fn_key.reset(key_token)
 
-                # Route to background if task metadata present and mode allows
-                if task_meta and task_mode != "forbidden":
-                    task_meta_dict = task_meta.model_dump(exclude_none=True)
-                    result = await handle_resource_as_task(
-                        self, str(uri), resource, task_meta_dict
-                    )
-                    return mcp.types.ServerResult(result)
-
-                # Forbidden mode: task requested but mode="forbidden"
-                if task_meta and task_mode == "forbidden":
-                    raise McpError(
-                        ErrorData(
-                            code=METHOD_NOT_FOUND,
-                            message=f"Resource '{uri}' does not support task-augmented execution",
-                        )
-                    )
-
-            # Synchronous execution
-            contents = await self._read_resource_mcp(uri)
-            mcp_contents = [item.to_mcp_resource_contents(uri) for item in contents]
-            return mcp.types.ServerResult(
-                mcp.types.ReadResourceResult(contents=mcp_contents)
-            )
+            except DisabledError as e:
+                raise NotFoundError(f"Unknown resource: {str(uri)!r}") from e
+            except NotFoundError as e:
+                raise NotFoundError(f"Unknown resource: {str(uri)!r}") from e
 
     async def _get_prompt_handler(
         self, req: mcp.types.GetPromptRequest
@@ -1386,62 +1370,44 @@ class FastMCP(Generic[LifespanResultT]):
         This is a custom handler because the SDK's get_prompt decorator
         does not support returning CreateTaskResult for background tasks.
         """
-        from fastmcp.server.tasks.handlers import handle_prompt_as_task
+        from fastmcp.server.dependencies import _docket_fn_key, _task_metadata
 
         name = req.params.name
         arguments = req.params.arguments
 
         # Check for task metadata via SDK's request context
-        task_meta = None
+        task_meta_dict: dict[str, Any] | None = None
         try:
             ctx = self._mcp_server.request_context
             if ctx.experimental.is_task:
                 task_meta = ctx.experimental.task_metadata
+                task_meta_dict = task_meta.model_dump(exclude_none=True)
         except (AttributeError, LookupError):
             pass
 
         async with fastmcp.server.context.Context(fastmcp=self):
             try:
-                prompt = await self.get_prompt(name)
-            except NotFoundError:
-                prompt = None
-            if (
-                prompt
-                and self._should_enable_component(prompt)
-                and hasattr(prompt, "task_config")
-                and prompt.task_config
-            ):
-                task_mode = prompt.task_config.mode  # type: ignore[union-attr]
+                # Set contextvars so Prompt._render() can access them
+                task_token = _task_metadata.set(task_meta_dict)
+                key_token = _docket_fn_key.set(name)
+                try:
+                    # Middleware always runs - Prompt._render() handles backgrounding
+                    result = await self._get_prompt_content_middleware(name, arguments)
 
-                # Enforce mode="required" - must have task metadata
-                if task_mode == "required" and not task_meta:
-                    raise McpError(
-                        ErrorData(
-                            code=METHOD_NOT_FOUND,
-                            message=f"Prompt '{name}' requires task-augmented execution",
-                        )
-                    )
+                    # Result could be CreateTaskResult (from nested Prompt._render())
+                    if isinstance(result, mcp.types.CreateTaskResult):
+                        return mcp.types.ServerResult(result)
 
-                # Route to background if task metadata present and mode allows
-                if task_meta and task_mode != "forbidden":
-                    task_meta_dict = task_meta.model_dump(exclude_none=True)
-                    result = await handle_prompt_as_task(
-                        self, name, arguments, task_meta_dict
-                    )
-                    return mcp.types.ServerResult(result)
+                    # Normal synchronous result
+                    return mcp.types.ServerResult(result.to_mcp_prompt_result())
+                finally:
+                    _task_metadata.reset(task_token)
+                    _docket_fn_key.reset(key_token)
 
-                # Forbidden mode: task requested but mode="forbidden"
-                if task_meta and task_mode == "forbidden":
-                    raise McpError(
-                        ErrorData(
-                            code=METHOD_NOT_FOUND,
-                            message=f"Prompt '{name}' does not support task-augmented execution",
-                        )
-                    )
-
-            # Synchronous execution
-            result = await self._get_prompt_mcp(name, arguments)
-            return mcp.types.ServerResult(result)
+            except DisabledError as e:
+                raise NotFoundError(f"Unknown prompt: {name!r}") from e
+            except NotFoundError as e:
+                raise NotFoundError(f"Unknown prompt: {name!r}") from e
 
     async def _call_tool_middleware(
         self,
@@ -1529,7 +1495,14 @@ class FastMCP(Generic[LifespanResultT]):
         async with fastmcp.server.context.Context(fastmcp=self):
             try:
                 # Task routing handled by custom handler
-                return list[ResourceContent](await self._read_resource_middleware(uri))
+                # Note: Without task metadata, _read_resource_middleware always returns list
+                result = await self._read_resource_middleware(uri)
+                if isinstance(result, mcp.types.CreateTaskResult):
+                    # Should never happen without task metadata, but handle for type safety
+                    raise RuntimeError(
+                        "Unexpected CreateTaskResult in _read_resource_mcp"
+                    )
+                return result
             except DisabledError as e:
                 # convert to NotFoundError to avoid leaking resource presence
                 raise NotFoundError(f"Unknown resource: {str(uri)!r}") from e
@@ -1540,9 +1513,12 @@ class FastMCP(Generic[LifespanResultT]):
     async def _read_resource_middleware(
         self,
         uri: AnyUrl | str,
-    ) -> list[ResourceContent]:
+    ) -> list[ResourceContent] | mcp.types.CreateTaskResult:
         """
         Applies this server's middleware and delegates the filtered call to the manager.
+
+        Returns list[ResourceContent] for synchronous execution, or CreateTaskResult
+        if the resource was submitted to Docket for background execution.
         """
 
         # Convert string URI to AnyUrl if needed
@@ -1555,32 +1531,41 @@ class FastMCP(Generic[LifespanResultT]):
             method="resources/read",
             fastmcp_context=fastmcp.server.dependencies.get_context(),
         )
-        return list(
-            await self._apply_middleware(
-                context=mw_context, call_next=self._read_resource
-            )
+        result = await self._apply_middleware(
+            context=mw_context, call_next=self._read_resource
         )
+        # CreateTaskResult passes through, otherwise convert to list
+        if isinstance(result, mcp.types.CreateTaskResult):
+            return result
+        return list(result)
 
     async def _read_resource(
         self,
         context: MiddlewareContext[mcp.types.ReadResourceRequestParams],
-    ) -> list[ResourceContent]:
+    ) -> list[ResourceContent] | mcp.types.CreateTaskResult:
         """
-        Read a resource
+        Read a resource.
+
+        Returns list[ResourceContent] for synchronous execution, or CreateTaskResult
+        if the resource was submitted to Docket for background execution.
         """
+
         uri_str = str(context.message.uri)
 
-        # Try local resources first (static resources take precedence)
-        try:
-            resource = await self._resource_manager.get_resource(uri_str)
+        # Try local concrete resources first (static resources take precedence)
+        # Note: Don't use get_resource() here because it creates resources from templates,
+        # which would bypass our template execution flow that handles task routing properly.
+        local_resources = await self._resource_manager.get_resources()
+        if uri_str in local_resources:
+            resource = local_resources[uri_str]
             if self._should_enable_component(resource):
-                content = await self._execute_resource(resource, uri_str)
+                result = await self._execute_resource(resource, uri_str)
+                if isinstance(result, mcp.types.CreateTaskResult):
+                    return result
                 # Use mime_type from ResourceContent if set, otherwise from resource
-                if content.mime_type is None:
-                    content.mime_type = resource.mime_type
-                return [content]
-        except NotFoundError:
-            pass
+                if result.mime_type is None:
+                    result.mime_type = resource.mime_type
+                return [result]
 
         # Try local templates
         templates = await self._resource_manager.get_resource_templates()
@@ -1588,18 +1573,23 @@ class FastMCP(Generic[LifespanResultT]):
             params = template.matches(uri_str)
             if params is not None:
                 if self._should_enable_component(template):
-                    resource = await template.create_resource(uri_str, params)
-                    content = await self._execute_resource(resource, uri_str)
-                    return [content]
+                    # Templates need special task routing - call _execute_template
+                    # which handles passing params to Docket
+                    result = await self._execute_template(template, uri_str, params)
+                    if isinstance(result, mcp.types.CreateTaskResult):
+                        return result
+                    return [result]
 
         # Try component providers (first registered wins) - concrete resources
         for provider in self._providers:
             resource = await provider.get_resource(uri_str)
             if resource is not None and self._should_enable_component(resource):
-                content = await self._execute_resource(resource, uri_str)
-                if content.mime_type is None:
-                    content.mime_type = resource.mime_type
-                return [content]
+                result = await self._execute_resource(resource, uri_str)
+                if isinstance(result, mcp.types.CreateTaskResult):
+                    return result
+                if result.mime_type is None:
+                    result.mime_type = resource.mime_type
+                return [result]
 
         # Try component providers (first registered wins) - templates
         for provider in self._providers:
@@ -1607,18 +1597,47 @@ class FastMCP(Generic[LifespanResultT]):
             if template is not None and self._should_enable_component(template):
                 params = template.matches(uri_str)
                 if params is not None:
-                    resource = await template.create_resource(uri_str, params)
-                    content = await self._execute_resource(resource, uri_str)
-                    return [content]
+                    # Templates need special task routing - call _execute_template
+                    # which handles passing params to Docket
+                    result = await self._execute_template(template, uri_str, params)
+                    if isinstance(result, mcp.types.CreateTaskResult):
+                        return result
+                    return [result]
 
         raise NotFoundError(f"Unknown resource: {uri_str!r}")
 
     async def _execute_resource(
         self, resource: Resource, uri_str: str
-    ) -> ResourceContent:
-        """Read a resource with unified error handling."""
+    ) -> ResourceContent | mcp.types.CreateTaskResult:
+        """Read a resource with unified error handling.
+
+        Calls resource._read() which handles task routing - checking the task_metadata
+        contextvar and submitting to Docket if appropriate.
+        """
         try:
             return await resource._read()
+        except ResourceError:
+            logger.exception(f"Error reading resource {uri_str!r}")
+            raise
+        except Exception as e:
+            logger.exception(f"Error reading resource {uri_str!r}")
+            if self._mask_error_details:
+                raise ResourceError(f"Error reading resource {uri_str!r}") from e
+            raise ResourceError(f"Error reading resource {uri_str!r}: {e}") from e
+
+    async def _execute_template(
+        self,
+        template: ResourceTemplate,
+        uri_str: str,
+        params: dict[str, Any],
+    ) -> ResourceContent | mcp.types.CreateTaskResult:
+        """Execute a template with unified error handling.
+
+        Calls template._read() which handles task routing - checking the task_metadata
+        contextvar and submitting to Docket if appropriate.
+        """
+        try:
+            return await template._read(uri_str, params)
         except ResourceError:
             logger.exception(f"Error reading resource {uri_str!r}")
             raise
@@ -1659,16 +1678,27 @@ class FastMCP(Generic[LifespanResultT]):
         """
         Applies this server's middleware and delegates the filtered call to the manager.
         Converts PromptResult to GetPromptResult for MCP protocol.
+
+        Note: This method assumes synchronous execution. For task-augmented execution,
+        use _get_prompt_content_middleware directly and handle CreateTaskResult.
         """
         result = await self._get_prompt_content_middleware(name, arguments)
+        if isinstance(result, mcp.types.CreateTaskResult):
+            raise RuntimeError(
+                "Prompt returned CreateTaskResult but _get_prompt_middleware "
+                "expects synchronous execution"
+            )
         return result.to_mcp_prompt_result()
 
     async def _get_prompt_content_middleware(
         self, name: str, arguments: dict[str, Any] | None = None
-    ) -> PromptResult:
+    ) -> PromptResult | mcp.types.CreateTaskResult:
         """
         Applies this server's middleware and returns PromptResult.
         Used internally and by parent servers for mounted prompts.
+
+        Returns PromptResult for synchronous execution, or CreateTaskResult
+        if the prompt was submitted to Docket for background execution.
         """
         mw_context = MiddlewareContext(
             message=mcp.types.GetPromptRequestParams(name=name, arguments=arguments),
@@ -1684,7 +1714,13 @@ class FastMCP(Generic[LifespanResultT]):
     async def _get_prompt(
         self,
         context: MiddlewareContext[mcp.types.GetPromptRequestParams],
-    ) -> PromptResult:
+    ) -> PromptResult | mcp.types.CreateTaskResult:
+        """
+        Get a prompt.
+
+        Returns PromptResult for synchronous execution, or CreateTaskResult
+        if the prompt was submitted to Docket for background execution.
+        """
         name = context.message.name
 
         # Try local prompts first (static prompts take precedence)
@@ -1709,8 +1745,12 @@ class FastMCP(Generic[LifespanResultT]):
 
     async def _execute_prompt(
         self, prompt: Prompt, name: str, arguments: dict[str, Any] | None
-    ) -> PromptResult:
-        """Render a prompt with unified error handling."""
+    ) -> PromptResult | mcp.types.CreateTaskResult:
+        """Render a prompt with unified error handling.
+
+        Calls prompt._render() which handles task routing - checking the task_metadata
+        contextvar and submitting to Docket if appropriate.
+        """
         try:
             return await prompt._render(arguments)
         except PromptError:

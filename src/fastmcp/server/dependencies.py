@@ -46,9 +46,9 @@ _task_metadata: ContextVar[dict[str, Any] | None] = ContextVar(
     "task_metadata", default=None
 )
 
-# ContextVar for the tool key as seen by the MCP layer (with namespace prefix)
-# Used by Tool._submit_as_task() to build the correct Docket task key
-_tool_call_key: ContextVar[str | None] = ContextVar("tool_call_key", default=None)
+# ContextVar for the component's Docket function lookup key (with namespace prefix)
+# Used by Tool._run(), Resource._read(), Prompt._render() to find the registered function
+_docket_fn_key: ContextVar[str | None] = ContextVar("docket_fn_key", default=None)
 
 __all__ = [
     "AccessToken",

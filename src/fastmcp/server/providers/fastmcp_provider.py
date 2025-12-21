@@ -142,11 +142,25 @@ class FastMCPProviderResource(Resource):
             task_config=resource.task_config,
         )
 
+    async def _read(self) -> ResourceContent | mcp.types.CreateTaskResult:
+        """Skip task routing - delegate to read() which calls child middleware.
+
+        The actual underlying resource will check _task_metadata contextvar and
+        submit to Docket if appropriate. This wrapper just passes through.
+        """
+        return await self.read()
+
     async def read(self) -> ResourceContent:
         """Delegate to child server's middleware.
 
         When called from a Docket worker (background task), there's no FastMCP
         context set up, so we create one for the child server.
+
+        Note: The _docket_fn_key contextvar is intentionally NOT updated here.
+        The parent set it to the full namespaced key (e.g., data://c/gc/value)
+        which is what the function is registered under in Docket. All provider
+        layers pass this through unchanged so the eventual resource._read()
+        uses the correct Docket lookup key.
         """
         import fastmcp.server.context
 
@@ -154,15 +168,19 @@ class FastMCPProviderResource(Resource):
             from fastmcp.server.dependencies import get_context
 
             get_context()  # Will raise if no context
-            contents = await self._server._read_resource_middleware(self._original_uri)
-            return contents[0]
+            result = await self._server._read_resource_middleware(self._original_uri)
+            if isinstance(result, mcp.types.CreateTaskResult):
+                return result  # type: ignore[return-value]
+            return result[0]
         except RuntimeError:
             # No context (e.g., Docket worker) - create one for the child server
             async with fastmcp.server.context.Context(fastmcp=self._server):
-                contents = await self._server._read_resource_middleware(
+                result = await self._server._read_resource_middleware(
                     self._original_uri
                 )
-                return contents[0]
+                if isinstance(result, mcp.types.CreateTaskResult):
+                    return result  # type: ignore[return-value]
+                return result[0]
 
 
 class FastMCPProviderPrompt(Prompt):
@@ -200,11 +218,27 @@ class FastMCPProviderPrompt(Prompt):
             task_config=prompt.task_config,
         )
 
+    async def _render(
+        self, arguments: dict[str, Any] | None = None
+    ) -> PromptResult | mcp.types.CreateTaskResult:
+        """Skip task routing - delegate to render() which calls child middleware.
+
+        The actual underlying prompt will check _task_metadata contextvar and
+        submit to Docket if appropriate. This wrapper just passes through.
+        """
+        return await self.render(arguments)
+
     async def render(self, arguments: dict[str, Any] | None = None) -> PromptResult:
         """Delegate to child server's middleware.
 
         When called from a Docket worker (background task), there's no FastMCP
         context set up, so we create one for the child server.
+
+        Note: The _docket_fn_key contextvar is intentionally NOT updated here.
+        The parent set it to the full namespaced name (e.g., c_gc_greet) which
+        is what the function is registered under in Docket. All provider layers
+        pass this through unchanged so the eventual prompt._render() uses the
+        correct Docket lookup key.
         """
         import fastmcp.server.context
 
@@ -212,15 +246,21 @@ class FastMCPProviderPrompt(Prompt):
             from fastmcp.server.dependencies import get_context
 
             get_context()  # Will raise if no context
-            return await self._server._get_prompt_content_middleware(
+            result = await self._server._get_prompt_content_middleware(
                 self._original_name, arguments
             )
+            if isinstance(result, mcp.types.CreateTaskResult):
+                return result  # type: ignore[return-value]
+            return result
         except RuntimeError:
             # No context (e.g., Docket worker) - create one for the child server
             async with fastmcp.server.context.Context(fastmcp=self._server):
-                return await self._server._get_prompt_content_middleware(
+                result = await self._server._get_prompt_content_middleware(
                     self._original_name, arguments
                 )
+                if isinstance(result, mcp.types.CreateTaskResult):
+                    return result  # type: ignore[return-value]
+                return result
 
 
 class FastMCPProviderResourceTemplate(ResourceTemplate):
@@ -281,6 +321,35 @@ class FastMCPProviderResourceTemplate(ResourceTemplate):
             mime_type=self.mime_type,
         )
 
+    async def _read(
+        self, uri: str, params: dict[str, Any]
+    ) -> ResourceContent | mcp.types.CreateTaskResult:
+        """Delegate to child server's middleware.
+
+        Skips task routing at this layer - the child's template._read() will
+        check _task_metadata contextvar and submit to Docket if appropriate.
+        """
+        import fastmcp.server.context
+
+        # Expand the original template with params to get internal URI
+        original_uri = _expand_uri_template(self._original_uri_template or "", params)
+
+        try:
+            from fastmcp.server.dependencies import get_context
+
+            get_context()  # Will raise if no context
+            result = await self._server._read_resource_middleware(original_uri)
+            if isinstance(result, mcp.types.CreateTaskResult):
+                return result
+            return result[0]
+        except RuntimeError:
+            # No context (e.g., Docket worker) - create one for the child server
+            async with fastmcp.server.context.Context(fastmcp=self._server):
+                result = await self._server._read_resource_middleware(original_uri)
+                if isinstance(result, mcp.types.CreateTaskResult):
+                    return result
+                return result[0]
+
     async def read(self, arguments: dict[str, Any]) -> str | bytes:
         """Read the resource content for background task execution.
 
@@ -308,6 +377,9 @@ class FastMCPProviderResourceTemplate(ResourceTemplate):
             return result.content  # type: ignore[return-value]
         return result  # type: ignore[return-value]
 
+    def register_with_docket(self, docket: Docket) -> None:
+        """No-op: the child's actual template is registered via get_tasks()."""
+
     async def add_to_docket(  # type: ignore[override]
         self,
         docket: Docket,
@@ -319,7 +391,8 @@ class FastMCPProviderResourceTemplate(ResourceTemplate):
     ) -> Execution:
         """Schedule this template for background execution via docket.
 
-        FastMCPProviderResourceTemplate splats the params dict since read() expects **kwargs.
+        The child's FunctionResourceTemplate.fn is registered (via get_tasks),
+        and it expects splatted **kwargs, so we splat params here.
         """
         lookup_key = fn_key or self.key
         if task_key:

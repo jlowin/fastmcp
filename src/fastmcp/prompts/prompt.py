@@ -13,6 +13,7 @@ import pydantic_core
 if TYPE_CHECKING:
     from docket import Docket
     from docket.execution import Execution
+import mcp.types
 from mcp import GetPromptResult
 from mcp.types import ContentBlock, Icon, PromptMessage, Role, TextContent
 from mcp.types import Prompt as SDKPrompt
@@ -221,12 +222,54 @@ class Prompt(FastMCPComponent):
     async def _render(
         self,
         arguments: dict[str, Any] | None = None,
-    ) -> PromptResult:
-        """Internal API that always returns PromptResult.
+    ) -> PromptResult | mcp.types.CreateTaskResult:
+        """Server entry point that handles task routing.
 
-        Calls render() and wraps list[PromptMessage] in PromptResult.
-        This is what PromptManager calls internally.
+        This allows ANY Prompt subclass to support background execution by setting
+        task_config.mode to "supported" or "required". The server calls this
+        method instead of render() directly.
+
+        Subclasses can override this to customize task routing behavior.
+        For example, FastMCPProviderPrompt overrides to delegate to child
+        middleware without submitting to Docket.
         """
+
+        from fastmcp.server.dependencies import _docket_fn_key, get_task_metadata
+        from fastmcp.server.tasks.handlers import submit_to_docket
+
+        task_meta = get_task_metadata()
+
+        # Enforce mode="required" - must have task metadata
+        if self.task_config.mode == "required" and not task_meta:
+            from mcp.shared.exceptions import McpError
+            from mcp.types import METHOD_NOT_FOUND, ErrorData
+
+            raise McpError(
+                ErrorData(
+                    code=METHOD_NOT_FOUND,
+                    message=f"Prompt '{self.name}' requires task-augmented execution",
+                )
+            )
+
+        # Enforce mode="forbidden" - cannot be called with task metadata
+        if self.task_config.mode == "forbidden" and task_meta:
+            from mcp.shared.exceptions import McpError
+            from mcp.types import METHOD_NOT_FOUND, ErrorData
+
+            raise McpError(
+                ErrorData(
+                    code=METHOD_NOT_FOUND,
+                    message=f"Prompt '{self.name}' does not support task-augmented execution",
+                )
+            )
+
+        # Route to background if task metadata present
+        if task_meta:
+            # Use the key from contextvar (preserves namespace from parent)
+            key = _docket_fn_key.get() or self.name
+            return await submit_to_docket("prompt", key, self, arguments)
+
+        # Synchronous execution
         result = await self.render(arguments)
         if isinstance(result, PromptResult):
             return result

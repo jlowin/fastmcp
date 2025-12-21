@@ -8,6 +8,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs, unquote
 
+import mcp.types
 from mcp.types import Annotations, Icon
 
 if TYPE_CHECKING:
@@ -20,7 +21,7 @@ from pydantic import (
     validate_call,
 )
 
-from fastmcp.resources.resource import Resource
+from fastmcp.resources.resource import Resource, ResourceContent
 from fastmcp.server.dependencies import get_context, without_injected_parameters
 from fastmcp.server.tasks.config import TaskConfig
 from fastmcp.utilities.components import FastMCPComponent
@@ -175,6 +176,58 @@ class ResourceTemplate(FastMCPComponent):
         raise NotImplementedError(
             "Subclasses must implement read() or override create_resource()"
         )
+
+    async def _read(
+        self, uri: str, params: dict[str, Any]
+    ) -> ResourceContent | mcp.types.CreateTaskResult:
+        """Server entry point that handles task routing.
+
+        This allows ANY ResourceTemplate subclass to support background execution
+        by setting task_config.mode to "supported" or "required". The server calls
+        this method instead of create_resource()/read() directly.
+
+        Subclasses can override this to customize task routing behavior.
+        For example, FastMCPProviderResourceTemplate overrides to delegate to child
+        middleware without submitting to Docket.
+        """
+        from fastmcp.server.dependencies import _docket_fn_key, get_task_metadata
+        from fastmcp.server.tasks.handlers import submit_to_docket
+
+        task_meta = get_task_metadata()
+
+        # Enforce mode="required" - must have task metadata
+        if self.task_config.mode == "required" and not task_meta:
+            from mcp.shared.exceptions import McpError
+            from mcp.types import METHOD_NOT_FOUND, ErrorData
+
+            raise McpError(
+                ErrorData(
+                    code=METHOD_NOT_FOUND,
+                    message=f"Resource template '{self.uri_template}' requires task-augmented execution",
+                )
+            )
+
+        # Enforce mode="forbidden" - cannot be called with task metadata
+        if self.task_config.mode == "forbidden" and task_meta:
+            from mcp.shared.exceptions import McpError
+            from mcp.types import METHOD_NOT_FOUND, ErrorData
+
+            raise McpError(
+                ErrorData(
+                    code=METHOD_NOT_FOUND,
+                    message=f"Resource template '{self.uri_template}' does not support task-augmented execution",
+                )
+            )
+
+        # Route to background if task metadata present
+        if task_meta:
+            # Use the key from contextvar (preserves namespace from parent)
+            key = _docket_fn_key.get() or self.uri_template
+            return await submit_to_docket("template", key, self, params)
+
+        # Synchronous execution - create resource and read
+        resource = await self.create_resource(uri, params)
+        return await resource._read()
 
     async def create_resource(self, uri: str, params: dict[str, Any]) -> Resource:
         """Create a resource from the template with the given parameters.
