@@ -1050,9 +1050,10 @@ class TestToolOutputSchema:
             result = await client.call_tool("explicit_tool", {})
             assert result.structured_content == {"greeting": "Hello", "count": 42}
             # Client deserializes according to schema, so check fields
-            assert isinstance(result.data, dict)
-            assert result.data["greeting"] == "Hello"
-            assert result.data["count"] == 42
+            # result.data is a dynamically generated Root type, so check attributes directly
+            assert result.data is not None
+            assert result.data.greeting == "Hello"  # type: ignore[attr-defined]
+            assert result.data.count == 42  # type: ignore[attr-defined]
 
     async def test_output_schema_wrapped_primitive_full_handshake(self):
         """Test wrapped primitive output schema through full client/server handshake."""
@@ -1138,9 +1139,10 @@ class TestToolOutputSchema:
             result = await client.call_tool("dataclass_tool", {})
             assert result.structured_content == {"name": "Alice", "age": 30}
             # Client deserializes according to schema
-            assert isinstance(result.data, User)
-            assert result.data.name == "Alice"
-            assert result.data.age == 30
+            # result.data is a dynamically generated Root type, so check attributes directly
+            assert result.data is not None
+            assert result.data.name == "Alice"  # type: ignore[attr-defined]
+            assert result.data.age == 30  # type: ignore[attr-defined]
 
     async def test_output_schema_mixed_content_types(self):
         """Test tools with mixed content and output schemas."""

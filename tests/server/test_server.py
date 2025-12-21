@@ -5,7 +5,7 @@ from typing import Annotated
 
 import pytest
 from mcp import McpError
-from mcp.types import TextContent, TextResourceContents
+from mcp.types import BlobResourceContents, TextContent, TextResourceContents
 from pydantic import Field
 
 from fastmcp import Client, FastMCP
@@ -657,7 +657,7 @@ class TestResourceDecorator:
             assert len(result) == 1
             # Binary content comes back as blob
             assert hasattr(result[0], "blob")
-            assert isinstance(result[0], TextResourceContents)
+            assert isinstance(result[0], BlobResourceContents)
             assert result[0].meta == {"encoding": "raw"}
 
     async def test_resource_content_without_meta(self):

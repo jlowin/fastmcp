@@ -311,7 +311,7 @@ class TestScalarResponseTypes:
         async def my_tool(context: Context) -> ResponseEnum:
             result = await context.elicit(message="", response_type=ResponseEnum)
             assert isinstance(result, AcceptedElicitation)
-            assert isinstance(result.data, str)
+            assert isinstance(result.data, ResponseEnum)
             return result.data
 
         async def elicitation_handler(message, response_type, params, ctx):
