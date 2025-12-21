@@ -84,11 +84,14 @@ async def tasks_get_handler(server: FastMCP, params: dict[str, Any]) -> GetTaskR
         created_at = (
             None if created_at_bytes is None else created_at_bytes.decode("utf-8")
         )
-        poll_interval_ms = (
-            int(poll_interval_bytes.decode("utf-8"))
-            if poll_interval_bytes
-            else 5000  # Default to 5 seconds
-        )
+        try:
+            poll_interval_ms = (
+                int(poll_interval_bytes.decode("utf-8"))
+                if poll_interval_bytes
+                else 5000  # Default to 5 seconds
+            )
+        except (ValueError, UnicodeDecodeError):
+            poll_interval_ms = 5000
 
         if task_key is None:
             # Task not found - raise error per MCP protocol
@@ -364,11 +367,14 @@ async def tasks_cancel_handler(
         created_at = (
             None if created_at_bytes is None else created_at_bytes.decode("utf-8")
         )
-        poll_interval_ms = (
-            int(poll_interval_bytes.decode("utf-8"))
-            if poll_interval_bytes
-            else 5000  # Default to 5 seconds
-        )
+        try:
+            poll_interval_ms = (
+                int(poll_interval_bytes.decode("utf-8"))
+                if poll_interval_bytes
+                else 5000  # Default to 5 seconds
+            )
+        except (ValueError, UnicodeDecodeError):
+            poll_interval_ms = 5000
 
         if task_key is None:
             raise McpError(

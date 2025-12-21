@@ -29,7 +29,7 @@ async def subscribe_to_task_updates(
     task_key: str,
     session: ServerSession,
     docket: Docket,
-    poll_interval_ms: int = 1000,
+    poll_interval_ms: int = 5000,
 ) -> None:
     """Subscribe to Docket execution events and send MCP notifications.
 
@@ -83,7 +83,7 @@ async def _send_status_notification(
     task_key: str,
     docket: Docket,
     state: ExecutionState,
-    poll_interval_ms: int = 1000,
+    poll_interval_ms: int = 5000,
 ) -> None:
     """Send notifications/tasks/status to client.
 
@@ -155,7 +155,7 @@ async def _send_progress_notification(
     task_key: str,
     docket: Docket,
     execution: Execution,
-    poll_interval_ms: int = 1000,
+    poll_interval_ms: int = 5000,
 ) -> None:
     """Send notifications/tasks/status when progress updates.
 
