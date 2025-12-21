@@ -213,11 +213,11 @@ class TestProvider:
         async with Client(base_server) as client:
             await client.call_tool(name="dynamic_multiply", arguments={"a": 2, "b": 3})
 
-        # get_tool is called twice:
-        # 1. Server.get_tool() for task config check calls provider.get_tool()
-        # 2. _call_tool() calls provider.get_tool() to get the tool and execute it
+        # get_tool is called once for efficient lookup:
+        # _call_tool() calls provider.get_tool() to get the tool and execute it
+        # (task config is checked inside the tool's _run() method, not via a separate lookup)
         # Key point: list_tools is NOT called during tool execution (efficient lookup)
-        assert provider.get_tool_call_count == 2
+        assert provider.get_tool_call_count == 1
 
     async def test_default_get_tool_falls_back_to_list(self, base_server: FastMCP):
         """Test that BaseToolProvider's default get_tool calls list_tools."""

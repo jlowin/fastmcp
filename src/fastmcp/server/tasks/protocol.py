@@ -239,7 +239,7 @@ async def tasks_result_handler(server: FastMCP, params: dict[str, Any]) -> Any:
             from fastmcp.tools.tool import convert_to_tool_result
 
             tool = await server.get_tool(component_id)
-            fastmcp_result = convert_to_tool_result(raw_value, tool.output_schema)
+            fastmcp_result = convert_to_tool_result(raw_value, tool)
             mcp_result = fastmcp_result.to_mcp_result()
             # Ensure we have a CallToolResult and add metadata
             if isinstance(mcp_result, mcp.types.CallToolResult):
@@ -261,21 +261,38 @@ async def tasks_result_handler(server: FastMCP, params: dict[str, Any]) -> Any:
             from fastmcp.prompts.prompt import convert_to_prompt_result
 
             prompt = await server.get_prompt(component_id)
-            fastmcp_result = convert_to_prompt_result(
-                raw_value, prompt.description, prompt.meta
-            )
+            fastmcp_result = convert_to_prompt_result(raw_value, prompt)
             mcp_result = fastmcp_result.to_mcp_prompt_result()
             mcp_result._meta = related_task_meta  # type: ignore[attr-defined]
             return mcp_result
 
         elif task_type == "resource":
-            # Convert raw value to ResourceContent (handles str, bytes, ResourceContent)
             from fastmcp.resources.resource import ResourceContent
 
+            resource = await server.get_resource(component_id)
             if isinstance(raw_value, ResourceContent):
                 resource_content = raw_value
             else:
-                resource_content = ResourceContent.from_value(raw_value)
+                resource_content = ResourceContent.from_value(
+                    raw_value, mime_type=resource.mime_type
+                )
+
+            mcp_content = resource_content.to_mcp_resource_contents(component_id)
+            return mcp.types.ReadResourceResult(
+                contents=[mcp_content],
+                _meta=related_task_meta,
+            )
+
+        elif task_type == "template":
+            from fastmcp.resources.resource import ResourceContent
+
+            template = await server.get_resource_template(component_id)
+            if isinstance(raw_value, ResourceContent):
+                resource_content = raw_value
+            else:
+                resource_content = ResourceContent.from_value(
+                    raw_value, mime_type=template.mime_type
+                )
 
             mcp_content = resource_content.to_mcp_resource_contents(component_id)
             return mcp.types.ReadResourceResult(

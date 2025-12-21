@@ -190,7 +190,7 @@ class ResourceTemplate(FastMCPComponent):
         For example, FastMCPProviderResourceTemplate overrides to delegate to child
         middleware without submitting to Docket.
         """
-        from fastmcp.server.dependencies import _docket_fn_key, get_task_metadata
+        from fastmcp.server.dependencies import get_task_metadata
         from fastmcp.server.tasks.handlers import submit_to_docket
 
         task_meta = get_task_metadata()
@@ -221,13 +221,24 @@ class ResourceTemplate(FastMCPComponent):
 
         # Route to background if task metadata present
         if task_meta:
-            # Use the key from contextvar (preserves namespace from parent)
-            key = _docket_fn_key.get() or self.uri_template
+            from fastmcp.server.dependencies import _docket_fn_key
+
+            # Use _docket_fn_key only if it contains a template pattern (has '{').
+            # The server sets it to the concrete URI (e.g., "file://user/123/data.json"),
+            # but we need the pattern. FastMCPProviderResourceTemplate sets it to
+            # the transformed pattern (e.g., "item://c/gc/{id}") for mounted templates.
+            key = _docket_fn_key.get()
+            if not key or "{" not in key:
+                key = self.uri_template
             return await submit_to_docket("template", key, self, params)
 
-        # Synchronous execution - create resource and read
+        # Synchronous execution - create resource and read directly
+        # Call resource.read() not resource._read() to avoid task routing on ephemeral resource
         resource = await self.create_resource(uri, params)
-        return await resource._read()
+        result = await resource.read()
+        if isinstance(result, ResourceContent):
+            return result
+        return ResourceContent.from_value(result, mime_type=resource.mime_type)
 
     async def create_resource(self, uri: str, params: dict[str, Any]) -> Resource:
         """Create a resource from the template with the given parameters.
@@ -313,6 +324,60 @@ class FunctionResourceTemplate(ResourceTemplate):
     """A template for dynamically creating resources."""
 
     fn: Callable[..., Any]
+
+    async def _read(
+        self, uri: str, params: dict[str, Any]
+    ) -> ResourceContent | mcp.types.CreateTaskResult:
+        """Optimized server entry point that skips ephemeral resource creation.
+
+        For FunctionResourceTemplate, we can call read() directly instead of
+        creating a temporary resource, which is more efficient.
+        """
+        from fastmcp.server.dependencies import get_task_metadata
+        from fastmcp.server.tasks.handlers import submit_to_docket
+
+        task_meta = get_task_metadata()
+
+        # Enforce mode="required" - must have task metadata
+        if self.task_config.mode == "required" and not task_meta:
+            from mcp.shared.exceptions import McpError
+            from mcp.types import METHOD_NOT_FOUND, ErrorData
+
+            raise McpError(
+                ErrorData(
+                    code=METHOD_NOT_FOUND,
+                    message=f"Resource template '{self.uri_template}' requires task-augmented execution",
+                )
+            )
+
+        # Enforce mode="forbidden" - cannot be called with task metadata
+        if self.task_config.mode == "forbidden" and task_meta:
+            from mcp.shared.exceptions import McpError
+            from mcp.types import METHOD_NOT_FOUND, ErrorData
+
+            raise McpError(
+                ErrorData(
+                    code=METHOD_NOT_FOUND,
+                    message=f"Resource template '{self.uri_template}' does not support task-augmented execution",
+                )
+            )
+
+        # Route to background if task metadata present
+        if task_meta:
+            from fastmcp.server.dependencies import _docket_fn_key
+
+            # Use _docket_fn_key only if it contains a template pattern (has '{').
+            # The server sets it to the concrete URI (e.g., "file://user/123/data.json"),
+            # but we need the pattern. FastMCPProviderResourceTemplate sets it to
+            # the transformed pattern (e.g., "item://c/gc/{id}") for mounted templates.
+            key = _docket_fn_key.get()
+            if not key or "{" not in key:
+                key = self.uri_template
+            return await submit_to_docket("template", key, self, params)
+
+        # Synchronous execution - call read() directly, skip resource creation
+        result = await self.read(arguments=params)
+        return ResourceContent.from_value(result, mime_type=self.mime_type)
 
     async def create_resource(self, uri: str, params: dict[str, Any]) -> Resource:
         """Create a resource from the template with the given parameters."""

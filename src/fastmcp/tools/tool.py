@@ -458,7 +458,7 @@ class FunctionTool(Tool):
         if inspect.isawaitable(result):
             result = await result
 
-        return convert_to_tool_result(result, self.output_schema)
+        return convert_to_tool_result(result, self)
 
     def register_with_docket(self, docket: Docket) -> None:
         """Register this tool with docket for background execution.
@@ -718,27 +718,29 @@ def _convert_to_content(
     return [TextContent(type="text", text=_serialize_with_fallback(result, serializer))]
 
 
-def convert_to_tool_result(
-    result: Any, output_schema: dict[str, Any] | None = None
-) -> ToolResult:
+def convert_to_tool_result(result: Any, tool: Tool) -> ToolResult:
     """Convert any result to ToolResult.
 
-    Handles ToolResult passthrough and converts raw values using output_schema
-    to determine proper structured_content wrapping.
+    Handles ToolResult passthrough and converts raw values using the tool's
+    attributes (serializer, output_schema) for proper conversion.
 
     Args:
         result: Raw return value or ToolResult
-        output_schema: Tool's output schema (for x-fastmcp-wrap-result flag)
+        tool: The Tool instance (provides serializer, output_schema, etc.)
     """
     if isinstance(result, ToolResult):
         return result
 
-    content = _convert_to_content(result)
+    content = _convert_to_content(result, serializer=tool.serializer)
 
-    # Skip structured content for ContentBlock types
-    if isinstance(result, ContentBlock | Audio | Image | File) or (
-        isinstance(result, list | tuple)
-        and any(isinstance(item, ContentBlock) for item in result)
+    # Skip structured content for ContentBlock types only if no output_schema
+    # (if output_schema exists, MCP SDK requires structured_content)
+    if tool.output_schema is None and (
+        isinstance(result, ContentBlock | Audio | Image | File)
+        or (
+            isinstance(result, list | tuple)
+            and any(isinstance(item, ContentBlock) for item in result)
+        )
     ):
         return ToolResult(content=content)
 
@@ -747,14 +749,14 @@ def convert_to_tool_result(
     except pydantic_core.PydanticSerializationError:
         return ToolResult(content=content)
 
-    if output_schema is None:
+    if tool.output_schema is None:
         # No schema - only use structured_content for dicts
         if isinstance(structured, dict):
             return ToolResult(content=content, structured_content=structured)
         return ToolResult(content=content)
 
     # Has output_schema - wrap if x-fastmcp-wrap-result is set
-    wrap_result = output_schema.get("x-fastmcp-wrap-result")
+    wrap_result = tool.output_schema.get("x-fastmcp-wrap-result")
     return ToolResult(
         content=content,
         structured_content={"result": structured} if wrap_result else structured,

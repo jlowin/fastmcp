@@ -328,27 +328,49 @@ class FastMCPProviderResourceTemplate(ResourceTemplate):
 
         Skips task routing at this layer - the child's template._read() will
         check _task_metadata contextvar and submit to Docket if appropriate.
+
+        Sets _docket_fn_key to self.uri_template (the transformed pattern) so that
+        when the child template's _read() submits to Docket, it uses the correct
+        key that matches what was registered via TransformingProvider.get_tasks().
+
+        Only sets _docket_fn_key if not already set - in nested mounts, the
+        outermost wrapper sets the key and inner wrappers preserve it.
         """
         import fastmcp.server.context
+        from fastmcp.server.dependencies import _docket_fn_key
 
         # Expand the original template with params to get internal URI
         original_uri = _expand_uri_template(self._original_uri_template or "", params)
 
+        # Set _docket_fn_key to the template pattern, but only if the current
+        # value isn't already a template pattern (contains '{').
+        # - Server sets concrete URI (e.g., "item://c/gc/42") - no '{', override it
+        # - Outer wrapper sets pattern (e.g., "item://c/gc/{id}") - has '{', keep it
+        # In nested mounts (parent→child→grandchild), the outermost wrapper
+        # has the fully-transformed pattern that matches Docket registration.
+        existing_key = _docket_fn_key.get()
+        key_token = None
+        if not existing_key or "{" not in existing_key:
+            key_token = _docket_fn_key.set(self.uri_template)
         try:
-            from fastmcp.server.dependencies import get_context
+            try:
+                from fastmcp.server.dependencies import get_context
 
-            get_context()  # Will raise if no context
-            result = await self._server._read_resource_middleware(original_uri)
-            if isinstance(result, mcp.types.CreateTaskResult):
-                return result
-            return result[0]
-        except RuntimeError:
-            # No context (e.g., Docket worker) - create one for the child server
-            async with fastmcp.server.context.Context(fastmcp=self._server):
+                get_context()  # Will raise if no context
                 result = await self._server._read_resource_middleware(original_uri)
                 if isinstance(result, mcp.types.CreateTaskResult):
                     return result
                 return result[0]
+            except RuntimeError:
+                # No context (e.g., Docket worker) - create one for the child server
+                async with fastmcp.server.context.Context(fastmcp=self._server):
+                    result = await self._server._read_resource_middleware(original_uri)
+                    if isinstance(result, mcp.types.CreateTaskResult):
+                        return result
+                    return result[0]
+        finally:
+            if key_token is not None:
+                _docket_fn_key.reset(key_token)
 
     async def read(self, arguments: dict[str, Any]) -> str | bytes:
         """Read the resource content for background task execution.

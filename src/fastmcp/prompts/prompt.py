@@ -583,19 +583,14 @@ class FunctionPrompt(Prompt):
         return await docket.add(lookup_key, **kwargs)(**(arguments or {}))
 
 
-def convert_to_prompt_result(
-    raw_value: Any,
-    description: str | None = None,
-    meta: dict[str, Any] | None = None,
-) -> PromptResult:
+def convert_to_prompt_result(raw_value: Any, prompt: Prompt) -> PromptResult:
     """Convert any result to PromptResult.
 
     Handles PromptResult passthrough and converts raw values to messages.
 
     Args:
         raw_value: Raw return value or PromptResult
-        description: Prompt description for the result
-        meta: Optional metadata for the result
+        prompt: The Prompt instance (provides description, meta, etc.)
     """
     if isinstance(raw_value, PromptResult):
         return raw_value
@@ -630,6 +625,6 @@ def convert_to_prompt_result(
 
     return PromptResult(
         messages=messages,
-        description=description,
-        meta=meta,
+        description=prompt.description,
+        meta=prompt.meta,
     )

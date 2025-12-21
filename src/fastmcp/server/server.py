@@ -33,6 +33,7 @@ import uvicorn
 from docket import Docket, Worker
 from mcp.server.lowlevel.server import LifespanResultT, NotificationOptions
 from mcp.server.stdio import stdio_server
+from mcp.shared.exceptions import McpError
 from mcp.types import (
     Annotations,
     AnyFunction,
@@ -712,17 +713,6 @@ class FastMCP(Generic[LifespanResultT]):
                 continue
 
         raise NotFoundError(f"Unknown tool: {key}")
-
-    async def _get_tool_with_task_config(self, key: str) -> Tool | None:
-        """Get a tool by key, returning None if not found.
-
-        Used for task config checking where we need the actual tool object
-        (including from mounted servers and proxies) but don't want to raise.
-        """
-        try:
-            return await self.get_tool(key)
-        except NotFoundError:
-            return None
 
     async def _get_resource_or_template_or_none(
         self, uri: str
@@ -1616,7 +1606,7 @@ class FastMCP(Generic[LifespanResultT]):
         """
         try:
             return await resource._read()
-        except ResourceError:
+        except (ResourceError, McpError):
             logger.exception(f"Error reading resource {uri_str!r}")
             raise
         except Exception as e:
@@ -1638,7 +1628,7 @@ class FastMCP(Generic[LifespanResultT]):
         """
         try:
             return await template._read(uri_str, params)
-        except ResourceError:
+        except (ResourceError, McpError):
             logger.exception(f"Error reading resource {uri_str!r}")
             raise
         except Exception as e:
@@ -1753,7 +1743,7 @@ class FastMCP(Generic[LifespanResultT]):
         """
         try:
             return await prompt._render(arguments)
-        except PromptError:
+        except (PromptError, McpError):
             logger.exception(f"Error rendering prompt {name!r}")
             raise
         except Exception as e:
