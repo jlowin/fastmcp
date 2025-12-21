@@ -69,9 +69,9 @@ from fastmcp.mcp_config import MCPConfig
 from fastmcp.prompts import Prompt
 from fastmcp.prompts.prompt import FunctionPrompt, PromptResult
 from fastmcp.prompts.prompt_manager import PromptManager
-from fastmcp.resources.resource import FunctionResource, Resource, ResourceContent
+from fastmcp.resources.resource import Resource, ResourceContent
 from fastmcp.resources.resource_manager import ResourceManager
-from fastmcp.resources.template import FunctionResourceTemplate, ResourceTemplate
+from fastmcp.resources.template import ResourceTemplate
 from fastmcp.server.auth import AuthProvider
 from fastmcp.server.event_store import EventStore
 from fastmcp.server.http import (
@@ -84,11 +84,6 @@ from fastmcp.server.middleware import Middleware, MiddlewareContext
 from fastmcp.server.providers import Provider
 from fastmcp.server.tasks.capabilities import get_task_capabilities
 from fastmcp.server.tasks.config import TaskConfig
-from fastmcp.server.tasks.handlers import (
-    handle_prompt_as_task,
-    handle_resource_as_task,
-    handle_tool_as_task,
-)
 from fastmcp.settings import Settings
 from fastmcp.tools.tool import FunctionTool, Tool, ToolResult
 from fastmcp.tools.tool_manager import ToolManager
@@ -110,23 +105,6 @@ if TYPE_CHECKING:
     from fastmcp.tools.tool import ToolResultSerializerType
 
 logger = get_logger(__name__)
-
-
-def _create_named_fn_wrapper(fn: Callable[..., Any], name: str) -> Callable[..., Any]:
-    """Create a wrapper function with a custom __name__ for Docket registration.
-
-    Docket uses fn.__name__ as the key for function registration and lookup.
-    When mounting servers, we need unique names to avoid collisions between
-    mounted servers that have identically-named functions.
-    """
-    import functools
-
-    @functools.wraps(fn)
-    async def wrapper(*args: Any, **kwargs: Any) -> Any:
-        return await fn(*args, **kwargs)
-
-    wrapper.__name__ = name
-    return wrapper
 
 
 DuplicateBehavior = Literal["warn", "error", "replace", "ignore"]
@@ -433,58 +411,32 @@ class FastMCP(Generic[LifespanResultT]):
                 # Store on server instance for cross-task access (FastMCPTransport)
                 self._docket = docket
 
-                # Register local task-enabled tools/prompts/resources with Docket
-                # Only function-based variants support background tasks
-                # Register components where task execution is not "forbidden"
+                # Register local task-enabled components with Docket
+                # Each component checks task_config internally and no-ops if forbidden
                 for tool in self._tool_manager._tools.values():
-                    if (
-                        isinstance(tool, FunctionTool)
-                        and tool.task_config.mode != "forbidden"
-                    ):
-                        docket.register(tool.fn)
+                    tool.register_with_docket(docket)
 
                 for prompt in self._prompt_manager._prompts.values():
-                    if (
-                        isinstance(prompt, FunctionPrompt)
-                        and prompt.task_config.mode != "forbidden"
-                    ):
-                        # task execution requires async fn (validated at creation time)
-                        docket.register(cast(Callable[..., Awaitable[Any]], prompt.fn))
+                    prompt.register_with_docket(docket)
 
                 for resource in self._resource_manager._resources.values():
-                    if (
-                        isinstance(resource, FunctionResource)
-                        and resource.task_config.mode != "forbidden"
-                    ):
-                        docket.register(resource.fn)
+                    resource.register_with_docket(docket)
 
                 for template in self._resource_manager._templates.values():
-                    if (
-                        isinstance(template, FunctionResourceTemplate)
-                        and template.task_config.mode != "forbidden"
-                    ):
-                        docket.register(template.fn)
+                    template.register_with_docket(docket)
 
                 # Register provider components
                 for provider in self._providers:
                     try:
                         tasks = await provider.get_tasks()
                         for tool in tasks.tools:
-                            named_fn = _create_named_fn_wrapper(tool.fn, tool.key)
-                            docket.register(named_fn)
+                            tool.register_with_docket(docket)
                         for resource in tasks.resources:
-                            named_fn = _create_named_fn_wrapper(
-                                resource.fn, resource.name
-                            )
-                            docket.register(named_fn)
+                            resource.register_with_docket(docket)
                         for template in tasks.templates:
-                            named_fn = _create_named_fn_wrapper(
-                                template.fn, template.name
-                            )
-                            docket.register(named_fn)
+                            template.register_with_docket(docket)
                         for prompt in tasks.prompts:
-                            named_fn = _create_named_fn_wrapper(prompt.fn, prompt.key)
-                            docket.register(named_fn)
+                            prompt.register_with_docket(docket)
                     except Exception as e:
                         provider_name = getattr(
                             provider, "server", provider
@@ -612,179 +564,39 @@ class FastMCP(Generic[LifespanResultT]):
         )
 
     def _setup_handlers(self) -> None:
-        """Set up core MCP protocol handlers."""
+        """Set up core MCP protocol handlers.
+
+        We override the SDK's default handlers for tools/call, resources/read,
+        and prompts/get to add task-augmented execution support (SEP-1686).
+
+        The SDK's decorators have different capabilities:
+        - call_tool: Supports CreateTaskResult returns AND validate_input
+        - read_resource: Does NOT support CreateTaskResult
+        - get_prompt: Does NOT support CreateTaskResult
+
+        So we use the SDK decorator for tools (to get input validation), but
+        register custom handlers for resources and prompts.
+        """
         self._mcp_server.list_tools()(self._list_tools_mcp)
         self._mcp_server.list_resources()(self._list_resources_mcp)
         self._mcp_server.list_resource_templates()(self._list_resource_templates_mcp)
         self._mcp_server.list_prompts()(self._list_prompts_mcp)
+
+        # Tools: SDK decorator provides validate_input + CreateTaskResult support
         self._mcp_server.call_tool(validate_input=self.strict_input_validation)(
             self._call_tool_mcp
         )
-        # Register custom read_resource handler (SDK decorator doesn't support CreateTaskResult)
-        self._setup_read_resource_handler()
-        # Register custom get_prompt handler (SDK decorator doesn't support CreateTaskResult)
-        self._setup_get_prompt_handler()
-        # Register custom SEP-1686 task protocol handlers
+
+        # Resources/Prompts: Custom handlers (SDK decorators don't support CreateTaskResult)
+        self._mcp_server.request_handlers[mcp.types.ReadResourceRequest] = (
+            self._read_resource_handler
+        )
+        self._mcp_server.request_handlers[mcp.types.GetPromptRequest] = (
+            self._get_prompt_handler
+        )
+
+        # Register SEP-1686 task protocol handlers
         self._setup_task_protocol_handlers()
-
-    def _setup_read_resource_handler(self) -> None:
-        """
-        Set up custom read_resource handler that supports task-augmented responses.
-
-        The SDK's read_resource decorator doesn't support CreateTaskResult returns,
-        so we register a custom handler that checks request_context.experimental.is_task.
-        """
-
-        async def handler(req: mcp.types.ReadResourceRequest) -> mcp.types.ServerResult:
-            uri = req.params.uri
-
-            # Check for task metadata via SDK's request context
-            task_meta = None
-            try:
-                ctx = self._mcp_server.request_context
-                if ctx.experimental.is_task:
-                    task_meta = ctx.experimental.task_metadata
-            except (AttributeError, LookupError):
-                pass
-
-            # Check for task metadata and route appropriately
-            async with fastmcp.server.context.Context(fastmcp=self):
-                # Get resource including from mounted servers
-                resource = await self._get_resource_or_template_or_none(str(uri))
-                if (
-                    resource
-                    and self._should_enable_component(resource)
-                    and hasattr(resource, "task_config")
-                ):
-                    task_mode = resource.task_config.mode  # type: ignore[union-attr]
-
-                    # Enforce mode="required" - must have task metadata
-                    if task_mode == "required" and not task_meta:
-                        raise McpError(
-                            ErrorData(
-                                code=METHOD_NOT_FOUND,
-                                message=f"Resource '{uri}' requires task-augmented execution",
-                            )
-                        )
-
-                    # Route to background if task metadata present and mode allows
-                    if task_meta and task_mode != "forbidden":
-                        # For FunctionResource/FunctionResourceTemplate, use Docket
-                        if isinstance(
-                            resource,
-                            FunctionResource | FunctionResourceTemplate,
-                        ):
-                            task_meta_dict = task_meta.model_dump(exclude_none=True)
-                            return await handle_resource_as_task(
-                                self, str(uri), resource, task_meta_dict
-                            )
-
-                    # Forbidden mode: task requested but mode="forbidden"
-                    # Raise error since resources don't have isError field
-                    if task_meta and task_mode == "forbidden":
-                        raise McpError(
-                            ErrorData(
-                                code=METHOD_NOT_FOUND,
-                                message=f"Resource '{uri}' does not support task-augmented execution",
-                            )
-                        )
-
-            # Synchronous execution
-            result = await self._read_resource_mcp(uri)
-
-            # Graceful degradation: if we got here with task_meta, something went wrong
-            # (This should be unreachable now that forbidden raises)
-            if task_meta:
-                mcp_contents = [item.to_mcp_resource_contents(uri) for item in result]
-                return mcp.types.ServerResult(
-                    mcp.types.ReadResourceResult(
-                        contents=mcp_contents,
-                        _meta={
-                            "modelcontextprotocol.io/task": {
-                                "returned_immediately": True
-                            }
-                        },
-                    )
-                )
-
-            # Convert to proper ServerResult
-            if isinstance(result, mcp.types.ServerResult):
-                return result
-
-            mcp_contents = [item.to_mcp_resource_contents(uri) for item in result]
-            return mcp.types.ServerResult(
-                mcp.types.ReadResourceResult(contents=mcp_contents)
-            )
-
-        self._mcp_server.request_handlers[mcp.types.ReadResourceRequest] = handler
-
-    def _setup_get_prompt_handler(self) -> None:
-        """
-        Set up custom get_prompt handler that supports task-augmented responses.
-
-        The SDK's get_prompt decorator doesn't support CreateTaskResult returns,
-        so we register a custom handler that checks request_context.experimental.is_task.
-        """
-
-        async def handler(req: mcp.types.GetPromptRequest) -> mcp.types.ServerResult:
-            name = req.params.name
-            arguments = req.params.arguments
-
-            # Check for task metadata via SDK's request context
-            task_meta = None
-            try:
-                ctx = self._mcp_server.request_context
-                if ctx.experimental.is_task:
-                    task_meta = ctx.experimental.task_metadata
-            except (AttributeError, LookupError):
-                pass
-
-            # Check for task metadata and route appropriately
-            async with fastmcp.server.context.Context(fastmcp=self):
-                try:
-                    prompt = await self.get_prompt(name)
-                except NotFoundError:
-                    prompt = None
-                if (
-                    prompt
-                    and self._should_enable_component(prompt)
-                    and hasattr(prompt, "task_config")
-                    and prompt.task_config
-                ):
-                    task_mode = prompt.task_config.mode  # type: ignore[union-attr]
-
-                    # Enforce mode="required" - must have task metadata
-                    if task_mode == "required" and not task_meta:
-                        raise McpError(
-                            ErrorData(
-                                code=METHOD_NOT_FOUND,
-                                message=f"Prompt '{name}' requires task-augmented execution",
-                            )
-                        )
-
-                    # Route to background if task metadata present and mode allows
-                    if task_meta and task_mode != "forbidden":
-                        task_meta_dict = task_meta.model_dump(exclude_none=True)
-                        result = await handle_prompt_as_task(
-                            self, name, arguments, task_meta_dict
-                        )
-                        return mcp.types.ServerResult(result)
-
-                    # Forbidden mode: task requested but mode="forbidden"
-                    # Raise error since prompts don't have isError field
-                    if task_meta and task_mode == "forbidden":
-                        raise McpError(
-                            ErrorData(
-                                code=METHOD_NOT_FOUND,
-                                message=f"Prompt '{name}' does not support task-augmented execution",
-                            )
-                        )
-
-            # Synchronous execution
-            result = await self._get_prompt_mcp(name, arguments)
-            return mcp.types.ServerResult(result)
-
-        self._mcp_server.request_handlers[mcp.types.GetPromptRequest] = handler
 
     def _setup_task_protocol_handlers(self) -> None:
         """Register SEP-1686 task protocol handlers with SDK."""
@@ -868,7 +680,7 @@ class FastMCP(Generic[LifespanResultT]):
         """Get all tools (unfiltered), including from providers, indexed by key."""
         all_tools = dict(await self._tool_manager.get_tools())
 
-        # Get tools from providers (including MountedProvider)
+        # Get tools from providers (including FastMCPProvider)
         for provider in self._providers:
             try:
                 provider_tools = await provider.list_tools()
@@ -973,7 +785,7 @@ class FastMCP(Generic[LifespanResultT]):
         """Get all resources (unfiltered), including from providers, indexed by key."""
         all_resources = dict(await self._resource_manager.get_resources())
 
-        # Get resources from providers (including MountedProvider)
+        # Get resources from providers (including FastMCPProvider)
         for provider in self._providers:
             try:
                 provider_resources = await provider.list_resources()
@@ -1019,7 +831,7 @@ class FastMCP(Generic[LifespanResultT]):
         """Get all resource templates (unfiltered), including from providers, indexed by key."""
         all_templates = dict(await self._resource_manager.get_resource_templates())
 
-        # Get templates from providers (including MountedProvider)
+        # Get templates from providers (including FastMCPProvider)
         for provider in self._providers:
             try:
                 provider_templates = await provider.list_resource_templates()
@@ -1065,7 +877,7 @@ class FastMCP(Generic[LifespanResultT]):
         """Get all prompts (unfiltered), including from providers, indexed by key."""
         all_prompts = dict(await self._prompt_manager.get_prompts())
 
-        # Get prompts from providers (including MountedProvider)
+        # Get prompts from providers (including FastMCPProvider)
         for provider in self._providers:
             try:
                 provider_prompts = await provider.list_prompts()
@@ -1159,7 +971,7 @@ class FastMCP(Generic[LifespanResultT]):
         """Get all additional HTTP routes including from providers.
 
         Returns a list of all custom HTTP routes from this server and
-        from all providers that have HTTP routes (e.g., MountedProvider).
+        from all providers that have HTTP routes (e.g., FastMCPProvider).
 
         Returns:
             List of Starlette BaseRoute objects
@@ -1480,6 +1292,7 @@ class FastMCP(Generic[LifespanResultT]):
         list[ContentBlock]
         | tuple[list[ContentBlock], dict[str, Any]]
         | mcp.types.CallToolResult
+        | mcp.types.CreateTaskResult
     ):
         """
         Handle MCP 'callTool' requests.
@@ -1493,6 +1306,8 @@ class FastMCP(Generic[LifespanResultT]):
         Returns:
             List of MCP Content objects containing the tool results
         """
+        from fastmcp.server.tasks.handlers import handle_tool_as_task
+
         logger.debug(
             f"[{self.name}] Handler called: call_tool %s with %s", key, arguments
         )
@@ -1530,14 +1345,11 @@ class FastMCP(Generic[LifespanResultT]):
 
                     # Route to background if task metadata present and mode allows
                     if task_meta and task_mode != "forbidden":
-                        # For FunctionTool, use Docket for background execution
-                        if isinstance(tool, FunctionTool):
-                            task_meta_dict = task_meta.model_dump(exclude_none=True)
-                            return await handle_tool_as_task(
-                                self, key, arguments, task_meta_dict
-                            )
-                        # For ProxyTool/mounted tools, proceed with normal execution
-                        # They will forward task metadata to their backend
+                        # Tool has task support, use Docket for background execution
+                        task_meta_dict = task_meta.model_dump(exclude_none=True)
+                        return await handle_tool_as_task(
+                            self, key, arguments, task_meta_dict
+                        )
 
                     # Forbidden mode: task requested but mode="forbidden"
                     # Return error result with returned_immediately=True
@@ -1564,6 +1376,135 @@ class FastMCP(Generic[LifespanResultT]):
                 raise NotFoundError(f"Unknown tool: {key}") from e
             except NotFoundError as e:
                 raise NotFoundError(f"Unknown tool: {key}") from e
+
+    async def _read_resource_handler(
+        self, req: mcp.types.ReadResourceRequest
+    ) -> mcp.types.ServerResult:
+        """Handle resources/read requests with task-augmented execution support.
+
+        This is a custom handler because the SDK's read_resource decorator
+        does not support returning CreateTaskResult for background tasks.
+        """
+        from fastmcp.server.tasks.handlers import handle_resource_as_task
+
+        uri = req.params.uri
+
+        # Check for task metadata via SDK's request context
+        task_meta = None
+        try:
+            ctx = self._mcp_server.request_context
+            if ctx.experimental.is_task:
+                task_meta = ctx.experimental.task_metadata
+        except (AttributeError, LookupError):
+            pass
+
+        async with fastmcp.server.context.Context(fastmcp=self):
+            # Get resource including from mounted servers
+            resource = await self._get_resource_or_template_or_none(str(uri))
+            if (
+                resource
+                and self._should_enable_component(resource)
+                and hasattr(resource, "task_config")
+            ):
+                task_mode = resource.task_config.mode  # type: ignore[union-attr]
+
+                # Enforce mode="required" - must have task metadata
+                if task_mode == "required" and not task_meta:
+                    raise McpError(
+                        ErrorData(
+                            code=METHOD_NOT_FOUND,
+                            message=f"Resource '{uri}' requires task-augmented execution",
+                        )
+                    )
+
+                # Route to background if task metadata present and mode allows
+                if task_meta and task_mode != "forbidden":
+                    task_meta_dict = task_meta.model_dump(exclude_none=True)
+                    result = await handle_resource_as_task(
+                        self, str(uri), resource, task_meta_dict
+                    )
+                    return mcp.types.ServerResult(result)
+
+                # Forbidden mode: task requested but mode="forbidden"
+                if task_meta and task_mode == "forbidden":
+                    raise McpError(
+                        ErrorData(
+                            code=METHOD_NOT_FOUND,
+                            message=f"Resource '{uri}' does not support task-augmented execution",
+                        )
+                    )
+
+            # Synchronous execution
+            contents = await self._read_resource_mcp(uri)
+            mcp_contents = [item.to_mcp_resource_contents(uri) for item in contents]
+            return mcp.types.ServerResult(
+                mcp.types.ReadResourceResult(contents=mcp_contents)
+            )
+
+    async def _get_prompt_handler(
+        self, req: mcp.types.GetPromptRequest
+    ) -> mcp.types.ServerResult:
+        """Handle prompts/get requests with task-augmented execution support.
+
+        This is a custom handler because the SDK's get_prompt decorator
+        does not support returning CreateTaskResult for background tasks.
+        """
+        from fastmcp.server.tasks.handlers import handle_prompt_as_task
+
+        name = req.params.name
+        arguments = req.params.arguments
+
+        # Check for task metadata via SDK's request context
+        task_meta = None
+        try:
+            ctx = self._mcp_server.request_context
+            if ctx.experimental.is_task:
+                task_meta = ctx.experimental.task_metadata
+        except (AttributeError, LookupError):
+            pass
+
+        async with fastmcp.server.context.Context(fastmcp=self):
+            try:
+                prompt = await self.get_prompt(name)
+            except NotFoundError:
+                prompt = None
+            if (
+                prompt
+                and self._should_enable_component(prompt)
+                and hasattr(prompt, "task_config")
+                and prompt.task_config
+            ):
+                task_mode = prompt.task_config.mode  # type: ignore[union-attr]
+
+                # Enforce mode="required" - must have task metadata
+                if task_mode == "required" and not task_meta:
+                    raise McpError(
+                        ErrorData(
+                            code=METHOD_NOT_FOUND,
+                            message=f"Prompt '{name}' requires task-augmented execution",
+                        )
+                    )
+
+                # Route to background if task metadata present and mode allows
+                if task_meta and task_mode != "forbidden":
+                    task_meta_dict = task_meta.model_dump(exclude_none=True)
+                    result = await handle_prompt_as_task(
+                        self, name, arguments, task_meta_dict
+                    )
+                    return mcp.types.ServerResult(result)
+
+                # Forbidden mode: task requested but mode="forbidden"
+                if task_meta and task_mode == "forbidden":
+                    raise McpError(
+                        ErrorData(
+                            code=METHOD_NOT_FOUND,
+                            message=f"Prompt '{name}' does not support task-augmented execution",
+                        )
+                    )
+
+            # Synchronous execution
+            result = await self._get_prompt_mcp(name, arguments)
+            return mcp.types.ServerResult(result)
 
     async def _call_tool_middleware(
         self,
@@ -2706,11 +2647,12 @@ class FastMCP(Generic[LifespanResultT]):
     def mount(
         self,
         server: FastMCP[LifespanResultT],
-        prefix: str | None = None,
+        namespace: str | None = None,
         as_proxy: bool | None = None,
         tool_names: dict[str, str] | None = None,
+        prefix: str | None = None,  # deprecated, use namespace
     ) -> None:
-        """Mount another FastMCP server on this server with an optional prefix.
+        """Mount another FastMCP server on this server with an optional namespace.
 
         Unlike importing (with import_server), mounting establishes a dynamic connection
         between servers. When a client interacts with a mounted server's objects through
@@ -2718,40 +2660,53 @@ class FastMCP(Generic[LifespanResultT]):
         This means changes to the mounted server are immediately reflected when accessed
         through the parent.
 
-        When a server is mounted with a prefix:
-        - Tools from the mounted server are accessible with prefixed names.
-          Example: If server has a tool named "get_weather", it will be available as "prefix_get_weather".
-        - Resources are accessible with prefixed URIs.
+        When a server is mounted with a namespace:
+        - Tools from the mounted server are accessible with namespaced names.
+          Example: If server has a tool named "get_weather", it will be available as "namespace_get_weather".
+        - Resources are accessible with namespaced URIs.
           Example: If server has a resource with URI "weather://forecast", it will be available as
-          "weather://prefix/forecast".
-        - Templates are accessible with prefixed URI templates.
+          "weather://namespace/forecast".
+        - Templates are accessible with namespaced URI templates.
           Example: If server has a template with URI "weather://location/{id}", it will be available
-          as "weather://prefix/location/{id}".
-        - Prompts are accessible with prefixed names.
+          as "weather://namespace/location/{id}".
+        - Prompts are accessible with namespaced names.
           Example: If server has a prompt named "weather_prompt", it will be available as
-          "prefix_weather_prompt".
+          "namespace_weather_prompt".
 
-        When a server is mounted without a prefix (prefix=None), its tools, resources, templates,
+        When a server is mounted without a namespace (namespace=None), its tools, resources, templates,
         and prompts are accessible with their original names. Multiple servers can be mounted
-        without prefixes, and they will be tried in order until a match is found.
+        without namespaces, and they will be tried in order until a match is found.
 
         The mounted server's lifespan is executed when the parent server starts, and its
         middleware chain is invoked for all operations (tool calls, resource reads, prompts).
 
         Args:
             server: The FastMCP server to mount.
-            prefix: Optional prefix to use for the mounted server's objects. If None,
+            namespace: Optional namespace to use for the mounted server's objects. If None,
                 the server's objects are accessible with their original names.
             as_proxy: Deprecated. Mounted servers now always have their lifespan and
                 middleware invoked. To create a proxy server, use FastMCP.as_proxy()
                 explicitly before mounting.
             tool_names: Optional mapping of original tool names to custom names. Use this
-                to override prefixed names. Keys are the original tool names from the
+                to override namespaced names. Keys are the original tool names from the
                 mounted server.
+            prefix: Deprecated. Use namespace instead.
         """
         import warnings
 
-        from fastmcp.server.providers import MountedProvider
+        from fastmcp.server.providers.fastmcp_provider import FastMCPProvider
+
+        # Handle deprecated prefix parameter
+        if prefix is not None:
+            warnings.warn(
+                "The 'prefix' parameter is deprecated, use 'namespace' instead",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            if namespace is None:
+                namespace = prefix
+            else:
+                raise ValueError("Cannot specify both 'prefix' and 'namespace'")
 
         if as_proxy is not None:
             warnings.warn(
@@ -2768,8 +2723,12 @@ class FastMCP(Generic[LifespanResultT]):
                 if not isinstance(server, FastMCPProxy):
                     server = FastMCP.as_proxy(server)
 
-        # Create a MountedProvider and add it to providers
-        provider = MountedProvider(server, prefix, tool_names)
+        # Create provider with optional transformations
+        provider: Provider = FastMCPProvider(server)
+        if namespace or tool_names:
+            provider = provider.with_transforms(
+                namespace=namespace, tool_renames=tool_names
+            )
         self._providers.append(provider)
 
     async def import_server(
@@ -2814,41 +2773,45 @@ class FastMCP(Generic[LifespanResultT]):
         """
         import warnings
 
-        from fastmcp.server.providers.mounted import add_resource_prefix
-
         warnings.warn(
             "import_server is deprecated, use mount() instead",
             DeprecationWarning,
             stacklevel=2,
         )
 
+        def add_resource_prefix(uri: str, prefix: str) -> str:
+            """Add prefix to resource URI: protocol://path → protocol://prefix/path."""
+            match = URI_PATTERN.match(uri)
+            if match:
+                protocol, path = match.groups()
+                return f"{protocol}{prefix}/{path}"
+            return uri
+
         # Import tools from the server
-        for key, tool in (await server.get_tools()).items():
+        for tool in (await server.get_tools()).values():
             if prefix:
-                tool = tool.model_copy(key=f"{prefix}_{key}")
+                tool = tool.model_copy(update={"name": f"{prefix}_{tool.name}"})
             self._tool_manager.add_tool(tool)
 
         # Import resources and templates from the server
-        for key, resource in (await server.get_resources()).items():
+        for resource in (await server.get_resources()).values():
             if prefix:
-                resource_key = add_resource_prefix(key, prefix)
-                resource = resource.model_copy(
-                    update={"name": f"{prefix}_{resource.name}"}, key=resource_key
-                )
+                new_uri = add_resource_prefix(str(resource.uri), prefix)
+                resource = resource.model_copy(update={"uri": new_uri})
             self._resource_manager.add_resource(resource)
 
-        for key, template in (await server.get_resource_templates()).items():
+        for template in (await server.get_resource_templates()).values():
             if prefix:
-                template_key = add_resource_prefix(key, prefix)
+                new_uri_template = add_resource_prefix(template.uri_template, prefix)
                 template = template.model_copy(
-                    update={"name": f"{prefix}_{template.name}"}, key=template_key
+                    update={"uri_template": new_uri_template}
                 )
             self._resource_manager.add_template(template)
 
         # Import prompts from the server
-        for key, prompt in (await server.get_prompts()).items():
+        for prompt in (await server.get_prompts()).values():
             if prefix:
-                prompt = prompt.model_copy(key=f"{prefix}_{key}")
+                prompt = prompt.model_copy(update={"name": f"{prefix}_{prompt.name}"})
             self._prompt_manager.add_prompt(prompt)
 
         if server._lifespan != default_lifespan:

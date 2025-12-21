@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Annotated, Any, TypedDict, cast
+from typing import TYPE_CHECKING, Annotated, Any, TypedDict
 
 from mcp.types import Icon
 from pydantic import BeforeValidator, Field, PrivateAttr
 from typing_extensions import Self, TypeVar
 
 import fastmcp
+from fastmcp.server.tasks.config import TaskConfig
 from fastmcp.utilities.types import FastMCPBaseModel
+
+if TYPE_CHECKING:
+    from docket import Docket
+    from docket.execution import Execution
 
 T = TypeVar("T", default=Any)
 
@@ -55,22 +60,21 @@ class FastMCPComponent(FastMCPBaseModel):
         default=True,
         description="Whether the component is enabled.",
     )
-
-    _key: str | None = PrivateAttr()
-
-    def __init__(self, *, key: str | None = None, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
-        self._key = key
+    task_config: Annotated[
+        TaskConfig,
+        Field(description="Background task execution configuration (SEP-1686)."),
+    ] = Field(default_factory=lambda: TaskConfig(mode="forbidden"))
 
     @property
     def key(self) -> str:
+        """The lookup key for this component. Returns name by default.
+
+        Subclasses override this to return different identifiers:
+        - Tools/Prompts: name
+        - Resources: str(uri)
+        - Templates: uri_template
         """
-        The key of the component. This is used for internal bookkeeping
-        and may reflect e.g. prefixes or other identifiers. You should not depend on
-        keys having a certain value, as the same tool loaded from different
-        hierarchies of servers may have different keys.
-        """
-        return self._key or self.name
+        return self.name
 
     def get_meta(
         self, include_fastmcp_meta: bool | None = None
@@ -96,29 +100,6 @@ class FastMCPComponent(FastMCPBaseModel):
 
         return meta or None
 
-    def model_copy(  # type: ignore[override]
-        self,
-        *,
-        update: dict[str, Any] | None = None,
-        deep: bool = False,
-        key: str | None = None,
-    ) -> Self:
-        """
-        Create a copy of the component.
-
-        Args:
-            update: A dictionary of fields to update.
-            deep: Whether to deep copy the component.
-            key: The key to use for the copy.
-        """
-        # `model_copy` has an `update` parameter but it doesn't work for certain private attributes
-        # https://github.com/pydantic/pydantic/issues/12116
-        # So we manually set the private attribute here instead, such as _key
-        copy = super().model_copy(update=update, deep=deep)
-        if key is not None:
-            copy._key = key
-        return cast(Self, copy)
-
     def __eq__(self, other: object) -> bool:
         if type(self) is not type(other):
             return False
@@ -140,6 +121,36 @@ class FastMCPComponent(FastMCPBaseModel):
     def copy(self) -> Self:  # type: ignore[override]
         """Create a copy of the component."""
         return self.model_copy()
+
+    def register_with_docket(self, docket: Docket) -> None:
+        """Register this component with docket for background execution.
+
+        No-ops if task_config.mode is "forbidden". Subclasses override to
+        register their callable (self.run, self.read, self.render, or self.fn).
+        """
+        # Base implementation: no-op (subclasses override)
+
+    async def add_to_docket(
+        self, docket: Docket, *args: Any, **kwargs: Any
+    ) -> Execution:
+        """Schedule this component for background execution via docket.
+
+        Subclasses override this to handle their specific calling conventions:
+        - Tool: add_to_docket(docket, arguments: dict, **kwargs)
+        - Resource: add_to_docket(docket, **kwargs)
+        - ResourceTemplate: add_to_docket(docket, params: dict, **kwargs)
+        - Prompt: add_to_docket(docket, arguments: dict | None, **kwargs)
+
+        The **kwargs are passed through to docket.add() (e.g., key=task_key).
+        """
+        if self.task_config.mode == "forbidden":
+            raise RuntimeError(
+                f"Cannot add {self.__class__.__name__} '{self.name}' to docket: "
+                f"task_config.mode is 'forbidden'"
+            )
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not implement add_to_docket()"
+        )
 
 
 class MirroredComponent(FastMCPComponent):

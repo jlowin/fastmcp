@@ -6,9 +6,13 @@ import inspect
 import json
 import warnings
 from collections.abc import Awaitable, Callable, Sequence
-from typing import Annotated, Any
+from typing import TYPE_CHECKING, Any
 
 import pydantic_core
+
+if TYPE_CHECKING:
+    from docket import Docket
+    from docket.execution import Execution
 from mcp import GetPromptResult
 from mcp.types import ContentBlock, Icon, PromptMessage, Role, TextContent
 from mcp.types import Prompt as SDKPrompt
@@ -204,6 +208,13 @@ class Prompt(FastMCPComponent):
         """
         raise NotImplementedError("Subclasses must implement render()")
 
+    def convert_result(self, raw_value: Any) -> PromptResult:
+        """Convert a raw return value to PromptResult.
+
+        Subclasses should override this to handle their specific conversion logic.
+        """
+        raise NotImplementedError("Subclasses must implement convert_result()")
+
     async def _render(
         self,
         arguments: dict[str, Any] | None = None,
@@ -229,15 +240,23 @@ class Prompt(FastMCPComponent):
             result, description=self.description, meta=self.meta
         )
 
+    def register_with_docket(self, docket: Docket) -> None:
+        """Register this prompt with docket for background execution."""
+        if self.task_config.mode == "forbidden":
+            return
+        docket.register(self.render, names=[self.key])
+
+    async def add_to_docket(  # type: ignore[override]
+        self, docket: Docket, arguments: dict[str, Any] | None, **kwargs: Any
+    ) -> Execution:
+        """Schedule this prompt for background execution via docket."""
+        return await docket.add(self.key, **kwargs)(arguments)
+
 
 class FunctionPrompt(Prompt):
     """A prompt that is a function."""
 
     fn: Callable[..., _PromptFnReturn | Awaitable[_PromptFnReturn]]
-    task_config: Annotated[
-        TaskConfig,
-        Field(description="Background task execution configuration (SEP-1686)."),
-    ] = Field(default_factory=lambda: TaskConfig(mode="forbidden"))
 
     @classmethod
     def from_function(
@@ -420,41 +439,66 @@ class FunctionPrompt(Prompt):
             if inspect.isawaitable(result):
                 result = await result
 
-            # Validate messages
-            if not isinstance(result, list | tuple):
-                result = [result]
-
-            # Convert result to messages
-            messages: list[PromptMessage] = []
-            for msg in result:
-                try:
-                    if isinstance(msg, PromptMessage):
-                        messages.append(msg)
-                    elif isinstance(msg, str):
-                        messages.append(
-                            PromptMessage(
-                                role="user",
-                                content=TextContent(type="text", text=msg),
-                            )
-                        )
-                    else:
-                        content = pydantic_core.to_json(msg, fallback=str).decode()
-                        messages.append(
-                            PromptMessage(
-                                role="user",
-                                content=TextContent(type="text", text=content),
-                            )
-                        )
-                except Exception as e:
-                    raise PromptError(
-                        "Could not convert prompt result to message."
-                    ) from e
-
-            return PromptResult(
-                messages=messages,
-                description=self.description,
-                meta=self.meta,
-            )
+            return self.convert_result(result)
         except Exception as e:
             logger.exception(f"Error rendering prompt {self.name}")
             raise PromptError(f"Error rendering prompt {self.name}.") from e
+
+    def convert_result(self, raw_value: Any) -> PromptResult:
+        """Convert a raw return value to PromptResult.
+
+        This handles the same conversion logic as render(), but works on
+        already-executed raw values (e.g., from Docket background execution).
+        """
+        # Normalize to list
+        if not isinstance(raw_value, list | tuple):
+            raw_value = [raw_value]
+
+        # Convert result to messages
+        messages: list[PromptMessage] = []
+        for msg in raw_value:
+            try:
+                if isinstance(msg, PromptMessage):
+                    messages.append(msg)
+                elif isinstance(msg, str):
+                    messages.append(
+                        PromptMessage(
+                            role="user",
+                            content=TextContent(type="text", text=msg),
+                        )
+                    )
+                else:
+                    content = pydantic_core.to_json(msg, fallback=str).decode()
+                    messages.append(
+                        PromptMessage(
+                            role="user",
+                            content=TextContent(type="text", text=content),
+                        )
+                    )
+            except Exception as e:
+                raise PromptError("Could not convert prompt result to message.") from e
+
+        return PromptResult(
+            messages=messages,
+            description=self.description,
+            meta=self.meta,
+        )
+
+    def register_with_docket(self, docket: Docket) -> None:
+        """Register this prompt with docket for background execution.
+
+        FunctionPrompt registers the underlying function, which has the user's
+        Depends parameters for docket to resolve.
+        """
+        if self.task_config.mode == "forbidden":
+            return
+        docket.register(self.fn, names=[self.key])  # type: ignore[arg-type]
+
+    async def add_to_docket(  # type: ignore[override]
+        self, docket: Docket, arguments: dict[str, Any] | None, **kwargs: Any
+    ) -> Execution:
+        """Schedule this prompt for background execution via docket.
+
+        FunctionPrompt splats the arguments dict since .fn expects **kwargs.
+        """
+        return await docket.add(self.key, **kwargs)(**(arguments or {}))
