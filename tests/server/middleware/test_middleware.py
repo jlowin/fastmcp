@@ -439,13 +439,15 @@ class TestMiddlewareHooks:
             ):
                 # modify argument
                 if context.message.name == "add":
-                    context.message.arguments["a"] += 100  # type: ignore
+                    assert isinstance(context.message.arguments["a"], int)
+                    context.message.arguments["a"] += 100
 
                 result = await call_next(context)
 
                 # modify result
                 if context.message.name == "add":
-                    result.structured_content["result"] += 5  # type: ignore
+                    assert isinstance(result.structured_content["result"], int)
+                    result.structured_content["result"] += 5
 
                 return result
 
@@ -454,7 +456,8 @@ class TestMiddlewareHooks:
         async with Client(server) as client:
             result = await client.call_tool("add", {"a": 1, "b": 2})
 
-        assert result.structured_content["result"] == 108  # type: ignore
+        assert isinstance(result.structured_content["result"], int)
+        assert result.structured_content["result"] == 108
 
 
 class TestNestedMiddlewareHooks:
