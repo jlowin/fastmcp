@@ -1266,16 +1266,17 @@ class FastMCP(Generic[LifespanResultT]):
         """
         Handle MCP 'callTool' requests.
 
-        Detects SEP-1686 task metadata and routes to background execution if supported.
+        Sets task metadata contextvar and runs middleware. The tool's _run() method
+        handles the backgrounding decision, ensuring middleware runs before Docket.
 
         Args:
             key: The name of the tool to call
             arguments: Arguments to pass to the tool
 
         Returns:
-            List of MCP Content objects containing the tool results
+            Tool result or CreateTaskResult for background execution
         """
-        from fastmcp.server.tasks.handlers import handle_tool_as_task
+        from fastmcp.server.dependencies import _task_metadata, _tool_call_key
 
         logger.debug(
             f"[{self.name}] Handler called: call_tool %s with %s", key, arguments
@@ -1283,64 +1284,31 @@ class FastMCP(Generic[LifespanResultT]):
 
         async with fastmcp.server.context.Context(fastmcp=self):
             try:
-                # Check for SEP-1686 task metadata via request context
-                task_meta = None
+                # Extract SEP-1686 task metadata from request context
+                task_meta_dict: dict[str, Any] | None = None
                 try:
-                    # Access task metadata from SDK's request context
                     ctx = self._mcp_server.request_context
                     if ctx.experimental.is_task:
                         task_meta = ctx.experimental.task_metadata
+                        task_meta_dict = task_meta.model_dump(exclude_none=True)
                 except (AttributeError, LookupError):
-                    # No request context available - proceed without task metadata
                     pass
 
-                # Get tool from local manager, mounted servers, or proxy
-                tool = await self._get_tool_with_task_config(key)
-                if (
-                    tool
-                    and self._should_enable_component(tool)
-                    and hasattr(tool, "task_config")
-                ):
-                    task_mode = tool.task_config.mode  # type: ignore[union-attr]
+                # Set contextvars so tool._run() can access them
+                task_token = _task_metadata.set(task_meta_dict)
+                key_token = _tool_call_key.set(key)
+                try:
+                    # Middleware always runs - tool._run() handles backgrounding
+                    result = await self._call_tool_middleware(key, arguments)
 
-                    # Enforce mode="required" - must have task metadata
-                    if task_mode == "required" and not task_meta:
-                        raise McpError(
-                            ErrorData(
-                                code=METHOD_NOT_FOUND,
-                                message=f"Tool '{key}' requires task-augmented execution",
-                            )
-                        )
+                    # Result could be CreateTaskResult (from nested tool._run())
+                    if isinstance(result, mcp.types.CreateTaskResult):
+                        return result
+                    return result.to_mcp_result()
+                finally:
+                    _task_metadata.reset(task_token)
+                    _tool_call_key.reset(key_token)
 
-                    # Route to background if task metadata present and mode allows
-                    if task_meta and task_mode != "forbidden":
-                        # Tool has task support, use Docket for background execution
-                        task_meta_dict = task_meta.model_dump(exclude_none=True)
-                        return await handle_tool_as_task(
-                            self, key, arguments, task_meta_dict
-                        )
-
-                    # Forbidden mode: task requested but mode="forbidden"
-                    # Return error result with returned_immediately=True
-                    if task_meta and task_mode == "forbidden":
-                        return mcp.types.CallToolResult(
-                            content=[
-                                mcp.types.TextContent(
-                                    type="text",
-                                    text=f"Tool '{key}' does not support task-augmented execution",
-                                )
-                            ],
-                            isError=True,
-                            _meta={
-                                "modelcontextprotocol.io/task": {
-                                    "returned_immediately": True
-                                }
-                            },
-                        )
-
-                # Synchronous execution (normal path)
-                result = await self._call_tool_middleware(key, arguments)
-                return result.to_mcp_result()
             except DisabledError as e:
                 raise NotFoundError(f"Unknown tool: {key}") from e
             except NotFoundError as e:
@@ -1479,9 +1447,12 @@ class FastMCP(Generic[LifespanResultT]):
         self,
         key: str,
         arguments: dict[str, Any],
-    ) -> ToolResult:
+    ) -> ToolResult | mcp.types.CreateTaskResult:
         """
         Applies this server's middleware and delegates the filtered call to the manager.
+
+        Returns ToolResult for synchronous execution, or CreateTaskResult if the
+        tool was submitted to Docket for background execution.
         """
 
         mw_context = MiddlewareContext[CallToolRequestParams](
@@ -1498,7 +1469,7 @@ class FastMCP(Generic[LifespanResultT]):
     async def _call_tool(
         self,
         context: MiddlewareContext[mcp.types.CallToolRequestParams],
-    ) -> ToolResult:
+    ) -> ToolResult | mcp.types.CreateTaskResult:
         """
         Call a tool
         """
@@ -1516,35 +1487,24 @@ class FastMCP(Generic[LifespanResultT]):
 
         # Try component providers (first registered wins)
         for provider in self._providers:
-            try:
-                tool = await provider.get_tool(tool_name)
-                if tool is not None and self._should_enable_component(tool):
-                    result = await provider.call_tool(
-                        tool_name, context.message.arguments or {}
-                    )
-                    if result is not None:
-                        return result
-            except (ValidationError, PydanticValidationError):
-                # Validation errors are never masked
-                logger.exception(f"Error validating tool {tool_name!r}")
-                raise
-            except ToolError:
-                logger.exception(f"Error calling tool {tool_name!r}")
-                raise
-            except Exception as e:
-                logger.exception(f"Error calling tool {tool_name!r} from provider")
-                if self._mask_error_details:
-                    raise ToolError(f"Error calling tool {tool_name!r}") from e
-                raise ToolError(f"Error calling tool {tool_name!r}: {e}") from e
+            tool = await provider.get_tool(tool_name)
+            if tool is not None and self._should_enable_component(tool):
+                return await self._execute_tool(
+                    tool, tool_name, context.message.arguments or {}
+                )
 
         raise NotFoundError(f"Unknown tool: {tool_name!r}")
 
     async def _execute_tool(
         self, tool: Tool, tool_name: str, arguments: dict[str, Any]
-    ) -> ToolResult:
-        """Run a tool with unified error handling."""
+    ) -> ToolResult | mcp.types.CreateTaskResult:
+        """Run a tool with unified error handling.
+
+        Calls tool._run() which handles task routing - checking the task_metadata
+        contextvar and submitting to Docket if appropriate.
+        """
         try:
-            return await tool.run(arguments)
+            return await tool._run(arguments)
         except (ValidationError, PydanticValidationError):
             # Validation errors are never masked - they indicate client input issues
             logger.exception(f"Error validating tool {tool_name!r}")
@@ -1634,39 +1594,22 @@ class FastMCP(Generic[LifespanResultT]):
 
         # Try component providers (first registered wins) - concrete resources
         for provider in self._providers:
-            try:
-                resource = await provider.get_resource(uri_str)
-                if resource is not None and self._should_enable_component(resource):
-                    content = await provider.read_resource(uri_str)
-                    if content is not None:
-                        return [content]
-            except ResourceError:
-                logger.exception(f"Error reading resource {uri_str!r}")
-                raise
-            except Exception as e:
-                logger.exception(f"Error reading resource {uri_str!r} from provider")
-                if self._mask_error_details:
-                    raise ResourceError(f"Error reading resource {uri_str!r}") from e
-                raise ResourceError(f"Error reading resource {uri_str!r}: {e}") from e
+            resource = await provider.get_resource(uri_str)
+            if resource is not None and self._should_enable_component(resource):
+                content = await self._execute_resource(resource, uri_str)
+                if content.mime_type is None:
+                    content.mime_type = resource.mime_type
+                return [content]
 
         # Try component providers (first registered wins) - templates
         for provider in self._providers:
-            try:
-                template = await provider.get_resource_template(uri_str)
-                if template is not None and self._should_enable_component(template):
-                    content = await provider.read_resource_template(uri_str)
-                    if content is not None:
-                        return [content]
-            except ResourceError:
-                logger.exception(f"Error reading resource {uri_str!r}")
-                raise
-            except Exception as e:
-                logger.exception(
-                    f"Error reading resource {uri_str!r} from provider template"
-                )
-                if self._mask_error_details:
-                    raise ResourceError(f"Error reading resource {uri_str!r}") from e
-                raise ResourceError(f"Error reading resource {uri_str!r}: {e}") from e
+            template = await provider.get_resource_template(uri_str)
+            if template is not None and self._should_enable_component(template):
+                params = template.matches(uri_str)
+                if params is not None:
+                    resource = await template.create_resource(uri_str, params)
+                    content = await self._execute_resource(resource, uri_str)
+                    return [content]
 
         raise NotFoundError(f"Unknown resource: {uri_str!r}")
 
@@ -1756,22 +1699,11 @@ class FastMCP(Generic[LifespanResultT]):
 
         # Try component providers (first registered wins)
         for provider in self._providers:
-            try:
-                prompt = await provider.get_prompt(name)
-                if prompt is not None and self._should_enable_component(prompt):
-                    result = await provider.render_prompt(
-                        name, context.message.arguments
-                    )
-                    if result is not None:
-                        return result
-            except PromptError:
-                logger.exception(f"Error rendering prompt {name!r}")
-                raise
-            except Exception as e:
-                logger.exception(f"Error rendering prompt {name!r} from provider")
-                if self._mask_error_details:
-                    raise PromptError(f"Error rendering prompt {name!r}") from e
-                raise PromptError(f"Error rendering prompt {name!r}: {e}") from e
+            prompt = await provider.get_prompt(name)
+            if prompt is not None and self._should_enable_component(prompt):
+                return await self._execute_prompt(
+                    prompt, name, context.message.arguments
+                )
 
         raise NotFoundError(f"Unknown prompt: {name!r}")
 

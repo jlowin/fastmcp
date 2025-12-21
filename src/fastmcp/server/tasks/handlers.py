@@ -21,29 +21,31 @@ if TYPE_CHECKING:
     from fastmcp.resources.resource import Resource
     from fastmcp.resources.template import ResourceTemplate
     from fastmcp.server.server import FastMCP
+    from fastmcp.tools.tool import Tool
 
 # Redis mapping TTL buffer: Add 15 minutes to Docket's execution_ttl
 TASK_MAPPING_TTL_BUFFER_SECONDS = 15 * 60
 
 
-async def handle_tool_as_task(
-    server: FastMCP,
-    tool_name: str,
+async def submit_tool_to_docket(
+    key: str,
+    tool: Tool,
     arguments: dict[str, Any],
     _task_meta: dict[str, Any],
 ) -> mcp.types.CreateTaskResult:
-    """Handle tool execution as background task (SEP-1686).
+    """Submit a tool to Docket for background execution (SEP-1686).
 
-    Queues the user's actual function to Docket (preserving signature for DI),
-    stores raw return values, converts to MCP types on retrieval.
+    Called by Tool._run() when task metadata is present and mode allows.
+    Queues the tool's run() method to Docket, stores raw return values,
+    and converts to MCP types on retrieval.
 
     Note: Client-requested TTL in task_meta is intentionally ignored.
     Server-side TTL policy (docket.execution_ttl) takes precedence for
     consistent task lifecycle management.
 
     Args:
-        server: FastMCP server instance
-        tool_name: Name of the tool to execute
+        key: The tool key as seen by the MCP layer (with namespace prefix)
+        tool: The Tool instance to execute
         arguments: Tool arguments
         _task_meta: Task metadata from request (unused - server TTL policy applies)
 
@@ -71,10 +73,7 @@ async def handle_tool_as_task(
         )
 
     # Build full task key with embedded metadata
-    task_key = build_task_key(session_id, server_task_id, "tool", tool_name)
-
-    # Get the tool to access user's function
-    tool = await server.get_tool(tool_name)
+    task_key = build_task_key(session_id, server_task_id, "tool", key)
 
     # Store task key mapping and creation timestamp in Redis for protocol handlers
     redis_key = f"fastmcp:task:{session_id}:{server_task_id}"
@@ -98,15 +97,15 @@ async def handle_tool_as_task(
             }
         },
     )
-
-    ctx = get_context()
     with suppress(Exception):
         # Don't let notification failures break task creation
         await ctx.session.send_notification(notification)  # type: ignore[arg-type]
 
     # Queue function to Docket by key (result storage via execution_ttl)
     # Use tool.add_to_docket() which handles calling conventions
-    await tool.add_to_docket(docket, arguments, key=task_key)
+    # `name` is the function lookup key (e.g., "child_multiply")
+    # `key` is the task result key (e.g., "fastmcp:task:{session}:{task_id}:tool:child_multiply")
+    await tool.add_to_docket(docket, arguments, name=key, key=task_key)
 
     # Spawn subscription task to send status notifications (SEP-1686 optional feature)
     from fastmcp.server.tasks.subscriptions import subscribe_to_task_updates

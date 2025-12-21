@@ -211,8 +211,11 @@ class Prompt(FastMCPComponent):
     def convert_result(self, raw_value: Any) -> PromptResult:
         """Convert a raw return value to PromptResult.
 
-        Subclasses should override this to handle their specific conversion logic.
+        Default implementation handles PromptResult pass-through.
+        Subclasses should override for other conversion logic.
         """
+        if isinstance(raw_value, PromptResult):
+            return raw_value
         raise NotImplementedError("Subclasses must implement convert_result()")
 
     async def _render(
@@ -502,3 +505,55 @@ class FunctionPrompt(Prompt):
         FunctionPrompt splats the arguments dict since .fn expects **kwargs.
         """
         return await docket.add(self.key, **kwargs)(**(arguments or {}))
+
+
+def convert_to_prompt_result(
+    raw_value: Any,
+    description: str | None = None,
+    meta: dict[str, Any] | None = None,
+) -> PromptResult:
+    """Convert any result to PromptResult.
+
+    Handles PromptResult passthrough and converts raw values to messages.
+
+    Args:
+        raw_value: Raw return value or PromptResult
+        description: Prompt description for the result
+        meta: Optional metadata for the result
+    """
+    if isinstance(raw_value, PromptResult):
+        return raw_value
+
+    # Normalize to list
+    if not isinstance(raw_value, list | tuple):
+        raw_value = [raw_value]
+
+    # Convert result to messages
+    messages: list[PromptMessage] = []
+    for msg in raw_value:
+        try:
+            if isinstance(msg, PromptMessage):
+                messages.append(msg)
+            elif isinstance(msg, str):
+                messages.append(
+                    PromptMessage(
+                        role="user",
+                        content=TextContent(type="text", text=msg),
+                    )
+                )
+            else:
+                content = pydantic_core.to_json(msg, fallback=str).decode()
+                messages.append(
+                    PromptMessage(
+                        role="user",
+                        content=TextContent(type="text", text=content),
+                    )
+                )
+        except Exception as e:
+            raise PromptError("Could not convert prompt result to message.") from e
+
+    return PromptResult(
+        messages=messages,
+        description=description,
+        meta=meta,
+    )
