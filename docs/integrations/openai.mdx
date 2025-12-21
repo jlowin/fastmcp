@@ -44,7 +44,7 @@ if __name__ == "__main__":
 
 Your server must be deployed to a public URL in order for OpenAI to access it.
 
-For development, you can use tools like `ngrok` to temporarily expose a locally-running server to the internet. We'll do that for this example (you may need to install `ngrok` and create a free account), but you can use any other method to deploy your server.
+For development, you can use tools like `ngrok` or `inspectr` to temporarily expose a locally-running server to the internet. We'll do that for this example by using `inspectr` since it comes with a UI for [MCP insights](https://inspectr.dev/docs/examples/expose-your-fastmcp/#mcp-insights) (or you may need to install `ngrok` which requires to create an account), but you can use any other method to deploy your server.
 
 Assuming you saved the above code as `server.py`, you can run the following two commands in two separate terminals to deploy your server and expose it to the internet:
 
@@ -53,13 +53,13 @@ Assuming you saved the above code as `server.py`, you can run the following two 
 python server.py
 ```
 
-```bash ngrok
-ngrok http 8000
+```bash inspectr
+npx @inspectr/inspectr --backend=http://localhost:8000 --expose
 ```
 </CodeGroup>
 
 <Warning>
-This exposes your unauthenticated server to the internet. Only run this command in a safe environment if you understand the risks.
+This exposes your unauthenticated server to the internet, with a public URL like `https://my-fastmcp.in-spectr.dev`. Only run this command in a safe environment if you understand the risks.
 </Warning>
 
 ### Call the Server
@@ -82,7 +82,7 @@ Here is an example of how to call your server from Python. Note that you'll need
 from openai import OpenAI
 
 # Your server URL (replace with your actual URL)
-url = 'https://your-server-url.com'
+url = 'https://my-fastmcp.in-spectr.dev'
 
 client = OpenAI()
 

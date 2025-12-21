@@ -37,7 +37,8 @@ if __name__ == "__main__":
 
 ### Deploy Your Server
 
-Your server must be accessible from the internet. For development, use `ngrok`:
+Your server must be accessible from the internet. For development, you can use `inspectr` or `ngrok`:
+For this example, we'll use [inspectr](https://inspectr.dev/docs/examples/expose-your-fastmcp/#mcp-insights), since it runs with just one command and comes with a handy UI for MCP insight & Tracing options.
 
 <CodeGroup>
 ```bash Terminal 1
@@ -45,11 +46,11 @@ python server.py
 ```
 
 ```bash Terminal 2
-ngrok http 8000
+npx @inspectr/inspectr --backend=http://localhost:8000 --expose
 ```
 </CodeGroup>
 
-Note your public URL (e.g., `https://abc123.ngrok.io`) for the next steps.
+Note your public URL (e.g., `https://my-fastmcp.in-spectr.dev`) for the next steps.
 
 ## Chat Mode
 
@@ -67,7 +68,7 @@ Chat mode lets you use MCP tools directly in ChatGPT conversations. See [OpenAI'
 1. In **Settings** → **Connectors**, click **Create**
 2. Enter:
    - **Name**: Your server name
-   - **Server URL**: `https://your-server.ngrok.io/mcp/`
+   - **Server URL**: `https://my-fastmcp.in-spectr.dev/mcp/`
 3. Check **I trust this provider**
 4. Add authentication if needed
 5. Click **Create**
