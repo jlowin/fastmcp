@@ -31,42 +31,26 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from fastmcp.prompts.prompt import Prompt, PromptResult
 from fastmcp.resources.resource import Resource, ResourceContent
 from fastmcp.resources.template import ResourceTemplate
 from fastmcp.tools.tool import Tool, ToolResult
 
-if TYPE_CHECKING:
-    from fastmcp.prompts.prompt import FunctionPrompt
-    from fastmcp.resources.resource import FunctionResource
-    from fastmcp.resources.template import FunctionResourceTemplate
-    from fastmcp.tools.tool import FunctionTool
-
 
 @dataclass
-class Components:
-    """Collection of MCP components."""
+class TaskComponents:
+    """Collection of components eligible for background task execution.
+
+    Used by get_tasks() to return components for Docket registration.
+    Components must implement register_with_docket() and add_to_docket().
+    """
 
     tools: Sequence[Tool] = ()
     resources: Sequence[Resource] = ()
     templates: Sequence[ResourceTemplate] = ()
     prompts: Sequence[Prompt] = ()
-
-
-@dataclass
-class TaskComponents:
-    """Collection of function-based components eligible for background task execution.
-
-    Used by get_tasks() to return components for Docket registration.
-    All components have a `.fn` attribute pointing to the underlying callable.
-    """
-
-    tools: Sequence[FunctionTool] = ()
-    resources: Sequence[FunctionResource] = ()
-    templates: Sequence[FunctionResourceTemplate] = ()
-    prompts: Sequence[FunctionPrompt] = ()
 
 
 class Provider:
@@ -80,13 +64,11 @@ class Provider:
         - Return `None` from `get_*` methods to indicate "I don't have it" (search continues)
         - Static components (registered via decorators) always take precedence over providers
         - Providers are queried in registration order; first non-None wins
+        - Components execute themselves via run()/read()/render() - providers just source them
 
     Error handling:
         - `list_*` methods: Errors are logged and the provider returns empty (graceful degradation).
           This allows other providers to still contribute their components.
-        - Execution methods (`call_tool`, `read_resource`, `render_prompt`): Errors propagate
-          with unified handling. ToolError/ResourceError/PromptError pass through; other
-          exceptions are wrapped with optional detail masking.
     """
 
     def with_transforms(
@@ -176,22 +158,6 @@ class Provider:
         tools = await self.list_tools()
         return next((t for t in tools if t.name == name), None)
 
-    async def call_tool(
-        self, name: str, arguments: dict[str, Any]
-    ) -> ToolResult | None:
-        """Execute a tool by name.
-
-        Default implementation gets the tool and runs it.
-        Override for custom execution logic (e.g., middleware, error handling).
-
-        Returns:
-            The ToolResult if found and executed, or None if tool not found.
-        """
-        tool = await self.get_tool(name)
-        if tool is None:
-            return None
-        return await tool.run(arguments)
-
     async def list_resources(self) -> Sequence[Resource]:
         """Return all available resources.
 
@@ -234,43 +200,6 @@ class Provider:
             None,
         )
 
-    async def read_resource(self, uri: str) -> ResourceContent | None:
-        """Read a concrete resource by URI.
-
-        Default implementation gets the resource and reads it.
-        Override for custom read logic (e.g., middleware, caching).
-
-        Note: This only handles concrete resources. For template-based resources,
-        use read_resource_template().
-
-        Returns:
-            The ResourceContent if found and read, or None if not found.
-        """
-        resource = await self.get_resource(uri)
-        if resource is None:
-            return None
-        return await resource._read()
-
-    async def read_resource_template(self, uri: str) -> ResourceContent | None:
-        """Read a resource via a matching template.
-
-        Default implementation finds a matching template, creates a resource
-        from it, and reads the content.
-        Override for custom read logic (e.g., middleware, caching).
-
-        Returns:
-            The ResourceContent if a matching template is found and read,
-            or None if no template matches.
-        """
-        template = await self.get_resource_template(uri)
-        if template is None:
-            return None
-        params = template.matches(uri)
-        if params is None:
-            return None
-        resource = await template.create_resource(uri, params)
-        return await resource._read()
-
     async def list_prompts(self) -> Sequence[Prompt]:
         """Return all available prompts.
 
@@ -290,21 +219,82 @@ class Provider:
         prompts = await self.list_prompts()
         return next((p for p in prompts if p.name == name), None)
 
+    # -------------------------------------------------------------------------
+    # Execution methods (optional - default implementations delegate to components)
+    # -------------------------------------------------------------------------
+
+    async def call_tool(
+        self, name: str, arguments: dict[str, Any]
+    ) -> ToolResult | None:
+        """Call a tool by name.
+
+        Default implementation gets the tool and calls its run() method.
+        Override for custom execution logic.
+
+        Returns:
+            ToolResult if the tool was found and executed, None otherwise.
+        """
+        tool = await self.get_tool(name)
+        if tool is None:
+            return None
+        return await tool.run(arguments)
+
+    async def read_resource(self, uri: str) -> ResourceContent | None:
+        """Read a resource by URI.
+
+        Default implementation gets the resource and calls its read() method.
+        Override for custom execution logic.
+
+        Returns:
+            ResourceContent if the resource was found and read, None otherwise.
+        """
+        resource = await self.get_resource(uri)
+        if resource is None:
+            return None
+        result = await resource.read()
+        if isinstance(result, ResourceContent):
+            return result
+        return ResourceContent.from_value(result)
+
+    async def read_resource_template(self, uri: str) -> ResourceContent | None:
+        """Read a resource template by URI.
+
+        Default implementation gets the template, extracts parameters from the URI,
+        and calls its read() method with those parameters.
+        Override for custom execution logic.
+
+        Returns:
+            ResourceContent if the template was found and read, None otherwise.
+        """
+        template = await self.get_resource_template(uri)
+        if template is None:
+            return None
+        params = template.matches(uri)
+        if params is None:
+            return None
+        result = await template.read(params)
+        if isinstance(result, ResourceContent):
+            return result
+        return ResourceContent.from_value(result)
+
     async def render_prompt(
         self, name: str, arguments: dict[str, Any] | None
     ) -> PromptResult | None:
         """Render a prompt by name.
 
-        Default implementation gets the prompt and renders it.
-        Override for custom render logic (e.g., middleware, templating).
+        Default implementation gets the prompt and calls its render() method.
+        Override for custom execution logic.
 
         Returns:
-            The PromptResult if found and rendered, or None if not found.
+            PromptResult if the prompt was found and rendered, None otherwise.
         """
         prompt = await self.get_prompt(name)
         if prompt is None:
             return None
-        return await prompt._render(arguments)
+        result = await prompt.render(arguments)
+        if isinstance(result, PromptResult):
+            return result
+        return PromptResult.from_value(result)
 
     # -------------------------------------------------------------------------
     # Task registration
@@ -333,23 +323,23 @@ class Provider:
             tools=[
                 t
                 for t in all_tools
-                if isinstance(t, FunctionTool) and t.task_config.mode != "forbidden"
+                if isinstance(t, FunctionTool) and t.task_config.supports_tasks()
             ],
             resources=[
                 r
                 for r in all_resources
-                if isinstance(r, FunctionResource) and r.task_config.mode != "forbidden"
+                if isinstance(r, FunctionResource) and r.task_config.supports_tasks()
             ],
             templates=[
                 t
                 for t in all_templates
                 if isinstance(t, FunctionResourceTemplate)
-                and t.task_config.mode != "forbidden"
+                and t.task_config.supports_tasks()
             ],
             prompts=[
                 p
                 for p in all_prompts
-                if isinstance(p, FunctionPrompt) and p.task_config.mode != "forbidden"
+                if isinstance(p, FunctionPrompt) and p.task_config.supports_tasks()
             ],
         )
 

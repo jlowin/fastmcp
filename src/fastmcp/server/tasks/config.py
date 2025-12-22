@@ -9,10 +9,16 @@ from __future__ import annotations
 import inspect
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any, Literal
 
 # Task execution modes per SEP-1686 / MCP ToolExecution.taskSupport
 TaskMode = Literal["forbidden", "optional", "required"]
+
+# Default values for task metadata (single source of truth)
+DEFAULT_POLL_INTERVAL = timedelta(seconds=5)  # Default poll interval
+DEFAULT_POLL_INTERVAL_MS = int(DEFAULT_POLL_INTERVAL.total_seconds() * 1000)
+DEFAULT_TTL_MS = 60_000  # Default TTL in milliseconds
 
 
 @dataclass
@@ -46,6 +52,7 @@ class TaskConfig:
     """
 
     mode: TaskMode = "optional"
+    poll_interval: timedelta = DEFAULT_POLL_INTERVAL
 
     @classmethod
     def from_bool(cls, value: bool) -> TaskConfig:
@@ -58,6 +65,14 @@ class TaskConfig:
             TaskConfig with appropriate mode.
         """
         return cls(mode="optional" if value else "forbidden")
+
+    def supports_tasks(self) -> bool:
+        """Check if this component supports task execution.
+
+        Returns:
+            True if mode is "optional" or "required", False if "forbidden".
+        """
+        return self.mode != "forbidden"
 
     def validate_function(self, fn: Callable[..., Any], name: str) -> None:
         """Validate that function is compatible with this task config.
@@ -72,7 +87,7 @@ class TaskConfig:
         Raises:
             ValueError: If task execution is enabled but function is sync.
         """
-        if self.mode == "forbidden":
+        if not self.supports_tasks():
             return
 
         # Unwrap callable classes and staticmethods

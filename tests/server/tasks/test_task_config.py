@@ -1,18 +1,22 @@
-"""Tests for TaskConfig mode enforcement (SEP-1686).
+"""Tests for TaskConfig (SEP-1686).
 
-Tests that the server correctly enforces task execution modes:
-- "forbidden": No task support, error if client requests task
-- "optional": Supports both sync and task execution
-- "required": Requires task execution, error if client doesn't request task
+Tests for TaskConfig:
+- Mode enforcement (forbidden, optional, required)
+- Poll interval configuration
 """
+
+from datetime import timedelta
 
 import pytest
 from mcp.shared.exceptions import McpError
+from mcp.types import TextContent, ToolExecution
+from mcp.types import Tool as MCPTool
 
 from fastmcp import FastMCP
 from fastmcp.client import Client
 from fastmcp.exceptions import ToolError
 from fastmcp.server.tasks import TaskConfig
+from fastmcp.tools.tool import Tool
 
 
 class TestTaskConfigNormalization:
@@ -27,8 +31,8 @@ class TestTaskConfigNormalization:
             return "ok"
 
         tool = await mcp._tool_manager.get_tool("my_tool")
-        assert tool is not None
-        assert tool.task_config.mode == "optional"  # type: ignore[attr-defined]
+        assert isinstance(tool, Tool)
+        assert tool.task_config.mode == "optional"
 
     async def test_task_false_normalizes_to_forbidden(self):
         """task=False should normalize to TaskConfig(mode='forbidden')."""
@@ -39,8 +43,8 @@ class TestTaskConfigNormalization:
             return "ok"
 
         tool = await mcp._tool_manager.get_tool("my_tool")
-        assert tool is not None
-        assert tool.task_config.mode == "forbidden"  # type: ignore[attr-defined]
+        assert isinstance(tool, Tool)
+        assert tool.task_config.mode == "forbidden"
 
     async def test_task_config_passed_directly(self):
         """TaskConfig should be preserved when passed directly."""
@@ -51,8 +55,8 @@ class TestTaskConfigNormalization:
             return "ok"
 
         tool = await mcp._tool_manager.get_tool("my_tool")
-        assert tool is not None
-        assert tool.task_config.mode == "required"  # type: ignore[attr-defined]
+        assert isinstance(tool, Tool)
+        assert tool.task_config.mode == "required"
 
     async def test_default_task_inherits_server_default(self):
         """Default task value should inherit from server default."""
@@ -64,8 +68,8 @@ class TestTaskConfigNormalization:
             return "ok"
 
         tool = await mcp_no_tasks._tool_manager.get_tool("my_tool_sync")
-        assert tool is not None
-        assert tool.task_config.mode == "forbidden"  # type: ignore[attr-defined]
+        assert isinstance(tool, Tool)
+        assert tool.task_config.mode == "forbidden"
 
         # Server with tasks enabled
         mcp_tasks = FastMCP("test", tasks=True)
@@ -75,8 +79,8 @@ class TestTaskConfigNormalization:
             return "ok"
 
         tool2 = await mcp_tasks._tool_manager.get_tool("my_tool_async")
-        assert tool2 is not None
-        assert tool2.task_config.mode == "optional"  # type: ignore[attr-defined]
+        assert isinstance(tool2, Tool)
+        assert tool2.task_config.mode == "optional"
 
 
 class TestToolModeEnforcement:
@@ -254,7 +258,8 @@ class TestPromptModeEnforcement:
         """Forbidden mode succeeds when called without task metadata."""
         async with Client(server) as client:
             result = await client.get_prompt("forbidden_prompt")
-            assert "forbidden message" in str(result.messages[0].content)  # type: ignore[attr-defined]
+            assert isinstance(result.messages[0].content, TextContent)
+            assert "forbidden message" in str(result.messages[0].content)
 
 
 class TestToolExecutionMetadata:
@@ -271,8 +276,9 @@ class TestToolExecutionMetadata:
         async with Client(mcp) as client:
             tools = await client.list_tools()
             tool = next(t for t in tools if t.name == "my_tool")
-            assert tool.execution is not None
-            assert tool.execution.taskSupport == "optional"  # type: ignore[attr-defined]
+            assert isinstance(tool, MCPTool)
+            assert isinstance(tool.execution, ToolExecution)
+            assert tool.execution.taskSupport == "optional"
 
     async def test_required_tool_exposes_task_support(self):
         """Tools with mode=required should expose taskSupport='required'."""
@@ -285,8 +291,9 @@ class TestToolExecutionMetadata:
         async with Client(mcp) as client:
             tools = await client.list_tools()
             tool = next(t for t in tools if t.name == "my_tool")
-            assert tool.execution is not None
-            assert tool.execution.taskSupport == "required"  # type: ignore[attr-defined]
+            assert isinstance(tool, MCPTool)
+            assert isinstance(tool.execution, ToolExecution)
+            assert tool.execution.taskSupport == "required"
 
     async def test_forbidden_tool_has_no_execution(self):
         """Tools with mode=forbidden should not expose execution metadata."""
@@ -344,5 +351,43 @@ class TestSyncFunctionValidation:
             return "ok"
 
         tool = await mcp._tool_manager.get_tool("sync_tool")
-        assert tool is not None
-        assert tool.task_config.mode == "forbidden"  # type: ignore[attr-defined]
+        assert isinstance(tool, Tool)
+        assert tool.task_config.mode == "forbidden"
+
+
+class TestPollIntervalConfiguration:
+    """Test poll_interval configuration in TaskConfig."""
+
+    async def test_default_poll_interval_is_5_seconds(self):
+        """Default poll_interval should be 5 seconds."""
+        config = TaskConfig()
+        assert config.poll_interval == timedelta(seconds=5)
+
+    async def test_custom_poll_interval_preserved(self):
+        """Custom poll_interval should be preserved in TaskConfig."""
+        config = TaskConfig(poll_interval=timedelta(seconds=10))
+        assert config.poll_interval == timedelta(seconds=10)
+
+    async def test_tool_inherits_poll_interval(self):
+        """Tool should inherit poll_interval from TaskConfig."""
+        mcp = FastMCP("test", tasks=False)
+
+        @mcp.tool(task=TaskConfig(mode="optional", poll_interval=timedelta(seconds=2)))
+        async def my_tool() -> str:
+            return "ok"
+
+        tool = await mcp._tool_manager.get_tool("my_tool")
+        assert isinstance(tool, Tool)
+        assert tool.task_config.poll_interval == timedelta(seconds=2)
+
+    async def test_task_true_uses_default_poll_interval(self):
+        """task=True should use default 5 second poll_interval."""
+        mcp = FastMCP("test", tasks=False)
+
+        @mcp.tool(task=True)
+        async def my_tool() -> str:
+            return "ok"
+
+        tool = await mcp._tool_manager.get_tool("my_tool")
+        assert isinstance(tool, Tool)
+        assert tool.task_config.poll_interval == timedelta(seconds=5)

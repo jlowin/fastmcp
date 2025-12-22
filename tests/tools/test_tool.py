@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Annotated, Any
 
 import pytest
@@ -54,7 +55,10 @@ class TestToolFromFunction:
                     "x-fastmcp-wrap-result": True,
                 },
                 "fn": HasName("add"),
-                "task_config": {"mode": "forbidden"},
+                "task_config": {
+                    "mode": "forbidden",
+                    "poll_interval": timedelta(seconds=5),
+                },
             }
         )
 
@@ -102,7 +106,10 @@ class TestToolFromFunction:
                     "x-fastmcp-wrap-result": True,
                 },
                 "fn": HasName("fetch_data"),
-                "task_config": {"mode": "forbidden"},
+                "task_config": {
+                    "mode": "forbidden",
+                    "poll_interval": timedelta(seconds=5),
+                },
             }
         )
 
@@ -136,7 +143,10 @@ class TestToolFromFunction:
                     "type": "object",
                     "x-fastmcp-wrap-result": True,
                 },
-                "task_config": {"mode": "forbidden"},
+                "task_config": {
+                    "mode": "forbidden",
+                    "poll_interval": timedelta(seconds=5),
+                },
             }
         )
 
@@ -170,7 +180,10 @@ class TestToolFromFunction:
                     "type": "object",
                     "x-fastmcp-wrap-result": True,
                 },
-                "task_config": {"mode": "forbidden"},
+                "task_config": {
+                    "mode": "forbidden",
+                    "poll_interval": timedelta(seconds=5),
+                },
             }
         )
 
@@ -213,7 +226,10 @@ class TestToolFromFunction:
                 },
                 "output_schema": {"additionalProperties": True, "type": "object"},
                 "fn": HasName("create_user"),
-                "task_config": {"mode": "forbidden"},
+                "task_config": {
+                    "mode": "forbidden",
+                    "poll_interval": timedelta(seconds=5),
+                },
             }
         )
 
@@ -275,7 +291,10 @@ class TestToolFromFunction:
                     "required": ["x"],
                     "type": "object",
                 },
-                "task_config": {"mode": "forbidden"},
+                "task_config": {
+                    "mode": "forbidden",
+                    "poll_interval": timedelta(seconds=5),
+                },
             }
         )
 
@@ -308,7 +327,10 @@ class TestToolFromFunction:
                     "required": ["_a", "_b"],
                     "type": "object",
                 },
-                "task_config": {"mode": "forbidden"},
+                "task_config": {
+                    "mode": "forbidden",
+                    "poll_interval": timedelta(seconds=5),
+                },
             }
         )
 
@@ -363,7 +385,10 @@ class TestToolFromFunction:
                     "type": "object",
                     "x-fastmcp-wrap-result": True,
                 },
-                "task_config": {"mode": "forbidden"},
+                "task_config": {
+                    "mode": "forbidden",
+                    "poll_interval": timedelta(seconds=5),
+                },
             }
         )
 
@@ -741,7 +766,8 @@ class TestToolFromFunctionOutputSchema:
         # Dict objects automatically become structured content even without schema
         assert result.structured_content == {"message": "Hello, world!"}
         assert len(result.content) == 1
-        assert result.content[0].text == '{"message":"Hello, world!"}'  # type: ignore[attr-defined]
+        assert isinstance(result.content[0], TextContent)
+        assert result.content[0].text == '{"message":"Hello, world!"}'
 
     async def test_output_schema_none_disables_structured_content(self):
         """Test that output_schema=None explicitly disables structured content."""
@@ -755,7 +781,8 @@ class TestToolFromFunctionOutputSchema:
         result = await tool.run({})
         assert result.structured_content is None
         assert len(result.content) == 1
-        assert result.content[0].text == "42"  # type: ignore[attr-defined]
+        assert isinstance(result.content[0], TextContent)
+        assert result.content[0].text == "42"
 
     async def test_output_schema_inferred_when_not_specified(self):
         """Test that output schema is inferred when not explicitly specified."""
@@ -795,7 +822,8 @@ class TestToolFromFunctionOutputSchema:
         result = await tool.run({})
         # Dict result with object schema is used directly
         assert result.structured_content == {"value": 42}
-        assert result.content[0].text == '{"value":42}'  # type: ignore[attr-defined]
+        assert isinstance(result.content[0], TextContent)
+        assert result.content[0].text == '{"value":42}'
 
     async def test_explicit_object_schema_with_non_dict_return_fails(self):
         """Test that explicit object schemas fail when function returns non-dict."""
@@ -849,7 +877,8 @@ class TestToolFromFunctionOutputSchema:
         result = await tool.run({})
         # Unstructured content
         assert len(result.content) == 1
-        assert result.content[0].text == "hello"  # type: ignore[attr-defined]
+        assert isinstance(result.content[0], TextContent)
+        assert result.content[0].text == "hello"
         # Structured content should be wrapped
         assert result.structured_content == {"result": "hello"}
 
@@ -917,7 +946,9 @@ class TestToolFromFunctionOutputSchema:
         assert result_default.structured_content == {
             "result": 123
         }  # Schema-based generation with wrapping
-        assert result_none.content[0].text == result_default.content[0].text == "123"  # type: ignore[attr-defined]
+        assert isinstance(result_none.content[0], TextContent)
+        assert isinstance(result_default.content[0], TextContent)
+        assert result_none.content[0].text == result_default.content[0].text == "123"
 
     async def test_non_object_output_schema_raises_error(self):
         """Test that providing a non-object output schema raises a ValueError."""

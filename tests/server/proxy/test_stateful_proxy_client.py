@@ -8,7 +8,7 @@ from fastmcp import Client, Context, FastMCP
 from fastmcp.client.logging import LogMessage
 from fastmcp.client.transports import FastMCPTransport
 from fastmcp.exceptions import ToolError
-from fastmcp.server.proxy import FastMCPProxy, StatefulProxyClient
+from fastmcp.server.providers.proxy import FastMCPProxy, StatefulProxyClient
 from fastmcp.utilities.tests import find_available_port
 
 
@@ -137,8 +137,8 @@ class TestStatefulProxyClient:
             client_factory=StatefulProxyClient(mcp_b).new_stateful
         )
         multi_proxy_mcp = FastMCP()
-        multi_proxy_mcp.mount(proxy_mcp_a, prefix="a")
-        multi_proxy_mcp.mount(proxy_mcp_b, prefix="b")
+        multi_proxy_mcp.mount(proxy_mcp_a, namespace="a")
+        multi_proxy_mcp.mount(proxy_mcp_b, namespace="b")
 
         async with Client(multi_proxy_mcp) as client:
             result_a = await client.call_tool("a_tool_a", {})
