@@ -713,7 +713,7 @@ def _convert_to_content(
     """Convert a result to a sequence of content objects."""
 
     if result is None:
-        return [TextContent(type="text", text='')]
+        return [TextContent(type="text", text="")]
 
     if not isinstance(result, (list | tuple)) or not result:
         return [_convert_to_single_content_block(result, serializer)]
