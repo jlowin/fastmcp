@@ -548,7 +548,7 @@ class ProxyProvider(Provider):
         server lifespan initialization, which would open the client before any
         context is set. All Proxy* components have task_config.mode="forbidden".
         """
-        return TaskComponents(tools=[], resources=[], prompts=[])
+        return TaskComponents()
 
     # lifespan() uses default implementation (empty context manager)
     # because client cleanup is handled per-request
