@@ -1859,7 +1859,11 @@ class FastMCP(Generic[LifespanResultT]):
         meta: dict[str, Any] | None = None,
         enabled: bool | None = None,
         task: bool | TaskConfig | None = None,
-    ) -> Callable[[AnyFunction], FunctionTool] | FunctionTool:
+    ) -> (
+        Callable[[AnyFunction], FunctionTool]
+        | FunctionTool
+        | partial[Callable[[AnyFunction], FunctionTool] | FunctionTool]
+    ):
         """Decorator to register a tool.
 
         Tools can optionally request a Context object by adding a parameter with the
@@ -2241,7 +2245,11 @@ class FastMCP(Generic[LifespanResultT]):
         enabled: bool | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
-    ) -> Callable[[AnyFunction], FunctionPrompt] | FunctionPrompt:
+    ) -> (
+        Callable[[AnyFunction], FunctionPrompt]
+        | FunctionPrompt
+        | partial[Callable[[AnyFunction], FunctionPrompt] | FunctionPrompt]
+    ):
         """Decorator to register a prompt.
 
         Prompts can optionally request a Context object by adding a parameter with the
@@ -2905,7 +2913,7 @@ class FastMCP(Generic[LifespanResultT]):
 
             # Fresh client created from transport - use fresh sessions per request
             def proxy_client_factory():
-                return base_client.new()
+                return base_client.new()  # type: ignore[misc]
 
             client_factory = proxy_client_factory
 
