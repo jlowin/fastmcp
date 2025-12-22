@@ -111,7 +111,7 @@ class OpenAPIProvider(Provider):
             self._spec = SchemaPath.from_dict(openapi_spec)  # type: ignore[arg-type]
             self._director = RequestDirector(self._spec)
         except Exception as e:
-            logger.error(f"Failed to initialize RequestDirector: {e}")
+            logger.exception("Failed to initialize RequestDirector")
             raise ValueError(f"Invalid OpenAPI specification: {e}") from e
 
         http_routes = parse_openapi_to_http_routes(openapi_spec)

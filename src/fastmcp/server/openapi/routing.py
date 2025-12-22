@@ -4,6 +4,8 @@
     This module is deprecated. Import from fastmcp.server.providers.openapi instead.
 """
 
+# ruff: noqa: E402
+
 import warnings
 
 # Backwards compatibility - export everything that was previously public
@@ -24,7 +26,6 @@ warnings.warn(
 )
 
 # Re-export from new canonical location
-# ruff: noqa: E402
 from fastmcp.server.providers.openapi.routing import (
     DEFAULT_ROUTE_MAPPINGS as DEFAULT_ROUTE_MAPPINGS,
 )

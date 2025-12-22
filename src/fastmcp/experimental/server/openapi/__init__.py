@@ -11,9 +11,8 @@ warnings.warn(
 )
 
 # Import from canonical location
-# ruff: noqa: E402
-from fastmcp.server.openapi.server import FastMCPOpenAPI as FastMCPOpenAPI
-from fastmcp.server.providers.openapi import (
+from fastmcp.server.openapi.server import FastMCPOpenAPI as FastMCPOpenAPI  # noqa: E402
+from fastmcp.server.providers.openapi import (  # noqa: E402
     ComponentFn as ComponentFn,
     MCPType as MCPType,
     OpenAPIResource as OpenAPIResource,
@@ -22,7 +21,7 @@ from fastmcp.server.providers.openapi import (
     RouteMap as RouteMap,
     RouteMapFn as RouteMapFn,
 )
-from fastmcp.server.providers.openapi.routing import (
+from fastmcp.server.providers.openapi.routing import (  # noqa: E402
     DEFAULT_ROUTE_MAPPINGS as DEFAULT_ROUTE_MAPPINGS,
     _determine_route_type as _determine_route_type,
 )
