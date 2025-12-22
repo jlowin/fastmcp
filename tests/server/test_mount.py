@@ -3,12 +3,13 @@ import sys
 from contextlib import asynccontextmanager
 
 import pytest
+from mcp.types import TextContent, TextResourceContents
 
 from fastmcp import FastMCP
 from fastmcp.client import Client
 from fastmcp.client.transports import FastMCPTransport, SSETransport
 from fastmcp.server.providers import FastMCPProvider, TransformingProvider
-from fastmcp.server.proxy import FastMCPProxy
+from fastmcp.server.providers.proxy import FastMCPProxy
 from fastmcp.tools.tool import Tool
 from fastmcp.tools.tool_transform import TransformedTool
 from fastmcp.utilities.tests import caplog_for_fastmcp
@@ -77,7 +78,7 @@ class TestBasicMount:
             return "This is from the sub app"
 
         # Mount with empty prefix but without deprecated separators
-        main_app.mount(sub_app, prefix=prefix)
+        main_app.mount(sub_app, namespace=prefix)
 
         tools = await main_app.get_tools()
         # With empty prefix, the tool should keep its original name
@@ -144,7 +145,8 @@ class TestBasicMount:
         # Test actual functionality
         async with Client(main_app) as client:
             resource_result = await client.read_resource("data://config")
-            assert resource_result[0].text == "Sub resource data"  # type: ignore[attr-defined]
+            assert isinstance(resource_result[0], TextResourceContents)
+            assert resource_result[0].text == "Sub resource data"
 
     async def test_mount_resource_templates_no_prefix(self):
         """Test mounting a server with resource templates without prefix."""
@@ -165,7 +167,8 @@ class TestBasicMount:
         # Test actual functionality
         async with Client(main_app) as client:
             template_result = await client.read_resource("users://123/info")
-            assert template_result[0].text == "Sub template for user 123"  # type: ignore[attr-defined]
+            assert isinstance(template_result[0], TextResourceContents)
+            assert template_result[0].text == "Sub template for user 123"
 
     async def test_mount_prompts_no_prefix(self):
         """Test mounting a server with prompts without prefix."""
@@ -413,7 +416,8 @@ class TestPrefixConflictResolution:
 
             # Test that reading the resource uses the first server's implementation
             result = await client.read_resource("shared://data")
-            assert result[0].text == "First app data"  # type: ignore[attr-defined]
+            assert isinstance(result[0], TextResourceContents)
+            assert result[0].text == "First app data"
 
     async def test_first_server_wins_resources_same_prefix(self):
         """Test that first mounted server wins for resources when same prefix is used."""
@@ -444,7 +448,8 @@ class TestPrefixConflictResolution:
 
             # Test that reading the resource uses the first server's implementation
             result = await client.read_resource("shared://api/data")
-            assert result[0].text == "First app data"  # type: ignore[attr-defined]
+            assert isinstance(result[0], TextResourceContents)
+            assert result[0].text == "First app data"
 
     async def test_first_server_wins_resource_templates_no_prefix(self):
         """Test that first mounted server wins for resource templates when no prefix is used."""
@@ -475,7 +480,8 @@ class TestPrefixConflictResolution:
 
             # Test that reading the resource uses the first server's implementation
             result = await client.read_resource("users://123/profile")
-            assert result[0].text == "First app user 123"  # type: ignore[attr-defined]
+            assert isinstance(result[0], TextResourceContents)
+            assert result[0].text == "First app user 123"
 
     async def test_first_server_wins_resource_templates_same_prefix(self):
         """Test that first mounted server wins for resource templates when same prefix is used."""
@@ -506,7 +512,8 @@ class TestPrefixConflictResolution:
 
             # Test that reading the resource uses the first server's implementation
             result = await client.read_resource("users://api/123/profile")
-            assert result[0].text == "First app user 123"  # type: ignore[attr-defined]
+            assert isinstance(result[0], TextResourceContents)
+            assert result[0].text == "First app user 123"
 
     async def test_first_server_wins_prompts_no_prefix(self):
         """Test that first mounted server wins for prompts when no prefix is used."""
@@ -536,7 +543,8 @@ class TestPrefixConflictResolution:
             # Test that getting the prompt uses the first server's implementation
             result = await client.get_prompt("shared_prompt", {})
             assert result.messages is not None
-            assert result.messages[0].content.text == "First app prompt"  # type: ignore[attr-defined]
+            assert isinstance(result.messages[0].content, TextContent)
+            assert result.messages[0].content.text == "First app prompt"
 
     async def test_first_server_wins_prompts_same_prefix(self):
         """Test that first mounted server wins for prompts when same prefix is used."""
@@ -568,7 +576,8 @@ class TestPrefixConflictResolution:
             # Test that getting the prompt uses the first server's implementation
             result = await client.get_prompt("api_shared_prompt", {})
             assert result.messages is not None
-            assert result.messages[0].content.text == "First app prompt"  # type: ignore[attr-defined]
+            assert isinstance(result.messages[0].content, TextContent)
+            assert result.messages[0].content.text == "First app prompt"
 
 
 class TestDynamicChanges:
@@ -646,7 +655,8 @@ class TestResourcesAndTemplates:
         # Check that resource can be accessed
         async with Client(main_app) as client:
             result = await client.read_resource("data://data/users")
-            assert json.loads(result[0].text) == ["user1", "user2"]  # type: ignore[attr-defined]
+            assert isinstance(result[0], TextResourceContents)
+            assert json.loads(result[0].text) == ["user1", "user2"]
 
     async def test_mount_with_resource_templates(self):
         """Test mounting a server with resource templates."""
@@ -667,7 +677,8 @@ class TestResourcesAndTemplates:
         # Check template instantiation
         async with Client(main_app) as client:
             result = await client.read_resource("users://api/123/profile")
-            profile = json.loads(result[0].text)  # type: ignore
+            assert isinstance(result[0], TextResourceContents)
+            profile = json.loads(result[0].text)
             assert profile["id"] == "123"
             assert profile["name"] == "User 123"
 
@@ -691,7 +702,8 @@ class TestResourcesAndTemplates:
         # Check access to the resource
         async with Client(main_app) as client:
             result = await client.read_resource("data://data/config")
-            config = json.loads(result[0].text)  # type: ignore[attr-defined]
+            assert isinstance(result[0], TextResourceContents)
+            config = json.loads(result[0].text)
             assert config["version"] == "1.0"
 
 
@@ -817,7 +829,8 @@ class TestProxyServer:
         # Resource should be accessible through main app
         async with Client(main_app) as client:
             result = await client.read_resource("config://proxy/settings")
-            config = json.loads(result[0].text)  # type: ignore[attr-defined]
+            assert isinstance(result[0], TextResourceContents)
+            config = json.loads(result[0].text)
             assert config["api_key"] == "12345"
 
     async def test_proxy_server_with_prompts(self):
@@ -1148,7 +1161,8 @@ class TestCustomRouteForwarding:
 
         routes = server._get_additional_http_routes()
         assert len(routes) == 1
-        assert routes[0].path == "/test"  # type: ignore[attr-defined]
+        assert hasattr(routes[0], "path")
+        assert routes[0].path == "/test"
 
     async def test_mounted_servers_tracking(self):
         """Test that _providers list tracks mounted servers correctly."""
@@ -1195,7 +1209,7 @@ class TestCustomRouteForwarding:
 
         routes = server._get_additional_http_routes()
         assert len(routes) == 2
-        route_paths = [route.path for route in routes]  # type: ignore[attr-defined]
+        route_paths = [route.path for route in routes if hasattr(route, "path")]
         assert "/route1" in route_paths
         assert "/route2" in route_paths
 
@@ -1222,8 +1236,8 @@ class TestDeeplyNestedMount:
         def multiply(a: int, b: int) -> int:
             return a * b
 
-        middle.mount(leaf, prefix="leaf")
-        root.mount(middle, prefix="middle")
+        middle.mount(leaf, namespace="leaf")
+        root.mount(middle, namespace="middle")
 
         async with Client(root) as client:
             # Tool at level 2 should work
@@ -1248,8 +1262,8 @@ class TestDeeplyNestedMount:
         def middle_data() -> str:
             return "middle data"
 
-        middle.mount(leaf, prefix="leaf")
-        root.mount(middle, prefix="middle")
+        middle.mount(leaf, namespace="leaf")
+        root.mount(middle, namespace="middle")
 
         async with Client(root) as client:
             # Resource at level 2 should work
@@ -1274,8 +1288,8 @@ class TestDeeplyNestedMount:
         def middle_item(id: str) -> str:
             return f"middle item {id}"
 
-        middle.mount(leaf, prefix="leaf")
-        root.mount(middle, prefix="middle")
+        middle.mount(leaf, namespace="leaf")
+        root.mount(middle, namespace="middle")
 
         async with Client(root) as client:
             # Resource template at level 2 should work
@@ -1300,19 +1314,21 @@ class TestDeeplyNestedMount:
         def middle_prompt(name: str) -> str:
             return f"Hello from middle: {name}"
 
-        middle.mount(leaf, prefix="leaf")
-        root.mount(middle, prefix="middle")
+        middle.mount(leaf, namespace="leaf")
+        root.mount(middle, namespace="middle")
 
         async with Client(root) as client:
             # Prompt at level 2 should work
             result = await client.get_prompt("middle_middle_prompt", {"name": "World"})
-            assert "Hello from middle: World" in result.messages[0].content.text  # type: ignore[union-attr]
+            assert isinstance(result.messages[0].content, TextContent)
+            assert "Hello from middle: World" in result.messages[0].content.text
 
             # Prompt at level 3 should also work
             result = await client.get_prompt(
                 "middle_leaf_leaf_prompt", {"name": "Test"}
             )
-            assert "Hello from leaf: Test" in result.messages[0].content.text  # type: ignore[union-attr]
+            assert isinstance(result.messages[0].content, TextContent)
+            assert "Hello from leaf: Test" in result.messages[0].content.text
 
     async def test_four_level_nested_tool_invocation(self):
         """Test invoking tools from servers mounted 4 levels deep."""
@@ -1325,9 +1341,9 @@ class TestDeeplyNestedMount:
         def deep_tool() -> str:
             return "very deep"
 
-        level2.mount(level3, prefix="l3")
-        level1.mount(level2, prefix="l2")
-        root.mount(level1, prefix="l1")
+        level2.mount(level3, namespace="l3")
+        level1.mount(level2, namespace="l2")
+        root.mount(level1, namespace="l1")
 
         async with Client(root) as client:
             # Verify tool is listed
