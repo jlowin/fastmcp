@@ -217,7 +217,7 @@ class TestPerformanceComparison:
         """Verify that performance optimization doesn't break functionality."""
         client = httpx.AsyncClient(base_url="https://api.example.com")
 
-        # Create both servers
+        # Create both servers (both use provider-based architecture now)
         legacy_server = LegacyFastMCPOpenAPI(
             openapi_spec=comprehensive_spec,
             client=client,
@@ -229,16 +229,26 @@ class TestPerformanceComparison:
             name="New Server",
         )
 
+        # Get tools from the provider (tools are now provided, not in tool manager)
+        def get_provider_tools(server):
+            for provider in server._providers:
+                if hasattr(provider, "_tools"):
+                    return provider._tools
+            return {}
+
+        legacy_tools = get_provider_tools(legacy_server)
+        new_tools = get_provider_tools(new_server)
+
         # Both should have the same number of tools
-        legacy_tool_count = len(legacy_server._tool_manager._tools)
-        new_tool_count = len(new_server._tool_manager._tools)
+        legacy_tool_count = len(legacy_tools)
+        new_tool_count = len(new_tools)
 
         assert legacy_tool_count == new_tool_count
         assert legacy_tool_count == 6  # 6 operations in the spec
 
         # Tool names should be identical
-        legacy_tool_names = set(legacy_server._tool_manager._tools.keys())
-        new_tool_names = set(new_server._tool_manager._tools.keys())
+        legacy_tool_names = set(legacy_tools.keys())
+        new_tool_names = set(new_tools.keys())
 
         assert legacy_tool_names == new_tool_names
 
@@ -257,6 +267,13 @@ class TestPerformanceComparison:
         """Test that new implementation doesn't significantly increase memory usage."""
         import gc
 
+        # Helper to get tools from provider
+        def get_provider_tools(server):
+            for provider in server._providers:
+                if hasattr(provider, "_tools"):
+                    return provider._tools
+            return {}
+
         # This is a basic test - in practice you'd use more sophisticated memory profiling
         gc.collect()  # Clean up before baseline
         baseline_refs = len(gc.get_objects())
@@ -273,7 +290,7 @@ class TestPerformanceComparison:
 
         # Servers should all be functional
         assert len(servers) == 10
-        assert all(len(s._tool_manager._tools) == 6 for s in servers)
+        assert all(len(get_provider_tools(s)) == 6 for s in servers)
 
         # Memory usage shouldn't explode (this is a basic check)
         gc.collect()  # Clean up
