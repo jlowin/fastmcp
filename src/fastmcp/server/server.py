@@ -2501,7 +2501,7 @@ class FastMCP(Generic[LifespanResultT]):
             async with self._lifespan_manager():
                 config = uvicorn.Config(app, host=host, port=port, **config_kwargs)
                 server = uvicorn.Server(config)
-                path = app.state.path.lstrip("/")  # type: ignore
+                path = getattr(app.state, "path", "").lstrip("/")
                 logger.info(
                     f"Starting MCP server {self.name!r} with transport {transport!r} on http://{host}:{port}/{path}"
                 )
@@ -2912,11 +2912,12 @@ class FastMCP(Generic[LifespanResultT]):
 
                 client_factory = fresh_client_factory
         else:
-            base_client = ProxyClient(backend)  # type: ignore
+            # backend is not a Client, so it's compatible with ProxyClient.__init__
+            base_client = ProxyClient(cast(Any, backend))
 
             # Fresh client created from transport - use fresh sessions per request
             def proxy_client_factory():
-                return base_client.new()  # type: ignore[misc]
+                return base_client.new()
 
             client_factory = proxy_client_factory
 

@@ -7,7 +7,7 @@ These handlers query and manage existing tasks (contrast with handlers.py which 
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import mcp.types
 from docket.execution import ExecutionState
@@ -145,7 +145,9 @@ async def tasks_get_handler(server: FastMCP, params: dict[str, Any]) -> GetTaskR
         await execution.sync()
 
         # Map Docket state to MCP state
-        mcp_state = DOCKET_TO_MCP_STATE.get(execution.state, "failed")
+        mcp_state: Literal[
+            "working", "input_required", "completed", "failed", "cancelled"
+        ] = DOCKET_TO_MCP_STATE.get(execution.state, "failed")  # type: ignore[assignment]
 
         # Build response (use default ttl since we don't track per-task values)
         # createdAt is REQUIRED per SEP-1686 final spec (line 430)
@@ -163,10 +165,22 @@ async def tasks_get_handler(server: FastMCP, params: dict[str, Any]) -> GetTaskR
             # Extract progress message from Docket if available (spec line 403)
             status_message = execution.progress.message
 
+        # createdAt is required per spec, but can be None from Redis
+        # Parse ISO string to datetime, or use current time as fallback
+        if created_at:
+            try:
+                created_at_dt = datetime.fromisoformat(
+                    created_at.replace("Z", "+00:00")
+                )
+            except (ValueError, AttributeError):
+                created_at_dt = datetime.now(timezone.utc)
+        else:
+            created_at_dt = datetime.now(timezone.utc)
+
         return GetTaskResult(
             taskId=client_task_id,
-            status=mcp_state,  # type: ignore[arg-type]
-            createdAt=created_at,  # type: ignore[arg-type]
+            status=mcp_state,
+            createdAt=created_at_dt,
             lastUpdatedAt=datetime.now(timezone.utc),
             ttl=DEFAULT_TTL_MS,
             pollInterval=poll_interval_ms,

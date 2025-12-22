@@ -680,7 +680,7 @@ class Context:
                 if mask_error_details is not None
                 else settings.mask_error_details
             )
-            tool_results = await run_sampling_tools(
+            tool_results: list[SamplingMessageContentBlock] = await run_sampling_tools(  # type: ignore[assignment]
                 step_tool_calls, tool_map, mask_error_details=effective_mask
             )
 
@@ -688,7 +688,7 @@ class Context:
                 current_messages.append(
                     SamplingMessage(
                         role="user",
-                        content=tool_results,  # type: ignore[arg-type]
+                        content=tool_results,
                     )
                 )
 
