@@ -255,7 +255,7 @@ async def tasks_result_handler(server: FastMCP, params: dict[str, Any]) -> Any:
             return mcp.types.CallToolResult(
                 content=[mcp.types.TextContent(type="text", text=str(error))],
                 isError=True,
-                _meta={
+                _meta={  # type: ignore[call-arg]  # _meta is Pydantic alias for meta field
                     "modelcontextprotocol.io/related-task": {
                         "taskId": client_task_id,
                     }
@@ -287,11 +287,12 @@ async def tasks_result_handler(server: FastMCP, params: dict[str, Any]) -> Any:
                 mcp_result = mcp.types.CallToolResult(
                     content=content,
                     structuredContent=structured_content,
-                    _meta=related_task_meta,
+                    _meta=related_task_meta,  # type: ignore[call-arg]  # _meta is Pydantic alias for meta field
                 )
             else:
                 mcp_result = mcp.types.CallToolResult(
-                    content=mcp_result, _meta=related_task_meta
+                    content=mcp_result,
+                    _meta=related_task_meta,  # type: ignore[call-arg]  # _meta is Pydantic alias for meta field
                 )
             return mcp_result
 
@@ -308,7 +309,7 @@ async def tasks_result_handler(server: FastMCP, params: dict[str, Any]) -> Any:
             mcp_content = resource_content.to_mcp_resource_contents(component_id)
             return mcp.types.ReadResourceResult(
                 contents=[mcp_content],
-                _meta=related_task_meta,
+                _meta=related_task_meta,  # type: ignore[call-arg]  # _meta is Pydantic alias for meta field
             )
 
         elif task_type == "template":
@@ -317,7 +318,7 @@ async def tasks_result_handler(server: FastMCP, params: dict[str, Any]) -> Any:
             mcp_content = resource_content.to_mcp_resource_contents(component_id)
             return mcp.types.ReadResourceResult(
                 contents=[mcp_content],
-                _meta=related_task_meta,
+                _meta=related_task_meta,  # type: ignore[call-arg]  # _meta is Pydantic alias for meta field
             )
 
         else:
