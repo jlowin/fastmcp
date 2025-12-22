@@ -1189,7 +1189,8 @@ class TestConvertResultToContent:
         """Test that an empty list results in an empty list."""
         result = _convert_to_content([])
         assert isinstance(result, list)
-        assert len(result) == 0
+        assert len(result) == 1
+        assert isinstance(result[0], TextContent)
 
     def test_empty_dict(self):
         """Test that an empty dictionary is converted to TextContent."""

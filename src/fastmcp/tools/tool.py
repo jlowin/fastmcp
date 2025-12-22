@@ -715,7 +715,7 @@ def _convert_to_content(
     if result is None:
         return []
 
-    if not isinstance(result, (list | tuple)):
+    if not isinstance(result, (list | tuple)) or not result:
         return [_convert_to_single_content_block(result, serializer)]
 
     # If all items are ContentBlocks, return them as is
