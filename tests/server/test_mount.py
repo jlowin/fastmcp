@@ -1173,7 +1173,7 @@ class TestCustomRouteForwarding:
 
     async def test_mounted_servers_tracking(self):
         """Test that _providers list tracks mounted servers correctly."""
-        from fastmcp.server.providers.local import LocalProvider
+        from fastmcp.server.providers.local_provider import LocalProvider
 
         main_server = FastMCP("MainServer")
         sub_server1 = FastMCP("SubServer1")
