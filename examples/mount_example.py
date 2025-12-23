@@ -1,7 +1,6 @@
 """Example of mounting FastMCP apps together.
 
-This example demonstrates how to mount FastMCP apps together using
-the ToolManager's import_tools functionality. It shows how to:
+This example demonstrates how to mount FastMCP apps together. It shows how to:
 
 1. Create sub-applications for different domains
 2. Mount those sub-applications to a main application

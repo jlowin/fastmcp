@@ -295,7 +295,7 @@ class TestToolDecorator:
             return x * 2
 
         # Verify the tags were set correctly (local inventory)
-        tools_dict = await mcp._tool_manager.get_tools()
+        tools_dict = await mcp.get_tools()
         assert len(tools_dict) == 1
         only_tool = next(iter(tools_dict.values()))
         assert only_tool.tags == {"example", "test-tag"}

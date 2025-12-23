@@ -55,9 +55,6 @@ class ComponentService:
 
     def __init__(self, server: FastMCP):
         self._server = server
-        self._tool_manager = server._tool_manager
-        self._resource_manager = server._resource_manager
-        self._prompt_manager = server._prompt_manager
 
     async def _enable_tool(self, key: str) -> Tool:
         """Handle 'enableTool' requests.
@@ -71,7 +68,7 @@ class ComponentService:
         logger.debug("Enabling tool: %s", key)
 
         # 1. Check local tools first. The server will have already applied its filter.
-        if key in self._server._tool_manager._tools:
+        if key in self._server._local_provider._tools:
             tool: Tool = await self._server.get_tool(key)
             tool.enable()
             return tool
@@ -98,7 +95,7 @@ class ComponentService:
         logger.debug("Disable tool: %s", key)
 
         # 1. Check local tools first. The server will have already applied its filter.
-        if key in self._server._tool_manager._tools:
+        if key in self._server._local_provider._tools:
             tool: Tool = await self._server.get_tool(key)
             tool.disable()
             return tool
@@ -125,11 +122,11 @@ class ComponentService:
         logger.debug("Enabling resource: %s", key)
 
         # 1. Check local resources first. The server will have already applied its filter.
-        if key in self._resource_manager._resources:
+        if key in self._server._local_provider._resources:
             resource: Resource = await self._server.get_resource(key)
             resource.enable()
             return resource
-        if key in self._resource_manager._templates:
+        if key in self._server._local_provider._templates:
             template: ResourceTemplate = await self._server.get_resource_template(key)
             template.enable()
             return template
@@ -158,11 +155,11 @@ class ComponentService:
         logger.debug("Disable resource: %s", key)
 
         # 1. Check local resources first. The server will have already applied its filter.
-        if key in self._resource_manager._resources:
+        if key in self._server._local_provider._resources:
             resource: Resource = await self._server.get_resource(key)
             resource.disable()
             return resource
-        if key in self._resource_manager._templates:
+        if key in self._server._local_provider._templates:
             template: ResourceTemplate = await self._server.get_resource_template(key)
             template.disable()
             return template
@@ -191,7 +188,7 @@ class ComponentService:
         logger.debug("Enabling prompt: %s", key)
 
         # 1. Check local prompts first. The server will have already applied its filter.
-        if key in self._server._prompt_manager._prompts:
+        if key in self._server._local_provider._prompts:
             prompt: Prompt = await self._server.get_prompt(key)
             prompt.enable()
             return prompt
@@ -217,7 +214,7 @@ class ComponentService:
         """
 
         # 1. Check local prompts first. The server will have already applied its filter.
-        if key in self._server._prompt_manager._prompts:
+        if key in self._server._local_provider._prompts:
             prompt: Prompt = await self._server.get_prompt(key)
             prompt.disable()
             return prompt
