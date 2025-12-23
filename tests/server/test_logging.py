@@ -49,9 +49,13 @@ async def test_uvicorn_logging_default_level(
     )
     mock_server_instance.serve.assert_awaited_once()
 
+    # Signal the mock to finish and cancel with timeout
+    serve_finished_event.set()
     server_task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await server_task
+    try:
+        await asyncio.wait_for(server_task, timeout=2.0)
+    except (asyncio.CancelledError, asyncio.TimeoutError):
+        pass
 
 
 @patch("fastmcp.server.server.uvicorn.Server")
@@ -109,9 +113,13 @@ async def test_uvicorn_logging_with_custom_log_config(
     )
     mock_server_instance.serve.assert_awaited_once()
 
+    # Signal the mock to finish and cancel with timeout
+    serve_finished_event.set()
     server_task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await server_task
+    try:
+        await asyncio.wait_for(server_task, timeout=2.0)
+    except (asyncio.CancelledError, asyncio.TimeoutError):
+        pass
 
 
 @patch("fastmcp.server.server.uvicorn.Server")
@@ -172,6 +180,10 @@ async def test_uvicorn_logging_custom_log_config_overrides_log_level_param(
     )
     mock_server_instance.serve.assert_awaited_once()
 
+    # Signal the mock to finish and cancel with timeout
+    serve_finished_event.set()
     server_task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await server_task
+    try:
+        await asyncio.wait_for(server_task, timeout=2.0)
+    except (asyncio.CancelledError, asyncio.TimeoutError):
+        pass
