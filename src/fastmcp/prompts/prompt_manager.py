@@ -7,7 +7,7 @@ from typing import Any
 from mcp import GetPromptResult
 
 from fastmcp import settings
-from fastmcp.exceptions import NotFoundError, PromptError
+from fastmcp.exceptions import FastMCPError, NotFoundError, PromptError
 from fastmcp.prompts.prompt import FunctionPrompt, Prompt, PromptResult
 from fastmcp.settings import DuplicateBehavior
 from fastmcp.utilities.logging import get_logger
@@ -107,9 +107,8 @@ class PromptManager:
         try:
             messages = await prompt.render(arguments)
             return GetPromptResult(description=prompt.description, messages=messages)
-        except PromptError as e:
-            logger.exception(f"Error rendering prompt {name!r}")
-            raise e
+        except FastMCPError:
+            raise
         except Exception as e:
             logger.exception(f"Error rendering prompt {name!r}")
             if self.mask_error_details:

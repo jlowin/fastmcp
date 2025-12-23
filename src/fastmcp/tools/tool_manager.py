@@ -8,7 +8,7 @@ from mcp.types import ToolAnnotations
 from pydantic import ValidationError
 
 from fastmcp import settings
-from fastmcp.exceptions import NotFoundError, ToolError
+from fastmcp.exceptions import FastMCPError, NotFoundError, ToolError
 from fastmcp.settings import DuplicateBehavior
 from fastmcp.tools.tool import Tool, ToolResult
 from fastmcp.tools.tool_transform import (
@@ -158,12 +158,10 @@ class ToolManager:
         tool = await self.get_tool(key)
         try:
             return await tool.run(arguments)
-        except ValidationError as e:
-            logger.exception(f"Error validating tool {key!r}: {e}")
-            raise e
-        except ToolError as e:
-            logger.exception(f"Error calling tool {key!r}")
-            raise e
+        except FastMCPError:
+            raise
+        except ValidationError:
+            raise
         except Exception as e:
             logger.exception(f"Error calling tool {key!r}")
             if self.mask_error_details:

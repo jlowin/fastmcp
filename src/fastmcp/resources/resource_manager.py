@@ -10,7 +10,7 @@ from typing import Any
 from pydantic import AnyUrl
 
 from fastmcp import settings
-from fastmcp.exceptions import NotFoundError, ResourceError
+from fastmcp.exceptions import FastMCPError, NotFoundError, ResourceError
 from fastmcp.resources.resource import Resource
 from fastmcp.resources.template import (
     ResourceTemplate,
@@ -268,10 +268,9 @@ class ResourceManager:
                         uri_str,
                         params=params,
                     )
-                # Pass through ResourceErrors as-is
-                except ResourceError as e:
-                    logger.error(f"Error creating resource from template: {e}")
-                    raise e
+                # Pass through FastMCPErrors as-is
+                except FastMCPError:
+                    raise
                 # Handle other exceptions
                 except Exception as e:
                     logger.error(f"Error creating resource from template: {e}")
@@ -299,10 +298,9 @@ class ResourceManager:
             try:
                 return await resource.read()
 
-            # raise ResourceErrors as-is
-            except ResourceError as e:
-                logger.exception(f"Error reading resource {uri_str!r}")
-                raise e
+            # raise FastMCPErrors as-is
+            except FastMCPError:
+                raise
 
             # Handle other exceptions
             except Exception as e:
@@ -322,11 +320,8 @@ class ResourceManager:
                 try:
                     resource = await template.create_resource(uri_str, params=params)
                     return await resource.read()
-                except ResourceError as e:
-                    logger.exception(
-                        f"Error reading resource from template {uri_str!r}"
-                    )
-                    raise e
+                except FastMCPError:
+                    raise
                 except Exception as e:
                     logger.exception(
                         f"Error reading resource from template {uri_str!r}"
