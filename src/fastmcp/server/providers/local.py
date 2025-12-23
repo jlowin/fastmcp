@@ -27,7 +27,7 @@ from __future__ import annotations
 import inspect
 from collections.abc import Callable, Sequence
 from functools import partial
-from typing import TYPE_CHECKING, Any, overload
+from typing import TYPE_CHECKING, Any, Literal, overload
 
 import mcp.types
 from mcp.types import Annotations, AnyFunction, ToolAnnotations
@@ -49,6 +49,8 @@ if TYPE_CHECKING:
     from fastmcp.tools.tool import ToolResultSerializerType
 
 logger = get_logger(__name__)
+
+DuplicateBehavior = Literal["error", "warn", "replace", "ignore"]
 
 
 class LocalProvider(Provider):
@@ -86,9 +88,21 @@ class LocalProvider(Provider):
         ```
     """
 
-    def __init__(self) -> None:
-        """Initialize a LocalProvider with empty storage."""
+    def __init__(
+        self,
+        on_duplicate: DuplicateBehavior = "error",
+    ) -> None:
+        """Initialize a LocalProvider with empty storage.
+
+        Args:
+            on_duplicate: Behavior when adding a component that already exists:
+                - "error": Raise ValueError
+                - "warn": Log warning and replace
+                - "replace": Silently replace
+                - "ignore": Keep existing, return it
+        """
         super().__init__()
+        self._on_duplicate = on_duplicate
         self._tools: dict[str, Tool] = {}
         self._resources: dict[str, Resource] = {}
         self._templates: dict[str, ResourceTemplate] = {}
@@ -102,16 +116,24 @@ class LocalProvider(Provider):
     def add_tool(self, tool: Tool) -> Tool:
         """Add a tool to this provider's storage.
 
-        Note: Duplicate handling is done at the server level when using
-        server.add_tool(). This method simply stores the tool.
-
         Args:
             tool: The Tool instance to add.
 
         Returns:
-            The tool that was added.
+            The tool that was added (or existing tool if on_duplicate="ignore").
         """
+        existing = self._tools.get(tool.key)
+        if existing:
+            if self._on_duplicate == "error":
+                raise ValueError(f"Tool already exists: {tool.key}")
+            elif self._on_duplicate == "warn":
+                logger.warning(f"Tool already exists: {tool.key}")
+            elif self._on_duplicate == "ignore":
+                return existing
+            # "replace" and "warn" fall through to add
+
         self._tools[tool.key] = tool
+        self._notify("tools")
         return tool
 
     def remove_tool(self, key: str) -> None:
@@ -126,6 +148,7 @@ class LocalProvider(Provider):
         if key not in self._tools:
             raise KeyError(f"Tool {key!r} not found")
         del self._tools[key]
+        self._notify("tools")
 
     def add_resource(self, resource: Resource) -> Resource:
         """Add a resource to this provider's storage.
@@ -134,9 +157,19 @@ class LocalProvider(Provider):
             resource: The Resource instance to add.
 
         Returns:
-            The resource that was added.
+            The resource that was added (or existing if on_duplicate="ignore").
         """
+        existing = self._resources.get(resource.key)
+        if existing:
+            if self._on_duplicate == "error":
+                raise ValueError(f"Resource already exists: {resource.key}")
+            elif self._on_duplicate == "warn":
+                logger.warning(f"Resource already exists: {resource.key}")
+            elif self._on_duplicate == "ignore":
+                return existing
+
         self._resources[resource.key] = resource
+        self._notify("resources")
         return resource
 
     def remove_resource(self, key: str) -> None:
@@ -151,6 +184,7 @@ class LocalProvider(Provider):
         if key not in self._resources:
             raise KeyError(f"Resource {key!r} not found")
         del self._resources[key]
+        self._notify("resources")
 
     def add_template(self, template: ResourceTemplate) -> ResourceTemplate:
         """Add a resource template to this provider's storage.
@@ -159,9 +193,19 @@ class LocalProvider(Provider):
             template: The ResourceTemplate instance to add.
 
         Returns:
-            The template that was added.
+            The template that was added (or existing if on_duplicate="ignore").
         """
+        existing = self._templates.get(template.key)
+        if existing:
+            if self._on_duplicate == "error":
+                raise ValueError(f"Template already exists: {template.key}")
+            elif self._on_duplicate == "warn":
+                logger.warning(f"Template already exists: {template.key}")
+            elif self._on_duplicate == "ignore":
+                return existing
+
         self._templates[template.key] = template
+        self._notify("resources")
         return template
 
     def remove_template(self, key: str) -> None:
@@ -176,6 +220,7 @@ class LocalProvider(Provider):
         if key not in self._templates:
             raise KeyError(f"Template {key!r} not found")
         del self._templates[key]
+        self._notify("resources")
 
     def add_prompt(self, prompt: Prompt) -> Prompt:
         """Add a prompt to this provider's storage.
@@ -184,9 +229,19 @@ class LocalProvider(Provider):
             prompt: The Prompt instance to add.
 
         Returns:
-            The prompt that was added.
+            The prompt that was added (or existing if on_duplicate="ignore").
         """
+        existing = self._prompts.get(prompt.key)
+        if existing:
+            if self._on_duplicate == "error":
+                raise ValueError(f"Prompt already exists: {prompt.key}")
+            elif self._on_duplicate == "warn":
+                logger.warning(f"Prompt already exists: {prompt.key}")
+            elif self._on_duplicate == "ignore":
+                return existing
+
         self._prompts[prompt.key] = prompt
+        self._notify("prompts")
         return prompt
 
     def remove_prompt(self, key: str) -> None:
@@ -201,6 +256,7 @@ class LocalProvider(Provider):
         if key not in self._prompts:
             raise KeyError(f"Prompt {key!r} not found")
         del self._prompts[key]
+        self._notify("prompts")
 
     # =========================================================================
     # Tool transformation methods

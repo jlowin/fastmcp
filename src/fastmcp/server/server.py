@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import re
 import secrets
 import warnings
@@ -105,6 +104,43 @@ logger = get_logger(__name__)
 
 
 DuplicateBehavior = Literal["warn", "error", "replace", "ignore"]
+
+
+def _resolve_on_duplicate(
+    on_duplicate: DuplicateBehavior | None,
+    on_duplicate_tools: DuplicateBehavior | None,
+    on_duplicate_resources: DuplicateBehavior | None,
+    on_duplicate_prompts: DuplicateBehavior | None,
+) -> DuplicateBehavior:
+    """Resolve on_duplicate from deprecated per-type params.
+
+    Takes the most strict value if multiple are provided.
+    Delete this function when removing deprecated params.
+    """
+    strictness_order: list[DuplicateBehavior] = ["error", "warn", "replace", "ignore"]
+    deprecated_values: list[DuplicateBehavior] = []
+
+    deprecated_params: list[tuple[str, DuplicateBehavior | None]] = [
+        ("on_duplicate_tools", on_duplicate_tools),
+        ("on_duplicate_resources", on_duplicate_resources),
+        ("on_duplicate_prompts", on_duplicate_prompts),
+    ]
+    for name, value in deprecated_params:
+        if value is not None:
+            if fastmcp.settings.deprecation_warnings:
+                warnings.warn(
+                    f"{name} is deprecated, use on_duplicate instead",
+                    DeprecationWarning,
+                    stacklevel=4,
+                )
+            deprecated_values.append(value)
+
+    if on_duplicate is None and deprecated_values:
+        return min(deprecated_values, key=lambda x: strictness_order.index(x))
+
+    return on_duplicate or "warn"
+
+
 Transport = Literal["stdio", "http", "sse", "streamable-http"]
 
 # Compiled URI parsing regex to split a URI into protocol and path components
@@ -193,37 +229,13 @@ class FastMCP(Generic[LifespanResultT]):
         sampling_handler: SamplingHandler | None = None,
         sampling_handler_behavior: Literal["always", "fallback"] | None = None,
     ):
-        # Handle deprecated on_duplicate_* parameters
-        if on_duplicate_tools is not None:
-            if fastmcp.settings.deprecation_warnings:
-                warnings.warn(
-                    "on_duplicate_tools is deprecated, use on_duplicate instead",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-            if on_duplicate is None:
-                on_duplicate = on_duplicate_tools
-        if on_duplicate_resources is not None:
-            if fastmcp.settings.deprecation_warnings:
-                warnings.warn(
-                    "on_duplicate_resources is deprecated, use on_duplicate instead",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-            if on_duplicate is None:
-                on_duplicate = on_duplicate_resources
-        if on_duplicate_prompts is not None:
-            if fastmcp.settings.deprecation_warnings:
-                warnings.warn(
-                    "on_duplicate_prompts is deprecated, use on_duplicate instead",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-            if on_duplicate is None:
-                on_duplicate = on_duplicate_prompts
-
-        # Store duplicate behavior on server (default to "warn")
-        self._on_duplicate: DuplicateBehaviorSetting = on_duplicate or "warn"
+        # Resolve on_duplicate from deprecated params (delete when removing deprecation)
+        self._on_duplicate: DuplicateBehaviorSetting = _resolve_on_duplicate(
+            on_duplicate,
+            on_duplicate_tools,
+            on_duplicate_resources,
+            on_duplicate_prompts,
+        )
 
         # Resolve server default for background task support
         self._support_tasks_by_default: bool = tasks if tasks is not None else False
@@ -234,7 +246,9 @@ class FastMCP(Generic[LifespanResultT]):
         self._additional_http_routes: list[BaseRoute] = []
 
         # Create LocalProvider for local components
-        self._local_provider: LocalProvider = LocalProvider()
+        self._local_provider: LocalProvider = LocalProvider(
+            on_duplicate=self._on_duplicate
+        )
 
         # Apply tool transformations to LocalProvider
         if tool_transformations:
@@ -1682,29 +1696,7 @@ class FastMCP(Generic[LifespanResultT]):
         Returns:
             The tool instance that was added to the server.
         """
-        # Handle duplicate behavior at server level
-        existing = self._local_provider._tools.get(tool.key)
-        if existing:
-            if self._on_duplicate == "error":
-                raise ValueError(f"Tool already exists: {tool.key}")
-            elif self._on_duplicate == "warn":
-                logger.warning(f"Tool already exists: {tool.key}")
-            elif self._on_duplicate == "ignore":
-                return existing
-            # "replace" and "warn" fall through to add
-
-        self._local_provider.add_tool(tool)
-
-        # Send notification if we're in a request context
-        try:
-            from fastmcp.server.dependencies import get_context
-
-            context = get_context()
-            context._queue_tool_list_changed()  # type: ignore[private-use]
-        except RuntimeError:
-            pass  # No context available
-
-        return tool
+        return self._local_provider.add_tool(tool)
 
     def remove_tool(self, name: str) -> None:
         """Remove a tool from the server.
@@ -1719,15 +1711,6 @@ class FastMCP(Generic[LifespanResultT]):
             self._local_provider.remove_tool(name)
         except KeyError:
             raise NotFoundError(f"Tool {name!r} not found") from None
-
-        # Send notification if we're in a request context
-        try:
-            from fastmcp.server.dependencies import get_context
-
-            context = get_context()
-            context._queue_tool_list_changed()  # type: ignore[private-use]
-        except RuntimeError:
-            pass  # No context available
 
     def add_tool_transformation(
         self, tool_name: str, transformation: ToolTransformConfig
@@ -1844,73 +1827,10 @@ class FastMCP(Generic[LifespanResultT]):
             server.tool(my_function, name="custom_name")
             ```
         """
-        if isinstance(annotations, dict):
-            annotations = ToolAnnotations(**annotations)
-
-        if isinstance(name_or_fn, classmethod):
-            raise ValueError(
-                inspect.cleandoc(
-                    """
-                    To decorate a classmethod, first define the method and then call
-                    tool() directly on the method instead of using it as a
-                    decorator. See https://gofastmcp.com/patterns/decorating-methods
-                    for examples and more information.
-                    """
-                )
-            )
-
-        # Determine the actual name and function based on the calling pattern
-        if inspect.isroutine(name_or_fn):
-            # Case 1: @tool (without parens) - function passed directly
-            # Case 2: direct call like tool(fn, name="something")
-            fn = name_or_fn
-            tool_name = name  # Use keyword name if provided, otherwise None
-
-            # Resolve task parameter
-            supports_task: bool | TaskConfig = (
-                task if task is not None else self._support_tasks_by_default
-            )
-
-            # Register the tool immediately and return the tool object
-            # Note: Deprecation warning for exclude_args is handled in Tool.from_function
-            tool = Tool.from_function(
-                fn,
-                name=tool_name,
-                title=title,
-                description=description,
-                icons=icons,
-                tags=tags,
-                output_schema=output_schema,
-                annotations=annotations,
-                exclude_args=exclude_args,
-                meta=meta,
-                serializer=self._tool_serializer,
-                enabled=enabled,
-                task=supports_task,
-            )
-            self.add_tool(tool)
-            return tool
-
-        elif isinstance(name_or_fn, str):
-            # Case 3: @tool("custom_name") - name passed as first argument
-            if name is not None:
-                raise TypeError(
-                    "Cannot specify both a name as first argument and as keyword argument. "
-                    f"Use either @tool('{name_or_fn}') or @tool(name='{name}'), not both."
-                )
-            tool_name = name_or_fn
-        elif name_or_fn is None:
-            # Case 4: @tool or @tool(name="something") - use keyword name
-            tool_name = name
-        else:
-            raise TypeError(
-                f"First argument to @tool must be a function, string, or None, got {type(name_or_fn)}"
-            )
-
-        # Return partial for cases where we need to wait for the function
-        return partial(
-            self.tool,
-            name=tool_name,
+        # Delegate to LocalProvider with server-level defaults
+        result = self._local_provider.tool(
+            name_or_fn,
+            name=name,
             title=title,
             description=description,
             icons=icons,
@@ -1920,8 +1840,11 @@ class FastMCP(Generic[LifespanResultT]):
             exclude_args=exclude_args,
             meta=meta,
             enabled=enabled,
-            task=task,
+            task=task if task is not None else self._support_tasks_by_default,
+            serializer=self._tool_serializer,
         )
+
+        return result
 
     def add_resource(self, resource: Resource) -> Resource:
         """Add a resource to the server.
@@ -1932,29 +1855,7 @@ class FastMCP(Generic[LifespanResultT]):
         Returns:
             The resource instance that was added to the server.
         """
-        # Handle duplicate behavior at server level
-        existing = self._local_provider._resources.get(resource.key)
-        if existing:
-            if self._on_duplicate == "error":
-                raise ValueError(f"Resource already exists: {resource.key}")
-            elif self._on_duplicate == "warn":
-                logger.warning(f"Resource already exists: {resource.key}")
-            elif self._on_duplicate == "ignore":
-                return existing
-            # "replace" and "warn" fall through to add
-
-        self._local_provider.add_resource(resource)
-
-        # Send notification if we're in a request context
-        try:
-            from fastmcp.server.dependencies import get_context
-
-            context = get_context()
-            context._queue_resource_list_changed()  # type: ignore[private-use]
-        except RuntimeError:
-            pass  # No context available
-
-        return resource
+        return self._local_provider.add_resource(resource)
 
     def add_template(self, template: ResourceTemplate) -> ResourceTemplate:
         """Add a resource template to the server.
@@ -1965,29 +1866,7 @@ class FastMCP(Generic[LifespanResultT]):
         Returns:
             The template instance that was added to the server.
         """
-        # Handle duplicate behavior at server level
-        existing = self._local_provider._templates.get(template.key)
-        if existing:
-            if self._on_duplicate == "error":
-                raise ValueError(f"Template already exists: {template.key}")
-            elif self._on_duplicate == "warn":
-                logger.warning(f"Template already exists: {template.key}")
-            elif self._on_duplicate == "ignore":
-                return existing
-            # "replace" and "warn" fall through to add
-
-        self._local_provider.add_template(template)
-
-        # Send notification if we're in a request context
-        try:
-            from fastmcp.server.dependencies import get_context
-
-            context = get_context()
-            context._queue_resource_list_changed()  # type: ignore[private-use]
-        except RuntimeError:
-            pass  # No context available
-
-        return template
+        return self._local_provider.add_template(template)
 
     def resource(
         self,
@@ -2056,81 +1935,23 @@ class FastMCP(Generic[LifespanResultT]):
                 return f"Weather for {city}: {data}"
             ```
         """
-        if isinstance(annotations, dict):
-            annotations = Annotations(**annotations)
-
-        # Check if user passed function directly instead of calling decorator
-        if inspect.isroutine(uri):
-            raise TypeError(
-                "The @resource decorator was used incorrectly. "
-                "Did you forget to call it? Use @resource('uri') instead of @resource"
-            )
+        # Delegate to LocalProvider with server-level defaults
+        inner_decorator = self._local_provider.resource(
+            uri,
+            name=name,
+            title=title,
+            description=description,
+            icons=icons,
+            mime_type=mime_type,
+            tags=tags,
+            enabled=enabled,
+            annotations=annotations,
+            meta=meta,
+            task=task if task is not None else self._support_tasks_by_default,
+        )
 
         def decorator(fn: AnyFunction) -> Resource | ResourceTemplate:
-            if isinstance(fn, classmethod):  # type: ignore[reportUnnecessaryIsInstance]
-                raise ValueError(
-                    inspect.cleandoc(
-                        """
-                        To decorate a classmethod, first define the method and then call
-                        resource() directly on the method instead of using it as a
-                        decorator. See https://gofastmcp.com/patterns/decorating-methods
-                        for examples and more information.
-                        """
-                    )
-                )
-
-            # Resolve task parameter
-            supports_task: bool | TaskConfig = (
-                task if task is not None else self._support_tasks_by_default
-            )
-
-            # Check if this should be a template
-            has_uri_params = "{" in uri and "}" in uri
-            # Use wrapper to check for user-facing parameters
-            from fastmcp.server.dependencies import without_injected_parameters
-
-            wrapper_fn = without_injected_parameters(fn)
-            has_func_params = bool(inspect.signature(wrapper_fn).parameters)
-
-            if has_uri_params or has_func_params:
-                template = ResourceTemplate.from_function(
-                    fn=fn,
-                    uri_template=uri,
-                    name=name,
-                    title=title,
-                    description=description,
-                    icons=icons,
-                    mime_type=mime_type,
-                    tags=tags,
-                    enabled=enabled,
-                    annotations=annotations,
-                    meta=meta,
-                    task=supports_task,
-                )
-                self.add_template(template)
-                return template
-            elif not has_uri_params and not has_func_params:
-                resource = Resource.from_function(
-                    fn=fn,
-                    uri=uri,
-                    name=name,
-                    title=title,
-                    description=description,
-                    icons=icons,
-                    mime_type=mime_type,
-                    tags=tags,
-                    enabled=enabled,
-                    annotations=annotations,
-                    meta=meta,
-                    task=supports_task,
-                )
-                self.add_resource(resource)
-                return resource
-            else:
-                raise ValueError(
-                    "Invalid resource or template definition due to a "
-                    "mismatch between URI parameters and function parameters."
-                )
+            return inner_decorator(fn)
 
         return decorator
 
@@ -2143,29 +1964,7 @@ class FastMCP(Generic[LifespanResultT]):
         Returns:
             The prompt instance that was added to the server.
         """
-        # Handle duplicate behavior at server level
-        existing = self._local_provider._prompts.get(prompt.key)
-        if existing:
-            if self._on_duplicate == "error":
-                raise ValueError(f"Prompt already exists: {prompt.key}")
-            elif self._on_duplicate == "warn":
-                logger.warning(f"Prompt already exists: {prompt.key}")
-            elif self._on_duplicate == "ignore":
-                return existing
-            # "replace" and "warn" fall through to add
-
-        self._local_provider.add_prompt(prompt)
-
-        # Send notification if we're in a request context
-        try:
-            from fastmcp.server.dependencies import get_context
-
-            context = get_context()
-            context._queue_prompt_list_changed()  # type: ignore[private-use]
-        except RuntimeError:
-            pass  # No context available
-
-        return prompt
+        return self._local_provider.add_prompt(prompt)
 
     @overload
     def prompt(
@@ -2283,74 +2082,17 @@ class FastMCP(Generic[LifespanResultT]):
             server.prompt(my_function, name="custom_name")
             ```
         """
-
-        if isinstance(name_or_fn, classmethod):
-            raise ValueError(
-                inspect.cleandoc(
-                    """
-                    To decorate a classmethod, first define the method and then call
-                    prompt() directly on the method instead of using it as a
-                    decorator. See https://gofastmcp.com/patterns/decorating-methods
-                    for examples and more information.
-                    """
-                )
-            )
-
-        # Determine the actual name and function based on the calling pattern
-        if inspect.isroutine(name_or_fn):
-            # Case 1: @prompt (without parens) - function passed directly as decorator
-            # Case 2: direct call like prompt(fn, name="something")
-            fn = name_or_fn
-            prompt_name = name  # Use keyword name if provided, otherwise None
-
-            # Resolve task parameter
-            supports_task: bool | TaskConfig = (
-                task if task is not None else self._support_tasks_by_default
-            )
-
-            # Register the prompt immediately
-            prompt = Prompt.from_function(
-                fn=fn,
-                name=prompt_name,
-                title=title,
-                description=description,
-                icons=icons,
-                tags=tags,
-                enabled=enabled,
-                meta=meta,
-                task=supports_task,
-            )
-            self.add_prompt(prompt)
-
-            return prompt
-
-        elif isinstance(name_or_fn, str):
-            # Case 3: @prompt("custom_name") - name passed as first argument
-            if name is not None:
-                raise TypeError(
-                    "Cannot specify both a name as first argument and as keyword argument. "
-                    f"Use either @prompt('{name_or_fn}') or @prompt(name='{name}'), not both."
-                )
-            prompt_name = name_or_fn
-        elif name_or_fn is None:
-            # Case 4: @prompt() or @prompt(name="something") - use keyword name
-            prompt_name = name
-        else:
-            raise TypeError(
-                f"First argument to @prompt must be a function, string, or None, got {type(name_or_fn)}"
-            )
-
-        # Return partial for cases where we need to wait for the function
-        return partial(
-            self.prompt,
-            name=prompt_name,
+        # Delegate to LocalProvider with server-level defaults
+        return self._local_provider.prompt(
+            name_or_fn,
+            name=name,
             title=title,
             description=description,
             icons=icons,
             tags=tags,
             enabled=enabled,
             meta=meta,
-            task=task,
+            task=task if task is not None else self._support_tasks_by_default,
         )
 
     async def run_stdio_async(
