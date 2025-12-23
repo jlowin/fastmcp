@@ -133,11 +133,11 @@ async def nested_server():
 
     yield f"http://127.0.0.1:{port}/nest-outer/nest-inner/final/mcp"
 
-    # Cleanup
+    # Cleanup with timeout to prevent hanging
     server_task.cancel()
     try:
-        await server_task
-    except asyncio.CancelledError:
+        await asyncio.wait_for(server_task, timeout=3.0)
+    except (asyncio.CancelledError, asyncio.TimeoutError):
         pass
 
 
