@@ -105,23 +105,6 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-def _create_named_fn_wrapper(fn: Callable[..., Any], name: str) -> Callable[..., Any]:
-    """Create a wrapper function with a custom __name__ for Docket registration.
-
-    Docket uses fn.__name__ as the key for function registration and lookup.
-    When mounting servers, we need unique names to avoid collisions between
-    mounted servers that have identically-named functions.
-    """
-    import functools
-
-    @functools.wraps(fn)
-    async def wrapper(*args: Any, **kwargs: Any) -> Any:
-        return await fn(*args, **kwargs)
-
-    wrapper.__name__ = name
-    return wrapper
-
-
 DuplicateBehavior = Literal["warn", "error", "replace", "ignore"]
 Transport = Literal["stdio", "http", "sse", "streamable-http"]
 
@@ -437,7 +420,7 @@ class FastMCP(Generic[LifespanResultT]):
                         isinstance(tool, FunctionTool)
                         and tool.task_config.mode != "forbidden"
                     ):
-                        docket.register(tool.fn)
+                        docket.register(tool.fn, names=[tool.key])
 
                 for prompt in self._prompt_manager._prompts.values():
                     if (
@@ -445,21 +428,24 @@ class FastMCP(Generic[LifespanResultT]):
                         and prompt.task_config.mode != "forbidden"
                     ):
                         # task execution requires async fn (validated at creation time)
-                        docket.register(cast(Callable[..., Awaitable[Any]], prompt.fn))
+                        docket.register(
+                            cast(Callable[..., Awaitable[Any]], prompt.fn),
+                            names=[prompt.key],
+                        )
 
                 for resource in self._resource_manager._resources.values():
                     if (
                         isinstance(resource, FunctionResource)
                         and resource.task_config.mode != "forbidden"
                     ):
-                        docket.register(resource.fn)
+                        docket.register(resource.fn, names=[resource.name])
 
                 for template in self._resource_manager._templates.values():
                     if (
                         isinstance(template, FunctionResourceTemplate)
                         and template.task_config.mode != "forbidden"
                     ):
-                        docket.register(template.fn)
+                        docket.register(template.fn, names=[template.name])
 
                 # Also register functions from mounted servers so tasks can
                 # execute in the parent's Docket context
@@ -535,8 +521,7 @@ class FastMCP(Generic[LifespanResultT]):
                     fn_name = f"{prefix}_{tool.key}"
                 else:
                     fn_name = tool.key
-                named_fn = _create_named_fn_wrapper(tool.fn, fn_name)
-                docket.register(named_fn)
+                docket.register(tool.fn, names=[fn_name])
 
         # Register prompts with prefixed names
         for prompt in server._prompt_manager._prompts.values():
@@ -545,10 +530,10 @@ class FastMCP(Generic[LifespanResultT]):
                 and prompt.task_config.mode != "forbidden"
             ):
                 fn_name = f"{prefix}_{prompt.key}" if prefix else prompt.key
-                named_fn = _create_named_fn_wrapper(
-                    cast(Callable[..., Awaitable[Any]], prompt.fn), fn_name
+                docket.register(
+                    cast(Callable[..., Awaitable[Any]], prompt.fn),
+                    names=[fn_name],
                 )
-                docket.register(named_fn)
 
         # Register resources with prefixed names (use name, not key/URI)
         for resource in server._resource_manager._resources.values():
@@ -557,8 +542,7 @@ class FastMCP(Generic[LifespanResultT]):
                 and resource.task_config.mode != "forbidden"
             ):
                 fn_name = f"{prefix}_{resource.name}" if prefix else resource.name
-                named_fn = _create_named_fn_wrapper(resource.fn, fn_name)
-                docket.register(named_fn)
+                docket.register(resource.fn, names=[fn_name])
 
         # Register resource templates with prefixed names (use name, not key/URI)
         for template in server._resource_manager._templates.values():
@@ -567,8 +551,7 @@ class FastMCP(Generic[LifespanResultT]):
                 and template.task_config.mode != "forbidden"
             ):
                 fn_name = f"{prefix}_{template.name}" if prefix else template.name
-                named_fn = _create_named_fn_wrapper(template.fn, fn_name)
-                docket.register(named_fn)
+                docket.register(template.fn, names=[fn_name])
 
         # Recursively register from nested mounted servers with accumulated prefix
         for nested in server._mounted_servers:
