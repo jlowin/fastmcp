@@ -1,6 +1,7 @@
 import asyncio
 import json
 import sys
+from contextlib import suppress
 from unittest.mock import AsyncMock, call
 
 import pytest
@@ -106,8 +107,8 @@ async def nested_server():
 
     from fastmcp.utilities.http import find_available_port
 
-    server = create_test_server()
-    mcp_app = server.http_app(path="/final/mcp")
+    mcp_server = create_test_server()
+    mcp_app = mcp_server.http_app(path="/final/mcp")
 
     # Nest the app under multiple mounts to test URL resolution
     inner = Starlette(routes=[Mount("/nest-inner", app=mcp_app)])
@@ -124,18 +125,19 @@ async def nested_server():
         port=port,
         log_level="critical",
         ws="websockets-sansio",
+        timeout_graceful_shutdown=0,
     )
 
-    # Use the simple asyncio pattern
     uvicorn_server = uvicorn.Server(config)
     server_task = asyncio.create_task(uvicorn_server.serve())
     await asyncio.sleep(0.1)
 
     yield f"http://127.0.0.1:{port}/nest-outer/nest-inner/final/mcp"
 
-    # Graceful shutdown - required for uvicorn 0.39+ due to context isolation
+    # Cleanup: signal uvicorn to shutdown, then cancel the task
     uvicorn_server.should_exit = True
-    await server_task
+    with suppress(asyncio.CancelledError, asyncio.TimeoutError):
+        await asyncio.wait_for(server_task, timeout=2.0)
 
 
 async def test_ping(streamable_http_server: str):
