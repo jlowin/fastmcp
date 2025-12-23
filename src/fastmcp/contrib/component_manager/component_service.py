@@ -25,7 +25,7 @@ def _get_mounted_server_and_key(
     Args:
         provider: The provider to check.
         key: The transformed component key.
-        component_type: Either "tool" (for tools/prompts) or "resource".
+        component_type: Either "tool", "prompt", or "resource".
 
     Returns:
         Tuple of (server, original_key) if the key matches this provider,
@@ -35,6 +35,8 @@ def _get_mounted_server_and_key(
         # TransformingProvider - reverse the transformation
         if component_type == "resource":
             original = provider._reverse_resource_uri(key)
+        elif component_type == "prompt":
+            original = provider._reverse_prompt_name(key)
         else:
             original = provider._reverse_tool_name(key)
 
@@ -195,7 +197,7 @@ class ComponentService:
 
         # 2. Check mounted servers via FastMCPProvider/TransformingProvider
         for provider in self._server._providers:
-            result = _get_mounted_server_and_key(provider, key, "tool")
+            result = _get_mounted_server_and_key(provider, key, "prompt")
             if result is not None:
                 server, unprefixed = result
                 mounted_service = ComponentService(server)
@@ -221,7 +223,7 @@ class ComponentService:
 
         # 2. Check mounted servers via FastMCPProvider/TransformingProvider
         for provider in self._server._providers:
-            result = _get_mounted_server_and_key(provider, key, "tool")
+            result = _get_mounted_server_and_key(provider, key, "prompt")
             if result is not None:
                 server, unprefixed = result
                 mounted_service = ComponentService(server)

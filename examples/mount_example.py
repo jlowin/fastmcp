@@ -102,10 +102,6 @@ async def get_server_details():
     print(f"  - Imported from weather app: {weather_resources}")
     print(f"  - Imported from news app: {news_resources}")
 
-    # Let's try to access resources using the prefixed URI
-    weather_data = await app._read_resource_mcp(uri="weather://weather/forecast")
-    print(f"\nWeather data from prefixed URI: {weather_data}")
-
 
 if __name__ == "__main__":
     # First run our async function to display info
