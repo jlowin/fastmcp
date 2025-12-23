@@ -32,12 +32,12 @@ from typing import TYPE_CHECKING, Any, Literal, overload
 import mcp.types
 from mcp.types import Annotations, AnyFunction, ToolAnnotations
 
-from fastmcp.prompts.prompt import FunctionPrompt, Prompt, PromptResult
-from fastmcp.resources.resource import Resource, ResourceContent
+from fastmcp.prompts.prompt import FunctionPrompt, Prompt
+from fastmcp.resources.resource import Resource
 from fastmcp.resources.template import ResourceTemplate
 from fastmcp.server.providers.base import Provider, TaskComponents
 from fastmcp.server.tasks.config import TaskConfig
-from fastmcp.tools.tool import FunctionTool, Tool, ToolResult
+from fastmcp.tools.tool import FunctionTool, Tool
 from fastmcp.tools.tool_transform import (
     ToolTransformConfig,
     apply_transformations_to_tools,
@@ -310,15 +310,6 @@ class LocalProvider(Provider):
         tools = await self.list_tools()
         return next((t for t in tools if t.name == name), None)
 
-    async def call_tool(
-        self, name: str, arguments: dict[str, Any]
-    ) -> ToolResult | None:
-        """Call a tool by name."""
-        tool = await self.get_tool(name)
-        if tool is None:
-            return None
-        return await tool.run(arguments)
-
     async def list_resources(self) -> Sequence[Resource]:
         """Return all resources."""
         return list(self._resources.values())
@@ -326,16 +317,6 @@ class LocalProvider(Provider):
     async def get_resource(self, uri: str) -> Resource | None:
         """Get a resource by URI."""
         return self._resources.get(uri)
-
-    async def read_resource(self, uri: str) -> ResourceContent | None:
-        """Read a resource by URI."""
-        resource = await self.get_resource(uri)
-        if resource is None:
-            return None
-        result = await resource.read()
-        if isinstance(result, ResourceContent):
-            return result
-        return ResourceContent.from_value(result)
 
     async def list_resource_templates(self) -> Sequence[ResourceTemplate]:
         """Return all resource templates."""
@@ -348,19 +329,6 @@ class LocalProvider(Provider):
                 return template
         return None
 
-    async def read_resource_template(self, uri: str) -> ResourceContent | None:
-        """Read a resource template by URI."""
-        template = await self.get_resource_template(uri)
-        if template is None:
-            return None
-        params = template.matches(uri)
-        if params is None:
-            return None
-        result = await template.read(params)
-        if isinstance(result, ResourceContent):
-            return result
-        return ResourceContent.from_value(result)
-
     async def list_prompts(self) -> Sequence[Prompt]:
         """Return all prompts."""
         return list(self._prompts.values())
@@ -368,18 +336,6 @@ class LocalProvider(Provider):
     async def get_prompt(self, name: str) -> Prompt | None:
         """Get a prompt by name."""
         return self._prompts.get(name)
-
-    async def render_prompt(
-        self, name: str, arguments: dict[str, Any] | None
-    ) -> PromptResult | None:
-        """Render a prompt by name."""
-        prompt = await self.get_prompt(name)
-        if prompt is None:
-            return None
-        result = await prompt.render(arguments)
-        if isinstance(result, PromptResult):
-            return result
-        return PromptResult.from_value(result)
 
     # =========================================================================
     # Task registration
