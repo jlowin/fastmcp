@@ -52,6 +52,7 @@ from starlette.middleware import Middleware as ASGIMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 from starlette.routing import BaseRoute, Route
+from typing_extensions import Self
 
 import fastmcp
 import fastmcp.server
@@ -96,9 +97,9 @@ if TYPE_CHECKING:
     from fastmcp.client.client import FastMCP1Server
     from fastmcp.client.sampling import SamplingHandler
     from fastmcp.client.transports import ClientTransport, ClientTransportT
-    from fastmcp.server.openapi import ComponentFn as OpenAPIComponentFn
-    from fastmcp.server.openapi import FastMCPOpenAPI, RouteMap
-    from fastmcp.server.openapi import RouteMapFn as OpenAPIRouteMapFn
+    from fastmcp.server.providers.openapi import ComponentFn as OpenAPIComponentFn
+    from fastmcp.server.providers.openapi import RouteMap
+    from fastmcp.server.providers.openapi import RouteMapFn as OpenAPIRouteMapFn
     from fastmcp.server.providers.proxy import FastMCPProxy
     from fastmcp.tools.tool import ToolResultSerializerType
 
@@ -245,11 +246,14 @@ class FastMCP(Generic[LifespanResultT]):
         # if auth is `NotSet`, try to create a provider from the environment
         if auth is NotSet:
             if fastmcp.settings.server_auth is not None:
-                # server_auth_class returns the class itself
-                auth = fastmcp.settings.server_auth_class()
+                # server_auth_class returns the class itself, not an instance
+                auth_class = cast(
+                    type[AuthProvider], fastmcp.settings.server_auth_class
+                )
+                auth = auth_class()
             else:
                 auth = None
-        self.auth: AuthProvider | None = cast(AuthProvider | None, auth)
+        self.auth: AuthProvider | None = auth
 
         if tools:
             for tool in tools:
@@ -1858,7 +1862,11 @@ class FastMCP(Generic[LifespanResultT]):
         meta: dict[str, Any] | None = None,
         enabled: bool | None = None,
         task: bool | TaskConfig | None = None,
-    ) -> Callable[[AnyFunction], FunctionTool] | FunctionTool:
+    ) -> (
+        Callable[[AnyFunction], FunctionTool]
+        | FunctionTool
+        | partial[Callable[[AnyFunction], FunctionTool] | FunctionTool]
+    ):
         """Decorator to register a tool.
 
         Tools can optionally request a Context object by adding a parameter with the
@@ -2240,7 +2248,11 @@ class FastMCP(Generic[LifespanResultT]):
         enabled: bool | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
-    ) -> Callable[[AnyFunction], FunctionPrompt] | FunctionPrompt:
+    ) -> (
+        Callable[[AnyFunction], FunctionPrompt]
+        | FunctionPrompt
+        | partial[Callable[[AnyFunction], FunctionPrompt] | FunctionPrompt]
+    ):
         """Decorator to register a prompt.
 
         Prompts can optionally request a Context object by adding a parameter with the
@@ -2489,7 +2501,7 @@ class FastMCP(Generic[LifespanResultT]):
             async with self._lifespan_manager():
                 config = uvicorn.Config(app, host=host, port=port, **config_kwargs)
                 server = uvicorn.Server(config)
-                path = app.state.path.lstrip("/")  # type: ignore
+                path = getattr(app.state, "path", "").lstrip("/")
                 logger.info(
                     f"Starting MCP server {self.name!r} with transport {transport!r} on http://{host}:{port}/{path}"
                 )
@@ -2748,19 +2760,36 @@ class FastMCP(Generic[LifespanResultT]):
         cls,
         openapi_spec: dict[str, Any],
         client: httpx.AsyncClient,
+        name: str = "OpenAPI Server",
         route_maps: list[RouteMap] | None = None,
         route_map_fn: OpenAPIRouteMapFn | None = None,
         mcp_component_fn: OpenAPIComponentFn | None = None,
         mcp_names: dict[str, str] | None = None,
         tags: set[str] | None = None,
+        timeout: float | None = None,
         **settings: Any,
-    ) -> FastMCPOpenAPI:
+    ) -> Self:
         """
         Create a FastMCP server from an OpenAPI specification.
-        """
-        from .openapi import FastMCPOpenAPI
 
-        return FastMCPOpenAPI(
+        Args:
+            openapi_spec: OpenAPI schema as a dictionary
+            client: httpx AsyncClient for making HTTP requests
+            name: Name for the MCP server
+            route_maps: Optional list of RouteMap objects defining route mappings
+            route_map_fn: Optional callable for advanced route type mapping
+            mcp_component_fn: Optional callable for component customization
+            mcp_names: Optional dictionary mapping operationId to component names
+            tags: Optional set of tags to add to all components
+            timeout: Optional timeout (in seconds) for all requests
+            **settings: Additional settings passed to FastMCP
+
+        Returns:
+            A FastMCP server with an OpenAPIProvider attached.
+        """
+        from .providers.openapi import OpenAPIProvider
+
+        provider = OpenAPIProvider(
             openapi_spec=openapi_spec,
             client=client,
             route_maps=route_maps,
@@ -2768,8 +2797,9 @@ class FastMCP(Generic[LifespanResultT]):
             mcp_component_fn=mcp_component_fn,
             mcp_names=mcp_names,
             tags=tags,
-            **settings,
+            timeout=timeout,
         )
+        return cls(name=name, providers=[provider], **settings)
 
     @classmethod
     def from_fastapi(
@@ -2782,12 +2812,28 @@ class FastMCP(Generic[LifespanResultT]):
         mcp_names: dict[str, str] | None = None,
         httpx_client_kwargs: dict[str, Any] | None = None,
         tags: set[str] | None = None,
+        timeout: float | None = None,
         **settings: Any,
-    ) -> FastMCPOpenAPI:
+    ) -> Self:
         """
         Create a FastMCP server from a FastAPI application.
+
+        Args:
+            app: FastAPI application instance
+            name: Name for the MCP server (defaults to app.title)
+            route_maps: Optional list of RouteMap objects defining route mappings
+            route_map_fn: Optional callable for advanced route type mapping
+            mcp_component_fn: Optional callable for component customization
+            mcp_names: Optional dictionary mapping operationId to component names
+            httpx_client_kwargs: Optional kwargs passed to httpx.AsyncClient
+            tags: Optional set of tags to add to all components
+            timeout: Optional timeout (in seconds) for all requests
+            **settings: Additional settings passed to FastMCP
+
+        Returns:
+            A FastMCP server with an OpenAPIProvider attached.
         """
-        from .openapi import FastMCPOpenAPI
+        from .providers.openapi import OpenAPIProvider
 
         if httpx_client_kwargs is None:
             httpx_client_kwargs = {}
@@ -2798,19 +2844,19 @@ class FastMCP(Generic[LifespanResultT]):
             **httpx_client_kwargs,
         )
 
-        name = name or app.title
+        server_name = name or app.title
 
-        return FastMCPOpenAPI(
+        provider = OpenAPIProvider(
             openapi_spec=app.openapi(),
             client=client,
-            name=name,
             route_maps=route_maps,
             route_map_fn=route_map_fn,
             mcp_component_fn=mcp_component_fn,
             mcp_names=mcp_names,
             tags=tags,
-            **settings,
+            timeout=timeout,
         )
+        return cls(name=server_name, providers=[provider], **settings)
 
     @classmethod
     def as_proxy(
@@ -2862,7 +2908,8 @@ class FastMCP(Generic[LifespanResultT]):
 
                 client_factory = fresh_client_factory
         else:
-            base_client = ProxyClient(backend)  # type: ignore
+            # backend is not a Client, so it's compatible with ProxyClient.__init__
+            base_client = ProxyClient(cast(Any, backend))
 
             # Fresh client created from transport - use fresh sessions per request
             def proxy_client_factory():
