@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING, Annotated, Any, TypedDict
 
 from mcp.types import Icon
-from pydantic import BeforeValidator, Field, PrivateAttr
+from pydantic import BeforeValidator, Field
 from typing_extensions import Self, TypeVar
 
 import fastmcp
@@ -56,10 +56,6 @@ class FastMCPComponent(FastMCPBaseModel):
     meta: dict[str, Any] | None = Field(
         default=None, description="Meta information about the component"
     )
-    enabled: bool = Field(
-        default=True,
-        description="Whether the component is enabled.",
-    )
     task_config: Annotated[
         TaskConfig,
         Field(description="Background task execution configuration (SEP-1686)."),
@@ -75,6 +71,18 @@ class FastMCPComponent(FastMCPBaseModel):
         - Templates: uri_template
         """
         return self.name
+
+    @property
+    def qualified_key(self) -> str:
+        """The fully qualified key for this component.
+
+        Returns format '<type>:<key>' for use in enable/disable blocklists.
+        Subclasses override to provide the type prefix:
+        - Tool: 'tool:<name>'
+        - Prompt: 'prompt:<name>'
+        - Resource/ResourceTemplate: 'resource:<uri>'
+        """
+        return self.key
 
     def get_meta(
         self, include_fastmcp_meta: bool | None = None
@@ -108,15 +116,29 @@ class FastMCPComponent(FastMCPBaseModel):
         return self.model_dump() == other.model_dump()
 
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__}(name={self.name!r}, title={self.title!r}, description={self.description!r}, tags={self.tags}, enabled={self.enabled})"
+        return f"{self.__class__.__name__}(name={self.name!r}, title={self.title!r}, description={self.description!r}, tags={self.tags})"
 
     def enable(self) -> None:
-        """Enable the component."""
-        self.enabled = True
+        """Enable the component.
+
+        .. deprecated:: 3.0
+            Component.enable() was removed. Use server.enable(keys=[...]) instead.
+        """
+        raise NotImplementedError(
+            f"Component.enable() was removed in FastMCP 3.0. "
+            f"Use server.enable(keys=['{self.key}']) instead."
+        )
 
     def disable(self) -> None:
-        """Disable the component."""
-        self.enabled = False
+        """Disable the component.
+
+        .. deprecated:: 3.0
+            Component.disable() was removed. Use server.disable(keys=[...]) instead.
+        """
+        raise NotImplementedError(
+            f"Component.disable() was removed in FastMCP 3.0. "
+            f"Use server.disable(keys=['{self.key}']) instead."
+        )
 
     def copy(self) -> Self:  # type: ignore[override]
         """Create a copy of the component."""
@@ -151,42 +173,3 @@ class FastMCPComponent(FastMCPBaseModel):
         raise NotImplementedError(
             f"{self.__class__.__name__} does not implement add_to_docket()"
         )
-
-
-class MirroredComponent(FastMCPComponent):
-    """Base class for components that are mirrored from a remote server.
-
-    Mirrored components cannot be enabled or disabled directly. Call copy() first
-    to create a local version you can modify.
-    """
-
-    _mirrored: bool = PrivateAttr(default=False)
-
-    def __init__(self, *, _mirrored: bool = False, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
-        self._mirrored = _mirrored
-
-    def enable(self) -> None:
-        """Enable the component."""
-        if self._mirrored:
-            raise RuntimeError(
-                f"Cannot enable mirrored component '{self.name}'. "
-                f"Create a local copy first with {self.name}.copy() and add it to your server."
-            )
-        super().enable()
-
-    def disable(self) -> None:
-        """Disable the component."""
-        if self._mirrored:
-            raise RuntimeError(
-                f"Cannot disable mirrored component '{self.name}'. "
-                f"Create a local copy first with {self.name}.copy() and add it to your server."
-            )
-        super().disable()
-
-    def copy(self) -> Self:  # type: ignore[override]
-        """Create a copy of the component that can be modified."""
-        # Create a copy and mark it as not mirrored
-        copied = self.model_copy()
-        copied._mirrored = False
-        return copied

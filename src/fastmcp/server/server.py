@@ -313,6 +313,21 @@ class FastMCP(Generic[LifespanResultT]):
             set(exclude_tags) if exclude_tags is not None else None
         )
 
+        # Emit deprecation warnings for include_tags and exclude_tags
+        if include_tags is not None:
+            warnings.warn(
+                "include_tags is deprecated. Filter components by tags in your "
+                "application logic instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        if exclude_tags is not None:
+            warnings.warn(
+                "exclude_tags is deprecated. Use server.disable(tags=...) instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
         self.strict_input_validation: bool = (
             strict_input_validation
             if strict_input_validation is not None
@@ -705,6 +720,178 @@ class FastMCP(Generic[LifespanResultT]):
             provider: A Provider instance that will provide components dynamically.
         """
         self._providers.append(provider)
+
+    # -------------------------------------------------------------------------
+    # Enable/Disable
+    # -------------------------------------------------------------------------
+
+    async def enable(
+        self,
+        *,
+        keys: list[str | FastMCPComponent] | None = None,
+        tags: set[str] | None = None,
+    ) -> list[FastMCPComponent]:
+        """Enable components by removing from provider blocklists.
+
+        Components are matched by key OR tags (union semantics). Enabling
+        removes the matching entries from the blocklist, making them visible again.
+
+        Keys can be:
+        - Component objects: ``server.enable(keys=[tool])``
+        - Strings: ``"my_tool"`` (if unambiguous) or ``"tool:my_tool"`` (explicit)
+
+        Type prefixes: ``tool:``, ``prompt:``, ``resource:`` (for both resources
+        and templates - distinguished by URI pattern).
+
+        Args:
+            keys: Keys to enable. Can be strings or component objects.
+            tags: Tags to enable - components with these tags will be enabled.
+
+        Returns:
+            List of components that were affected across all providers.
+
+        Raises:
+            ValueError: If an unprefixed key matches multiple component types.
+
+        Example:
+            .. code-block:: python
+
+                # By key
+                await server.enable(keys=["my_tool"])
+
+                # By component object
+                tool = await server.get_tool("my_tool")
+                await server.enable(keys=[tool])
+
+                # By tag
+                await server.enable(tags={"internal"})
+
+                # Disambiguate with prefix
+                await server.enable(keys=["tool:analyze", "prompt:analyze"])
+        """
+        normalized_keys = await self._normalize_keys(keys) if keys else None
+        affected: list[FastMCPComponent] = []
+        for provider in self._providers:
+            affected.extend(await provider.enable(keys=normalized_keys, tags=tags))
+        return affected
+
+    async def disable(
+        self,
+        *,
+        keys: list[str | FastMCPComponent] | None = None,
+        tags: set[str] | None = None,
+    ) -> list[FastMCPComponent]:
+        """Disable components by adding to provider blocklists.
+
+        Components are matched by key OR tags (union semantics). Disabling
+        adds the matching entries to the blocklist, hiding them from clients.
+
+        Keys can be:
+        - Component objects: ``server.disable(keys=[tool])``
+        - Strings: ``"my_tool"`` (if unambiguous) or ``"tool:my_tool"`` (explicit)
+
+        Type prefixes: ``tool:``, ``prompt:``, ``resource:`` (for both resources
+        and templates - distinguished by URI pattern).
+
+        Args:
+            keys: Keys to disable. Can be strings or component objects.
+            tags: Tags to disable - components with these tags will be disabled.
+
+        Returns:
+            List of components that were affected across all providers.
+
+        Raises:
+            ValueError: If an unprefixed key matches multiple component types.
+
+        Example:
+            .. code-block:: python
+
+                # By key
+                await server.disable(keys=["my_tool"])
+
+                # By component object
+                tool = await server.get_tool("my_tool")
+                await server.disable(keys=[tool])
+
+                # By tag
+                await server.disable(tags={"dangerous", "internal"})
+
+                # Disambiguate with prefix
+                await server.disable(keys=["tool:analyze", "prompt:analyze"])
+        """
+        normalized_keys = await self._normalize_keys(keys) if keys else None
+        affected: list[FastMCPComponent] = []
+        for provider in self._providers:
+            affected.extend(await provider.disable(keys=normalized_keys, tags=tags))
+        return affected
+
+    async def _normalize_keys(self, keys: list[str | FastMCPComponent]) -> list[str]:
+        """Normalize keys to the format 'type:key'.
+
+        Component objects are converted to their normalized form.
+        String keys are validated and normalized:
+        - 'tool:name' -> kept as-is
+        - 'name' -> resolved to 'tool:name' if unambiguous, else raises ValueError
+        """
+        normalized: list[str] = []
+        for key in keys:
+            if isinstance(key, FastMCPComponent):
+                # Get type from component class
+                if isinstance(key, Tool):
+                    normalized.append(f"tool:{key.key}")
+                elif isinstance(key, Prompt):
+                    normalized.append(f"prompt:{key.key}")
+                elif isinstance(key, (Resource, ResourceTemplate)):
+                    normalized.append(f"resource:{key.key}")
+                else:
+                    raise ValueError(f"Unknown component type: {type(key)}")
+            elif ":" in key:
+                # Already has type prefix
+                normalized.append(key)
+            else:
+                # Need to resolve - check if it's ambiguous
+                resolved = await self._resolve_key(key)
+                normalized.append(resolved)
+        return normalized
+
+    async def _resolve_key(self, key: str) -> str:
+        """Resolve an unprefixed key to 'type:key'.
+
+        Raises ValueError if the key matches multiple component types.
+        If the key doesn't match any known component, we still normalize it
+        (useful for disabling components that don't exist yet).
+        """
+        matches: list[str] = []
+
+        # Check all component types - note: we use get_tools() etc. to get
+        # unfiltered lists (including disabled components)
+        all_tools = await self.get_tools()
+        if key in all_tools:
+            matches.append(f"tool:{key}")
+
+        all_prompts = await self.get_prompts()
+        if key in all_prompts:
+            matches.append(f"prompt:{key}")
+
+        all_resources = await self.get_resources()
+        if key in all_resources:
+            matches.append(f"resource:{key}")
+
+        all_templates = await self.get_resource_templates()
+        if key in all_templates:
+            matches.append(f"resource:{key}")
+
+        if len(matches) > 1:
+            raise ValueError(
+                f"Key {key!r} is ambiguous - matches {', '.join(matches)}. "
+                f"Use a type prefix like 'tool:{key}' or 'prompt:{key}'."
+            )
+        elif len(matches) == 1:
+            return matches[0]
+        else:
+            # Key doesn't exist yet - default to tool: prefix as most common
+            # This allows disabling keys before they're registered
+            return f"tool:{key}"
 
     async def get_tools(self) -> dict[str, Tool]:
         """Get all tools (unfiltered), including from providers, indexed by key.
@@ -1734,7 +1921,6 @@ class FastMCP(Generic[LifespanResultT]):
         annotations: ToolAnnotations | dict[str, Any] | None = None,
         exclude_args: list[str] | None = None,
         meta: dict[str, Any] | None = None,
-        enabled: bool | None = None,
         task: bool | TaskConfig | None = None,
     ) -> FunctionTool: ...
 
@@ -1752,7 +1938,6 @@ class FastMCP(Generic[LifespanResultT]):
         annotations: ToolAnnotations | dict[str, Any] | None = None,
         exclude_args: list[str] | None = None,
         meta: dict[str, Any] | None = None,
-        enabled: bool | None = None,
         task: bool | TaskConfig | None = None,
     ) -> Callable[[AnyFunction], FunctionTool]: ...
 
@@ -1769,7 +1954,6 @@ class FastMCP(Generic[LifespanResultT]):
         annotations: ToolAnnotations | dict[str, Any] | None = None,
         exclude_args: list[str] | None = None,
         meta: dict[str, Any] | None = None,
-        enabled: bool | None = None,
         task: bool | TaskConfig | None = None,
     ) -> (
         Callable[[AnyFunction], FunctionTool]
@@ -1799,7 +1983,6 @@ class FastMCP(Generic[LifespanResultT]):
             exclude_args: Optional list of argument names to exclude from the tool schema.
                 Deprecated: Use `Depends()` for dependency injection instead.
             meta: Optional meta information about the tool
-            enabled: Optional boolean to enable or disable the tool
 
         Examples:
             Register a tool with a custom name:
@@ -1837,7 +2020,6 @@ class FastMCP(Generic[LifespanResultT]):
             annotations=annotations,
             exclude_args=exclude_args,
             meta=meta,
-            enabled=enabled,
             task=task if task is not None else self._support_tasks_by_default,
             serializer=self._tool_serializer,
         )
@@ -1876,7 +2058,6 @@ class FastMCP(Generic[LifespanResultT]):
         icons: list[mcp.types.Icon] | None = None,
         mime_type: str | None = None,
         tags: set[str] | None = None,
-        enabled: bool | None = None,
         annotations: Annotations | dict[str, Any] | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
@@ -1902,7 +2083,6 @@ class FastMCP(Generic[LifespanResultT]):
             description: Optional description of the resource
             mime_type: Optional MIME type for the resource
             tags: Optional set of tags for categorizing the resource
-            enabled: Optional boolean to enable or disable the resource
             annotations: Optional annotations about the resource's behavior
             meta: Optional meta information about the resource
 
@@ -1942,7 +2122,6 @@ class FastMCP(Generic[LifespanResultT]):
             icons=icons,
             mime_type=mime_type,
             tags=tags,
-            enabled=enabled,
             annotations=annotations,
             meta=meta,
             task=task if task is not None else self._support_tasks_by_default,
@@ -1974,7 +2153,6 @@ class FastMCP(Generic[LifespanResultT]):
         description: str | None = None,
         icons: list[mcp.types.Icon] | None = None,
         tags: set[str] | None = None,
-        enabled: bool | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
     ) -> FunctionPrompt: ...
@@ -1989,7 +2167,6 @@ class FastMCP(Generic[LifespanResultT]):
         description: str | None = None,
         icons: list[mcp.types.Icon] | None = None,
         tags: set[str] | None = None,
-        enabled: bool | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
     ) -> Callable[[AnyFunction], FunctionPrompt]: ...
@@ -2003,7 +2180,6 @@ class FastMCP(Generic[LifespanResultT]):
         description: str | None = None,
         icons: list[mcp.types.Icon] | None = None,
         tags: set[str] | None = None,
-        enabled: bool | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
     ) -> (
@@ -2029,7 +2205,6 @@ class FastMCP(Generic[LifespanResultT]):
             name: Optional name for the prompt (keyword-only, alternative to name_or_fn)
             description: Optional description of what the prompt does
             tags: Optional set of tags for categorizing the prompt
-            enabled: Optional boolean to enable or disable the prompt
             meta: Optional meta information about the prompt
 
         Examples:
@@ -2088,7 +2263,6 @@ class FastMCP(Generic[LifespanResultT]):
             description=description,
             icons=icons,
             tags=tags,
-            enabled=enabled,
             meta=meta,
             task=task if task is not None else self._support_tasks_by_default,
         )
@@ -2625,21 +2799,17 @@ class FastMCP(Generic[LifespanResultT]):
         component: FastMCPComponent,
     ) -> bool:
         """
-        Given a component, determine if it should be enabled. Returns True if it should be enabled; False if it should not.
+        Check if a component should be enabled based on deprecated include_tags/exclude_tags.
+
+        This method is deprecated and will be removed in a future version.
+        Use server.disable(tags=...) instead of exclude_tags,
+        and filter components by tags manually instead of include_tags.
 
         Rules:
-            - If the component's enabled property is False, always return False.
             - If both include_tags and exclude_tags are None, return True.
-            - If exclude_tags is provided, check each exclude tag:
-                - If the exclude tag is a string, it must be present in the input tags to exclude.
-            - If include_tags is provided, check each include tag:
-                - If the include tag is a string, it must be present in the input tags to include.
-            - If include_tags is provided and none of the include tags match, return False.
-            - If include_tags is not provided, return True.
+            - If exclude_tags is provided, exclude components with matching tags.
+            - If include_tags is provided, only include components with matching tags.
         """
-        if not component.enabled:
-            return False
-
         if self.include_tags is None and self.exclude_tags is None:
             return True
 

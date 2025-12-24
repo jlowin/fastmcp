@@ -178,7 +178,6 @@ class Resource(FastMCPComponent):
         icons: list[Icon] | None = None,
         mime_type: str | None = None,
         tags: set[str] | None = None,
-        enabled: bool | None = None,
         annotations: Annotations | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
@@ -192,7 +191,6 @@ class Resource(FastMCPComponent):
             icons=icons,
             mime_type=mime_type,
             tags=tags,
-            enabled=enabled,
             annotations=annotations,
             meta=meta,
             task=task,
@@ -303,6 +301,11 @@ class Resource(FastMCPComponent):
         """The lookup key for this resource. Returns str(uri)."""
         return str(self.uri)
 
+    @property
+    def qualified_key(self) -> str:
+        """The fully qualified key for this resource (e.g., 'resource:file://path')."""
+        return f"resource:{self.key}"
+
     def register_with_docket(self, docket: Docket) -> None:
         """Register this resource with docket for background execution."""
         if not self.task_config.supports_tasks():
@@ -357,7 +360,6 @@ class FunctionResource(Resource):
         icons: list[Icon] | None = None,
         mime_type: str | None = None,
         tags: set[str] | None = None,
-        enabled: bool | None = None,
         annotations: Annotations | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
@@ -389,7 +391,6 @@ class FunctionResource(Resource):
             icons=icons,
             mime_type=mime_type or "text/plain",
             tags=tags or set(),
-            enabled=enabled if enabled is not None else True,
             annotations=annotations,
             meta=meta,
             task_config=task_config,

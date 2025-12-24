@@ -298,12 +298,12 @@ class LocalProvider(Provider):
     # =========================================================================
 
     async def list_tools(self) -> Sequence[Tool]:
-        """Return all tools with transformations applied."""
+        """Return all enabled tools with transformations applied."""
         transformed = apply_transformations_to_tools(
             tools=self._tools,
             transformations=self._tool_transformations,
         )
-        return list(transformed.values())
+        return [t for t in transformed.values() if self.is_component_enabled(t)]
 
     async def get_tool(self, name: str) -> Tool | None:
         """Get a tool by name, with transformations applied."""
@@ -311,31 +311,39 @@ class LocalProvider(Provider):
         return next((t for t in tools if t.name == name), None)
 
     async def list_resources(self) -> Sequence[Resource]:
-        """Return all resources."""
-        return list(self._resources.values())
+        """Return all enabled resources."""
+        return [r for r in self._resources.values() if self.is_component_enabled(r)]
 
     async def get_resource(self, uri: str) -> Resource | None:
-        """Get a resource by URI."""
-        return self._resources.get(uri)
+        """Get a resource by URI if enabled."""
+        resource = self._resources.get(uri)
+        if resource and self.is_component_enabled(resource):
+            return resource
+        return None
 
     async def list_resource_templates(self) -> Sequence[ResourceTemplate]:
-        """Return all resource templates."""
-        return list(self._templates.values())
+        """Return all enabled resource templates."""
+        return [t for t in self._templates.values() if self.is_component_enabled(t)]
 
     async def get_resource_template(self, uri: str) -> ResourceTemplate | None:
-        """Get a resource template that matches the given URI."""
+        """Get a resource template that matches the given URI if enabled."""
         for template in self._templates.values():
-            if template.matches(uri) is not None:
+            if template.matches(uri) is not None and self.is_component_enabled(
+                template
+            ):
                 return template
         return None
 
     async def list_prompts(self) -> Sequence[Prompt]:
-        """Return all prompts."""
-        return list(self._prompts.values())
+        """Return all enabled prompts."""
+        return [p for p in self._prompts.values() if self.is_component_enabled(p)]
 
     async def get_prompt(self, name: str) -> Prompt | None:
-        """Get a prompt by name."""
-        return self._prompts.get(name)
+        """Get a prompt by name if enabled."""
+        prompt = self._prompts.get(name)
+        if prompt and self.is_component_enabled(prompt):
+            return prompt
+        return None
 
     # =========================================================================
     # Task registration
@@ -379,7 +387,6 @@ class LocalProvider(Provider):
         annotations: ToolAnnotations | dict[str, Any] | None = None,
         exclude_args: list[str] | None = None,
         meta: dict[str, Any] | None = None,
-        enabled: bool | None = None,
         task: bool | TaskConfig | None = None,
         serializer: ToolResultSerializerType | None = None,
     ) -> FunctionTool: ...
@@ -398,7 +405,6 @@ class LocalProvider(Provider):
         annotations: ToolAnnotations | dict[str, Any] | None = None,
         exclude_args: list[str] | None = None,
         meta: dict[str, Any] | None = None,
-        enabled: bool | None = None,
         task: bool | TaskConfig | None = None,
         serializer: ToolResultSerializerType | None = None,
     ) -> Callable[[AnyFunction], FunctionTool]: ...
@@ -416,7 +422,6 @@ class LocalProvider(Provider):
         annotations: ToolAnnotations | dict[str, Any] | None = None,
         exclude_args: list[str] | None = None,
         meta: dict[str, Any] | None = None,
-        enabled: bool | None = None,
         task: bool | TaskConfig | None = None,
         serializer: ToolResultSerializerType | None = None,
     ) -> (
@@ -444,7 +449,6 @@ class LocalProvider(Provider):
             annotations: Optional annotations about the tool's behavior
             exclude_args: Optional list of argument names to exclude from the tool schema
             meta: Optional meta information about the tool
-            enabled: Optional boolean to enable or disable the tool
             task: Optional task configuration for background execution
             serializer: Optional serializer for the tool result
 
@@ -502,7 +506,6 @@ class LocalProvider(Provider):
                 exclude_args=exclude_args,
                 meta=meta,
                 serializer=serializer,
-                enabled=enabled,
                 task=supports_task,
             )
             self.add_tool(tool_obj)
@@ -536,7 +539,6 @@ class LocalProvider(Provider):
             annotations=annotations,
             exclude_args=exclude_args,
             meta=meta,
-            enabled=enabled,
             task=task,
             serializer=serializer,
         )
@@ -551,7 +553,6 @@ class LocalProvider(Provider):
         icons: list[mcp.types.Icon] | None = None,
         mime_type: str | None = None,
         tags: set[str] | None = None,
-        enabled: bool | None = None,
         annotations: Annotations | dict[str, Any] | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
@@ -569,7 +570,6 @@ class LocalProvider(Provider):
             icons: Optional icons for the resource
             mime_type: Optional MIME type for the resource
             tags: Optional set of tags for categorizing the resource
-            enabled: Optional boolean to enable or disable the resource
             annotations: Optional annotations about the resource's behavior
             meta: Optional meta information about the resource
             task: Optional task configuration for background execution
@@ -634,7 +634,6 @@ class LocalProvider(Provider):
                     icons=icons,
                     mime_type=mime_type,
                     tags=tags,
-                    enabled=enabled,
                     annotations=annotations,
                     meta=meta,
                     task=supports_task,
@@ -651,7 +650,6 @@ class LocalProvider(Provider):
                     icons=icons,
                     mime_type=mime_type,
                     tags=tags,
-                    enabled=enabled,
                     annotations=annotations,
                     meta=meta,
                     task=supports_task,
@@ -676,7 +674,6 @@ class LocalProvider(Provider):
         description: str | None = None,
         icons: list[mcp.types.Icon] | None = None,
         tags: set[str] | None = None,
-        enabled: bool | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
     ) -> FunctionPrompt: ...
@@ -691,7 +688,6 @@ class LocalProvider(Provider):
         description: str | None = None,
         icons: list[mcp.types.Icon] | None = None,
         tags: set[str] | None = None,
-        enabled: bool | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
     ) -> Callable[[AnyFunction], FunctionPrompt]: ...
@@ -705,7 +701,6 @@ class LocalProvider(Provider):
         description: str | None = None,
         icons: list[mcp.types.Icon] | None = None,
         tags: set[str] | None = None,
-        enabled: bool | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
     ) -> (
@@ -729,7 +724,6 @@ class LocalProvider(Provider):
             description: Optional description of what the prompt does
             icons: Optional icons for the prompt
             tags: Optional set of tags for categorizing the prompt
-            enabled: Optional boolean to enable or disable the prompt
             meta: Optional meta information about the prompt
             task: Optional task configuration for background execution
 
@@ -779,7 +773,6 @@ class LocalProvider(Provider):
                 description=description,
                 icons=icons,
                 tags=tags,
-                enabled=enabled,
                 meta=meta,
                 task=supports_task,
             )
@@ -810,7 +803,6 @@ class LocalProvider(Provider):
             description=description,
             icons=icons,
             tags=tags,
-            enabled=enabled,
             meta=meta,
             task=task,
         )

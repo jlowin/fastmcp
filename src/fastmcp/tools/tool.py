@@ -151,6 +151,11 @@ class Tool(FastMCPComponent):
         validate_and_warn_tool_name(self.name)
         return self
 
+    @property
+    def qualified_key(self) -> str:
+        """The fully qualified key for this tool (e.g., 'tool:my_tool')."""
+        return f"tool:{self.key}"
+
     def enable(self) -> None:
         super().enable()
         try:
@@ -208,7 +213,6 @@ class Tool(FastMCPComponent):
         output_schema: dict[str, Any] | NotSetT | None = NotSet,
         serializer: ToolResultSerializerType | None = None,
         meta: dict[str, Any] | None = None,
-        enabled: bool | None = None,
         task: bool | TaskConfig | None = None,
     ) -> FunctionTool:
         """Create a Tool from a function."""
@@ -224,7 +228,6 @@ class Tool(FastMCPComponent):
             output_schema=output_schema,
             serializer=serializer,
             meta=meta,
-            enabled=enabled,
             task=task,
         )
 
@@ -348,7 +351,6 @@ class Tool(FastMCPComponent):
         serializer: ToolResultSerializerType | None = None,
         meta: dict[str, Any] | NotSetT | None = NotSet,
         transform_args: dict[str, ArgTransform] | None = None,
-        enabled: bool | None = None,
         transform_fn: Callable[..., Any] | None = None,
     ) -> TransformedTool:
         from fastmcp.tools.tool_transform import TransformedTool
@@ -365,7 +367,6 @@ class Tool(FastMCPComponent):
             output_schema=output_schema,
             serializer=serializer,
             meta=meta,
-            enabled=enabled,
         )
 
 
@@ -408,7 +409,6 @@ class FunctionTool(Tool):
         output_schema: dict[str, Any] | NotSetT | None = NotSet,
         serializer: ToolResultSerializerType | None = None,
         meta: dict[str, Any] | None = None,
-        enabled: bool | None = None,
         task: bool | TaskConfig | None = None,
     ) -> FunctionTool:
         """Create a Tool from a function."""
@@ -463,7 +463,6 @@ class FunctionTool(Tool):
             tags=tags or set(),
             serializer=serializer,
             meta=meta,
-            enabled=enabled if enabled is not None else True,
             task_config=task_config,
         )
 

@@ -139,7 +139,6 @@ class ResourceTemplate(FastMCPComponent):
         icons: list[Icon] | None = None,
         mime_type: str | None = None,
         tags: set[str] | None = None,
-        enabled: bool | None = None,
         annotations: Annotations | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
@@ -153,7 +152,6 @@ class ResourceTemplate(FastMCPComponent):
             icons=icons,
             mime_type=mime_type,
             tags=tags,
-            enabled=enabled,
             annotations=annotations,
             meta=meta,
             task=task,
@@ -268,6 +266,11 @@ class ResourceTemplate(FastMCPComponent):
         """The lookup key for this template. Returns uri_template."""
         return self.uri_template
 
+    @property
+    def qualified_key(self) -> str:
+        """The fully qualified key for this template (e.g., 'resource:weather://{city}')."""
+        return f"resource:{self.key}"
+
     def register_with_docket(self, docket: Docket) -> None:
         """Register this template with docket for background execution."""
         if not self.task_config.supports_tasks():
@@ -343,7 +346,6 @@ class FunctionResourceTemplate(ResourceTemplate):
             description=self.description,
             mime_type=self.mime_type,
             tags=self.tags,
-            enabled=self.enabled,
             task=self.task_config,
         )
 
@@ -424,7 +426,6 @@ class FunctionResourceTemplate(ResourceTemplate):
         icons: list[Icon] | None = None,
         mime_type: str | None = None,
         tags: set[str] | None = None,
-        enabled: bool | None = None,
         annotations: Annotations | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
@@ -532,7 +533,6 @@ class FunctionResourceTemplate(ResourceTemplate):
             fn=fn,
             parameters=parameters,
             tags=tags or set(),
-            enabled=enabled if enabled is not None else True,
             annotations=annotations,
             meta=meta,
             task_config=task_config,

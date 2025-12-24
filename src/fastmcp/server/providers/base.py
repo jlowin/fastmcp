@@ -31,12 +31,15 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from fastmcp.prompts.prompt import Prompt
 from fastmcp.resources.resource import Resource
 from fastmcp.resources.template import ResourceTemplate
 from fastmcp.tools.tool import Tool
+
+if TYPE_CHECKING:
+    from fastmcp.utilities.components import FastMCPComponent
 
 
 @dataclass
@@ -70,6 +73,10 @@ class Provider:
         - `list_*` methods: Errors are logged and the provider returns empty (graceful degradation).
           This allows other providers to still contribute their components.
     """
+
+    def __init__(self) -> None:
+        self._disabled_keys: set[str] = set()
+        self._disabled_tags: set[str] = set()
 
     def _notify(
         self, notification_type: Literal["tools", "resources", "prompts"]
@@ -315,3 +322,85 @@ class Provider:
             ```
         """
         yield
+
+    # -------------------------------------------------------------------------
+    # Enable/Disable
+    # -------------------------------------------------------------------------
+
+    async def enable(
+        self,
+        *,
+        keys: list[str] | None = None,
+        tags: set[str] | None = None,
+    ) -> list[FastMCPComponent]:
+        """Enable components by removing from the blocklist.
+
+        Args:
+            keys: Normalized keys to enable (e.g., "tool:my_tool").
+            tags: Tags to enable - components with these tags will be enabled.
+
+        Returns:
+            List of components that were affected (empty for base Provider).
+        """
+        if keys:
+            self._disabled_keys -= set(keys)
+        if tags:
+            self._disabled_tags -= tags
+        return []
+
+    async def disable(
+        self,
+        *,
+        keys: list[str] | None = None,
+        tags: set[str] | None = None,
+    ) -> list[FastMCPComponent]:
+        """Disable components by adding to the blocklist.
+
+        Args:
+            keys: Normalized keys to disable (e.g., "tool:my_tool").
+            tags: Tags to disable - components with these tags will be disabled.
+
+        Returns:
+            List of components that were affected (empty for base Provider).
+        """
+        if keys:
+            self._disabled_keys.update(keys)
+        if tags:
+            self._disabled_tags.update(tags)
+        return []
+
+    def _get_component_type(self, component: FastMCPComponent) -> str:
+        """Get the type prefix for a component.
+
+        Uses: tool:, prompt:, resource: (for both resources and templates).
+        """
+        if isinstance(component, Tool):
+            return "tool"
+        elif isinstance(component, Prompt):
+            return "prompt"
+        elif isinstance(component, (Resource, ResourceTemplate)):
+            # Templates are a type of resource - distinguish by URI pattern
+            return "resource"
+        else:
+            return "unknown"
+
+    def is_component_enabled(self, component: FastMCPComponent) -> bool:
+        """Check if a component should be served.
+
+        A component is disabled if:
+        - Its normalized key is in _disabled_keys, OR
+        - Any of its tags are in _disabled_tags
+
+        Args:
+            component: The component to check.
+
+        Returns:
+            True if the component should be served, False otherwise.
+        """
+        component_type = self._get_component_type(component)
+        full_key = f"{component_type}:{component.key}"
+
+        if full_key in self._disabled_keys:
+            return False
+
+        return not bool(component.tags & self._disabled_tags)

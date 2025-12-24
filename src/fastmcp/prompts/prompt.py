@@ -122,6 +122,11 @@ class Prompt(FastMCPComponent):
         default=None, description="Arguments that can be passed to the prompt"
     )
 
+    @property
+    def qualified_key(self) -> str:
+        """The fully qualified key for this prompt (e.g., 'prompt:my_prompt')."""
+        return f"prompt:{self.key}"
+
     def enable(self) -> None:
         super().enable()
         try:
@@ -173,7 +178,6 @@ class Prompt(FastMCPComponent):
         description: str | None = None,
         icons: list[Icon] | None = None,
         tags: set[str] | None = None,
-        enabled: bool | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
     ) -> FunctionPrompt:
@@ -192,7 +196,6 @@ class Prompt(FastMCPComponent):
             description=description,
             icons=icons,
             tags=tags,
-            enabled=enabled,
             meta=meta,
             task=task,
         )
@@ -336,7 +339,6 @@ class FunctionPrompt(Prompt):
         description: str | None = None,
         icons: list[Icon] | None = None,
         tags: set[str] | None = None,
-        enabled: bool | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
     ) -> FunctionPrompt:
@@ -432,7 +434,6 @@ class FunctionPrompt(Prompt):
             icons=icons,
             arguments=arguments,
             tags=tags or set(),
-            enabled=enabled if enabled is not None else True,
             fn=wrapped_fn,
             meta=meta,
             task_config=task_config,

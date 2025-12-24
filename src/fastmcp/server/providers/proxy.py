@@ -47,7 +47,6 @@ from fastmcp.tools.tool_transform import (
     ToolTransformConfig,
     apply_transformations_to_tools,
 )
-from fastmcp.utilities.components import MirroredComponent
 from fastmcp.utilities.logging import get_logger
 
 if TYPE_CHECKING:
@@ -64,7 +63,7 @@ ClientFactoryT = Callable[[], Client] | Callable[[], Awaitable[Client]]
 # -----------------------------------------------------------------------------
 
 
-class ProxyTool(Tool, MirroredComponent):
+class ProxyTool(Tool):
     """A Tool that represents and executes a tool on a remote server."""
 
     task_config: TaskConfig = TaskConfig(mode="forbidden")
@@ -151,7 +150,7 @@ class ProxyTool(Tool, MirroredComponent):
         )
 
 
-class ProxyResource(Resource, MirroredComponent):
+class ProxyResource(Resource):
     """A Resource that represents and reads a resource from a remote server."""
 
     task_config: TaskConfig = TaskConfig(mode="forbidden")
@@ -236,7 +235,7 @@ class ProxyResource(Resource, MirroredComponent):
             raise ResourceError(f"Unsupported content type: {type(result[0])}")
 
 
-class ProxyTemplate(ResourceTemplate, MirroredComponent):
+class ProxyTemplate(ResourceTemplate):
     """A ResourceTemplate that represents and creates resources from a remote server template."""
 
     task_config: TaskConfig = TaskConfig(mode="forbidden")
@@ -334,7 +333,7 @@ class ProxyTemplate(ResourceTemplate, MirroredComponent):
         )
 
 
-class ProxyPrompt(Prompt, MirroredComponent):
+class ProxyPrompt(Prompt):
     """A Prompt that represents and renders a prompt from a remote server."""
 
     task_config: TaskConfig = TaskConfig(mode="forbidden")
