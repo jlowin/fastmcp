@@ -201,6 +201,10 @@ def test_parse_multiple_servers():
     assert mcp_config.mcpServers["test_server_2"].env == {"TEST": "test"}
 
 
+@pytest.mark.skipif(
+    sys.platform.startswith("win32"),
+    reason="Windows has process lifecycle issues with stdio subprocesses",
+)
 async def test_multi_client(tmp_path: Path):
     server_script = inspect.cleandoc("""
         from fastmcp import FastMCP
