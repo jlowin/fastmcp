@@ -96,7 +96,7 @@ class ComponentService:
         Returns:
             The tool that was disabled
         """
-        logger.debug("Disable tool: %s", name)
+        logger.debug("Disabling tool: %s", name)
 
         # 1. Check local tools first. The server will have already applied its filter.
         key = Tool.make_key(name)
@@ -160,7 +160,7 @@ class ComponentService:
         Returns:
             The resource that was disabled
         """
-        logger.debug("Disable resource: %s", uri)
+        logger.debug("Disabling resource: %s", uri)
 
         # 1. Check local components first (try resource, then template)
         resource_key = Resource.make_key(uri)
@@ -224,6 +224,7 @@ class ComponentService:
         Returns:
             The prompt that was disabled
         """
+        logger.debug("Disabling prompt: %s", name)
 
         # 1. Check local prompts first. The server will have already applied its filter.
         key = Prompt.make_key(name)

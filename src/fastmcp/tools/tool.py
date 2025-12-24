@@ -30,7 +30,7 @@ from pydantic import Field, PydanticSchemaGenerationError, model_validator
 from typing_extensions import TypeVar
 
 import fastmcp
-from fastmcp.server.dependencies import get_context, without_injected_parameters
+from fastmcp.server.dependencies import without_injected_parameters
 from fastmcp.server.tasks.config import TaskConfig
 from fastmcp.utilities.components import FastMCPComponent
 from fastmcp.utilities.json_schema import compress_schema
@@ -153,27 +153,6 @@ class Tool(FastMCPComponent):
         """Validate tool name according to MCP specification (SEP-986)."""
         validate_and_warn_tool_name(self.name)
         return self
-
-    @property
-    def qualified_key(self) -> str:
-        """The fully qualified key for this tool (e.g., 'tool:my_tool')."""
-        return f"tool:{self.key}"
-
-    def enable(self) -> None:
-        super().enable()
-        try:
-            context = get_context()
-            context._queue_tool_list_changed()  # type: ignore[private-use]
-        except RuntimeError:
-            pass  # No context available
-
-    def disable(self) -> None:
-        super().disable()
-        try:
-            context = get_context()
-            context._queue_tool_list_changed()  # type: ignore[private-use]
-        except RuntimeError:
-            pass  # No context available
 
     def to_mcp_tool(
         self,

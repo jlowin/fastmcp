@@ -22,7 +22,7 @@ from pydantic import (
 )
 
 from fastmcp.resources.resource import Resource, ResourceContent
-from fastmcp.server.dependencies import get_context, without_injected_parameters
+from fastmcp.server.dependencies import without_injected_parameters
 from fastmcp.server.tasks.config import TaskConfig
 from fastmcp.utilities.components import FastMCPComponent
 from fastmcp.utilities.json_schema import compress_schema
@@ -114,22 +114,6 @@ class ResourceTemplate(FastMCPComponent):
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(uri_template={self.uri_template!r}, name={self.name!r}, description={self.description!r}, tags={self.tags})"
-
-    def enable(self) -> None:
-        super().enable()
-        try:
-            context = get_context()
-            context._queue_resource_list_changed()  # type: ignore[private-use]
-        except RuntimeError:
-            pass  # No context available
-
-    def disable(self) -> None:
-        super().disable()
-        try:
-            context = get_context()
-            context._queue_resource_list_changed()  # type: ignore[private-use]
-        except RuntimeError:
-            pass  # No context available
 
     @staticmethod
     def from_function(
@@ -267,11 +251,6 @@ class ResourceTemplate(FastMCPComponent):
     def key(self) -> str:
         """The globally unique lookup key for this template."""
         return self.make_key(self.uri_template)
-
-    @property
-    def qualified_key(self) -> str:
-        """The fully qualified key for this template (e.g., 'resource:weather://{city}')."""
-        return f"resource:{self.key}"
 
     def register_with_docket(self, docket: Docket) -> None:
         """Register this template with docket for background execution."""

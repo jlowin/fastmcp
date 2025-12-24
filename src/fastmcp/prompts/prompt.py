@@ -22,7 +22,7 @@ from pydantic import Field, TypeAdapter
 
 from fastmcp import settings
 from fastmcp.exceptions import PromptError
-from fastmcp.server.dependencies import get_context, without_injected_parameters
+from fastmcp.server.dependencies import without_injected_parameters
 from fastmcp.server.tasks.config import TaskConfig
 from fastmcp.utilities.components import FastMCPComponent
 from fastmcp.utilities.json_schema import compress_schema
@@ -123,27 +123,6 @@ class Prompt(FastMCPComponent):
     arguments: list[PromptArgument] | None = Field(
         default=None, description="Arguments that can be passed to the prompt"
     )
-
-    @property
-    def qualified_key(self) -> str:
-        """The fully qualified key for this prompt (e.g., 'prompt:my_prompt')."""
-        return f"prompt:{self.key}"
-
-    def enable(self) -> None:
-        super().enable()
-        try:
-            context = get_context()
-            context._queue_prompt_list_changed()  # type: ignore[private-use]
-        except RuntimeError:
-            pass  # No context available
-
-    def disable(self) -> None:
-        super().disable()
-        try:
-            context = get_context()
-            context._queue_prompt_list_changed()  # type: ignore[private-use]
-        except RuntimeError:
-            pass  # No context available
 
     def to_mcp_prompt(
         self,

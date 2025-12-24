@@ -28,7 +28,7 @@ from pydantic import (
 from typing_extensions import Self
 
 from fastmcp import settings
-from fastmcp.server.dependencies import get_context, without_injected_parameters
+from fastmcp.server.dependencies import without_injected_parameters
 from fastmcp.server.tasks.config import TaskConfig
 from fastmcp.utilities.components import FastMCPComponent
 from fastmcp.utilities.types import (
@@ -153,22 +153,6 @@ class Resource(FastMCPComponent):
         Annotations | None,
         Field(description="Optional annotations about the resource's behavior"),
     ] = None
-
-    def enable(self) -> None:
-        super().enable()
-        try:
-            context = get_context()
-            context._queue_resource_list_changed()  # type: ignore[private-use]
-        except RuntimeError:
-            pass  # No context available
-
-    def disable(self) -> None:
-        super().disable()
-        try:
-            context = get_context()
-            context._queue_resource_list_changed()  # type: ignore[private-use]
-        except RuntimeError:
-            pass  # No context available
 
     @staticmethod
     def from_function(
@@ -302,11 +286,6 @@ class Resource(FastMCPComponent):
     def key(self) -> str:
         """The globally unique lookup key for this resource."""
         return self.make_key(str(self.uri))
-
-    @property
-    def qualified_key(self) -> str:
-        """The fully qualified key for this resource (e.g., 'resource:file://path')."""
-        return f"resource:{self.key}"
 
     def register_with_docket(self, docket: Docket) -> None:
         """Register this resource with docket for background execution."""

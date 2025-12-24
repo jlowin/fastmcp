@@ -101,18 +101,6 @@ class FastMCPComponent(FastMCPBaseModel):
         """
         return self.make_key(self.name)
 
-    @property
-    def qualified_key(self) -> str:
-        """The fully qualified key for this component.
-
-        Returns format '<type>:<key>' for use in enable/disable blocklists.
-        Subclasses override to provide the type prefix:
-        - Tool: 'tool:<name>'
-        - Prompt: 'prompt:<name>'
-        - Resource/ResourceTemplate: 'resource:<uri>'
-        """
-        return self.key
-
     def get_meta(
         self, include_fastmcp_meta: bool | None = None
     ) -> dict[str, Any] | None:
