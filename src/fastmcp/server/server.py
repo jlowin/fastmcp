@@ -57,6 +57,7 @@ import fastmcp
 import fastmcp.server
 from fastmcp.exceptions import (
     DisabledError,
+    FastMCPError,
     NotFoundError,
     PromptError,
     ResourceError,
@@ -500,12 +501,9 @@ class FastMCP(Generic[LifespanResultT]):
                             try:
                                 yield
                             finally:
-                                # Cancel worker task on exit with timeout to prevent hanging
                                 worker_task.cancel()
-                                with suppress(
-                                    asyncio.CancelledError, asyncio.TimeoutError
-                                ):
-                                    await asyncio.wait_for(worker_task, timeout=2.0)
+                                with suppress(asyncio.CancelledError):
+                                    await worker_task
                         finally:
                             _current_worker.reset(worker_token)
                 finally:
@@ -1429,12 +1427,12 @@ class FastMCP(Generic[LifespanResultT]):
         """
         try:
             return await tool._run(arguments)
+        except FastMCPError:
+            logger.exception(f"Error calling tool {tool_name!r}")
+            raise
         except (ValidationError, PydanticValidationError):
             # Validation errors are never masked - they indicate client input issues
             logger.exception(f"Error validating tool {tool_name!r}")
-            raise
-        except ToolError:
-            logger.exception(f"Error calling tool {tool_name!r}")
             raise
         except Exception as e:
             logger.exception(f"Error calling tool {tool_name!r}")
@@ -1546,7 +1544,7 @@ class FastMCP(Generic[LifespanResultT]):
         """
         try:
             return await resource._read()
-        except (ResourceError, McpError):
+        except (FastMCPError, McpError):
             logger.exception(f"Error reading resource {uri_str!r}")
             raise
         except Exception as e:
@@ -1568,7 +1566,7 @@ class FastMCP(Generic[LifespanResultT]):
         """
         try:
             return await template._read(uri_str, params)
-        except (ResourceError, McpError):
+        except (FastMCPError, McpError):
             logger.exception(f"Error reading resource {uri_str!r}")
             raise
         except Exception as e:
@@ -1675,7 +1673,7 @@ class FastMCP(Generic[LifespanResultT]):
         """
         try:
             return await prompt._render(arguments)
-        except (PromptError, McpError):
+        except (FastMCPError, McpError):
             logger.exception(f"Error rendering prompt {name!r}")
             raise
         except Exception as e:
