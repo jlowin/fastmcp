@@ -33,6 +33,9 @@
 >
 > **For production MCP applications, install FastMCP:** `pip install fastmcp`
 
+> [!Important]
+> FastMCP 3.0 is in development and may include breaking changes. To avoid unexpected issues, pin your dependency to v2: `fastmcp<3`
+
 ---
 
 **FastMCP is the standard framework for building MCP applications**, providing the fastest path from idea to production.
