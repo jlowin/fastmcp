@@ -39,7 +39,7 @@ from fastmcp.resources import Resource, ResourceTemplate
 from fastmcp.resources.resource import ResourceContent
 from fastmcp.server.context import Context
 from fastmcp.server.dependencies import get_context
-from fastmcp.server.providers.base import Provider, TaskComponents
+from fastmcp.server.providers.base import Provider
 from fastmcp.server.server import FastMCP
 from fastmcp.server.tasks.config import TaskConfig
 from fastmcp.tools.tool import Tool, ToolResult
@@ -47,6 +47,7 @@ from fastmcp.tools.tool_transform import (
     ToolTransformConfig,
     apply_transformations_to_tools,
 )
+from fastmcp.utilities.components import FastMCPComponent, MirroredComponent
 from fastmcp.utilities.logging import get_logger
 
 if TYPE_CHECKING:
@@ -63,7 +64,7 @@ ClientFactoryT = Callable[[], Client] | Callable[[], Awaitable[Client]]
 # -----------------------------------------------------------------------------
 
 
-class ProxyTool(Tool):
+class ProxyTool(Tool, MirroredComponent):
     """A Tool that represents and executes a tool on a remote server."""
 
     task_config: TaskConfig = TaskConfig(mode="forbidden")
@@ -150,7 +151,7 @@ class ProxyTool(Tool):
         )
 
 
-class ProxyResource(Resource):
+class ProxyResource(Resource, MirroredComponent):
     """A Resource that represents and reads a resource from a remote server."""
 
     task_config: TaskConfig = TaskConfig(mode="forbidden")
@@ -235,7 +236,7 @@ class ProxyResource(Resource):
             raise ResourceError(f"Unsupported content type: {type(result[0])}")
 
 
-class ProxyTemplate(ResourceTemplate):
+class ProxyTemplate(ResourceTemplate, MirroredComponent):
     """A ResourceTemplate that represents and creates resources from a remote server template."""
 
     task_config: TaskConfig = TaskConfig(mode="forbidden")
@@ -333,7 +334,7 @@ class ProxyTemplate(ResourceTemplate):
         )
 
 
-class ProxyPrompt(Prompt):
+class ProxyPrompt(Prompt, MirroredComponent):
     """A Prompt that represents and renders a prompt from a remote server."""
 
     task_config: TaskConfig = TaskConfig(mode="forbidden")
@@ -540,14 +541,14 @@ class ProxyProvider(Provider):
     # Task methods
     # -------------------------------------------------------------------------
 
-    async def get_tasks(self) -> TaskComponents:
-        """Return empty TaskComponents since proxy components don't support tasks.
+    async def get_tasks(self) -> Sequence[FastMCPComponent]:
+        """Return empty list since proxy components don't support tasks.
 
         Override the base implementation to avoid calling list_tools() during
         server lifespan initialization, which would open the client before any
         context is set. All Proxy* components have task_config.mode="forbidden".
         """
-        return TaskComponents()
+        return []
 
     # lifespan() uses default implementation (empty context manager)
     # because client cleanup is handled per-request
