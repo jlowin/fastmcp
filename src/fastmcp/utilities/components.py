@@ -136,22 +136,14 @@ class FastMCPComponent(FastMCPBaseModel):
         return f"{self.__class__.__name__}(name={self.name!r}, title={self.title!r}, description={self.description!r}, tags={self.tags})"
 
     def enable(self) -> None:
-        """Enable the component.
-
-        .. deprecated:: 3.0
-            Component.enable() was removed. Use server.enable(keys=[...]) instead.
-        """
+        """Removed in 3.0. Use server.enable(keys=[...]) instead."""
         raise NotImplementedError(
             f"Component.enable() was removed in FastMCP 3.0. "
             f"Use server.enable(keys=['{self.key}']) instead."
         )
 
     def disable(self) -> None:
-        """Disable the component.
-
-        .. deprecated:: 3.0
-            Component.disable() was removed. Use server.disable(keys=[...]) instead.
-        """
+        """Removed in 3.0. Use server.disable(keys=[...]) instead."""
         raise NotImplementedError(
             f"Component.disable() was removed in FastMCP 3.0. "
             f"Use server.disable(keys=['{self.key}']) instead."
