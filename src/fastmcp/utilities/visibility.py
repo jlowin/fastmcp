@@ -10,6 +10,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Literal
 
+import mcp.types
+
 if TYPE_CHECKING:
     from fastmcp.utilities.components import FastMCPComponent
 
@@ -53,12 +55,15 @@ class VisibilityFilter:
         if context is None:
             return  # No context available
 
-        if notification_type == "tools":
-            context._queue_tool_list_changed()
-        elif notification_type == "resources":
-            context._queue_resource_list_changed()
-        elif notification_type == "prompts":
-            context._queue_prompt_list_changed()
+        match notification_type:
+            case "tools":
+                notification = mcp.types.ToolListChangedNotification()
+            case "resources":
+                notification = mcp.types.ResourceListChangedNotification()
+            case "prompts":
+                notification = mcp.types.PromptListChangedNotification()
+
+        context.send_notification_sync(notification)
 
     def _notify(self, component_types: set[str]) -> None:
         """Send notifications for the given component types."""
