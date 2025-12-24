@@ -39,8 +39,7 @@ class FastMCPComponent(FastMCPBaseModel):
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
         # Warn if a subclass doesn't define KEY_PREFIX (inherited or its own)
-        # MirroredComponent is a mixin that will be removed; skip it
-        if not cls.KEY_PREFIX and cls.__name__ != "MirroredComponent":
+        if not cls.KEY_PREFIX:
             import warnings
 
             warnings.warn(
