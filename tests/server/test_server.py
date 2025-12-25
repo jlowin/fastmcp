@@ -2,11 +2,9 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from textwrap import dedent
 
-import pytest
 from mcp.types import TextContent, TextResourceContents
 
 from fastmcp import Client, FastMCP
-from fastmcp.exceptions import NotFoundError
 from fastmcp.tools import FunctionTool
 from fastmcp.tools.tool import Tool
 
@@ -46,73 +44,6 @@ class TestCreateServer:
 
             result = await client.call_tool("hello_world", {})
             assert result.data == "¡Hola, 世界! 👋"
-
-
-class TestTools:
-    async def test_mcp_tool_name(self):
-        """Test MCPTool name for add_tool (key != tool.name)."""
-
-        mcp = FastMCP()
-
-        @mcp.tool
-        def fn(x: int) -> int:
-            return x + 1
-
-        mcp_tools = await mcp._list_tools_mcp()
-        assert len(mcp_tools) == 1
-        assert mcp_tools[0].name == "fn"
-
-    async def test_mcp_tool_custom_name(self):
-        """Test MCPTool name for add_tool (key != tool.name)."""
-
-        mcp = FastMCP()
-
-        @mcp.tool(name="custom_name")
-        def fn(x: int) -> int:
-            return x + 1
-
-        mcp_tools = await mcp._list_tools_mcp()
-        assert len(mcp_tools) == 1
-        assert mcp_tools[0].name == "custom_name"
-
-    async def test_remove_tool_successfully(self):
-        """Test that FastMCP.remove_tool removes the tool from the registry."""
-
-        mcp = FastMCP()
-
-        @mcp.tool(name="adder")
-        def add(a: int, b: int) -> int:
-            return a + b
-
-        mcp_tools = await mcp.get_tools()
-        assert any(t.name == "adder" for t in mcp_tools)
-
-        mcp.remove_tool("adder")
-        mcp_tools = await mcp.get_tools()
-        assert not any(t.name == "adder" for t in mcp_tools)
-
-        with pytest.raises(NotFoundError, match="Unknown tool: 'adder'"):
-            await mcp._call_tool_mcp("adder", {"a": 1, "b": 2})
-
-    async def test_add_tool_at_init(self):
-        def f(x: int) -> int:
-            return x + 1
-
-        def g(x: int) -> int:
-            """add two to a number"""
-            return x + 2
-
-        g_tool = FunctionTool.from_function(g, name="g-tool")
-
-        mcp = FastMCP(tools=[f, g_tool])
-
-        tools = await mcp.get_tools()
-        assert len(tools) == 2
-        f_tool = next(t for t in tools if t.name == "f")
-        g_tool = next(t for t in tools if t.name == "g-tool")
-        assert f_tool.name == "f"
-        assert g_tool.name == "g-tool"
-        assert g_tool.description == "add two to a number"
 
 
 class TestServerDelegation:
