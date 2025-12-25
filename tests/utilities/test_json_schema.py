@@ -1,6 +1,7 @@
 from fastmcp.utilities.json_schema import (
     _prune_param,
     compress_schema,
+    simplify_additional_properties,
 )
 
 # Wrapper for backward compatibility with tests
@@ -505,3 +506,166 @@ class TestCompressSchema:
             "title" not in compressed["properties"]["title"]["properties"]["subtitle"]
         )
         assert "title" not in compressed["properties"]["normal_field"]
+
+
+class TestSimplifyAdditionalProperties:
+    """Tests for the simplify_additional_properties function.
+
+    This function converts object-type additionalProperties to boolean true
+    for MCP SDK client compatibility (e.g., Zod validation).
+    """
+
+    def test_converts_object_to_true(self):
+        """Test that object-type additionalProperties is converted to true."""
+        schema = {
+            "type": "object",
+            "additionalProperties": {"type": "array", "items": {"type": "string"}},
+        }
+        result = simplify_additional_properties(schema)
+
+        assert result["additionalProperties"] is True
+        assert result["type"] == "object"
+
+    def test_keeps_boolean_true(self):
+        """Test that boolean true additionalProperties is preserved."""
+        schema = {
+            "type": "object",
+            "additionalProperties": True,
+        }
+        result = simplify_additional_properties(schema)
+
+        assert result["additionalProperties"] is True
+
+    def test_keeps_boolean_false(self):
+        """Test that boolean false additionalProperties is preserved."""
+        schema = {
+            "type": "object",
+            "additionalProperties": False,
+        }
+        result = simplify_additional_properties(schema)
+
+        assert result["additionalProperties"] is False
+
+    def test_nested_in_properties(self):
+        """Test that nested schemas in properties are also processed."""
+        schema = {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "object",
+                    "additionalProperties": {"type": "integer"},
+                }
+            },
+        }
+        result = simplify_additional_properties(schema)
+
+        assert result["properties"]["data"]["additionalProperties"] is True
+
+    def test_nested_in_items(self):
+        """Test that nested schemas in array items are processed."""
+        schema = {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": {"type": "string"},
+            },
+        }
+        result = simplify_additional_properties(schema)
+
+        assert result["items"]["additionalProperties"] is True
+
+    def test_nested_in_defs(self):
+        """Test that schemas in $defs are processed."""
+        schema = {
+            "$defs": {
+                "MyType": {
+                    "type": "object",
+                    "additionalProperties": {"type": "number"},
+                }
+            },
+            "type": "object",
+            "$ref": "#/$defs/MyType",
+        }
+        result = simplify_additional_properties(schema)
+
+        assert result["$defs"]["MyType"]["additionalProperties"] is True
+
+    def test_deeply_nested_schema(self):
+        """Test that deeply nested additionalProperties are simplified."""
+        schema = {
+            "type": "object",
+            "additionalProperties": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "object",
+                        "additionalProperties": {"type": "string"},
+                    },
+                },
+            },
+        }
+        result = simplify_additional_properties(schema)
+
+        # All nested additionalProperties should be simplified to true
+        assert result["additionalProperties"] is True
+
+    def test_complex_dict_type_schema(self):
+        """Test schema from Dict[str, List[Dict[str, Any]]].
+
+        This is the exact case from issue #2459.
+        """
+        schema = {
+            "type": "object",
+            "additionalProperties": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": True,
+                },
+            },
+        }
+        result = simplify_additional_properties(schema)
+
+        # Top-level additionalProperties should be true
+        assert result["additionalProperties"] is True
+
+    def test_preserves_other_fields(self):
+        """Test that other schema fields are preserved."""
+        schema = {
+            "type": "object",
+            "description": "A test schema",
+            "additionalProperties": {"type": "string"},
+            "required": ["name"],
+            "properties": {"name": {"type": "string"}},
+        }
+        result = simplify_additional_properties(schema)
+
+        assert result["type"] == "object"
+        assert result["description"] == "A test schema"
+        assert result["required"] == ["name"]
+        assert result["additionalProperties"] is True
+        assert "name" in result["properties"]
+
+    def test_handles_allof_oneof_anyof(self):
+        """Test that schema composition keywords are processed."""
+        schema = {
+            "oneOf": [
+                {
+                    "type": "object",
+                    "additionalProperties": {"type": "string"},
+                },
+                {
+                    "type": "object",
+                    "additionalProperties": {"type": "integer"},
+                },
+            ]
+        }
+        result = simplify_additional_properties(schema)
+
+        assert result["oneOf"][0]["additionalProperties"] is True
+        assert result["oneOf"][1]["additionalProperties"] is True
+
+    def test_handles_empty_dict(self):
+        """Test that empty dict is returned unchanged."""
+        assert simplify_additional_properties({}) == {}

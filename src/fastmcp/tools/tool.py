@@ -33,7 +33,10 @@ import fastmcp
 from fastmcp.server.dependencies import without_injected_parameters
 from fastmcp.server.tasks.config import TaskConfig
 from fastmcp.utilities.components import FastMCPComponent
-from fastmcp.utilities.json_schema import compress_schema
+from fastmcp.utilities.json_schema import (
+    compress_schema,
+    simplify_additional_properties,
+)
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.types import (
     Audio,
@@ -635,6 +638,10 @@ class ParsedFunction:
                     output_schema = base_schema
 
                 output_schema = compress_schema(output_schema, prune_titles=True)
+
+                # Simplify additionalProperties schema objects to boolean true
+                # MCP SDK clients (like Zod) expect additionalProperties to be boolean
+                output_schema = simplify_additional_properties(output_schema)
 
             except PydanticSchemaGenerationError as e:
                 if "_UnserializableType" not in str(e):

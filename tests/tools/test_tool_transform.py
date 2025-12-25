@@ -1231,8 +1231,9 @@ class TestTransformToolOutputSchema:
         new_tool = Tool.from_tool(base_string_tool, transform_fn=custom_fn)
 
         # Object types should not be wrapped
-        expected_schema = TypeAdapter(dict[str, int]).json_schema()
-        assert new_tool.output_schema == expected_schema
+        # Note: additionalProperties schema objects are simplified to boolean true
+        # for MCP SDK client compatibility (issue #2459)
+        assert new_tool.output_schema == {"additionalProperties": True, "type": "object"}
         assert isinstance(new_tool.output_schema, dict)
         assert "x-fastmcp-wrap-result" not in new_tool.output_schema
 
@@ -1311,8 +1312,9 @@ class TestTransformToolOutputSchema:
         )
 
         # Should infer object schema from custom function
-        expected_schema = TypeAdapter(dict[str, str]).json_schema()
-        assert new_tool.output_schema == expected_schema
+        # Note: additionalProperties schema objects are simplified to boolean true
+        # for MCP SDK client compatibility (issue #2459)
+        assert new_tool.output_schema == {"additionalProperties": True, "type": "object"}
 
     async def test_transform_output_schema_default_vs_none(self, base_string_tool):
         """Test default (NotSet) vs explicit None behavior for output_schema in transforms."""

@@ -1,6 +1,70 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from typing import Any
+
+
+def simplify_additional_properties(schema: dict[str, Any]) -> dict[str, Any]:
+    """Convert schema objects in additionalProperties to boolean true.
+
+    MCP SDK clients (like Zod) expect additionalProperties to be a boolean value,
+    not a schema object. When Pydantic generates schemas for types like
+    Dict[str, List[...]], it uses a schema object for additionalProperties.
+    This function recursively converts such cases to additionalProperties: true.
+
+    Args:
+        schema: JSON schema dict that may have object-type additionalProperties
+
+    Returns:
+        A new schema dict with object-type additionalProperties simplified to true
+
+    Example:
+        >>> schema = {
+        ...     "type": "object",
+        ...     "additionalProperties": {"type": "array", "items": {"type": "string"}}
+        ... }
+        >>> simplified = simplify_additional_properties(schema)
+        >>> # Result: {"type": "object", "additionalProperties": true}
+    """
+
+    result = {}
+    for key, value in schema.items():
+        if key == "additionalProperties":
+            # Convert object schemas to true, keep booleans as-is
+            if isinstance(value, dict):
+                result[key] = True
+            else:
+                result[key] = value
+        elif key == "$defs":
+            # Recursively process definitions
+            result[key] = {
+                def_name: simplify_additional_properties(def_schema)
+                for def_name, def_schema in value.items()
+            }
+        elif key == "properties":
+            # Recursively process property schemas
+            result[key] = {
+                prop_name: simplify_additional_properties(prop_schema)
+                for prop_name, prop_schema in value.items()
+            }
+        elif key == "items":
+            # Process array items schema
+            if isinstance(value, dict):
+                result[key] = simplify_additional_properties(value)
+            elif isinstance(value, list):
+                result[key] = [simplify_additional_properties(item) for item in value]
+            else:
+                result[key] = value
+        elif key in ("allOf", "oneOf", "anyOf"):
+            # Process schema composition keywords
+            if isinstance(value, list):
+                result[key] = [simplify_additional_properties(item) for item in value]
+            else:
+                result[key] = value
+        else:
+            result[key] = value
+
+    return result
 
 
 def _prune_param(schema: dict, param: str) -> dict:

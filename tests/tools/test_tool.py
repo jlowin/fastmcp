@@ -495,7 +495,13 @@ class TestToolFromFunctionOutputSchema:
             # # Note: Parameterized test - keeping original assertion for multiple parameter values
         else:
             # Object types remain unwrapped
-            assert tool.output_schema == base_schema
+            # Note: additionalProperties schema objects are simplified to boolean true
+            # for MCP SDK client compatibility (issue #2459)
+            assert tool.output_schema is not None
+            assert tool.output_schema.get("type") == "object"
+            # additionalProperties should be simplified to boolean
+            if "additionalProperties" in tool.output_schema:
+                assert isinstance(tool.output_schema["additionalProperties"], bool)
 
     @pytest.mark.parametrize(
         "annotation",
@@ -842,8 +848,9 @@ class TestToolFromFunctionOutputSchema:
 
         # Object schemas should never be wrapped, even when inferred
         tool = Tool.from_function(func)
-        expected_schema = TypeAdapter(dict[str, int]).json_schema()
-        assert tool.output_schema == expected_schema  # Not wrapped
+        # Note: additionalProperties schema objects are simplified to boolean true
+        # for MCP SDK client compatibility (issue #2459)
+        assert tool.output_schema == {"additionalProperties": True, "type": "object"}
         assert tool.output_schema and "x-fastmcp-wrap-result" not in tool.output_schema
 
         result = await tool.run({})
@@ -962,6 +969,41 @@ class TestToolFromFunctionOutputSchema:
                 ValueError, match="Output schemas must represent object types"
             ):
                 Tool.from_function(func, output_schema=schema)
+
+    async def test_dict_with_complex_value_type_has_boolean_additionalProperties(self):
+        """Test that Dict[str, List[...]] has boolean additionalProperties.
+
+        MCP SDK clients (like Zod) expect additionalProperties to be a boolean,
+        not a schema object. This test ensures FastMCP simplifies schema objects
+        to boolean true.
+
+        Regression test for issue #2459.
+        """
+
+        def get_data() -> dict[str, list[dict[str, Any]]]:
+            return {"items": [{"key": "value"}]}
+
+        tool = Tool.from_function(get_data)
+
+        # The output schema should have boolean additionalProperties, not schema object
+        assert tool.output_schema is not None
+        assert tool.output_schema.get("additionalProperties") is True
+        assert isinstance(tool.output_schema.get("additionalProperties"), bool)
+
+    async def test_simple_dict_any_has_boolean_additionalProperties(self):
+        """Test that Dict[str, Any] has boolean additionalProperties.
+
+        Regression test for issue #2459.
+        """
+
+        def get_data() -> dict[str, Any]:
+            return {"key": "value"}
+
+        tool = Tool.from_function(get_data)
+
+        assert tool.output_schema is not None
+        assert tool.output_schema.get("additionalProperties") is True
+        assert isinstance(tool.output_schema.get("additionalProperties"), bool)
 
 
 class SampleModel(BaseModel):
