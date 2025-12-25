@@ -808,10 +808,7 @@ class FastMCP(Generic[LifespanResultT]):
         for i, result in enumerate(results):
             if isinstance(result, BaseException):
                 provider = self._providers[i]
-                provider_name = getattr(provider, "server", provider).__class__.__name__
-                logger.warning(
-                    f"Failed to get tools from provider {provider_name!r}: {result}"
-                )
+                logger.warning(f"Failed to get tools from {provider}: {result}")
                 if fastmcp.settings.mounted_components_raise_on_load_error:
                     raise result
                 continue
@@ -888,10 +885,7 @@ class FastMCP(Generic[LifespanResultT]):
         for i, result in enumerate(results):
             if isinstance(result, BaseException):
                 provider = self._providers[i]
-                provider_name = getattr(provider, "server", provider).__class__.__name__
-                logger.warning(
-                    f"Failed to get resources from provider {provider_name!r}: {result}"
-                )
+                logger.warning(f"Failed to get resources from {provider}: {result}")
                 if fastmcp.settings.mounted_components_raise_on_load_error:
                     raise result
                 continue
@@ -933,9 +927,8 @@ class FastMCP(Generic[LifespanResultT]):
         for i, result in enumerate(results):
             if isinstance(result, BaseException):
                 provider = self._providers[i]
-                provider_name = getattr(provider, "server", provider).__class__.__name__
                 logger.warning(
-                    f"Failed to get resource templates from provider {provider_name!r}: {result}"
+                    f"Failed to get resource templates from {provider}: {result}"
                 )
                 if fastmcp.settings.mounted_components_raise_on_load_error:
                     raise result
@@ -982,10 +975,7 @@ class FastMCP(Generic[LifespanResultT]):
         for i, result in enumerate(results):
             if isinstance(result, BaseException):
                 provider = self._providers[i]
-                provider_name = getattr(provider, "server", provider).__class__.__name__
-                logger.warning(
-                    f"Failed to get prompts from provider {provider_name!r}: {result}"
-                )
+                logger.warning(f"Failed to get prompts from {provider}: {result}")
                 if fastmcp.settings.mounted_components_raise_on_load_error:
                     raise result
                 continue

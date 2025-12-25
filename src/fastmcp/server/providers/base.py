@@ -61,6 +61,9 @@ class Provider:
     def __init__(self) -> None:
         self._visibility = VisibilityFilter()
 
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}()"
+
     def with_transforms(
         self,
         *,
