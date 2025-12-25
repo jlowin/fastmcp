@@ -34,7 +34,10 @@ from fastmcp import Client, Context, FastMCP
 from fastmcp.client.client import CallToolResult
 from fastmcp.exceptions import ToolError
 from fastmcp.tools.tool import Tool, ToolResult
-from fastmcp.utilities.json_schema import compress_schema, simplify_additional_properties
+from fastmcp.utilities.json_schema import (
+    compress_schema,
+    simplify_additional_properties,
+)
 from fastmcp.utilities.types import Audio, File, Image
 
 
