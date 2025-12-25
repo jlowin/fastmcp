@@ -6,7 +6,7 @@ import pytest
 from dirty_equals import IsList
 from inline_snapshot import snapshot
 from mcp.types import TextContent
-from pydantic import BaseModel, Field, TypeAdapter
+from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
 from fastmcp import FastMCP
@@ -1233,7 +1233,10 @@ class TestTransformToolOutputSchema:
         # Object types should not be wrapped
         # Note: additionalProperties schema objects are simplified to boolean true
         # for MCP SDK client compatibility (issue #2459)
-        assert new_tool.output_schema == {"additionalProperties": True, "type": "object"}
+        assert new_tool.output_schema == {
+            "additionalProperties": True,
+            "type": "object",
+        }
         assert isinstance(new_tool.output_schema, dict)
         assert "x-fastmcp-wrap-result" not in new_tool.output_schema
 
@@ -1314,7 +1317,10 @@ class TestTransformToolOutputSchema:
         # Should infer object schema from custom function
         # Note: additionalProperties schema objects are simplified to boolean true
         # for MCP SDK client compatibility (issue #2459)
-        assert new_tool.output_schema == {"additionalProperties": True, "type": "object"}
+        assert new_tool.output_schema == {
+            "additionalProperties": True,
+            "type": "object",
+        }
 
     async def test_transform_output_schema_default_vs_none(self, base_string_tool):
         """Test default (NotSet) vs explicit None behavior for output_schema in transforms."""
