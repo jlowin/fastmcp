@@ -192,6 +192,11 @@
             "group": "Integrations",
             "pages": [
               {
+                "group": "Providers",
+                "icon": "globe",
+                "pages": ["integrations/fastapi", "integrations/openapi"]
+              },
+              {
                 "group": "Authentication",
                 "icon": "key",
                 "pages": [
@@ -237,11 +242,6 @@
                   "integrations/gemini",
                   "integrations/openai"
                 ]
-              },
-              {
-                "group": "API Integration",
-                "icon": "globe",
-                "pages": ["integrations/fastapi", "integrations/openapi"]
               }
             ]
           },
