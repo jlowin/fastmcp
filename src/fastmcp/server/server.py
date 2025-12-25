@@ -692,7 +692,7 @@ class FastMCP(Generic[LifespanResultT]):
         self._mcp_server.request_handlers[ListTasksRequest] = handle_list_tasks
         self._mcp_server.request_handlers[CancelTaskRequest] = handle_cancel_task
 
-    async def _apply_middleware(
+    async def _run_middleware(
         self,
         context: MiddlewareContext[Any],
         call_next: Callable[[MiddlewareContext[Any]], Awaitable[Any]],
@@ -790,17 +790,17 @@ class FastMCP(Generic[LifespanResultT]):
         """Check if a component is enabled (not in blocklist, passes allowlist)."""
         return self._visibility.is_enabled(component)
 
-    async def get_tools(self, *, apply_middleware: bool = False) -> list[Tool]:
+    async def get_tools(self, *, run_middleware: bool = False) -> list[Tool]:
         """Get all enabled tools from providers.
 
         Queries all providers in parallel and collects tools.
         First provider wins for duplicate keys. Filters by server blocklist.
 
         Args:
-            apply_middleware: If True, apply the middleware chain before
+            run_middleware: If True, apply the middleware chain before
                 returning results. Used by MCP handlers and mounted servers.
         """
-        if apply_middleware:
+        if run_middleware:
             async with fastmcp.server.context.Context(fastmcp=self) as fastmcp_ctx:
                 mw_context = MiddlewareContext(
                     message=mcp.types.ListToolsRequest(method="tools/list"),
@@ -810,11 +810,9 @@ class FastMCP(Generic[LifespanResultT]):
                     fastmcp_context=fastmcp_ctx,
                 )
                 return list(
-                    await self._apply_middleware(
+                    await self._run_middleware(
                         context=mw_context,
-                        call_next=lambda context: self.get_tools(
-                            apply_middleware=False
-                        ),
+                        call_next=lambda context: self.get_tools(run_middleware=False),
                     )
                 )
 
@@ -889,17 +887,17 @@ class FastMCP(Generic[LifespanResultT]):
 
         return None
 
-    async def get_resources(self, *, apply_middleware: bool = False) -> list[Resource]:
+    async def get_resources(self, *, run_middleware: bool = False) -> list[Resource]:
         """Get all enabled resources from providers.
 
         Queries all providers in parallel and collects resources.
         First provider wins for duplicate keys. Filters by server blocklist.
 
         Args:
-            apply_middleware: If True, apply the middleware chain before
+            run_middleware: If True, apply the middleware chain before
                 returning results. Used by MCP handlers and mounted servers.
         """
-        if apply_middleware:
+        if run_middleware:
             async with fastmcp.server.context.Context(fastmcp=self) as fastmcp_ctx:
                 mw_context = MiddlewareContext(
                     message={},  # List resources doesn't have parameters
@@ -909,10 +907,10 @@ class FastMCP(Generic[LifespanResultT]):
                     fastmcp_context=fastmcp_ctx,
                 )
                 return list(
-                    await self._apply_middleware(
+                    await self._run_middleware(
                         context=mw_context,
                         call_next=lambda context: self.get_resources(
-                            apply_middleware=False
+                            run_middleware=False
                         ),
                     )
                 )
@@ -962,7 +960,7 @@ class FastMCP(Generic[LifespanResultT]):
         raise NotFoundError(f"Unknown resource: {uri}")
 
     async def get_resource_templates(
-        self, *, apply_middleware: bool = False
+        self, *, run_middleware: bool = False
     ) -> list[ResourceTemplate]:
         """Get all enabled resource templates from providers.
 
@@ -970,10 +968,10 @@ class FastMCP(Generic[LifespanResultT]):
         First provider wins for duplicate keys. Filters by server blocklist.
 
         Args:
-            apply_middleware: If True, apply the middleware chain before
+            run_middleware: If True, apply the middleware chain before
                 returning results. Used by MCP handlers and mounted servers.
         """
-        if apply_middleware:
+        if run_middleware:
             async with fastmcp.server.context.Context(fastmcp=self) as fastmcp_ctx:
                 mw_context = MiddlewareContext(
                     message={},  # List resource templates doesn't have parameters
@@ -983,10 +981,10 @@ class FastMCP(Generic[LifespanResultT]):
                     fastmcp_context=fastmcp_ctx,
                 )
                 return list(
-                    await self._apply_middleware(
+                    await self._run_middleware(
                         context=mw_context,
                         call_next=lambda context: self.get_resource_templates(
-                            apply_middleware=False
+                            run_middleware=False
                         ),
                     )
                 )
@@ -1039,17 +1037,17 @@ class FastMCP(Generic[LifespanResultT]):
 
         raise NotFoundError(f"Unknown resource template: {uri}")
 
-    async def get_prompts(self, *, apply_middleware: bool = False) -> list[Prompt]:
+    async def get_prompts(self, *, run_middleware: bool = False) -> list[Prompt]:
         """Get all enabled prompts from providers.
 
         Queries all providers in parallel and collects prompts.
         First provider wins for duplicate keys. Filters by server blocklist.
 
         Args:
-            apply_middleware: If True, apply the middleware chain before
+            run_middleware: If True, apply the middleware chain before
                 returning results. Used by MCP handlers and mounted servers.
         """
-        if apply_middleware:
+        if run_middleware:
             async with fastmcp.server.context.Context(fastmcp=self) as fastmcp_ctx:
                 mw_context = MiddlewareContext(
                     message=mcp.types.ListPromptsRequest(method="prompts/list"),
@@ -1059,10 +1057,10 @@ class FastMCP(Generic[LifespanResultT]):
                     fastmcp_context=fastmcp_ctx,
                 )
                 return list(
-                    await self._apply_middleware(
+                    await self._run_middleware(
                         context=mw_context,
                         call_next=lambda context: self.get_prompts(
-                            apply_middleware=False
+                            run_middleware=False
                         ),
                     )
                 )
@@ -1147,7 +1145,7 @@ class FastMCP(Generic[LifespanResultT]):
         name: str,
         arguments: dict[str, Any] | None = None,
         *,
-        apply_middleware: bool = True,
+        run_middleware: bool = True,
     ) -> ToolResult | mcp.types.CreateTaskResult:
         """Call a tool by name.
 
@@ -1156,7 +1154,7 @@ class FastMCP(Generic[LifespanResultT]):
         Args:
             name: The tool name
             arguments: Tool arguments (optional)
-            apply_middleware: If True (default), apply the middleware chain.
+            run_middleware: If True (default), apply the middleware chain.
                 Set to False when called from middleware to avoid re-applying.
 
         Returns:
@@ -1169,7 +1167,7 @@ class FastMCP(Generic[LifespanResultT]):
             ValidationError: If arguments fail validation
         """
         async with fastmcp.server.context.Context(fastmcp=self) as ctx:
-            if apply_middleware:
+            if run_middleware:
                 mw_context = MiddlewareContext[CallToolRequestParams](
                     message=mcp.types.CallToolRequestParams(
                         name=name, arguments=arguments or {}
@@ -1179,12 +1177,12 @@ class FastMCP(Generic[LifespanResultT]):
                     method="tools/call",
                     fastmcp_context=ctx,
                 )
-                return await self._apply_middleware(
+                return await self._run_middleware(
                     context=mw_context,
                     call_next=lambda context: self.call_tool(
                         context.message.name,
                         context.message.arguments or {},
-                        apply_middleware=False,
+                        run_middleware=False,
                     ),
                 )
 
@@ -1212,7 +1210,7 @@ class FastMCP(Generic[LifespanResultT]):
         self,
         uri: str,
         *,
-        apply_middleware: bool = True,
+        run_middleware: bool = True,
     ) -> list[ResourceContent] | mcp.types.CreateTaskResult:
         """Read a resource by URI.
 
@@ -1221,7 +1219,7 @@ class FastMCP(Generic[LifespanResultT]):
 
         Args:
             uri: The resource URI
-            apply_middleware: If True (default), apply the middleware chain.
+            run_middleware: If True (default), apply the middleware chain.
                 Set to False when called from middleware to avoid re-applying.
 
         Returns:
@@ -1233,7 +1231,7 @@ class FastMCP(Generic[LifespanResultT]):
             ResourceError: If resource read fails
         """
         async with fastmcp.server.context.Context(fastmcp=self) as ctx:
-            if apply_middleware:
+            if run_middleware:
                 uri_param = AnyUrl(uri)
                 mw_context = MiddlewareContext(
                     message=mcp.types.ReadResourceRequestParams(uri=uri_param),
@@ -1242,11 +1240,11 @@ class FastMCP(Generic[LifespanResultT]):
                     method="resources/read",
                     fastmcp_context=ctx,
                 )
-                result = await self._apply_middleware(
+                result = await self._run_middleware(
                     context=mw_context,
                     call_next=lambda context: self.read_resource(
                         str(context.message.uri),
-                        apply_middleware=False,
+                        run_middleware=False,
                     ),
                 )
                 if isinstance(result, mcp.types.CreateTaskResult):
@@ -1309,7 +1307,7 @@ class FastMCP(Generic[LifespanResultT]):
         name: str,
         arguments: dict[str, Any] | None = None,
         *,
-        apply_middleware: bool = True,
+        run_middleware: bool = True,
     ) -> PromptResult | mcp.types.CreateTaskResult:
         """Render a prompt by name.
 
@@ -1319,7 +1317,7 @@ class FastMCP(Generic[LifespanResultT]):
         Args:
             name: The prompt name
             arguments: Prompt arguments (optional)
-            apply_middleware: If True (default), apply the middleware chain.
+            run_middleware: If True (default), apply the middleware chain.
                 Set to False when called from middleware to avoid re-applying.
 
         Returns:
@@ -1331,7 +1329,7 @@ class FastMCP(Generic[LifespanResultT]):
             PromptError: If prompt rendering fails
         """
         async with fastmcp.server.context.Context(fastmcp=self) as ctx:
-            if apply_middleware:
+            if run_middleware:
                 mw_context = MiddlewareContext(
                     message=mcp.types.GetPromptRequestParams(
                         name=name, arguments=arguments
@@ -1341,12 +1339,12 @@ class FastMCP(Generic[LifespanResultT]):
                     method="prompts/get",
                     fastmcp_context=ctx,
                 )
-                return await self._apply_middleware(
+                return await self._run_middleware(
                     context=mw_context,
                     call_next=lambda context: self.render_prompt(
                         context.message.name,
                         context.message.arguments,
-                        apply_middleware=False,
+                        run_middleware=False,
                     ),
                 )
 
@@ -1438,7 +1436,7 @@ class FastMCP(Generic[LifespanResultT]):
         logger.debug(f"[{self.name}] Handler called: list_tools")
 
         async with fastmcp.server.context.Context(fastmcp=self):
-            tools = await self.get_tools(apply_middleware=True)
+            tools = await self.get_tools(run_middleware=True)
             return [
                 tool.to_mcp_tool(
                     name=tool.name,
@@ -1455,7 +1453,7 @@ class FastMCP(Generic[LifespanResultT]):
         logger.debug(f"[{self.name}] Handler called: list_resources")
 
         async with fastmcp.server.context.Context(fastmcp=self):
-            resources = await self.get_resources(apply_middleware=True)
+            resources = await self.get_resources(run_middleware=True)
             return [
                 resource.to_mcp_resource(
                     uri=str(resource.uri),
@@ -1472,7 +1470,7 @@ class FastMCP(Generic[LifespanResultT]):
         logger.debug(f"[{self.name}] Handler called: list_resource_templates")
 
         async with fastmcp.server.context.Context(fastmcp=self):
-            templates = await self.get_resource_templates(apply_middleware=True)
+            templates = await self.get_resource_templates(run_middleware=True)
             return [
                 template.to_mcp_template(
                     uriTemplate=template.uri_template,
@@ -1489,7 +1487,7 @@ class FastMCP(Generic[LifespanResultT]):
         logger.debug(f"[{self.name}] Handler called: list_prompts")
 
         async with fastmcp.server.context.Context(fastmcp=self):
-            prompts = await self.get_prompts(apply_middleware=True)
+            prompts = await self.get_prompts(run_middleware=True)
             return [
                 prompt.to_mcp_prompt(
                     name=prompt.name,

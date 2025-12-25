@@ -426,7 +426,7 @@ class FastMCPProvider(Provider):
         each tool as a FastMCPProviderTool that delegates execution to the
         nested server's middleware.
         """
-        raw_tools = await self.server.get_tools(apply_middleware=True)
+        raw_tools = await self.server.get_tools(run_middleware=True)
         return [FastMCPProviderTool.wrap(self.server, t) for t in raw_tools]
 
     async def get_tool(self, name: str) -> Tool | None:
@@ -445,7 +445,7 @@ class FastMCPProvider(Provider):
         each resource as a FastMCPProviderResource that delegates reading to the
         nested server's middleware.
         """
-        raw_resources = await self.server.get_resources(apply_middleware=True)
+        raw_resources = await self.server.get_resources(run_middleware=True)
         return [FastMCPProviderResource.wrap(self.server, r) for r in raw_resources]
 
     async def get_resource(self, uri: str) -> Resource | None:
@@ -463,7 +463,7 @@ class FastMCPProvider(Provider):
         Returns FastMCPProviderResourceTemplate instances that create
         FastMCPProviderResources when materialized.
         """
-        raw_templates = await self.server.get_resource_templates(apply_middleware=True)
+        raw_templates = await self.server.get_resource_templates(run_middleware=True)
         return [
             FastMCPProviderResourceTemplate.wrap(self.server, t) for t in raw_templates
         ]
@@ -486,7 +486,7 @@ class FastMCPProvider(Provider):
         Returns FastMCPProviderPrompt instances that delegate rendering to the
         wrapped server's middleware.
         """
-        raw_prompts = await self.server.get_prompts(apply_middleware=True)
+        raw_prompts = await self.server.get_prompts(run_middleware=True)
         return [FastMCPProviderPrompt.wrap(self.server, p) for p in raw_prompts]
 
     async def get_prompt(self, name: str) -> Prompt | None:
