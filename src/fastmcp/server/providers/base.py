@@ -35,6 +35,7 @@ from fastmcp.prompts.prompt import Prompt
 from fastmcp.resources.resource import Resource
 from fastmcp.resources.template import ResourceTemplate
 from fastmcp.tools.tool import Tool
+from fastmcp.utilities.async_utils import gather
 from fastmcp.utilities.components import FastMCPComponent
 from fastmcp.utilities.visibility import VisibilityFilter
 
@@ -219,17 +220,29 @@ class Provider:
         Returns:
             The component if found, or None to continue searching other providers.
         """
-        # Default implementation: iterate through all components and match by key
-        for tool in await self.list_tools():
+        # Default implementation: fetch all component types in parallel
+        # Exceptions propagate since return_exceptions=False
+        results = await gather(
+            self.list_tools(),
+            self.list_resources(),
+            self.list_resource_templates(),
+            self.list_prompts(),
+        )
+        tools: Sequence[Tool] = results[0]  # type: ignore[assignment]
+        resources: Sequence[Resource] = results[1]  # type: ignore[assignment]
+        templates: Sequence[ResourceTemplate] = results[2]  # type: ignore[assignment]
+        prompts: Sequence[Prompt] = results[3]  # type: ignore[assignment]
+
+        for tool in tools:
             if tool.key == key:
                 return tool
-        for resource in await self.list_resources():
+        for resource in resources:
             if resource.key == key:
                 return resource
-        for template in await self.list_resource_templates():
+        for template in templates:
             if template.key == key:
                 return template
-        for prompt in await self.list_prompts():
+        for prompt in prompts:
             if prompt.key == key:
                 return prompt
         return None
