@@ -855,7 +855,7 @@ class FastMCP(Generic[LifespanResultT]):
             if isinstance(result, Tool) and self._is_component_enabled(result):
                 return result
 
-        raise NotFoundError(f"Unknown tool: {name}")
+        raise NotFoundError(f"Unknown tool: {name!r}")
 
     async def _get_resource_or_template_or_none(
         self, uri: str
@@ -1548,9 +1548,9 @@ class FastMCP(Generic[LifespanResultT]):
                 _docket_fn_key.reset(key_token)
 
         except DisabledError as e:
-            raise NotFoundError(f"Unknown tool: {key}") from e
+            raise NotFoundError(f"Unknown tool: {key!r}") from e
         except NotFoundError as e:
-            raise NotFoundError(f"Unknown tool: {key}") from e
+            raise NotFoundError(f"Unknown tool: {key!r}") from e
 
     async def _read_resource_handler(
         self, req: mcp.types.ReadResourceRequest
