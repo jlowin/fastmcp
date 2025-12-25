@@ -436,7 +436,7 @@ This creates the following execution flow:
 
 ## Server Composition and Middleware
 
-When using [Server Composition](/servers/composition) with `mount` or `import_server`, middleware behavior follows these rules:
+When using [Mounting Servers](/servers/providers/mounting) with `mount` or `import_server`, middleware behavior follows these rules:
 
 1. **Parent server middleware** runs for all requests, including those routed to mounted servers
 2. **Mounted server middleware** only runs for requests handled by that specific server
