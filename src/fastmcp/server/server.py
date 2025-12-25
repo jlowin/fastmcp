@@ -483,11 +483,8 @@ class FastMCP(Generic[LifespanResultT]):
                 for i, result in enumerate(task_results):
                     if isinstance(result, BaseException):
                         provider = self._providers[i]
-                        provider_name = getattr(
-                            provider, "server", provider
-                        ).__class__.__name__
                         logger.warning(
-                            f"Failed to register tasks from provider {provider_name!r}: {result}"
+                            f"Failed to register tasks from {provider}: {result}"
                         )
                         if fastmcp.settings.mounted_components_raise_on_load_error:
                             raise result
@@ -796,7 +793,7 @@ class FastMCP(Generic[LifespanResultT]):
     async def get_tools(self) -> dict[str, Tool]:
         """Get all enabled tools from providers, indexed by name.
 
-        Queries all providers in parallel (LocalProvider first) and collects tools.
+        Queries all providers in parallel and collects tools.
         First provider wins for duplicate names. Filters by server blocklist.
         """
         results = await gather(
@@ -820,7 +817,7 @@ class FastMCP(Generic[LifespanResultT]):
     async def get_tool(self, name: str) -> Tool:
         """Get an enabled tool by name.
 
-        Queries all providers in parallel (LocalProvider first) to find the tool.
+        Queries all providers in parallel to find the tool.
         First provider wins. Returns only if enabled.
         """
         results = await gather(
@@ -842,30 +839,20 @@ class FastMCP(Generic[LifespanResultT]):
         Returns the original ResourceTemplate (not a Resource created from it)
         to preserve the registered function for task execution.
 
-        Queries all providers in parallel (LocalProvider first).
+        Queries all providers in parallel.
         First provider wins. Checks concrete resources first, then templates.
         """
-        # Query both resources and templates from all providers in parallel
-        resource_results, template_results = await gather(
-            gather(
-                *[p.get_resource(uri) for p in self._providers], return_exceptions=True
-            ),
-            gather(
-                *[p.get_resource_template(uri) for p in self._providers],
-                return_exceptions=True,
-            ),
+        # Resources listed first so they have priority over templates
+        results = await gather(
+            *[p.get_resource(uri) for p in self._providers],
+            *[p.get_resource_template(uri) for p in self._providers],
+            return_exceptions=True,
         )
 
-        # First pass: check concrete resources (priority over templates)
-        for result in resource_results:
-            if isinstance(result, Resource) and self._is_component_enabled(result):
-                return result
-
-        # Second pass: check templates
-        for result in template_results:
-            if isinstance(result, ResourceTemplate) and self._is_component_enabled(
-                result
-            ):
+        for result in results:
+            if isinstance(
+                result, (Resource, ResourceTemplate)
+            ) and self._is_component_enabled(result):
                 return result
 
         return None
@@ -873,7 +860,7 @@ class FastMCP(Generic[LifespanResultT]):
     async def get_resources(self) -> dict[str, Resource]:
         """Get all enabled resources from providers, indexed by URI.
 
-        Queries all providers in parallel (LocalProvider first) and collects resources.
+        Queries all providers in parallel and collects resources.
         First provider wins for duplicate URIs. Filters by server blocklist.
         """
         results = await gather(
@@ -898,7 +885,7 @@ class FastMCP(Generic[LifespanResultT]):
     async def get_resource(self, uri: str) -> Resource:
         """Get an enabled resource by URI.
 
-        Queries all providers in parallel (LocalProvider first) to find the resource.
+        Queries all providers in parallel to find the resource.
         First provider wins. Returns only if enabled.
         """
         results = await gather(
@@ -915,7 +902,7 @@ class FastMCP(Generic[LifespanResultT]):
     async def get_resource_templates(self) -> dict[str, ResourceTemplate]:
         """Get all enabled resource templates from providers, indexed by uri_template.
 
-        Queries all providers in parallel (LocalProvider first) and collects templates.
+        Queries all providers in parallel and collects templates.
         First provider wins for duplicate uri_templates. Filters by server blocklist.
         """
         results = await gather(
@@ -944,7 +931,7 @@ class FastMCP(Generic[LifespanResultT]):
     async def get_resource_template(self, uri: str) -> ResourceTemplate:
         """Get an enabled resource template that matches the given URI.
 
-        Queries all providers in parallel (LocalProvider first) to find the template.
+        Queries all providers in parallel to find the template.
         First provider wins. Returns only if enabled.
         """
         results = await gather(
@@ -963,7 +950,7 @@ class FastMCP(Generic[LifespanResultT]):
     async def get_prompts(self) -> dict[str, Prompt]:
         """Get all enabled prompts from providers, indexed by name.
 
-        Queries all providers in parallel (LocalProvider first) and collects prompts.
+        Queries all providers in parallel and collects prompts.
         First provider wins for duplicate names. Filters by server blocklist.
         """
         results = await gather(
@@ -989,7 +976,7 @@ class FastMCP(Generic[LifespanResultT]):
     async def get_prompt(self, name: str) -> Prompt:
         """Get an enabled prompt by name.
 
-        Queries all providers in parallel (LocalProvider first) to find the prompt.
+        Queries all providers in parallel to find the prompt.
         First provider wins. Returns only if enabled.
         """
         results = await gather(
@@ -1008,7 +995,7 @@ class FastMCP(Generic[LifespanResultT]):
     ) -> Tool | Resource | ResourceTemplate | Prompt:
         """Get a component by its prefixed key.
 
-        Queries all providers in parallel (LocalProvider first) to find the component.
+        Queries all providers in parallel to find the component.
         First provider wins.
 
         Args:
@@ -1138,7 +1125,7 @@ class FastMCP(Generic[LifespanResultT]):
         """
         List all available tools.
 
-        Queries all providers in parallel (LocalProvider first) and collects tools.
+        Queries all providers in parallel and collects tools.
         First provider wins for duplicate keys.
         """
         results = await gather(
@@ -1204,7 +1191,7 @@ class FastMCP(Generic[LifespanResultT]):
         """
         List all available resources.
 
-        Queries all providers in parallel (LocalProvider first) and collects resources.
+        Queries all providers in parallel and collects resources.
         First provider wins for duplicate keys.
         """
         results = await gather(
@@ -1276,7 +1263,7 @@ class FastMCP(Generic[LifespanResultT]):
         """
         List all available resource templates.
 
-        Queries all providers in parallel (LocalProvider first) and collects templates.
+        Queries all providers in parallel and collects templates.
         First provider wins for duplicate keys.
         """
         results = await gather(
@@ -1348,7 +1335,7 @@ class FastMCP(Generic[LifespanResultT]):
         """
         List all available prompts.
 
-        Queries all providers in parallel (LocalProvider first) and collects prompts.
+        Queries all providers in parallel and collects prompts.
         First provider wins for duplicate keys.
         """
         results = await gather(
@@ -1555,7 +1542,7 @@ class FastMCP(Generic[LifespanResultT]):
         """
         Call a tool.
 
-        Iterates through all providers (LocalProvider first) to find the tool.
+        Iterates through all providers to find the tool.
         First provider wins.
         """
         tool_name = context.message.name
@@ -1654,7 +1641,7 @@ class FastMCP(Generic[LifespanResultT]):
         """
         Read a resource.
 
-        Iterates through all providers (LocalProvider first) to find the resource.
+        Iterates through all providers to find the resource.
         First provider wins. Checks concrete resources first, then templates.
 
         Returns list[ResourceContent] for synchronous execution, or CreateTaskResult
@@ -1798,7 +1785,7 @@ class FastMCP(Generic[LifespanResultT]):
         """
         Get a prompt.
 
-        Iterates through all providers (LocalProvider first) to find the prompt.
+        Iterates through all providers to find the prompt.
         First provider wins.
 
         Returns PromptResult for synchronous execution, or CreateTaskResult

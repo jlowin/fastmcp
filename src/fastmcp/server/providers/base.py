@@ -231,23 +231,10 @@ class Provider:
             self.list_resource_templates(),
             self.list_prompts(),
         )
-        tools: Sequence[Tool] = results[0]  # type: ignore[assignment]
-        resources: Sequence[Resource] = results[1]  # type: ignore[assignment]
-        templates: Sequence[ResourceTemplate] = results[2]  # type: ignore[assignment]
-        prompts: Sequence[Prompt] = results[3]  # type: ignore[assignment]
-
-        for tool in tools:
-            if tool.key == key:
-                return tool
-        for resource in resources:
-            if resource.key == key:
-                return resource
-        for template in templates:
-            if template.key == key:
-                return template
-        for prompt in prompts:
-            if prompt.key == key:
-                return prompt
+        for components in results:
+            for component in components:  # type: ignore[union-attr]
+                if component.key == key:
+                    return component
         return None
 
     # -------------------------------------------------------------------------
