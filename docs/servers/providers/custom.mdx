@@ -118,7 +118,7 @@ from fastmcp.server.providers import Provider
 from fastmcp.tools import Tool
 
 class DictProvider(Provider):
-    def __init__(self, tools: dict[str, callable]):
+    def __init__(self, tools: dict[str, Callable]):
         super().__init__()
         self._tools = [
             Tool.from_function(fn, name=name)
@@ -194,7 +194,7 @@ class ApiResourceProvider(Provider):
         self.client = None
 
     @asynccontextmanager
-    async def lifespan(self):
+    async def lifespan(self) -> AsyncIterator[None]:
         self.client = httpx.AsyncClient(
             base_url=self.base_url,
             headers={"Authorization": f"Bearer {self.api_key}"}

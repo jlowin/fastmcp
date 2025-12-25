@@ -179,7 +179,7 @@ prod_app = FastMCP("Production")
 prod_app.mount(api_server, namespace="api")
 prod_app.enable(tags={"production"}, only=True)
 
-# Only api_prod_endpoint is visible - api_dev_endpoint is filtered out
+# Only prod_endpoint (namespaced as api_prod_endpoint) is visible
 ```
 
 ## Performance Considerations

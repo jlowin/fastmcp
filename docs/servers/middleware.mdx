@@ -458,7 +458,7 @@ def child_tool() -> str:
     return "from child"
 
 # Mount the child server
-parent.mount(child, prefix="child")
+parent.mount(child, namespace="child")
 ```
 
 When a client calls "child_tool", the request will flow through the parent's authentication middleware first, then route to the child server where it will go through the child's logging middleware.
