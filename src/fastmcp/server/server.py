@@ -825,7 +825,13 @@ class FastMCP(Generic[LifespanResultT]):
             return_exceptions=True,
         )
 
-        for result in results:
+        for i, result in enumerate(results):
+            if isinstance(result, BaseException):
+                if not isinstance(result, NotFoundError):
+                    logger.debug(
+                        f"Error getting tool from {self._providers[i]}: {result}"
+                    )
+                continue
             if isinstance(result, Tool) and self._is_component_enabled(result):
                 return result
 
@@ -850,6 +856,10 @@ class FastMCP(Generic[LifespanResultT]):
         )
 
         for result in results:
+            if isinstance(result, BaseException):
+                if not isinstance(result, NotFoundError):
+                    logger.debug(f"Error getting resource/template: {result}")
+                continue
             if isinstance(
                 result, (Resource, ResourceTemplate)
             ) and self._is_component_enabled(result):
@@ -893,7 +903,13 @@ class FastMCP(Generic[LifespanResultT]):
             return_exceptions=True,
         )
 
-        for result in results:
+        for i, result in enumerate(results):
+            if isinstance(result, BaseException):
+                if not isinstance(result, NotFoundError):
+                    logger.debug(
+                        f"Error getting resource from {self._providers[i]}: {result}"
+                    )
+                continue
             if isinstance(result, Resource) and self._is_component_enabled(result):
                 return result
 
@@ -939,7 +955,13 @@ class FastMCP(Generic[LifespanResultT]):
             return_exceptions=True,
         )
 
-        for result in results:
+        for i, result in enumerate(results):
+            if isinstance(result, BaseException):
+                if not isinstance(result, NotFoundError):
+                    logger.debug(
+                        f"Error getting template from {self._providers[i]}: {result}"
+                    )
+                continue
             if isinstance(result, ResourceTemplate) and self._is_component_enabled(
                 result
             ):
@@ -984,7 +1006,13 @@ class FastMCP(Generic[LifespanResultT]):
             return_exceptions=True,
         )
 
-        for result in results:
+        for i, result in enumerate(results):
+            if isinstance(result, BaseException):
+                if not isinstance(result, NotFoundError):
+                    logger.debug(
+                        f"Error getting prompt from {self._providers[i]}: {result}"
+                    )
+                continue
             if isinstance(result, Prompt) and self._is_component_enabled(result):
                 return result
 
@@ -1012,7 +1040,13 @@ class FastMCP(Generic[LifespanResultT]):
             return_exceptions=True,
         )
 
-        for result in results:
+        for i, result in enumerate(results):
+            if isinstance(result, BaseException):
+                if not isinstance(result, NotFoundError):
+                    logger.debug(
+                        f"Error getting component from {self._providers[i]}: {result}"
+                    )
+                continue
             if isinstance(result, FastMCPComponent):
                 return result
 
