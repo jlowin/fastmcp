@@ -34,7 +34,7 @@ from fastmcp import Client, Context, FastMCP
 from fastmcp.client.client import CallToolResult
 from fastmcp.exceptions import ToolError
 from fastmcp.tools.tool import Tool, ToolResult
-from fastmcp.utilities.json_schema import compress_schema
+from fastmcp.utilities.json_schema import compress_schema, simplify_additional_properties
 from fastmcp.utilities.types import Audio, File, Image
 
 
@@ -784,8 +784,10 @@ class TestToolOutputSchema:
         async with Client(mcp) as client:
             tools = await client.list_tools()
 
-            type_schema = compress_schema(
-                TypeAdapter(annotation).json_schema(), prune_titles=True
+            type_schema = simplify_additional_properties(
+                compress_schema(
+                    TypeAdapter(annotation).json_schema(), prune_titles=True
+                )
             )
             assert len(tools) == 1
 
@@ -916,8 +918,10 @@ class TestToolOutputSchema:
         async with Client(mcp) as client:
             tools = await client.list_tools()
             tool = next(t for t in tools if t.name == "complex_tool")
-            expected_inner_schema = compress_schema(
-                TypeAdapter(list[dict[str, int]]).json_schema(), prune_titles=True
+            expected_inner_schema = simplify_additional_properties(
+                compress_schema(
+                    TypeAdapter(list[dict[str, int]]).json_schema(), prune_titles=True
+                )
             )
             expected_schema = {
                 "type": "object",
