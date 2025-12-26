@@ -5,8 +5,6 @@ from pydantic import FileUrl
 from fastmcp.prompts.prompt import (
     Message,
     Prompt,
-    PromptMessage,
-    TextContent,
 )
 
 
@@ -17,11 +15,7 @@ class TestRenderPrompt:
 
         prompt = Prompt.from_function(fn)
         result = await prompt.render()
-        assert result.messages == [
-            PromptMessage(
-                role="user", content=TextContent(type="text", text="Hello, world!")
-            )
-        ]
+        assert result.messages == [Message("Hello, world!")]
 
     async def test_async_fn(self):
         async def fn() -> str:
@@ -29,11 +23,7 @@ class TestRenderPrompt:
 
         prompt = Prompt.from_function(fn)
         result = await prompt.render()
-        assert result.messages == [
-            PromptMessage(
-                role="user", content=TextContent(type="text", text="Hello, world!")
-            )
-        ]
+        assert result.messages == [Message("Hello, world!")]
 
     async def test_fn_with_args(self):
         async def fn(name: str, age: int = 30) -> str:
@@ -41,14 +31,7 @@ class TestRenderPrompt:
 
         prompt = Prompt.from_function(fn)
         result = await prompt.render(arguments=dict(name="World"))
-        assert result.messages == [
-            PromptMessage(
-                role="user",
-                content=TextContent(
-                    type="text", text="Hello, World! You're 30 years old."
-                ),
-            )
-        ]
+        assert result.messages == [Message("Hello, World! You're 30 years old.")]
 
     async def test_callable_object(self):
         class MyPrompt:
@@ -57,11 +40,7 @@ class TestRenderPrompt:
 
         prompt = Prompt.from_function(MyPrompt())
         result = await prompt.render(arguments=dict(name="World"))
-        assert result.messages == [
-            PromptMessage(
-                role="user", content=TextContent(type="text", text="Hello, World!")
-            )
-        ]
+        assert result.messages == [Message("Hello, World!")]
 
     async def test_async_callable_object(self):
         class MyPrompt:
@@ -70,11 +49,7 @@ class TestRenderPrompt:
 
         prompt = Prompt.from_function(MyPrompt())
         result = await prompt.render(arguments=dict(name="World"))
-        assert result.messages == [
-            PromptMessage(
-                role="user", content=TextContent(type="text", text="Hello, World!")
-            )
-        ]
+        assert result.messages == [Message("Hello, World!")]
 
     async def test_fn_with_invalid_kwargs(self):
         async def fn(name: str, age: int = 30) -> str:
@@ -84,45 +59,30 @@ class TestRenderPrompt:
         with pytest.raises(ValueError):
             await prompt.render(arguments=dict(age=40))
 
-    async def test_fn_returns_message(self):
-        async def fn() -> PromptMessage:
-            return PromptMessage(
-                role="user", content=TextContent(type="text", text="Hello, world!")
-            )
+    async def test_fn_returns_message_list(self):
+        async def fn() -> list[Message]:
+            return [Message("Hello, world!")]
 
         prompt = Prompt.from_function(fn)
         result = await prompt.render()
-        assert result.messages == [
-            PromptMessage(
-                role="user", content=TextContent(type="text", text="Hello, world!")
-            )
-        ]
+        assert result.messages == [Message("Hello, world!")]
 
     async def test_fn_returns_assistant_message(self):
-        async def fn() -> PromptMessage:
-            return PromptMessage(
-                role="assistant", content=TextContent(type="text", text="Hello, world!")
-            )
+        async def fn() -> list[Message]:
+            return [Message("Hello, world!", role="assistant")]
 
         prompt = Prompt.from_function(fn)
         result = await prompt.render()
-        assert result.messages == [
-            PromptMessage(
-                role="assistant", content=TextContent(type="text", text="Hello, world!")
-            )
-        ]
+        assert result.messages == [Message("Hello, world!", role="assistant")]
 
     async def test_fn_returns_multiple_messages(self):
         expected = [
-            Message(role="user", content="Hello, world!"),
-            Message(role="assistant", content="How can I help you today?"),
-            Message(
-                role="user",
-                content="I'm looking for a restaurant in the center of town.",
-            ),
+            Message("Hello, world!"),
+            Message("How can I help you today?", role="assistant"),
+            Message("I'm looking for a restaurant in the center of town."),
         ]
 
-        async def fn() -> list[PromptMessage]:
+        async def fn() -> list[Message]:
             return expected
 
         prompt = Prompt.from_function(fn)
@@ -140,51 +100,14 @@ class TestRenderPrompt:
 
         prompt = Prompt.from_function(fn)
         result = await prompt.render()
-        assert result.messages == [
-            PromptMessage(role="user", content=TextContent(type="text", text=t))
-            for t in expected
-        ]
+        assert result.messages == [Message(t) for t in expected]
 
     async def test_fn_returns_resource_content(self):
         """Test returning a message with resource content."""
 
-        async def fn() -> PromptMessage:
-            return PromptMessage(
-                role="user",
-                content=EmbeddedResource(
-                    type="resource",
-                    resource=TextResourceContents(
-                        uri=FileUrl("file://file.txt"),
-                        text="File contents",
-                        mimeType="text/plain",
-                    ),
-                ),
-            )
-
-        prompt = Prompt.from_function(fn)
-        result = await prompt.render()
-        assert result.messages == [
-            PromptMessage(
-                role="user",
-                content=EmbeddedResource(
-                    type="resource",
-                    resource=TextResourceContents(
-                        uri=FileUrl("file://file.txt"),
-                        text="File contents",
-                        mimeType="text/plain",
-                    ),
-                ),
-            )
-        ]
-
-    async def test_fn_returns_mixed_content(self):
-        """Test returning messages with mixed content types."""
-
-        async def fn() -> list[PromptMessage | str]:
+        async def fn() -> list[Message]:
             return [
-                "Please analyze this file:",
-                PromptMessage(
-                    role="user",
+                Message(
                     content=EmbeddedResource(
                         type="resource",
                         resource=TextResourceContents(
@@ -193,19 +116,14 @@ class TestRenderPrompt:
                             mimeType="text/plain",
                         ),
                     ),
-                ),
-                Message(role="assistant", content="I'll help analyze that file."),
+                    role="user",
+                )
             ]
 
         prompt = Prompt.from_function(fn)
         result = await prompt.render()
         assert result.messages == [
-            PromptMessage(
-                role="user",
-                content=TextContent(type="text", text="Please analyze this file:"),
-            ),
-            PromptMessage(
-                role="user",
+            Message(
                 content=EmbeddedResource(
                     type="resource",
                     resource=TextResourceContents(
@@ -214,34 +132,35 @@ class TestRenderPrompt:
                         mimeType="text/plain",
                     ),
                 ),
-            ),
-            PromptMessage(
-                role="assistant",
-                content=TextContent(type="text", text="I'll help analyze that file."),
-            ),
+                role="user",
+            )
         ]
 
-    async def test_fn_returns_message_with_resource(self):
-        """Test returning a dict with resource content."""
+    async def test_fn_returns_mixed_content(self):
+        """Test returning messages with mixed content types."""
 
-        async def fn() -> PromptMessage:
-            return PromptMessage(
-                role="user",
-                content=EmbeddedResource(
-                    type="resource",
-                    resource=TextResourceContents(
-                        uri=FileUrl("file://file.txt"),
-                        text="File contents",
-                        mimeType="text/plain",
+        async def fn() -> list[Message | str]:
+            return [
+                "Please analyze this file:",
+                Message(
+                    content=EmbeddedResource(
+                        type="resource",
+                        resource=TextResourceContents(
+                            uri=FileUrl("file://file.txt"),
+                            text="File contents",
+                            mimeType="text/plain",
+                        ),
                     ),
+                    role="user",
                 ),
-            )
+                Message("I'll help analyze that file.", role="assistant"),
+            ]
 
         prompt = Prompt.from_function(fn)
         result = await prompt.render()
         assert result.messages == [
-            PromptMessage(
-                role="user",
+            Message("Please analyze this file:"),
+            Message(
                 content=EmbeddedResource(
                     type="resource",
                     resource=TextResourceContents(
@@ -250,6 +169,42 @@ class TestRenderPrompt:
                         mimeType="text/plain",
                     ),
                 ),
+                role="user",
+            ),
+            Message("I'll help analyze that file.", role="assistant"),
+        ]
+
+    async def test_fn_returns_message_with_resource(self):
+        """Test returning a message with resource content."""
+
+        async def fn() -> list[Message]:
+            return [
+                Message(
+                    content=EmbeddedResource(
+                        type="resource",
+                        resource=TextResourceContents(
+                            uri=FileUrl("file://file.txt"),
+                            text="File contents",
+                            mimeType="text/plain",
+                        ),
+                    ),
+                    role="user",
+                )
+            ]
+
+        prompt = Prompt.from_function(fn)
+        result = await prompt.render()
+        assert result.messages == [
+            Message(
+                content=EmbeddedResource(
+                    type="resource",
+                    resource=TextResourceContents(
+                        uri=FileUrl("file://file.txt"),
+                        text="File contents",
+                        mimeType="text/plain",
+                    ),
+                ),
+                role="user",
             )
         ]
 
@@ -270,11 +225,7 @@ class TestPromptTypeConversion:
         result_from_string = await prompt.render(
             arguments={"numbers": "[1, 2, 3, 4, 5]"}
         )
-        assert result_from_string.messages == [
-            PromptMessage(
-                role="user", content=TextContent(type="text", text="The sum is: 15")
-            )
-        ]
+        assert result_from_string.messages == [Message("The sum is: 15")]
 
         # Both should work now with string conversion
         result_from_list_string = await prompt.render(
@@ -310,11 +261,7 @@ class TestPromptTypeConversion:
         expected_text = (
             "Alice (25): 3 scores, active=True, metadata keys=['project', 'version']"
         )
-        assert result.messages == [
-            PromptMessage(
-                role="user", content=TextContent(type="text", text=expected_text)
-            )
-        ]
+        assert result.messages == [Message(expected_text)]
 
     async def test_type_conversion_error_handling(self):
         """Test that informative errors are raised for invalid type conversions."""
@@ -341,19 +288,11 @@ class TestPromptTypeConversion:
 
         # This should work with JSON parsing (integer as string)
         result1 = await prompt.render(arguments={"value": "42"})
-        assert result1.messages == [
-            PromptMessage(
-                role="user", content=TextContent(type="text", text="Value: 42")
-            )
-        ]
+        assert result1.messages == [Message("Value: 42")]
 
         # This should work with direct validation (already an integer string)
         result2 = await prompt.render(arguments={"value": "123"})
-        assert result2.messages == [
-            PromptMessage(
-                role="user", content=TextContent(type="text", text="Value: 123")
-            )
-        ]
+        assert result2.messages == [Message("Value: 123")]
 
     async def test_mixed_string_and_typed_args(self):
         """Test mixing string args (no conversion) with typed args (conversion needed)."""
@@ -370,12 +309,7 @@ class TestPromptTypeConversion:
             }
         )
 
-        assert result.messages == [
-            PromptMessage(
-                role="user",
-                content=TextContent(type="text", text="Hello world (repeated 3 times)"),
-            )
-        ]
+        assert result.messages == [Message("Hello world (repeated 3 times)")]
 
 
 class TestPromptArgumentDescriptions:
