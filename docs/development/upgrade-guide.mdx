@@ -150,6 +150,10 @@ def my_prompt() -> Message:
 
 See [Prompts documentation](/servers/prompts#return-values) for full details.
 
+### Tool Serializer Deprecated
+
+The `tool_serializer` parameter on `FastMCP` is deprecated. Return `ToolResult` from your tools for explicit control over serialization. See [Custom Serialization](/servers/tools#custom-serialization) for examples.
+
 ## v2.14.0
 
 ### OpenAPI Parser Promotion
