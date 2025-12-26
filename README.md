@@ -34,6 +34,66 @@
 
 ---
 
+## 🧭 MAOS v1 Governance (Activ8-AI Fork)
+
+This fork operates under MAOS v1 (Modular Automation Operating System) governance framework, which establishes:
+
+- **Tier 3 Repository Classification**: Full governance controls with automated agent workflows
+- **Charter Compliance**: All changes must align with Charter Standards for security, modularity, and provider-agnostic design
+- **Fail-Closed Enforcement**: Required governance checks must pass before merge
+- **Human Authority**: All merges require explicit human approval
+- **Audit Trail**: Comprehensive logging and compliance tracking
+
+### Fork-Specific Governance
+
+This is an Activ8-AI maintained fork of [FastMCP](https://github.com/jlowin/fastmcp).
+
+**Upstream Synchronization**:
+- Regular syncs with upstream FastMCP repository
+- Activ8-AI specific modifications tracked separately
+- Governance requirements apply to Activ8-AI changes only
+
+**Contribution Guidelines**:
+- Upstream contributions should be made to the original FastMCP repository
+- Activ8-AI specific features require governance approval
+- See main repository [Activ8-AI/mcp](https://github.com/Activ8-AI/mcp) for governance details
+
+For complete governance documentation, see:
+- **Main Repository**: [Activ8-AI/mcp](https://github.com/Activ8-AI/mcp) - Primary governance standards
+- **Upstream**: [jlowin/fastmcp](https://github.com/jlowin/fastmcp) - Original project
+- **Documentation**: [gofastmcp.com](https://gofastmcp.com) - Official docs
+- **Made by**: [Prefect](https://www.prefect.io/) - Workflow orchestration
+
+### High-Risk Powers
+
+This MCP framework has specific governance requirements:
+
+- **MCP Server Framework**: Production-ready server and client implementations
+- **Authentication**: Enterprise auth (Google, GitHub, WorkOS, Azure, Auth0)
+- **Server Composition**: Multi-server orchestration and proxying
+- **OpenAPI Generation**: Automatic FastAPI/OpenAPI integration
+- **Tool Transformation**: Dynamic tool and function registration
+- **Deployment Tools**: Production deployment utilities
+- **Testing Framework**: Comprehensive testing and validation
+- **Python SDK**: Client library access to MCP servers
+
+All high-risk operations are:
+- Gated behind required human approval
+- Logged for audit compliance
+- Subject to automated security scanning
+- Governed by principle of least privilege
+- Require secure credential management
+
+### Security Notes
+
+- **Authentication Providers**: Secure configuration of enterprise SSO
+- **API Keys**: Never commit authentication credentials to version control
+- **Server Composition**: Review security of composed/proxied servers
+- **Tool Registration**: Validate tools before exposing to LLMs
+- **Production Deployment**: Follow security best practices for deployment
+
+---
+
 **FastMCP is the standard framework for building MCP applications**, providing the fastest path from idea to production.
 
 The [Model Context Protocol (MCP)](https://modelcontextprotocol.io) is a standardized way to provide context and tools to LLMs. FastMCP makes building production-ready MCP servers simple, with enterprise auth, deployment tools, and a complete ecosystem built in.
