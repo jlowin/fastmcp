@@ -29,8 +29,8 @@ from mcp.types import (
 from pydantic import AnyUrl, BaseModel, Field, TypeAdapter
 from typing_extensions import TypedDict
 
-from fastmcp import Client, Context, FastMCP
-from fastmcp.exceptions import ToolError
+from fastmcp import Context, FastMCP
+from fastmcp.exceptions import NotFoundError
 from fastmcp.tools.tool import Tool, ToolResult
 from fastmcp.utilities.json_schema import compress_schema
 from fastmcp.utilities.types import Audio, File, Image
@@ -1327,6 +1327,7 @@ class TestToolDecorator:
         assert any(t.name == "custom_multiply" for t in tools)
 
         result = await mcp.call_tool("custom_multiply", {"a": 5, "b": 3})
+        assert isinstance(result, ToolResult)
         assert result.structured_content == {"result": 15}
 
         assert not any(t.name == "multiply" for t in tools)
@@ -1382,6 +1383,7 @@ class TestToolDecorator:
         assert tool is result_fn
 
         result = await mcp.call_tool("direct_call_tool", {"x": 5, "y": 3})
+        assert isinstance(result, ToolResult)
         assert result.structured_content == {"result": 8}
 
     async def test_tool_decorator_with_string_name(self):
@@ -1398,6 +1400,7 @@ class TestToolDecorator:
         assert not any(t.name == "my_function" for t in tools)
 
         result = await mcp.call_tool("string_named_tool", {"x": 42})
+        assert isinstance(result, ToolResult)
         assert result.structured_content == {"result": "Result: 42"}
 
     async def test_tool_decorator_conflicting_names_error(self):
@@ -1457,58 +1460,44 @@ class TestToolTags:
 
     async def test_include_tags_all_tools(self):
         mcp = self.create_server(include_tags={"a", "b"})
-
-        async with Client(mcp) as client:
-            tools = await client.list_tools()
-            assert {t.name for t in tools} == {"tool_1", "tool_2"}
+        tools = await mcp.get_tools()
+        assert {t.name for t in tools} == {"tool_1", "tool_2"}
 
     async def test_include_tags_some_tools(self):
         mcp = self.create_server(include_tags={"a", "z"})
-
-        async with Client(mcp) as client:
-            tools = await client.list_tools()
-            assert {t.name for t in tools} == {"tool_1"}
+        tools = await mcp.get_tools()
+        assert {t.name for t in tools} == {"tool_1"}
 
     async def test_exclude_tags_all_tools(self):
         mcp = self.create_server(exclude_tags={"a", "b"})
-
-        async with Client(mcp) as client:
-            tools = await client.list_tools()
-            assert {t.name for t in tools} == set()
+        tools = await mcp.get_tools()
+        assert {t.name for t in tools} == set()
 
     async def test_exclude_tags_some_tools(self):
         mcp = self.create_server(exclude_tags={"a", "z"})
-
-        async with Client(mcp) as client:
-            tools = await client.list_tools()
-            assert {t.name for t in tools} == {"tool_2"}
+        tools = await mcp.get_tools()
+        assert {t.name for t in tools} == {"tool_2"}
 
     async def test_exclude_precedence(self):
         mcp = self.create_server(exclude_tags={"a"}, include_tags={"b"})
-
-        async with Client(mcp) as client:
-            tools = await client.list_tools()
-            assert {t.name for t in tools} == {"tool_2"}
+        tools = await mcp.get_tools()
+        assert {t.name for t in tools} == {"tool_2"}
 
     async def test_call_included_tool(self):
         mcp = self.create_server(include_tags={"a"})
+        result_1 = await mcp.call_tool("tool_1", {})
+        assert result_1.structured_content == {"result": 1}
 
-        async with Client(mcp) as client:
-            result_1 = await client.call_tool("tool_1", {})
-            assert result_1.data == 1
-
-            with pytest.raises(ToolError, match="Unknown tool"):
-                await client.call_tool("tool_2", {})
+        with pytest.raises(NotFoundError, match="Unknown tool"):
+            await mcp.call_tool("tool_2", {})
 
     async def test_call_excluded_tool(self):
         mcp = self.create_server(exclude_tags={"a"})
+        with pytest.raises(NotFoundError, match="Unknown tool"):
+            await mcp.call_tool("tool_1", {})
 
-        async with Client(mcp) as client:
-            with pytest.raises(ToolError, match="Unknown tool"):
-                await client.call_tool("tool_1", {})
-
-            result_2 = await client.call_tool("tool_2", {})
-            assert result_2.data == 2
+        result_2 = await mcp.call_tool("tool_2", {})
+        assert result_2.structured_content == {"result": 2}
 
 
 class TestToolEnabled:
@@ -1542,15 +1531,12 @@ class TestToolEnabled:
         def sample_tool(x: int) -> int:
             return x * 2
 
-        # Disable the tool via server
         mcp.disable(keys=["tool:sample_tool"])
+        tools = await mcp.get_tools()
+        assert len(tools) == 0
 
-        async with Client(mcp) as client:
-            tools = await client.list_tools()
-            assert len(tools) == 0
-
-            with pytest.raises(ToolError, match="Unknown tool"):
-                await client.call_tool("sample_tool", {"x": 5})
+        with pytest.raises(NotFoundError, match="Unknown tool"):
+            await mcp.call_tool("sample_tool", {"x": 5})
 
     async def test_tool_toggle_enabled(self):
         mcp = FastMCP()
@@ -1559,13 +1545,10 @@ class TestToolEnabled:
         def sample_tool(x: int) -> int:
             return x * 2
 
-        # Disable then re-enable
         mcp.disable(keys=["tool:sample_tool"])
         mcp.enable(keys=["tool:sample_tool"])
-
-        async with Client(mcp) as client:
-            tools = await client.list_tools()
-            assert len(tools) == 1
+        tools = await mcp.get_tools()
+        assert len(tools) == 1
 
     async def test_tool_toggle_disabled(self):
         mcp = FastMCP()
@@ -1575,13 +1558,11 @@ class TestToolEnabled:
             return x * 2
 
         mcp.disable(keys=["tool:sample_tool"])
+        tools = await mcp.get_tools()
+        assert len(tools) == 0
 
-        async with Client(mcp) as client:
-            tools = await client.list_tools()
-            assert len(tools) == 0
-
-            with pytest.raises(ToolError, match="Unknown tool"):
-                await client.call_tool("sample_tool", {"x": 5})
+        with pytest.raises(NotFoundError, match="Unknown tool"):
+            await mcp.call_tool("sample_tool", {"x": 5})
 
     async def test_get_tool_and_disable(self):
         mcp = FastMCP()
@@ -1594,13 +1575,11 @@ class TestToolEnabled:
         assert tool is not None
 
         mcp.disable(keys=["tool:sample_tool"])
+        tools = await mcp.get_tools()
+        assert len(tools) == 0
 
-        async with Client(mcp) as client:
-            result = await client.list_tools()
-            assert len(result) == 0
-
-            with pytest.raises(ToolError, match="Unknown tool"):
-                await client.call_tool("sample_tool", {"x": 5})
+        with pytest.raises(NotFoundError, match="Unknown tool"):
+            await mcp.call_tool("sample_tool", {"x": 5})
 
     async def test_cant_call_disabled_tool(self):
         mcp = FastMCP()
@@ -1611,6 +1590,5 @@ class TestToolEnabled:
 
         mcp.disable(keys=["tool:sample_tool"])
 
-        with pytest.raises(Exception, match="Unknown tool"):
-            async with Client(mcp) as client:
-                await client.call_tool("sample_tool", {"x": 5})
+        with pytest.raises(NotFoundError, match="Unknown tool"):
+            await mcp.call_tool("sample_tool", {"x": 5})

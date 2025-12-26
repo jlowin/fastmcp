@@ -6,11 +6,11 @@ Tests cover:
 """
 
 import pytest
-from mcp import McpError
 from mcp.types import TextContent
 
 from fastmcp import Client, Context, FastMCP
-from fastmcp.prompts.prompt import FunctionPrompt, Prompt
+from fastmcp.exceptions import NotFoundError
+from fastmcp.prompts.prompt import FunctionPrompt, Prompt, PromptResult
 
 
 class TestPromptContext:
@@ -350,13 +350,11 @@ class TestPromptEnabled:
             return "Hello, world!"
 
         mcp.disable(keys=["prompt:sample_prompt"])
+        prompts = await mcp.get_prompts()
+        assert len(prompts) == 0
 
-        async with Client(mcp) as client:
-            prompts = await client.list_prompts()
-            assert len(prompts) == 0
-
-            with pytest.raises(McpError, match="Unknown prompt"):
-                await client.get_prompt("sample_prompt")
+        with pytest.raises(NotFoundError, match="Unknown prompt"):
+            await mcp.get_prompt("sample_prompt")
 
     async def test_prompt_toggle_enabled(self):
         mcp = FastMCP()
@@ -366,15 +364,12 @@ class TestPromptEnabled:
             return "Hello, world!"
 
         mcp.disable(keys=["prompt:sample_prompt"])
-
         prompts = await mcp.get_prompts()
         assert not any(p.name == "sample_prompt" for p in prompts)
 
         mcp.enable(keys=["prompt:sample_prompt"])
-
-        async with Client(mcp) as client:
-            prompts = await client.list_prompts()
-            assert len(prompts) == 1
+        prompts = await mcp.get_prompts()
+        assert len(prompts) == 1
 
     async def test_prompt_toggle_disabled(self):
         mcp = FastMCP()
@@ -384,13 +379,11 @@ class TestPromptEnabled:
             return "Hello, world!"
 
         mcp.disable(keys=["prompt:sample_prompt"])
+        prompts = await mcp.get_prompts()
+        assert len(prompts) == 0
 
-        async with Client(mcp) as client:
-            prompts = await client.list_prompts()
-            assert len(prompts) == 0
-
-            with pytest.raises(McpError, match="Unknown prompt"):
-                await client.get_prompt("sample_prompt")
+        with pytest.raises(NotFoundError, match="Unknown prompt"):
+            await mcp.get_prompt("sample_prompt")
 
     async def test_get_prompt_and_disable(self):
         mcp = FastMCP()
@@ -403,13 +396,11 @@ class TestPromptEnabled:
         assert prompt is not None
 
         mcp.disable(keys=["prompt:sample_prompt"])
+        prompts = await mcp.get_prompts()
+        assert len(prompts) == 0
 
-        async with Client(mcp) as client:
-            result = await client.list_prompts()
-            assert len(result) == 0
-
-            with pytest.raises(McpError, match="Unknown prompt"):
-                await client.get_prompt("sample_prompt")
+        with pytest.raises(NotFoundError, match="Unknown prompt"):
+            await mcp.get_prompt("sample_prompt")
 
     async def test_cant_get_disabled_prompt(self):
         mcp = FastMCP()
@@ -420,9 +411,8 @@ class TestPromptEnabled:
 
         mcp.disable(keys=["prompt:sample_prompt"])
 
-        with pytest.raises(McpError, match="Unknown prompt"):
-            async with Client(mcp) as client:
-                await client.get_prompt("sample_prompt")
+        with pytest.raises(NotFoundError, match="Unknown prompt"):
+            await mcp.get_prompt("sample_prompt")
 
 
 class TestPromptTags:
@@ -441,57 +431,43 @@ class TestPromptTags:
 
     async def test_include_tags_all_prompts(self):
         mcp = self.create_server(include_tags={"a", "b"})
-
-        async with Client(mcp) as client:
-            prompts = await client.list_prompts()
-            assert {p.name for p in prompts} == {"prompt_1", "prompt_2"}
+        prompts = await mcp.get_prompts()
+        assert {p.name for p in prompts} == {"prompt_1", "prompt_2"}
 
     async def test_include_tags_some_prompts(self):
         mcp = self.create_server(include_tags={"a"})
-
-        async with Client(mcp) as client:
-            prompts = await client.list_prompts()
-            assert {p.name for p in prompts} == {"prompt_1"}
+        prompts = await mcp.get_prompts()
+        assert {p.name for p in prompts} == {"prompt_1"}
 
     async def test_exclude_tags_all_prompts(self):
         mcp = self.create_server(exclude_tags={"a", "b"})
-
-        async with Client(mcp) as client:
-            prompts = await client.list_prompts()
-            assert {p.name for p in prompts} == set()
+        prompts = await mcp.get_prompts()
+        assert {p.name for p in prompts} == set()
 
     async def test_exclude_tags_some_prompts(self):
         mcp = self.create_server(exclude_tags={"a"})
-
-        async with Client(mcp) as client:
-            prompts = await client.list_prompts()
-            assert {p.name for p in prompts} == {"prompt_2"}
+        prompts = await mcp.get_prompts()
+        assert {p.name for p in prompts} == {"prompt_2"}
 
     async def test_exclude_takes_precedence_over_include(self):
         mcp = self.create_server(exclude_tags={"a"}, include_tags={"b"})
-
-        async with Client(mcp) as client:
-            prompts = await client.list_prompts()
-            assert {p.name for p in prompts} == {"prompt_2"}
+        prompts = await mcp.get_prompts()
+        assert {p.name for p in prompts} == {"prompt_2"}
 
     async def test_read_prompt_includes_tags(self):
         mcp = self.create_server(include_tags={"a"})
+        prompt = await mcp.get_prompt("prompt_1")
+        result = await prompt.render({})
+        assert result.messages[0].content.text == "1"
 
-        async with Client(mcp) as client:
-            result = await client.get_prompt("prompt_1")
-            assert isinstance(result.messages[0].content, TextContent)
-            assert result.messages[0].content.text == "1"
-
-            with pytest.raises(McpError, match="Unknown prompt"):
-                await client.get_prompt("prompt_2")
+        with pytest.raises(NotFoundError, match="Unknown prompt"):
+            await mcp.get_prompt("prompt_2")
 
     async def test_read_prompt_excludes_tags(self):
         mcp = self.create_server(exclude_tags={"a"})
+        with pytest.raises(NotFoundError, match="Unknown prompt"):
+            await mcp.get_prompt("prompt_1")
 
-        async with Client(mcp) as client:
-            with pytest.raises(McpError, match="Unknown prompt"):
-                await client.get_prompt("prompt_1")
-
-            result = await client.get_prompt("prompt_2")
-            assert isinstance(result.messages[0].content, TextContent)
-            assert result.messages[0].content.text == "2"
+        prompt = await mcp.get_prompt("prompt_2")
+        result = await prompt.render({})
+        assert result.messages[0].content.text == "2"

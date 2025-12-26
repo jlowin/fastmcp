@@ -8,6 +8,7 @@ from mcp.types import AnyUrl, TextContent
 
 from fastmcp import FastMCP
 from fastmcp.prompts.prompt import FunctionPrompt, Prompt, PromptResult
+from fastmcp.resources import ResourceResult
 from fastmcp.resources.resource import FunctionResource, Resource
 from fastmcp.resources.template import FunctionResourceTemplate, ResourceTemplate
 from fastmcp.server.providers import Provider
@@ -394,9 +395,9 @@ class TestProviderExecutionMethods:
 
         result = await mcp.read_resource("test://data")
 
-        assert isinstance(result, list)
-        assert len(result) == 1
-        assert result[0].content == "hello world"
+        assert isinstance(result, ResourceResult)
+        assert len(result.contents) == 1
+        assert result.contents[0].content == "hello world"
 
     async def test_read_resource_template_default(self):
         """Test that read_resource_template handles template-based resources."""
@@ -417,9 +418,9 @@ class TestProviderExecutionMethods:
 
         result = await mcp.read_resource("data://files/test.txt")
 
-        assert isinstance(result, list)
-        assert len(result) == 1
-        assert result[0].content == "content of test.txt"
+        assert isinstance(result, ResourceResult)
+        assert len(result.contents) == 1
+        assert result.contents[0].content == "content of test.txt"
 
     async def test_render_prompt_default_implementation(self):
         """Test that default render_prompt uses get_prompt and renders it."""

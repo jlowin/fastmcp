@@ -141,55 +141,38 @@ class TestMeta:
             assert prompt.meta is None
 
     async def test_temporary_include_fastmcp_meta_setting(self):
-        """Test that temporary_settings can toggle include_fastmcp_meta."""
-        mcp = FastMCP()
+        """Test that temporary_settings can toggle include_fastmcp_meta for new servers."""
 
-        @mcp.tool(tags={"test-tag"})
-        def sample_tool(x: int) -> int:
-            """A sample tool."""
-            return x * 2
+        def make_server() -> FastMCP:
+            mcp = FastMCP()
+
+            @mcp.tool(tags={"test-tag"})
+            def sample_tool(x: int) -> int:
+                """A sample tool."""
+                return x * 2
+
+            return mcp
 
         # Default: meta should be present
+        mcp = make_server()
         async with Client(mcp) as client:
             tools = await client.list_tools()
             tool = next(t for t in tools if t.name == "sample_tool")
             assert tool.meta is not None
             assert set(tool.meta["_fastmcp"]["tags"]) == {"test-tag"}
 
-        # With setting disabled: meta should be None
-        with temporary_settings(mcp, include_fastmcp_meta=False):
+        # With setting disabled: new server should not include meta
+        with temporary_settings(include_fastmcp_meta=False):
+            mcp = make_server()
             async with Client(mcp) as client:
                 tools = await client.list_tools()
                 tool = next(t for t in tools if t.name == "sample_tool")
                 assert tool.meta is None
 
-        # After context: meta should be back
+        # After context: new server should have meta again
+        mcp = make_server()
         async with Client(mcp) as client:
             tools = await client.list_tools()
             tool = next(t for t in tools if t.name == "sample_tool")
             assert tool.meta is not None
             assert set(tool.meta["_fastmcp"]["tags"]) == {"test-tag"}
-
-    async def test_enabled_in_meta_with_default_setting(self):
-        """Test that enabled status appears in meta under _fastmcp key with default setting."""
-        mcp = FastMCP()
-
-        @mcp.tool
-        def enabled_tool(x: int) -> int:
-            """An enabled tool."""
-            return x * 2
-
-        mcp.disable(tools=["enabled_tool"])
-
-        async with Client(mcp) as client:
-            # When disabled, tool should not appear
-            tools = await client.list_tools()
-            assert not any(t.name == "enabled_tool" for t in tools)
-
-        mcp.enable(tools=["enabled_tool"])
-
-        async with Client(mcp) as client:
-            tools = await client.list_tools()
-            tool = next(t for t in tools if t.name == "enabled_tool")
-            assert tool.meta is not None
-            assert tool.meta["_fastmcp"]["enabled"] is True

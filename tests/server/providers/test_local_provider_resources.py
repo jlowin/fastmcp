@@ -9,7 +9,6 @@ Tests cover:
 """
 
 import pytest
-from mcp import McpError
 from mcp.types import TextResourceContents
 from pydantic import AnyUrl
 
@@ -83,7 +82,8 @@ class TestResourceTemplates:
             return f"Data for {name}"
 
         result = await mcp.read_resource("resource://test/data")
-        assert result[0].content == "Data for test"
+        assert isinstance(result, ResourceResult)
+        assert result.contents[0].content == "Data for test"
 
     async def test_resource_mismatched_params(self):
         """Test that mismatched parameters raise an error"""
@@ -107,7 +107,8 @@ class TestResourceTemplates:
             return f"Data for {org}/{repo}"
 
         result = await mcp.read_resource("resource://cursor/fastmcp/data")
-        assert result[0].content == "Data for cursor/fastmcp"
+        assert isinstance(result, ResourceResult)
+        assert result.contents[0].content == "Data for cursor/fastmcp"
 
     async def test_resource_multiple_mismatched_params(self):
         """Test that mismatched parameters raise an error"""
@@ -131,7 +132,8 @@ class TestResourceTemplates:
             return str(sum(int(v) for v in kwargs.values()))
 
         result = await mcp.read_resource("test://1/2/3")
-        assert result[0].content == "6"
+        assert isinstance(result, ResourceResult)
+        assert result.contents[0].content == "6"
 
     async def test_template_with_default_params(self):
         """Test that a template can have default parameters."""
@@ -146,10 +148,12 @@ class TestResourceTemplates:
         assert templates[0].uri_template == "math://add/{x}"
 
         result = await mcp.read_resource("math://add/5")
-        assert result[0].content == "15"
+        assert isinstance(result, ResourceResult)
+        assert result.contents[0].content == "15"
 
         result2 = await mcp.read_resource("math://add/7")
-        assert result2[0].content == "17"
+        assert isinstance(result2, ResourceResult)
+        assert result2.contents[0].content == "17"
 
     async def test_template_to_resource_conversion(self):
         """Test that a template can be converted to a resource."""
@@ -164,7 +168,8 @@ class TestResourceTemplates:
         assert templates[0].uri_template == "resource://{name}/data"
 
         result = await mcp.read_resource("resource://test/data")
-        assert result[0].content == "Data for test"
+        assert isinstance(result, ResourceResult)
+        assert result.contents[0].content == "Data for test"
 
     async def test_template_decorator_with_tags(self):
         mcp = FastMCP()
@@ -185,7 +190,8 @@ class TestResourceTemplates:
             return f"Template resource: {param}"
 
         result = await mcp.read_resource("resource://test/data")
-        assert result[0].content == "Template resource: test/data"
+        assert isinstance(result, ResourceResult)
+        assert result.contents[0].content == "Template resource: test/data"
 
     async def test_template_with_query_params(self):
         """Test RFC 6570 query parameters in resource templates."""
@@ -196,13 +202,16 @@ class TestResourceTemplates:
             return f"id={id}, format={format}, limit={limit}"
 
         result = await mcp.read_resource("data://123")
-        assert result[0].content == "id=123, format=json, limit=10"
+        assert isinstance(result, ResourceResult)
+        assert result.contents[0].content == "id=123, format=json, limit=10"
 
         result = await mcp.read_resource("data://123?format=xml")
-        assert result[0].content == "id=123, format=xml, limit=10"
+        assert isinstance(result, ResourceResult)
+        assert result.contents[0].content == "id=123, format=xml, limit=10"
 
         result = await mcp.read_resource("data://123?format=csv&limit=50")
-        assert result[0].content == "id=123, format=csv, limit=50"
+        assert isinstance(result, ResourceResult)
+        assert result.contents[0].content == "id=123, format=csv, limit=50"
 
     async def test_templates_match_in_order_of_definition(self):
         """If a wildcard template is defined first, it will take priority."""
@@ -217,10 +226,12 @@ class TestResourceTemplates:
             return f"Template resource 2: {x}/{y}"
 
         result = await mcp.read_resource("resource://a/b/c")
-        assert result[0].content == "Template resource 1: a/b/c"
+        assert isinstance(result, ResourceResult)
+        assert result.contents[0].content == "Template resource 1: a/b/c"
 
         result = await mcp.read_resource("resource://a/b")
-        assert result[0].content == "Template resource 1: a/b"
+        assert isinstance(result, ResourceResult)
+        assert result.contents[0].content == "Template resource 1: a/b"
 
     async def test_templates_shadow_each_other_reorder(self):
         """If a wildcard template is defined second, it will *not* take priority."""
@@ -235,10 +246,12 @@ class TestResourceTemplates:
             return f"Template resource 2: {param}"
 
         result = await mcp.read_resource("resource://a/b/c")
-        assert result[0].content == "Template resource 2: a/b/c"
+        assert isinstance(result, ResourceResult)
+        assert result.contents[0].content == "Template resource 2: a/b/c"
 
         result = await mcp.read_resource("resource://a/b")
-        assert result[0].content == "Template resource 1: a/b"
+        assert isinstance(result, ResourceResult)
+        assert result.contents[0].content == "Template resource 1: a/b"
 
     async def test_resource_template_with_annotations(self):
         """Test that resource template annotations are visible."""
@@ -311,7 +324,8 @@ class TestResourceDecorator:
             return "Hello, world!"
 
         result = await mcp.read_resource("resource://data")
-        assert result[0].content == "Hello, world!"
+        assert isinstance(result, ResourceResult)
+        assert result.contents[0].content == "Hello, world!"
 
     async def test_resource_decorator_incorrect_usage(self):
         mcp = FastMCP()
@@ -336,7 +350,8 @@ class TestResourceDecorator:
         assert resources[0].name == "custom-data"
 
         result = await mcp.read_resource("resource://data")
-        assert result[0].content == "Hello, world!"
+        assert isinstance(result, ResourceResult)
+        assert result.contents[0].content == "Hello, world!"
 
     async def test_resource_decorator_with_description(self):
         mcp = FastMCP()
@@ -380,7 +395,8 @@ class TestResourceDecorator:
         )
 
         result = await mcp.read_resource("resource://data")
-        assert result[0].content == "My prefix: Hello, world!"
+        assert isinstance(result, ResourceResult)
+        assert result.contents[0].content == "My prefix: Hello, world!"
 
     async def test_resource_decorator_classmethod(self):
         mcp = FastMCP()
@@ -399,7 +415,8 @@ class TestResourceDecorator:
         )
 
         result = await mcp.read_resource("resource://data")
-        assert result[0].content == "Class prefix: Hello, world!"
+        assert isinstance(result, ResourceResult)
+        assert result.contents[0].content == "Class prefix: Hello, world!"
 
     async def test_resource_decorator_classmethod_error(self):
         mcp = FastMCP()
@@ -422,7 +439,8 @@ class TestResourceDecorator:
                 return "Static Hello, world!"
 
         result = await mcp.read_resource("resource://data")
-        assert result[0].content == "Static Hello, world!"
+        assert isinstance(result, ResourceResult)
+        assert result.contents[0].content == "Static Hello, world!"
 
     async def test_resource_decorator_async_function(self):
         mcp = FastMCP()
@@ -432,7 +450,8 @@ class TestResourceDecorator:
             return "Async Hello, world!"
 
         result = await mcp.read_resource("resource://data")
-        assert result[0].content == "Async Hello, world!"
+        assert isinstance(result, ResourceResult)
+        assert result.contents[0].content == "Async Hello, world!"
 
     async def test_resource_decorator_staticmethod_order(self):
         """Test that both decorator orders work for static methods"""
@@ -445,7 +464,8 @@ class TestResourceDecorator:
                 return "Static Hello, world!"
 
         result = await mcp.read_resource("resource://data")
-        assert result[0].content == "Static Hello, world!"
+        assert isinstance(result, ResourceResult)
+        assert result.contents[0].content == "Static Hello, world!"
 
     async def test_resource_decorator_with_meta(self):
         """Test that meta parameter is passed through the resource decorator."""
@@ -479,10 +499,11 @@ class TestResourceDecorator:
             )
 
         result = await mcp.read_resource("resource://widget")
-        assert len(result) == 1
-        assert result[0].content == "<widget>content</widget>"
-        assert result[0].mime_type == "text/html"
-        assert result[0].meta == {"csp": "script-src 'self'", "version": "1.0"}
+        assert isinstance(result, ResourceResult)
+        assert len(result.contents) == 1
+        assert result.contents[0].content == "<widget>content</widget>"
+        assert result.contents[0].mime_type == "text/html"
+        assert result.contents[0].meta == {"csp": "script-src 'self'", "version": "1.0"}
 
     async def test_resource_content_binary_with_meta(self):
         """Test that ResourceContent with binary content and meta works."""
@@ -500,9 +521,10 @@ class TestResourceDecorator:
             )
 
         result = await mcp.read_resource("resource://binary")
-        assert len(result) == 1
-        assert result[0].content == b"\x00\x01\x02"
-        assert result[0].meta == {"encoding": "raw"}
+        assert isinstance(result, ResourceResult)
+        assert len(result.contents) == 1
+        assert result.contents[0].content == b"\x00\x01\x02"
+        assert result.contents[0].meta == {"encoding": "raw"}
 
     async def test_resource_content_without_meta(self):
         """Test that ResourceContent without meta works (meta is None)."""
@@ -513,9 +535,10 @@ class TestResourceDecorator:
             return ResourceResult([ResourceContent(content="plain content")])
 
         result = await mcp.read_resource("resource://plain")
-        assert len(result) == 1
-        assert result[0].content == "plain content"
-        assert result[0].meta is None
+        assert isinstance(result, ResourceResult)
+        assert len(result.contents) == 1
+        assert result.contents[0].content == "plain content"
+        assert result.contents[0].meta is None
 
 
 class TestTemplateDecorator:
@@ -532,7 +555,8 @@ class TestTemplateDecorator:
         assert templates[0].uri_template == "resource://{name}/data"
 
         result = await mcp.read_resource("resource://test/data")
-        assert result[0].content == "Data for test"
+        assert isinstance(result, ResourceResult)
+        assert result.contents[0].content == "Data for test"
 
     async def test_template_decorator_incorrect_usage(self):
         mcp = FastMCP()
@@ -557,7 +581,8 @@ class TestTemplateDecorator:
         assert templates[0].name == "custom-template"
 
         result = await mcp.read_resource("resource://test/data")
-        assert result[0].content == "Data for test"
+        assert isinstance(result, ResourceResult)
+        assert result.contents[0].content == "Data for test"
 
     async def test_template_decorator_with_description(self):
         mcp = FastMCP()
@@ -589,7 +614,8 @@ class TestTemplateDecorator:
         mcp.add_template(template)
 
         result = await mcp.read_resource("resource://test/data")
-        assert result[0].content == "My prefix: Data for test"
+        assert isinstance(result, ResourceResult)
+        assert result.contents[0].content == "My prefix: Data for test"
 
     async def test_template_decorator_classmethod(self):
         mcp = FastMCP()
@@ -609,7 +635,8 @@ class TestTemplateDecorator:
         mcp.add_template(template)
 
         result = await mcp.read_resource("resource://test/data")
-        assert result[0].content == "Class prefix: Data for test"
+        assert isinstance(result, ResourceResult)
+        assert result.contents[0].content == "Class prefix: Data for test"
 
     async def test_template_decorator_staticmethod(self):
         mcp = FastMCP()
@@ -621,7 +648,8 @@ class TestTemplateDecorator:
                 return f"Static Data for {name}"
 
         result = await mcp.read_resource("resource://test/data")
-        assert result[0].content == "Static Data for test"
+        assert isinstance(result, ResourceResult)
+        assert result.contents[0].content == "Static Data for test"
 
     async def test_template_decorator_async_function(self):
         mcp = FastMCP()
@@ -631,7 +659,8 @@ class TestTemplateDecorator:
             return f"Async Data for {name}"
 
         result = await mcp.read_resource("resource://test/data")
-        assert result[0].content == "Async Data for test"
+        assert isinstance(result, ResourceResult)
+        assert result.contents[0].content == "Async Data for test"
 
     async def test_template_decorator_with_tags(self):
         """Test that the template decorator properly sets tags."""
@@ -691,56 +720,41 @@ class TestResourceTags:
 
     async def test_include_tags_all_resources(self):
         mcp = self.create_server(include_tags={"a", "b"})
-
-        async with Client(mcp) as client:
-            resources = await client.list_resources()
-            assert {r.name for r in resources} == {"resource_1", "resource_2"}
+        resources = await mcp.get_resources()
+        assert {r.name for r in resources} == {"resource_1", "resource_2"}
 
     async def test_include_tags_some_resources(self):
         mcp = self.create_server(include_tags={"a", "z"})
-
-        async with Client(mcp) as client:
-            resources = await client.list_resources()
-            assert {r.name for r in resources} == {"resource_1"}
+        resources = await mcp.get_resources()
+        assert {r.name for r in resources} == {"resource_1"}
 
     async def test_exclude_tags_all_resources(self):
         mcp = self.create_server(exclude_tags={"a", "b"})
-
-        async with Client(mcp) as client:
-            resources = await client.list_resources()
-            assert {r.name for r in resources} == set()
+        resources = await mcp.get_resources()
+        assert {r.name for r in resources} == set()
 
     async def test_exclude_tags_some_resources(self):
         mcp = self.create_server(exclude_tags={"a"})
-
-        async with Client(mcp) as client:
-            resources = await client.list_resources()
-            assert {r.name for r in resources} == {"resource_2"}
+        resources = await mcp.get_resources()
+        assert {r.name for r in resources} == {"resource_2"}
 
     async def test_exclude_precedence(self):
         mcp = self.create_server(exclude_tags={"a"}, include_tags={"b"})
-
-        async with Client(mcp) as client:
-            resources = await client.list_resources()
-            assert {r.name for r in resources} == {"resource_2"}
+        resources = await mcp.get_resources()
+        assert {r.name for r in resources} == {"resource_2"}
 
     async def test_read_included_resource(self):
         mcp = self.create_server(include_tags={"a"})
+        result = await mcp.read_resource("resource://1")
+        assert result.contents[0].content == "1"
 
-        async with Client(mcp) as client:
-            result = await client.read_resource(AnyUrl("resource://1"))
-            assert isinstance(result[0], TextResourceContents)
-            assert result[0].text == "1"
-
-            with pytest.raises(McpError, match="Unknown resource"):
-                await client.read_resource(AnyUrl("resource://2"))
+        with pytest.raises(NotFoundError, match="Unknown resource"):
+            await mcp.read_resource("resource://2")
 
     async def test_read_excluded_resource(self):
         mcp = self.create_server(exclude_tags={"a"})
-
-        async with Client(mcp) as client:
-            with pytest.raises(McpError, match="Unknown resource"):
-                await client.read_resource(AnyUrl("resource://1"))
+        with pytest.raises(NotFoundError, match="Unknown resource"):
+            await mcp.read_resource("resource://1")
 
 
 class TestResourceEnabled:
@@ -772,13 +786,11 @@ class TestResourceEnabled:
             return "Hello, world!"
 
         mcp.disable(keys=["resource:resource://data"])
+        resources = await mcp.get_resources()
+        assert len(resources) == 0
 
-        async with Client(mcp) as client:
-            resources = await client.list_resources()
-            assert len(resources) == 0
-
-            with pytest.raises(McpError, match="Unknown resource"):
-                await client.read_resource(AnyUrl("resource://data"))
+        with pytest.raises(NotFoundError, match="Unknown resource"):
+            await mcp.read_resource("resource://data")
 
     async def test_resource_toggle_enabled(self):
         mcp = FastMCP()
@@ -788,15 +800,12 @@ class TestResourceEnabled:
             return "Hello, world!"
 
         mcp.disable(keys=["resource:resource://data"])
-
         resources = await mcp.get_resources()
         assert not any(str(r.uri) == "resource://data" for r in resources)
 
         mcp.enable(keys=["resource:resource://data"])
-
-        async with Client(mcp) as client:
-            resources = await client.list_resources()
-            assert len(resources) == 1
+        resources = await mcp.get_resources()
+        assert len(resources) == 1
 
     async def test_resource_toggle_disabled(self):
         mcp = FastMCP()
@@ -806,13 +815,11 @@ class TestResourceEnabled:
             return "Hello, world!"
 
         mcp.disable(keys=["resource:resource://data"])
+        resources = await mcp.get_resources()
+        assert len(resources) == 0
 
-        async with Client(mcp) as client:
-            resources = await client.list_resources()
-            assert len(resources) == 0
-
-            with pytest.raises(McpError, match="Unknown resource"):
-                await client.read_resource(AnyUrl("resource://data"))
+        with pytest.raises(NotFoundError, match="Unknown resource"):
+            await mcp.read_resource("resource://data")
 
     async def test_get_resource_and_disable(self):
         mcp = FastMCP()
@@ -825,13 +832,11 @@ class TestResourceEnabled:
         assert resource is not None
 
         mcp.disable(keys=["resource:resource://data"])
+        resources = await mcp.get_resources()
+        assert len(resources) == 0
 
-        async with Client(mcp) as client:
-            result = await client.list_resources()
-            assert len(result) == 0
-
-            with pytest.raises(McpError, match="Unknown resource"):
-                await client.read_resource(AnyUrl("resource://data"))
+        with pytest.raises(NotFoundError, match="Unknown resource"):
+            await mcp.read_resource("resource://data")
 
     async def test_cant_read_disabled_resource(self):
         mcp = FastMCP()
@@ -842,9 +847,8 @@ class TestResourceEnabled:
 
         mcp.disable(keys=["resource:resource://data"])
 
-        with pytest.raises(McpError, match="Unknown resource"):
-            async with Client(mcp) as client:
-                await client.read_resource(AnyUrl("resource://data"))
+        with pytest.raises(NotFoundError, match="Unknown resource"):
+            await mcp.read_resource("resource://data")
 
 
 class TestResourceTemplatesTags:
@@ -863,63 +867,47 @@ class TestResourceTemplatesTags:
 
     async def test_include_tags_all_resources(self):
         mcp = self.create_server(include_tags={"a", "b"})
-
-        async with Client(mcp) as client:
-            resources = await client.list_resource_templates()
-            assert {r.name for r in resources} == {
-                "template_resource_1",
-                "template_resource_2",
-            }
+        templates = await mcp.get_resource_templates()
+        assert {t.name for t in templates} == {
+            "template_resource_1",
+            "template_resource_2",
+        }
 
     async def test_include_tags_some_resources(self):
         mcp = self.create_server(include_tags={"a"})
-
-        async with Client(mcp) as client:
-            resources = await client.list_resource_templates()
-            assert {r.name for r in resources} == {"template_resource_1"}
+        templates = await mcp.get_resource_templates()
+        assert {t.name for t in templates} == {"template_resource_1"}
 
     async def test_exclude_tags_all_resources(self):
         mcp = self.create_server(exclude_tags={"a", "b"})
-
-        async with Client(mcp) as client:
-            resources = await client.list_resource_templates()
-            assert {r.name for r in resources} == set()
+        templates = await mcp.get_resource_templates()
+        assert {t.name for t in templates} == set()
 
     async def test_exclude_tags_some_resources(self):
         mcp = self.create_server(exclude_tags={"a"})
-
-        async with Client(mcp) as client:
-            resources = await client.list_resource_templates()
-            assert {r.name for r in resources} == {"template_resource_2"}
+        templates = await mcp.get_resource_templates()
+        assert {t.name for t in templates} == {"template_resource_2"}
 
     async def test_exclude_takes_precedence_over_include(self):
         mcp = self.create_server(exclude_tags={"a"}, include_tags={"b"})
-
-        async with Client(mcp) as client:
-            resources = await client.list_resource_templates()
-            assert {r.name for r in resources} == {"template_resource_2"}
+        templates = await mcp.get_resource_templates()
+        assert {t.name for t in templates} == {"template_resource_2"}
 
     async def test_read_resource_template_includes_tags(self):
         mcp = self.create_server(include_tags={"a"})
+        result = await mcp.read_resource("resource://1/x")
+        assert result.contents[0].content == "Template resource 1: x"
 
-        async with Client(mcp) as client:
-            result = await client.read_resource("resource://1/x")
-            assert isinstance(result[0], TextResourceContents)
-            assert result[0].text == "Template resource 1: x"
-
-            with pytest.raises(McpError, match="Unknown resource"):
-                await client.read_resource("resource://2/x")
+        with pytest.raises(NotFoundError, match="Unknown resource"):
+            await mcp.read_resource("resource://2/x")
 
     async def test_read_resource_template_excludes_tags(self):
         mcp = self.create_server(exclude_tags={"a"})
+        with pytest.raises(NotFoundError, match="Unknown resource"):
+            await mcp.read_resource("resource://1/x")
 
-        async with Client(mcp) as client:
-            with pytest.raises(McpError, match="Unknown resource"):
-                await client.read_resource("resource://1/x")
-
-            result = await client.read_resource("resource://2/x")
-            assert isinstance(result[0], TextResourceContents)
-            assert result[0].text == "Template resource 2: x"
+        result = await mcp.read_resource("resource://2/x")
+        assert result.contents[0].content == "Template resource 2: x"
 
 
 class TestResourceTemplateEnabled:
@@ -951,13 +939,11 @@ class TestResourceTemplateEnabled:
             return f"Template: {param}"
 
         mcp.disable(keys=["template:resource://{param}"])
+        templates = await mcp.get_resource_templates()
+        assert len(templates) == 0
 
-        async with Client(mcp) as client:
-            templates = await client.list_resource_templates()
-            assert len(templates) == 0
-
-            with pytest.raises(McpError, match="Unknown resource"):
-                await client.read_resource(AnyUrl("resource://test"))
+        with pytest.raises(NotFoundError, match="Unknown resource"):
+            await mcp.read_resource("resource://test")
 
     async def test_template_toggle_enabled(self):
         mcp = FastMCP()
@@ -967,15 +953,12 @@ class TestResourceTemplateEnabled:
             return f"Template: {param}"
 
         mcp.disable(keys=["template:resource://{param}"])
-
         templates = await mcp.get_resource_templates()
         assert not any(t.uri_template == "resource://{param}" for t in templates)
 
         mcp.enable(keys=["template:resource://{param}"])
-
-        async with Client(mcp) as client:
-            templates = await client.list_resource_templates()
-            assert len(templates) == 1
+        templates = await mcp.get_resource_templates()
+        assert len(templates) == 1
 
     async def test_template_toggle_disabled(self):
         mcp = FastMCP()
@@ -985,13 +968,11 @@ class TestResourceTemplateEnabled:
             return f"Template: {param}"
 
         mcp.disable(keys=["template:resource://{param}"])
+        templates = await mcp.get_resource_templates()
+        assert len(templates) == 0
 
-        async with Client(mcp) as client:
-            templates = await client.list_resource_templates()
-            assert len(templates) == 0
-
-            with pytest.raises(McpError, match="Unknown resource"):
-                await client.read_resource(AnyUrl("resource://test"))
+        with pytest.raises(NotFoundError, match="Unknown resource"):
+            await mcp.read_resource("resource://test")
 
     async def test_get_template_and_disable(self):
         mcp = FastMCP()
@@ -1004,13 +985,11 @@ class TestResourceTemplateEnabled:
         assert template is not None
 
         mcp.disable(keys=["template:resource://{param}"])
+        templates = await mcp.get_resource_templates()
+        assert len(templates) == 0
 
-        async with Client(mcp) as client:
-            result = await client.list_resource_templates()
-            assert len(result) == 0
-
-            with pytest.raises(McpError, match="Unknown resource"):
-                await client.read_resource(AnyUrl("resource://test"))
+        with pytest.raises(NotFoundError, match="Unknown resource"):
+            await mcp.read_resource("resource://test")
 
     async def test_cant_read_disabled_template(self):
         mcp = FastMCP()
@@ -1021,6 +1000,5 @@ class TestResourceTemplateEnabled:
 
         mcp.disable(keys=["template:resource://{param}"])
 
-        with pytest.raises(McpError, match="Unknown resource"):
-            async with Client(mcp) as client:
-                await client.read_resource(AnyUrl("resource://test"))
+        with pytest.raises(NotFoundError, match="Unknown resource"):
+            await mcp.read_resource("resource://test")
