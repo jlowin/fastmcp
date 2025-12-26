@@ -404,9 +404,9 @@ You can add annotations to a resource using the `annotations` parameter in the `
         "idempotentHint": True
     }
 )
-def get_config() -> dict:
+def get_config() -> str:
     """Get application configuration."""
-    return {"version": "1.0", "debug": False}
+    return json.dumps({"version": "1.0", "debug": False})
 ```
 
 FastMCP supports these standard annotations:
@@ -433,22 +433,21 @@ Functions with `*args` are not supported as resource templates. However, unlike 
 Here is a complete example that shows how to define two resource templates:
 
 ```python
+import json
 from fastmcp import FastMCP
 
 mcp = FastMCP(name="DataServer")
 
 # Template URI includes {city} placeholder
 @mcp.resource("weather://{city}/current")
-def get_weather(city: str) -> dict:
+def get_weather(city: str) -> str:
     """Provides weather information for a specific city."""
-    # In a real implementation, this would call a weather API
-    # Here we're using simplified logic for example purposes
-    return {
+    return json.dumps({
         "city": city.capitalize(),
         "temperature": 22,
         "condition": "Sunny",
         "unit": "celsius"
-    }
+    })
 
 # Template with multiple parameters and annotations
 @mcp.resource(
@@ -458,16 +457,15 @@ def get_weather(city: str) -> dict:
         "idempotentHint": True
     }
 )
-def get_repo_info(owner: str, repo: str) -> dict:
+def get_repo_info(owner: str, repo: str) -> str:
     """Retrieves information about a GitHub repository."""
-    # In a real implementation, this would call the GitHub API
-    return {
+    return json.dumps({
         "owner": owner,
         "name": repo,
         "full_name": f"{owner}/{repo}",
         "stars": 120,
         "forks": 48
-    }
+    })
 ```
 
 With these two templates defined, clients can request a variety of resources:
