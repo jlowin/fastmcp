@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 import re
 from collections.abc import Callable
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any, ClassVar, overload
 from urllib.parse import parse_qs, unquote
 
@@ -213,9 +214,9 @@ class ResourceTemplate(FastMCPComponent):
         """
         from fastmcp.server.tasks.routing import check_background_task
 
-        # Enrich task_meta with fn_key (template pattern) if not already set
+        # Enrich task_meta with fn_key if not already set (fallback for programmatic API)
         if task_meta is not None and task_meta.fn_key is None:
-            task_meta = TaskMeta(ttl=task_meta.ttl, fn_key=self.key)
+            task_meta = replace(task_meta, fn_key=self.key)
 
         task_result = await check_background_task(
             component=self, task_type="template", arguments=params, task_meta=task_meta
@@ -345,9 +346,9 @@ class FunctionResourceTemplate(ResourceTemplate):
         """
         from fastmcp.server.tasks.routing import check_background_task
 
-        # Enrich task_meta with fn_key (template pattern) if not already set
+        # Enrich task_meta with fn_key if not already set (fallback for programmatic API)
         if task_meta is not None and task_meta.fn_key is None:
-            task_meta = TaskMeta(ttl=task_meta.ttl, fn_key=self.key)
+            task_meta = replace(task_meta, fn_key=self.key)
 
         task_result = await check_background_task(
             component=self, task_type="template", arguments=params, task_meta=task_meta

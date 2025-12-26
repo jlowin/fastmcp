@@ -1176,9 +1176,8 @@ class FastMCP(Generic[LifespanResultT]):
             ToolError: If tool execution fails
             ValidationError: If arguments fail validation
         """
-        # Enrich task_meta with fn_key if task execution requested
-        if task_meta is not None and task_meta.fn_key is None:
-            task_meta = TaskMeta(ttl=task_meta.ttl, fn_key=Tool.make_key(name))
+        # Note: fn_key enrichment happens in Tool._run(), not here,
+        # so that provider wrappers can enrich with their namespaced key.
 
         async with fastmcp.server.context.Context(fastmcp=self) as ctx:
             if run_middleware:
@@ -1557,17 +1556,18 @@ class FastMCP(Generic[LifespanResultT]):
         )
 
         try:
-            # Extract SEP-1686 task metadata from request context
+            # Extract SEP-1686 task metadata from request context.
+            # NOTE: fn_key is NOT set here. The component (or provider wrapper) will
+            # enrich fn_key with self.key. For mounted servers, the provider wrapper
+            # sets fn_key to the parent's namespaced key, ensuring Docket finds the
+            # correctly registered function.
             task_meta: TaskMeta | None = None
             try:
                 ctx = self._mcp_server.request_context
                 if ctx.experimental.is_task:
                     mcp_task_meta = ctx.experimental.task_metadata
                     task_meta_dict = mcp_task_meta.model_dump(exclude_none=True)
-                    task_meta = TaskMeta(
-                        ttl=task_meta_dict.get("ttl"),
-                        fn_key=Tool.make_key(key),
-                    )
+                    task_meta = TaskMeta(ttl=task_meta_dict.get("ttl"))
             except (AttributeError, LookupError):
                 pass
 
@@ -1600,8 +1600,13 @@ class FastMCP(Generic[LifespanResultT]):
         logger.debug(f"[{self.name}] Handler called: read_resource %s", uri)
 
         try:
-            # Extract SEP-1686 task metadata from request context
-            # fn_key is left as None - each component enriches it in _read()
+            # Extract SEP-1686 task metadata from request context.
+            # NOTE: fn_key is NOT set here for resources because we don't know yet
+            # if the URI will be handled by a direct resource or a template. Templates
+            # need their pattern-based key for Docket lookup, not the concrete URI.
+            # The component (or provider wrapper) will enrich fn_key with self.key.
+            # For mounted servers, the provider wrapper sets fn_key to the parent's
+            # namespaced key, ensuring Docket finds the correctly registered function.
             task_meta: TaskMeta | None = None
             try:
                 ctx = self._mcp_server.request_context

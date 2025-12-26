@@ -13,6 +13,7 @@ from __future__ import annotations
 import re
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any, overload
 
 import mcp.types
@@ -85,6 +86,20 @@ class FastMCPProviderTool(Tool):
             task_config=tool.task_config,
         )
 
+    @overload
+    async def _run(
+        self,
+        arguments: dict[str, Any],
+        task_meta: None = None,
+    ) -> ToolResult: ...
+
+    @overload
+    async def _run(
+        self,
+        arguments: dict[str, Any],
+        task_meta: TaskMeta,
+    ) -> mcp.types.CreateTaskResult: ...
+
     async def _run(
         self,
         arguments: dict[str, Any],
@@ -94,7 +109,15 @@ class FastMCPProviderTool(Tool):
 
         Passes task_meta through to the child server so it can handle
         backgrounding appropriately.
+
+        Enriches fn_key with self.key (the parent's namespaced tool name) so that
+        when the child tool delegates to Docket, it uses the correct lookup key
+        that was registered via get_tasks().
         """
+        # Enrich fn_key with parent's key before delegating to child
+        if task_meta is not None and task_meta.fn_key is None:
+            task_meta = replace(task_meta, fn_key=self.key)
+
         return await self._server.call_tool(
             self._original_name, arguments, task_meta=task_meta
         )
@@ -312,9 +335,9 @@ class FastMCPProviderResourceTemplate(ResourceTemplate):
         # Expand the original template with params to get internal URI
         original_uri = _expand_uri_template(self._original_uri_template or "", params)
 
-        # Enrich fn_key with parent's template pattern before delegating to child
+        # Enrich fn_key with parent's namespaced template pattern before delegating
         if task_meta is not None and task_meta.fn_key is None:
-            task_meta = TaskMeta(ttl=task_meta.ttl, fn_key=self.key)
+            task_meta = replace(task_meta, fn_key=self.key)
 
         return await self._server.read_resource(original_uri, task_meta=task_meta)
 
