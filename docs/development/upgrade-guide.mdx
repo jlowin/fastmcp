@@ -150,9 +150,9 @@ def my_prompt() -> Message:
 
 See [Prompts documentation](/servers/prompts#return-values) for full details.
 
-### Auth Provider Environment Variables Removed
+### Auth Provider Automatic Environment Variable Loading Removed
 
-Auth providers no longer automatically read configuration from environment variables. All required parameters must be passed explicitly:
+Auth providers no longer automatically read configuration from environment variables. You can still use environment variables, but you must read them yourself:
 
 <CodeGroup>
 ```python Before

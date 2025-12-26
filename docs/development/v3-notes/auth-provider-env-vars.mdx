@@ -4,6 +4,8 @@ title: Auth Provider Environment Variables
 
 ## Decision: Remove automatic environment variable loading from auth providers
 
+You can still use environment variables for configuration - you just read them yourself with `os.environ` instead of relying on FastMCP's automatic loading.
+
 **Status:** Implemented in v3.0.0
 
 ### Background
