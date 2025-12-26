@@ -989,18 +989,20 @@ class TestPrompts:
         mcp = FastMCP()
 
         @mcp.prompt
-        def fn() -> Message:
-            return Message(
-                content=EmbeddedResource(
-                    type="resource",
-                    resource=TextResourceContents(
-                        uri=AnyUrl("file://file.txt"),
-                        text="File contents",
-                        mimeType="text/plain",
+        def fn() -> list[Message]:
+            return [
+                Message(
+                    content=EmbeddedResource(
+                        type="resource",
+                        resource=TextResourceContents(
+                            uri=AnyUrl("file://file.txt"),
+                            text="File contents",
+                            mimeType="text/plain",
+                        ),
                     ),
-                ),
-                role="user",
-            )
+                    role="user",
+                )
+            ]
 
         async with Client(mcp) as client:
             result = await client.get_prompt("fn")
@@ -1010,6 +1012,27 @@ class TestPrompts:
             assert isinstance(content.resource, TextResourceContents)
             assert content.resource.text == "File contents"
             assert content.resource.mimeType == "text/plain"
+
+    async def test_get_prompt_with_meta(self):
+        """Test that PromptResult meta is passed through to client."""
+        from fastmcp.prompts import PromptResult
+
+        mcp = FastMCP()
+
+        @mcp.prompt
+        def fn() -> PromptResult:
+            return PromptResult(
+                "Hello!",
+                description="A greeting",
+                meta={"priority": "high", "category": "greeting"},
+            )
+
+        async with Client(mcp) as client:
+            result = await client.get_prompt("fn")
+            assert result.description == "A greeting"
+            assert result.meta is not None
+            assert result.meta["priority"] == "high"
+            assert result.meta["category"] == "greeting"
 
     async def test_get_unknown_prompt(self):
         """Test error when getting unknown prompt."""

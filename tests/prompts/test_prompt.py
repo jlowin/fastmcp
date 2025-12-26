@@ -5,6 +5,7 @@ from pydantic import FileUrl
 from fastmcp.prompts.prompt import (
     Message,
     Prompt,
+    PromptResult,
 )
 
 
@@ -443,3 +444,109 @@ class TestPromptArgumentDescriptions:
         # MCP prompt includes fastmcp meta, so check that our meta is included
         assert mcp_prompt.meta is not None
         assert meta_data.items() <= mcp_prompt.meta.items()
+
+
+class TestMessage:
+    def test_message_string_content(self):
+        """Test Message with string content."""
+        from mcp.types import TextContent
+
+        msg = Message("Hello, world!")
+        assert msg.role == "user"
+        assert isinstance(msg.content, TextContent)
+        assert msg.content.text == "Hello, world!"
+
+    def test_message_with_role(self):
+        """Test Message with explicit role."""
+        from mcp.types import TextContent
+
+        msg = Message("I can help.", role="assistant")
+        assert msg.role == "assistant"
+        assert isinstance(msg.content, TextContent)
+        assert msg.content.text == "I can help."
+
+    def test_message_auto_serializes_dict(self):
+        """Test Message auto-serializes dicts to JSON."""
+        from mcp.types import TextContent
+
+        msg = Message({"key": "value", "nested": {"a": 1}})
+        assert msg.role == "user"
+        assert isinstance(msg.content, TextContent)
+        assert '"key"' in msg.content.text
+        assert '"value"' in msg.content.text
+
+    def test_message_auto_serializes_list(self):
+        """Test Message auto-serializes lists to JSON."""
+        from mcp.types import TextContent
+
+        msg = Message(["item1", "item2", "item3"])
+        assert isinstance(msg.content, TextContent)
+        assert '["item1"' in msg.content.text
+
+    def test_message_to_mcp_prompt_message(self):
+        """Test conversion to MCP PromptMessage."""
+        from mcp.types import TextContent
+
+        msg = Message("Hello", role="assistant")
+        mcp_msg = msg.to_mcp_prompt_message()
+        assert mcp_msg.role == "assistant"
+        assert isinstance(mcp_msg.content, TextContent)
+        assert mcp_msg.content.text == "Hello"
+
+
+class TestPromptResult:
+    def test_promptresult_from_string(self):
+        """Test PromptResult accepts string and wraps as Message."""
+        from mcp.types import TextContent
+
+        result = PromptResult("Hello!")
+        assert len(result.messages) == 1
+        assert isinstance(result.messages[0].content, TextContent)
+        assert result.messages[0].content.text == "Hello!"
+        assert result.messages[0].role == "user"
+
+    def test_promptresult_from_message_list(self):
+        """Test PromptResult accepts list of Messages."""
+        result = PromptResult(
+            [
+                Message("Question?"),
+                Message("Answer.", role="assistant"),
+            ]
+        )
+        assert len(result.messages) == 2
+        assert result.messages[0].role == "user"
+        assert result.messages[1].role == "assistant"
+
+    def test_promptresult_rejects_single_message(self):
+        """Test PromptResult rejects single Message (must be in list)."""
+        with pytest.raises(TypeError, match="must be str or list"):
+            PromptResult(Message("Hello"))  # type: ignore[arg-type]
+
+    def test_promptresult_rejects_dict(self):
+        """Test PromptResult rejects dict."""
+        with pytest.raises(TypeError, match="must be str or list"):
+            PromptResult({"key": "value"})  # type: ignore[arg-type]
+
+    def test_promptresult_with_meta(self):
+        """Test PromptResult with meta field."""
+        result = PromptResult(
+            "Hello!", meta={"priority": "high", "category": "greeting"}
+        )
+        assert result.meta == {"priority": "high", "category": "greeting"}
+
+    def test_promptresult_with_description(self):
+        """Test PromptResult with description field."""
+        result = PromptResult("Hello!", description="A greeting prompt")
+        assert result.description == "A greeting prompt"
+
+    def test_promptresult_to_mcp(self):
+        """Test conversion to MCP GetPromptResult."""
+        result = PromptResult(
+            [Message("Hello"), Message("World", role="assistant")],
+            description="Test",
+            meta={"key": "value"},
+        )
+        mcp_result = result.to_mcp_prompt_result()
+        assert len(mcp_result.messages) == 2
+        assert mcp_result.description == "Test"
+        assert mcp_result.meta == {"key": "value"}
