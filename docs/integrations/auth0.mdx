@@ -194,36 +194,3 @@ For complete details on these parameters, see the [OAuth Proxy documentation](/s
 <Info>
 The client caches tokens locally, so you won't need to re-authenticate for subsequent runs unless the token expires or you explicitly clear the cache.
 </Info>
-
-## Production Configuration
-
-For production deployments, load sensitive credentials from environment variables:
-
-```python server.py
-import os
-from fastmcp import FastMCP
-from fastmcp.server.auth.providers.auth0 import Auth0Provider
-
-# Load secrets from environment variables
-auth = Auth0Provider(
-    config_url=os.environ.get("AUTH0_CONFIG_URL"),
-    client_id=os.environ.get("AUTH0_CLIENT_ID"),
-    client_secret=os.environ.get("AUTH0_CLIENT_SECRET"),
-    audience=os.environ.get("AUTH0_AUDIENCE"),
-    base_url=os.environ.get("BASE_URL", "https://your-server.com")
-)
-
-mcp = FastMCP(name="Auth0 Secured App", auth=auth)
-
-```python server.py
-from fastmcp import FastMCP
-
-# Authentication is automatically configured from environment
-mcp = FastMCP(name="Auth0 Secured App")
-
-@mcp.tool
-async def search_logs() -> list[str]:
-    """Search the service logs."""
-    # Your tool implementation here
-    pass
-```

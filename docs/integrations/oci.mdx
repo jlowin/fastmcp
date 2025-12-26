@@ -247,39 +247,3 @@ For complete details on these parameters, see the [OAuth Proxy documentation](/s
 <Info>
 The client caches tokens locally, so you won't need to re-authenticate for subsequent runs unless the token expires or you explicitly clear the cache.
 </Info>
-
-## Production Configuration
-
-For production deployments, load sensitive credentials from environment variables:
-
-```python server.py
-import os
-from fastmcp import FastMCP
-from fastmcp.server.auth.providers.oci import OCIProvider
-
-# Load secrets from environment variables
-auth = OCIProvider(
-    config_url=os.environ.get("OCI_CONFIG_URL"),
-    client_id=os.environ.get("OCI_CLIENT_ID"),
-    client_secret=os.environ.get("OCI_CLIENT_SECRET"),
-    base_url=os.environ.get("BASE_URL", "https://your-server.com")
-)
-
-mcp = FastMCP(name="OCI Secured App", auth=auth)
-
-```python server.py
-from fastmcp import FastMCP
-from fastmcp.server.dependencies import get_access_token
-
-# Authentication is automatically configured from environment
-mcp = FastMCP(name="OCI Secured App")
-
-@mcp.tool
-def whoami() -> str:
-    """The whoami function is to test MCP server without requiring token exchange.
-    This tool can be used to test successful authentication against OCI IAM.
-    It will return logged in user's subject (username from IAM domain)."""
-    token = get_access_token()
-    user = token.claims.get("sub")
-    return f"You are User: {user}"
-```

@@ -168,25 +168,6 @@ Parameters (`jwt_signing_key` and `client_storage`) work together to ensure toke
 For complete details on these parameters, see the [OAuth Proxy documentation](/servers/auth/oauth-proxy#configuration-parameters).
 </Note>
 
-## Production Configuration
-
-For production deployments, load sensitive credentials from environment variables:
-
-```python server.py
-import os
-from fastmcp import FastMCP
-from fastmcp.server.auth.providers.workos import WorkOSProvider
-
-# Load secrets from environment variables
-auth = WorkOSProvider(
-    client_id=os.environ.get("WORKOS_CLIENT_ID"),
-    client_secret=os.environ.get("WORKOS_CLIENT_SECRET"),
-    authkit_domain=os.environ.get("WORKOS_AUTHKIT_DOMAIN"),
-    base_url=os.environ.get("BASE_URL", "https://your-server.com")
-)
-
-mcp = FastMCP(name="WorkOS Protected Server", auth=auth)
-
 ## Configuration Options
 
 <Card>

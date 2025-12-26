@@ -174,28 +174,3 @@ Parameters (`jwt_signing_key` and `client_storage`) work together to ensure toke
 
 For complete details on these parameters, see the [OAuth Proxy documentation](/servers/auth/oauth-proxy#configuration-parameters).
 </Note>
-
-## Production Configuration
-
-For production deployments, load sensitive credentials from environment variables:
-
-```python server.py
-import os
-from fastmcp import FastMCP
-from fastmcp.server.auth.providers.github import GitHubProvider
-
-# Load secrets from environment variables
-auth = GitHubProvider(
-    client_id=os.environ.get("GITHUB_CLIENT_ID"),
-    client_secret=os.environ.get("GITHUB_CLIENT_SECRET"),
-    base_url=os.environ.get("BASE_URL", "https://your-server.com")
-)
-
-mcp = FastMCP(name="GitHub Secured App", auth=auth)
-
-@mcp.tool
-async def list_repos() -> list[str]:
-    """List the authenticated user's repositories."""
-    # Your tool implementation here
-    pass
-```

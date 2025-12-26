@@ -238,44 +238,6 @@ Parameters (`jwt_signing_key` and `client_storage`) work together to ensure toke
 For complete details on these parameters, see the [OAuth Proxy documentation](/servers/auth/oauth-proxy#configuration-parameters).
 </Note>
 
-## Production Configuration
-
-For production deployments, load sensitive credentials from environment variables:
-
-```python server.py
-import os
-from fastmcp import FastMCP
-from fastmcp.server.auth.providers.aws import AWSCognitoProvider
-
-# Load secrets from environment variables
-auth = AWSCognitoProvider(
-    user_pool_id=os.environ.get("AWS_COGNITO_USER_POOL_ID"),
-    client_id=os.environ.get("AWS_COGNITO_CLIENT_ID"),
-    client_secret=os.environ.get("AWS_COGNITO_CLIENT_SECRET"),
-    base_url=os.environ.get("BASE_URL", "https://your-server.com"),
-    aws_region=os.environ.get("AWS_REGION", "eu-central-1")
-)
-
-mcp = FastMCP(name="AWS Cognito Secured App", auth=auth)
-
-```python server.py
-from fastmcp import FastMCP
-from fastmcp.server.dependencies import get_access_token
-
-# Authentication is automatically configured from environment
-mcp = FastMCP(name="AWS Cognito Secured App")
-
-@mcp.tool
-async def get_access_token_claims() -> dict:
-    """Get the authenticated user's access token claims."""
-    token = get_access_token()
-    return {
-        "sub": token.claims.get("sub"),
-        "username": token.claims.get("username"),
-        "cognito:groups": token.claims.get("cognito:groups", []),
-    }
-```
-
 ## Features
 
 ### JWT Token Validation

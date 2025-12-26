@@ -188,28 +188,3 @@ Parameters (`jwt_signing_key` and `client_storage`) work together to ensure toke
 
 For complete details on these parameters, see the [OAuth Proxy documentation](/servers/auth/oauth-proxy#configuration-parameters).
 </Note>
-
-## Production Configuration
-
-For production deployments, load sensitive credentials from environment variables:
-
-```python server.py
-import os
-from fastmcp import FastMCP
-from fastmcp.server.auth.providers.google import GoogleProvider
-
-# Load secrets from environment variables
-auth = GoogleProvider(
-    client_id=os.environ.get("GOOGLE_CLIENT_ID"),
-    client_secret=os.environ.get("GOOGLE_CLIENT_SECRET"),
-    base_url=os.environ.get("BASE_URL", "https://your-server.com")
-)
-
-mcp = FastMCP(name="Google Secured App", auth=auth)
-
-@mcp.tool
-async def protected_tool(query: str) -> str:
-    """A tool that requires Google authentication to access."""
-    # Your tool implementation here
-    return f"Processing authenticated request: {query}"
-```

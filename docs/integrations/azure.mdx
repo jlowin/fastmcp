@@ -279,31 +279,3 @@ Parameters (`jwt_signing_key` and `client_storage`) work together to ensure toke
 
 For complete details on these parameters, see the [OAuth Proxy documentation](/servers/auth/oauth-proxy#configuration-parameters).
 </Note>
-
-## Production Configuration
-
-For production deployments, load sensitive credentials from environment variables:
-
-```python server.py
-import os
-from fastmcp import FastMCP
-from fastmcp.server.auth.providers.azure import AzureProvider
-
-# Load secrets from environment variables
-auth = AzureProvider(
-    client_id=os.environ.get("AZURE_CLIENT_ID"),
-    client_secret=os.environ.get("AZURE_CLIENT_SECRET"),
-    tenant_id=os.environ.get("AZURE_TENANT_ID"),
-    required_scopes=["read", "write"],  # At least one scope required
-    base_url=os.environ.get("BASE_URL", "https://your-server.com")
-)
-
-mcp = FastMCP(name="Azure Secured App", auth=auth)
-
-@mcp.tool
-async def protected_tool(query: str) -> str:
-    """A tool that requires Azure authentication to access."""
-    # Your tool implementation here
-    return f"Processing authenticated request: {query}"
-```
-
