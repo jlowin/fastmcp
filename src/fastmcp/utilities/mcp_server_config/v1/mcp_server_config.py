@@ -13,13 +13,12 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, TypeAlias, cast, overload
 
-from pydantic import Field, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.mcp_server_config.v1.environments.uv import UVEnvironment
 from fastmcp.utilities.mcp_server_config.v1.sources.base import Source
 from fastmcp.utilities.mcp_server_config.v1.sources.filesystem import FileSystemSource
-from fastmcp.utilities.types import FastMCPBaseModel
 
 logger = get_logger("cli.config")
 
@@ -34,7 +33,7 @@ SourceType: TypeAlias = FileSystemSource
 EnvironmentType: TypeAlias = UVEnvironment
 
 
-class Deployment(FastMCPBaseModel):
+class Deployment(BaseModel):
     """Configuration for server deployment and runtime settings."""
 
     transport: Literal["stdio", "http", "sse", "streamable-http"] | None = Field(
@@ -132,7 +131,7 @@ class Deployment(FastMCPBaseModel):
         return re.sub(r"\$\{([^}]+)\}", replace_var, value)
 
 
-class MCPServerConfig(FastMCPBaseModel):
+class MCPServerConfig(BaseModel):
     """Configuration for a FastMCP server.
 
     This configuration file allows you to specify all settings needed to run
