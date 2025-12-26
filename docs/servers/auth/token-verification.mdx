@@ -313,11 +313,15 @@ from fastmcp import FastMCP
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 
 # Load configuration from environment variables
+# Parse comma-separated scopes if provided
+scopes_env = os.environ.get("JWT_REQUIRED_SCOPES")
+required_scopes = scopes_env.split(",") if scopes_env else None
+
 verifier = JWTVerifier(
     jwks_uri=os.environ.get("JWT_JWKS_URI"),
     issuer=os.environ.get("JWT_ISSUER"),
     audience=os.environ.get("JWT_AUDIENCE"),
-    required_scopes=os.environ.get("JWT_REQUIRED_SCOPES", "").split(",") if os.environ.get("JWT_REQUIRED_SCOPES") else None
+    required_scopes=required_scopes,
 )
 
 mcp = FastMCP(name="Production API", auth=verifier)
