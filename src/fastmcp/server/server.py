@@ -1221,11 +1221,30 @@ class FastMCP(Generic[LifespanResultT]):
 
             raise NotFoundError(f"Unknown tool: {name!r}")
 
+    @overload
     async def read_resource(
         self,
         uri: str,
         *,
         run_middleware: bool = True,
+        task_meta: None = None,
+    ) -> ResourceResult: ...
+
+    @overload
+    async def read_resource(
+        self,
+        uri: str,
+        *,
+        run_middleware: bool = True,
+        task_meta: TaskMeta,
+    ) -> mcp.types.CreateTaskResult: ...
+
+    async def read_resource(
+        self,
+        uri: str,
+        *,
+        run_middleware: bool = True,
+        task_meta: TaskMeta | None = None,
     ) -> ResourceResult | mcp.types.CreateTaskResult:
         """Read a resource by URI.
 
@@ -1236,15 +1255,23 @@ class FastMCP(Generic[LifespanResultT]):
             uri: The resource URI
             run_middleware: If True (default), apply the middleware chain.
                 Set to False when called from middleware to avoid re-applying.
+            task_meta: If provided, execute as a background task and return
+                CreateTaskResult. If None (default), execute synchronously and
+                return ResourceResult.
 
         Returns:
-            ResourceResult with contents.
-            May return CreateTaskResult if called in MCP context with task metadata.
+            ResourceResult when task_meta is None.
+            CreateTaskResult when task_meta is provided.
 
         Raises:
             NotFoundError: If resource not found or disabled
             ResourceError: If resource read fails
         """
+        # Note: fn_key enrichment happens in each component's _read() method,
+        # not here, because resources and templates use different key formats:
+        # - Resources use Resource.make_key(uri) for the concrete URI
+        # - Templates use self.key which is the template pattern
+
         async with fastmcp.server.context.Context(fastmcp=self) as ctx:
             if run_middleware:
                 uri_param = AnyUrl(uri)
@@ -1255,16 +1282,14 @@ class FastMCP(Generic[LifespanResultT]):
                     method="resources/read",
                     fastmcp_context=ctx,
                 )
-                result = await self._run_middleware(
+                return await self._run_middleware(
                     context=mw_context,
                     call_next=lambda context: self.read_resource(
                         str(context.message.uri),
                         run_middleware=False,
+                        task_meta=task_meta,
                     ),
                 )
-                if isinstance(result, mcp.types.CreateTaskResult):
-                    return result
-                return result
 
             # Core logic: find and read resource
             # First pass: try concrete resources from all providers
@@ -1272,10 +1297,7 @@ class FastMCP(Generic[LifespanResultT]):
                 resource = await provider.get_resource(uri)
                 if resource is not None and self._is_component_enabled(resource):
                     try:
-                        result = await resource._read()
-                        if isinstance(result, mcp.types.CreateTaskResult):
-                            return result
-                        return result
+                        return await resource._read(task_meta=task_meta)
                     except (FastMCPError, McpError):
                         logger.exception(f"Error reading resource {uri!r}")
                         raise
@@ -1296,10 +1318,9 @@ class FastMCP(Generic[LifespanResultT]):
                     params = template.matches(uri)
                     if params is not None:
                         try:
-                            result = await template._read(uri, params)
-                            if isinstance(result, mcp.types.CreateTaskResult):
-                                return result
-                            return result
+                            return await template._read(
+                                uri, params, task_meta=task_meta
+                            )
                         except (FastMCPError, McpError):
                             logger.exception(f"Error reading resource {uri!r}")
                             raise
@@ -1566,8 +1587,9 @@ class FastMCP(Generic[LifespanResultT]):
     ) -> mcp.types.ReadResourceResult | mcp.types.CreateTaskResult:
         """Handle MCP 'readResource' requests.
 
-        Sets task metadata contextvar and calls read_resource(). The resource's
-        _read() method handles the backgrounding decision.
+        Extracts task metadata from MCP request context and passes it explicitly
+        to read_resource(). The resource's _read() method handles the backgrounding
+        decision, ensuring middleware runs before Docket.
 
         Args:
             uri: The resource URI
@@ -1575,33 +1597,26 @@ class FastMCP(Generic[LifespanResultT]):
         Returns:
             ReadResourceResult or CreateTaskResult for background execution
         """
-        from fastmcp.server.dependencies import _docket_fn_key, _task_metadata
-
         logger.debug(f"[{self.name}] Handler called: read_resource %s", uri)
 
         try:
             # Extract SEP-1686 task metadata from request context
-            task_meta_dict: dict[str, Any] | None = None
+            # fn_key is left as None - each component enriches it in _read()
+            task_meta: TaskMeta | None = None
             try:
                 ctx = self._mcp_server.request_context
                 if ctx.experimental.is_task:
-                    task_meta = ctx.experimental.task_metadata
-                    task_meta_dict = task_meta.model_dump(exclude_none=True)
+                    mcp_task_meta = ctx.experimental.task_metadata
+                    task_meta_dict = mcp_task_meta.model_dump(exclude_none=True)
+                    task_meta = TaskMeta(ttl=task_meta_dict.get("ttl"))
             except (AttributeError, LookupError):
                 pass
 
-            # Set contextvars so resource._read() can access them
-            task_token = _task_metadata.set(task_meta_dict)
-            key_token = _docket_fn_key.set(Resource.make_key(str(uri)))
-            try:
-                result = await self.read_resource(str(uri))
+            result = await self.read_resource(str(uri), task_meta=task_meta)
 
-                if isinstance(result, mcp.types.CreateTaskResult):
-                    return result
-                return result.to_mcp_result(uri)
-            finally:
-                _task_metadata.reset(task_token)
-                _docket_fn_key.reset(key_token)
+            if isinstance(result, mcp.types.CreateTaskResult):
+                return result
+            return result.to_mcp_result(uri)
         except DisabledError as e:
             raise NotFoundError(f"Unknown resource: {str(uri)!r}") from e
         except NotFoundError:
