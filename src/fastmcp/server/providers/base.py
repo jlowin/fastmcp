@@ -30,27 +30,14 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
-from typing import Literal
 
 from fastmcp.prompts.prompt import Prompt
 from fastmcp.resources.resource import Resource
 from fastmcp.resources.template import ResourceTemplate
 from fastmcp.tools.tool import Tool
-
-
-@dataclass
-class TaskComponents:
-    """Collection of components eligible for background task execution.
-
-    Used by get_tasks() to return components for Docket registration.
-    Components must implement register_with_docket() and add_to_docket().
-    """
-
-    tools: Sequence[Tool] = ()
-    resources: Sequence[Resource] = ()
-    templates: Sequence[ResourceTemplate] = ()
-    prompts: Sequence[Prompt] = ()
+from fastmcp.utilities.async_utils import gather
+from fastmcp.utilities.components import FastMCPComponent
+from fastmcp.utilities.visibility import VisibilityFilter
 
 
 class Provider:
@@ -71,25 +58,11 @@ class Provider:
           This allows other providers to still contribute their components.
     """
 
-    def _notify(
-        self, notification_type: Literal["tools", "resources", "prompts"]
-    ) -> None:
-        """Send a list changed notification if we're in a request context.
+    def __init__(self) -> None:
+        self._visibility = VisibilityFilter()
 
-        This is a no-op if called outside a request context (e.g., during setup).
-        """
-        try:
-            from fastmcp.server.dependencies import get_context
-
-            context = get_context()
-            if notification_type == "tools":
-                context._queue_tool_list_changed()
-            elif notification_type == "resources":
-                context._queue_resource_list_changed()
-            elif notification_type == "prompts":
-                context._queue_prompt_list_changed()
-        except RuntimeError:
-            pass  # No context available
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}()"
 
     def with_transforms(
         self,
@@ -239,52 +212,57 @@ class Provider:
         prompts = await self.list_prompts()
         return next((p for p in prompts if p.name == name), None)
 
+    async def get_component(
+        self, key: str
+    ) -> Tool | Resource | ResourceTemplate | Prompt | None:
+        """Get a component by its prefixed key.
+
+        Args:
+            key: The prefixed key (e.g., "tool:name", "resource:uri", "template:uri").
+
+        Returns:
+            The component if found, or None to continue searching other providers.
+        """
+        # Default implementation: fetch all component types in parallel
+        # Exceptions propagate since return_exceptions=False
+        results = await gather(
+            self.list_tools(),
+            self.list_resources(),
+            self.list_resource_templates(),
+            self.list_prompts(),
+        )
+        for components in results:
+            for component in components:  # type: ignore[union-attr]
+                if component.key == key:
+                    return component
+        return None
+
     # -------------------------------------------------------------------------
     # Task registration
     # -------------------------------------------------------------------------
 
-    async def get_tasks(self) -> TaskComponents:
+    async def get_tasks(self) -> Sequence[FastMCPComponent]:
         """Return components that should be registered as background tasks.
 
         Override to customize which components are task-eligible.
-        Default calls list_* methods and filters for function-based components
+        Default calls list_* methods and filters for components
         with task_config.mode != 'forbidden'.
 
         Used by the server during startup to register functions with Docket.
         """
-        from fastmcp.prompts.prompt import FunctionPrompt
-        from fastmcp.resources.resource import FunctionResource
-        from fastmcp.resources.template import FunctionResourceTemplate
-        from fastmcp.tools.tool import FunctionTool
-
-        all_tools = await self.list_tools()
-        all_resources = await self.list_resources()
-        all_templates = await self.list_resource_templates()
-        all_prompts = await self.list_prompts()
-
-        return TaskComponents(
-            tools=[
-                t
-                for t in all_tools
-                if isinstance(t, FunctionTool) and t.task_config.supports_tasks()
-            ],
-            resources=[
-                r
-                for r in all_resources
-                if isinstance(r, FunctionResource) and r.task_config.supports_tasks()
-            ],
-            templates=[
-                t
-                for t in all_templates
-                if isinstance(t, FunctionResourceTemplate)
-                and t.task_config.supports_tasks()
-            ],
-            prompts=[
-                p
-                for p in all_prompts
-                if isinstance(p, FunctionPrompt) and p.task_config.supports_tasks()
-            ],
+        # Fetch all component types in parallel
+        tools, resources, templates, prompts = await gather(
+            self.list_tools(),
+            self.list_resources(),
+            self.list_resource_templates(),
+            self.list_prompts(),
         )
+
+        return [
+            c
+            for c in [*tools, *resources, *templates, *prompts]
+            if c.task_config.supports_tasks()
+        ]
 
     # -------------------------------------------------------------------------
     # Lifecycle methods
@@ -315,3 +293,50 @@ class Provider:
             ```
         """
         yield
+
+    # -------------------------------------------------------------------------
+    # Enable/Disable
+    # -------------------------------------------------------------------------
+
+    def enable(
+        self,
+        *,
+        keys: Sequence[str] | None = None,
+        tags: set[str] | None = None,
+        only: bool = False,
+    ) -> None:
+        """Enable components by removing from blocklist, or set allowlist with only=True.
+
+        Args:
+            keys: Keys to enable (e.g., "tool:my_tool").
+            tags: Tags to enable - components with these tags will be enabled.
+            only: If True, switches to allowlist mode - ONLY show these keys/tags.
+        """
+        self._visibility.enable(keys=keys, tags=tags, only=only)
+
+    def disable(
+        self,
+        *,
+        keys: Sequence[str] | None = None,
+        tags: set[str] | None = None,
+    ) -> None:
+        """Disable components by adding to the blocklist.
+
+        Args:
+            keys: Keys to disable (e.g., "tool:my_tool").
+            tags: Tags to disable - components with these tags will be disabled.
+        """
+        self._visibility.disable(keys=keys, tags=tags)
+
+    def _is_component_enabled(self, component: FastMCPComponent) -> bool:
+        """Check if a component is enabled.
+
+        Delegates to the visibility filter which handles blocklist and allowlist logic.
+
+        Args:
+            component: The component to check.
+
+        Returns:
+            True if the component should be served, False otherwise.
+        """
+        return self._visibility.is_enabled(component)

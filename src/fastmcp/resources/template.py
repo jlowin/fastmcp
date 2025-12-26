@@ -5,7 +5,7 @@ from __future__ import annotations
 import inspect
 import re
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 from urllib.parse import parse_qs, unquote
 
 import mcp.types
@@ -21,8 +21,8 @@ from pydantic import (
     validate_call,
 )
 
-from fastmcp.resources.resource import Resource, ResourceContent
-from fastmcp.server.dependencies import get_context, without_injected_parameters
+from fastmcp.resources.resource import Resource, ResourceResult
+from fastmcp.server.dependencies import without_injected_parameters
 from fastmcp.server.tasks.config import TaskConfig
 from fastmcp.utilities.components import FastMCPComponent
 from fastmcp.utilities.json_schema import compress_schema
@@ -97,6 +97,8 @@ def match_uri_template(uri: str, uri_template: str) -> dict[str, str] | None:
 class ResourceTemplate(FastMCPComponent):
     """A template for dynamically creating resources."""
 
+    KEY_PREFIX: ClassVar[str] = "template"
+
     uri_template: str = Field(
         description="URI template with parameters (e.g. weather://{city}/current)"
     )
@@ -113,22 +115,6 @@ class ResourceTemplate(FastMCPComponent):
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(uri_template={self.uri_template!r}, name={self.name!r}, description={self.description!r}, tags={self.tags})"
 
-    def enable(self) -> None:
-        super().enable()
-        try:
-            context = get_context()
-            context._queue_resource_list_changed()  # type: ignore[private-use]
-        except RuntimeError:
-            pass  # No context available
-
-    def disable(self) -> None:
-        super().disable()
-        try:
-            context = get_context()
-            context._queue_resource_list_changed()  # type: ignore[private-use]
-        except RuntimeError:
-            pass  # No context available
-
     @staticmethod
     def from_function(
         fn: Callable[..., Any],
@@ -139,7 +125,6 @@ class ResourceTemplate(FastMCPComponent):
         icons: list[Icon] | None = None,
         mime_type: str | None = None,
         tags: set[str] | None = None,
-        enabled: bool | None = None,
         annotations: Annotations | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
@@ -153,7 +138,6 @@ class ResourceTemplate(FastMCPComponent):
             icons=icons,
             mime_type=mime_type,
             tags=tags,
-            enabled=enabled,
             annotations=annotations,
             meta=meta,
             task=task,
@@ -171,22 +155,31 @@ class ResourceTemplate(FastMCPComponent):
         """Check if URI matches template and extract parameters."""
         return match_uri_template(uri, self.uri_template)
 
-    async def read(self, arguments: dict[str, Any]) -> str | bytes:
+    async def read(self, arguments: dict[str, Any]) -> str | bytes | ResourceResult:
         """Read the resource content."""
         raise NotImplementedError(
             "Subclasses must implement read() or override create_resource()"
         )
 
-    def convert_result(self, raw_value: Any) -> ResourceContent:
-        """Convert a raw return value to ResourceContent.
+    def convert_result(self, raw_value: Any) -> ResourceResult:
+        """Convert a raw result to ResourceResult.
 
-        Handles ResourceContent passthrough and converts raw values using mime_type.
+        This is used in two contexts:
+        1. In _read() to convert user function return values to ResourceResult
+        2. In tasks_result_handler() to convert Docket task results to ResourceResult
+
+        Handles ResourceResult passthrough and converts raw values using
+        ResourceResult's normalization.
         """
-        return ResourceContent.from_value(raw_value, mime_type=self.mime_type)
+        if isinstance(raw_value, ResourceResult):
+            return raw_value
+
+        # ResourceResult.__init__ handles all normalization
+        return ResourceResult(raw_value)
 
     async def _read(
         self, uri: str, params: dict[str, Any]
-    ) -> ResourceContent | mcp.types.CreateTaskResult:
+    ) -> ResourceResult | mcp.types.CreateTaskResult:
         """Server entry point that handles task routing.
 
         This allows ANY ResourceTemplate subclass to support background execution
@@ -214,9 +207,7 @@ class ResourceTemplate(FastMCPComponent):
         # Call resource.read() not resource._read() to avoid task routing on ephemeral resource
         resource = await self.create_resource(uri, params)
         result = await resource.read()
-        if isinstance(result, ResourceContent):
-            return result
-        return resource.convert_result(result)
+        return self.convert_result(result)
 
     async def create_resource(self, uri: str, params: dict[str, Any]) -> Resource:
         """Create a resource from the template with the given parameters.
@@ -265,8 +256,8 @@ class ResourceTemplate(FastMCPComponent):
 
     @property
     def key(self) -> str:
-        """The lookup key for this template. Returns uri_template."""
-        return self.uri_template
+        """The globally unique lookup key for this template."""
+        return self.make_key(self.uri_template)
 
     def register_with_docket(self, docket: Docket) -> None:
         """Register this template with docket for background execution."""
@@ -305,7 +296,7 @@ class FunctionResourceTemplate(ResourceTemplate):
 
     async def _read(
         self, uri: str, params: dict[str, Any]
-    ) -> ResourceContent | mcp.types.CreateTaskResult:
+    ) -> ResourceResult | mcp.types.CreateTaskResult:
         """Optimized server entry point that skips ephemeral resource creation.
 
         For FunctionResourceTemplate, we can call read() directly instead of
@@ -331,7 +322,7 @@ class FunctionResourceTemplate(ResourceTemplate):
     async def create_resource(self, uri: str, params: dict[str, Any]) -> Resource:
         """Create a resource from the template with the given parameters."""
 
-        async def resource_read_fn() -> str | bytes:
+        async def resource_read_fn() -> str | bytes | ResourceResult:
             # Call function and check if result is a coroutine
             result = await self.read(arguments=params)
             return result
@@ -343,11 +334,10 @@ class FunctionResourceTemplate(ResourceTemplate):
             description=self.description,
             mime_type=self.mime_type,
             tags=self.tags,
-            enabled=self.enabled,
             task=self.task_config,
         )
 
-    async def read(self, arguments: dict[str, Any]) -> str | bytes:
+    async def read(self, arguments: dict[str, Any]) -> str | bytes | ResourceResult:
         """Read the resource content."""
         # Type coercion for query parameters (which arrive as strings)
         kwargs = arguments.copy()
@@ -424,7 +414,6 @@ class FunctionResourceTemplate(ResourceTemplate):
         icons: list[Icon] | None = None,
         mime_type: str | None = None,
         tags: set[str] | None = None,
-        enabled: bool | None = None,
         annotations: Annotations | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
@@ -532,7 +521,6 @@ class FunctionResourceTemplate(ResourceTemplate):
             fn=fn,
             parameters=parameters,
             tags=tags or set(),
-            enabled=enabled if enabled is not None else True,
             annotations=annotations,
             meta=meta,
             task_config=task_config,

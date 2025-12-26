@@ -27,7 +27,7 @@ from __future__ import annotations
 import inspect
 from collections.abc import Callable, Sequence
 from functools import partial
-from typing import TYPE_CHECKING, Any, Literal, overload
+from typing import TYPE_CHECKING, Any, Literal, TypeVar, overload
 
 import mcp.types
 from mcp.types import Annotations, AnyFunction, ToolAnnotations
@@ -35,13 +35,14 @@ from mcp.types import Annotations, AnyFunction, ToolAnnotations
 from fastmcp.prompts.prompt import FunctionPrompt, Prompt
 from fastmcp.resources.resource import Resource
 from fastmcp.resources.template import ResourceTemplate
-from fastmcp.server.providers.base import Provider, TaskComponents
+from fastmcp.server.providers.base import Provider
 from fastmcp.server.tasks.config import TaskConfig
 from fastmcp.tools.tool import FunctionTool, Tool
 from fastmcp.tools.tool_transform import (
     ToolTransformConfig,
     apply_transformations_to_tools,
 )
+from fastmcp.utilities.components import FastMCPComponent
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.types import NotSet, NotSetT
 
@@ -51,6 +52,8 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 DuplicateBehavior = Literal["error", "warn", "replace", "ignore"]
+
+_C = TypeVar("_C", bound=FastMCPComponent)
 
 
 class LocalProvider(Provider):
@@ -103,160 +106,110 @@ class LocalProvider(Provider):
         """
         super().__init__()
         self._on_duplicate = on_duplicate
-        self._tools: dict[str, Tool] = {}
-        self._resources: dict[str, Resource] = {}
-        self._templates: dict[str, ResourceTemplate] = {}
-        self._prompts: dict[str, Prompt] = {}
+        # Unified component storage - keyed by prefixed key (e.g., "tool:name", "resource:uri")
+        self._components: dict[str, FastMCPComponent] = {}
         self._tool_transformations: dict[str, ToolTransformConfig] = {}
+
+    def _send_list_changed_notification(self, component: FastMCPComponent) -> None:
+        """Send a list changed notification for the component type."""
+        from fastmcp.server.context import _current_context
+
+        context = _current_context.get()
+        if context is None:
+            return
+
+        if isinstance(component, Tool):
+            context.send_notification_sync(mcp.types.ToolListChangedNotification())
+        elif isinstance(component, (Resource, ResourceTemplate)):
+            context.send_notification_sync(mcp.types.ResourceListChangedNotification())
+        elif isinstance(component, Prompt):
+            context.send_notification_sync(mcp.types.PromptListChangedNotification())
 
     # =========================================================================
     # Storage methods
     # =========================================================================
 
-    def add_tool(self, tool: Tool) -> Tool:
-        """Add a tool to this provider's storage.
+    def _add_component(self, component: _C) -> _C:
+        """Add a component to unified storage.
 
         Args:
-            tool: The Tool instance to add.
+            component: The component to add.
 
         Returns:
-            The tool that was added (or existing tool if on_duplicate="ignore").
+            The component that was added (or existing if on_duplicate="ignore").
         """
-        existing = self._tools.get(tool.key)
+        existing = self._components.get(component.key)
         if existing:
             if self._on_duplicate == "error":
-                raise ValueError(f"Tool already exists: {tool.key}")
+                raise ValueError(f"Component already exists: {component.key}")
             elif self._on_duplicate == "warn":
-                logger.warning(f"Tool already exists: {tool.key}")
+                logger.warning(f"Component already exists: {component.key}")
             elif self._on_duplicate == "ignore":
-                return existing
+                return existing  # type: ignore[return-value]
             # "replace" and "warn" fall through to add
 
-        self._tools[tool.key] = tool
-        self._notify("tools")
-        return tool
+        self._components[component.key] = component
+        self._send_list_changed_notification(component)
+        return component
 
-    def remove_tool(self, key: str) -> None:
-        """Remove a tool from this provider's storage.
+    def _remove_component(self, key: str) -> None:
+        """Remove a component from unified storage.
 
         Args:
-            key: The key of the tool to remove.
+            key: The prefixed key of the component.
 
         Raises:
-            KeyError: If the tool is not found.
+            KeyError: If the component is not found.
         """
-        if key not in self._tools:
-            raise KeyError(f"Tool {key!r} not found")
-        del self._tools[key]
-        self._notify("tools")
+        component = self._components.get(key)
+        if component is None:
+            raise KeyError(f"Component {key!r} not found")
+
+        del self._components[key]
+        self._send_list_changed_notification(component)
+
+    def _get_component(self, key: str) -> FastMCPComponent | None:
+        """Get a component by its prefixed key.
+
+        Args:
+            key: The prefixed key (e.g., "tool:name", "resource:uri").
+
+        Returns:
+            The component, or None if not found.
+        """
+        return self._components.get(key)
+
+    def add_tool(self, tool: Tool) -> Tool:
+        """Add a tool to this provider's storage."""
+        return self._add_component(tool)
+
+    def remove_tool(self, name: str) -> None:
+        """Remove a tool from this provider's storage."""
+        self._remove_component(Tool.make_key(name))
 
     def add_resource(self, resource: Resource) -> Resource:
-        """Add a resource to this provider's storage.
+        """Add a resource to this provider's storage."""
+        return self._add_component(resource)
 
-        Args:
-            resource: The Resource instance to add.
-
-        Returns:
-            The resource that was added (or existing if on_duplicate="ignore").
-        """
-        existing = self._resources.get(resource.key)
-        if existing:
-            if self._on_duplicate == "error":
-                raise ValueError(f"Resource already exists: {resource.key}")
-            elif self._on_duplicate == "warn":
-                logger.warning(f"Resource already exists: {resource.key}")
-            elif self._on_duplicate == "ignore":
-                return existing
-
-        self._resources[resource.key] = resource
-        self._notify("resources")
-        return resource
-
-    def remove_resource(self, key: str) -> None:
-        """Remove a resource from this provider's storage.
-
-        Args:
-            key: The key of the resource to remove.
-
-        Raises:
-            KeyError: If the resource is not found.
-        """
-        if key not in self._resources:
-            raise KeyError(f"Resource {key!r} not found")
-        del self._resources[key]
-        self._notify("resources")
+    def remove_resource(self, uri: str) -> None:
+        """Remove a resource from this provider's storage."""
+        self._remove_component(Resource.make_key(uri))
 
     def add_template(self, template: ResourceTemplate) -> ResourceTemplate:
-        """Add a resource template to this provider's storage.
+        """Add a resource template to this provider's storage."""
+        return self._add_component(template)
 
-        Args:
-            template: The ResourceTemplate instance to add.
-
-        Returns:
-            The template that was added (or existing if on_duplicate="ignore").
-        """
-        existing = self._templates.get(template.key)
-        if existing:
-            if self._on_duplicate == "error":
-                raise ValueError(f"Template already exists: {template.key}")
-            elif self._on_duplicate == "warn":
-                logger.warning(f"Template already exists: {template.key}")
-            elif self._on_duplicate == "ignore":
-                return existing
-
-        self._templates[template.key] = template
-        self._notify("resources")
-        return template
-
-    def remove_template(self, key: str) -> None:
-        """Remove a resource template from this provider's storage.
-
-        Args:
-            key: The key of the template to remove.
-
-        Raises:
-            KeyError: If the template is not found.
-        """
-        if key not in self._templates:
-            raise KeyError(f"Template {key!r} not found")
-        del self._templates[key]
-        self._notify("resources")
+    def remove_template(self, uri_template: str) -> None:
+        """Remove a resource template from this provider's storage."""
+        self._remove_component(ResourceTemplate.make_key(uri_template))
 
     def add_prompt(self, prompt: Prompt) -> Prompt:
-        """Add a prompt to this provider's storage.
+        """Add a prompt to this provider's storage."""
+        return self._add_component(prompt)
 
-        Args:
-            prompt: The Prompt instance to add.
-
-        Returns:
-            The prompt that was added (or existing if on_duplicate="ignore").
-        """
-        existing = self._prompts.get(prompt.key)
-        if existing:
-            if self._on_duplicate == "error":
-                raise ValueError(f"Prompt already exists: {prompt.key}")
-            elif self._on_duplicate == "warn":
-                logger.warning(f"Prompt already exists: {prompt.key}")
-            elif self._on_duplicate == "ignore":
-                return existing
-
-        self._prompts[prompt.key] = prompt
-        self._notify("prompts")
-        return prompt
-
-    def remove_prompt(self, key: str) -> None:
-        """Remove a prompt from this provider's storage.
-
-        Args:
-            key: The key of the prompt to remove.
-
-        Raises:
-            KeyError: If the prompt is not found.
-        """
-        if key not in self._prompts:
-            raise KeyError(f"Prompt {key!r} not found")
-        del self._prompts[key]
-        self._notify("prompts")
+    def remove_prompt(self, name: str) -> None:
+        """Remove a prompt from this provider's storage."""
+        self._remove_component(Prompt.make_key(name))
 
     # =========================================================================
     # Tool transformation methods
@@ -298,12 +251,13 @@ class LocalProvider(Provider):
     # =========================================================================
 
     async def list_tools(self) -> Sequence[Tool]:
-        """Return all tools with transformations applied."""
+        """Return all visible tools with transformations applied."""
+        tools = {k: v for k, v in self._components.items() if isinstance(v, Tool)}
         transformed = apply_transformations_to_tools(
-            tools=self._tools,
+            tools=tools,
             transformations=self._tool_transformations,
         )
-        return list(transformed.values())
+        return [t for t in transformed.values() if self._is_component_enabled(t)]
 
     async def get_tool(self, name: str) -> Tool | None:
         """Get a tool by name, with transformations applied."""
@@ -311,55 +265,78 @@ class LocalProvider(Provider):
         return next((t for t in tools if t.name == name), None)
 
     async def list_resources(self) -> Sequence[Resource]:
-        """Return all resources."""
-        return list(self._resources.values())
+        """Return all visible resources."""
+        return [
+            v
+            for v in self._components.values()
+            if isinstance(v, Resource) and self._is_component_enabled(v)
+        ]
 
     async def get_resource(self, uri: str) -> Resource | None:
-        """Get a resource by URI."""
-        return self._resources.get(uri)
+        """Get a resource by URI if visible."""
+        component = self._components.get(Resource.make_key(uri))
+        if isinstance(component, Resource) and self._is_component_enabled(component):
+            return component
+        return None
 
     async def list_resource_templates(self) -> Sequence[ResourceTemplate]:
-        """Return all resource templates."""
-        return list(self._templates.values())
+        """Return all visible resource templates."""
+        return [
+            v
+            for v in self._components.values()
+            if isinstance(v, ResourceTemplate) and self._is_component_enabled(v)
+        ]
 
     async def get_resource_template(self, uri: str) -> ResourceTemplate | None:
-        """Get a resource template that matches the given URI."""
-        for template in self._templates.values():
-            if template.matches(uri) is not None:
-                return template
+        """Get a resource template that matches the given URI if visible."""
+        for component in self._components.values():
+            if (
+                isinstance(component, ResourceTemplate)
+                and component.matches(uri) is not None
+                and self._is_component_enabled(component)
+            ):
+                return component
         return None
 
     async def list_prompts(self) -> Sequence[Prompt]:
-        """Return all prompts."""
-        return list(self._prompts.values())
+        """Return all visible prompts."""
+        return [
+            v
+            for v in self._components.values()
+            if isinstance(v, Prompt) and self._is_component_enabled(v)
+        ]
 
     async def get_prompt(self, name: str) -> Prompt | None:
-        """Get a prompt by name."""
-        return self._prompts.get(name)
+        """Get a prompt by name if visible."""
+        component = self._components.get(Prompt.make_key(name))
+        if isinstance(component, Prompt) and self._is_component_enabled(component):
+            return component
+        return None
+
+    async def get_component(
+        self, key: str
+    ) -> Tool | Resource | ResourceTemplate | Prompt | None:
+        """Get a component by its prefixed key.
+
+        Efficient O(1) lookup in the unified components dict.
+        """
+        component = self._get_component(key)
+        if component and self._is_component_enabled(component):
+            return component  # type: ignore[return-value]
+        return None
 
     # =========================================================================
     # Task registration
     # =========================================================================
 
-    async def get_tasks(self) -> TaskComponents:
+    async def get_tasks(self) -> Sequence[FastMCPComponent]:
         """Return components eligible for background task execution.
 
         Returns components that have task_config.mode != 'forbidden'.
         This includes both FunctionTool/Resource/Prompt instances created via
         decorators and custom Tool/Resource/Prompt subclasses.
         """
-        return TaskComponents(
-            tools=[t for t in self._tools.values() if t.task_config.supports_tasks()],
-            resources=[
-                r for r in self._resources.values() if r.task_config.supports_tasks()
-            ],
-            templates=[
-                t for t in self._templates.values() if t.task_config.supports_tasks()
-            ],
-            prompts=[
-                p for p in self._prompts.values() if p.task_config.supports_tasks()
-            ],
-        )
+        return [c for c in self._components.values() if c.task_config.supports_tasks()]
 
     # =========================================================================
     # Decorator methods
@@ -379,7 +356,7 @@ class LocalProvider(Provider):
         annotations: ToolAnnotations | dict[str, Any] | None = None,
         exclude_args: list[str] | None = None,
         meta: dict[str, Any] | None = None,
-        enabled: bool | None = None,
+        enabled: bool = True,
         task: bool | TaskConfig | None = None,
         serializer: ToolResultSerializerType | None = None,
     ) -> FunctionTool: ...
@@ -398,7 +375,7 @@ class LocalProvider(Provider):
         annotations: ToolAnnotations | dict[str, Any] | None = None,
         exclude_args: list[str] | None = None,
         meta: dict[str, Any] | None = None,
-        enabled: bool | None = None,
+        enabled: bool = True,
         task: bool | TaskConfig | None = None,
         serializer: ToolResultSerializerType | None = None,
     ) -> Callable[[AnyFunction], FunctionTool]: ...
@@ -416,7 +393,7 @@ class LocalProvider(Provider):
         annotations: ToolAnnotations | dict[str, Any] | None = None,
         exclude_args: list[str] | None = None,
         meta: dict[str, Any] | None = None,
-        enabled: bool | None = None,
+        enabled: bool = True,
         task: bool | TaskConfig | None = None,
         serializer: ToolResultSerializerType | None = None,
     ) -> (
@@ -444,7 +421,7 @@ class LocalProvider(Provider):
             annotations: Optional annotations about the tool's behavior
             exclude_args: Optional list of argument names to exclude from the tool schema
             meta: Optional meta information about the tool
-            enabled: Optional boolean to enable or disable the tool
+            enabled: Whether the tool is enabled (default True). If False, adds to blocklist.
             task: Optional task configuration for background execution
             serializer: Optional serializer for the tool result
 
@@ -502,10 +479,12 @@ class LocalProvider(Provider):
                 exclude_args=exclude_args,
                 meta=meta,
                 serializer=serializer,
-                enabled=enabled,
                 task=supports_task,
             )
             self.add_tool(tool_obj)
+            # If disabled, add to blocklist
+            if not enabled:
+                self.disable(keys=[tool_obj.key])
             return tool_obj
 
         elif isinstance(name_or_fn, str):
@@ -551,7 +530,7 @@ class LocalProvider(Provider):
         icons: list[mcp.types.Icon] | None = None,
         mime_type: str | None = None,
         tags: set[str] | None = None,
-        enabled: bool | None = None,
+        enabled: bool = True,
         annotations: Annotations | dict[str, Any] | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
@@ -569,7 +548,7 @@ class LocalProvider(Provider):
             icons: Optional icons for the resource
             mime_type: Optional MIME type for the resource
             tags: Optional set of tags for categorizing the resource
-            enabled: Optional boolean to enable or disable the resource
+            enabled: Whether the resource is enabled (default True). If False, adds to blocklist.
             annotations: Optional annotations about the resource's behavior
             meta: Optional meta information about the resource
             task: Optional task configuration for background execution
@@ -634,12 +613,14 @@ class LocalProvider(Provider):
                     icons=icons,
                     mime_type=mime_type,
                     tags=tags,
-                    enabled=enabled,
                     annotations=annotations,
                     meta=meta,
                     task=supports_task,
                 )
                 self.add_template(template)
+                # If disabled, add to blocklist
+                if not enabled:
+                    self.disable(keys=[template.key])
                 return template
             elif not has_uri_params and not has_func_params:
                 resource_obj = Resource.from_function(
@@ -651,12 +632,14 @@ class LocalProvider(Provider):
                     icons=icons,
                     mime_type=mime_type,
                     tags=tags,
-                    enabled=enabled,
                     annotations=annotations,
                     meta=meta,
                     task=supports_task,
                 )
                 self.add_resource(resource_obj)
+                # If disabled, add to blocklist
+                if not enabled:
+                    self.disable(keys=[resource_obj.key])
                 return resource_obj
             else:
                 raise ValueError(
@@ -676,7 +659,7 @@ class LocalProvider(Provider):
         description: str | None = None,
         icons: list[mcp.types.Icon] | None = None,
         tags: set[str] | None = None,
-        enabled: bool | None = None,
+        enabled: bool = True,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
     ) -> FunctionPrompt: ...
@@ -691,7 +674,7 @@ class LocalProvider(Provider):
         description: str | None = None,
         icons: list[mcp.types.Icon] | None = None,
         tags: set[str] | None = None,
-        enabled: bool | None = None,
+        enabled: bool = True,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
     ) -> Callable[[AnyFunction], FunctionPrompt]: ...
@@ -705,7 +688,7 @@ class LocalProvider(Provider):
         description: str | None = None,
         icons: list[mcp.types.Icon] | None = None,
         tags: set[str] | None = None,
-        enabled: bool | None = None,
+        enabled: bool = True,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
     ) -> (
@@ -729,7 +712,7 @@ class LocalProvider(Provider):
             description: Optional description of what the prompt does
             icons: Optional icons for the prompt
             tags: Optional set of tags for categorizing the prompt
-            enabled: Optional boolean to enable or disable the prompt
+            enabled: Whether the prompt is enabled (default True). If False, adds to blocklist.
             meta: Optional meta information about the prompt
             task: Optional task configuration for background execution
 
@@ -779,11 +762,13 @@ class LocalProvider(Provider):
                 description=description,
                 icons=icons,
                 tags=tags,
-                enabled=enabled,
                 meta=meta,
                 task=supports_task,
             )
             self.add_prompt(prompt_obj)
+            # If disabled, add to blocklist
+            if not enabled:
+                self.disable(keys=[prompt_obj.key])
             return prompt_obj
 
         elif isinstance(name_or_fn, str):

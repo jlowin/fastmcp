@@ -14,7 +14,12 @@ from mcp.types import BlobResourceContents, TextResourceContents
 from pydantic import AnyUrl
 
 from fastmcp import Client, Context, FastMCP
-from fastmcp.resources import Resource, ResourceContent, ResourceTemplate
+from fastmcp.resources import (
+    Resource,
+    ResourceContent,
+    ResourceResult,
+    ResourceTemplate,
+)
 
 
 class TestResourceContext:
@@ -127,8 +132,8 @@ class TestResourceTemplates:
         mcp = FastMCP()
 
         @mcp.resource("test://{x}/{y}/{z}")
-        def func(**kwargs: int) -> int:
-            return sum(kwargs.values())
+        def func(**kwargs: int) -> str:
+            return str(sum(int(v) for v in kwargs.values()))
 
         async with Client(mcp) as client:
             result = await client.read_resource(AnyUrl("test://1/2/3"))
@@ -140,11 +145,10 @@ class TestResourceTemplates:
         mcp = FastMCP()
 
         @mcp.resource("math://add/{x}")
-        def add(x: int, y: int = 10) -> int:
-            return x + y
+        def add(x: int, y: int = 10) -> str:
+            return str(int(x) + y)
 
-        templates_dict = await mcp.get_resource_templates()
-        templates = list(templates_dict.values())
+        templates = await mcp.get_resource_templates()
         assert len(templates) == 1
         assert templates[0].uri_template == "math://add/{x}"
 
@@ -165,8 +169,7 @@ class TestResourceTemplates:
         def get_data(name: str) -> str:
             return f"Data for {name}"
 
-        templates_dict = await mcp.get_resource_templates()
-        templates = list(templates_dict.values())
+        templates = await mcp.get_resource_templates()
         assert len(templates) == 1
         assert templates[0].uri_template == "resource://{name}/data"
 
@@ -182,8 +185,8 @@ class TestResourceTemplates:
         def template_resource(param: str) -> str:
             return f"Template resource: {param}"
 
-        templates_dict = await mcp.get_resource_templates()
-        template = templates_dict["resource://{param}"]
+        templates = await mcp.get_resource_templates()
+        template = next(t for t in templates if t.uri_template == "resource://{param}")
         assert template.tags == {"template", "test-tag"}
 
     async def test_template_decorator_wildcard_param(self):
@@ -358,8 +361,7 @@ class TestResourceDecorator:
         def get_data() -> str:
             return "Hello, world!"
 
-        resources_dict = await mcp.get_resources()
-        resources = list(resources_dict.values())
+        resources = await mcp.get_resources()
         assert len(resources) == 1
         assert resources[0].name == "custom-data"
 
@@ -375,8 +377,7 @@ class TestResourceDecorator:
         def get_data() -> str:
             return "Hello, world!"
 
-        resources_dict = await mcp.get_resources()
-        resources = list(resources_dict.values())
+        resources = await mcp.get_resources()
         assert len(resources) == 1
         assert resources[0].description == "Data resource"
 
@@ -388,8 +389,7 @@ class TestResourceDecorator:
         def get_data() -> str:
             return "Hello, world!"
 
-        resources_dict = await mcp.get_resources()
-        resources = list(resources_dict.values())
+        resources = await mcp.get_resources()
         assert len(resources) == 1
         assert resources[0].tags == {"example", "test-tag"}
 
@@ -499,8 +499,8 @@ class TestResourceDecorator:
         def get_data() -> str:
             return "Hello, world!"
 
-        resources_dict = await mcp.get_resources()
-        resource = resources_dict["resource://data"]
+        resources = await mcp.get_resources()
+        resource = next(r for r in resources if str(r.uri) == "resource://data")
 
         assert resource.meta == meta_data
 
@@ -509,11 +509,15 @@ class TestResourceDecorator:
         mcp = FastMCP()
 
         @mcp.resource("resource://widget")
-        def get_widget() -> ResourceContent:
-            return ResourceContent(
-                content="<widget>content</widget>",
-                mime_type="text/html",
-                meta={"csp": "script-src 'self'", "version": "1.0"},
+        def get_widget() -> ResourceResult:
+            return ResourceResult(
+                [
+                    ResourceContent(
+                        content="<widget>content</widget>",
+                        mime_type="text/html",
+                        meta={"csp": "script-src 'self'", "version": "1.0"},
+                    )
+                ]
             )
 
         async with Client(mcp) as client:
@@ -530,10 +534,14 @@ class TestResourceDecorator:
         mcp = FastMCP()
 
         @mcp.resource("resource://binary")
-        def get_binary() -> ResourceContent:
-            return ResourceContent(
-                content=b"\x00\x01\x02",
-                meta={"encoding": "raw"},
+        def get_binary() -> ResourceResult:
+            return ResourceResult(
+                [
+                    ResourceContent(
+                        content=b"\x00\x01\x02",
+                        meta={"encoding": "raw"},
+                    )
+                ]
             )
 
         async with Client(mcp) as client:
@@ -548,8 +556,8 @@ class TestResourceDecorator:
         mcp = FastMCP()
 
         @mcp.resource("resource://plain")
-        def get_plain() -> ResourceContent:
-            return ResourceContent(content="plain content")
+        def get_plain() -> ResourceResult:
+            return ResourceResult([ResourceContent(content="plain content")])
 
         async with Client(mcp) as client:
             result = await client.read_resource("resource://plain")
@@ -568,8 +576,7 @@ class TestTemplateDecorator:
         def get_data(name: str) -> str:
             return f"Data for {name}"
 
-        templates_dict = await mcp.get_resource_templates()
-        templates = list(templates_dict.values())
+        templates = await mcp.get_resource_templates()
         assert len(templates) == 1
         assert templates[0].name == "get_data"
         assert templates[0].uri_template == "resource://{name}/data"
@@ -597,8 +604,7 @@ class TestTemplateDecorator:
         def get_data(name: str) -> str:
             return f"Data for {name}"
 
-        templates_dict = await mcp.get_resource_templates()
-        templates = list(templates_dict.values())
+        templates = await mcp.get_resource_templates()
         assert len(templates) == 1
         assert templates[0].name == "custom-template"
 
@@ -614,8 +620,7 @@ class TestTemplateDecorator:
         def get_data(name: str) -> str:
             return f"Data for {name}"
 
-        templates_dict = await mcp.get_resource_templates()
-        templates = list(templates_dict.values())
+        templates = await mcp.get_resource_templates()
         assert len(templates) == 1
         assert templates[0].description == "Template description"
 
@@ -698,8 +703,8 @@ class TestTemplateDecorator:
         def template_resource(param: str) -> str:
             return f"Template resource: {param}"
 
-        templates_dict = await mcp.get_resource_templates()
-        template = templates_dict["resource://{param}"]
+        templates = await mcp.get_resource_templates()
+        template = next(t for t in templates if t.uri_template == "resource://{param}")
         assert template.tags == {"template", "test-tag"}
 
     async def test_template_decorator_wildcard_param(self):
@@ -709,8 +714,8 @@ class TestTemplateDecorator:
         def template_resource(param: str) -> str:
             return f"Template resource: {param}"
 
-        templates_dict = await mcp.get_resource_templates()
-        template = templates_dict["resource://{param*}"]
+        templates = await mcp.get_resource_templates()
+        template = next(t for t in templates if t.uri_template == "resource://{param*}")
         assert template.uri_template == "resource://{param*}"
         assert template.name == "template_resource"
 
@@ -724,7 +729,9 @@ class TestTemplateDecorator:
         def get_template_data(param: str) -> str:
             return f"Data for {param}"
 
-        templates_dict = await mcp.get_resource_templates()
-        template = templates_dict["resource://{param}/data"]
+        templates = await mcp.get_resource_templates()
+        template = next(
+            t for t in templates if t.uri_template == "resource://{param}/data"
+        )
 
         assert template.meta == meta_data

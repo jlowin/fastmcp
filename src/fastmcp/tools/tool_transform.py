@@ -373,7 +373,6 @@ class TransformedTool(Tool):
         output_schema: dict[str, Any] | NotSetT | None = NotSet,
         serializer: Callable[[Any], str] | NotSetT | None = NotSet,
         meta: dict[str, Any] | NotSetT | None = NotSet,
-        enabled: bool | None = None,
     ) -> TransformedTool:
         """Create a transformed tool from a parent tool.
 
@@ -566,7 +565,6 @@ class TransformedTool(Tool):
         final_serializer = (
             serializer if not isinstance(serializer, NotSetT) else tool.serializer
         )
-        final_enabled = enabled if enabled is not None else tool.enabled
 
         transformed_tool = cls(
             fn=final_fn,
@@ -582,7 +580,6 @@ class TransformedTool(Tool):
             serializer=final_serializer,
             meta=final_meta,
             transform_args=transform_args,
-            enabled=final_enabled,
         )
 
         return transformed_tool
@@ -897,11 +894,6 @@ class ToolTransformConfig(FastMCPBaseModel):
         description="The new meta information for the tool.",
     )
 
-    enabled: bool = Field(
-        default=True,
-        description="Whether the tool is enabled.",
-    )
-
     arguments: dict[str, ArgTransformConfig] = Field(
         default_factory=dict,
         description="A dictionary of argument transforms to apply to the tool.",
@@ -927,17 +919,20 @@ def apply_transformations_to_tools(
 ) -> dict[str, Tool]:
     """Apply a list of transformations to a list of tools. Tools that do not have any transformations
     are left unchanged.
+
+    Note: tools dict is keyed by prefixed key (e.g., "tool:my_tool"),
+    but transformations are keyed by tool name (e.g., "my_tool").
     """
 
     transformed_tools: dict[str, Tool] = {}
 
-    for tool_name, tool in tools.items():
-        if transformation := transformations.get(tool_name):
-            transformed_tools[transformation.name or tool_name] = transformation.apply(
-                tool
-            )
+    for tool_key, tool in tools.items():
+        # Look up transformation by tool name, not prefixed key
+        if transformation := transformations.get(tool.name):
+            transformed = transformation.apply(tool)
+            transformed_tools[transformed.key] = transformed
             continue
 
-        transformed_tools[tool_name] = tool
+        transformed_tools[tool_key] = tool
 
     return transformed_tools

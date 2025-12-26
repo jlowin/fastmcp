@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Annotated, Any, TypedDict
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, TypedDict
 
 from mcp.types import Icon
-from pydantic import BeforeValidator, Field, PrivateAttr
+from pydantic import BeforeValidator, Field
 from typing_extensions import Self, TypeVar
 
 import fastmcp
@@ -34,6 +34,21 @@ def _convert_set_default_none(maybe_set: set[T] | Sequence[T] | None) -> set[T]:
 class FastMCPComponent(FastMCPBaseModel):
     """Base class for FastMCP tools, prompts, resources, and resource templates."""
 
+    KEY_PREFIX: ClassVar[str] = ""
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        # Warn if a subclass doesn't define KEY_PREFIX (inherited or its own)
+        if not cls.KEY_PREFIX:
+            import warnings
+
+            warnings.warn(
+                f"{cls.__name__} does not define KEY_PREFIX. "
+                f"Component keys will not be type-prefixed, which may cause collisions.",
+                UserWarning,
+                stacklevel=2,
+            )
+
     name: str = Field(
         description="The name of the component.",
     )
@@ -56,25 +71,35 @@ class FastMCPComponent(FastMCPBaseModel):
     meta: dict[str, Any] | None = Field(
         default=None, description="Meta information about the component"
     )
-    enabled: bool = Field(
-        default=True,
-        description="Whether the component is enabled.",
-    )
     task_config: Annotated[
         TaskConfig,
         Field(description="Background task execution configuration (SEP-1686)."),
     ] = Field(default_factory=lambda: TaskConfig(mode="forbidden"))
 
+    @classmethod
+    def make_key(cls, identifier: str) -> str:
+        """Construct the lookup key for this component type.
+
+        Args:
+            identifier: The raw identifier (name for tools/prompts, uri for resources)
+
+        Returns:
+            A prefixed key like "tool:name" or "resource:uri"
+        """
+        if cls.KEY_PREFIX:
+            return f"{cls.KEY_PREFIX}:{identifier}"
+        return identifier
+
     @property
     def key(self) -> str:
-        """The lookup key for this component. Returns name by default.
+        """The globally unique lookup key for this component.
 
-        Subclasses override this to return different identifiers:
-        - Tools/Prompts: name
-        - Resources: str(uri)
-        - Templates: uri_template
+        Format: "{key_prefix}:{identifier}" e.g. "tool:my_tool", "resource:file://x.txt"
+
+        Subclasses should override this to use their specific identifier.
+        Base implementation uses name.
         """
-        return self.name
+        return self.make_key(self.name)
 
     def get_meta(
         self, include_fastmcp_meta: bool | None = None
@@ -108,15 +133,21 @@ class FastMCPComponent(FastMCPBaseModel):
         return self.model_dump() == other.model_dump()
 
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__}(name={self.name!r}, title={self.title!r}, description={self.description!r}, tags={self.tags}, enabled={self.enabled})"
+        return f"{self.__class__.__name__}(name={self.name!r}, title={self.title!r}, description={self.description!r}, tags={self.tags})"
 
     def enable(self) -> None:
-        """Enable the component."""
-        self.enabled = True
+        """Removed in 3.0. Use server.enable(keys=[...]) instead."""
+        raise NotImplementedError(
+            f"Component.enable() was removed in FastMCP 3.0. "
+            f"Use server.enable(keys=['{self.key}']) instead."
+        )
 
     def disable(self) -> None:
-        """Disable the component."""
-        self.enabled = False
+        """Removed in 3.0. Use server.disable(keys=[...]) instead."""
+        raise NotImplementedError(
+            f"Component.disable() was removed in FastMCP 3.0. "
+            f"Use server.disable(keys=['{self.key}']) instead."
+        )
 
     def copy(self) -> Self:  # type: ignore[override]
         """Create a copy of the component."""
@@ -151,42 +182,3 @@ class FastMCPComponent(FastMCPBaseModel):
         raise NotImplementedError(
             f"{self.__class__.__name__} does not implement add_to_docket()"
         )
-
-
-class MirroredComponent(FastMCPComponent):
-    """Base class for components that are mirrored from a remote server.
-
-    Mirrored components cannot be enabled or disabled directly. Call copy() first
-    to create a local version you can modify.
-    """
-
-    _mirrored: bool = PrivateAttr(default=False)
-
-    def __init__(self, *, _mirrored: bool = False, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
-        self._mirrored = _mirrored
-
-    def enable(self) -> None:
-        """Enable the component."""
-        if self._mirrored:
-            raise RuntimeError(
-                f"Cannot enable mirrored component '{self.name}'. "
-                f"Create a local copy first with {self.name}.copy() and add it to your server."
-            )
-        super().enable()
-
-    def disable(self) -> None:
-        """Disable the component."""
-        if self._mirrored:
-            raise RuntimeError(
-                f"Cannot disable mirrored component '{self.name}'. "
-                f"Create a local copy first with {self.name}.copy() and add it to your server."
-            )
-        super().disable()
-
-    def copy(self) -> Self:  # type: ignore[override]
-        """Create a copy of the component that can be modified."""
-        # Create a copy and mark it as not mirrored
-        copied = self.model_copy()
-        copied._mirrored = False
-        return copied

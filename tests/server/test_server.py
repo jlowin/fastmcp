@@ -85,13 +85,13 @@ class TestTools:
             return a + b
 
         mcp_tools = await mcp.get_tools()
-        assert "adder" in mcp_tools
+        assert any(t.name == "adder" for t in mcp_tools)
 
         mcp.remove_tool("adder")
         mcp_tools = await mcp.get_tools()
-        assert "adder" not in mcp_tools
+        assert not any(t.name == "adder" for t in mcp_tools)
 
-        with pytest.raises(NotFoundError, match="Unknown tool: adder"):
+        with pytest.raises(NotFoundError, match="Unknown tool: 'adder'"):
             await mcp._call_tool_mcp("adder", {"a": 1, "b": 2})
 
     async def test_add_tool_at_init(self):
@@ -108,9 +108,11 @@ class TestTools:
 
         tools = await mcp.get_tools()
         assert len(tools) == 2
-        assert tools["f"].name == "f"
-        assert tools["g-tool"].name == "g-tool"
-        assert tools["g-tool"].description == "add two to a number"
+        f_tool = next(t for t in tools if t.name == "f")
+        g_tool = next(t for t in tools if t.name == "g-tool")
+        assert f_tool.name == "f"
+        assert g_tool.name == "g-tool"
+        assert g_tool.description == "add two to a number"
 
 
 class TestServerDelegation:
@@ -177,7 +179,7 @@ class TestServerDelegation:
             return "local"
 
         tools = await mcp.get_tools()
-        assert "local_tool" in tools
+        assert any(t.name == "local_tool" for t in tools)
 
 
 class TestResourcePrefixMounting:
@@ -208,9 +210,11 @@ class TestResourcePrefixMounting:
         resources = await main_server.get_resources()
         templates = await main_server.get_resource_templates()
 
-        assert "resource://prefix/test-resource" in resources
-        assert "resource://prefix//absolute/path" in resources
-        assert "resource://prefix/{param}/template" in templates
+        assert any(str(r.uri) == "resource://prefix/test-resource" for r in resources)
+        assert any(str(r.uri) == "resource://prefix//absolute/path" for r in resources)
+        assert any(
+            t.uri_template == "resource://prefix/{param}/template" for t in templates
+        )
 
         # Test that prefixed resources can be accessed
         async with Client(main_server) as client:
@@ -230,109 +234,6 @@ class TestResourcePrefixMounting:
             )
             assert isinstance(result[0], TextResourceContents)
             assert result[0].text == "Template resource with param-value"
-
-
-class TestShouldIncludeComponent:
-    def test_no_filters_returns_true(self):
-        """Test that when no include or exclude filters are provided, always returns True."""
-        tool = Tool(name="test_tool", tags={"tag1", "tag2"}, parameters={})
-        mcp = FastMCP(tools=[tool])
-        result = mcp._should_enable_component(tool)
-        assert result is True
-
-    def test_exclude_string_tag_present_returns_false(self):
-        """Test that when an exclude string tag is present in tags, returns False."""
-        tool = Tool(
-            name="test_tool", tags={"tag1", "tag2", "exclude_me"}, parameters={}
-        )
-        mcp = FastMCP(tools=[tool], exclude_tags={"exclude_me"})
-        result = mcp._should_enable_component(tool)
-        assert result is False
-
-    def test_exclude_string_tag_absent_returns_true(self):
-        """Test that when an exclude string tag is not present in tags, returns True."""
-        tool = Tool(name="test_tool", tags={"tag1", "tag2"}, parameters={})
-        mcp = FastMCP(tools=[tool], exclude_tags={"exclude_me"})
-        result = mcp._should_enable_component(tool)
-        assert result is True
-
-    def test_multiple_exclude_tags_any_match_returns_false(self):
-        """Test that when any exclude tag matches, returns False."""
-        tool = Tool(name="test_tool", tags={"tag1", "tag2", "tag3"}, parameters={})
-        mcp = FastMCP(
-            tools=[tool], exclude_tags={"not_present", "tag2", "also_not_present"}
-        )
-        result = mcp._should_enable_component(tool)
-        assert result is False
-
-    def test_include_string_tag_present_returns_true(self):
-        """Test that when an include string tag is present in tags, returns True."""
-        tool = Tool(
-            name="test_tool", tags={"tag1", "include_me", "tag2"}, parameters={}
-        )
-        mcp = FastMCP(tools=[tool], include_tags={"include_me"})
-        result = mcp._should_enable_component(tool)
-        assert result is True
-
-    def test_include_string_tag_absent_returns_false(self):
-        """Test that when an include string tag is not present in tags, returns False."""
-        tool = Tool(name="test_tool", tags={"tag1", "tag2"}, parameters={})
-        mcp = FastMCP(tools=[tool], include_tags={"include_me"})
-        result = mcp._should_enable_component(tool)
-        assert result is False
-
-    def test_multiple_include_tags_any_match_returns_true(self):
-        """Test that when any include tag matches, returns True."""
-        tool = Tool(name="test_tool", tags={"tag1", "tag2", "tag3"}, parameters={})
-        mcp = FastMCP(
-            tools=[tool], include_tags={"not_present", "tag2", "also_not_present"}
-        )
-        result = mcp._should_enable_component(tool)
-        assert result is True
-
-    def test_multiple_include_tags_none_match_returns_false(self):
-        """Test that when no include tags match, returns False."""
-        tool = Tool(name="test_tool", tags={"tag1", "tag2", "tag3"}, parameters={})
-        mcp = FastMCP(tools=[tool], include_tags={"not_present", "also_not_present"})
-        result = mcp._should_enable_component(tool)
-        assert result is False
-
-    def test_exclude_takes_precedence_over_include(self):
-        """Test that exclude tags take precedence over include tags."""
-        tool = Tool(
-            name="test_tool", tags={"tag1", "tag2", "exclude_me"}, parameters={}
-        )
-        mcp = FastMCP(tools=[tool], include_tags={"tag1"}, exclude_tags={"exclude_me"})
-        result = mcp._should_enable_component(tool)
-        assert result is False
-
-    def test_empty_include_exclude_sets(self):
-        """Test behavior with empty include/exclude sets."""
-        # Empty include set means nothing matches
-        tool1 = Tool(name="test_tool", tags={"tag1", "tag2"}, parameters={})
-        mcp1 = FastMCP(tools=[tool1], include_tags=set())
-        result = mcp1._should_enable_component(tool1)
-        assert result is False
-
-        # Empty exclude set means nothing excluded
-        tool2 = Tool(name="test_tool", tags={"tag1", "tag2"}, parameters={})
-        mcp2 = FastMCP(tools=[tool2], exclude_tags=set())
-        result = mcp2._should_enable_component(tool2)
-        assert result is True
-
-    def test_empty_tags_with_filters(self):
-        """Test behavior when input tags are empty."""
-        # With include filters, empty tags should not match
-        tool1 = Tool(name="test_tool", tags=set(), parameters={})
-        mcp1 = FastMCP(tools=[tool1], include_tags={"required_tag"})
-        result = mcp1._should_enable_component(tool1)
-        assert result is False
-
-        # With exclude filters but no include, empty tags should pass
-        tool2 = Tool(name="test_tool", tags=set(), parameters={})
-        mcp2 = FastMCP(tools=[tool2], exclude_tags={"bad_tag"})
-        result = mcp2._should_enable_component(tool2)
-        assert result is True
 
 
 class TestSettingsFromEnvironment:

@@ -17,8 +17,8 @@ from key_value.aio.wrappers.statistics.wrapper import (
 from pydantic import BaseModel, Field
 from typing_extensions import NotRequired, Self, override
 
-from fastmcp.prompts.prompt import Prompt, PromptResult
-from fastmcp.resources.resource import Resource, ResourceContent
+from fastmcp.prompts.prompt import Message, Prompt, PromptResult
+from fastmcp.resources.resource import Resource, ResourceContent, ResourceResult
 from fastmcp.server.middleware.middleware import CallNext, Middleware, MiddlewareContext
 from fastmcp.tools.tool import Tool, ToolResult
 from fastmcp.utilities.logging import get_logger
@@ -34,35 +34,45 @@ ONE_MB_IN_BYTES = 1024 * 1024
 GLOBAL_KEY = "__global__"
 
 
-class CachableReadResourceContents(BaseModel):
+class CachableResourceContent(BaseModel):
     """A wrapper for ResourceContent that can be cached."""
 
     content: str | bytes
     mime_type: str | None = None
     meta: dict[str, Any] | None = None
 
+
+class CachableResourceResult(BaseModel):
+    """A wrapper for ResourceResult that can be cached."""
+
+    contents: list[CachableResourceContent]
+    meta: dict[str, Any] | None = None
+
     def get_size(self) -> int:
         return len(self.model_dump_json())
 
     @classmethod
-    def get_sizes(cls, values: Sequence[Self]) -> int:
-        return sum(item.get_size() for item in values)
+    def wrap(cls, value: ResourceResult) -> Self:
+        return cls(
+            contents=[
+                CachableResourceContent(
+                    content=item.content, mime_type=item.mime_type, meta=item.meta
+                )
+                for item in value.contents
+            ],
+            meta=value.meta,
+        )
 
-    @classmethod
-    def wrap(cls, values: Sequence[ResourceContent]) -> list[Self]:
-        return [
-            cls(content=item.content, mime_type=item.mime_type, meta=item.meta)
-            for item in values
-        ]
-
-    @classmethod
-    def unwrap(cls, values: Sequence[Self]) -> list[ResourceContent]:
-        return [
-            ResourceContent(
-                content=item.content, mime_type=item.mime_type, meta=item.meta
-            )
-            for item in values
-        ]
+    def unwrap(self) -> ResourceResult:
+        return ResourceResult(
+            contents=[
+                ResourceContent(
+                    content=item.content, mime_type=item.mime_type, meta=item.meta
+                )
+                for item in self.contents
+            ],
+            meta=self.meta,
+        )
 
 
 class CachableToolResult(BaseModel):
@@ -82,6 +92,44 @@ class CachableToolResult(BaseModel):
         return ToolResult(
             content=self.content,
             structured_content=self.structured_content,
+            meta=self.meta,
+        )
+
+
+class CachableMessage(BaseModel):
+    """A wrapper for Message that can be cached."""
+
+    role: str
+    content: mcp.types.TextContent | mcp.types.EmbeddedResource
+
+
+class CachablePromptResult(BaseModel):
+    """A wrapper for PromptResult that can be cached."""
+
+    messages: list[CachableMessage]
+    description: str | None = None
+    meta: dict[str, Any] | None = None
+
+    def get_size(self) -> int:
+        return len(self.model_dump_json())
+
+    @classmethod
+    def wrap(cls, value: PromptResult) -> Self:
+        return cls(
+            messages=[
+                CachableMessage(role=m.role, content=m.content) for m in value.messages
+            ],
+            description=value.description,
+            meta=value.meta,
+        )
+
+    def unwrap(self) -> PromptResult:
+        return PromptResult(
+            messages=[
+                Message(content=m.content, role=m.role)  # type: ignore[arg-type]
+                for m in self.messages
+            ],
+            description=self.description,
             meta=self.meta,
         )
 
@@ -214,17 +262,17 @@ class ResponseCachingMiddleware(Middleware):
             default_collection="prompts/list",
         )
 
-        self._read_resource_cache: PydanticAdapter[
-            list[CachableReadResourceContents]
-        ] = PydanticAdapter(
-            key_value=self._stats,
-            pydantic_model=list[CachableReadResourceContents],  # type: ignore[arg-type]
-            default_collection="resources/read",
+        self._read_resource_cache: PydanticAdapter[CachableResourceResult] = (
+            PydanticAdapter(
+                key_value=self._stats,
+                pydantic_model=CachableResourceResult,  # type: ignore[arg-type]
+                default_collection="resources/read",
+            )
         )
 
-        self._get_prompt_cache: PydanticAdapter[PromptResult] = PydanticAdapter(
+        self._get_prompt_cache: PydanticAdapter[CachablePromptResult] = PydanticAdapter(
             key_value=self._stats,
-            pydantic_model=PromptResult,  # type: ignore[arg-type]
+            pydantic_model=CachablePromptResult,  # type: ignore[arg-type]
             default_collection="prompts/get",
         )
 
@@ -261,7 +309,6 @@ class ResponseCachingMiddleware(Middleware):
                 annotations=tool.annotations,
                 meta=tool.meta,
                 tags=tool.tags,
-                enabled=tool.enabled,
             )
             for tool in tools
         ]
@@ -300,7 +347,6 @@ class ResponseCachingMiddleware(Middleware):
                 meta=resource.meta,
                 mime_type=resource.mime_type,
                 annotations=resource.annotations,
-                enabled=resource.enabled,
                 uri=resource.uri,
             )
             for resource in resources
@@ -338,7 +384,6 @@ class ResponseCachingMiddleware(Middleware):
                 description=prompt.description,
                 tags=prompt.tags,
                 meta=prompt.meta,
-                enabled=prompt.enabled,
                 arguments=prompt.arguments,
             )
             for prompt in prompts
@@ -389,23 +434,21 @@ class ResponseCachingMiddleware(Middleware):
     async def on_read_resource(
         self,
         context: MiddlewareContext[mcp.types.ReadResourceRequestParams],
-        call_next: CallNext[
-            mcp.types.ReadResourceRequestParams, Sequence[ResourceContent]
-        ],
-    ) -> Sequence[ResourceContent]:
+        call_next: CallNext[mcp.types.ReadResourceRequestParams, ResourceResult],
+    ) -> ResourceResult:
         """Read a resource from the cache, if caching is enabled, and the result is in the cache. Otherwise,
         otherwise call the next middleware and store the result in the cache if caching is enabled."""
         if self._read_resource_settings.get("enabled") is False:
             return await call_next(context=context)
 
         cache_key: str = str(context.message.uri)
-        cached_value: list[CachableReadResourceContents] | None
+        cached_value: CachableResourceResult | None
 
         if cached_value := await self._read_resource_cache.get(key=cache_key):
-            return CachableReadResourceContents.unwrap(values=cached_value)
+            return cached_value.unwrap()
 
-        value: Sequence[ResourceContent] = await call_next(context=context)
-        cached_value = CachableReadResourceContents.wrap(values=value)
+        value: ResourceResult = await call_next(context=context)
+        cached_value = CachableResourceResult.wrap(value)
 
         await self._read_resource_cache.put(
             key=cache_key,
@@ -413,7 +456,7 @@ class ResponseCachingMiddleware(Middleware):
             ttl=self._read_resource_settings.get("ttl", ONE_HOUR_IN_SECONDS),
         )
 
-        return CachableReadResourceContents.unwrap(values=cached_value)
+        return cached_value.unwrap()
 
     @override
     async def on_get_prompt(
@@ -429,13 +472,13 @@ class ResponseCachingMiddleware(Middleware):
         cache_key: str = f"{context.message.name}:{_get_arguments_str(arguments=context.message.arguments)}"
 
         if cached_value := await self._get_prompt_cache.get(key=cache_key):
-            return cached_value
+            return cached_value.unwrap()
 
         value: PromptResult = await call_next(context=context)
 
         await self._get_prompt_cache.put(
             key=cache_key,
-            value=value,
+            value=CachablePromptResult.wrap(value),
             ttl=self._get_prompt_settings.get("ttl", ONE_HOUR_IN_SECONDS),
         )
 

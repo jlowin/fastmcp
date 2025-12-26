@@ -33,13 +33,13 @@ from fastmcp.client.roots import RootsList
 from fastmcp.client.transports import ClientTransportT
 from fastmcp.exceptions import ResourceError, ToolError
 from fastmcp.mcp_config import MCPConfig
-from fastmcp.prompts import Prompt, PromptResult
+from fastmcp.prompts import Message, Prompt, PromptResult
 from fastmcp.prompts.prompt import PromptArgument
 from fastmcp.resources import Resource, ResourceTemplate
-from fastmcp.resources.resource import ResourceContent
+from fastmcp.resources.resource import ResourceContent, ResourceResult
 from fastmcp.server.context import Context
 from fastmcp.server.dependencies import get_context
-from fastmcp.server.providers.base import Provider, TaskComponents
+from fastmcp.server.providers.base import Provider
 from fastmcp.server.server import FastMCP
 from fastmcp.server.tasks.config import TaskConfig
 from fastmcp.tools.tool import Tool, ToolResult
@@ -47,7 +47,7 @@ from fastmcp.tools.tool_transform import (
     ToolTransformConfig,
     apply_transformations_to_tools,
 )
-from fastmcp.utilities.components import MirroredComponent
+from fastmcp.utilities.components import FastMCPComponent
 from fastmcp.utilities.logging import get_logger
 
 if TYPE_CHECKING:
@@ -64,7 +64,7 @@ ClientFactoryT = Callable[[], Client] | Callable[[], Awaitable[Client]]
 # -----------------------------------------------------------------------------
 
 
-class ProxyTool(Tool, MirroredComponent):
+class ProxyTool(Tool):
     """A Tool that represents and executes a tool on a remote server."""
 
     task_config: TaskConfig = TaskConfig(mode="forbidden")
@@ -106,7 +106,6 @@ class ProxyTool(Tool, MirroredComponent):
             icons=mcp_tool.icons,
             meta=mcp_tool.meta,
             tags=(mcp_tool.meta or {}).get("_fastmcp", {}).get("tags", []),
-            _mirrored=True,
         )
 
     async def run(
@@ -151,18 +150,18 @@ class ProxyTool(Tool, MirroredComponent):
         )
 
 
-class ProxyResource(Resource, MirroredComponent):
+class ProxyResource(Resource):
     """A Resource that represents and reads a resource from a remote server."""
 
     task_config: TaskConfig = TaskConfig(mode="forbidden")
-    _cached_content: ResourceContent | None = None
+    _cached_content: ResourceResult | None = None
     _backend_uri: str | None = None
 
     def __init__(
         self,
         client_factory: ClientFactoryT,
         *,
-        _cached_content: ResourceContent | None = None,
+        _cached_content: ResourceResult | None = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -204,10 +203,9 @@ class ProxyResource(Resource, MirroredComponent):
             meta=mcp_resource.meta,
             tags=(mcp_resource.meta or {}).get("_fastmcp", {}).get("tags", []),
             task_config=TaskConfig(mode="forbidden"),
-            _mirrored=True,
         )
 
-    async def read(self) -> ResourceContent:
+    async def read(self) -> ResourceResult:
         """Read the resource content from the remote server."""
         if self._cached_content is not None:
             return self._cached_content
@@ -220,23 +218,33 @@ class ProxyResource(Resource, MirroredComponent):
             raise ResourceError(
                 f"Remote server returned empty content for {backend_uri}"
             )
-        if isinstance(result[0], TextResourceContents):
-            return ResourceContent(
-                content=result[0].text,
-                mime_type=result[0].mimeType,
-                meta=result[0].meta,
-            )
-        elif isinstance(result[0], BlobResourceContents):
-            return ResourceContent(
-                content=base64.b64decode(result[0].blob),
-                mime_type=result[0].mimeType,
-                meta=result[0].meta,
-            )
-        else:
-            raise ResourceError(f"Unsupported content type: {type(result[0])}")
+
+        # Process all items in the result list, not just the first one
+        contents: list[ResourceContent] = []
+        for item in result:
+            if isinstance(item, TextResourceContents):
+                contents.append(
+                    ResourceContent(
+                        content=item.text,
+                        mime_type=item.mimeType,
+                        meta=item.meta,
+                    )
+                )
+            elif isinstance(item, BlobResourceContents):
+                contents.append(
+                    ResourceContent(
+                        content=base64.b64decode(item.blob),
+                        mime_type=item.mimeType,
+                        meta=item.meta,
+                    )
+                )
+            else:
+                raise ResourceError(f"Unsupported content type: {type(item)}")
+
+        return ResourceResult(contents=contents)
 
 
-class ProxyTemplate(ResourceTemplate, MirroredComponent):
+class ProxyTemplate(ResourceTemplate):
     """A ResourceTemplate that represents and creates resources from a remote server template."""
 
     task_config: TaskConfig = TaskConfig(mode="forbidden")
@@ -280,7 +288,6 @@ class ProxyTemplate(ResourceTemplate, MirroredComponent):
             meta=mcp_template.meta,
             tags=(mcp_template.meta or {}).get("_fastmcp", {}).get("tags", []),
             task_config=TaskConfig(mode="forbidden"),
-            _mirrored=True,
         )
 
     async def create_resource(
@@ -305,20 +312,30 @@ class ProxyTemplate(ResourceTemplate, MirroredComponent):
             raise ResourceError(
                 f"Remote server returned empty content for {parameterized_uri}"
             )
-        if isinstance(result[0], TextResourceContents):
-            cached_content = ResourceContent(
-                content=result[0].text,
-                mime_type=result[0].mimeType,
-                meta=result[0].meta,
-            )
-        elif isinstance(result[0], BlobResourceContents):
-            cached_content = ResourceContent(
-                content=base64.b64decode(result[0].blob),
-                mime_type=result[0].mimeType,
-                meta=result[0].meta,
-            )
-        else:
-            raise ResourceError(f"Unsupported content type: {type(result[0])}")
+
+        # Process all items in the result list, not just the first one
+        contents: list[ResourceContent] = []
+        for item in result:
+            if isinstance(item, TextResourceContents):
+                contents.append(
+                    ResourceContent(
+                        content=item.text,
+                        mime_type=item.mimeType,
+                        meta=item.meta,
+                    )
+                )
+            elif isinstance(item, BlobResourceContents):
+                contents.append(
+                    ResourceContent(
+                        content=base64.b64decode(item.blob),
+                        mime_type=item.mimeType,
+                        meta=item.meta,
+                    )
+                )
+            else:
+                raise ResourceError(f"Unsupported content type: {type(item)}")
+
+        cached_content = ResourceResult(contents=contents)
 
         return ProxyResource(
             client_factory=self._client_factory,
@@ -326,7 +343,9 @@ class ProxyTemplate(ResourceTemplate, MirroredComponent):
             name=self.name,
             title=self.title,
             description=self.description,
-            mime_type=result[0].mimeType,
+            mime_type=result[
+                0
+            ].mimeType,  # Use first item's mimeType for backward compatibility
             icons=self.icons,
             meta=self.meta,
             tags=(self.meta or {}).get("_fastmcp", {}).get("tags", []),
@@ -334,7 +353,7 @@ class ProxyTemplate(ResourceTemplate, MirroredComponent):
         )
 
 
-class ProxyPrompt(Prompt, MirroredComponent):
+class ProxyPrompt(Prompt):
     """A Prompt that represents and renders a prompt from a remote server."""
 
     task_config: TaskConfig = TaskConfig(mode="forbidden")
@@ -383,7 +402,6 @@ class ProxyPrompt(Prompt, MirroredComponent):
             meta=mcp_prompt.meta,
             tags=(mcp_prompt.meta or {}).get("_fastmcp", {}).get("tags", []),
             task_config=TaskConfig(mode="forbidden"),
-            _mirrored=True,
         )
 
     async def render(self, arguments: dict[str, Any]) -> PromptResult:  # type: ignore[override]
@@ -393,8 +411,10 @@ class ProxyPrompt(Prompt, MirroredComponent):
             result = await client.get_prompt(self._backend_name or self.name, arguments)
         # Convert GetPromptResult to PromptResult, preserving runtime meta from the result
         # (not the static prompt meta which includes fastmcp tags)
+        # Convert PromptMessages to Messages
+        messages = [Message(content=m.content, role=m.role) for m in result.messages]
         return PromptResult(
-            messages=result.messages,
+            messages=messages,
             description=result.description,
             meta=result.meta,
         )
@@ -541,14 +561,14 @@ class ProxyProvider(Provider):
     # Task methods
     # -------------------------------------------------------------------------
 
-    async def get_tasks(self) -> TaskComponents:
-        """Return empty TaskComponents since proxy components don't support tasks.
+    async def get_tasks(self) -> Sequence[FastMCPComponent]:
+        """Return empty list since proxy components don't support tasks.
 
         Override the base implementation to avoid calling list_tools() during
         server lifespan initialization, which would open the client before any
         context is set. All Proxy* components have task_config.mode="forbidden".
         """
-        return TaskComponents()
+        return []
 
     # lifespan() uses default implementation (empty context manager)
     # because client cleanup is handled per-request

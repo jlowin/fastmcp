@@ -1094,10 +1094,9 @@ class TestToolContextInjection:
 
         @mcp.tool
         async def tool_with_resource(ctx: Context) -> str:
-            r_iter = await ctx.read_resource("test://data")
-            r_list = list(r_iter)
-            assert len(r_list) == 1
-            r = r_list[0]
+            result = await ctx.read_resource("test://data")
+            assert len(result.contents) == 1
+            r = result.contents[0]
             return f"Read resource: {r.content} with mime type {r.mime_type}"
 
         async with Client(mcp) as client:
@@ -1165,7 +1164,7 @@ class TestToolDecorator:
 
         from fastmcp.exceptions import NotFoundError
 
-        with pytest.raises(NotFoundError, match="Unknown tool: add"):
+        with pytest.raises(NotFoundError, match="Unknown tool: 'add'"):
             await mcp._call_tool_mcp("add", {"x": 1, "y": 2})
 
     async def test_tool_decorator(self):
@@ -1188,7 +1187,7 @@ class TestToolDecorator:
             return x + y
 
         tools = await mcp.get_tools()
-        assert "add" in tools
+        assert any(t.name == "add" for t in tools)
 
         async with Client(mcp) as client:
             result = await client.call_tool("add", {"x": 1, "y": 2})
@@ -1333,10 +1332,9 @@ class TestToolDecorator:
         def sample_tool(x: int) -> int:
             return x * 2
 
-        tools_dict = await mcp.get_tools()
-        assert len(tools_dict) == 1
-        only_tool = next(iter(tools_dict.values()))
-        assert only_tool.tags == {"example", "test-tag"}
+        tools = await mcp.get_tools()
+        assert len(tools) == 1
+        assert tools[0].tags == {"example", "test-tag"}
 
     async def test_add_tool_with_custom_name(self):
         """Test adding a tool with a custom name using server.add_tool()."""
@@ -1349,13 +1347,13 @@ class TestToolDecorator:
         mcp.add_tool(Tool.from_function(multiply, name="custom_multiply"))
 
         tools = await mcp.get_tools()
-        assert "custom_multiply" in tools
+        assert any(t.name == "custom_multiply" for t in tools)
 
         async with Client(mcp) as client:
             result = await client.call_tool("custom_multiply", {"a": 5, "b": 3})
             assert result.data == 15
 
-        assert "multiply" not in tools
+        assert not any(t.name == "multiply" for t in tools)
 
     async def test_tool_with_annotated_arguments(self):
         """Test that tools with annotated arguments work correctly."""
@@ -1368,7 +1366,8 @@ class TestToolDecorator:
         ) -> None:
             pass
 
-        tool = (await mcp.get_tools())["add"]
+        tools = await mcp.get_tools()
+        tool = next(t for t in tools if t.name == "add")
         assert tool.parameters["properties"]["x"]["description"] == "x is an int"
         assert tool.parameters["properties"]["y"]["description"] == "y is not an int"
 
@@ -1383,7 +1382,8 @@ class TestToolDecorator:
         ) -> None:
             pass
 
-        tool = (await mcp.get_tools())["add"]
+        tools = await mcp.get_tools()
+        tool = next(t for t in tools if t.name == "add")
         assert tool.parameters["properties"]["x"]["description"] == "x is an int"
         assert tool.parameters["properties"]["y"]["description"] == "y is not an int"
 
@@ -1402,7 +1402,8 @@ class TestToolDecorator:
         assert isinstance(result_fn, FunctionTool)
 
         tools = await mcp.get_tools()
-        assert tools["direct_call_tool"] is result_fn
+        tool = next(t for t in tools if t.name == "direct_call_tool")
+        assert tool is result_fn
 
         async with Client(mcp) as client:
             result = await client.call_tool("direct_call_tool", {"x": 5, "y": 3})
@@ -1418,8 +1419,8 @@ class TestToolDecorator:
             return f"Result: {x}"
 
         tools = await mcp.get_tools()
-        assert "string_named_tool" in tools
-        assert "my_function" not in tools
+        assert any(t.name == "string_named_tool" for t in tools)
+        assert not any(t.name == "my_function" for t in tools)
 
         async with Client(mcp) as client:
             result = await client.call_tool("string_named_tool", {"x": 42})
@@ -1460,7 +1461,7 @@ class TestToolDecorator:
             """Multiply two numbers."""
             return a * b
 
-        tools_dict = await mcp.get_tools()
-        tool = tools_dict["multiply"]
+        tools = await mcp.get_tools()
+        tool = next(t for t in tools if t.name == "multiply")
 
         assert tool.meta == meta_data
