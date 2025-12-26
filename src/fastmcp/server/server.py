@@ -1684,6 +1684,7 @@ class FastMCP(Generic[LifespanResultT]):
         exclude_args: list[str] | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
+        serializer: ToolResultSerializerType | None = None,
     ) -> FunctionTool: ...
 
     @overload
@@ -1701,6 +1702,7 @@ class FastMCP(Generic[LifespanResultT]):
         exclude_args: list[str] | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
+        serializer: ToolResultSerializerType | None = None,
     ) -> Callable[[AnyFunction], FunctionTool]: ...
 
     def tool(
@@ -1717,6 +1719,7 @@ class FastMCP(Generic[LifespanResultT]):
         exclude_args: list[str] | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
+        serializer: ToolResultSerializerType | None = None,
     ) -> (
         Callable[[AnyFunction], FunctionTool]
         | FunctionTool
@@ -1783,7 +1786,7 @@ class FastMCP(Generic[LifespanResultT]):
             exclude_args=exclude_args,
             meta=meta,
             task=task if task is not None else self._support_tasks_by_default,
-            serializer=self._tool_serializer,
+            serializer=serializer if serializer else self._tool_serializer,
         )
 
         return result
