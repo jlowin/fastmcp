@@ -140,6 +140,7 @@ FastMCP automatically converts your function's return value into the appropriate
 -   **`dict`, `list`, `pydantic.BaseModel`**: Automatically serialized to a JSON string and sent as `TextResourceContents` (with `mime_type="application/json"` by default).
 -   **`bytes`**: Base64 encoded and sent as `BlobResourceContents`. You should specify an appropriate `mime_type` (e.g., `"image/png"`, `"application/octet-stream"`).
 -   **`ResourceContent`**: Full control over content, MIME type, and metadata. See [ResourceContent](#resourcecontent) below.
+-   **`ResourceResult`**: Wrap multiple contents with result-level metadata. See [ResourceResult](#resourceresult) below.
 -   **`None`**: Results in an empty resource content list being returned.
 
 #### ResourceContent
@@ -191,6 +192,57 @@ The `meta` field in `ResourceContent` is for runtime metadata specific to this r
 </Note>
 
 You can still return plain `str` or `bytes` from your resource functions—`ResourceContent` is opt-in for when you need to include metadata.
+
+#### ResourceResult
+
+<VersionBadge version="2.14.1" />
+
+When you need to return multiple pieces of content or add metadata at the result level, use `ResourceResult`. This wrapper type follows the same pattern as `ToolResult` and `PromptResult` elsewhere in FastMCP.
+
+```python
+from fastmcp import FastMCP
+from fastmcp.resources import ResourceResult, ResourceContent
+
+mcp = FastMCP(name="DataServer")
+
+@mcp.resource("data://items")
+def get_items() -> ResourceResult:
+    """Returns multiple items with result-level metadata."""
+    return ResourceResult(
+        contents=[
+            ResourceContent(content="item1", mime_type="text/plain"),
+            ResourceContent(content="item2", mime_type="text/plain"),
+        ],
+        meta={"count": 2, "version": "1.0"}
+    )
+```
+
+`ResourceResult` accepts two fields:
+
+**`contents`** - The resource content to return. This can be a single value (str, bytes, dict, etc.) or a list of values. Raw values are automatically normalized to `ResourceContent` objects, so you can pass simple types directly.
+
+**`meta`** - Optional result-level metadata dictionary included in the MCP response's `_meta` field. Use this for metadata about the overall read operation rather than individual content items.
+
+The automatic normalization means you can pass raw values without wrapping them in `ResourceContent`:
+
+```python
+# These are equivalent:
+return ResourceResult("hello")
+return ResourceResult(ResourceContent(content="hello", mime_type="text/plain"))
+
+# Pass multiple items as a list
+return ResourceResult(["item1", "item2"])
+
+# Mix raw values with ResourceContent for fine-grained control
+return ResourceResult([
+    "plain text item",
+    ResourceContent(content="<html>...</html>", mime_type="text/html"),
+])
+```
+
+<Note>
+`ResourceResult.meta` and `ResourceContent.meta` serve different purposes. Use `ResourceContent.meta` for metadata specific to a single piece of content (like CSP headers for an HTML widget). Use `ResourceResult.meta` for metadata about the overall read operation (like total counts or version information).
+</Note>
 
 ### Visibility Control
 

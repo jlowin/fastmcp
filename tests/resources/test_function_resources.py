@@ -1,7 +1,7 @@
 import pytest
 from pydantic import AnyUrl, BaseModel
 
-from fastmcp.resources.resource import FunctionResource, ResourceContent
+from fastmcp.resources.resource import FunctionResource, ResourceContent, ResourceResult
 
 
 class TestFunctionResource:
@@ -36,10 +36,16 @@ class TestFunctionResource:
             name="test",
             fn=get_data,
         )
+        # read() returns raw value
         result = await resource.read()
-        assert isinstance(result, ResourceContent)
-        assert result.content == "Hello, world!"
-        assert result.mime_type == "text/plain"
+        assert result == "Hello, world!"
+
+        # _read() converts to ResourceResult
+        result = await resource._read()
+        assert isinstance(result, ResourceResult)
+        assert len(result.contents) == 1
+        assert result.contents[0].content == "Hello, world!"
+        assert result.contents[0].mime_type == "text/plain"
 
     async def test_read_binary(self):
         """Test reading binary data from a FunctionResource."""
@@ -52,9 +58,14 @@ class TestFunctionResource:
             name="test",
             fn=get_data,
         )
+        # read() returns raw value
         result = await resource.read()
-        assert isinstance(result, ResourceContent)
-        assert result.content == b"Hello, world!"
+        assert result == b"Hello, world!"
+
+        # _read() converts to ResourceResult
+        result = await resource._read()
+        assert isinstance(result, ResourceResult)
+        assert result.contents[0].content == b"Hello, world!"
 
     async def test_json_conversion(self):
         """Test automatic JSON conversion of non-string results."""
@@ -67,10 +78,15 @@ class TestFunctionResource:
             name="test",
             fn=get_data,
         )
+        # read() returns raw value
         result = await resource.read()
-        assert isinstance(result, ResourceContent)
-        assert isinstance(result.content, str)
-        assert '"key":"value"' in result.content
+        assert result == {"key": "value"}
+
+        # _read() converts to ResourceResult with JSON serialization
+        result = await resource._read()
+        assert isinstance(result, ResourceResult)
+        assert isinstance(result.contents[0].content, str)
+        assert '"key":"value"' in result.contents[0].content
 
     async def test_error_handling(self):
         """Test error handling in FunctionResource."""
@@ -97,9 +113,14 @@ class TestFunctionResource:
             name="test",
             fn=lambda: MyModel(name="test"),
         )
-        result = await resource.read()
-        assert isinstance(result, ResourceContent)
-        assert result.content == '{"name":"test"}'
+        # read() returns raw value
+        raw_result = await resource.read()
+        assert isinstance(raw_result, MyModel)
+
+        # _read() converts to ResourceResult with JSON serialization
+        result = await resource._read()
+        assert isinstance(result, ResourceResult)
+        assert result.contents[0].content == '{"name":"test"}'
 
     async def test_custom_type_conversion(self):
         """Test handling of custom types."""
@@ -116,9 +137,14 @@ class TestFunctionResource:
             name="test",
             fn=get_data,
         )
-        result = await resource.read()
-        assert isinstance(result, ResourceContent)
-        assert isinstance(result.content, str)
+        # read() returns raw value
+        raw_result = await resource.read()
+        assert isinstance(raw_result, CustomData)
+
+        # _read() converts to ResourceResult
+        result = await resource._read()
+        assert isinstance(result, ResourceResult)
+        assert isinstance(result.contents[0].content, str)
 
     async def test_async_read_text(self):
         """Test reading text from async FunctionResource."""
@@ -131,10 +157,15 @@ class TestFunctionResource:
             name="test",
             fn=get_data,
         )
+        # read() returns raw value
         result = await resource.read()
-        assert isinstance(result, ResourceContent)
-        assert result.content == "Hello, world!"
-        assert result.mime_type == "text/plain"
+        assert result == "Hello, world!"
+
+        # _read() converts to ResourceResult
+        result = await resource._read()
+        assert isinstance(result, ResourceResult)
+        assert result.contents[0].content == "Hello, world!"
+        assert result.contents[0].mime_type == "text/plain"
 
     async def test_resource_content_text(self):
         """Test returning ResourceContent with text content."""

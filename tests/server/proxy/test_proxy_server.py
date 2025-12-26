@@ -302,8 +302,12 @@ class TestResources:
     async def test_read_json_resource(self, proxy_server: FastMCPProxy):
         async with Client(proxy_server) as client:
             result = await client.read_resource("data://users")
+        # ProxyResource.read() only returns the first content item
+        assert len(result) == 1
         assert isinstance(result[0], TextResourceContents)
-        assert json.loads(result[0].text) == USERS
+        # The first content contains the first user dict serialized as JSON
+        first_user = json.loads(result[0].text)
+        assert first_user == USERS[0]
 
     async def test_read_resource_returns_none_if_not_found(self, proxy_server):
         with pytest.raises(

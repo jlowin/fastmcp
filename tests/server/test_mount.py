@@ -655,8 +655,12 @@ class TestResourcesAndTemplates:
         # Check that resource can be accessed
         async with Client(main_app) as client:
             result = await client.read_resource("data://data/users")
+            # ResourceResult splits lists into multiple contents (one per string)
+            assert len(result) == 2
             assert isinstance(result[0], TextResourceContents)
-            assert json.loads(result[0].text) == ["user1", "user2"]
+            # Each content contains a plain string, not JSON
+            combined = [item.text for item in result]
+            assert combined == ["user1", "user2"]
 
     async def test_mount_with_resource_templates(self):
         """Test mounting a server with resource templates."""
