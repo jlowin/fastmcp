@@ -14,7 +14,7 @@ from key_value.aio.wrappers.statistics import StatisticsWrapper
 from key_value.aio.wrappers.statistics.wrapper import (
     KVStoreCollectionStatistics,
 )
-from pydantic import BaseModel, Field
+from pydantic import Field
 from typing_extensions import NotRequired, Self, override
 
 from fastmcp.prompts.prompt import Prompt, PromptResult
@@ -22,6 +22,7 @@ from fastmcp.resources.resource import Resource, ResourceContent, ResourceResult
 from fastmcp.server.middleware.middleware import CallNext, Middleware, MiddlewareContext
 from fastmcp.tools.tool import Tool, ToolResult
 from fastmcp.utilities.logging import get_logger
+from fastmcp.utilities.types import FastMCPBaseModel
 
 logger: Logger = get_logger(name=__name__)
 
@@ -34,7 +35,7 @@ ONE_MB_IN_BYTES = 1024 * 1024
 GLOBAL_KEY = "__global__"
 
 
-class CachableResourceContent(BaseModel):
+class CachableResourceContent(FastMCPBaseModel):
     """A wrapper for ResourceContent that can be cached."""
 
     content: str | bytes
@@ -42,7 +43,7 @@ class CachableResourceContent(BaseModel):
     meta: dict[str, Any] | None = None
 
 
-class CachableResourceResult(BaseModel):
+class CachableResourceResult(FastMCPBaseModel):
     """A wrapper for ResourceResult that can be cached."""
 
     contents: list[CachableResourceContent]
@@ -75,7 +76,7 @@ class CachableResourceResult(BaseModel):
         )
 
 
-class CachableToolResult(BaseModel):
+class CachableToolResult(FastMCPBaseModel):
     content: list[mcp.types.ContentBlock]
     structured_content: dict[str, Any] | None
     meta: dict[str, Any] | None
@@ -130,7 +131,7 @@ class GetPromptSettings(SharedMethodSettings):
     """Configuration options for Prompt-related caching."""
 
 
-class ResponseCachingStatistics(BaseModel):
+class ResponseCachingStatistics(FastMCPBaseModel):
     list_tools: KVStoreCollectionStatistics | None = Field(default=None)
     list_resources: KVStoreCollectionStatistics | None = Field(default=None)
     list_prompts: KVStoreCollectionStatistics | None = Field(default=None)

@@ -26,7 +26,7 @@ from mcp.types import (
     ToolExecution,
 )
 from mcp.types import Tool as MCPTool
-from pydantic import BaseModel, Field, PydanticSchemaGenerationError, model_validator
+from pydantic import Field, PydanticSchemaGenerationError, model_validator
 from typing_extensions import TypeVar
 
 import fastmcp
@@ -37,6 +37,7 @@ from fastmcp.utilities.json_schema import compress_schema, resolve_root_ref
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.types import (
     Audio,
+    FastMCPBaseModel,
     File,
     Image,
     NotSet,
@@ -75,7 +76,7 @@ def default_serializer(data: Any) -> str:
     return pydantic_core.to_json(data, fallback=str).decode()
 
 
-class ToolResult(BaseModel):
+class ToolResult(FastMCPBaseModel):
     content: list[ContentBlock] = Field(
         description="List of content blocks for the tool result"
     )
@@ -117,9 +118,9 @@ class ToolResult(BaseModel):
                 )
 
         super().__init__(
-            content=converted_content,
-            structured_content=structured_content,
-            meta=meta,
+            content=converted_content,  # type: ignore[unknown-argument]
+            structured_content=structured_content,  # type: ignore[unknown-argument]
+            meta=meta,  # type: ignore[unknown-argument]
         )
 
     def to_mcp_result(
