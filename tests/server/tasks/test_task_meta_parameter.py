@@ -29,7 +29,6 @@ class TestTaskMetaParameter:
 
         result = await server.call_tool("simple_tool", {"x": 5})
 
-        assert isinstance(result, ToolResult)
         first_content = result.content[0]
         assert isinstance(first_content, mcp.types.TextContent)
         assert first_content.text == "10"
@@ -45,7 +44,6 @@ class TestTaskMetaParameter:
         # Without task_meta, should execute synchronously
         result = await server.call_tool("task_enabled_tool", {"x": 5})
 
-        assert isinstance(result, ToolResult)
         first_content = result.content[0]
         assert isinstance(first_content, mcp.types.TextContent)
         assert first_content.text == "10"
@@ -265,9 +263,7 @@ class TestTaskMetaDirectServerCall:
                 "inner_tool", {"x": x}, task_meta=TaskMeta()
             )
             # Should get CreateTaskResult since we're in server context
-            if isinstance(result, mcp.types.CreateTaskResult):
-                return f"Created task: {result.task.taskId}"
-            return f"Result: {result}"
+            return f"Created task: {result.task.taskId}"
 
         async with Client(server) as client:
             # Call outer_tool which internally calls inner_tool with task_meta
@@ -288,7 +284,6 @@ class TestTaskMetaDirectServerCall:
             # Call inner tool synchronously (no task_meta)
             result = await server.call_tool("inner_tool", {"x": x})
             # Should get ToolResult directly
-            assert isinstance(result, ToolResult)
             first_content = result.content[0]
             assert isinstance(first_content, mcp.types.TextContent)
             return f"Got result: {first_content.text}"
@@ -311,9 +306,7 @@ class TestTaskMetaDirectServerCall:
             result = await server.call_tool(
                 "inner_tool", {"x": x}, task_meta=TaskMeta(ttl=custom_ttl)
             )
-            if isinstance(result, mcp.types.CreateTaskResult):
-                return f"Task TTL: {result.task.ttl}"
-            return "Not a task"
+            return f"Task TTL: {result.task.ttl}"
 
         async with Client(server) as client:
             result = await client.call_tool("outer_tool", {"x": 5})
