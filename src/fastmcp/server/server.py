@@ -1595,10 +1595,7 @@ class FastMCP(Generic[LifespanResultT]):
 
         try:
             # Extract SEP-1686 task metadata from request context.
-            # NOTE: fn_key is NOT set here. The component (or provider wrapper) will
-            # enrich fn_key with self.key. For mounted servers, the provider wrapper
-            # sets fn_key to the parent's namespaced key, ensuring Docket finds the
-            # correctly registered function.
+            # fn_key is set by call_tool() after finding the tool.
             task_meta: TaskMeta | None = None
             try:
                 ctx = self._mcp_server.request_context
@@ -1639,12 +1636,7 @@ class FastMCP(Generic[LifespanResultT]):
 
         try:
             # Extract SEP-1686 task metadata from request context.
-            # NOTE: fn_key is NOT set here for resources because we don't know yet
-            # if the URI will be handled by a direct resource or a template. Templates
-            # need their pattern-based key for Docket lookup, not the concrete URI.
-            # The component (or provider wrapper) will enrich fn_key with self.key.
-            # For mounted servers, the provider wrapper sets fn_key to the parent's
-            # namespaced key, ensuring Docket finds the correctly registered function.
+            # fn_key is set by read_resource() after finding the resource/template.
             task_meta: TaskMeta | None = None
             try:
                 ctx = self._mcp_server.request_context
@@ -1687,10 +1679,7 @@ class FastMCP(Generic[LifespanResultT]):
 
         try:
             # Extract SEP-1686 task metadata from request context.
-            # NOTE: fn_key is NOT set here. The component (or provider wrapper) will
-            # enrich fn_key with self.key. For mounted servers, the provider wrapper
-            # sets fn_key to the parent's namespaced key, ensuring Docket finds the
-            # correctly registered function.
+            # fn_key is set by render_prompt() after finding the prompt.
             task_meta: TaskMeta | None = None
             try:
                 ctx = self._mcp_server.request_context

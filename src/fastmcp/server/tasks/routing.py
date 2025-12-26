@@ -71,6 +71,6 @@ async def check_background_task(
     if not task_meta:
         return None
 
-    # fn_key is set by the component's _run()/_read()/_render() method
+    # fn_key is expected to be set; fall back to component.key for direct calls
     fn_key = task_meta.fn_key or component.key
     return await submit_to_docket(task_type, fn_key, component, arguments, task_meta)
