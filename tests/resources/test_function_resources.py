@@ -67,8 +67,8 @@ class TestFunctionResource:
         assert isinstance(result, ResourceResult)
         assert result.contents[0].content == b"Hello, world!"
 
-    async def test_json_conversion(self):
-        """Test automatic JSON conversion of non-string results."""
+    async def test_dict_return_raises_type_error(self):
+        """Returning dict from read() raises TypeError - use ResourceResult."""
 
         def get_data() -> dict:
             return {"key": "value"}
@@ -78,15 +78,13 @@ class TestFunctionResource:
             name="test",
             fn=get_data,
         )
-        # read() returns raw value
+        # read() returns raw value (no type checking at runtime)
         result = await resource.read()
         assert result == {"key": "value"}
 
-        # _read() converts to ResourceResult with JSON serialization
-        result = await resource._read()
-        assert isinstance(result, ResourceResult)
-        assert isinstance(result.contents[0].content, str)
-        assert '"key":"value"' in result.contents[0].content
+        # _read() raises TypeError - must return str, bytes, or ResourceResult
+        with pytest.raises(TypeError, match="must be str, bytes, or list"):
+            await resource._read()
 
     async def test_error_handling(self):
         """Test error handling in FunctionResource."""
@@ -102,8 +100,8 @@ class TestFunctionResource:
         with pytest.raises(ValueError, match="Test error"):
             await resource.read()
 
-    async def test_basemodel_conversion(self):
-        """Test handling of BaseModel types."""
+    async def test_basemodel_return_raises_type_error(self):
+        """Returning BaseModel from read() raises TypeError - use ResourceResult."""
 
         class MyModel(BaseModel):
             name: str
@@ -113,17 +111,16 @@ class TestFunctionResource:
             name="test",
             fn=lambda: MyModel(name="test"),
         )
-        # read() returns raw value
+        # read() returns raw value (no type checking at runtime)
         raw_result = await resource.read()
         assert isinstance(raw_result, MyModel)
 
-        # _read() converts to ResourceResult with JSON serialization
-        result = await resource._read()
-        assert isinstance(result, ResourceResult)
-        assert result.contents[0].content == '{"name":"test"}'
+        # _read() raises TypeError - must return str, bytes, or ResourceResult
+        with pytest.raises(TypeError, match="must be str, bytes, or list"):
+            await resource._read()
 
-    async def test_custom_type_conversion(self):
-        """Test handling of custom types."""
+    async def test_custom_type_return_raises_type_error(self):
+        """Returning custom type from read() raises TypeError - use ResourceResult."""
 
         class CustomData:
             def __str__(self) -> str:
@@ -137,14 +134,13 @@ class TestFunctionResource:
             name="test",
             fn=get_data,
         )
-        # read() returns raw value
+        # read() returns raw value (no type checking at runtime)
         raw_result = await resource.read()
         assert isinstance(raw_result, CustomData)
 
-        # _read() converts to ResourceResult
-        result = await resource._read()
-        assert isinstance(result, ResourceResult)
-        assert isinstance(result.contents[0].content, str)
+        # _read() raises TypeError - must return str, bytes, or ResourceResult
+        with pytest.raises(TypeError, match="must be str, bytes, or list"):
+            await resource._read()
 
     async def test_async_read_text(self):
         """Test reading text from async FunctionResource."""
@@ -209,21 +205,11 @@ class TestFunctionResource:
         assert result.meta is None
 
     async def test_resource_content_without_meta(self):
-        """Test returning ResourceContent without meta."""
-
-        def get_data() -> ResourceContent:
-            return ResourceContent(content="plain text")
-
-        resource = FunctionResource(
-            uri=AnyUrl("function://test"),
-            name="test",
-            fn=get_data,
-        )
-        result = await resource.read()
-        assert isinstance(result, ResourceContent)
-        assert result.content == "plain text"
-        assert result.mime_type is None
-        assert result.meta is None
+        """Test that ResourceContent auto-sets mime_type defaults."""
+        content = ResourceContent(content="plain text")
+        assert content.content == "plain text"
+        assert content.mime_type == "text/plain"  # Auto-set for string content
+        assert content.meta is None
 
     async def test_async_resource_content(self):
         """Test async function returning ResourceContent."""

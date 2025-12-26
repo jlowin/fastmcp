@@ -35,74 +35,61 @@ from fastmcp.utilities.types import (
 
 
 class ResourceContent(pydantic.BaseModel):
-    """Canonical wrapper for resource content.
+    """Wrapper for resource content with optional MIME type and metadata.
 
-    This is the internal representation for all resource reads. Users can
-    return ResourceContent directly for full control, or return simpler types
-    (str, bytes, dict) which will be automatically converted.
+    Accepts any value for content - strings and bytes pass through directly,
+    other types (dict, list, BaseModel, etc.) are automatically JSON-serialized.
 
     Example:
         ```python
-        from fastmcp import FastMCP
         from fastmcp.resources import ResourceContent
 
-        mcp = FastMCP()
+        # String content
+        ResourceContent("plain text")
 
-        @mcp.resource("widget://my-widget")
-        def my_widget() -> ResourceContent:
-            return ResourceContent(
-                content="<widget html>",
-                meta={"csp": "script-src 'self'"}
-            )
+        # Binary content
+        ResourceContent(b"binary data", mime_type="application/octet-stream")
+
+        # Auto-serialized to JSON
+        ResourceContent({"key": "value"})
+        ResourceContent(["a", "b", "c"])
         ```
     """
-
-    model_config = pydantic.ConfigDict(arbitrary_types_allowed=True)
 
     content: str | bytes
     mime_type: str | None = None
     meta: dict[str, Any] | None = None
 
-    @classmethod
-    def from_value(
-        cls,
-        value: Any,
+    def __init__(
+        self,
+        content: Any,
         mime_type: str | None = None,
         meta: dict[str, Any] | None = None,
-    ) -> ResourceContent:
-        """Convert any value to ResourceContent, handling serialization.
+        **kwargs: Any,
+    ):
+        """Create ResourceContent with automatic serialization.
 
         Args:
-            value: The value to convert. Can be:
-                - ResourceContent: returned as-is (meta param ignored)
-                - str: text content
-                - bytes: binary content
-                - other: serialized to JSON string
-
-            mime_type: Optional MIME type override. If not provided:
-                - str → "text/plain"
-                - bytes → "application/octet-stream"
-                - other → "application/json"
-
-            meta: Optional metadata (ignored if value is already ResourceContent)
-
-        Returns:
-            ResourceContent instance
+            content: The content value. str and bytes pass through directly.
+                     Other types (dict, list, BaseModel) are JSON-serialized.
+            mime_type: Optional MIME type. Defaults based on content type:
+                       str → "text/plain", bytes → "application/octet-stream",
+                       other → "application/json"
+            meta: Optional metadata dictionary.
         """
-        if isinstance(value, ResourceContent):
-            return value
-        if isinstance(value, str):
-            return cls(content=value, mime_type=mime_type or "text/plain", meta=meta)
-        if isinstance(value, bytes):
-            return cls(
-                content=value,
-                mime_type=mime_type or "application/octet-stream",
-                meta=meta,
-            )
-        # dict, list, BaseModel, etc → JSON
-        json_str = pydantic_core.to_json(value, fallback=str).decode()
-        return cls(
-            content=json_str, mime_type=mime_type or "application/json", meta=meta
+        if isinstance(content, str):
+            normalized_content: str | bytes = content
+            mime_type = mime_type or "text/plain"
+        elif isinstance(content, bytes):
+            normalized_content = content
+            mime_type = mime_type or "application/octet-stream"
+        else:
+            # dict, list, BaseModel, etc → JSON
+            normalized_content = pydantic_core.to_json(content, fallback=str).decode()
+            mime_type = mime_type or "application/json"
+
+        super().__init__(
+            content=normalized_content, mime_type=mime_type, meta=meta, **kwargs
         )
 
     def to_mcp_resource_contents(
@@ -135,10 +122,13 @@ class ResourceContent(pydantic.BaseModel):
 class ResourceResult(pydantic.BaseModel):
     """Canonical result type for resource reads.
 
-    Wraps resource contents with optional metadata, matching the
-    ToolResult/PromptResult pattern. Users can return ResourceResult
-    directly for full control, or return simpler types (str, bytes, dict)
-    which will be automatically converted.
+    Provides explicit control over resource responses: multiple content items,
+    per-item MIME types, and metadata at both the item and result level.
+
+    Accepts:
+        - str: Wrapped as single ResourceContent (text/plain)
+        - bytes: Wrapped as single ResourceContent (application/octet-stream)
+        - list[ResourceContent]: Used directly for multiple items or custom MIME types
 
     Example:
         ```python
@@ -147,20 +137,21 @@ class ResourceResult(pydantic.BaseModel):
 
         mcp = FastMCP()
 
+        # Simple string content
+        @mcp.resource("data://simple")
+        def get_simple() -> ResourceResult:
+            return ResourceResult("hello world")
+
+        # Multiple items with custom MIME types
         @mcp.resource("data://items")
         def get_items() -> ResourceResult:
             return ResourceResult(
                 contents=[
-                    ResourceContent(content="item1", mime_type="text/plain"),
-                    ResourceContent(content="item2", mime_type="text/plain"),
+                    ResourceContent({"key": "value"}),  # auto-serialized to JSON
+                    ResourceContent(b"binary data"),
                 ],
                 meta={"count": 2}
             )
-
-        # Or simply return a string - it will be auto-converted:
-        @mcp.resource("data://simple")
-        def get_simple() -> str:
-            return "hello world"
         ```
     """
 
@@ -169,15 +160,14 @@ class ResourceResult(pydantic.BaseModel):
 
     def __init__(
         self,
-        contents: str | bytes | ResourceContent | list[Any] | Any,
+        contents: str | bytes | list[ResourceContent],
         meta: dict[str, Any] | None = None,
         **kwargs: Any,
     ):
-        """Create ResourceResult with automatic content normalization.
+        """Create ResourceResult.
 
         Args:
-            contents: Raw content (str, bytes, dict, etc.) or ResourceContent objects.
-                      Automatically converted to list[ResourceContent].
+            contents: String, bytes, or list of ResourceContent objects.
             meta: Optional metadata about the resource result.
         """
         normalized = self._normalize_contents(contents)
@@ -185,18 +175,25 @@ class ResourceResult(pydantic.BaseModel):
 
     @staticmethod
     def _normalize_contents(
-        contents: str | bytes | ResourceContent | list[Any] | Any,
+        contents: str | bytes | list[ResourceContent],
     ) -> list[ResourceContent]:
-        """Normalize various input types to list[ResourceContent]."""
-        if isinstance(contents, ResourceContent):
-            return [contents]
+        """Normalize input to list[ResourceContent]."""
+        if isinstance(contents, str):
+            return [ResourceContent(contents)]
+        if isinstance(contents, bytes):
+            return [ResourceContent(contents)]
         if isinstance(contents, list):
-            return [
-                c if isinstance(c, ResourceContent) else ResourceContent.from_value(c)
-                for c in contents
-            ]
-        # str, bytes, dict, BaseModel, etc.
-        return [ResourceContent.from_value(contents)]
+            # Validate all items are ResourceContent
+            for i, item in enumerate(contents):
+                if not isinstance(item, ResourceContent):
+                    raise TypeError(
+                        f"contents[{i}] must be ResourceContent, got {type(item).__name__}. "
+                        f"Use ResourceContent({item!r}) to wrap the value."
+                    )
+            return contents
+        raise TypeError(
+            f"contents must be str, bytes, or list[ResourceContent], got {type(contents).__name__}"
+        )
 
     def to_mcp_result(self, uri: AnyUrl | str) -> mcp.types.ReadResourceResult:
         """Convert to MCP ReadResourceResult.
@@ -283,20 +280,12 @@ class Resource(FastMCPComponent):
 
     async def read(
         self,
-    ) -> (
-        str
-        | bytes
-        | ResourceContent
-        | list[str | bytes | ResourceContent]
-        | ResourceResult
-    ):
+    ) -> str | bytes | ResourceResult:
         """Read the resource content.
 
         Subclasses implement this to return resource data. Supported return types:
             - str: Text content
             - bytes: Binary content
-            - ResourceContent: Single content with explicit mime_type/meta
-            - list[str | bytes | ResourceContent]: Multiple contents
             - ResourceResult: Full control over contents and result-level meta
         """
         raise NotImplementedError("Subclasses must implement read()")
@@ -463,13 +452,7 @@ class FunctionResource(Resource):
 
     async def read(
         self,
-    ) -> (
-        str
-        | bytes
-        | ResourceContent
-        | list[str | bytes | ResourceContent]
-        | ResourceResult
-    ):
+    ) -> str | bytes | ResourceResult:
         """Read the resource by calling the wrapped function."""
         # self.fn is wrapped by without_injected_parameters which handles
         # dependency resolution internally

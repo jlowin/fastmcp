@@ -4,6 +4,7 @@ import mcp.types as mcp_types
 import pytest
 
 from fastmcp import FastMCP
+from fastmcp.resources import ResourceContent, ResourceResult
 
 
 @pytest.fixture()
@@ -29,9 +30,10 @@ def mcp() -> FastMCP:
 @pytest.fixture(autouse=True)
 def resources(mcp: FastMCP, test_dir: Path) -> FastMCP:
     @mcp.resource("dir://test_dir")
-    def list_test_dir() -> list[str]:
+    def list_test_dir() -> ResourceResult:
         """List the files in the test directory"""
-        return [str(f) for f in test_dir.iterdir()]
+        files = [str(f) for f in test_dir.iterdir()]
+        return ResourceResult([ResourceContent(f) for f in files])
 
     @mcp.resource("file://test_dir/example.py")
     def read_example_py() -> str:

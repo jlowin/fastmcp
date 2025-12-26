@@ -39,15 +39,15 @@ def get_greeting() -> str:
     """Provides a simple greeting message."""
     return "Hello from FastMCP Resources!"
 
-# Resource returning JSON data (dict is auto-serialized)
+# Resource returning JSON data
 @mcp.resource("data://config")
-def get_config() -> dict:
+def get_config() -> str:
     """Provides application configuration as JSON."""
-    return {
+    return json.dumps({
         "theme": "dark",
         "version": "1.2.0",
         "features": ["tools", "resources"],
-    }
+    })
 ```
 
 **Key Concepts:**
@@ -76,9 +76,9 @@ mcp = FastMCP(name="DataServer")
     tags={"monitoring", "status"}, # Categorization tags
     meta={"version": "2.1", "team": "infrastructure"}  # Custom metadata
 )
-def get_application_status() -> dict:
+def get_application_status() -> str:
     """Internal function description (ignored if description is provided above)."""
-    return {"status": "ok", "uptime": 12345, "version": mcp.settings.version} # Example usage
+    return json.dumps({"status": "ok", "uptime": 12345, "version": mcp.settings.version})
 ```
 
 <Card icon="code" title="@resource Decorator Arguments">
@@ -134,115 +134,66 @@ def get_application_status() -> dict:
 
 ### Return Values
 
-FastMCP automatically converts your function's return value into the appropriate MCP resource content:
+Resource functions must return one of three types:
 
 -   **`str`**: Sent as `TextResourceContents` (with `mime_type="text/plain"` by default).
--   **`dict`, `list`, `pydantic.BaseModel`**: Automatically serialized to a JSON string and sent as `TextResourceContents` (with `mime_type="application/json"` by default).
 -   **`bytes`**: Base64 encoded and sent as `BlobResourceContents`. You should specify an appropriate `mime_type` (e.g., `"image/png"`, `"application/octet-stream"`).
--   **`ResourceContent`**: Full control over content, MIME type, and metadata. See [ResourceContent](#resourcecontent) below.
--   **`ResourceResult`**: Wrap multiple contents with result-level metadata. See [ResourceResult](#resourceresult) below.
--   **`None`**: Results in an empty resource content list being returned.
-
-#### ResourceContent
-
-<VersionBadge version="2.14.1" />
-
-For complete control over resource responses, return a `ResourceContent` object. This lets you include metadata alongside your resource content, which is useful for cases like Content Security Policy headers for HTML widgets.
-
-```python
-from fastmcp import FastMCP
-from fastmcp.resources import ResourceContent
-
-mcp = FastMCP(name="WidgetServer")
-
-@mcp.resource("widget://my-widget")
-def get_widget() -> ResourceContent:
-    """Returns an HTML widget with CSP metadata."""
-    return ResourceContent(
-        content="<html><body>My Widget</body></html>",
-        mime_type="text/html",
-        meta={"csp": "script-src 'self'"}
-    )
-```
-
-`ResourceContent` accepts three fields:
-
-**`content`** - The actual resource content. Can be `str` (text content) or `bytes` (binary content). This is the data that will be returned to the client.
-
-**`mime_type`** - Optional MIME type for the content. Defaults to `"text/plain"` for string content and `"application/octet-stream"` for binary content.
-
-**`meta`** - Optional metadata dictionary that will be included in the MCP response's `_meta` field. Use this for runtime metadata like Content Security Policy headers, caching hints, or other client-specific data.
-
-```python
-# Binary content with metadata
-@mcp.resource("images://logo")
-def get_logo() -> ResourceContent:
-    """Returns a logo image with caching metadata."""
-    with open("logo.png", "rb") as f:
-        image_data = f.read()
-    return ResourceContent(
-        content=image_data,
-        mime_type="image/png",
-        meta={"cache-control": "max-age=3600"}
-    )
-```
+-   **`ResourceResult`**: Full control over contents, MIME types, and metadata. See [ResourceResult](#resourceresult) below.
 
 <Note>
-The `meta` field in `ResourceContent` is for runtime metadata specific to this read response. This is separate from the `meta` parameter in `@mcp.resource(meta={...})`, which provides static metadata about the resource definition itself (returned when listing resources).
+To return structured data like dicts or lists, serialize them to JSON strings using `json.dumps()`. This explicit approach ensures your type checker catches errors during development rather than at runtime when a client reads the resource.
 </Note>
-
-You can still return plain `str` or `bytes` from your resource functions—`ResourceContent` is opt-in for when you need to include metadata.
 
 #### ResourceResult
 
-<VersionBadge version="2.14.1" />
+<VersionBadge version="3.0.0" />
 
-When you need to return multiple pieces of content or add metadata at the result level, use `ResourceResult`. This wrapper type follows the same pattern as `ToolResult` and `PromptResult` elsewhere in FastMCP.
+`ResourceResult` gives you explicit control over resource responses: multiple content items, per-item MIME types, and metadata at both the item and result level.
 
 ```python
 from fastmcp import FastMCP
 from fastmcp.resources import ResourceResult, ResourceContent
 
-mcp = FastMCP(name="DataServer")
+mcp = FastMCP()
 
-@mcp.resource("data://items")
-def get_items() -> ResourceResult:
-    """Returns multiple items with result-level metadata."""
+@mcp.resource("data://users")
+def get_users() -> ResourceResult:
     return ResourceResult(
         contents=[
-            ResourceContent(content="item1", mime_type="text/plain"),
-            ResourceContent(content="item2", mime_type="text/plain"),
+            ResourceContent(content='[{"id": 1}]', mime_type="application/json"),
+            ResourceContent(content="# Users\n...", mime_type="text/markdown"),
         ],
-        meta={"count": 2, "version": "1.0"}
+        meta={"total": 1}
     )
 ```
 
-`ResourceResult` accepts two fields:
-
-**`contents`** - The resource content to return. This can be a single value (str, bytes, dict, etc.) or a list of values. Raw values are automatically normalized to `ResourceContent` objects, so you can pass simple types directly.
-
-**`meta`** - Optional result-level metadata dictionary included in the MCP response's `_meta` field. Use this for metadata about the overall read operation rather than individual content items.
-
-The automatic normalization means you can pass raw values without wrapping them in `ResourceContent`:
+For simple cases, you can pass `str` or `bytes` directly:
 
 ```python
-# These are equivalent:
-return ResourceResult("hello")
-return ResourceResult(ResourceContent(content="hello", mime_type="text/plain"))
-
-# Pass multiple items as a list
-return ResourceResult(["item1", "item2"])
-
-# Mix raw values with ResourceContent for fine-grained control
-return ResourceResult([
-    "plain text item",
-    ResourceContent(content="<html>...</html>", mime_type="text/html"),
-])
+return ResourceResult("plain text")           # auto-converts to ResourceContent
+return ResourceResult(b"\x00\x01\x02")         # binary content
 ```
 
-<Note>
-`ResourceResult.meta` and `ResourceContent.meta` serve different purposes. Use `ResourceContent.meta` for metadata specific to a single piece of content (like CSP headers for an HTML widget). Use `ResourceResult.meta` for metadata about the overall read operation (like total counts or version information).
-</Note>
+<Card title="ResourceResult">
+<ParamField body="contents" type="str | bytes | list[ResourceContent]" required>
+  Content to return. Strings and bytes are wrapped in a single `ResourceContent`. Use a list of `ResourceContent` for multiple items or custom MIME types.
+</ParamField>
+<ParamField body="meta" type="dict[str, Any] | None">
+  Result-level metadata, included in the MCP response's `_meta` field.
+</ParamField>
+</Card>
+
+<Card title="ResourceContent">
+<ParamField body="content" type="Any" required>
+  The content data. Strings and bytes pass through directly. Other types (dict, list, BaseModel) are automatically JSON-serialized.
+</ParamField>
+<ParamField body="mime_type" type="str | None">
+  MIME type. Defaults to `text/plain` for strings, `application/octet-stream` for bytes, `application/json` for serialized objects.
+</ParamField>
+<ParamField body="meta" type="dict[str, Any] | None">
+  Item-level metadata for this specific content.
+</ParamField>
+</Card>
 
 ### Visibility Control
 
@@ -286,20 +237,20 @@ from fastmcp import FastMCP, Context
 mcp = FastMCP(name="DataServer")
 
 @mcp.resource("resource://system-status")
-async def get_system_status(ctx: Context) -> dict:
+async def get_system_status(ctx: Context) -> str:
     """Provides system status information."""
-    return {
+    return json.dumps({
         "status": "operational",
         "request_id": ctx.request_id
-    }
+    })
 
 @mcp.resource("resource://{name}/details")
-async def get_details(name: str, ctx: Context) -> dict:
+async def get_details(name: str, ctx: Context) -> str:
     """Get details for a specific name."""
-    return {
+    return json.dumps({
         "name": name,
         "accessed_at": ctx.request_id
-    }
+    })
 ```
 
 For full documentation on the Context object and all its capabilities, see the [Context documentation](/servers/context).

@@ -1,5 +1,4 @@
 import functools
-import json
 from urllib.parse import quote
 
 import pytest
@@ -168,8 +167,8 @@ class TestResourceTemplate:
     async def test_create_resource(self):
         """Test creating a resource from a template."""
 
-        def my_func(key: str, value: int) -> dict:
-            return {"key": key, "value": value}
+        def my_func(key: str, value: int) -> str:
+            return f"key={key}, value={value}"
 
         template = ResourceTemplate.from_function(
             fn=my_func,
@@ -185,15 +184,13 @@ class TestResourceTemplate:
         assert isinstance(resource, FunctionResource)
         # read() returns raw value from function
         result = await resource.read()
-        assert result == {"key": "foo", "value": 123}
+        assert result == "key=foo, value=123"
 
         # _read() wraps in ResourceResult
         resource_result = await resource._read()
         assert isinstance(resource_result, ResourceResult)
         assert len(resource_result.contents) == 1
-        assert isinstance(resource_result.contents[0].content, str)
-        data = json.loads(resource_result.contents[0].content)
-        assert data == {"key": "foo", "value": 123}
+        assert resource_result.contents[0].content == "key=foo, value=123"
 
     async def test_async_text_resource(self):
         """Test creating a text resource from async function."""

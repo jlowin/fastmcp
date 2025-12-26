@@ -19,7 +19,7 @@ import mcp.types
 from mcp.types import AnyUrl
 
 from fastmcp.prompts.prompt import Prompt, PromptResult
-from fastmcp.resources.resource import Resource, ResourceContent, ResourceResult
+from fastmcp.resources.resource import Resource, ResourceResult
 from fastmcp.resources.template import ResourceTemplate
 from fastmcp.server.providers.base import Provider
 from fastmcp.tools.tool import Tool, ToolResult
@@ -305,15 +305,7 @@ class FastMCPProviderResourceTemplate(ResourceTemplate):
             if key_token is not None:
                 _docket_fn_key.reset(key_token)
 
-    async def read(
-        self, arguments: dict[str, Any]
-    ) -> (
-        str
-        | bytes
-        | ResourceContent
-        | list[str | bytes | ResourceContent]
-        | ResourceResult
-    ):
+    async def read(self, arguments: dict[str, Any]) -> str | bytes | ResourceResult:
         """Read the resource content for background task execution.
 
         Reads the resource via the wrapped server and returns the ResourceResult.

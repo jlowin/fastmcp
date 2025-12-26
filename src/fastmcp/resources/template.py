@@ -21,7 +21,7 @@ from pydantic import (
     validate_call,
 )
 
-from fastmcp.resources.resource import Resource, ResourceContent, ResourceResult
+from fastmcp.resources.resource import Resource, ResourceResult
 from fastmcp.server.dependencies import without_injected_parameters
 from fastmcp.server.tasks.config import TaskConfig
 from fastmcp.utilities.components import FastMCPComponent
@@ -155,15 +155,7 @@ class ResourceTemplate(FastMCPComponent):
         """Check if URI matches template and extract parameters."""
         return match_uri_template(uri, self.uri_template)
 
-    async def read(
-        self, arguments: dict[str, Any]
-    ) -> (
-        str
-        | bytes
-        | ResourceContent
-        | list[str | bytes | ResourceContent]
-        | ResourceResult
-    ):
+    async def read(self, arguments: dict[str, Any]) -> str | bytes | ResourceResult:
         """Read the resource content."""
         raise NotImplementedError(
             "Subclasses must implement read() or override create_resource()"
@@ -330,13 +322,7 @@ class FunctionResourceTemplate(ResourceTemplate):
     async def create_resource(self, uri: str, params: dict[str, Any]) -> Resource:
         """Create a resource from the template with the given parameters."""
 
-        async def resource_read_fn() -> (
-            str
-            | bytes
-            | ResourceContent
-            | list[str | bytes | ResourceContent]
-            | ResourceResult
-        ):
+        async def resource_read_fn() -> str | bytes | ResourceResult:
             # Call function and check if result is a coroutine
             result = await self.read(arguments=params)
             return result
@@ -351,15 +337,7 @@ class FunctionResourceTemplate(ResourceTemplate):
             task=self.task_config,
         )
 
-    async def read(
-        self, arguments: dict[str, Any]
-    ) -> (
-        str
-        | bytes
-        | ResourceContent
-        | list[str | bytes | ResourceContent]
-        | ResourceResult
-    ):
+    async def read(self, arguments: dict[str, Any]) -> str | bytes | ResourceResult:
         """Read the resource content."""
         # Type coercion for query parameters (which arrive as strings)
         kwargs = arguments.copy()

@@ -121,57 +121,51 @@ class TestResourceValidation:
 class TestResourceContent:
     """Test ResourceContent creation and conversion."""
 
-    def test_from_value_string(self):
+    def test_string_content(self):
         """String input creates text content with text/plain mime type."""
-        content = ResourceContent.from_value("hello world")
+        content = ResourceContent("hello world")
         assert content.content == "hello world"
         assert content.mime_type == "text/plain"
         assert content.meta is None
 
-    def test_from_value_bytes(self):
+    def test_bytes_content(self):
         """Bytes input creates binary content with octet-stream mime type."""
-        content = ResourceContent.from_value(b"\x00\x01\x02")
+        content = ResourceContent(b"\x00\x01\x02")
         assert content.content == b"\x00\x01\x02"
         assert content.mime_type == "application/octet-stream"
         assert content.meta is None
 
-    def test_from_value_dict(self):
+    def test_dict_serialized_to_json(self):
         """Dict input is JSON-serialized with application/json mime type."""
-        content = ResourceContent.from_value({"key": "value", "count": 42})
+        content = ResourceContent({"key": "value", "count": 42})
         assert content.content == '{"key":"value","count":42}'
         assert content.mime_type == "application/json"
 
-    def test_from_value_list(self):
+    def test_list_serialized_to_json(self):
         """List input is JSON-serialized."""
-        content = ResourceContent.from_value([1, 2, 3])
+        content = ResourceContent([1, 2, 3])
         assert content.content == "[1,2,3]"
         assert content.mime_type == "application/json"
 
-    def test_from_value_pydantic_model(self):
+    def test_pydantic_model_serialized_to_json(self):
         """Pydantic model is JSON-serialized."""
 
         class Item(BaseModel):
             name: str
             price: float
 
-        content = ResourceContent.from_value(Item(name="Widget", price=9.99))
+        content = ResourceContent(Item(name="Widget", price=9.99))
         assert content.content == '{"name":"Widget","price":9.99}'
         assert content.mime_type == "application/json"
 
-    def test_from_value_passthrough(self):
-        """ResourceContent input is returned unchanged."""
-        original = ResourceContent(content="test", mime_type="text/html", meta={"x": 1})
-        result = ResourceContent.from_value(original)
-        assert result is original
-
-    def test_from_value_custom_mime_type(self):
+    def test_custom_mime_type(self):
         """Custom mime type overrides default."""
-        content = ResourceContent.from_value("test", mime_type="text/html")
+        content = ResourceContent("test", mime_type="text/html")
         assert content.mime_type == "text/html"
 
-    def test_from_value_with_meta(self):
+    def test_with_meta(self):
         """Meta is passed through to content."""
-        content = ResourceContent.from_value("test", meta={"version": "1.0"})
+        content = ResourceContent("test", meta={"version": "1.0"})
         assert content.meta == {"version": "1.0"}
 
     def test_to_mcp_text_contents(self):
@@ -214,19 +208,16 @@ class TestResourceResult:
         assert result.contents[0].content == b"\xff\xfe"
         assert result.contents[0].mime_type == "application/octet-stream"
 
-    def test_init_from_dict(self):
-        """Dict input is JSON-serialized."""
-        result = ResourceResult({"page": 1, "total": 100})
-        assert len(result.contents) == 1
-        assert result.contents[0].content == '{"page":1,"total":100}'
-        assert result.contents[0].mime_type == "application/json"
+    def test_init_from_dict_raises_type_error(self):
+        """Dict input raises TypeError - must use ResourceContent for serialization."""
+        with pytest.raises(TypeError, match="must be str, bytes, or list"):
+            ResourceResult({"page": 1, "total": 100})  # type: ignore[arg-type]
 
-    def test_init_from_resource_content(self):
-        """ResourceContent input is wrapped in list."""
+    def test_init_from_single_resource_content_raises_type_error(self):
+        """Single ResourceContent raises TypeError - must be in a list."""
         content = ResourceContent(content="test", mime_type="text/html")
-        result = ResourceResult(content)
-        assert len(result.contents) == 1
-        assert result.contents[0] is content
+        with pytest.raises(TypeError, match="must be str, bytes, or list"):
+            ResourceResult(content)  # type: ignore[arg-type]
 
     def test_init_from_list_of_resource_content(self):
         """List of ResourceContent is used directly."""
@@ -239,16 +230,10 @@ class TestResourceResult:
         assert result.contents[0].content == "one"
         assert result.contents[1].content == "two"
 
-    def test_init_from_mixed_list(self):
-        """Mixed list items are normalized to ResourceContent."""
-        result = ResourceResult(["text", b"bytes", {"key": "value"}])
-        assert len(result.contents) == 3
-        assert result.contents[0].content == "text"
-        assert result.contents[0].mime_type == "text/plain"
-        assert result.contents[1].content == b"bytes"
-        assert result.contents[1].mime_type == "application/octet-stream"
-        assert result.contents[2].content == '{"key":"value"}'
-        assert result.contents[2].mime_type == "application/json"
+    def test_init_from_mixed_list_raises_type_error(self):
+        """Mixed list items raise TypeError - all items must be ResourceContent."""
+        with pytest.raises(TypeError, match=r"contents\[0\] must be ResourceContent"):
+            ResourceResult(["text", b"bytes", {"key": "value"}])  # type: ignore[arg-type]
 
     def test_init_preserves_meta(self):
         """Meta is preserved on ResourceResult."""
@@ -271,7 +256,13 @@ class TestResourceResult:
 
     def test_to_mcp_result_multiple_contents(self):
         """Multiple contents all get same URI."""
-        result = ResourceResult(["one", "two", "three"])
+        result = ResourceResult(
+            [
+                ResourceContent("one"),
+                ResourceContent("two"),
+                ResourceContent("three"),
+            ]
+        )
         mcp_result = result.to_mcp_result("resource://multi")
         assert len(mcp_result.contents) == 3
         for item in mcp_result.contents:
@@ -337,8 +328,10 @@ class TestResourceMetaPropagation:
         mcp = FastMCP()
 
         @mcp.resource("test://content-meta")
-        def resource_with_content_meta() -> ResourceContent:
-            return ResourceContent(content="data", meta={"item_version": "1.0"})
+        def resource_with_content_meta() -> ResourceResult:
+            return ResourceResult(
+                [ResourceContent(content="data", meta={"item_version": "1.0"})]
+            )
 
         async with Client(mcp) as client:
             result = await client.read_resource_mcp("test://content-meta")
