@@ -290,7 +290,7 @@ return PromptResult("Please help me with this task")  # auto-converts to single 
 The `meta` field in `PromptResult` is for runtime metadata specific to this render response. This is separate from the `meta` parameter in `@mcp.prompt(meta={...})`, which provides static metadata about the prompt definition itself (returned when listing prompts).
 </Note>
 
-You can still return plain `str`, `Message`, or lists from your prompt functions—`PromptResult` is opt-in for when you need to include metadata.
+You can still return plain `str` or `list[Message | str]` from your prompt functions—`PromptResult` is opt-in for when you need to include metadata.
 
 ### Required vs. Optional Parameters
 
