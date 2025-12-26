@@ -213,14 +213,6 @@ class Tool(FastMCPComponent):
         task: bool | TaskConfig | None = None,
     ) -> FunctionTool:
         """Create a Tool from a function."""
-        if serializer is not None and fastmcp.settings.deprecation_warnings:
-            warnings.warn(
-                "The `serializer` parameter is deprecated. "
-                "Return ToolResult from your tools for full control over serialization. "
-                "See https://gofastmcp.com/servers/tools#custom-serialization for migration examples.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
         return FunctionTool.from_function(
             fn=fn,
             name=name,
@@ -385,14 +377,6 @@ class Tool(FastMCPComponent):
         transform_args: dict[str, ArgTransform] | None = None,
         transform_fn: Callable[..., Any] | None = None,
     ) -> TransformedTool:
-        if serializer is not None and fastmcp.settings.deprecation_warnings:
-            warnings.warn(
-                "The `serializer` parameter is deprecated. "
-                "Return ToolResult from your tools for full control over serialization. "
-                "See https://gofastmcp.com/servers/tools#custom-serialization for migration examples.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
         from fastmcp.tools.tool_transform import TransformedTool
 
         return TransformedTool.from_tool(
