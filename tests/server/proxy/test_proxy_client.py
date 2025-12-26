@@ -16,7 +16,8 @@ from fastmcp.client.elicitation import ElicitRequestParams, ElicitResult
 from fastmcp.client.logging import LogMessage
 from fastmcp.client.sampling import RequestContext, SamplingMessage, SamplingParams
 from fastmcp.exceptions import ToolError
-from fastmcp.server.proxy import ProxyClient
+from fastmcp.server.elicitation import AcceptedElicitation
+from fastmcp.server.providers.proxy import ProxyClient
 
 
 @pytest.fixture
@@ -57,7 +58,9 @@ def fastmcp_server():
         )
 
         if result.action == "accept":
-            return f"Hello, {result.data.name}!"  # type: ignore[attr-defined]
+            assert isinstance(result, AcceptedElicitation)
+            assert isinstance(result.data, Person)
+            return f"Hello, {result.data.name}!"
         else:
             return "No name provided."
 
@@ -368,7 +371,9 @@ class TestProxyClient:
             )
 
             if result.action == "accept":
-                return f"Content: {result.data.content}, Acknowledge: {result.data.acknowledge}"  # type: ignore[attr-defined]
+                assert isinstance(result, AcceptedElicitation)
+                assert isinstance(result.data, TestModel)
+                return f"Content: {result.data.content}, Acknowledge: {result.data.acknowledge}"
             else:
                 return f"Elicitation {result.action}"
 
@@ -397,7 +402,7 @@ class TestProxyClient:
 
     async def test_client_factory_creates_fresh_sessions(self, fastmcp_server: FastMCP):
         """Test that the client factory pattern creates fresh sessions for each request."""
-        from fastmcp.server.proxy import FastMCPProxy
+        from fastmcp.server.providers.proxy import FastMCPProxy
 
         # Create a disconnected client (should use fresh sessions per request)
         base_client = Client(fastmcp_server)
@@ -411,8 +416,8 @@ class TestProxyClient:
         assert proxy_via_factory is not None
 
         # Verify they have the expected client factory behavior
-        assert hasattr(proxy_via_as_proxy, "_tool_manager")
-        assert hasattr(proxy_via_factory, "_tool_manager")
+        assert hasattr(proxy_via_as_proxy, "_local_provider")
+        assert hasattr(proxy_via_factory, "_local_provider")
 
     async def test_connected_client_reuses_sessions(self, fastmcp_server: FastMCP):
         """Test that connected clients passed to as_proxy reuse sessions (preserves #959 behavior)."""
@@ -422,4 +427,4 @@ class TestProxyClient:
 
             # Verify the proxy is created successfully and uses session reuse
             assert proxy is not None
-            assert hasattr(proxy, "_tool_manager")
+            assert hasattr(proxy, "_local_provider")

@@ -15,13 +15,13 @@ from key_value.aio.wrappers.statistics.wrapper import (
     PutStatistics,
 )
 from mcp.server.lowlevel.helper_types import ReadResourceContents
-from mcp.types import PromptMessage, TextContent, TextResourceContents
+from mcp.types import TextContent, TextResourceContents
 from pydantic import AnyUrl, BaseModel
 
 from fastmcp import Context, FastMCP
 from fastmcp.client.client import CallToolResult, Client
 from fastmcp.client.transports import FastMCPTransport
-from fastmcp.prompts.prompt import FunctionPrompt, Prompt
+from fastmcp.prompts.prompt import FunctionPrompt, Message, Prompt
 from fastmcp.resources.resource import Resource
 from fastmcp.server.middleware.caching import (
     CachableToolResult,
@@ -44,11 +44,8 @@ def sample_resource_fn() -> list[ReadResourceContents]:
     return [SAMPLE_READ_RESOURCE_CONTENTS]
 
 
-SAMPLE_PROMPT_CONTENTS = TextContent(type="text", text="test_text")
-
-
-def sample_prompt_fn() -> PromptMessage:
-    return PromptMessage(role="user", content=SAMPLE_PROMPT_CONTENTS)
+def sample_prompt_fn() -> Message:
+    return Message("test_text")
 
 
 SAMPLE_RESOURCE = Resource.from_function(
@@ -57,11 +54,7 @@ SAMPLE_RESOURCE = Resource.from_function(
 
 SAMPLE_PROMPT = Prompt.from_function(fn=sample_prompt_fn, name="test_prompt")
 SAMPLE_GET_PROMPT_RESULT = mcp.types.GetPromptResult(
-    messages=[
-        mcp.types.PromptMessage(
-            role="user", content=mcp.types.TextContent(type="text", text="test_text")
-        )
-    ]
+    messages=[Message("test_text").to_mcp_prompt_message()]
 )
 SAMPLE_TOOL = Tool(name="test_tool", parameters={"param1": "value1", "param2": 42})
 SAMPLE_TOOL_RESULT = ToolResult(
@@ -132,17 +125,19 @@ class TrackingCalculator:
     def how_to_calculate(self, a: int, b: int) -> str:
         return f"To calculate {a} + {b}, you need to add {a} and {b} together."
 
-    def get_add_calls(self) -> int:
-        return self.add_calls
+    def get_add_calls(self) -> str:
+        return str(self.add_calls)
 
-    def get_multiply_calls(self) -> int:
-        return self.multiply_calls
+    def get_multiply_calls(self) -> str:
+        return str(self.multiply_calls)
 
-    def get_crazy_calls(self) -> int:
-        return self.crazy_calls
+    def get_crazy_calls(self) -> str:
+        return str(self.crazy_calls)
 
     async def update_tool_list(self, context: Context):
-        await context.send_tool_list_changed()
+        import mcp.types
+
+        await context.send_notification(mcp.types.ToolListChangedNotification())
 
     def add_tools(self, fastmcp: FastMCP, prefix: str = ""):
         _ = fastmcp.add_tool(tool=Tool.from_function(fn=self.add, name=f"{prefix}add"))

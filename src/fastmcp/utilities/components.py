@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Annotated, Any, TypedDict, cast
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, TypedDict
 
 from mcp.types import Icon
-from pydantic import BeforeValidator, Field, PrivateAttr
+from pydantic import BeforeValidator, Field
 from typing_extensions import Self, TypeVar
 
 import fastmcp
+from fastmcp.server.tasks.config import TaskConfig
 from fastmcp.utilities.types import FastMCPBaseModel
+
+if TYPE_CHECKING:
+    from docket import Docket
+    from docket.execution import Execution
 
 T = TypeVar("T", default=Any)
 
@@ -28,6 +33,21 @@ def _convert_set_default_none(maybe_set: set[T] | Sequence[T] | None) -> set[T]:
 
 class FastMCPComponent(FastMCPBaseModel):
     """Base class for FastMCP tools, prompts, resources, and resource templates."""
+
+    KEY_PREFIX: ClassVar[str] = ""
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        # Warn if a subclass doesn't define KEY_PREFIX (inherited or its own)
+        if not cls.KEY_PREFIX:
+            import warnings
+
+            warnings.warn(
+                f"{cls.__name__} does not define KEY_PREFIX. "
+                f"Component keys will not be type-prefixed, which may cause collisions.",
+                UserWarning,
+                stacklevel=2,
+            )
 
     name: str = Field(
         description="The name of the component.",
@@ -51,26 +71,35 @@ class FastMCPComponent(FastMCPBaseModel):
     meta: dict[str, Any] | None = Field(
         default=None, description="Meta information about the component"
     )
-    enabled: bool = Field(
-        default=True,
-        description="Whether the component is enabled.",
-    )
+    task_config: Annotated[
+        TaskConfig,
+        Field(description="Background task execution configuration (SEP-1686)."),
+    ] = Field(default_factory=lambda: TaskConfig(mode="forbidden"))
 
-    _key: str | None = PrivateAttr()
+    @classmethod
+    def make_key(cls, identifier: str) -> str:
+        """Construct the lookup key for this component type.
 
-    def __init__(self, *, key: str | None = None, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
-        self._key = key
+        Args:
+            identifier: The raw identifier (name for tools/prompts, uri for resources)
+
+        Returns:
+            A prefixed key like "tool:name" or "resource:uri"
+        """
+        if cls.KEY_PREFIX:
+            return f"{cls.KEY_PREFIX}:{identifier}"
+        return identifier
 
     @property
     def key(self) -> str:
+        """The globally unique lookup key for this component.
+
+        Format: "{key_prefix}:{identifier}" e.g. "tool:my_tool", "resource:file://x.txt"
+
+        Subclasses should override this to use their specific identifier.
+        Base implementation uses name.
         """
-        The key of the component. This is used for internal bookkeeping
-        and may reflect e.g. prefixes or other identifiers. You should not depend on
-        keys having a certain value, as the same tool loaded from different
-        hierarchies of servers may have different keys.
-        """
-        return self._key or self.name
+        return self.make_key(self.name)
 
     def get_meta(
         self, include_fastmcp_meta: bool | None = None
@@ -96,29 +125,6 @@ class FastMCPComponent(FastMCPBaseModel):
 
         return meta or None
 
-    def model_copy(  # type: ignore[override]
-        self,
-        *,
-        update: dict[str, Any] | None = None,
-        deep: bool = False,
-        key: str | None = None,
-    ) -> Self:
-        """
-        Create a copy of the component.
-
-        Args:
-            update: A dictionary of fields to update.
-            deep: Whether to deep copy the component.
-            key: The key to use for the copy.
-        """
-        # `model_copy` has an `update` parameter but it doesn't work for certain private attributes
-        # https://github.com/pydantic/pydantic/issues/12116
-        # So we manually set the private attribute here instead, such as _key
-        copy = super().model_copy(update=update, deep=deep)
-        if key is not None:
-            copy._key = key
-        return cast(Self, copy)
-
     def __eq__(self, other: object) -> bool:
         if type(self) is not type(other):
             return False
@@ -127,55 +133,52 @@ class FastMCPComponent(FastMCPBaseModel):
         return self.model_dump() == other.model_dump()
 
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__}(name={self.name!r}, title={self.title!r}, description={self.description!r}, tags={self.tags}, enabled={self.enabled})"
+        return f"{self.__class__.__name__}(name={self.name!r}, title={self.title!r}, description={self.description!r}, tags={self.tags})"
 
     def enable(self) -> None:
-        """Enable the component."""
-        self.enabled = True
+        """Removed in 3.0. Use server.enable(keys=[...]) instead."""
+        raise NotImplementedError(
+            f"Component.enable() was removed in FastMCP 3.0. "
+            f"Use server.enable(keys=['{self.key}']) instead."
+        )
 
     def disable(self) -> None:
-        """Disable the component."""
-        self.enabled = False
+        """Removed in 3.0. Use server.disable(keys=[...]) instead."""
+        raise NotImplementedError(
+            f"Component.disable() was removed in FastMCP 3.0. "
+            f"Use server.disable(keys=['{self.key}']) instead."
+        )
 
     def copy(self) -> Self:  # type: ignore[override]
         """Create a copy of the component."""
         return self.model_copy()
 
+    def register_with_docket(self, docket: Docket) -> None:
+        """Register this component with docket for background execution.
 
-class MirroredComponent(FastMCPComponent):
-    """Base class for components that are mirrored from a remote server.
+        No-ops if task_config.mode is "forbidden". Subclasses override to
+        register their callable (self.run, self.read, self.render, or self.fn).
+        """
+        # Base implementation: no-op (subclasses override)
 
-    Mirrored components cannot be enabled or disabled directly. Call copy() first
-    to create a local version you can modify.
-    """
+    async def add_to_docket(
+        self, docket: Docket, *args: Any, **kwargs: Any
+    ) -> Execution:
+        """Schedule this component for background execution via docket.
 
-    _mirrored: bool = PrivateAttr(default=False)
+        Subclasses override this to handle their specific calling conventions:
+        - Tool: add_to_docket(docket, arguments: dict, **kwargs)
+        - Resource: add_to_docket(docket, **kwargs)
+        - ResourceTemplate: add_to_docket(docket, params: dict, **kwargs)
+        - Prompt: add_to_docket(docket, arguments: dict | None, **kwargs)
 
-    def __init__(self, *, _mirrored: bool = False, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
-        self._mirrored = _mirrored
-
-    def enable(self) -> None:
-        """Enable the component."""
-        if self._mirrored:
+        The **kwargs are passed through to docket.add() (e.g., key=task_key).
+        """
+        if not self.task_config.supports_tasks():
             raise RuntimeError(
-                f"Cannot enable mirrored component '{self.name}'. "
-                f"Create a local copy first with {self.name}.copy() and add it to your server."
+                f"Cannot add {self.__class__.__name__} '{self.name}' to docket: "
+                f"task execution not supported"
             )
-        super().enable()
-
-    def disable(self) -> None:
-        """Disable the component."""
-        if self._mirrored:
-            raise RuntimeError(
-                f"Cannot disable mirrored component '{self.name}'. "
-                f"Create a local copy first with {self.name}.copy() and add it to your server."
-            )
-        super().disable()
-
-    def copy(self) -> Self:  # type: ignore[override]
-        """Create a copy of the component that can be modified."""
-        # Create a copy and mark it as not mirrored
-        copied = self.model_copy()
-        copied._mirrored = False
-        return copied
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not implement add_to_docket()"
+        )

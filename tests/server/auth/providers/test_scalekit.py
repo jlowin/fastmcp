@@ -1,13 +1,11 @@
 """Tests for Scalekit OAuth provider."""
 
-import os
-from unittest.mock import patch
-
 import httpx
 import pytest
 
 from fastmcp import Client, FastMCP
 from fastmcp.client.transports import StreamableHttpTransport
+from fastmcp.server.auth.providers.jwt import JWTVerifier
 from fastmcp.server.auth.providers.scalekit import ScalekitProvider
 from fastmcp.utilities.tests import HeadlessOAuth, run_server_async
 
@@ -49,38 +47,6 @@ class TestScalekitProvider:
         )
 
         assert str(provider.base_url) == "https://preferred-base.com/"
-
-    def test_init_with_env_vars(self):
-        """Test ScalekitProvider initialization from environment variables."""
-        with patch.dict(
-            os.environ,
-            {
-                "FASTMCP_SERVER_AUTH_SCALEKITPROVIDER_ENVIRONMENT_URL": "https://env-scalekit.com",
-                "FASTMCP_SERVER_AUTH_SCALEKITPROVIDER_RESOURCE_ID": "res_456",
-                "FASTMCP_SERVER_AUTH_SCALEKITPROVIDER_BASE_URL": "https://envserver.com/mcp",
-                "FASTMCP_SERVER_AUTH_SCALEKITPROVIDER_REQUIRED_SCOPES": "read,write",
-            },
-        ):
-            provider = ScalekitProvider()
-
-            assert provider.environment_url == "https://env-scalekit.com"
-            assert provider.resource_id == "res_456"
-            assert str(provider.base_url) == "https://envserver.com/mcp"
-            assert provider.required_scopes == ["read", "write"]
-
-    def test_init_with_legacy_env_var(self):
-        """FASTMCP_SERVER_AUTH_SCALEKITPROVIDER_MCP_URL should still be supported."""
-        with patch.dict(
-            os.environ,
-            {
-                "FASTMCP_SERVER_AUTH_SCALEKITPROVIDER_ENVIRONMENT_URL": "https://env-scalekit.com",
-                "FASTMCP_SERVER_AUTH_SCALEKITPROVIDER_RESOURCE_ID": "res_456",
-                "FASTMCP_SERVER_AUTH_SCALEKITPROVIDER_MCP_URL": "https://legacy-env.com/",
-            },
-        ):
-            provider = ScalekitProvider()
-
-        assert str(provider.base_url) == "https://legacy-env.com/"
 
     def test_environment_variable_loading(self):
         """Test that environment variables are loaded correctly."""
@@ -125,16 +91,10 @@ class TestScalekitProvider:
         )
 
         # Check that JWT verifier uses the correct endpoints
-        assert (
-            provider.token_verifier.jwks_uri  # type: ignore[attr-defined]
-            == "https://my-env.scalekit.com/keys"
-        )
-        assert (
-            provider.token_verifier.issuer == "https://my-env.scalekit.com"  # type: ignore[attr-defined]
-        )
-        assert (
-            provider.token_verifier.audience is None  # type: ignore[attr-defined]
-        )
+        assert isinstance(provider.token_verifier, JWTVerifier)
+        assert provider.token_verifier.jwks_uri == "https://my-env.scalekit.com/keys"
+        assert provider.token_verifier.issuer == "https://my-env.scalekit.com"
+        assert provider.token_verifier.audience is None
 
     def test_required_scopes_hooks_into_verifier(self):
         """Token verifier should enforce required scopes when provided."""
@@ -145,7 +105,8 @@ class TestScalekitProvider:
             required_scopes=["read"],
         )
 
-        assert provider.token_verifier.required_scopes == ["read"]  # type: ignore[attr-defined]
+        assert isinstance(provider.token_verifier, JWTVerifier)
+        assert provider.token_verifier.required_scopes == ["read"]
 
     def test_authorization_servers_configuration(self):
         """Test that authorization servers are configured correctly."""

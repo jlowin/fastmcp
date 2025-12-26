@@ -4,6 +4,7 @@ import sys
 
 import pytest
 from mcp import McpError
+from mcp.types import TextResourceContents
 
 from fastmcp.client import Client
 from fastmcp.client.transports import SSETransport
@@ -34,17 +35,23 @@ def create_test_server() -> FastMCP:
         return f"Slept for {seconds} seconds"
 
     @server.resource(uri="data://users")
-    async def get_users():
-        return ["Alice", "Bob", "Charlie"]
+    async def get_users() -> str:
+        import json
+
+        return json.dumps(["Alice", "Bob", "Charlie"])
 
     @server.resource(uri="data://user/{user_id}")
-    async def get_user(user_id: str):
-        return {"id": user_id, "name": f"User {user_id}", "active": True}
+    async def get_user(user_id: str) -> str:
+        import json
+
+        return json.dumps({"id": user_id, "name": f"User {user_id}", "active": True})
 
     @server.resource(uri="request://headers")
-    async def get_headers() -> dict[str, str]:
+    async def get_headers() -> str:
+        import json
+
         request = get_http_request()
-        return dict(request.headers)
+        return json.dumps(dict(request.headers))
 
     @server.prompt
     def welcome(name: str) -> str:
@@ -75,7 +82,8 @@ async def test_http_headers(sse_server: str):
         transport=SSETransport(sse_server, headers={"X-DEMO-HEADER": "ABC"})
     ) as client:
         raw_result = await client.read_resource("request://headers")
-        json_result = json.loads(raw_result[0].text)  # type: ignore[attr-defined]
+        assert isinstance(raw_result[0], TextResourceContents)
+        json_result = json.loads(raw_result[0].text)
         assert "x-demo-header" in json_result
         assert json_result["x-demo-header"] == "ABC"
 
@@ -117,13 +125,15 @@ async def nested_sse_server():
         ws="websockets-sansio",
     )
 
-    server_task = asyncio.create_task(uvicorn.Server(config).serve())
+    uvicorn_server = uvicorn.Server(config)
+    server_task = asyncio.create_task(uvicorn_server.serve())
     await asyncio.sleep(0.1)
 
     try:
         yield f"http://127.0.0.1:{port}/nest-outer/nest-inner/mcp/sse/"
     finally:
-        server_task.cancel()
+        # Graceful shutdown - required for uvicorn 0.39+ due to context isolation
+        uvicorn_server.should_exit = True
         try:
             await server_task
         except asyncio.CancelledError:

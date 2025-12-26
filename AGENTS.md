@@ -18,6 +18,11 @@ uv run pytest -n auto                # Run full test suite
 
 **Tests must pass and lint/typing must be clean before committing.**
 
+**Before creating a PR**, evaluate whether documentation needs updating:
+- New features or APIs require corresponding docs
+- Changed behavior should be reflected in existing docs
+- Check `docs/` for affected pages
+
 ## Repository Structure
 
 | Path               | Purpose                                                                             |
@@ -130,7 +135,6 @@ async with Client(transport=StreamableHttpTransport(server_url)) as client:
 - Follow existing patterns and maintain consistency
 - **Prioritize readable, understandable code** - clarity over cleverness
 - Avoid obfuscated or confusing patterns even if they're shorter
-- Use `# type: ignore[attr-defined]` in tests for MCP results instead of type assertions
 - Each feature needs corresponding tests
 
 ### Module Exports
@@ -264,7 +268,6 @@ uv sync                    # Installs all deps including dev tools
 ### Error Handling
 
 - Never use bare `except` - be specific with exception types
-- Use `# type: ignore[attr-defined]` in tests for MCP results
 
 ### Build Issues (Common Solutions)
 

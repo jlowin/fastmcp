@@ -28,7 +28,7 @@ The most common way to define a prompt is by decorating a Python function. The d
 
 ```python
 from fastmcp import FastMCP
-from fastmcp.prompts.prompt import Message, PromptMessage, TextContent
+from fastmcp.prompts import Message
 
 mcp = FastMCP(name="PromptServer")
 
@@ -38,12 +38,14 @@ def ask_about_topic(topic: str) -> str:
     """Generates a user message asking for an explanation of a topic."""
     return f"Can you please explain the concept of '{topic}'?"
 
-# Prompt returning a specific message type
+# Prompt returning multiple messages
 @mcp.prompt
-def generate_code_request(language: str, task_description: str) -> PromptMessage:
-    """Generates a user message requesting code generation."""
-    content = f"Write a {language} function that performs the following task: {task_description}"
-    return PromptMessage(role="user", content=TextContent(type="text", text=content))
+def generate_code_request(language: str, task_description: str) -> list[Message]:
+    """Generates a conversation for code generation."""
+    return [
+        Message(f"Write a {language} function that performs the following task: {task_description}"),
+        Message("I'll help you write that function.", role="assistant"),
+    ]
 ```
 
 **Key Concepts:**
@@ -94,7 +96,8 @@ def data_analysis_prompt(
 </ParamField>
 
 <ParamField body="enabled" type="bool" default="True">
-  A boolean to enable or disable the prompt. See [Disabling Prompts](#disabling-prompts) for more information
+  <Warning>Deprecated in v3.0.0. Use `mcp.enable()` / `mcp.disable()` at the server level instead.</Warning>
+  A boolean to enable or disable the prompt. See [Visibility Control](#visibility-control) for the recommended approach.
 </ParamField>
 
 <ParamField body="icons" type="list[Icon] | None">
@@ -106,7 +109,7 @@ def data_analysis_prompt(
 <ParamField body="meta" type="dict[str, Any] | None">
   <VersionBadge version="2.11.0" />
 
-  Optional meta information about the prompt. This data is passed through to the MCP client as the `_meta` field of the client-side prompt object and can be used for custom metadata, versioning, or other application-specific purposes.
+  Optional meta information about the prompt. This data is passed through to the MCP client as the `meta` field of the client-side prompt object and can be used for custom metadata, versioning, or other application-specific purposes.
 </ParamField>
 </Card>
 
@@ -190,16 +193,14 @@ Avoid: Complex Pydantic models, deeply nested structures, custom classes
 
 ### Return Values
 
-FastMCP intelligently handles different return types from your prompt function:
+Prompt functions must return one of these types:
 
--   **`str`**: Automatically converted to a single `PromptMessage`.
--   **`PromptMessage`**: Used directly as provided. (Note a more user-friendly `Message` constructor is available that can accept raw strings instead of `TextContent` objects.)
--   **`list[PromptMessage | str]`**: Used as a sequence of messages (a conversation).
+-   **`str`**: Sent as a single user message.
+-   **`list[Message | str]`**: A sequence of messages (a conversation). Strings are auto-converted to user Messages.
 -   **`PromptResult`**: Full control over messages, description, and metadata. See [PromptResult](#promptresult) below.
--   **`Any`**: If the return type is not one of the above, the return value is attempted to be converted to a string and used as a `PromptMessage`.
 
 ```python
-from fastmcp.prompts.prompt import Message
+from fastmcp.prompts import Message
 
 @mcp.prompt
 def roleplay_scenario(character: str, situation: str) -> list[Message]:
@@ -210,11 +211,46 @@ def roleplay_scenario(character: str, situation: str) -> list[Message]:
     ]
 ```
 
+#### Message
+
+<VersionBadge version="3.0.0" />
+
+`Message` provides a user-friendly wrapper for prompt messages with automatic serialization.
+
+```python
+from fastmcp.prompts import Message
+
+# String content (user role by default)
+Message("Hello, world!")
+
+# Explicit role
+Message("I can help with that.", role="assistant")
+
+# Auto-serialized to JSON text
+Message({"key": "value"})
+Message(["item1", "item2"])
+```
+
+`Message` accepts two fields:
+
+**`content`** - The message content. Strings pass through directly. Other types (dict, list, BaseModel) are automatically JSON-serialized to text.
+
+**`role`** - The message role, either `"user"` (default) or `"assistant"`.
+
+<Card title="Message">
+<ParamField body="content" type="Any" required>
+  The content data. Strings pass through directly. Other types (dict, list, BaseModel) are automatically JSON-serialized.
+</ParamField>
+<ParamField body="role" type="Literal['user', 'assistant']" default="user">
+  The message role.
+</ParamField>
+</Card>
+
 #### PromptResult
 
-<VersionBadge version="2.14.1" />
+<VersionBadge version="3.0.0" />
 
-For complete control over prompt responses, return a `PromptResult` object. This lets you include metadata alongside your prompt messages, which is useful for passing runtime information to clients.
+`PromptResult` gives you explicit control over prompt responses: multiple messages, roles, and metadata at both the message and result level.
 
 ```python
 from fastmcp import FastMCP
@@ -228,25 +264,36 @@ def code_review(code: str) -> PromptResult:
     return PromptResult(
         messages=[
             Message(f"Please review this code:\n\n```\n{code}\n```"),
+            Message("I'll analyze this code for issues.", role="assistant"),
         ],
         description="Code review prompt",
         meta={"review_type": "security", "priority": "high"}
     )
 ```
 
-`PromptResult` accepts three fields:
+For simple cases, you can pass a string directly to `PromptResult`:
 
-**`messages`** - A list of `PromptMessage` or `Message` objects representing the conversation to send to the LLM.
+```python
+return PromptResult("Please help me with this task")  # auto-converts to single Message
+```
 
-**`description`** - Optional description of the prompt result. If not provided, defaults to the prompt's docstring.
-
-**`meta`** - Optional metadata dictionary that will be included in the MCP response's `_meta` field. Use this for runtime metadata like categorization, priority, or other client-specific data.
+<Card title="PromptResult">
+<ParamField body="messages" type="str | list[Message]" required>
+  Messages to return. Strings are wrapped as a single user Message.
+</ParamField>
+<ParamField body="description" type="str | None">
+  Optional description of the prompt result. If not provided, defaults to the prompt's docstring.
+</ParamField>
+<ParamField body="meta" type="dict[str, Any] | None">
+  Result-level metadata, included in the MCP response's `_meta` field. Use this for runtime metadata like categorization, priority, or other client-specific data.
+</ParamField>
+</Card>
 
 <Note>
 The `meta` field in `PromptResult` is for runtime metadata specific to this render response. This is separate from the `meta` parameter in `@mcp.prompt(meta={...})`, which provides static metadata about the prompt definition itself (returned when listing prompts).
 </Note>
 
-You can still return plain `str`, `PromptMessage`, or lists from your prompt functions—`PromptResult` is opt-in for when you need to include metadata.
+You can still return plain `str` or `list[Message | str]` from your prompt functions—`PromptResult` is opt-in for when you need to include metadata.
 
 ### Required vs. Optional Parameters
 
@@ -268,31 +315,36 @@ def data_analysis_prompt(
 
 In this example, the client *must* provide `data_uri`. If `analysis_type` or `include_charts` are omitted, their default values will be used.
 
-### Disabling Prompts
+### Visibility Control
 
-<VersionBadge version="2.8.0" />
+<VersionBadge version="3.0.0" />
 
-You can control the visibility and availability of prompts by enabling or disabling them. Disabled prompts will not appear in the list of available prompts, and attempting to call a disabled prompt will result in an "Unknown prompt" error.
-
-By default, all prompts are enabled. You can disable a prompt upon creation using the `enabled` parameter in the decorator:
+You can control which prompts are visible to clients using server-level visibility control. Disabled prompts don't appear in `list_prompts` and can't be called.
 
 ```python
-@mcp.prompt(enabled=False)
-def experimental_prompt():
-    """This prompt is not ready for use."""
-    return "This is an experimental prompt."
+from fastmcp import FastMCP
+
+mcp = FastMCP("MyServer")
+
+@mcp.prompt(tags={"public"})
+def public_prompt(topic: str) -> str:
+    return f"Discuss: {topic}"
+
+@mcp.prompt(tags={"internal"})
+def internal_prompt() -> str:
+    return "Internal system prompt"
+
+# Disable specific prompts by key
+mcp.disable(keys=["prompt:internal_prompt"])
+
+# Disable prompts by tag
+mcp.disable(tags={"internal"})
+
+# Or use allowlist mode - only show prompts with specific tags
+mcp.enable(tags={"public"}, only=True)
 ```
 
-You can also toggle a prompt's state programmatically after it has been created:
-
-```python
-@mcp.prompt
-def seasonal_prompt(): return "Happy Holidays!"
-
-# Disable and re-enable the prompt
-seasonal_prompt.disable()
-seasonal_prompt.enable()
-```
+See [Local Provider](/servers/providers/local#visibility-control) for the complete visibility control API including key formats and tag-based filtering.
 
 ### Async Prompts
 
@@ -349,9 +401,9 @@ def example_prompt() -> str:
     return "Hello!"
 
 # These operations trigger notifications:
-mcp.add_prompt(example_prompt)  # Sends prompts/list_changed notification
-example_prompt.disable()        # Sends prompts/list_changed notification  
-example_prompt.enable()         # Sends prompts/list_changed notification
+mcp.add_prompt(example_prompt)               # Sends prompts/list_changed notification
+mcp.disable(keys=["prompt:example_prompt"])  # Sends prompts/list_changed notification
+mcp.enable(keys=["prompt:example_prompt"])   # Sends prompts/list_changed notification
 ```
 
 Notifications are only sent when these operations occur within an active MCP request context (e.g., when called from within a tool or other MCP operation). Operations performed during server initialization do not trigger notifications.

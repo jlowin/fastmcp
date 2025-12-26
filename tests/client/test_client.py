@@ -8,6 +8,7 @@ import anyio
 import pytest
 from mcp import ClientSession, McpError
 from mcp.client.auth import OAuthClientProvider
+from mcp.types import TextContent
 from pydantic import AnyUrl
 
 import fastmcp
@@ -49,15 +50,22 @@ def fastmcp_server():
         await asyncio.sleep(seconds)
         return f"Slept for {seconds} seconds"
 
-    # Add a resource
+    # Add a resource (return JSON string for proper typing)
     @server.resource(uri="data://users")
-    async def get_users():
-        return ["Alice", "Bob", "Charlie"]
+    async def get_users() -> str:
+        import json
 
-    # Add a resource template
+        return json.dumps(["Alice", "Bob", "Charlie"], separators=(",", ":"))
+
+    # Add a resource template (return JSON string for proper typing)
     @server.resource(uri="data://user/{user_id}")
-    async def get_user(user_id: str):
-        return {"id": user_id, "name": f"User {user_id}", "active": True}
+    async def get_user(user_id: str) -> str:
+        import json
+
+        return json.dumps(
+            {"id": user_id, "name": f"User {user_id}", "active": True},
+            separators=(",", ":"),
+        )
 
     # Add a prompt
     @server.prompt
@@ -71,14 +79,16 @@ def fastmcp_server():
 @pytest.fixture
 def tagged_resources_server():
     """Fixture that creates a FastMCP server with tagged resources and templates."""
+    import json
+
     server = FastMCP("TaggedResourcesServer")
 
     # Add a resource with tags
     @server.resource(
         uri="data://tagged", tags={"test", "metadata"}, description="A tagged resource"
     )
-    async def get_tagged_data():
-        return {"type": "tagged_data"}
+    async def get_tagged_data() -> str:
+        return json.dumps({"type": "tagged_data"}, separators=(",", ":"))
 
     # Add a resource template with tags
     @server.resource(
@@ -86,8 +96,8 @@ def tagged_resources_server():
         tags={"template", "parameterized"},
         description="A tagged template",
     )
-    async def get_template_data(id: str):
-        return {"id": id, "type": "template_data"}
+    async def get_template_data(id: str) -> str:
+        return json.dumps({"id": id, "type": "template_data"}, separators=(",", ":"))
 
     return server
 
@@ -124,7 +134,8 @@ async def test_call_tool(fastmcp_server):
     async with client:
         result = await client.call_tool("greet", {"name": "World"})
 
-        assert result.content[0].text == "Hello, World!"  # type: ignore[attr-defined]
+        assert isinstance(result.content[0], TextContent)
+        assert result.content[0].text == "Hello, World!"
         assert result.structured_content == {"result": "Hello, World!"}
         assert result.data == "Hello, World!"
         assert result.is_error is False
@@ -249,7 +260,8 @@ async def test_get_prompt(fastmcp_server):
         result = await client.get_prompt("welcome", {"name": "Developer"})
 
         # The result should contain our welcome message
-        assert result.messages[0].content.text == "Welcome to FastMCP, Developer!"  # type: ignore[attr-defined]
+        assert isinstance(result.messages[0].content, TextContent)
+        assert result.messages[0].content.text == "Welcome to FastMCP, Developer!"
         assert result.description == "Example greeting prompt."
 
 
@@ -261,7 +273,8 @@ async def test_get_prompt_mcp(fastmcp_server):
         result = await client.get_prompt_mcp("welcome", {"name": "Developer"})
 
         # The result should contain our welcome message
-        assert result.messages[0].content.text == "Welcome to FastMCP, Developer!"  # type: ignore[attr-defined]
+        assert isinstance(result.messages[0].content, TextContent)
+        assert result.messages[0].content.text == "Welcome to FastMCP, Developer!"
         assert result.description == "Example greeting prompt."
 
 
@@ -286,7 +299,8 @@ async def test_client_serializes_all_non_string_arguments():
             },
         )
 
-        content = result.messages[0].content.text  # type: ignore[attr-defined]
+        assert isinstance(result.messages[0].content, TextContent)
+        content = result.messages[0].content.text
         assert "arg1: hello" in content
         assert "arg2: [1,2,3]" in content  # JSON serialized list
         assert 'arg3: {"key":"value"}' in content  # JSON serialized dict
@@ -309,7 +323,8 @@ async def test_client_server_type_conversion_integration():
             {"numbers": [1, 2, 3, 4], "config": {"theme": "dark", "lang": "en"}},
         )
 
-        content = result.messages[0].content.text  # type: ignore[attr-defined]
+        assert isinstance(result.messages[0].content, TextContent)
+        content = result.messages[0].content.text
         assert "Got 4 numbers and 2 config items" in content
 
 
@@ -800,8 +815,9 @@ class TestErrorHandling:
         async with client:
             result = await client.call_tool_mcp("error_tool", {})
             assert result.isError
-            assert "test error" in result.content[0].text  # type: ignore[attr-defined]
-            assert "abc" in result.content[0].text  # type: ignore[attr-defined]
+            assert isinstance(result.content[0], TextContent)
+            assert "test error" in result.content[0].text
+            assert "abc" in result.content[0].text
 
     async def test_general_tool_exceptions_are_masked_when_enabled(self):
         mcp = FastMCP("TestServer", mask_error_details=True)
@@ -815,8 +831,9 @@ class TestErrorHandling:
         async with client:
             result = await client.call_tool_mcp("error_tool", {})
             assert result.isError
-            assert "test error" not in result.content[0].text  # type: ignore[attr-defined]
-            assert "abc" not in result.content[0].text  # type: ignore[attr-defined]
+            assert isinstance(result.content[0], TextContent)
+            assert "test error" not in result.content[0].text
+            assert "abc" not in result.content[0].text
 
     async def test_validation_errors_are_not_masked_when_enabled(self):
         mcp = FastMCP("TestServer", mask_error_details=True)
@@ -829,7 +846,8 @@ class TestErrorHandling:
             result = await client.call_tool_mcp("validated_tool", {"x": "abc"})
             assert result.isError
             # Pydantic validation error message should NOT be masked
-            assert "Input should be a valid integer" in result.content[0].text  # type: ignore[attr-defined]
+            assert isinstance(result.content[0], TextContent)
+            assert "Input should be a valid integer" in result.content[0].text
 
     async def test_specific_tool_errors_are_sent_to_client(self):
         mcp = FastMCP("TestServer")
@@ -843,8 +861,9 @@ class TestErrorHandling:
         async with client:
             result = await client.call_tool_mcp("custom_error_tool", {})
             assert result.isError
-            assert "test error" in result.content[0].text  # type: ignore[attr-defined]
-            assert "abc" in result.content[0].text  # type: ignore[attr-defined]
+            assert isinstance(result.content[0], TextContent)
+            assert "test error" in result.content[0].text
+            assert "abc" in result.content[0].text
 
     async def test_general_resource_exceptions_are_not_masked_by_default(self):
         mcp = FastMCP("TestServer")
@@ -1092,7 +1111,8 @@ class TestInferTransport:
         transport = infer_transport(config)
         assert isinstance(transport, MCPConfigTransport)
         assert isinstance(transport.transport, FastMCPTransport)
-        assert len(cast(FastMCP, transport.transport.server)._providers) == 2
+        # 3 providers: LocalProvider (always first) + 2 mounted MCP servers
+        assert len(cast(FastMCP, transport.transport.server)._providers) == 3
 
     def test_infer_fastmcp_server(self, fastmcp_server):
         """FastMCP server instances should infer to FastMCPTransport."""
