@@ -13,7 +13,7 @@ from __future__ import annotations
 import re
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, overload
 
 import mcp.types
 from mcp.types import AnyUrl
@@ -22,6 +22,7 @@ from fastmcp.prompts.prompt import Prompt, PromptResult
 from fastmcp.resources.resource import Resource, ResourceResult
 from fastmcp.resources.template import ResourceTemplate
 from fastmcp.server.providers.base import Provider
+from fastmcp.server.tasks.config import TaskMeta
 from fastmcp.tools.tool import Tool, ToolResult
 from fastmcp.utilities.components import FastMCPComponent
 
@@ -84,25 +85,47 @@ class FastMCPProviderTool(Tool):
             task_config=tool.task_config,
         )
 
+    @overload
     async def _run(
-        self, arguments: dict[str, Any]
-    ) -> ToolResult | mcp.types.CreateTaskResult:
-        """Skip task handling - delegate to run() which calls child middleware.
+        self,
+        arguments: dict[str, Any],
+        task_meta: None = None,
+    ) -> ToolResult: ...
 
-        The actual underlying tool will check _task_metadata contextvar and
-        submit to Docket if appropriate. This wrapper just passes through.
+    @overload
+    async def _run(
+        self,
+        arguments: dict[str, Any],
+        task_meta: TaskMeta,
+    ) -> mcp.types.CreateTaskResult: ...
+
+    async def _run(
+        self,
+        arguments: dict[str, Any],
+        task_meta: TaskMeta | None = None,
+    ) -> ToolResult | mcp.types.CreateTaskResult:
+        """Delegate to child server's call_tool() with task_meta.
+
+        Passes task_meta through to the child server so it can handle
+        backgrounding appropriately. fn_key is already set by the parent
+        server before calling this method.
         """
-        return await self.run(arguments)
+        return await self._server.call_tool(
+            self._original_name, arguments, task_meta=task_meta
+        )
 
     async def run(
         self, arguments: dict[str, Any]
     ) -> ToolResult | mcp.types.CreateTaskResult:  # type: ignore[override]
-        """Delegate to child server's call_tool().
+        """Not implemented - use _run() which delegates to child server.
 
-        This runs BEFORE any backgrounding decision - the actual underlying
-        tool will check contextvars and submit to Docket if appropriate.
+        FastMCPProviderTool._run() handles all execution by delegating
+        to the child server's call_tool() with task_meta.
         """
-        return await self._server.call_tool(self._original_name, arguments)
+        raise NotImplementedError(
+            "FastMCPProviderTool.run() should not be called directly. "
+            "Use _run() which delegates to the child server's call_tool()."
+        )
 
 
 class FastMCPProviderResource(Resource):
@@ -140,19 +163,22 @@ class FastMCPProviderResource(Resource):
             task_config=resource.task_config,
         )
 
-    async def _read(self) -> ResourceResult | mcp.types.CreateTaskResult:
-        """Skip task routing - delegate to child server's read_resource().
+    @overload
+    async def _read(self, task_meta: None = None) -> ResourceResult: ...
 
-        The actual underlying resource will check _task_metadata contextvar and
-        submit to Docket if appropriate. This wrapper just passes through.
+    @overload
+    async def _read(self, task_meta: TaskMeta) -> mcp.types.CreateTaskResult: ...
 
-        Note: The _docket_fn_key contextvar is intentionally NOT updated here.
-        The parent set it to the full namespaced key (e.g., data://c/gc/value)
-        which is what the function is registered under in Docket. All provider
-        layers pass this through unchanged so the eventual resource._read()
-        uses the correct Docket lookup key.
+    async def _read(
+        self, task_meta: TaskMeta | None = None
+    ) -> ResourceResult | mcp.types.CreateTaskResult:
+        """Delegate to child server's read_resource() with task_meta.
+
+        Passes task_meta through to the child server so it can handle
+        backgrounding appropriately. fn_key is already set by the parent
+        server before calling this method.
         """
-        return await self._server.read_resource(self._original_uri)
+        return await self._server.read_resource(self._original_uri, task_meta=task_meta)
 
 
 class FastMCPProviderPrompt(Prompt):
@@ -188,28 +214,47 @@ class FastMCPProviderPrompt(Prompt):
             task_config=prompt.task_config,
         )
 
+    @overload
     async def _render(
-        self, arguments: dict[str, Any] | None = None
-    ) -> PromptResult | mcp.types.CreateTaskResult:
-        """Skip task routing - delegate to render() which calls child middleware.
+        self,
+        arguments: dict[str, Any] | None = None,
+        task_meta: None = None,
+    ) -> PromptResult: ...
 
-        The actual underlying prompt will check _task_metadata contextvar and
-        submit to Docket if appropriate. This wrapper just passes through.
+    @overload
+    async def _render(
+        self,
+        arguments: dict[str, Any] | None,
+        task_meta: TaskMeta,
+    ) -> mcp.types.CreateTaskResult: ...
+
+    async def _render(
+        self,
+        arguments: dict[str, Any] | None = None,
+        task_meta: TaskMeta | None = None,
+    ) -> PromptResult | mcp.types.CreateTaskResult:
+        """Delegate to child server's render_prompt() with task_meta.
+
+        Passes task_meta through to the child server so it can handle
+        backgrounding appropriately. fn_key is already set by the parent
+        server before calling this method.
         """
-        return await self.render(arguments)
+        return await self._server.render_prompt(
+            self._original_name, arguments, task_meta=task_meta
+        )
 
     async def render(
         self, arguments: dict[str, Any] | None = None
     ) -> PromptResult | mcp.types.CreateTaskResult:  # type: ignore[override]
-        """Delegate to child server's render_prompt().
+        """Not implemented - use _render() which delegates to child server.
 
-        Note: The _docket_fn_key contextvar is intentionally NOT updated here.
-        The parent set it to the full namespaced name (e.g., c_gc_greet) which
-        is what the function is registered under in Docket. All provider layers
-        pass this through unchanged so the eventual prompt._render() uses the
-        correct Docket lookup key.
+        FastMCPProviderPrompt._render() handles all execution by delegating
+        to the child server's render_prompt() with task_meta.
         """
-        return await self._server.render_prompt(self._original_name, arguments)
+        raise NotImplementedError(
+            "FastMCPProviderPrompt.render() should not be called directly. "
+            "Use _render() which delegates to the child server's render_prompt()."
+        )
 
 
 class FastMCPProviderResourceTemplate(ResourceTemplate):
@@ -269,41 +314,29 @@ class FastMCPProviderResourceTemplate(ResourceTemplate):
             mime_type=self.mime_type,
         )
 
+    @overload
     async def _read(
-        self, uri: str, params: dict[str, Any]
+        self, uri: str, params: dict[str, Any], task_meta: None = None
+    ) -> ResourceResult: ...
+
+    @overload
+    async def _read(
+        self, uri: str, params: dict[str, Any], task_meta: TaskMeta
+    ) -> mcp.types.CreateTaskResult: ...
+
+    async def _read(
+        self, uri: str, params: dict[str, Any], task_meta: TaskMeta | None = None
     ) -> ResourceResult | mcp.types.CreateTaskResult:
-        """Delegate to child server's read_resource().
+        """Delegate to child server's read_resource() with task_meta.
 
-        Skips task routing at this layer - the child's template._read() will
-        check _task_metadata contextvar and submit to Docket if appropriate.
-
-        Sets _docket_fn_key to self.uri_template (the transformed pattern) so that
-        when the child template's _read() submits to Docket, it uses the correct
-        key that matches what was registered via TransformingProvider.get_tasks().
-
-        Only sets _docket_fn_key if not already set - in nested mounts, the
-        outermost wrapper sets the key and inner wrappers preserve it.
+        Passes task_meta through to the child server so it can handle
+        backgrounding appropriately. fn_key is already set by the parent
+        server before calling this method.
         """
-        from fastmcp.server.dependencies import _docket_fn_key
-
         # Expand the original template with params to get internal URI
         original_uri = _expand_uri_template(self._original_uri_template or "", params)
 
-        # Set _docket_fn_key to the template pattern, but only if the current
-        # value isn't already a template pattern (contains '{').
-        # - Server sets concrete URI (e.g., "item://c/gc/42") - no '{', override it
-        # - Outer wrapper sets pattern (e.g., "item://c/gc/{id}") - has '{', keep it
-        # In nested mounts (parent→child→grandchild), the outermost wrapper
-        # has the fully-transformed pattern that matches Docket registration.
-        existing_key = _docket_fn_key.get()
-        key_token = None
-        if not existing_key or "{" not in existing_key:
-            key_token = _docket_fn_key.set(self.key)
-        try:
-            return await self._server.read_resource(original_uri)
-        finally:
-            if key_token is not None:
-                _docket_fn_key.reset(key_token)
+        return await self._server.read_resource(original_uri, task_meta=task_meta)
 
     async def read(self, arguments: dict[str, Any]) -> str | bytes | ResourceResult:
         """Read the resource content for background task execution.

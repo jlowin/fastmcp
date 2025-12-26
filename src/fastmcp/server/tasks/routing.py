@@ -11,7 +11,7 @@ import mcp.types
 from mcp.shared.exceptions import McpError
 from mcp.types import METHOD_NOT_FOUND, ErrorData
 
-from fastmcp.server.dependencies import get_task_metadata
+from fastmcp.server.tasks.config import TaskMeta
 from fastmcp.server.tasks.handlers import submit_to_docket
 
 if TYPE_CHECKING:
@@ -26,16 +26,16 @@ TaskType = Literal["tool", "resource", "template", "prompt"]
 async def check_background_task(
     component: Tool | Resource | ResourceTemplate | Prompt,
     task_type: TaskType,
-    key: str,
     arguments: dict[str, Any] | None = None,
+    task_meta: TaskMeta | None = None,
 ) -> mcp.types.CreateTaskResult | None:
     """Check task mode and submit to background if requested.
 
     Args:
         component: The MCP component
         task_type: Type of task ("tool", "resource", "template", "prompt")
-        key: Docket registration key (caller resolves from contextvar + fallback)
         arguments: Arguments for tool/prompt/template execution
+        task_meta: Task execution metadata. If provided, execute as background task.
 
     Returns:
         CreateTaskResult if submitted to docket, None for sync execution
@@ -44,7 +44,6 @@ async def check_background_task(
         McpError: If mode="required" but no task metadata, or mode="forbidden"
                   but task metadata is present
     """
-    task_meta = get_task_metadata()
     task_config = component.task_config
 
     # Infer label from component
@@ -72,4 +71,6 @@ async def check_background_task(
     if not task_meta:
         return None
 
-    return await submit_to_docket(task_type, key, component, arguments)
+    # fn_key is expected to be set; fall back to component.key for direct calls
+    fn_key = task_meta.fn_key or component.key
+    return await submit_to_docket(task_type, fn_key, component, arguments, task_meta)
