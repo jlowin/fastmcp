@@ -9,6 +9,7 @@ import pytest
 from fastmcp import Client, FastMCP
 from fastmcp.client.transports import StreamableHttpTransport
 from fastmcp.server.auth.providers.descope import DescopeProvider
+from fastmcp.server.auth.providers.jwt import JWTVerifier
 from fastmcp.utilities.tests import HeadlessOAuth, run_server_async
 
 
@@ -25,41 +26,6 @@ class TestDescopeProvider:
         assert provider.project_id == "P2abc123"
         assert str(provider.base_url) == "https://myserver.com/"
         assert str(provider.descope_base_url) == "https://api.descope.com"
-
-    def test_init_with_env_vars(self):
-        """Test DescopeProvider initialization from environment variables."""
-        with patch.dict(
-            os.environ,
-            {
-                "FASTMCP_SERVER_AUTH_DESCOPEPROVIDER_CONFIG_URL": "https://api.descope.com/v1/apps/agentic/P2env123/M123/.well-known/openid-configuration",
-                "FASTMCP_SERVER_AUTH_DESCOPEPROVIDER_BASE_URL": "https://envserver.com",
-            },
-        ):
-            provider = DescopeProvider()
-
-            assert provider.project_id == "P2env123"
-            assert str(provider.base_url) == "https://envserver.com/"
-            assert str(provider.descope_base_url) == "https://api.descope.com"
-
-    def test_init_with_old_env_vars(self):
-        """Test DescopeProvider initialization from old environment variables (backwards compatibility)."""
-        with patch.dict(
-            os.environ,
-            {
-                "FASTMCP_SERVER_AUTH_DESCOPEPROVIDER_PROJECT_ID": "P2oldenv123",
-                "FASTMCP_SERVER_AUTH_DESCOPEPROVIDER_DESCOPE_BASE_URL": "https://api.descope.com",
-                "FASTMCP_SERVER_AUTH_DESCOPEPROVIDER_BASE_URL": "https://envserver.com",
-            },
-        ):
-            provider = DescopeProvider()
-
-            assert provider.project_id == "P2oldenv123"
-            assert str(provider.base_url) == "https://envserver.com/"
-            assert str(provider.descope_base_url) == "https://api.descope.com"
-            assert (
-                provider.token_verifier.issuer  # type: ignore[attr-defined]
-                == "https://api.descope.com/v1/apps/P2oldenv123"
-            )
 
     def test_environment_variable_loading(self):
         """Test that environment variables are loaded correctly."""
@@ -121,12 +87,12 @@ class TestDescopeProvider:
         assert str(provider.base_url) == "https://myserver.com/"
 
         # Check that JWT verifier uses the old issuer format
+        assert isinstance(provider.token_verifier, JWTVerifier)
         assert (
-            provider.token_verifier.issuer  # type: ignore[attr-defined]
-            == "https://api.descope.com/v1/apps/P2abc123"
+            provider.token_verifier.issuer == "https://api.descope.com/v1/apps/P2abc123"
         )
         assert (
-            provider.token_verifier.jwks_uri  # type: ignore[attr-defined]
+            provider.token_verifier.jwks_uri
             == "https://api.descope.com/P2abc123/.well-known/jwks.json"
         )
 
@@ -139,9 +105,9 @@ class TestDescopeProvider:
         )
 
         assert str(provider.descope_base_url) == "https://api.descope.com"
+        assert isinstance(provider.token_verifier, JWTVerifier)
         assert (
-            provider.token_verifier.issuer  # type: ignore[attr-defined]
-            == "https://api.descope.com/v1/apps/P2abc123"
+            provider.token_verifier.issuer == "https://api.descope.com/v1/apps/P2abc123"
         )
 
     def test_config_url_takes_precedence_over_old_api(self):
@@ -156,8 +122,9 @@ class TestDescopeProvider:
         # Should use values from config_url, not the old API
         assert provider.project_id == "P2new123"
         assert str(provider.descope_base_url) == "https://api.descope.com"
+        assert isinstance(provider.token_verifier, JWTVerifier)
         assert (
-            provider.token_verifier.issuer  # type: ignore[attr-defined]
+            provider.token_verifier.issuer
             == "https://api.descope.com/v1/apps/agentic/P2new123/M123"
         )
 
@@ -172,14 +139,14 @@ class TestDescopeProvider:
         )
 
         # Check that JWT verifier uses the correct endpoints
+        assert isinstance(provider.token_verifier, JWTVerifier)
         assert (
-            provider.token_verifier.jwks_uri  # type: ignore[attr-defined]
+            provider.token_verifier.jwks_uri
             == "https://api.descope.com/P2abc123/.well-known/jwks.json"
         )
-        assert (
-            provider.token_verifier.issuer == issuer_url  # type: ignore[attr-defined]
-        )
-        assert provider.token_verifier.audience == "P2abc123"  # type: ignore[attr-defined]
+        assert provider.token_verifier.issuer == issuer_url
+        assert isinstance(provider.token_verifier, JWTVerifier)
+        assert provider.token_verifier.audience == "P2abc123"
 
     def test_required_scopes_support(self):
         """Test that required_scopes are supported and passed to JWT verifier."""
@@ -190,7 +157,8 @@ class TestDescopeProvider:
         )
 
         # Check that required_scopes are set on the token verifier
-        assert provider.token_verifier.required_scopes == ["read", "write"]  # type: ignore[attr-defined]
+        assert isinstance(provider.token_verifier, JWTVerifier)
+        assert provider.token_verifier.required_scopes == ["read", "write"]
 
     def test_required_scopes_with_old_api(self):
         """Test that required_scopes work with the old API (project_id + descope_base_url)."""
@@ -202,7 +170,8 @@ class TestDescopeProvider:
         )
 
         # Check that required_scopes are set on the token verifier
-        assert provider.token_verifier.required_scopes == ["openid", "email"]  # type: ignore[attr-defined]
+        assert isinstance(provider.token_verifier, JWTVerifier)
+        assert provider.token_verifier.required_scopes == ["openid", "email"]
 
     def test_required_scopes_from_env(self):
         """Test that required_scopes can be set via environment variable."""
@@ -214,9 +183,14 @@ class TestDescopeProvider:
                 "FASTMCP_SERVER_AUTH_DESCOPEPROVIDER_REQUIRED_SCOPES": "read,write",
             },
         ):
-            provider = DescopeProvider()
+            provider = DescopeProvider(
+                config_url="https://api.descope.com/v1/apps/agentic/P2env123/M123/.well-known/openid-configuration",
+                base_url="https://envserver.com",
+                required_scopes=["read", "write"],
+            )
 
-            assert provider.token_verifier.required_scopes == ["read", "write"]  # type: ignore[attr-defined]
+            assert isinstance(provider.token_verifier, JWTVerifier)
+            assert provider.token_verifier.required_scopes == ["read", "write"]
 
 
 @pytest.fixture

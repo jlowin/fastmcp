@@ -25,12 +25,35 @@ Example:
     ```
 """
 
-from fastmcp.server.providers.base import Components, Provider, TaskComponents
-from fastmcp.server.providers.mounted import MountedProvider
+from typing import TYPE_CHECKING
+
+from fastmcp.server.providers.base import Provider
+from fastmcp.server.providers.fastmcp_provider import FastMCPProvider
+from fastmcp.server.providers.local_provider import LocalProvider
+from fastmcp.server.providers.transforming import TransformingProvider
+
+if TYPE_CHECKING:
+    from fastmcp.server.providers.openapi import OpenAPIProvider as OpenAPIProvider
+    from fastmcp.server.providers.proxy import ProxyProvider as ProxyProvider
 
 __all__ = [
-    "Components",
-    "MountedProvider",
+    "FastMCPProvider",
+    "LocalProvider",
+    "OpenAPIProvider",
     "Provider",
-    "TaskComponents",
+    "ProxyProvider",
+    "TransformingProvider",
 ]
+
+
+def __getattr__(name: str):
+    """Lazy import for providers to avoid circular imports."""
+    if name == "ProxyProvider":
+        from fastmcp.server.providers.proxy import ProxyProvider
+
+        return ProxyProvider
+    if name == "OpenAPIProvider":
+        from fastmcp.server.providers.openapi import OpenAPIProvider
+
+        return OpenAPIProvider
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

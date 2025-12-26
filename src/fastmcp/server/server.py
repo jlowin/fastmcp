@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import re
 import secrets
 import warnings
@@ -22,6 +21,7 @@ from contextlib import (
     asynccontextmanager,
     suppress,
 )
+from dataclasses import replace
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Generic, Literal, cast, overload
@@ -35,13 +35,10 @@ from mcp.server.lowlevel.server import LifespanResultT, NotificationOptions
 from mcp.server.stdio import stdio_server
 from mcp.shared.exceptions import McpError
 from mcp.types import (
-    METHOD_NOT_FOUND,
     Annotations,
     AnyFunction,
     CallToolRequestParams,
     ContentBlock,
-    ErrorData,
-    GetPromptResult,
     ToolAnnotations,
 )
 from mcp.types import Prompt as SDKPrompt
@@ -54,11 +51,13 @@ from starlette.middleware import Middleware as ASGIMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 from starlette.routing import BaseRoute, Route
+from typing_extensions import Self
 
 import fastmcp
 import fastmcp.server
 from fastmcp.exceptions import (
     DisabledError,
+    FastMCPError,
     NotFoundError,
     PromptError,
     ResourceError,
@@ -68,10 +67,8 @@ from fastmcp.exceptions import (
 from fastmcp.mcp_config import MCPConfig
 from fastmcp.prompts import Prompt
 from fastmcp.prompts.prompt import FunctionPrompt, PromptResult
-from fastmcp.prompts.prompt_manager import PromptManager
-from fastmcp.resources.resource import FunctionResource, Resource, ResourceContent
-from fastmcp.resources.resource_manager import ResourceManager
-from fastmcp.resources.template import FunctionResourceTemplate, ResourceTemplate
+from fastmcp.resources.resource import Resource, ResourceResult
+from fastmcp.resources.template import ResourceTemplate
 from fastmcp.server.auth import AuthProvider
 from fastmcp.server.event_store import EventStore
 from fastmcp.server.http import (
@@ -81,38 +78,72 @@ from fastmcp.server.http import (
 )
 from fastmcp.server.low_level import LowLevelServer
 from fastmcp.server.middleware import Middleware, MiddlewareContext
-from fastmcp.server.providers import Provider
+from fastmcp.server.providers import LocalProvider, Provider
 from fastmcp.server.tasks.capabilities import get_task_capabilities
-from fastmcp.server.tasks.config import TaskConfig
-from fastmcp.server.tasks.handlers import (
-    handle_prompt_as_task,
-    handle_resource_as_task,
-    handle_tool_as_task,
-)
+from fastmcp.server.tasks.config import TaskConfig, TaskMeta
+from fastmcp.settings import DuplicateBehavior as DuplicateBehaviorSetting
 from fastmcp.settings import Settings
 from fastmcp.tools.tool import FunctionTool, Tool, ToolResult
-from fastmcp.tools.tool_manager import ToolManager
 from fastmcp.tools.tool_transform import ToolTransformConfig
+from fastmcp.utilities.async_utils import gather
 from fastmcp.utilities.cli import log_server_banner
 from fastmcp.utilities.components import FastMCPComponent
 from fastmcp.utilities.logging import get_logger, temporary_log_level
 from fastmcp.utilities.types import NotSet, NotSetT
+from fastmcp.utilities.visibility import VisibilityFilter
 
 if TYPE_CHECKING:
     from fastmcp.client import Client
     from fastmcp.client.client import FastMCP1Server
     from fastmcp.client.sampling import SamplingHandler
     from fastmcp.client.transports import ClientTransport, ClientTransportT
-    from fastmcp.server.openapi import ComponentFn as OpenAPIComponentFn
-    from fastmcp.server.openapi import FastMCPOpenAPI, RouteMap
-    from fastmcp.server.openapi import RouteMapFn as OpenAPIRouteMapFn
-    from fastmcp.server.proxy import FastMCPProxy
+    from fastmcp.server.providers.openapi import ComponentFn as OpenAPIComponentFn
+    from fastmcp.server.providers.openapi import RouteMap
+    from fastmcp.server.providers.openapi import RouteMapFn as OpenAPIRouteMapFn
+    from fastmcp.server.providers.proxy import FastMCPProxy
     from fastmcp.tools.tool import ToolResultSerializerType
 
 logger = get_logger(__name__)
 
 
 DuplicateBehavior = Literal["warn", "error", "replace", "ignore"]
+
+
+def _resolve_on_duplicate(
+    on_duplicate: DuplicateBehavior | None,
+    on_duplicate_tools: DuplicateBehavior | None,
+    on_duplicate_resources: DuplicateBehavior | None,
+    on_duplicate_prompts: DuplicateBehavior | None,
+) -> DuplicateBehavior:
+    """Resolve on_duplicate from deprecated per-type params.
+
+    Takes the most strict value if multiple are provided.
+    Delete this function when removing deprecated params.
+    """
+    strictness_order: list[DuplicateBehavior] = ["error", "warn", "replace", "ignore"]
+    deprecated_values: list[DuplicateBehavior] = []
+
+    deprecated_params: list[tuple[str, DuplicateBehavior | None]] = [
+        ("on_duplicate_tools", on_duplicate_tools),
+        ("on_duplicate_resources", on_duplicate_resources),
+        ("on_duplicate_prompts", on_duplicate_prompts),
+    ]
+    for name, value in deprecated_params:
+        if value is not None:
+            if fastmcp.settings.deprecation_warnings:
+                warnings.warn(
+                    f"{name} is deprecated, use on_duplicate instead",
+                    DeprecationWarning,
+                    stacklevel=4,
+                )
+            deprecated_values.append(value)
+
+    if on_duplicate is None and deprecated_values:
+        return min(deprecated_values, key=lambda x: strictness_order.index(x))
+
+    return on_duplicate or "warn"
+
+
 Transport = Literal["stdio", "http", "sse", "streamable-http"]
 
 # Compiled URI parsing regex to split a URI into protocol and path components
@@ -169,7 +200,7 @@ class FastMCP(Generic[LifespanResultT]):
         version: str | None = None,
         website_url: str | None = None,
         icons: list[mcp.types.Icon] | None = None,
-        auth: AuthProvider | NotSetT | None = NotSet,
+        auth: AuthProvider | None = None,
         middleware: Sequence[Middleware] | None = None,
         providers: Sequence[Provider] | None = None,
         lifespan: LifespanCallable | None = None,
@@ -180,16 +211,15 @@ class FastMCP(Generic[LifespanResultT]):
         include_tags: Collection[str] | None = None,
         exclude_tags: Collection[str] | None = None,
         include_fastmcp_meta: bool | None = None,
-        on_duplicate_tools: DuplicateBehavior | None = None,
-        on_duplicate_resources: DuplicateBehavior | None = None,
-        on_duplicate_prompts: DuplicateBehavior | None = None,
+        on_duplicate: DuplicateBehavior | None = None,
         strict_input_validation: bool | None = None,
         tasks: bool | None = None,
         # ---
+        # --- DEPRECATED parameters ---
         # ---
-        # --- The following arguments are DEPRECATED ---
-        # ---
-        # ---
+        on_duplicate_tools: DuplicateBehavior | None = None,
+        on_duplicate_resources: DuplicateBehavior | None = None,
+        on_duplicate_prompts: DuplicateBehavior | None = None,
         log_level: str | None = None,
         debug: bool | None = None,
         host: str | None = None,
@@ -202,6 +232,14 @@ class FastMCP(Generic[LifespanResultT]):
         sampling_handler: SamplingHandler | None = None,
         sampling_handler_behavior: Literal["always", "fallback"] | None = None,
     ):
+        # Resolve on_duplicate from deprecated params (delete when removing deprecation)
+        self._on_duplicate: DuplicateBehaviorSetting = _resolve_on_duplicate(
+            on_duplicate,
+            on_duplicate_tools,
+            on_duplicate_resources,
+            on_duplicate_prompts,
+        )
+
         # Resolve server default for background task support
         self._support_tasks_by_default: bool = tasks if tasks is not None else False
 
@@ -209,20 +247,23 @@ class FastMCP(Generic[LifespanResultT]):
         self._docket = None
 
         self._additional_http_routes: list[BaseRoute] = []
-        self._providers: list[Provider] = list(providers or [])
-        self._tool_manager: ToolManager = ToolManager(
-            duplicate_behavior=on_duplicate_tools,
-            mask_error_details=mask_error_details,
-            transformations=tool_transformations,
+
+        # Create LocalProvider for local components
+        self._local_provider: LocalProvider = LocalProvider(
+            on_duplicate=self._on_duplicate
         )
-        self._resource_manager: ResourceManager = ResourceManager(
-            duplicate_behavior=on_duplicate_resources,
-            mask_error_details=mask_error_details,
-        )
-        self._prompt_manager: PromptManager = PromptManager(
-            duplicate_behavior=on_duplicate_prompts,
-            mask_error_details=mask_error_details,
-        )
+
+        # Apply tool transformations to LocalProvider
+        if tool_transformations:
+            for tool_name, transformation in tool_transformations.items():
+                self._local_provider.add_tool_transformation(tool_name, transformation)
+
+        # LocalProvider is always first in the provider list
+        self._providers: list[Provider] = [
+            self._local_provider,
+            *(providers or []),
+        ]
+
         # Store mask_error_details for execution error handling
         self._mask_error_details: bool = (
             mask_error_details
@@ -249,14 +290,7 @@ class FastMCP(Generic[LifespanResultT]):
             lifespan=_lifespan_proxy(fastmcp_server=self),
         )
 
-        # if auth is `NotSet`, try to create a provider from the environment
-        if auth is NotSet:
-            if fastmcp.settings.server_auth is not None:
-                # server_auth_class returns the class itself
-                auth = fastmcp.settings.server_auth_class()
-            else:
-                auth = None
-        self.auth: AuthProvider | None = cast(AuthProvider | None, auth)
+        self.auth: AuthProvider | None = auth
 
         if tools:
             for tool in tools:
@@ -264,12 +298,26 @@ class FastMCP(Generic[LifespanResultT]):
                     tool = Tool.from_function(tool, serializer=self._tool_serializer)
                 self.add_tool(tool)
 
-        self.include_tags: set[str] | None = (
-            set(include_tags) if include_tags is not None else None
-        )
-        self.exclude_tags: set[str] | None = (
-            set(exclude_tags) if exclude_tags is not None else None
-        )
+        # Server-level visibility filter for runtime enable/disable
+        self._visibility = VisibilityFilter()
+
+        # Emit deprecation warnings for include_tags and exclude_tags
+        if include_tags is not None:
+            warnings.warn(
+                "include_tags is deprecated. Use server.enable(tags=..., only=True) instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            # For backwards compatibility, initialize allowlist from include_tags
+            self._visibility.enable(tags=set(include_tags), only=True)
+        if exclude_tags is not None:
+            warnings.warn(
+                "exclude_tags is deprecated. Use server.disable(tags=...) instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            # For backwards compatibility, initialize blocklist from exclude_tags
+            self._visibility.disable(tags=set(exclude_tags))
 
         self.strict_input_validation: bool = (
             strict_input_validation
@@ -416,65 +464,23 @@ class FastMCP(Generic[LifespanResultT]):
                 # Store on server instance for cross-task access (FastMCPTransport)
                 self._docket = docket
 
-                # Register local task-enabled tools/prompts/resources with Docket
-                # Only function-based variants support background tasks
-                # Register components where task execution is not "forbidden"
-                for tool in self._tool_manager._tools.values():
-                    if (
-                        isinstance(tool, FunctionTool)
-                        and tool.task_config.mode != "forbidden"
-                    ):
-                        docket.register(tool.fn, names=[tool.key])
+                # Register task-enabled components from all providers in parallel
+                task_results = await gather(
+                    *[p.get_tasks() for p in self._providers],
+                    return_exceptions=True,
+                )
 
-                for prompt in self._prompt_manager._prompts.values():
-                    if (
-                        isinstance(prompt, FunctionPrompt)
-                        and prompt.task_config.mode != "forbidden"
-                    ):
-                        # task execution requires async fn (validated at creation time)
-                        docket.register(
-                            cast(Callable[..., Awaitable[Any]], prompt.fn),
-                            names=[prompt.key],
-                        )
-
-                for resource in self._resource_manager._resources.values():
-                    if (
-                        isinstance(resource, FunctionResource)
-                        and resource.task_config.mode != "forbidden"
-                    ):
-                        docket.register(resource.fn, names=[resource.key])
-
-                for template in self._resource_manager._templates.values():
-                    if (
-                        isinstance(template, FunctionResourceTemplate)
-                        and template.task_config.mode != "forbidden"
-                    ):
-                        docket.register(template.fn, names=[template.key])
-
-                # Register provider components
-                for provider in self._providers:
-                    try:
-                        tasks = await provider.get_tasks()
-                        for tool in tasks.tools:
-                            docket.register(tool.fn, names=[tool.key])
-                        for resource in tasks.resources:
-                            docket.register(resource.fn, names=[resource.key])
-                        for template in tasks.templates:
-                            docket.register(template.fn, names=[template.key])
-                        for prompt in tasks.prompts:
-                            docket.register(
-                                cast(Callable[..., Awaitable[Any]], prompt.fn),
-                                names=[prompt.key],
-                            )
-                    except Exception as e:
-                        provider_name = getattr(
-                            provider, "server", provider
-                        ).__class__.__name__
+                for i, result in enumerate(task_results):
+                    if isinstance(result, BaseException):
+                        provider = self._providers[i]
                         logger.warning(
-                            f"Failed to register tasks from provider {provider_name!r}: {e}"
+                            f"Failed to register tasks from {provider}: {result}"
                         )
                         if fastmcp.settings.mounted_components_raise_on_load_error:
-                            raise
+                            raise result
+                        continue
+                    for component in result:
+                        component.register_with_docket(docket)
 
                 # Set Docket in ContextVar so CurrentDocket can access it
                 docket_token = _current_docket.set(docket)
@@ -497,12 +503,9 @@ class FastMCP(Generic[LifespanResultT]):
                             try:
                                 yield
                             finally:
-                                # Cancel worker task on exit with timeout to prevent hanging
                                 worker_task.cancel()
-                                with suppress(
-                                    asyncio.CancelledError, asyncio.TimeoutError
-                                ):
-                                    await asyncio.wait_for(worker_task, timeout=2.0)
+                                with suppress(asyncio.CancelledError):
+                                    await worker_task
                         finally:
                             _current_worker.reset(worker_token)
                 finally:
@@ -580,7 +583,7 @@ class FastMCP(Generic[LifespanResultT]):
         """Run the FastMCP server. Note this is a synchronous function.
 
         Args:
-            transport: Transport protocol to use ("stdio", "sse", or "streamable-http")
+            transport: Transport protocol to use ("http", "stdio", "sse", or "streamable-http")
         """
 
         anyio.run(
@@ -593,179 +596,26 @@ class FastMCP(Generic[LifespanResultT]):
         )
 
     def _setup_handlers(self) -> None:
-        """Set up core MCP protocol handlers."""
+        """Set up core MCP protocol handlers.
+
+        All handlers use decorator-based registration for consistency.
+        The call_tool decorator is from the SDK (supports CreateTaskResult + validate_input).
+        The read_resource and get_prompt decorators are from LowLevelServer to add
+        CreateTaskResult support until the SDK provides it natively.
+        """
         self._mcp_server.list_tools()(self._list_tools_mcp)
         self._mcp_server.list_resources()(self._list_resources_mcp)
         self._mcp_server.list_resource_templates()(self._list_resource_templates_mcp)
         self._mcp_server.list_prompts()(self._list_prompts_mcp)
+
         self._mcp_server.call_tool(validate_input=self.strict_input_validation)(
             self._call_tool_mcp
         )
-        # Register custom read_resource handler (SDK decorator doesn't support CreateTaskResult)
-        self._setup_read_resource_handler()
-        # Register custom get_prompt handler (SDK decorator doesn't support CreateTaskResult)
-        self._setup_get_prompt_handler()
-        # Register custom SEP-1686 task protocol handlers
+        self._mcp_server.read_resource()(self._read_resource_mcp)
+        self._mcp_server.get_prompt()(self._get_prompt_mcp)
+
+        # Register SEP-1686 task protocol handlers
         self._setup_task_protocol_handlers()
-
-    def _setup_read_resource_handler(self) -> None:
-        """
-        Set up custom read_resource handler that supports task-augmented responses.
-
-        The SDK's read_resource decorator doesn't support CreateTaskResult returns,
-        so we register a custom handler that checks request_context.experimental.is_task.
-        """
-
-        async def handler(req: mcp.types.ReadResourceRequest) -> mcp.types.ServerResult:
-            uri = req.params.uri
-
-            # Check for task metadata via SDK's request context
-            task_meta = None
-            try:
-                ctx = self._mcp_server.request_context
-                if ctx.experimental.is_task:
-                    task_meta = ctx.experimental.task_metadata
-            except (AttributeError, LookupError):
-                pass
-
-            # Check for task metadata and route appropriately
-            async with fastmcp.server.context.Context(fastmcp=self):
-                # Get resource including from mounted servers
-                resource = await self._get_resource_or_template_or_none(str(uri))
-                if (
-                    resource
-                    and self._should_enable_component(resource)
-                    and hasattr(resource, "task_config")
-                ):
-                    task_mode = resource.task_config.mode  # type: ignore[union-attr]
-
-                    # Enforce mode="required" - must have task metadata
-                    if task_mode == "required" and not task_meta:
-                        raise McpError(
-                            ErrorData(
-                                code=METHOD_NOT_FOUND,
-                                message=f"Resource '{uri}' requires task-augmented execution",
-                            )
-                        )
-
-                    # Route to background if task metadata present and mode allows
-                    if task_meta and task_mode != "forbidden":
-                        # For FunctionResource/FunctionResourceTemplate, use Docket
-                        if isinstance(
-                            resource,
-                            FunctionResource | FunctionResourceTemplate,
-                        ):
-                            task_meta_dict = task_meta.model_dump(exclude_none=True)
-                            return await handle_resource_as_task(
-                                self, str(uri), resource, task_meta_dict
-                            )
-
-                    # Forbidden mode: task requested but mode="forbidden"
-                    # Raise error since resources don't have isError field
-                    if task_meta and task_mode == "forbidden":
-                        raise McpError(
-                            ErrorData(
-                                code=METHOD_NOT_FOUND,
-                                message=f"Resource '{uri}' does not support task-augmented execution",
-                            )
-                        )
-
-            # Synchronous execution
-            result = await self._read_resource_mcp(uri)
-
-            # Graceful degradation: if we got here with task_meta, something went wrong
-            # (This should be unreachable now that forbidden raises)
-            if task_meta:
-                mcp_contents = [item.to_mcp_resource_contents(uri) for item in result]
-                return mcp.types.ServerResult(
-                    mcp.types.ReadResourceResult(
-                        contents=mcp_contents,
-                        _meta={
-                            "modelcontextprotocol.io/task": {
-                                "returned_immediately": True
-                            }
-                        },
-                    )
-                )
-
-            # Convert to proper ServerResult
-            if isinstance(result, mcp.types.ServerResult):
-                return result
-
-            mcp_contents = [item.to_mcp_resource_contents(uri) for item in result]
-            return mcp.types.ServerResult(
-                mcp.types.ReadResourceResult(contents=mcp_contents)
-            )
-
-        self._mcp_server.request_handlers[mcp.types.ReadResourceRequest] = handler
-
-    def _setup_get_prompt_handler(self) -> None:
-        """
-        Set up custom get_prompt handler that supports task-augmented responses.
-
-        The SDK's get_prompt decorator doesn't support CreateTaskResult returns,
-        so we register a custom handler that checks request_context.experimental.is_task.
-        """
-
-        async def handler(req: mcp.types.GetPromptRequest) -> mcp.types.ServerResult:
-            name = req.params.name
-            arguments = req.params.arguments
-
-            # Check for task metadata via SDK's request context
-            task_meta = None
-            try:
-                ctx = self._mcp_server.request_context
-                if ctx.experimental.is_task:
-                    task_meta = ctx.experimental.task_metadata
-            except (AttributeError, LookupError):
-                pass
-
-            # Check for task metadata and route appropriately
-            async with fastmcp.server.context.Context(fastmcp=self):
-                try:
-                    prompt = await self.get_prompt(name)
-                except NotFoundError:
-                    prompt = None
-                if (
-                    prompt
-                    and self._should_enable_component(prompt)
-                    and hasattr(prompt, "task_config")
-                    and prompt.task_config
-                ):
-                    task_mode = prompt.task_config.mode  # type: ignore[union-attr]
-
-                    # Enforce mode="required" - must have task metadata
-                    if task_mode == "required" and not task_meta:
-                        raise McpError(
-                            ErrorData(
-                                code=METHOD_NOT_FOUND,
-                                message=f"Prompt '{name}' requires task-augmented execution",
-                            )
-                        )
-
-                    # Route to background if task metadata present and mode allows
-                    if task_meta and task_mode != "forbidden":
-                        task_meta_dict = task_meta.model_dump(exclude_none=True)
-                        result = await handle_prompt_as_task(
-                            self, name, arguments, task_meta_dict
-                        )
-                        return mcp.types.ServerResult(result)
-
-                    # Forbidden mode: task requested but mode="forbidden"
-                    # Raise error since prompts don't have isError field
-                    if task_meta and task_mode == "forbidden":
-                        raise McpError(
-                            ErrorData(
-                                code=METHOD_NOT_FOUND,
-                                message=f"Prompt '{name}' does not support task-augmented execution",
-                            )
-                        )
-
-            # Synchronous execution
-            result = await self._get_prompt_mcp(name, arguments)
-            return mcp.types.ServerResult(result)
-
-        self._mcp_server.request_handlers[mcp.types.GetPromptRequest] = handler
 
     def _setup_task_protocol_handlers(self) -> None:
         """Register SEP-1686 task protocol handlers with SDK."""
@@ -777,7 +627,7 @@ class FastMCP(Generic[LifespanResultT]):
             ServerResult,
         )
 
-        from fastmcp.server.tasks.protocol import (
+        from fastmcp.server.tasks.requests import (
             tasks_cancel_handler,
             tasks_get_handler,
             tasks_list_handler,
@@ -819,7 +669,7 @@ class FastMCP(Generic[LifespanResultT]):
         self._mcp_server.request_handlers[ListTasksRequest] = handle_list_tasks
         self._mcp_server.request_handlers[CancelTaskRequest] = handle_cancel_task
 
-    async def _apply_middleware(
+    async def _run_middleware(
         self,
         context: MiddlewareContext[Any],
         call_next: Callable[[MiddlewareContext[Any]], Awaitable[Any]],
@@ -845,215 +695,690 @@ class FastMCP(Generic[LifespanResultT]):
         """
         self._providers.append(provider)
 
-    async def get_tools(self) -> dict[str, Tool]:
-        """Get all tools (unfiltered), including from providers, indexed by key."""
-        all_tools = dict(await self._tool_manager.get_tools())
+    # -------------------------------------------------------------------------
+    # Enable/Disable
+    # -------------------------------------------------------------------------
 
-        # Get tools from providers (including MountedProvider)
-        for provider in self._providers:
-            try:
-                provider_tools = await provider.list_tools()
-                for tool in provider_tools:
+    def enable(
+        self,
+        *,
+        keys: Sequence[str] | None = None,
+        tags: set[str] | None = None,
+        only: bool = False,
+    ) -> None:
+        """Enable components by removing from blocklist, or set allowlist with only=True.
+
+        Args:
+            keys: Keys to enable (e.g., ``"tool:my_tool"``).
+            tags: Tags to enable - components with these tags will be enabled.
+            only: If True, switches to allowlist mode - ONLY show these keys/tags.
+                This clears existing allowlists and sets default visibility to False.
+
+        Note:
+            Component keys must match how they appear on this server. If a tool
+            passes through a transforming provider (e.g., mounted with a namespace),
+            its key changes. Always retrieve components from the same server you
+            call enable/disable on.
+
+        Example:
+            .. code-block:: python
+
+                # By key (prefixed)
+                server.enable(keys=["tool:my_tool"])
+
+                # By tag
+                server.enable(tags={"internal"})
+
+                # Allowlist mode - ONLY show tools tagged "final"
+                server.enable(tags={"final"}, only=True)
+        """
+        self._visibility.enable(keys=keys, tags=tags, only=only)
+
+    def disable(
+        self,
+        *,
+        keys: Sequence[str] | None = None,
+        tags: set[str] | None = None,
+    ) -> None:
+        """Disable components by adding to the blocklist.
+
+        Args:
+            keys: Keys to disable (e.g., ``"tool:my_tool"``).
+            tags: Tags to disable - components with these tags will be disabled.
+
+        Note:
+            Component keys must match how they appear on this server. If a tool
+            passes through a transforming provider (e.g., mounted with a namespace),
+            its key changes. Always retrieve components from the same server you
+            call enable/disable on.
+
+        Example:
+            .. code-block:: python
+
+                # By key (prefixed)
+                server.disable(keys=["tool:my_tool"])
+
+                # By tag
+                server.disable(tags={"dangerous", "internal"})
+        """
+        self._visibility.disable(keys=keys, tags=tags)
+
+    def _is_component_enabled(self, component: FastMCPComponent) -> bool:
+        """Check if a component is enabled (not in blocklist, passes allowlist)."""
+        return self._visibility.is_enabled(component)
+
+    async def get_tools(self, *, run_middleware: bool = False) -> list[Tool]:
+        """Get all enabled tools from providers.
+
+        Queries all providers in parallel and collects tools.
+        First provider wins for duplicate keys. Filters by server blocklist.
+
+        Args:
+            run_middleware: If True, apply the middleware chain before
+                returning results. Used by MCP handlers and mounted servers.
+        """
+        if run_middleware:
+            async with fastmcp.server.context.Context(fastmcp=self) as fastmcp_ctx:
+                mw_context = MiddlewareContext(
+                    message=mcp.types.ListToolsRequest(method="tools/list"),
+                    source="client",
+                    type="request",
+                    method="tools/list",
+                    fastmcp_context=fastmcp_ctx,
+                )
+                return list(
+                    await self._run_middleware(
+                        context=mw_context,
+                        call_next=lambda context: self.get_tools(run_middleware=False),
+                    )
+                )
+
+        results = await gather(
+            *[p.list_tools() for p in self._providers],
+            return_exceptions=True,
+        )
+
+        all_tools: dict[str, Tool] = {}
+        for i, result in enumerate(results):
+            if isinstance(result, BaseException):
+                provider = self._providers[i]
+                logger.exception(f"Error listing tools from provider {provider}")
+                if fastmcp.settings.mounted_components_raise_on_load_error:
+                    raise result
+                continue
+            for tool in result:
+                if self._is_component_enabled(tool) and tool.key not in all_tools:
                     all_tools[tool.key] = tool
-            except Exception as e:
-                provider_name = getattr(provider, "server", provider).__class__.__name__
-                logger.warning(
-                    f"Failed to get tools from provider {provider_name!r}: {e}"
+        return list(all_tools.values())
+
+    async def get_tool(self, name: str) -> Tool:
+        """Get an enabled tool by name.
+
+        Queries all providers in parallel to find the tool.
+        First provider wins. Returns only if enabled.
+        """
+        results = await gather(
+            *[p.get_tool(name) for p in self._providers],
+            return_exceptions=True,
+        )
+
+        for i, result in enumerate(results):
+            if isinstance(result, BaseException):
+                if not isinstance(result, NotFoundError):
+                    logger.debug(
+                        f"Error getting tool from {self._providers[i]}: {result}"
+                    )
+                continue
+            if isinstance(result, Tool) and self._is_component_enabled(result):
+                return result
+
+        raise NotFoundError(f"Unknown tool: {name!r}")
+
+    async def get_resources(self, *, run_middleware: bool = False) -> list[Resource]:
+        """Get all enabled resources from providers.
+
+        Queries all providers in parallel and collects resources.
+        First provider wins for duplicate keys. Filters by server blocklist.
+
+        Args:
+            run_middleware: If True, apply the middleware chain before
+                returning results. Used by MCP handlers and mounted servers.
+        """
+        if run_middleware:
+            async with fastmcp.server.context.Context(fastmcp=self) as fastmcp_ctx:
+                mw_context = MiddlewareContext(
+                    message={},  # List resources doesn't have parameters
+                    source="client",
+                    type="request",
+                    method="resources/list",
+                    fastmcp_context=fastmcp_ctx,
                 )
+                return list(
+                    await self._run_middleware(
+                        context=mw_context,
+                        call_next=lambda context: self.get_resources(
+                            run_middleware=False
+                        ),
+                    )
+                )
+
+        results = await gather(
+            *[p.list_resources() for p in self._providers],
+            return_exceptions=True,
+        )
+
+        all_resources: dict[str, Resource] = {}
+        for i, result in enumerate(results):
+            if isinstance(result, BaseException):
+                provider = self._providers[i]
+                logger.exception(f"Error listing resources from provider {provider}")
                 if fastmcp.settings.mounted_components_raise_on_load_error:
-                    raise
+                    raise result
                 continue
-
-        return all_tools
-
-    async def get_tool(self, key: str) -> Tool:
-        """Get a tool by key, checking local tools first then providers."""
-        # Check local tools first
-        try:
-            return await self._tool_manager.get_tool(key)
-        except NotFoundError:
-            pass
-
-        # Try providers
-        for provider in self._providers:
-            try:
-                tool = await provider.get_tool(key)
-                if tool is not None:
-                    return tool
-            except NotFoundError:
-                continue
-
-        raise NotFoundError(f"Unknown tool: {key}")
-
-    async def _get_tool_with_task_config(self, key: str) -> Tool | None:
-        """Get a tool by key, returning None if not found.
-
-        Used for task config checking where we need the actual tool object
-        (including from mounted servers and proxies) but don't want to raise.
-        """
-        try:
-            return await self.get_tool(key)
-        except NotFoundError:
-            return None
-
-    async def _get_resource_or_template_or_none(
-        self, uri: str
-    ) -> Resource | ResourceTemplate | None:
-        """Get a resource or template by URI. Returns None if not found.
-
-        Returns the original ResourceTemplate (not a Resource created from it)
-        to preserve the registered function for task execution.
-        """
-        # Check local concrete resources first
-        local_resources = await self._resource_manager.get_resources()
-        if uri in local_resources:
-            return local_resources[uri]
-
-        # Check local templates - return the template itself, not a created resource
-        local_templates = await self._resource_manager.get_resource_templates()
-        for template in local_templates.values():
-            if template.matches(uri):
-                return template
-
-        # Check providers
-        for provider in self._providers:
-            try:
-                resource = await provider.get_resource(uri)
-                if resource is not None:
-                    return resource
-            except NotFoundError:
-                continue
-
-        # Check provider templates
-        for provider in self._providers:
-            try:
-                template = await provider.get_resource_template(uri)
-                if template is not None:
-                    return template
-            except NotFoundError:
-                continue
-
-        return None
-
-    async def get_resources(self) -> dict[str, Resource]:
-        """Get all resources (unfiltered), including from providers, indexed by key."""
-        all_resources = dict(await self._resource_manager.get_resources())
-
-        # Get resources from providers (including MountedProvider)
-        for provider in self._providers:
-            try:
-                provider_resources = await provider.list_resources()
-                for resource in provider_resources:
+            for resource in result:
+                if (
+                    self._is_component_enabled(resource)
+                    and resource.key not in all_resources
+                ):
                     all_resources[resource.key] = resource
-            except Exception as e:
-                provider_name = getattr(provider, "server", provider).__class__.__name__
-                logger.warning(
-                    f"Failed to get resources from provider {provider_name!r}: {e}"
+        return list(all_resources.values())
+
+    async def get_resource(self, uri: str) -> Resource:
+        """Get an enabled resource by URI.
+
+        Queries all providers in parallel to find the resource.
+        First provider wins. Returns only if enabled.
+        """
+        results = await gather(
+            *[p.get_resource(uri) for p in self._providers],
+            return_exceptions=True,
+        )
+
+        for i, result in enumerate(results):
+            if isinstance(result, BaseException):
+                if not isinstance(result, NotFoundError):
+                    logger.debug(
+                        f"Error getting resource from {self._providers[i]}: {result}"
+                    )
+                continue
+            if isinstance(result, Resource) and self._is_component_enabled(result):
+                return result
+
+        raise NotFoundError(f"Unknown resource: {uri}")
+
+    async def get_resource_templates(
+        self, *, run_middleware: bool = False
+    ) -> list[ResourceTemplate]:
+        """Get all enabled resource templates from providers.
+
+        Queries all providers in parallel and collects templates.
+        First provider wins for duplicate keys. Filters by server blocklist.
+
+        Args:
+            run_middleware: If True, apply the middleware chain before
+                returning results. Used by MCP handlers and mounted servers.
+        """
+        if run_middleware:
+            async with fastmcp.server.context.Context(fastmcp=self) as fastmcp_ctx:
+                mw_context = MiddlewareContext(
+                    message={},  # List resource templates doesn't have parameters
+                    source="client",
+                    type="request",
+                    method="resources/templates/list",
+                    fastmcp_context=fastmcp_ctx,
+                )
+                return list(
+                    await self._run_middleware(
+                        context=mw_context,
+                        call_next=lambda context: self.get_resource_templates(
+                            run_middleware=False
+                        ),
+                    )
+                )
+
+        results = await gather(
+            *[p.list_resource_templates() for p in self._providers],
+            return_exceptions=True,
+        )
+
+        all_templates: dict[str, ResourceTemplate] = {}
+        for i, result in enumerate(results):
+            if isinstance(result, BaseException):
+                provider = self._providers[i]
+                logger.exception(
+                    f"Error listing resource templates from provider {provider}"
                 )
                 if fastmcp.settings.mounted_components_raise_on_load_error:
-                    raise
+                    raise result
                 continue
-
-        return all_resources
-
-    async def get_resource(self, key: str) -> Resource:
-        """Get a resource by key, checking local resources first then providers."""
-        # Check local resources first
-        try:
-            return await self._resource_manager.get_resource(key)
-        except NotFoundError:
-            pass
-
-        # Try providers
-        for provider in self._providers:
-            try:
-                resource = await provider.get_resource(key)
-                if resource is not None:
-                    return resource
-            except NotFoundError:
-                continue
-
-        raise NotFoundError(f"Unknown resource: {key}")
-
-    async def get_resource_templates(self) -> dict[str, ResourceTemplate]:
-        """Get all resource templates (unfiltered), including from providers, indexed by key."""
-        all_templates = dict(await self._resource_manager.get_resource_templates())
-
-        # Get templates from providers (including MountedProvider)
-        for provider in self._providers:
-            try:
-                provider_templates = await provider.list_resource_templates()
-                for template in provider_templates:
+            for template in result:
+                if (
+                    self._is_component_enabled(template)
+                    and template.key not in all_templates
+                ):
                     all_templates[template.key] = template
-            except Exception as e:
-                provider_name = getattr(provider, "server", provider).__class__.__name__
-                logger.warning(
-                    f"Failed to get resource templates from provider {provider_name!r}: {e}"
+        return list(all_templates.values())
+
+    async def get_resource_template(self, uri: str) -> ResourceTemplate:
+        """Get an enabled resource template that matches the given URI.
+
+        Queries all providers in parallel to find the template.
+        First provider wins. Returns only if enabled.
+        """
+        results = await gather(
+            *[p.get_resource_template(uri) for p in self._providers],
+            return_exceptions=True,
+        )
+
+        for i, result in enumerate(results):
+            if isinstance(result, BaseException):
+                if not isinstance(result, NotFoundError):
+                    logger.debug(
+                        f"Error getting template from {self._providers[i]}: {result}"
+                    )
+                continue
+            if isinstance(result, ResourceTemplate) and self._is_component_enabled(
+                result
+            ):
+                return result
+
+        raise NotFoundError(f"Unknown resource template: {uri}")
+
+    async def get_prompts(self, *, run_middleware: bool = False) -> list[Prompt]:
+        """Get all enabled prompts from providers.
+
+        Queries all providers in parallel and collects prompts.
+        First provider wins for duplicate keys. Filters by server blocklist.
+
+        Args:
+            run_middleware: If True, apply the middleware chain before
+                returning results. Used by MCP handlers and mounted servers.
+        """
+        if run_middleware:
+            async with fastmcp.server.context.Context(fastmcp=self) as fastmcp_ctx:
+                mw_context = MiddlewareContext(
+                    message=mcp.types.ListPromptsRequest(method="prompts/list"),
+                    source="client",
+                    type="request",
+                    method="prompts/list",
+                    fastmcp_context=fastmcp_ctx,
                 )
+                return list(
+                    await self._run_middleware(
+                        context=mw_context,
+                        call_next=lambda context: self.get_prompts(
+                            run_middleware=False
+                        ),
+                    )
+                )
+
+        results = await gather(
+            *[p.list_prompts() for p in self._providers],
+            return_exceptions=True,
+        )
+
+        all_prompts: dict[str, Prompt] = {}
+        for i, result in enumerate(results):
+            if isinstance(result, BaseException):
+                provider = self._providers[i]
+                logger.exception(f"Error listing prompts from provider {provider}")
                 if fastmcp.settings.mounted_components_raise_on_load_error:
-                    raise
+                    raise result
                 continue
-
-        return all_templates
-
-    async def get_resource_template(self, key: str) -> ResourceTemplate:
-        """Get a registered resource template by key."""
-        # Check local templates first
-        local_templates = await self._resource_manager.get_resource_templates()
-        if key in local_templates:
-            return local_templates[key]
-
-        # Try providers
-        for provider in self._providers:
-            try:
-                # For templates, we use get_resource_template which matches by URI
-                template = await provider.get_resource_template(key)
-                if template is not None:
-                    return template
-            except NotFoundError:
-                continue
-
-        raise NotFoundError(f"Unknown resource template: {key}")
-
-    async def get_prompts(self) -> dict[str, Prompt]:
-        """Get all prompts (unfiltered), including from providers, indexed by key."""
-        all_prompts = dict(await self._prompt_manager.get_prompts())
-
-        # Get prompts from providers (including MountedProvider)
-        for provider in self._providers:
-            try:
-                provider_prompts = await provider.list_prompts()
-                for prompt in provider_prompts:
+            for prompt in result:
+                if self._is_component_enabled(prompt) and prompt.key not in all_prompts:
                     all_prompts[prompt.key] = prompt
-            except Exception as e:
-                provider_name = getattr(provider, "server", provider).__class__.__name__
-                logger.warning(
-                    f"Failed to get prompts from provider {provider_name!r}: {e}"
+        return list(all_prompts.values())
+
+    async def get_prompt(self, name: str) -> Prompt:
+        """Get an enabled prompt by name.
+
+        Queries all providers in parallel to find the prompt.
+        First provider wins. Returns only if enabled.
+        """
+        results = await gather(
+            *[p.get_prompt(name) for p in self._providers],
+            return_exceptions=True,
+        )
+
+        for i, result in enumerate(results):
+            if isinstance(result, BaseException):
+                if not isinstance(result, NotFoundError):
+                    logger.debug(
+                        f"Error getting prompt from {self._providers[i]}: {result}"
+                    )
+                continue
+            if isinstance(result, Prompt) and self._is_component_enabled(result):
+                return result
+
+        raise NotFoundError(f"Unknown prompt: {name}")
+
+    async def get_component(
+        self, key: str
+    ) -> Tool | Resource | ResourceTemplate | Prompt:
+        """Get a component by its prefixed key.
+
+        Queries all providers in parallel to find the component.
+        First provider wins.
+
+        Args:
+            key: The prefixed key (e.g., "tool:name", "resource:uri", "template:uri").
+
+        Returns:
+            The component if found.
+
+        Raises:
+            NotFoundError: If no component is found with the given key.
+        """
+        results = await gather(
+            *[p.get_component(key) for p in self._providers],
+            return_exceptions=True,
+        )
+
+        for i, result in enumerate(results):
+            if isinstance(result, BaseException):
+                if not isinstance(result, NotFoundError):
+                    logger.debug(
+                        f"Error getting component from {self._providers[i]}: {result}"
+                    )
+                continue
+            if isinstance(result, FastMCPComponent):
+                return result
+
+        raise NotFoundError(f"Unknown component: {key}")
+
+    @overload
+    async def call_tool(
+        self,
+        name: str,
+        arguments: dict[str, Any] | None = None,
+        *,
+        run_middleware: bool = True,
+        task_meta: None = None,
+    ) -> ToolResult: ...
+
+    @overload
+    async def call_tool(
+        self,
+        name: str,
+        arguments: dict[str, Any] | None = None,
+        *,
+        run_middleware: bool = True,
+        task_meta: TaskMeta,
+    ) -> mcp.types.CreateTaskResult: ...
+
+    async def call_tool(
+        self,
+        name: str,
+        arguments: dict[str, Any] | None = None,
+        *,
+        run_middleware: bool = True,
+        task_meta: TaskMeta | None = None,
+    ) -> ToolResult | mcp.types.CreateTaskResult:
+        """Call a tool by name.
+
+        This is the public API for executing tools. By default, middleware is applied.
+
+        Args:
+            name: The tool name
+            arguments: Tool arguments (optional)
+            run_middleware: If True (default), apply the middleware chain.
+                Set to False when called from middleware to avoid re-applying.
+            task_meta: If provided, execute as a background task and return
+                CreateTaskResult. If None (default), execute synchronously and
+                return ToolResult.
+
+        Returns:
+            ToolResult when task_meta is None.
+            CreateTaskResult when task_meta is provided.
+
+        Raises:
+            NotFoundError: If tool not found or disabled
+            ToolError: If tool execution fails
+            ValidationError: If arguments fail validation
+        """
+        # Note: fn_key enrichment happens here after finding the tool.
+        # For mounted servers, the parent's provider sets fn_key to the
+        # namespaced key before delegating, ensuring correct Docket routing.
+
+        async with fastmcp.server.context.Context(fastmcp=self) as ctx:
+            if run_middleware:
+                mw_context = MiddlewareContext[CallToolRequestParams](
+                    message=mcp.types.CallToolRequestParams(
+                        name=name, arguments=arguments or {}
+                    ),
+                    source="client",
+                    type="request",
+                    method="tools/call",
+                    fastmcp_context=ctx,
                 )
-                if fastmcp.settings.mounted_components_raise_on_load_error:
-                    raise
-                continue
+                return await self._run_middleware(
+                    context=mw_context,
+                    call_next=lambda context: self.call_tool(
+                        context.message.name,
+                        context.message.arguments or {},
+                        run_middleware=False,
+                        task_meta=task_meta,
+                    ),
+                )
 
-        return all_prompts
-
-    async def get_prompt(self, key: str) -> Prompt:
-        """Get a prompt by key, checking local prompts first then providers."""
-        # Check local prompts first
-        try:
-            return await self._prompt_manager.get_prompt(key)
-        except NotFoundError:
-            pass
-
-        # Try providers
-        for provider in self._providers:
+            # Core logic: find and execute tool (providers queried in parallel)
+            tool = await self.get_tool(name)
+            # Set fn_key for background task routing
+            if task_meta is not None and task_meta.fn_key is None:
+                task_meta = replace(task_meta, fn_key=tool.key)
             try:
-                prompt = await provider.get_prompt(key)
-                if prompt is not None:
-                    return prompt
-            except NotFoundError:
-                continue
+                return await tool._run(arguments or {}, task_meta=task_meta)
+            except FastMCPError:
+                logger.exception(f"Error calling tool {name!r}")
+                raise
+            except (ValidationError, PydanticValidationError):
+                logger.exception(f"Error validating tool {name!r}")
+                raise
+            except Exception as e:
+                logger.exception(f"Error calling tool {name!r}")
+                if self._mask_error_details:
+                    raise ToolError(f"Error calling tool {name!r}") from e
+                raise ToolError(f"Error calling tool {name!r}: {e}") from e
 
-        raise NotFoundError(f"Unknown prompt: {key}")
+    @overload
+    async def read_resource(
+        self,
+        uri: str,
+        *,
+        run_middleware: bool = True,
+        task_meta: None = None,
+    ) -> ResourceResult: ...
+
+    @overload
+    async def read_resource(
+        self,
+        uri: str,
+        *,
+        run_middleware: bool = True,
+        task_meta: TaskMeta,
+    ) -> mcp.types.CreateTaskResult: ...
+
+    async def read_resource(
+        self,
+        uri: str,
+        *,
+        run_middleware: bool = True,
+        task_meta: TaskMeta | None = None,
+    ) -> ResourceResult | mcp.types.CreateTaskResult:
+        """Read a resource by URI.
+
+        This is the public API for reading resources. By default, middleware is applied.
+        Checks concrete resources first, then templates.
+
+        Args:
+            uri: The resource URI
+            run_middleware: If True (default), apply the middleware chain.
+                Set to False when called from middleware to avoid re-applying.
+            task_meta: If provided, execute as a background task and return
+                CreateTaskResult. If None (default), execute synchronously and
+                return ResourceResult.
+
+        Returns:
+            ResourceResult when task_meta is None.
+            CreateTaskResult when task_meta is provided.
+
+        Raises:
+            NotFoundError: If resource not found or disabled
+            ResourceError: If resource read fails
+        """
+        # Note: fn_key enrichment happens here after finding the resource/template.
+        # Resources and templates use different key formats:
+        # - Resources use resource.key (derived from the concrete URI)
+        # - Templates use template.key (the template pattern)
+        # For mounted servers, the parent's provider sets fn_key to the
+        # namespaced key before delegating, ensuring correct Docket routing.
+
+        async with fastmcp.server.context.Context(fastmcp=self) as ctx:
+            if run_middleware:
+                uri_param = AnyUrl(uri)
+                mw_context = MiddlewareContext(
+                    message=mcp.types.ReadResourceRequestParams(uri=uri_param),
+                    source="client",
+                    type="request",
+                    method="resources/read",
+                    fastmcp_context=ctx,
+                )
+                return await self._run_middleware(
+                    context=mw_context,
+                    call_next=lambda context: self.read_resource(
+                        str(context.message.uri),
+                        run_middleware=False,
+                        task_meta=task_meta,
+                    ),
+                )
+
+            # Core logic: find and read resource (providers queried in parallel)
+            # Try concrete resources first
+            try:
+                resource = await self.get_resource(uri)
+                # Set fn_key for background task routing
+                if task_meta is not None and task_meta.fn_key is None:
+                    task_meta = replace(task_meta, fn_key=resource.key)
+                return await resource._read(task_meta=task_meta)
+            except NotFoundError:
+                pass  # Fall through to try templates
+            except (FastMCPError, McpError):
+                logger.exception(f"Error reading resource {uri!r}")
+                raise
+            except Exception as e:
+                logger.exception(f"Error reading resource {uri!r}")
+                if self._mask_error_details:
+                    raise ResourceError(f"Error reading resource {uri!r}") from e
+                raise ResourceError(f"Error reading resource {uri!r}: {e}") from e
+
+            # Try templates
+            try:
+                template = await self.get_resource_template(uri)
+            except NotFoundError:
+                raise NotFoundError(f"Unknown resource: {uri!r}") from None
+            params = template.matches(uri)
+            assert params is not None  # get_resource_template already verified match
+            # Set fn_key for background task routing
+            if task_meta is not None and task_meta.fn_key is None:
+                task_meta = replace(task_meta, fn_key=template.key)
+            try:
+                return await template._read(uri, params, task_meta=task_meta)
+            except (FastMCPError, McpError):
+                logger.exception(f"Error reading resource {uri!r}")
+                raise
+            except Exception as e:
+                logger.exception(f"Error reading resource {uri!r}")
+                if self._mask_error_details:
+                    raise ResourceError(f"Error reading resource {uri!r}") from e
+                raise ResourceError(f"Error reading resource {uri!r}: {e}") from e
+
+    @overload
+    async def render_prompt(
+        self,
+        name: str,
+        arguments: dict[str, Any] | None = None,
+        *,
+        run_middleware: bool = True,
+        task_meta: None = None,
+    ) -> PromptResult: ...
+
+    @overload
+    async def render_prompt(
+        self,
+        name: str,
+        arguments: dict[str, Any] | None = None,
+        *,
+        run_middleware: bool = True,
+        task_meta: TaskMeta,
+    ) -> mcp.types.CreateTaskResult: ...
+
+    async def render_prompt(
+        self,
+        name: str,
+        arguments: dict[str, Any] | None = None,
+        *,
+        run_middleware: bool = True,
+        task_meta: TaskMeta | None = None,
+    ) -> PromptResult | mcp.types.CreateTaskResult:
+        """Render a prompt by name.
+
+        This is the public API for rendering prompts. By default, middleware is applied.
+        Use get_prompt() to retrieve the prompt definition without rendering.
+
+        Args:
+            name: The prompt name
+            arguments: Prompt arguments (optional)
+            run_middleware: If True (default), apply the middleware chain.
+                Set to False when called from middleware to avoid re-applying.
+            task_meta: If provided, execute as a background task and return
+                CreateTaskResult. If None (default), execute synchronously and
+                return PromptResult.
+
+        Returns:
+            PromptResult when task_meta is None.
+            CreateTaskResult when task_meta is provided.
+
+        Raises:
+            NotFoundError: If prompt not found or disabled
+            PromptError: If prompt rendering fails
+        """
+        async with fastmcp.server.context.Context(fastmcp=self) as ctx:
+            if run_middleware:
+                mw_context = MiddlewareContext(
+                    message=mcp.types.GetPromptRequestParams(
+                        name=name, arguments=arguments
+                    ),
+                    source="client",
+                    type="request",
+                    method="prompts/get",
+                    fastmcp_context=ctx,
+                )
+                return await self._run_middleware(
+                    context=mw_context,
+                    call_next=lambda context: self.render_prompt(
+                        context.message.name,
+                        context.message.arguments,
+                        run_middleware=False,
+                        task_meta=task_meta,
+                    ),
+                )
+
+            # Core logic: find and render prompt (providers queried in parallel)
+            prompt = await self.get_prompt(name)
+            # Set fn_key for background task routing
+            if task_meta is not None and task_meta.fn_key is None:
+                task_meta = replace(task_meta, fn_key=prompt.key)
+            try:
+                return await prompt._render(arguments, task_meta=task_meta)
+            except (FastMCPError, McpError):
+                logger.exception(f"Error rendering prompt {name!r}")
+                raise
+            except Exception as e:
+                logger.exception(f"Error rendering prompt {name!r}")
+                if self._mask_error_details:
+                    raise PromptError(f"Error rendering prompt {name!r}") from e
+                raise PromptError(f"Error rendering prompt {name!r}: {e}") from e
 
     def custom_route(
         self,
@@ -1109,7 +1434,7 @@ class FastMCP(Generic[LifespanResultT]):
         """Get all additional HTTP routes including from providers.
 
         Returns a list of all custom HTTP routes from this server and
-        from all providers that have HTTP routes (e.g., MountedProvider).
+        from all providers that have HTTP routes (e.g., FastMCPProvider).
 
         Returns:
             List of Starlette BaseRoute objects
@@ -1124,73 +1449,14 @@ class FastMCP(Generic[LifespanResultT]):
         logger.debug(f"[{self.name}] Handler called: list_tools")
 
         async with fastmcp.server.context.Context(fastmcp=self):
-            tools = await self._list_tools_middleware()
+            tools = await self.get_tools(run_middleware=True)
             return [
                 tool.to_mcp_tool(
-                    name=tool.key,
+                    name=tool.name,
                     include_fastmcp_meta=self.include_fastmcp_meta,
                 )
                 for tool in tools
             ]
-
-    async def _list_tools_middleware(self) -> list[Tool]:
-        """
-        List all available tools, applying MCP middleware.
-        """
-
-        async with fastmcp.server.context.Context(fastmcp=self) as fastmcp_ctx:
-            # Create the middleware context.
-            mw_context = MiddlewareContext(
-                message=mcp.types.ListToolsRequest(method="tools/list"),
-                source="client",
-                type="request",
-                method="tools/list",
-                fastmcp_context=fastmcp_ctx,
-            )
-
-            # Apply the middleware chain.
-            return list(
-                await self._apply_middleware(
-                    context=mw_context, call_next=self._list_tools
-                )
-            )
-
-    async def _list_tools(
-        self,
-        context: MiddlewareContext[mcp.types.ListToolsRequest],
-    ) -> list[Tool]:
-        """
-        List all available tools.
-        """
-        # 1. Get local tools and filter them
-        local_tools = await self._tool_manager.get_tools()
-        local_tools_dict: dict[str, Tool] = {
-            tool.key: tool
-            for tool in local_tools.values()
-            if self._should_enable_component(tool)
-        }
-
-        # 2. Get tools from providers (later providers win for deduplication)
-        provider_tools_dict: dict[str, Tool] = {}
-        for provider in self._providers:
-            try:
-                provider_tools = await provider.list_tools()
-                for tool in provider_tools:
-                    if self._should_enable_component(tool):
-                        # Later providers override earlier ones
-                        provider_tools_dict[tool.key] = tool
-            except Exception:
-                logger.exception("Error listing tools from provider")
-                if fastmcp.settings.mounted_components_raise_on_load_error:
-                    raise
-
-        # Remove provider tools that conflict with local tools (local wins)
-        for key in local_tools_dict:
-            provider_tools_dict.pop(key, None)
-
-        # Provider tools come first in the list (for visibility),
-        # but local tools take precedence for execution
-        return list(provider_tools_dict.values()) + list(local_tools_dict.values())
 
     async def _list_resources_mcp(self) -> list[SDKResource]:
         """
@@ -1200,75 +1466,14 @@ class FastMCP(Generic[LifespanResultT]):
         logger.debug(f"[{self.name}] Handler called: list_resources")
 
         async with fastmcp.server.context.Context(fastmcp=self):
-            resources = await self._list_resources_middleware()
+            resources = await self.get_resources(run_middleware=True)
             return [
                 resource.to_mcp_resource(
-                    uri=resource.key,
+                    uri=str(resource.uri),
                     include_fastmcp_meta=self.include_fastmcp_meta,
                 )
                 for resource in resources
             ]
-
-    async def _list_resources_middleware(self) -> list[Resource]:
-        """
-        List all available resources, applying MCP middleware.
-        """
-
-        async with fastmcp.server.context.Context(fastmcp=self) as fastmcp_ctx:
-            # Create the middleware context.
-            mw_context = MiddlewareContext(
-                message={},  # List resources doesn't have parameters
-                source="client",
-                type="request",
-                method="resources/list",
-                fastmcp_context=fastmcp_ctx,
-            )
-
-            # Apply the middleware chain.
-            return list(
-                await self._apply_middleware(
-                    context=mw_context, call_next=self._list_resources
-                )
-            )
-
-    async def _list_resources(
-        self,
-        context: MiddlewareContext[dict[str, Any]],
-    ) -> list[Resource]:
-        """
-        List all available resources.
-        """
-        # 1. Filter local resources
-        local_resources = await self._resource_manager.get_resources()
-        local_resources_dict: dict[str, Resource] = {
-            resource.key: resource
-            for resource in local_resources.values()
-            if self._should_enable_component(resource)
-        }
-
-        # 2. Get resources from providers (later providers win for deduplication)
-        provider_resources_dict: dict[str, Resource] = {}
-        for provider in self._providers:
-            try:
-                provider_resources = await provider.list_resources()
-                for resource in provider_resources:
-                    if self._should_enable_component(resource):
-                        # Later providers override earlier ones
-                        provider_resources_dict[resource.key] = resource
-            except Exception:
-                logger.exception("Error listing resources from provider")
-                if fastmcp.settings.mounted_components_raise_on_load_error:
-                    raise
-
-        # Remove provider resources that conflict with local resources (local wins)
-        for key in local_resources_dict:
-            provider_resources_dict.pop(key, None)
-
-        # Provider resources come first in the list (for visibility),
-        # but local resources take precedence for read operations
-        return list(provider_resources_dict.values()) + list(
-            local_resources_dict.values()
-        )
 
     async def _list_resource_templates_mcp(self) -> list[SDKResourceTemplate]:
         """
@@ -1278,74 +1483,14 @@ class FastMCP(Generic[LifespanResultT]):
         logger.debug(f"[{self.name}] Handler called: list_resource_templates")
 
         async with fastmcp.server.context.Context(fastmcp=self):
-            templates = await self._list_resource_templates_middleware()
+            templates = await self.get_resource_templates(run_middleware=True)
             return [
                 template.to_mcp_template(
-                    uriTemplate=template.key,
+                    uriTemplate=template.uri_template,
                     include_fastmcp_meta=self.include_fastmcp_meta,
                 )
                 for template in templates
             ]
-
-    async def _list_resource_templates_middleware(self) -> list[ResourceTemplate]:
-        """
-        List all available resource templates, applying MCP middleware.
-
-        """
-
-        async with fastmcp.server.context.Context(fastmcp=self) as fastmcp_ctx:
-            # Create the middleware context.
-            mw_context = MiddlewareContext(
-                message={},  # List resource templates doesn't have parameters
-                source="client",
-                type="request",
-                method="resources/templates/list",
-                fastmcp_context=fastmcp_ctx,
-            )
-
-            # Apply the middleware chain.
-            return list(
-                await self._apply_middleware(
-                    context=mw_context, call_next=self._list_resource_templates
-                )
-            )
-
-    async def _list_resource_templates(
-        self,
-        context: MiddlewareContext[dict[str, Any]],
-    ) -> list[ResourceTemplate]:
-        """
-        List all available resource templates.
-        """
-        # 1. Filter local templates
-        local_templates = await self._resource_manager.get_resource_templates()
-        local_templates_dict: dict[str, ResourceTemplate] = {
-            template.key: template
-            for template in local_templates.values()
-            if self._should_enable_component(template)
-        }
-
-        # 2. Get resource templates from providers (later providers win for deduplication)
-        provider_templates_dict: dict[str, ResourceTemplate] = {}
-        for provider in self._providers:
-            try:
-                provider_templates = await provider.list_resource_templates()
-                for template in provider_templates:
-                    if self._should_enable_component(template):
-                        # Later providers override earlier ones
-                        provider_templates_dict[template.key] = template
-            except Exception:
-                logger.exception("Error listing resource templates from provider")
-                if fastmcp.settings.mounted_components_raise_on_load_error:
-                    raise
-
-        # Remove provider templates that conflict with local templates (local wins)
-        for key in local_templates_dict:
-            provider_templates_dict.pop(key, None)
-
-        return list(provider_templates_dict.values()) + list(
-            local_templates_dict.values()
-        )
 
     async def _list_prompts_mcp(self) -> list[SDKPrompt]:
         """
@@ -1355,74 +1500,14 @@ class FastMCP(Generic[LifespanResultT]):
         logger.debug(f"[{self.name}] Handler called: list_prompts")
 
         async with fastmcp.server.context.Context(fastmcp=self):
-            prompts = await self._list_prompts_middleware()
+            prompts = await self.get_prompts(run_middleware=True)
             return [
                 prompt.to_mcp_prompt(
-                    name=prompt.key,
+                    name=prompt.name,
                     include_fastmcp_meta=self.include_fastmcp_meta,
                 )
                 for prompt in prompts
             ]
-
-    async def _list_prompts_middleware(self) -> list[Prompt]:
-        """
-        List all available prompts, applying MCP middleware.
-
-        """
-
-        async with fastmcp.server.context.Context(fastmcp=self) as fastmcp_ctx:
-            # Create the middleware context.
-            mw_context = MiddlewareContext(
-                message=mcp.types.ListPromptsRequest(method="prompts/list"),
-                source="client",
-                type="request",
-                method="prompts/list",
-                fastmcp_context=fastmcp_ctx,
-            )
-
-            # Apply the middleware chain.
-            return list(
-                await self._apply_middleware(
-                    context=mw_context, call_next=self._list_prompts
-                )
-            )
-
-    async def _list_prompts(
-        self,
-        context: MiddlewareContext[mcp.types.ListPromptsRequest],
-    ) -> list[Prompt]:
-        """
-        List all available prompts.
-        """
-        # 1. Filter local prompts
-        local_prompts = await self._prompt_manager.get_prompts()
-        local_prompts_dict: dict[str, Prompt] = {
-            prompt.key: prompt
-            for prompt in local_prompts.values()
-            if self._should_enable_component(prompt)
-        }
-
-        # 2. Get prompts from providers (later providers win for deduplication)
-        provider_prompts_dict: dict[str, Prompt] = {}
-        for provider in self._providers:
-            try:
-                provider_prompts = await provider.list_prompts()
-                for prompt in provider_prompts:
-                    if self._should_enable_component(prompt):
-                        # Later providers override earlier ones
-                        provider_prompts_dict[prompt.key] = prompt
-            except Exception:
-                logger.exception("Error listing prompts from provider")
-                if fastmcp.settings.mounted_components_raise_on_load_error:
-                    raise
-
-        # Remove provider prompts that conflict with local prompts (local wins)
-        for key in local_prompts_dict:
-            provider_prompts_dict.pop(key, None)
-
-        # Provider prompts come first in the list (for visibility),
-        # but local prompts take precedence for render operations
-        return list(provider_prompts_dict.values()) + list(local_prompts_dict.values())
 
     async def _call_tool_mcp(
         self, key: str, arguments: dict[str, Any]
@@ -1430,405 +1515,132 @@ class FastMCP(Generic[LifespanResultT]):
         list[ContentBlock]
         | tuple[list[ContentBlock], dict[str, Any]]
         | mcp.types.CallToolResult
+        | mcp.types.CreateTaskResult
     ):
         """
         Handle MCP 'callTool' requests.
 
-        Detects SEP-1686 task metadata and routes to background execution if supported.
+        Extracts task metadata from MCP request context and passes it explicitly
+        to call_tool(). The tool's _run() method handles the backgrounding decision,
+        ensuring middleware runs before Docket.
 
         Args:
             key: The name of the tool to call
             arguments: Arguments to pass to the tool
 
         Returns:
-            List of MCP Content objects containing the tool results
+            Tool result or CreateTaskResult for background execution
         """
         logger.debug(
             f"[{self.name}] Handler called: call_tool %s with %s", key, arguments
         )
 
-        async with fastmcp.server.context.Context(fastmcp=self):
-            try:
-                # Check for SEP-1686 task metadata via request context
-                task_meta = None
-                try:
-                    # Access task metadata from SDK's request context
-                    ctx = self._mcp_server.request_context
-                    if ctx.experimental.is_task:
-                        task_meta = ctx.experimental.task_metadata
-                except (AttributeError, LookupError):
-                    # No request context available - proceed without task metadata
-                    pass
-
-                # Get tool from local manager, mounted servers, or proxy
-                tool = await self._get_tool_with_task_config(key)
-                if (
-                    tool
-                    and self._should_enable_component(tool)
-                    and hasattr(tool, "task_config")
-                ):
-                    task_mode = tool.task_config.mode  # type: ignore[union-attr]
-
-                    # Enforce mode="required" - must have task metadata
-                    if task_mode == "required" and not task_meta:
-                        raise McpError(
-                            ErrorData(
-                                code=METHOD_NOT_FOUND,
-                                message=f"Tool '{key}' requires task-augmented execution",
-                            )
-                        )
-
-                    # Route to background if task metadata present and mode allows
-                    if task_meta and task_mode != "forbidden":
-                        # For FunctionTool, use Docket for background execution
-                        if isinstance(tool, FunctionTool):
-                            task_meta_dict = task_meta.model_dump(exclude_none=True)
-                            return await handle_tool_as_task(
-                                self, key, arguments, task_meta_dict
-                            )
-                        # For ProxyTool/mounted tools, proceed with normal execution
-                        # They will forward task metadata to their backend
-
-                    # Forbidden mode: task requested but mode="forbidden"
-                    # Return error result with returned_immediately=True
-                    if task_meta and task_mode == "forbidden":
-                        return mcp.types.CallToolResult(
-                            content=[
-                                mcp.types.TextContent(
-                                    type="text",
-                                    text=f"Tool '{key}' does not support task-augmented execution",
-                                )
-                            ],
-                            isError=True,
-                            _meta={
-                                "modelcontextprotocol.io/task": {
-                                    "returned_immediately": True
-                                }
-                            },
-                        )
-
-                # Synchronous execution (normal path)
-                result = await self._call_tool_middleware(key, arguments)
-                return result.to_mcp_result()
-            except DisabledError as e:
-                raise NotFoundError(f"Unknown tool: {key}") from e
-            except NotFoundError as e:
-                raise NotFoundError(f"Unknown tool: {key}") from e
-
-    async def _call_tool_middleware(
-        self,
-        key: str,
-        arguments: dict[str, Any],
-    ) -> ToolResult:
-        """
-        Applies this server's middleware and delegates the filtered call to the manager.
-        """
-
-        mw_context = MiddlewareContext[CallToolRequestParams](
-            message=mcp.types.CallToolRequestParams(name=key, arguments=arguments),
-            source="client",
-            type="request",
-            method="tools/call",
-            fastmcp_context=fastmcp.server.dependencies.get_context(),
-        )
-        return await self._apply_middleware(
-            context=mw_context, call_next=self._call_tool
-        )
-
-    async def _call_tool(
-        self,
-        context: MiddlewareContext[mcp.types.CallToolRequestParams],
-    ) -> ToolResult:
-        """
-        Call a tool
-        """
-        tool_name = context.message.name
-
-        # Try local tools first (static tools take precedence)
         try:
-            tool = await self._tool_manager.get_tool(tool_name)
-            if self._should_enable_component(tool):
-                return await self._execute_tool(
-                    tool, tool_name, context.message.arguments or {}
-                )
-        except NotFoundError:
-            pass
-
-        # Try component providers (first registered wins)
-        for provider in self._providers:
+            # Extract SEP-1686 task metadata from request context.
+            # fn_key is set by call_tool() after finding the tool.
+            task_meta: TaskMeta | None = None
             try:
-                tool = await provider.get_tool(tool_name)
-                if tool is not None and self._should_enable_component(tool):
-                    result = await provider.call_tool(
-                        tool_name, context.message.arguments or {}
-                    )
-                    if result is not None:
-                        return result
-            except (ValidationError, PydanticValidationError):
-                # Validation errors are never masked
-                logger.exception(f"Error validating tool {tool_name!r}")
-                raise
-            except ToolError:
-                logger.exception(f"Error calling tool {tool_name!r}")
-                raise
-            except Exception as e:
-                logger.exception(f"Error calling tool {tool_name!r} from provider")
-                if self._mask_error_details:
-                    raise ToolError(f"Error calling tool {tool_name!r}") from e
-                raise ToolError(f"Error calling tool {tool_name!r}: {e}") from e
+                ctx = self._mcp_server.request_context
+                if ctx.experimental.is_task:
+                    mcp_task_meta = ctx.experimental.task_metadata
+                    task_meta_dict = mcp_task_meta.model_dump(exclude_none=True)
+                    task_meta = TaskMeta(ttl=task_meta_dict.get("ttl"))
+            except (AttributeError, LookupError):
+                pass
 
-        raise NotFoundError(f"Unknown tool: {tool_name!r}")
+            result = await self.call_tool(key, arguments, task_meta=task_meta)
 
-    async def _execute_tool(
-        self, tool: Tool, tool_name: str, arguments: dict[str, Any]
-    ) -> ToolResult:
-        """Run a tool with unified error handling."""
-        try:
-            return await tool.run(arguments)
-        except (ValidationError, PydanticValidationError):
-            # Validation errors are never masked - they indicate client input issues
-            logger.exception(f"Error validating tool {tool_name!r}")
-            raise
-        except ToolError:
-            logger.exception(f"Error calling tool {tool_name!r}")
-            raise
-        except Exception as e:
-            logger.exception(f"Error calling tool {tool_name!r}")
-            if self._mask_error_details:
-                raise ToolError(f"Error calling tool {tool_name!r}") from e
-            raise ToolError(f"Error calling tool {tool_name!r}: {e}") from e
+            if isinstance(result, mcp.types.CreateTaskResult):
+                return result
+            return result.to_mcp_result()
 
-    async def _read_resource_mcp(self, uri: AnyUrl | str) -> list[ResourceContent]:
-        """
-        Handle MCP 'readResource' requests.
+        except DisabledError as e:
+            raise NotFoundError(f"Unknown tool: {key!r}") from e
+        except NotFoundError as e:
+            raise NotFoundError(f"Unknown tool: {key!r}") from e
 
-        Delegates to _read_resource, which should be overridden by FastMCP subclasses.
+    async def _read_resource_mcp(
+        self, uri: AnyUrl | str
+    ) -> mcp.types.ReadResourceResult | mcp.types.CreateTaskResult:
+        """Handle MCP 'readResource' requests.
+
+        Extracts task metadata from MCP request context and passes it explicitly
+        to read_resource(). The resource's _read() method handles the backgrounding
+        decision, ensuring middleware runs before Docket.
+
+        Args:
+            uri: The resource URI
+
+        Returns:
+            ReadResourceResult or CreateTaskResult for background execution
         """
         logger.debug(f"[{self.name}] Handler called: read_resource %s", uri)
 
-        async with fastmcp.server.context.Context(fastmcp=self):
-            try:
-                # Task routing handled by custom handler
-                return list[ResourceContent](await self._read_resource_middleware(uri))
-            except DisabledError as e:
-                # convert to NotFoundError to avoid leaking resource presence
-                raise NotFoundError(f"Unknown resource: {str(uri)!r}") from e
-            except NotFoundError as e:
-                # standardize NotFound message
-                raise NotFoundError(f"Unknown resource: {str(uri)!r}") from e
-
-    async def _read_resource_middleware(
-        self,
-        uri: AnyUrl | str,
-    ) -> list[ResourceContent]:
-        """
-        Applies this server's middleware and delegates the filtered call to the manager.
-        """
-
-        # Convert string URI to AnyUrl if needed
-        uri_param = AnyUrl(uri) if isinstance(uri, str) else uri
-
-        mw_context = MiddlewareContext(
-            message=mcp.types.ReadResourceRequestParams(uri=uri_param),
-            source="client",
-            type="request",
-            method="resources/read",
-            fastmcp_context=fastmcp.server.dependencies.get_context(),
-        )
-        return list(
-            await self._apply_middleware(
-                context=mw_context, call_next=self._read_resource
-            )
-        )
-
-    async def _read_resource(
-        self,
-        context: MiddlewareContext[mcp.types.ReadResourceRequestParams],
-    ) -> list[ResourceContent]:
-        """
-        Read a resource
-        """
-        uri_str = str(context.message.uri)
-
-        # Try local resources first (static resources take precedence)
         try:
-            resource = await self._resource_manager.get_resource(uri_str)
-            if self._should_enable_component(resource):
-                content = await self._execute_resource(resource, uri_str)
-                # Use mime_type from ResourceContent if set, otherwise from resource
-                if content.mime_type is None:
-                    content.mime_type = resource.mime_type
-                return [content]
+            # Extract SEP-1686 task metadata from request context.
+            # fn_key is set by read_resource() after finding the resource/template.
+            task_meta: TaskMeta | None = None
+            try:
+                ctx = self._mcp_server.request_context
+                if ctx.experimental.is_task:
+                    mcp_task_meta = ctx.experimental.task_metadata
+                    task_meta_dict = mcp_task_meta.model_dump(exclude_none=True)
+                    task_meta = TaskMeta(ttl=task_meta_dict.get("ttl"))
+            except (AttributeError, LookupError):
+                pass
+
+            result = await self.read_resource(str(uri), task_meta=task_meta)
+
+            if isinstance(result, mcp.types.CreateTaskResult):
+                return result
+            return result.to_mcp_result(uri)
+        except DisabledError as e:
+            raise NotFoundError(f"Unknown resource: {str(uri)!r}") from e
         except NotFoundError:
-            pass
-
-        # Try local templates
-        templates = await self._resource_manager.get_resource_templates()
-        for template in templates.values():
-            params = template.matches(uri_str)
-            if params is not None:
-                if self._should_enable_component(template):
-                    resource = await template.create_resource(uri_str, params)
-                    content = await self._execute_resource(resource, uri_str)
-                    return [content]
-
-        # Try component providers (first registered wins) - concrete resources
-        for provider in self._providers:
-            try:
-                resource = await provider.get_resource(uri_str)
-                if resource is not None and self._should_enable_component(resource):
-                    content = await provider.read_resource(uri_str)
-                    if content is not None:
-                        return [content]
-            except ResourceError:
-                logger.exception(f"Error reading resource {uri_str!r}")
-                raise
-            except Exception as e:
-                logger.exception(f"Error reading resource {uri_str!r} from provider")
-                if self._mask_error_details:
-                    raise ResourceError(f"Error reading resource {uri_str!r}") from e
-                raise ResourceError(f"Error reading resource {uri_str!r}: {e}") from e
-
-        # Try component providers (first registered wins) - templates
-        for provider in self._providers:
-            try:
-                template = await provider.get_resource_template(uri_str)
-                if template is not None and self._should_enable_component(template):
-                    content = await provider.read_resource_template(uri_str)
-                    if content is not None:
-                        return [content]
-            except ResourceError:
-                logger.exception(f"Error reading resource {uri_str!r}")
-                raise
-            except Exception as e:
-                logger.exception(
-                    f"Error reading resource {uri_str!r} from provider template"
-                )
-                if self._mask_error_details:
-                    raise ResourceError(f"Error reading resource {uri_str!r}") from e
-                raise ResourceError(f"Error reading resource {uri_str!r}: {e}") from e
-
-        raise NotFoundError(f"Unknown resource: {uri_str!r}")
-
-    async def _execute_resource(
-        self, resource: Resource, uri_str: str
-    ) -> ResourceContent:
-        """Read a resource with unified error handling."""
-        try:
-            return await resource._read()
-        except ResourceError:
-            logger.exception(f"Error reading resource {uri_str!r}")
             raise
-        except Exception as e:
-            logger.exception(f"Error reading resource {uri_str!r}")
-            if self._mask_error_details:
-                raise ResourceError(f"Error reading resource {uri_str!r}") from e
-            raise ResourceError(f"Error reading resource {uri_str!r}: {e}") from e
 
     async def _get_prompt_mcp(
-        self, name: str, arguments: dict[str, Any] | None = None
-    ) -> GetPromptResult:
-        """
-        Handle MCP 'getPrompt' requests.
+        self, name: str, arguments: dict[str, Any] | None
+    ) -> mcp.types.GetPromptResult | mcp.types.CreateTaskResult:
+        """Handle MCP 'getPrompt' requests.
 
-        Delegates to _get_prompt, which should be overridden by FastMCP subclasses.
-        """
-        import fastmcp.server.context
+        Extracts task metadata from MCP request context and passes it explicitly
+        to render_prompt(). The prompt's _render() method handles the backgrounding
+        decision, ensuring middleware runs before Docket.
 
+        Args:
+            name: The prompt name
+            arguments: Prompt arguments
+
+        Returns:
+            GetPromptResult or CreateTaskResult for background execution
+        """
         logger.debug(
             f"[{self.name}] Handler called: get_prompt %s with %s", name, arguments
         )
 
-        async with fastmcp.server.context.Context(fastmcp=self):
-            try:
-                # Task routing handled by custom handler
-                return await self._get_prompt_middleware(name, arguments)
-            except DisabledError as e:
-                # convert to NotFoundError to avoid leaking prompt presence
-                raise NotFoundError(f"Unknown prompt: {name}") from e
-            except NotFoundError as e:
-                # standardize NotFound message
-                raise NotFoundError(f"Unknown prompt: {name}") from e
-
-    async def _get_prompt_middleware(
-        self, name: str, arguments: dict[str, Any] | None = None
-    ) -> GetPromptResult:
-        """
-        Applies this server's middleware and delegates the filtered call to the manager.
-        Converts PromptResult to GetPromptResult for MCP protocol.
-        """
-        result = await self._get_prompt_content_middleware(name, arguments)
-        return result.to_mcp_prompt_result()
-
-    async def _get_prompt_content_middleware(
-        self, name: str, arguments: dict[str, Any] | None = None
-    ) -> PromptResult:
-        """
-        Applies this server's middleware and returns PromptResult.
-        Used internally and by parent servers for mounted prompts.
-        """
-        mw_context = MiddlewareContext(
-            message=mcp.types.GetPromptRequestParams(name=name, arguments=arguments),
-            source="client",
-            type="request",
-            method="prompts/get",
-            fastmcp_context=fastmcp.server.dependencies.get_context(),
-        )
-        return await self._apply_middleware(
-            context=mw_context, call_next=self._get_prompt
-        )
-
-    async def _get_prompt(
-        self,
-        context: MiddlewareContext[mcp.types.GetPromptRequestParams],
-    ) -> PromptResult:
-        name = context.message.name
-
-        # Try local prompts first (static prompts take precedence)
         try:
-            prompt = await self._prompt_manager.get_prompt(name)
-            if self._should_enable_component(prompt):
-                return await self._execute_prompt(
-                    prompt, name, context.message.arguments
-                )
+            # Extract SEP-1686 task metadata from request context.
+            # fn_key is set by render_prompt() after finding the prompt.
+            task_meta: TaskMeta | None = None
+            try:
+                ctx = self._mcp_server.request_context
+                if ctx.experimental.is_task:
+                    mcp_task_meta = ctx.experimental.task_metadata
+                    task_meta_dict = mcp_task_meta.model_dump(exclude_none=True)
+                    task_meta = TaskMeta(ttl=task_meta_dict.get("ttl"))
+            except (AttributeError, LookupError):
+                pass
+
+            result = await self.render_prompt(name, arguments, task_meta=task_meta)
+
+            if isinstance(result, mcp.types.CreateTaskResult):
+                return result
+            return result.to_mcp_prompt_result()
+        except DisabledError as e:
+            raise NotFoundError(f"Unknown prompt: {name!r}") from e
         except NotFoundError:
-            pass
-
-        # Try component providers (first registered wins)
-        for provider in self._providers:
-            try:
-                prompt = await provider.get_prompt(name)
-                if prompt is not None and self._should_enable_component(prompt):
-                    result = await provider.render_prompt(
-                        name, context.message.arguments
-                    )
-                    if result is not None:
-                        return result
-            except PromptError:
-                logger.exception(f"Error rendering prompt {name!r}")
-                raise
-            except Exception as e:
-                logger.exception(f"Error rendering prompt {name!r} from provider")
-                if self._mask_error_details:
-                    raise PromptError(f"Error rendering prompt {name!r}") from e
-                raise PromptError(f"Error rendering prompt {name!r}: {e}") from e
-
-        raise NotFoundError(f"Unknown prompt: {name!r}")
-
-    async def _execute_prompt(
-        self, prompt: Prompt, name: str, arguments: dict[str, Any] | None
-    ) -> PromptResult:
-        """Render a prompt with unified error handling."""
-        try:
-            return await prompt._render(arguments)
-        except PromptError:
-            logger.exception(f"Error rendering prompt {name!r}")
             raise
-        except Exception as e:
-            logger.exception(f"Error rendering prompt {name!r}")
-            if self._mask_error_details:
-                raise PromptError(f"Error rendering prompt {name!r}") from e
-            raise PromptError(f"Error rendering prompt {name!r}: {e}") from e
 
     def add_tool(self, tool: Tool) -> Tool:
         """Add a tool to the server.
@@ -1842,18 +1654,7 @@ class FastMCP(Generic[LifespanResultT]):
         Returns:
             The tool instance that was added to the server.
         """
-        self._tool_manager.add_tool(tool)
-
-        # Send notification if we're in a request context
-        try:
-            from fastmcp.server.dependencies import get_context
-
-            context = get_context()
-            context._queue_tool_list_changed()  # type: ignore[private-use]
-        except RuntimeError:
-            pass  # No context available
-
-        return tool
+        return self._local_provider.add_tool(tool)
 
     def remove_tool(self, name: str) -> None:
         """Remove a tool from the server.
@@ -1864,26 +1665,20 @@ class FastMCP(Generic[LifespanResultT]):
         Raises:
             NotFoundError: If the tool is not found
         """
-        self._tool_manager.remove_tool(name)
-
-        # Send notification if we're in a request context
         try:
-            from fastmcp.server.dependencies import get_context
-
-            context = get_context()
-            context._queue_tool_list_changed()  # type: ignore[private-use]
-        except RuntimeError:
-            pass  # No context available
+            self._local_provider.remove_tool(name)
+        except KeyError:
+            raise NotFoundError(f"Tool {name!r} not found") from None
 
     def add_tool_transformation(
         self, tool_name: str, transformation: ToolTransformConfig
     ) -> None:
         """Add a tool transformation."""
-        self._tool_manager.add_tool_transformation(tool_name, transformation)
+        self._local_provider.add_tool_transformation(tool_name, transformation)
 
     def remove_tool_transformation(self, tool_name: str) -> None:
         """Remove a tool transformation."""
-        self._tool_manager.remove_tool_transformation(tool_name)
+        self._local_provider.remove_tool_transformation(tool_name)
 
     @overload
     def tool(
@@ -1899,7 +1694,6 @@ class FastMCP(Generic[LifespanResultT]):
         annotations: ToolAnnotations | dict[str, Any] | None = None,
         exclude_args: list[str] | None = None,
         meta: dict[str, Any] | None = None,
-        enabled: bool | None = None,
         task: bool | TaskConfig | None = None,
     ) -> FunctionTool: ...
 
@@ -1917,7 +1711,6 @@ class FastMCP(Generic[LifespanResultT]):
         annotations: ToolAnnotations | dict[str, Any] | None = None,
         exclude_args: list[str] | None = None,
         meta: dict[str, Any] | None = None,
-        enabled: bool | None = None,
         task: bool | TaskConfig | None = None,
     ) -> Callable[[AnyFunction], FunctionTool]: ...
 
@@ -1934,9 +1727,12 @@ class FastMCP(Generic[LifespanResultT]):
         annotations: ToolAnnotations | dict[str, Any] | None = None,
         exclude_args: list[str] | None = None,
         meta: dict[str, Any] | None = None,
-        enabled: bool | None = None,
         task: bool | TaskConfig | None = None,
-    ) -> Callable[[AnyFunction], FunctionTool] | FunctionTool:
+    ) -> (
+        Callable[[AnyFunction], FunctionTool]
+        | FunctionTool
+        | partial[Callable[[AnyFunction], FunctionTool] | FunctionTool]
+    ):
         """Decorator to register a tool.
 
         Tools can optionally request a Context object by adding a parameter with the
@@ -1960,7 +1756,6 @@ class FastMCP(Generic[LifespanResultT]):
             exclude_args: Optional list of argument names to exclude from the tool schema.
                 Deprecated: Use `Depends()` for dependency injection instead.
             meta: Optional meta information about the tool
-            enabled: Optional boolean to enable or disable the tool
 
         Examples:
             Register a tool with a custom name:
@@ -1986,73 +1781,10 @@ class FastMCP(Generic[LifespanResultT]):
             server.tool(my_function, name="custom_name")
             ```
         """
-        if isinstance(annotations, dict):
-            annotations = ToolAnnotations(**annotations)
-
-        if isinstance(name_or_fn, classmethod):
-            raise ValueError(
-                inspect.cleandoc(
-                    """
-                    To decorate a classmethod, first define the method and then call
-                    tool() directly on the method instead of using it as a
-                    decorator. See https://gofastmcp.com/patterns/decorating-methods
-                    for examples and more information.
-                    """
-                )
-            )
-
-        # Determine the actual name and function based on the calling pattern
-        if inspect.isroutine(name_or_fn):
-            # Case 1: @tool (without parens) - function passed directly
-            # Case 2: direct call like tool(fn, name="something")
-            fn = name_or_fn
-            tool_name = name  # Use keyword name if provided, otherwise None
-
-            # Resolve task parameter
-            supports_task: bool | TaskConfig = (
-                task if task is not None else self._support_tasks_by_default
-            )
-
-            # Register the tool immediately and return the tool object
-            # Note: Deprecation warning for exclude_args is handled in Tool.from_function
-            tool = Tool.from_function(
-                fn,
-                name=tool_name,
-                title=title,
-                description=description,
-                icons=icons,
-                tags=tags,
-                output_schema=output_schema,
-                annotations=annotations,
-                exclude_args=exclude_args,
-                meta=meta,
-                serializer=self._tool_serializer,
-                enabled=enabled,
-                task=supports_task,
-            )
-            self.add_tool(tool)
-            return tool
-
-        elif isinstance(name_or_fn, str):
-            # Case 3: @tool("custom_name") - name passed as first argument
-            if name is not None:
-                raise TypeError(
-                    "Cannot specify both a name as first argument and as keyword argument. "
-                    f"Use either @tool('{name_or_fn}') or @tool(name='{name}'), not both."
-                )
-            tool_name = name_or_fn
-        elif name_or_fn is None:
-            # Case 4: @tool or @tool(name="something") - use keyword name
-            tool_name = name
-        else:
-            raise TypeError(
-                f"First argument to @tool must be a function, string, or None, got {type(name_or_fn)}"
-            )
-
-        # Return partial for cases where we need to wait for the function
-        return partial(
-            self.tool,
-            name=tool_name,
+        # Delegate to LocalProvider with server-level defaults
+        result = self._local_provider.tool(
+            name_or_fn,
+            name=name,
             title=title,
             description=description,
             icons=icons,
@@ -2061,9 +1793,11 @@ class FastMCP(Generic[LifespanResultT]):
             annotations=annotations,
             exclude_args=exclude_args,
             meta=meta,
-            enabled=enabled,
-            task=task,
+            task=task if task is not None else self._support_tasks_by_default,
+            serializer=self._tool_serializer,
         )
+
+        return result
 
     def add_resource(self, resource: Resource) -> Resource:
         """Add a resource to the server.
@@ -2074,18 +1808,7 @@ class FastMCP(Generic[LifespanResultT]):
         Returns:
             The resource instance that was added to the server.
         """
-        self._resource_manager.add_resource(resource)
-
-        # Send notification if we're in a request context
-        try:
-            from fastmcp.server.dependencies import get_context
-
-            context = get_context()
-            context._queue_resource_list_changed()  # type: ignore[private-use]
-        except RuntimeError:
-            pass  # No context available
-
-        return resource
+        return self._local_provider.add_resource(resource)
 
     def add_template(self, template: ResourceTemplate) -> ResourceTemplate:
         """Add a resource template to the server.
@@ -2096,18 +1819,7 @@ class FastMCP(Generic[LifespanResultT]):
         Returns:
             The template instance that was added to the server.
         """
-        self._resource_manager.add_template(template)
-
-        # Send notification if we're in a request context
-        try:
-            from fastmcp.server.dependencies import get_context
-
-            context = get_context()
-            context._queue_resource_list_changed()  # type: ignore[private-use]
-        except RuntimeError:
-            pass  # No context available
-
-        return template
+        return self._local_provider.add_template(template)
 
     def resource(
         self,
@@ -2119,7 +1831,6 @@ class FastMCP(Generic[LifespanResultT]):
         icons: list[mcp.types.Icon] | None = None,
         mime_type: str | None = None,
         tags: set[str] | None = None,
-        enabled: bool | None = None,
         annotations: Annotations | dict[str, Any] | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
@@ -2145,7 +1856,6 @@ class FastMCP(Generic[LifespanResultT]):
             description: Optional description of the resource
             mime_type: Optional MIME type for the resource
             tags: Optional set of tags for categorizing the resource
-            enabled: Optional boolean to enable or disable the resource
             annotations: Optional annotations about the resource's behavior
             meta: Optional meta information about the resource
 
@@ -2176,81 +1886,22 @@ class FastMCP(Generic[LifespanResultT]):
                 return f"Weather for {city}: {data}"
             ```
         """
-        if isinstance(annotations, dict):
-            annotations = Annotations(**annotations)
-
-        # Check if user passed function directly instead of calling decorator
-        if inspect.isroutine(uri):
-            raise TypeError(
-                "The @resource decorator was used incorrectly. "
-                "Did you forget to call it? Use @resource('uri') instead of @resource"
-            )
+        # Delegate to LocalProvider with server-level defaults
+        inner_decorator = self._local_provider.resource(
+            uri,
+            name=name,
+            title=title,
+            description=description,
+            icons=icons,
+            mime_type=mime_type,
+            tags=tags,
+            annotations=annotations,
+            meta=meta,
+            task=task if task is not None else self._support_tasks_by_default,
+        )
 
         def decorator(fn: AnyFunction) -> Resource | ResourceTemplate:
-            if isinstance(fn, classmethod):  # type: ignore[reportUnnecessaryIsInstance]
-                raise ValueError(
-                    inspect.cleandoc(
-                        """
-                        To decorate a classmethod, first define the method and then call
-                        resource() directly on the method instead of using it as a
-                        decorator. See https://gofastmcp.com/patterns/decorating-methods
-                        for examples and more information.
-                        """
-                    )
-                )
-
-            # Resolve task parameter
-            supports_task: bool | TaskConfig = (
-                task if task is not None else self._support_tasks_by_default
-            )
-
-            # Check if this should be a template
-            has_uri_params = "{" in uri and "}" in uri
-            # Use wrapper to check for user-facing parameters
-            from fastmcp.server.dependencies import without_injected_parameters
-
-            wrapper_fn = without_injected_parameters(fn)
-            has_func_params = bool(inspect.signature(wrapper_fn).parameters)
-
-            if has_uri_params or has_func_params:
-                template = ResourceTemplate.from_function(
-                    fn=fn,
-                    uri_template=uri,
-                    name=name,
-                    title=title,
-                    description=description,
-                    icons=icons,
-                    mime_type=mime_type,
-                    tags=tags,
-                    enabled=enabled,
-                    annotations=annotations,
-                    meta=meta,
-                    task=supports_task,
-                )
-                self.add_template(template)
-                return template
-            elif not has_uri_params and not has_func_params:
-                resource = Resource.from_function(
-                    fn=fn,
-                    uri=uri,
-                    name=name,
-                    title=title,
-                    description=description,
-                    icons=icons,
-                    mime_type=mime_type,
-                    tags=tags,
-                    enabled=enabled,
-                    annotations=annotations,
-                    meta=meta,
-                    task=supports_task,
-                )
-                self.add_resource(resource)
-                return resource
-            else:
-                raise ValueError(
-                    "Invalid resource or template definition due to a "
-                    "mismatch between URI parameters and function parameters."
-                )
+            return inner_decorator(fn)
 
         return decorator
 
@@ -2263,18 +1914,7 @@ class FastMCP(Generic[LifespanResultT]):
         Returns:
             The prompt instance that was added to the server.
         """
-        self._prompt_manager.add_prompt(prompt)
-
-        # Send notification if we're in a request context
-        try:
-            from fastmcp.server.dependencies import get_context
-
-            context = get_context()
-            context._queue_prompt_list_changed()  # type: ignore[private-use]
-        except RuntimeError:
-            pass  # No context available
-
-        return prompt
+        return self._local_provider.add_prompt(prompt)
 
     @overload
     def prompt(
@@ -2286,7 +1926,6 @@ class FastMCP(Generic[LifespanResultT]):
         description: str | None = None,
         icons: list[mcp.types.Icon] | None = None,
         tags: set[str] | None = None,
-        enabled: bool | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
     ) -> FunctionPrompt: ...
@@ -2301,7 +1940,6 @@ class FastMCP(Generic[LifespanResultT]):
         description: str | None = None,
         icons: list[mcp.types.Icon] | None = None,
         tags: set[str] | None = None,
-        enabled: bool | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
     ) -> Callable[[AnyFunction], FunctionPrompt]: ...
@@ -2315,10 +1953,13 @@ class FastMCP(Generic[LifespanResultT]):
         description: str | None = None,
         icons: list[mcp.types.Icon] | None = None,
         tags: set[str] | None = None,
-        enabled: bool | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
-    ) -> Callable[[AnyFunction], FunctionPrompt] | FunctionPrompt:
+    ) -> (
+        Callable[[AnyFunction], FunctionPrompt]
+        | FunctionPrompt
+        | partial[Callable[[AnyFunction], FunctionPrompt] | FunctionPrompt]
+    ):
         """Decorator to register a prompt.
 
         Prompts can optionally request a Context object by adding a parameter with the
@@ -2337,7 +1978,6 @@ class FastMCP(Generic[LifespanResultT]):
             name: Optional name for the prompt (keyword-only, alternative to name_or_fn)
             description: Optional description of what the prompt does
             tags: Optional set of tags for categorizing the prompt
-            enabled: Optional boolean to enable or disable the prompt
             meta: Optional meta information about the prompt
 
         Examples:
@@ -2388,74 +2028,16 @@ class FastMCP(Generic[LifespanResultT]):
             server.prompt(my_function, name="custom_name")
             ```
         """
-
-        if isinstance(name_or_fn, classmethod):
-            raise ValueError(
-                inspect.cleandoc(
-                    """
-                    To decorate a classmethod, first define the method and then call
-                    prompt() directly on the method instead of using it as a
-                    decorator. See https://gofastmcp.com/patterns/decorating-methods
-                    for examples and more information.
-                    """
-                )
-            )
-
-        # Determine the actual name and function based on the calling pattern
-        if inspect.isroutine(name_or_fn):
-            # Case 1: @prompt (without parens) - function passed directly as decorator
-            # Case 2: direct call like prompt(fn, name="something")
-            fn = name_or_fn
-            prompt_name = name  # Use keyword name if provided, otherwise None
-
-            # Resolve task parameter
-            supports_task: bool | TaskConfig = (
-                task if task is not None else self._support_tasks_by_default
-            )
-
-            # Register the prompt immediately
-            prompt = Prompt.from_function(
-                fn=fn,
-                name=prompt_name,
-                title=title,
-                description=description,
-                icons=icons,
-                tags=tags,
-                enabled=enabled,
-                meta=meta,
-                task=supports_task,
-            )
-            self.add_prompt(prompt)
-
-            return prompt
-
-        elif isinstance(name_or_fn, str):
-            # Case 3: @prompt("custom_name") - name passed as first argument
-            if name is not None:
-                raise TypeError(
-                    "Cannot specify both a name as first argument and as keyword argument. "
-                    f"Use either @prompt('{name_or_fn}') or @prompt(name='{name}'), not both."
-                )
-            prompt_name = name_or_fn
-        elif name_or_fn is None:
-            # Case 4: @prompt() or @prompt(name="something") - use keyword name
-            prompt_name = name
-        else:
-            raise TypeError(
-                f"First argument to @prompt must be a function, string, or None, got {type(name_or_fn)}"
-            )
-
-        # Return partial for cases where we need to wait for the function
-        return partial(
-            self.prompt,
-            name=prompt_name,
+        # Delegate to LocalProvider with server-level defaults
+        return self._local_provider.prompt(
+            name_or_fn,
+            name=name,
             title=title,
             description=description,
             icons=icons,
             tags=tags,
-            enabled=enabled,
             meta=meta,
-            task=task,
+            task=task if task is not None else self._support_tasks_by_default,
         )
 
     async def run_stdio_async(
@@ -2567,7 +2149,7 @@ class FastMCP(Generic[LifespanResultT]):
             async with self._lifespan_manager():
                 config = uvicorn.Config(app, host=host, port=port, **config_kwargs)
                 server = uvicorn.Server(config)
-                path = app.state.path.lstrip("/")  # type: ignore
+                path = getattr(app.state, "path", "").lstrip("/")
                 logger.info(
                     f"Starting MCP server {self.name!r} with transport {transport!r} on http://{host}:{port}/{path}"
                 )
@@ -2638,11 +2220,12 @@ class FastMCP(Generic[LifespanResultT]):
     def mount(
         self,
         server: FastMCP[LifespanResultT],
-        prefix: str | None = None,
+        namespace: str | None = None,
         as_proxy: bool | None = None,
         tool_names: dict[str, str] | None = None,
+        prefix: str | None = None,  # deprecated, use namespace
     ) -> None:
-        """Mount another FastMCP server on this server with an optional prefix.
+        """Mount another FastMCP server on this server with an optional namespace.
 
         Unlike importing (with import_server), mounting establishes a dynamic connection
         between servers. When a client interacts with a mounted server's objects through
@@ -2650,40 +2233,53 @@ class FastMCP(Generic[LifespanResultT]):
         This means changes to the mounted server are immediately reflected when accessed
         through the parent.
 
-        When a server is mounted with a prefix:
-        - Tools from the mounted server are accessible with prefixed names.
-          Example: If server has a tool named "get_weather", it will be available as "prefix_get_weather".
-        - Resources are accessible with prefixed URIs.
+        When a server is mounted with a namespace:
+        - Tools from the mounted server are accessible with namespaced names.
+          Example: If server has a tool named "get_weather", it will be available as "namespace_get_weather".
+        - Resources are accessible with namespaced URIs.
           Example: If server has a resource with URI "weather://forecast", it will be available as
-          "weather://prefix/forecast".
-        - Templates are accessible with prefixed URI templates.
+          "weather://namespace/forecast".
+        - Templates are accessible with namespaced URI templates.
           Example: If server has a template with URI "weather://location/{id}", it will be available
-          as "weather://prefix/location/{id}".
-        - Prompts are accessible with prefixed names.
+          as "weather://namespace/location/{id}".
+        - Prompts are accessible with namespaced names.
           Example: If server has a prompt named "weather_prompt", it will be available as
-          "prefix_weather_prompt".
+          "namespace_weather_prompt".
 
-        When a server is mounted without a prefix (prefix=None), its tools, resources, templates,
+        When a server is mounted without a namespace (namespace=None), its tools, resources, templates,
         and prompts are accessible with their original names. Multiple servers can be mounted
-        without prefixes, and they will be tried in order until a match is found.
+        without namespaces, and they will be tried in order until a match is found.
 
         The mounted server's lifespan is executed when the parent server starts, and its
         middleware chain is invoked for all operations (tool calls, resource reads, prompts).
 
         Args:
             server: The FastMCP server to mount.
-            prefix: Optional prefix to use for the mounted server's objects. If None,
+            namespace: Optional namespace to use for the mounted server's objects. If None,
                 the server's objects are accessible with their original names.
             as_proxy: Deprecated. Mounted servers now always have their lifespan and
                 middleware invoked. To create a proxy server, use FastMCP.as_proxy()
                 explicitly before mounting.
             tool_names: Optional mapping of original tool names to custom names. Use this
-                to override prefixed names. Keys are the original tool names from the
+                to override namespaced names. Keys are the original tool names from the
                 mounted server.
+            prefix: Deprecated. Use namespace instead.
         """
         import warnings
 
-        from fastmcp.server.providers import MountedProvider
+        from fastmcp.server.providers.fastmcp_provider import FastMCPProvider
+
+        # Handle deprecated prefix parameter
+        if prefix is not None:
+            warnings.warn(
+                "The 'prefix' parameter is deprecated, use 'namespace' instead",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            if namespace is None:
+                namespace = prefix
+            else:
+                raise ValueError("Cannot specify both 'prefix' and 'namespace'")
 
         if as_proxy is not None:
             warnings.warn(
@@ -2695,13 +2291,17 @@ class FastMCP(Generic[LifespanResultT]):
             )
             # Still honor the flag for backward compatibility
             if as_proxy:
-                from fastmcp.server.proxy import FastMCPProxy
+                from fastmcp.server.providers.proxy import FastMCPProxy
 
                 if not isinstance(server, FastMCPProxy):
                     server = FastMCP.as_proxy(server)
 
-        # Create a MountedProvider and add it to providers
-        provider = MountedProvider(server, prefix, tool_names)
+        # Create provider with optional transformations
+        provider: Provider = FastMCPProvider(server)
+        if namespace or tool_names:
+            provider = provider.with_transforms(
+                namespace=namespace, tool_renames=tool_names
+            )
         self._providers.append(provider)
 
     async def import_server(
@@ -2746,40 +2346,46 @@ class FastMCP(Generic[LifespanResultT]):
         """
         import warnings
 
-        from fastmcp.server.providers.mounted import add_resource_prefix
-
         warnings.warn(
             "import_server is deprecated, use mount() instead",
             DeprecationWarning,
             stacklevel=2,
         )
 
+        def add_resource_prefix(uri: str, prefix: str) -> str:
+            """Add prefix to resource URI: protocol://path → protocol://prefix/path."""
+            match = URI_PATTERN.match(uri)
+            if match:
+                protocol, path = match.groups()
+                return f"{protocol}{prefix}/{path}"
+            return uri
+
         # Import tools from the server
-        for tool in (await server.get_tools()).values():
+        for tool in await server.get_tools():
             if prefix:
                 tool = tool.model_copy(update={"name": f"{prefix}_{tool.name}"})
-            self._tool_manager.add_tool(tool)
+            self.add_tool(tool)
 
         # Import resources and templates from the server
-        for resource in (await server.get_resources()).values():
+        for resource in await server.get_resources():
             if prefix:
                 new_uri = add_resource_prefix(str(resource.uri), prefix)
                 resource = resource.model_copy(update={"uri": new_uri})
-            self._resource_manager.add_resource(resource)
+            self.add_resource(resource)
 
-        for template in (await server.get_resource_templates()).values():
+        for template in await server.get_resource_templates():
             if prefix:
                 new_uri_template = add_resource_prefix(template.uri_template, prefix)
                 template = template.model_copy(
                     update={"uri_template": new_uri_template}
                 )
-            self._resource_manager.add_template(template)
+            self.add_template(template)
 
         # Import prompts from the server
-        for prompt in (await server.get_prompts()).values():
+        for prompt in await server.get_prompts():
             if prefix:
                 prompt = prompt.model_copy(update={"name": f"{prefix}_{prompt.name}"})
-            self._prompt_manager.add_prompt(prompt)
+            self.add_prompt(prompt)
 
         if server._lifespan != default_lifespan:
             from warnings import warn
@@ -2802,19 +2408,36 @@ class FastMCP(Generic[LifespanResultT]):
         cls,
         openapi_spec: dict[str, Any],
         client: httpx.AsyncClient,
+        name: str = "OpenAPI Server",
         route_maps: list[RouteMap] | None = None,
         route_map_fn: OpenAPIRouteMapFn | None = None,
         mcp_component_fn: OpenAPIComponentFn | None = None,
         mcp_names: dict[str, str] | None = None,
         tags: set[str] | None = None,
+        timeout: float | None = None,
         **settings: Any,
-    ) -> FastMCPOpenAPI:
+    ) -> Self:
         """
         Create a FastMCP server from an OpenAPI specification.
-        """
-        from .openapi import FastMCPOpenAPI
 
-        return FastMCPOpenAPI(
+        Args:
+            openapi_spec: OpenAPI schema as a dictionary
+            client: httpx AsyncClient for making HTTP requests
+            name: Name for the MCP server
+            route_maps: Optional list of RouteMap objects defining route mappings
+            route_map_fn: Optional callable for advanced route type mapping
+            mcp_component_fn: Optional callable for component customization
+            mcp_names: Optional dictionary mapping operationId to component names
+            tags: Optional set of tags to add to all components
+            timeout: Optional timeout (in seconds) for all requests
+            **settings: Additional settings passed to FastMCP
+
+        Returns:
+            A FastMCP server with an OpenAPIProvider attached.
+        """
+        from .providers.openapi import OpenAPIProvider
+
+        provider = OpenAPIProvider(
             openapi_spec=openapi_spec,
             client=client,
             route_maps=route_maps,
@@ -2822,8 +2445,9 @@ class FastMCP(Generic[LifespanResultT]):
             mcp_component_fn=mcp_component_fn,
             mcp_names=mcp_names,
             tags=tags,
-            **settings,
+            timeout=timeout,
         )
+        return cls(name=name, providers=[provider], **settings)
 
     @classmethod
     def from_fastapi(
@@ -2836,12 +2460,28 @@ class FastMCP(Generic[LifespanResultT]):
         mcp_names: dict[str, str] | None = None,
         httpx_client_kwargs: dict[str, Any] | None = None,
         tags: set[str] | None = None,
+        timeout: float | None = None,
         **settings: Any,
-    ) -> FastMCPOpenAPI:
+    ) -> Self:
         """
         Create a FastMCP server from a FastAPI application.
+
+        Args:
+            app: FastAPI application instance
+            name: Name for the MCP server (defaults to app.title)
+            route_maps: Optional list of RouteMap objects defining route mappings
+            route_map_fn: Optional callable for advanced route type mapping
+            mcp_component_fn: Optional callable for component customization
+            mcp_names: Optional dictionary mapping operationId to component names
+            httpx_client_kwargs: Optional kwargs passed to httpx.AsyncClient
+            tags: Optional set of tags to add to all components
+            timeout: Optional timeout (in seconds) for all requests
+            **settings: Additional settings passed to FastMCP
+
+        Returns:
+            A FastMCP server with an OpenAPIProvider attached.
         """
-        from .openapi import FastMCPOpenAPI
+        from .providers.openapi import OpenAPIProvider
 
         if httpx_client_kwargs is None:
             httpx_client_kwargs = {}
@@ -2852,19 +2492,19 @@ class FastMCP(Generic[LifespanResultT]):
             **httpx_client_kwargs,
         )
 
-        name = name or app.title
+        server_name = name or app.title
 
-        return FastMCPOpenAPI(
+        provider = OpenAPIProvider(
             openapi_spec=app.openapi(),
             client=client,
-            name=name,
             route_maps=route_maps,
             route_map_fn=route_map_fn,
             mcp_component_fn=mcp_component_fn,
             mcp_names=mcp_names,
             tags=tags,
-            **settings,
+            timeout=timeout,
         )
+        return cls(name=server_name, providers=[provider], **settings)
 
     @classmethod
     def as_proxy(
@@ -2890,7 +2530,7 @@ class FastMCP(Generic[LifespanResultT]):
         `fastmcp.client.Client` constructor.
         """
         from fastmcp.client.client import Client
-        from fastmcp.server.proxy import FastMCPProxy, ProxyClient
+        from fastmcp.server.providers.proxy import FastMCPProxy, ProxyClient
 
         if isinstance(backend, Client):
             client = backend
@@ -2916,7 +2556,8 @@ class FastMCP(Generic[LifespanResultT]):
 
                 client_factory = fresh_client_factory
         else:
-            base_client = ProxyClient(backend)  # type: ignore
+            # backend is not a Client, so it's compatible with ProxyClient.__init__
+            base_client = ProxyClient(cast(Any, backend))
 
             # Fresh client created from transport - use fresh sessions per request
             def proxy_client_factory():
@@ -2925,38 +2566,6 @@ class FastMCP(Generic[LifespanResultT]):
             client_factory = proxy_client_factory
 
         return FastMCPProxy(client_factory=client_factory, **settings)
-
-    def _should_enable_component(
-        self,
-        component: FastMCPComponent,
-    ) -> bool:
-        """
-        Given a component, determine if it should be enabled. Returns True if it should be enabled; False if it should not.
-
-        Rules:
-            - If the component's enabled property is False, always return False.
-            - If both include_tags and exclude_tags are None, return True.
-            - If exclude_tags is provided, check each exclude tag:
-                - If the exclude tag is a string, it must be present in the input tags to exclude.
-            - If include_tags is provided, check each include tag:
-                - If the include tag is a string, it must be present in the input tags to include.
-            - If include_tags is provided and none of the include tags match, return False.
-            - If include_tags is not provided, return True.
-        """
-        if not component.enabled:
-            return False
-
-        if self.include_tags is None and self.exclude_tags is None:
-            return True
-
-        if self.exclude_tags is not None:
-            if any(etag in component.tags for etag in self.exclude_tags):
-                return False
-
-        if self.include_tags is not None:
-            return bool(any(itag in component.tags for itag in self.include_tags))
-
-        return True
 
     @classmethod
     def generate_name(cls, name: str | None = None) -> str:

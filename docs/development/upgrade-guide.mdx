@@ -8,6 +8,173 @@ tag: NEW
 
 This guide provides migration instructions for breaking changes and major updates when upgrading between FastMCP versions.
 
+## v3.0.0
+
+### Provider Architecture
+
+FastMCP v3 introduces a unified provider architecture for sourcing components. All tools, resources, and prompts now flow through providers:
+
+- **LocalProvider** stores decorator-registered components (`@mcp.tool`, etc.)
+- **FastMCPProvider** wraps another FastMCP server for composition
+- **ProxyProvider** connects to remote MCP servers
+- **TransformingProvider** adds namespacing and renaming
+
+See [Providers](/servers/providers/overview) for the complete documentation.
+
+### Mount Namespace Parameter
+
+The `prefix` parameter for `mount()` has been renamed to `namespace`:
+
+<CodeGroup>
+```python Before
+main.mount(subserver, prefix="api")
+```
+
+```python After
+main.mount(subserver, namespace="api")
+```
+</CodeGroup>
+
+### Component Enable/Disable
+
+The `enabled` field and `enable()`/`disable()` methods have been removed from component objects. Use server or provider methods instead:
+
+<CodeGroup>
+```python Before
+tool = await server.get_tool("my_tool")
+tool.disable()
+tool.enable()
+```
+
+```python After
+server.disable(keys=["tool:my_tool"])
+server.enable(keys=["tool:my_tool"])
+```
+</CodeGroup>
+
+Components describe capabilities; servers and providers control availability. This ensures mutations work correctly even when components pass through transforming providers.
+
+**Allowlist mode:**
+
+Use `only=True` to restrict visibility to specific components:
+
+```python
+# Show ONLY tools with "public" tag
+server.enable(tags={"public"}, only=True)
+```
+
+**`FastMCP(include_tags=..., exclude_tags=...)` deprecated:**
+
+These init parameters emit deprecation warnings. Use the new methods instead:
+
+```python
+# Before
+mcp = FastMCP("server", exclude_tags={"internal"})
+
+# After
+mcp = FastMCP("server")
+mcp.disable(tags={"internal"})
+```
+
+### Component Lookup Method Parameter Names
+
+The server lookup methods now use semantic parameter names instead of generic `key`:
+
+- `FastMCP.get_tool(name=...)` (was `key`)
+- `FastMCP.get_resource(uri=...)` (was `key`)
+- `FastMCP.get_resource_template(uri=...)` (was `key`)
+- `FastMCP.get_prompt(name=...)` (was `key`)
+
+If you were passing arguments positionally, no change is needed. If you were using keyword arguments:
+
+<CodeGroup>
+```python Before
+tool = await mcp.get_tool(key="my_tool")
+```
+
+```python After
+tool = await mcp.get_tool(name="my_tool")
+```
+</CodeGroup>
+
+### Component Listing Methods Return Lists
+
+The `get_tools()`, `get_resources()`, `get_prompts()`, and `get_resource_templates()` methods now return lists instead of dicts:
+
+<CodeGroup>
+```python Before
+tools = await server.get_tools()
+if "my_tool" in tools:
+    tool = tools["my_tool"]
+```
+
+```python After
+tools = await server.get_tools()
+tool = next((t for t in tools if t.name == "my_tool"), None)
+```
+</CodeGroup>
+
+The dict key was redundant since components already have `.name` or `.uri` attributes. Use list comprehensions or `next()` for lookups.
+
+### Prompt Return Types
+
+Prompt functions now use `Message` instead of `mcp.types.PromptMessage`. The `Message` class provides auto-serialization and a simpler API:
+
+<CodeGroup>
+```python Before
+from mcp.types import PromptMessage, TextContent
+
+@mcp.prompt
+def my_prompt() -> PromptMessage:
+    return PromptMessage(
+        role="user",
+        content=TextContent(type="text", text="Hello")
+    )
+```
+
+```python After
+from fastmcp.prompts import Message
+
+@mcp.prompt
+def my_prompt() -> Message:
+    return Message("Hello")  # role defaults to "user"
+```
+</CodeGroup>
+
+**Key changes:**
+
+- Use `Message(content, role="user")` instead of `PromptMessage(role=..., content=TextContent(...))`
+- `Message` auto-serializes dicts, lists, and Pydantic models to JSON
+- `PromptResult` now accepts `str | list[Message]` (no single `Message`)
+- Returning `mcp.types.PromptMessage` directly is no longer supported
+
+See [Prompts documentation](/servers/prompts#return-values) for full details.
+
+### Auth Provider Automatic Environment Variable Loading Removed
+
+Auth providers no longer automatically read configuration from environment variables. You can still use environment variables, but you must read them yourself:
+
+<CodeGroup>
+```python Before
+# Relied on FASTMCP_SERVER_AUTH_GITHUB_CLIENT_ID, etc.
+auth = GitHubProvider()
+```
+
+```python After
+import os
+
+auth = GitHubProvider(
+    client_id=os.environ["GITHUB_CLIENT_ID"],
+    client_secret=os.environ["GITHUB_CLIENT_SECRET"],
+    base_url=os.environ["GITHUB_BASE_URL"],
+)
+```
+</CodeGroup>
+
+This applies to all auth providers: `GitHubProvider`, `GoogleProvider`, `AzureProvider`, `Auth0Provider`, `AWSProvider`, `WorkOSProvider`, `DescopeProvider`, `DiscordProvider`, `ScalekitProvider`, `SupabaseProvider`, `OCIProvider`, `JWTVerifier`, and `IntrospectionVerifier`.
+
+The `FastMCPSettings` class has also been simplified - it no longer includes auth-related settings that were previously loaded from environment variables.
+
 ## v2.14.0
 
 ### OpenAPI Parser Promotion

@@ -10,38 +10,16 @@ from __future__ import annotations
 from typing import Literal
 
 import httpx
-from pydantic import AnyHttpUrl, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import AnyHttpUrl
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from fastmcp.server.auth import RemoteAuthProvider, TokenVerifier
 from fastmcp.server.auth.providers.jwt import JWTVerifier
-from fastmcp.settings import ENV_FILE
 from fastmcp.utilities.auth import parse_scopes
 from fastmcp.utilities.logging import get_logger
-from fastmcp.utilities.types import NotSet, NotSetT
 
 logger = get_logger(__name__)
-
-
-class SupabaseProviderSettings(BaseSettings):
-    model_config = SettingsConfigDict(
-        env_prefix="FASTMCP_SERVER_AUTH_SUPABASE_",
-        env_file=ENV_FILE,
-        extra="ignore",
-    )
-
-    project_url: AnyHttpUrl
-    base_url: AnyHttpUrl
-    auth_route: str = "/auth/v1"
-    algorithm: Literal["HS256", "RS256", "ES256"] = "ES256"
-    required_scopes: list[str] | None = None
-
-    @field_validator("required_scopes", mode="before")
-    @classmethod
-    def _parse_scopes(cls, v):
-        return parse_scopes(v)
 
 
 class SupabaseProvider(RemoteAuthProvider):
@@ -62,6 +40,7 @@ class SupabaseProvider(RemoteAuthProvider):
     2. JWT Verification:
        - FastMCP verifies JWTs using the JWKS endpoint at {project_url}{auth_route}/.well-known/jwks.json
        - JWTs are issued by {project_url}{auth_route}
+       - Default auth_route is "/auth/v1" (can be customized for self-hosted setups)
        - Tokens are cached for up to 10 minutes by Supabase's edge servers
        - Algorithm must match your Supabase Auth configuration
 
@@ -92,11 +71,11 @@ class SupabaseProvider(RemoteAuthProvider):
     def __init__(
         self,
         *,
-        project_url: AnyHttpUrl | str | NotSetT = NotSet,
-        base_url: AnyHttpUrl | str | NotSetT = NotSet,
-        auth_route: str | NotSetT = NotSet,
-        algorithm: Literal["HS256", "RS256", "ES256"] | NotSetT = NotSet,
-        required_scopes: list[str] | NotSetT | None = NotSet,
+        project_url: AnyHttpUrl | str,
+        base_url: AnyHttpUrl | str,
+        auth_route: str = "/auth/v1",
+        algorithm: Literal["HS256", "RS256", "ES256"] = "ES256",
+        required_scopes: list[str] | None = None,
         token_verifier: TokenVerifier | None = None,
     ):
         """Initialize Supabase metadata provider.
@@ -104,7 +83,8 @@ class SupabaseProvider(RemoteAuthProvider):
         Args:
             project_url: Your Supabase project URL (e.g., "https://abc123.supabase.co")
             base_url: Public URL of this FastMCP server
-            auth_route: Supabase Auth route. Defaults to "/auth/v1".
+            auth_route: Supabase Auth route. Defaults to "/auth/v1". Can be customized
+                for self-hosted Supabase Auth setups using custom routes.
             algorithm: JWT signing algorithm (HS256, RS256, or ES256). Must match your
                 Supabase Auth configuration. Defaults to ES256.
             required_scopes: Optional list of scopes to require for all requests.
@@ -112,31 +92,22 @@ class SupabaseProvider(RemoteAuthProvider):
                 scopes are an upcoming feature.
             token_verifier: Optional token verifier. If None, creates JWT verifier for Supabase
         """
-        settings = SupabaseProviderSettings.model_validate(
-            {
-                k: v
-                for k, v in {
-                    "project_url": project_url,
-                    "base_url": base_url,
-                    "auth_route": auth_route,
-                    "algorithm": algorithm,
-                    "required_scopes": required_scopes,
-                }.items()
-                if v is not NotSet
-            }
-        )
+        self.project_url = str(project_url).rstrip("/")
+        self.base_url = AnyHttpUrl(str(base_url).rstrip("/"))
+        self.auth_route = auth_route.strip("/")
 
-        self.project_url = str(settings.project_url).rstrip("/")
-        self.base_url = AnyHttpUrl(str(settings.base_url).rstrip("/"))
-        self.auth_route = settings.auth_route.strip("/")
+        # Parse scopes if provided as string
+        parsed_scopes = (
+            parse_scopes(required_scopes) if required_scopes is not None else None
+        )
 
         # Create default JWT verifier if none provided
         if token_verifier is None:
             token_verifier = JWTVerifier(
                 jwks_uri=f"{self.project_url}/{self.auth_route}/.well-known/jwks.json",
                 issuer=f"{self.project_url}/{self.auth_route}",
-                algorithm=settings.algorithm,
-                required_scopes=settings.required_scopes,
+                algorithm=algorithm,
+                required_scopes=parsed_scopes,
             )
 
         # Initialize RemoteAuthProvider with Supabase as the authorization server

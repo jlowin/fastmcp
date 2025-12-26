@@ -6,14 +6,15 @@ import pytest
 from anyio import create_task_group
 from dirty_equals import Contains
 from mcp import McpError
-from mcp.types import Icon
+from mcp.types import Icon, TextContent, TextResourceContents
 from pydantic import AnyUrl
 
 from fastmcp import FastMCP
 from fastmcp.client import Client
 from fastmcp.client.transports import FastMCPTransport, StreamableHttpTransport
 from fastmcp.exceptions import ToolError
-from fastmcp.server.proxy import FastMCPProxy, ProxyClient
+from fastmcp.resources import ResourceContent, ResourceResult
+from fastmcp.server.providers.proxy import FastMCPProxy, ProxyClient
 from fastmcp.tools.tool import ToolResult
 from fastmcp.tools.tool_transform import (
     ToolTransformConfig,
@@ -67,8 +68,10 @@ def fastmcp_server():
         return "👋"
 
     @server.resource(uri="data://users")
-    async def get_users() -> list[dict[str, Any]]:
-        return USERS
+    async def get_users() -> str:
+        import json
+
+        return json.dumps(USERS, separators=(",", ":"))
 
     @server.resource(
         uri="data://user/{user_id}",
@@ -76,8 +79,41 @@ def fastmcp_server():
         title="User Template",
         icons=[Icon(src="https://example.com/user-icon.png")],
     )
-    async def get_user(user_id: str) -> dict[str, Any] | None:
-        return next((user for user in USERS if user["id"] == user_id), None)
+    async def get_user(user_id: str) -> str:
+        import json
+
+        user = next((user for user in USERS if user["id"] == user_id), None)
+        return json.dumps(user, separators=(",", ":")) if user else "null"
+
+    @server.resource(uri="data://multi")
+    def get_multi_content() -> ResourceResult:
+        """Resource that returns multiple content items."""
+        return ResourceResult(
+            contents=[
+                ResourceContent(content="First item", mime_type="text/plain"),
+                ResourceContent(
+                    content='{"key": "value"}', mime_type="application/json"
+                ),
+                ResourceContent(
+                    content="# Markdown\nContent", mime_type="text/markdown"
+                ),
+            ],
+            meta={"count": 3},
+        )
+
+    @server.resource(uri="data://multi/{id}")
+    def get_multi_template(id: str) -> ResourceResult:
+        """Resource template that returns multiple content items."""
+        return ResourceResult(
+            contents=[
+                ResourceContent(content=f"Item {id} - First", mime_type="text/plain"),
+                ResourceContent(
+                    content=f'{{"id": "{id}", "status": "active"}}',
+                    mime_type="application/json",
+                ),
+            ],
+            meta={"id": id},
+        )
 
     # --- Prompts ---
 
@@ -132,7 +168,7 @@ def test_as_proxy_with_url():
     assert isinstance(proxy, FastMCPProxy)
     client = cast(Client, proxy.client_factory())
     assert isinstance(client.transport, StreamableHttpTransport)
-    assert client.transport.url == "http://example.com/mcp/"  # type: ignore[attr-defined]
+    assert client.transport.url == "http://example.com/mcp/"
 
 
 async def test_proxy_with_async_client_factory():
@@ -147,20 +183,20 @@ async def test_proxy_with_async_client_factory():
     client = await proxy.client_factory()  # type: ignore[misc]
     assert isinstance(client, Client)
     assert isinstance(client.transport, StreamableHttpTransport)
-    assert client.transport.url == "http://example.com/mcp/"  # type: ignore[attr-defined]
+    assert client.transport.url == "http://example.com/mcp/"
 
 
 class TestTools:
     async def test_get_tools(self, proxy_server):
         tools = await proxy_server.get_tools()
-        assert "greet" in tools
-        assert "add" in tools
-        assert "error_tool" in tools
-        assert "tool_without_description" in tools
+        assert any(t.name == "greet" for t in tools)
+        assert any(t.name == "add" for t in tools)
+        assert any(t.name == "error_tool" for t in tools)
+        assert any(t.name == "tool_without_description" for t in tools)
 
     async def test_get_tools_meta(self, proxy_server):
         tools = await proxy_server.get_tools()
-        greet_tool = tools["greet"]
+        greet_tool = next(t for t in tools if t.name == "greet")
         assert greet_tool.title == "Greet"
         assert greet_tool.meta == {"_fastmcp": {"tags": ["greet"]}}
         assert greet_tool.icons == [Icon(src="https://example.com/greet-icon.png")]
@@ -174,8 +210,8 @@ class TestTools:
             "add", ToolTransformConfig(name="add_transformed")
         )
         tools = await proxy_server.get_tools()
-        assert "add_transformed" in tools
-        assert "add" not in tools
+        assert any(t.name == "add_transformed" for t in tools)
+        assert not any(t.name == "add" for t in tools)
 
     async def test_call_transformed_tools(
         self, fastmcp_server: FastMCP, proxy_server: FastMCPProxy
@@ -191,7 +227,8 @@ class TestTools:
 
     async def test_tool_without_description(self, proxy_server):
         tools = await proxy_server.get_tools()
-        assert tools["tool_without_description"].description is None
+        tool = next(t for t in tools if t.name == "tool_without_description")
+        assert tool.description is None
 
     async def test_list_tools_same_as_original(self, fastmcp_server, proxy_server):
         assert (
@@ -231,7 +268,8 @@ class TestTools:
         async with Client(proxy_server) as client:
             result = await client.call_tool("tool_with_meta", {"value": "test"})
 
-        assert result.content[0].text == "Result: test"  # type: ignore[attr-defined]
+        assert isinstance(result.content[0], TextContent)
+        assert result.content[0].text == "Result: test"
         assert result.meta == {"custom_key": "custom_value", "processed": True}
 
     async def test_proxy_can_overwrite_proxied_tool(self, proxy_server):
@@ -247,20 +285,6 @@ class TestTools:
             result = await client.call_tool("greet", {"name": "Marvin", "extra": "abc"})
         assert result.data == "Overwritten, Marvin! abc"
 
-    async def test_proxy_errors_if_overwritten_tool_is_disabled(self, proxy_server):
-        """
-        Test that a tool defined on the proxy is not listed if it is disabled,
-        and it doesn't fall back to the proxied tool with the same name
-        """
-
-        @proxy_server.tool(enabled=False)
-        def greet(name: str, extra: str = "extra") -> str:
-            return f"Overwritten, {name}! {extra}"
-
-        async with Client(proxy_server) as client:
-            with pytest.raises(ToolError, match="Unknown tool"):
-                await client.call_tool("greet", {"name": "Marvin", "extra": "abc"})
-
     async def test_proxy_can_list_overwritten_tool(self, proxy_server):
         """
         Test that a tool defined on the proxy is listed instead of the proxied tool
@@ -275,33 +299,19 @@ class TestTools:
             greet_tool = next(t for t in tools if t.name == "greet")
             assert "extra" in greet_tool.inputSchema["properties"]
 
-    async def test_proxy_can_list_overwritten_tool_if_disabled(self, proxy_server):
-        """
-        Test that a tool defined on the proxy is not listed if it is disabled,
-        and it doesn't fall back to the proxied tool with the same name
-        """
-
-        @proxy_server.tool(enabled=False)
-        def greet(name: str, extra: str = "extra") -> str:
-            return f"Overwritten, {name}! {extra}"
-
-        async with Client(proxy_server) as client:
-            tools = await client.list_tools()
-            assert not any(t.name == "greet" for t in tools)
-
 
 class TestResources:
     async def test_get_resources(self, proxy_server):
         resources = await proxy_server.get_resources()
-        assert [r.uri for r in resources.values()] == Contains(
+        assert [r.uri for r in resources] == Contains(
             AnyUrl("data://users"),
             AnyUrl("resource://wave"),
         )
-        assert [r.name for r in resources.values()] == Contains("get_users", "wave")
+        assert [r.name for r in resources] == Contains("get_users", "wave")
 
     async def test_get_resources_meta(self, proxy_server):
         resources = await proxy_server.get_resources()
-        wave_resource = resources["resource://wave"]
+        wave_resource = next(r for r in resources if str(r.uri) == "resource://wave")
         assert wave_resource.title == "Wave"
         assert wave_resource.meta == {"_fastmcp": {"tags": ["wave"]}}
         assert wave_resource.icons == [Icon(src="https://example.com/wave-icon.png")]
@@ -315,7 +325,8 @@ class TestResources:
     async def test_read_resource(self, proxy_server: FastMCPProxy):
         async with Client(proxy_server) as client:
             result = await client.read_resource("resource://wave")
-        assert result[0].text == "👋"  # type: ignore[attr-defined]
+        assert isinstance(result[0], TextResourceContents)
+        assert result[0].text == "👋"
 
     async def test_read_resource_same_as_original(self, fastmcp_server, proxy_server):
         async with Client(fastmcp_server) as client:
@@ -327,7 +338,45 @@ class TestResources:
     async def test_read_json_resource(self, proxy_server: FastMCPProxy):
         async with Client(proxy_server) as client:
             result = await client.read_resource("data://users")
-        assert json.loads(result[0].text) == USERS  # type: ignore[attr-defined]
+        assert len(result) == 1
+        assert isinstance(result[0], TextResourceContents)
+        # The resource returns all users serialized as JSON
+        users = json.loads(result[0].text)
+        assert users == USERS
+
+    async def test_proxy_returns_all_resource_contents(
+        self, fastmcp_server, proxy_server
+    ):
+        """Test that proxy correctly returns all resource contents, not just the first one."""
+        # Read from original server
+        async with Client(fastmcp_server) as client:
+            original_result = await client.read_resource("data://multi")
+
+        # Read from proxy server
+        async with Client(proxy_server) as client:
+            proxy_result = await client.read_resource("data://multi")
+
+        # Both should return the same number of contents
+        assert len(original_result) == len(proxy_result)
+        assert len(original_result) == 3
+
+        # Verify all contents match
+        for i, (original, proxied) in enumerate(zip(original_result, proxy_result)):
+            assert isinstance(original, TextResourceContents)
+            assert isinstance(proxied, TextResourceContents)
+            assert original.text == proxied.text, f"Content {i} text mismatch"
+            assert original.mimeType == proxied.mimeType, (
+                f"Content {i} mimeType mismatch"
+            )
+            assert original.meta == proxied.meta, f"Content {i} meta mismatch"
+
+        # Verify the contents are what we expect
+        assert original_result[0].text == "First item"
+        assert original_result[0].mimeType == "text/plain"
+        assert original_result[1].text == '{"key": "value"}'
+        assert original_result[1].mimeType == "application/json"
+        assert original_result[2].text == "# Markdown\nContent"
+        assert original_result[2].mimeType == "text/markdown"
 
     async def test_read_resource_returns_none_if_not_found(self, proxy_server):
         with pytest.raises(
@@ -347,21 +396,8 @@ class TestResources:
 
         async with Client(proxy_server) as client:
             result = await client.read_resource("resource://wave")
-        assert result[0].text == "Overwritten wave! 🌊"  # type: ignore[attr-defined]
-
-    async def test_proxy_errors_if_overwritten_resource_is_disabled(self, proxy_server):
-        """
-        Test that a resource defined on the proxy is not accessible if it is disabled,
-        and it doesn't fall back to the proxied resource with the same URI
-        """
-
-        @proxy_server.resource(uri="resource://wave", enabled=False)
-        def overwritten_wave() -> str:
-            return "Overwritten wave! 🌊"
-
-        async with Client(proxy_server) as client:
-            with pytest.raises(McpError, match="Unknown resource"):
-                await client.read_resource("resource://wave")
+        assert isinstance(result[0], TextResourceContents)
+        assert result[0].text == "Overwritten wave! 🌊"
 
     async def test_proxy_can_list_overwritten_resource(self, proxy_server):
         """
@@ -379,30 +415,17 @@ class TestResources:
             )
             assert wave_resource.name == "overwritten_wave"
 
-    async def test_proxy_can_list_overwritten_resource_if_disabled(self, proxy_server):
-        """
-        Test that a resource defined on the proxy is not listed if it is disabled,
-        and it doesn't fall back to the proxied resource with the same URI
-        """
-
-        @proxy_server.resource(uri="resource://wave", enabled=False)
-        def overwritten_wave() -> str:
-            return "Overwritten wave! 🌊"
-
-        async with Client(proxy_server) as client:
-            resources = await client.list_resources()
-            wave_resources = [r for r in resources if str(r.uri) == "resource://wave"]
-            assert len(wave_resources) == 0
-
 
 class TestResourceTemplates:
     async def test_get_resource_templates(self, proxy_server):
         templates = await proxy_server.get_resource_templates()
-        assert [t.name for t in templates.values()] == Contains("get_user")
+        assert [t.name for t in templates] == Contains("get_user")
 
     async def test_get_resource_templates_meta(self, proxy_server):
         templates = await proxy_server.get_resource_templates()
-        get_user_template = templates["data://user/{user_id}"]
+        get_user_template = next(
+            t for t in templates if t.uri_template == "data://user/{user_id}"
+        )
         assert get_user_template.title == "User Template"
         assert get_user_template.meta == {"_fastmcp": {"tags": ["users"]}}
         assert get_user_template.icons == [
@@ -420,7 +443,8 @@ class TestResourceTemplates:
     async def test_read_resource_template(self, proxy_server: FastMCPProxy, id: int):
         async with Client(proxy_server) as client:
             result = await client.read_resource(f"data://user/{id}")
-        assert json.loads(result[0].text) == USERS[id - 1]  # type: ignore[attr-defined]
+        assert isinstance(result[0], TextResourceContents)
+        assert json.loads(result[0].text) == USERS[id - 1]
 
     async def test_read_resource_template_same_as_original(
         self, fastmcp_server, proxy_server
@@ -431,41 +455,59 @@ class TestResourceTemplates:
             proxy_result = await client.read_resource("data://user/1")
         assert proxy_result == result
 
+    async def test_proxy_template_returns_all_resource_contents(
+        self, fastmcp_server, proxy_server
+    ):
+        """Test that proxy template correctly returns all resource contents."""
+        # Read from original server
+        async with Client(fastmcp_server) as client:
+            original_result = await client.read_resource("data://multi/test123")
+
+        # Read from proxy server
+        async with Client(proxy_server) as client:
+            proxy_result = await client.read_resource("data://multi/test123")
+
+        # Both should return the same number of contents
+        assert len(original_result) == len(proxy_result)
+        assert len(original_result) == 2
+
+        # Verify all contents match
+        for i, (original, proxied) in enumerate(zip(original_result, proxy_result)):
+            assert isinstance(original, TextResourceContents)
+            assert isinstance(proxied, TextResourceContents)
+            assert original.text == proxied.text, f"Content {i} text mismatch"
+            assert original.mimeType == proxied.mimeType, (
+                f"Content {i} mimeType mismatch"
+            )
+
+        # Verify the contents are what we expect
+        assert original_result[0].text == "Item test123 - First"
+        assert original_result[0].mimeType == "text/plain"
+        assert original_result[1].text == '{"id": "test123", "status": "active"}'
+        assert original_result[1].mimeType == "application/json"
+
     async def test_proxy_can_overwrite_proxied_resource_template(self, proxy_server):
         """
         Test that a resource template defined on the proxy can overwrite the proxied template with the same URI template.
         """
 
         @proxy_server.resource(uri="data://user/{user_id}", name="overwritten_get_user")
-        def overwritten_get_user(user_id: str) -> dict[str, Any]:
-            return {
-                "id": user_id,
-                "name": "Overwritten User",
-                "active": True,
-                "extra": "data",
-            }
+        def overwritten_get_user(user_id: str) -> str:
+            return json.dumps(
+                {
+                    "id": user_id,
+                    "name": "Overwritten User",
+                    "active": True,
+                    "extra": "data",
+                }
+            )
 
         async with Client(proxy_server) as client:
             result = await client.read_resource("data://user/1")
-        user_data = json.loads(result[0].text)  # type: ignore[attr-defined]
+        assert isinstance(result[0], TextResourceContents)
+        user_data = json.loads(result[0].text)
         assert user_data["name"] == "Overwritten User"
         assert user_data["extra"] == "data"
-
-    async def test_proxy_errors_if_overwritten_resource_template_is_disabled(
-        self, proxy_server
-    ):
-        """
-        Test that a resource template defined on the proxy is not accessible if it is disabled,
-        and it doesn't fall back to the proxied template with the same URI template
-        """
-
-        @proxy_server.resource(uri="data://user/{user_id}", enabled=False)
-        def overwritten_get_user(user_id: str) -> dict[str, Any]:
-            return {"id": user_id, "name": "Overwritten User", "active": True}
-
-        async with Client(proxy_server) as client:
-            with pytest.raises(McpError, match="Unknown resource"):
-                await client.read_resource("data://user/1")
 
     async def test_proxy_can_list_overwritten_resource_template(self, proxy_server):
         """
@@ -483,34 +525,15 @@ class TestResourceTemplates:
             )
             assert user_template.name == "overwritten_get_user"
 
-    async def test_proxy_can_list_overwritten_resource_template_if_disabled(
-        self, proxy_server
-    ):
-        """
-        Test that a resource template defined on the proxy is not listed if it is disabled,
-        and it doesn't fall back to the proxied template with the same URI template
-        """
-
-        @proxy_server.resource(uri="data://user/{user_id}", enabled=False)
-        def overwritten_get_user(user_id: str) -> dict[str, Any]:
-            return {"id": user_id, "name": "Overwritten User", "active": True}
-
-        async with Client(proxy_server) as client:
-            templates = await client.list_resource_templates()
-            user_templates = [
-                t for t in templates if t.uriTemplate == "data://user/{user_id}"
-            ]
-            assert len(user_templates) == 0
-
 
 class TestPrompts:
     async def test_get_prompts_server_method(self, proxy_server: FastMCPProxy):
         prompts = await proxy_server.get_prompts()
-        assert [p.name for p in prompts.values()] == Contains("welcome")
+        assert [p.name for p in prompts] == Contains("welcome")
 
     async def test_get_prompts_meta(self, proxy_server):
         prompts = await proxy_server.get_prompts()
-        welcome_prompt = prompts["welcome"]
+        welcome_prompt = next(p for p in prompts if p.name == "welcome")
         assert welcome_prompt.title == "Welcome"
         assert welcome_prompt.meta == {"_fastmcp": {"tags": ["welcome"]}}
         assert welcome_prompt.icons == [
@@ -537,7 +560,8 @@ class TestPrompts:
         async with Client(proxy_server) as client:
             result = await client.get_prompt("welcome", {"name": "Alice"})
         assert result.messages[0].role == "user"
-        assert result.messages[0].content.text == "Welcome to FastMCP, Alice!"  # type: ignore[attr-defined]
+        assert isinstance(result.messages[0].content, TextContent)
+        assert result.messages[0].content.text == "Welcome to FastMCP, Alice!"
 
     async def test_proxy_can_overwrite_proxied_prompt(self, proxy_server):
         """
@@ -553,24 +577,11 @@ class TestPrompts:
                 "welcome", {"name": "Alice", "extra": "colleague"}
             )
         assert result.messages[0].role == "user"
+        assert isinstance(result.messages[0].content, TextContent)
         assert (
-            result.messages[0].content.text  # type: ignore[attr-defined]
+            result.messages[0].content.text
             == "Overwritten welcome, Alice! You are my colleague."
         )
-
-    async def test_proxy_errors_if_overwritten_prompt_is_disabled(self, proxy_server):
-        """
-        Test that a prompt defined on the proxy is not accessible if it is disabled,
-        and it doesn't fall back to the proxied prompt with the same name
-        """
-
-        @proxy_server.prompt(enabled=False)
-        def welcome(name: str, extra: str = "friend") -> str:
-            return f"Overwritten welcome, {name}! You are my {extra}."
-
-        async with Client(proxy_server) as client:
-            with pytest.raises(McpError, match="Unknown prompt"):
-                await client.get_prompt("welcome", {"name": "Alice"})
 
     async def test_proxy_can_list_overwritten_prompt(self, proxy_server):
         """
@@ -588,21 +599,6 @@ class TestPrompts:
             param_names = [arg.name for arg in welcome_prompt.arguments or []]
             assert "extra" in param_names
 
-    async def test_proxy_can_list_overwritten_prompt_if_disabled(self, proxy_server):
-        """
-        Test that a prompt defined on the proxy is not listed if it is disabled,
-        and it doesn't fall back to the proxied prompt with the same name
-        """
-
-        @proxy_server.prompt(enabled=False)
-        def welcome(name: str, extra: str = "friend") -> str:
-            return f"Overwritten welcome, {name}! You are my {extra}."
-
-        async with Client(proxy_server) as client:
-            prompts = await client.list_prompts()
-            welcome_prompts = [p for p in prompts if p.name == "welcome"]
-            assert len(welcome_prompts) == 0
-
 
 async def test_proxy_handles_multiple_concurrent_tasks_correctly(
     proxy_server: FastMCPProxy,
@@ -618,172 +614,64 @@ async def test_proxy_handles_multiple_concurrent_tasks_correctly(
         tg.start_soon(get_and_store, "tools", proxy_server.get_tools)
 
     assert list(results) == Contains("resources", "prompts", "tools")
-    assert list(results["prompts"]) == Contains("welcome")
-    assert [r.uri for r in results["resources"].values()] == Contains(
+    assert [p.name for p in results["prompts"]] == Contains("welcome")
+    assert [r.uri for r in results["resources"]] == Contains(
         AnyUrl("data://users"),
         AnyUrl("resource://wave"),
     )
-    assert [r.name for r in results["resources"].values()] == Contains(
-        "get_users", "wave"
-    )
-    assert list(results["tools"]) == Contains(
+    assert [r.name for r in results["resources"]] == Contains("get_users", "wave")
+    assert [t.name for t in results["tools"]] == Contains(
         "greet", "add", "error_tool", "tool_without_description"
     )
 
 
-class TestMirroredComponents:
-    """Test mirrored component functionality - components retrieved from proxy servers."""
+class TestProxyComponentEnableDisable:
+    """Test that enable/disable on proxy components guides users to server-level methods."""
 
-    async def test_mirrored_tool_cannot_be_enabled(self, proxy_server):
-        """Test that mirrored tools cannot be enabled directly."""
+    async def test_proxy_tool_enable_raises_not_implemented(self, proxy_server):
+        """Test that enable() on proxy tools raises NotImplementedError."""
         tools = await proxy_server.get_tools()
-        mirrored_tool = tools["greet"]
+        tool = next(t for t in tools if t.name == "greet")
 
-        # Verify it's mirrored
-        assert mirrored_tool._mirrored is True
+        with pytest.raises(NotImplementedError, match="server.enable"):
+            tool.enable()
 
-        # Should raise error when trying to enable
-        with pytest.raises(RuntimeError, match="Cannot enable mirrored component"):
-            mirrored_tool.enable()
-
-    async def test_mirrored_tool_cannot_be_disabled(self, proxy_server):
-        """Test that mirrored tools cannot be disabled directly."""
+    async def test_proxy_tool_disable_raises_not_implemented(self, proxy_server):
+        """Test that disable() on proxy tools raises NotImplementedError."""
         tools = await proxy_server.get_tools()
-        mirrored_tool = tools["greet"]
+        tool = next(t for t in tools if t.name == "greet")
 
-        # Verify it's mirrored
-        assert mirrored_tool._mirrored is True
+        with pytest.raises(NotImplementedError, match="server.disable"):
+            tool.disable()
 
-        # Should raise error when trying to disable
-        with pytest.raises(RuntimeError, match="Cannot disable mirrored component"):
-            mirrored_tool.disable()
-
-    async def test_mirrored_resource_cannot_be_enabled(self, proxy_server):
-        """Test that mirrored resources cannot be enabled directly."""
+    async def test_proxy_resource_enable_raises_not_implemented(self, proxy_server):
+        """Test that enable() on proxy resources raises NotImplementedError."""
         resources = await proxy_server.get_resources()
-        mirrored_resource = resources["resource://wave"]
+        resource = next(r for r in resources if str(r.uri) == "resource://wave")
 
-        # Verify it's mirrored
-        assert mirrored_resource._mirrored is True
+        with pytest.raises(NotImplementedError, match="server.enable"):
+            resource.enable()
 
-        # Should raise error when trying to enable
-        with pytest.raises(RuntimeError, match="Cannot enable mirrored component"):
-            mirrored_resource.enable()
-
-    async def test_mirrored_resource_cannot_be_disabled(self, proxy_server):
-        """Test that mirrored resources cannot be disabled directly."""
+    async def test_proxy_resource_disable_raises_not_implemented(self, proxy_server):
+        """Test that disable() on proxy resources raises NotImplementedError."""
         resources = await proxy_server.get_resources()
-        mirrored_resource = resources["resource://wave"]
+        resource = next(r for r in resources if str(r.uri) == "resource://wave")
 
-        # Verify it's mirrored
-        assert mirrored_resource._mirrored is True
+        with pytest.raises(NotImplementedError, match="server.disable"):
+            resource.disable()
 
-        # Should raise error when trying to disable
-        with pytest.raises(RuntimeError, match="Cannot disable mirrored component"):
-            mirrored_resource.disable()
-
-    async def test_mirrored_prompt_cannot_be_enabled(self, proxy_server):
-        """Test that mirrored prompts cannot be enabled directly."""
+    async def test_proxy_prompt_enable_raises_not_implemented(self, proxy_server):
+        """Test that enable() on proxy prompts raises NotImplementedError."""
         prompts = await proxy_server.get_prompts()
-        mirrored_prompt = prompts["welcome"]
+        prompt = next(p for p in prompts if p.name == "welcome")
 
-        # Verify it's mirrored
-        assert mirrored_prompt._mirrored is True
+        with pytest.raises(NotImplementedError, match="server.enable"):
+            prompt.enable()
 
-        # Should raise error when trying to enable
-        with pytest.raises(RuntimeError, match="Cannot enable mirrored component"):
-            mirrored_prompt.enable()
-
-    async def test_mirrored_prompt_cannot_be_disabled(self, proxy_server):
-        """Test that mirrored prompts cannot be disabled directly."""
+    async def test_proxy_prompt_disable_raises_not_implemented(self, proxy_server):
+        """Test that disable() on proxy prompts raises NotImplementedError."""
         prompts = await proxy_server.get_prompts()
-        mirrored_prompt = prompts["welcome"]
+        prompt = next(p for p in prompts if p.name == "welcome")
 
-        # Verify it's mirrored
-        assert mirrored_prompt._mirrored is True
-
-        # Should raise error when trying to disable
-        with pytest.raises(RuntimeError, match="Cannot disable mirrored component"):
-            mirrored_prompt.disable()
-
-    async def test_copy_creates_non_mirrored_component(self, proxy_server):
-        """Test that copy() creates a non-mirrored component that can be modified."""
-        tools = await proxy_server.get_tools()
-        mirrored_tool = tools["greet"]
-
-        # Create a copy
-        local_tool = mirrored_tool.copy()
-
-        # Copy should not be mirrored
-        assert local_tool._mirrored is False
-
-        # Should be able to enable/disable the copy
-        local_tool.enable()
-        assert local_tool.enabled is True
-
-        local_tool.disable()
-        assert local_tool.enabled is False
-
-    async def test_local_component_takes_precedence_over_mirrored(self, proxy_server):
-        """Test that local components take precedence over mirrored ones."""
-        # Get the mirrored tool
-        tools = await proxy_server.get_tools()
-        mirrored_tool = tools["greet"]
-
-        # Create a local copy and add it
-        local_tool = mirrored_tool.copy()
-        proxy_server.add_tool(local_tool)
-
-        # Disable the local copy
-        local_tool.disable()
-
-        # The local disabled tool should take precedence
-        updated_tools = await proxy_server.get_tools()
-        final_tool = updated_tools["greet"]
-
-        # Should be the local tool (not mirrored) and disabled
-        assert final_tool is local_tool
-        assert final_tool._mirrored is False
-        assert final_tool.enabled is False
-
-    async def test_error_messages_mention_copy_method(self, proxy_server):
-        """Test that error messages guide users to use copy() method."""
-        tools = await proxy_server.get_tools()
-        mirrored_tool = tools["greet"]
-
-        # Check enable error message
-        with pytest.raises(RuntimeError) as exc_info:
-            mirrored_tool.enable()
-        assert "copy()" in str(exc_info.value)
-
-        # Check disable error message
-        with pytest.raises(RuntimeError) as exc_info:
-            mirrored_tool.disable()
-        assert "copy()" in str(exc_info.value)
-
-    async def test_client_cannot_call_disabled_proxy_tool(self, proxy_server):
-        """Test that clients cannot call a tool when local copy is disabled."""
-        # Get the mirrored tool
-        tools = await proxy_server.get_tools()
-        mirrored_tool = tools["greet"]
-
-        # Verify the tool works initially
-        async with Client(proxy_server) as client:
-            result = await client.call_tool("greet", {"name": "Alice"})
-            assert result.data == "Hello, Alice!"
-
-        # Create a local copy and disable it
-        local_tool = mirrored_tool.copy()
-        proxy_server.add_tool(local_tool)
-        local_tool.disable()
-
-        # Client should now get "Unknown tool" error
-        async with Client(proxy_server) as client:
-            with pytest.raises(ToolError, match="Unknown tool"):
-                await client.call_tool("greet", {"name": "Alice"})
-
-        # Tool should not appear in tool list either
-        async with Client(proxy_server) as client:
-            tools_list = await client.list_tools()
-            tool_names = [tool.name for tool in tools_list]
-            assert "greet" not in tool_names
+        with pytest.raises(NotImplementedError, match="server.disable"):
+            prompt.disable()

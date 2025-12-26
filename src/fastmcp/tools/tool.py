@@ -8,9 +8,11 @@ from typing import (
     TYPE_CHECKING,
     Annotated,
     Any,
+    ClassVar,
     Generic,
     TypeAlias,
     get_type_hints,
+    overload,
 )
 
 import mcp.types
@@ -25,14 +27,14 @@ from mcp.types import (
     ToolExecution,
 )
 from mcp.types import Tool as MCPTool
-from pydantic import Field, PydanticSchemaGenerationError, model_validator
+from pydantic import BaseModel, Field, PydanticSchemaGenerationError, model_validator
 from typing_extensions import TypeVar
 
 import fastmcp
-from fastmcp.server.dependencies import get_context, without_injected_parameters
-from fastmcp.server.tasks.config import TaskConfig
+from fastmcp.server.dependencies import without_injected_parameters
+from fastmcp.server.tasks.config import TaskConfig, TaskMeta
 from fastmcp.utilities.components import FastMCPComponent
-from fastmcp.utilities.json_schema import compress_schema
+from fastmcp.utilities.json_schema import compress_schema, resolve_root_ref
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.types import (
     Audio,
@@ -46,6 +48,9 @@ from fastmcp.utilities.types import (
 )
 
 if TYPE_CHECKING:
+    from docket import Docket
+    from docket.execution import Execution
+
     from fastmcp.tools.tool_transform import ArgTransform, TransformedTool
 
 logger = get_logger(__name__)
@@ -71,7 +76,17 @@ def default_serializer(data: Any) -> str:
     return pydantic_core.to_json(data, fallback=str).decode()
 
 
-class ToolResult:
+class ToolResult(BaseModel):
+    content: list[ContentBlock] = Field(
+        description="List of content blocks for the tool result"
+    )
+    structured_content: dict[str, Any] | None = Field(
+        default=None, description="Structured content matching the tool's output schema"
+    )
+    meta: dict[str, Any] | None = Field(
+        default=None, description="Runtime metadata about the tool execution"
+    )
+
     def __init__(
         self,
         content: list[ContentBlock] | Any | None = None,
@@ -83,8 +98,7 @@ class ToolResult:
         elif content is None:
             content = structured_content
 
-        self.content: list[ContentBlock] = _convert_to_content(result=content)
-        self.meta: dict[str, Any] | None = meta
+        converted_content: list[ContentBlock] = _convert_to_content(result=content)
 
         if structured_content is not None:
             try:
@@ -102,7 +116,10 @@ class ToolResult:
                     f"Got {type(structured_content).__name__}: {structured_content!r}. "
                     "Tools should wrap non-dict values based on their output_schema."
                 )
-        self.structured_content: dict[str, Any] | None = structured_content
+
+        super().__init__(
+            content=converted_content, structured_content=structured_content, meta=meta
+        )
 
     def to_mcp_result(
         self,
@@ -113,7 +130,7 @@ class ToolResult:
             return CallToolResult(
                 structuredContent=self.structured_content,
                 content=self.content,
-                _meta=self.meta,
+                _meta=self.meta,  # type: ignore[call-arg]  # _meta is Pydantic alias for meta field
             )
         if self.structured_content is None:
             return self.content
@@ -122,6 +139,8 @@ class ToolResult:
 
 class Tool(FastMCPComponent):
     """Internal tool registration info."""
+
+    KEY_PREFIX: ClassVar[str] = "tool"
 
     parameters: Annotated[
         dict[str, Any], Field(description="JSON schema for tool parameters")
@@ -148,22 +167,6 @@ class Tool(FastMCPComponent):
         validate_and_warn_tool_name(self.name)
         return self
 
-    def enable(self) -> None:
-        super().enable()
-        try:
-            context = get_context()
-            context._queue_tool_list_changed()  # type: ignore[private-use]
-        except RuntimeError:
-            pass  # No context available
-
-    def disable(self) -> None:
-        super().disable()
-        try:
-            context = get_context()
-            context._queue_tool_list_changed()  # type: ignore[private-use]
-        except RuntimeError:
-            pass  # No context available
-
     def to_mcp_tool(
         self,
         *,
@@ -187,7 +190,7 @@ class Tool(FastMCPComponent):
             icons=overrides.get("icons", self.icons),
             annotations=overrides.get("annotations", self.annotations),
             execution=overrides.get("execution", self.execution),
-            _meta=overrides.get(
+            _meta=overrides.get(  # type: ignore[call-arg]  # _meta is Pydantic alias for meta field
                 "_meta", self.get_meta(include_fastmcp_meta=include_fastmcp_meta)
             ),
         )
@@ -205,7 +208,6 @@ class Tool(FastMCPComponent):
         output_schema: dict[str, Any] | NotSetT | None = NotSet,
         serializer: ToolResultSerializerType | None = None,
         meta: dict[str, Any] | None = None,
-        enabled: bool | None = None,
         task: bool | TaskConfig | None = None,
     ) -> FunctionTool:
         """Create a Tool from a function."""
@@ -221,7 +223,6 @@ class Tool(FastMCPComponent):
             output_schema=output_schema,
             serializer=serializer,
             meta=meta,
-            enabled=enabled,
             task=task,
         )
 
@@ -237,6 +238,127 @@ class Tool(FastMCPComponent):
         """
         raise NotImplementedError("Subclasses must implement run()")
 
+    def convert_result(self, raw_value: Any) -> ToolResult:
+        """Convert a raw result to ToolResult.
+
+        Handles ToolResult passthrough and converts raw values using the tool's
+        attributes (serializer, output_schema) for proper conversion.
+        """
+        if isinstance(raw_value, ToolResult):
+            return raw_value
+
+        content = _convert_to_content(raw_value, serializer=self.serializer)
+
+        # Skip structured content for ContentBlock types only if no output_schema
+        # (if output_schema exists, MCP SDK requires structured_content)
+        if self.output_schema is None and (
+            isinstance(raw_value, ContentBlock | Audio | Image | File)
+            or (
+                isinstance(raw_value, list | tuple)
+                and any(isinstance(item, ContentBlock) for item in raw_value)
+            )
+        ):
+            return ToolResult(content=content)
+
+        try:
+            structured = pydantic_core.to_jsonable_python(raw_value)
+        except pydantic_core.PydanticSerializationError:
+            return ToolResult(content=content)
+
+        if self.output_schema is None:
+            # No schema - only use structured_content for dicts
+            if isinstance(structured, dict):
+                return ToolResult(content=content, structured_content=structured)
+            return ToolResult(content=content)
+
+        # Has output_schema - wrap if x-fastmcp-wrap-result is set
+        wrap_result = self.output_schema.get("x-fastmcp-wrap-result")
+        return ToolResult(
+            content=content,
+            structured_content={"result": structured} if wrap_result else structured,
+        )
+
+    @overload
+    async def _run(
+        self,
+        arguments: dict[str, Any],
+        task_meta: None = None,
+    ) -> ToolResult: ...
+
+    @overload
+    async def _run(
+        self,
+        arguments: dict[str, Any],
+        task_meta: TaskMeta,
+    ) -> mcp.types.CreateTaskResult: ...
+
+    async def _run(
+        self,
+        arguments: dict[str, Any],
+        task_meta: TaskMeta | None = None,
+    ) -> ToolResult | mcp.types.CreateTaskResult:
+        """Server entry point that handles task routing.
+
+        This allows ANY Tool subclass to support background execution by setting
+        task_config.mode to "supported" or "required". The server calls this
+        method instead of run() directly.
+
+        Args:
+            arguments: Tool arguments
+            task_meta: If provided, execute as background task and return
+                CreateTaskResult. If None (default), execute synchronously and
+                return ToolResult.
+
+        Returns:
+            ToolResult when task_meta is None.
+            CreateTaskResult when task_meta is provided.
+
+        Subclasses can override this to customize task routing behavior.
+        For example, FastMCPProviderTool overrides to delegate to child
+        middleware without submitting to Docket.
+        """
+        from fastmcp.server.tasks.routing import check_background_task
+
+        task_result = await check_background_task(
+            component=self,
+            task_type="tool",
+            arguments=arguments,
+            task_meta=task_meta,
+        )
+        if task_result:
+            return task_result
+
+        return await self.run(arguments)
+
+    def register_with_docket(self, docket: Docket) -> None:
+        """Register this tool with docket for background execution."""
+        if not self.task_config.supports_tasks():
+            return
+        docket.register(self.run, names=[self.key])
+
+    async def add_to_docket(  # type: ignore[override]
+        self,
+        docket: Docket,
+        arguments: dict[str, Any],
+        *,
+        fn_key: str | None = None,
+        task_key: str | None = None,
+        **kwargs: Any,
+    ) -> Execution:
+        """Schedule this tool for background execution via docket.
+
+        Args:
+            docket: The Docket instance
+            arguments: Tool arguments
+            fn_key: Function lookup key in Docket registry (defaults to self.key)
+            task_key: Redis storage key for the result
+            **kwargs: Additional kwargs passed to docket.add()
+        """
+        lookup_key = fn_key or self.key
+        if task_key:
+            kwargs["key"] = task_key
+        return await docket.add(lookup_key, **kwargs)(arguments)
+
     @classmethod
     def from_tool(
         cls,
@@ -251,7 +373,6 @@ class Tool(FastMCPComponent):
         serializer: ToolResultSerializerType | None = None,
         meta: dict[str, Any] | NotSetT | None = NotSet,
         transform_args: dict[str, ArgTransform] | None = None,
-        enabled: bool | None = None,
         transform_fn: Callable[..., Any] | None = None,
     ) -> TransformedTool:
         from fastmcp.tools.tool_transform import TransformedTool
@@ -268,16 +389,11 @@ class Tool(FastMCPComponent):
             output_schema=output_schema,
             serializer=serializer,
             meta=meta,
-            enabled=enabled,
         )
 
 
 class FunctionTool(Tool):
     fn: Callable[..., Any]
-    task_config: Annotated[
-        TaskConfig,
-        Field(description="Background task execution configuration (SEP-1686)."),
-    ] = Field(default_factory=lambda: TaskConfig(mode="forbidden"))
 
     def to_mcp_tool(
         self,
@@ -295,8 +411,8 @@ class FunctionTool(Tool):
         )
 
         # Add task execution mode per SEP-1686
-        # Only set execution if not overridden and mode is not "forbidden"
-        if self.task_config.mode != "forbidden" and "execution" not in overrides:
+        # Only set execution if not overridden and task execution is supported
+        if self.task_config.supports_tasks() and "execution" not in overrides:
             mcp_tool.execution = ToolExecution(taskSupport=self.task_config.mode)
 
         return mcp_tool
@@ -315,7 +431,6 @@ class FunctionTool(Tool):
         output_schema: dict[str, Any] | NotSetT | None = NotSet,
         serializer: ToolResultSerializerType | None = None,
         meta: dict[str, Any] | None = None,
-        enabled: bool | None = None,
         task: bool | TaskConfig | None = None,
     ) -> FunctionTool:
         """Create a Tool from a function."""
@@ -370,7 +485,6 @@ class FunctionTool(Tool):
             tags=tags or set(),
             serializer=serializer,
             meta=meta,
-            enabled=enabled if enabled is not None else True,
             task_config=task_config,
         )
 
@@ -382,39 +496,42 @@ class FunctionTool(Tool):
         if inspect.isawaitable(result):
             result = await result
 
-        if isinstance(result, ToolResult):
-            return result
+        return self.convert_result(result)
 
-        unstructured_result = _convert_to_content(result, serializer=self.serializer)
+    def register_with_docket(self, docket: Docket) -> None:
+        """Register this tool with docket for background execution.
 
-        if self.output_schema is None:
-            # Do not produce a structured output for MCP Content Types
-            if isinstance(result, ContentBlock | Audio | Image | File) or (
-                isinstance(result, list | tuple)
-                and any(isinstance(item, ContentBlock) for item in result)
-            ):
-                return ToolResult(content=unstructured_result)
+        FunctionTool registers the underlying function, which has the user's
+        Depends parameters for docket to resolve.
+        """
+        if not self.task_config.supports_tasks():
+            return
+        docket.register(self.fn, names=[self.key])
 
-            # Otherwise, try to serialize the result as a dict
-            try:
-                structured_content = pydantic_core.to_jsonable_python(result)
-                if isinstance(structured_content, dict):
-                    return ToolResult(
-                        content=unstructured_result,
-                        structured_content=structured_content,
-                    )
+    async def add_to_docket(  # type: ignore[override]
+        self,
+        docket: Docket,
+        arguments: dict[str, Any],
+        *,
+        fn_key: str | None = None,
+        task_key: str | None = None,
+        **kwargs: Any,
+    ) -> Execution:
+        """Schedule this tool for background execution via docket.
 
-            except pydantic_core.PydanticSerializationError:
-                pass
+        FunctionTool splats the arguments dict since .fn expects **kwargs.
 
-            return ToolResult(content=unstructured_result)
-
-        wrap_result = self.output_schema.get("x-fastmcp-wrap-result")
-
-        return ToolResult(
-            content=unstructured_result,
-            structured_content={"result": result} if wrap_result else result,
-        )
+        Args:
+            docket: The Docket instance
+            arguments: Tool arguments
+            fn_key: Function lookup key in Docket registry (defaults to self.key)
+            task_key: Redis storage key for the result
+            **kwargs: Additional kwargs passed to docket.add()
+        """
+        lookup_key = fn_key or self.key
+        if task_key:
+            kwargs["key"] = task_key
+        return await docket.add(lookup_key, **kwargs)(**arguments)
 
 
 def _is_object_schema(schema: dict[str, Any]) -> bool:
@@ -558,6 +675,10 @@ class ParsedFunction:
                     output_schema = base_schema
 
                 output_schema = compress_schema(output_schema, prune_titles=True)
+
+                # Resolve root-level $ref to meet MCP spec requirement for type: object
+                # Self-referential Pydantic models generate schemas with $ref at root
+                output_schema = resolve_root_ref(output_schema)
 
             except PydanticSchemaGenerationError as e:
                 if "_UnserializableType" not in str(e):

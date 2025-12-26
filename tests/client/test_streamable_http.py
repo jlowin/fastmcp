@@ -1,10 +1,12 @@
 import asyncio
 import json
 import sys
+from contextlib import suppress
 from unittest.mock import AsyncMock, call
 
 import pytest
 from mcp import McpError
+from mcp.types import TextResourceContents
 
 from fastmcp import Context
 from fastmcp.client import Client
@@ -52,17 +54,23 @@ def create_test_server() -> FastMCP:
         return f"Hello, {name}!"
 
     @server.resource(uri="data://users")
-    async def get_users():
-        return ["Alice", "Bob", "Charlie"]
+    async def get_users() -> str:
+        import json
+
+        return json.dumps(["Alice", "Bob", "Charlie"])
 
     @server.resource(uri="data://user/{user_id}")
-    async def get_user(user_id: str):
-        return {"id": user_id, "name": f"User {user_id}", "active": True}
+    async def get_user(user_id: str) -> str:
+        import json
+
+        return json.dumps({"id": user_id, "name": f"User {user_id}", "active": True})
 
     @server.resource(uri="request://headers")
-    async def get_headers() -> dict[str, str]:
+    async def get_headers() -> str:
+        import json
+
         request = get_http_request()
-        return dict(request.headers)
+        return json.dumps(dict(request.headers))
 
     @server.prompt
     def welcome(name: str) -> str:
@@ -106,8 +114,8 @@ async def nested_server():
 
     from fastmcp.utilities.http import find_available_port
 
-    server = create_test_server()
-    mcp_app = server.http_app(path="/final/mcp")
+    mcp_server = create_test_server()
+    mcp_app = mcp_server.http_app(path="/final/mcp")
 
     # Nest the app under multiple mounts to test URL resolution
     inner = Starlette(routes=[Mount("/nest-inner", app=mcp_app)])
@@ -124,20 +132,19 @@ async def nested_server():
         port=port,
         log_level="critical",
         ws="websockets-sansio",
+        timeout_graceful_shutdown=0,
     )
 
-    # Use the simple asyncio pattern
-    server_task = asyncio.create_task(uvicorn.Server(config).serve())
+    uvicorn_server = uvicorn.Server(config)
+    server_task = asyncio.create_task(uvicorn_server.serve())
     await asyncio.sleep(0.1)
 
     yield f"http://127.0.0.1:{port}/nest-outer/nest-inner/final/mcp"
 
-    # Cleanup
-    server_task.cancel()
-    try:
-        await server_task
-    except asyncio.CancelledError:
-        pass
+    # Graceful shutdown - required for uvicorn 0.39+ due to context isolation
+    uvicorn_server.should_exit = True
+    with suppress(asyncio.CancelledError, asyncio.TimeoutError):
+        await asyncio.wait_for(server_task, timeout=2.0)
 
 
 async def test_ping(streamable_http_server: str):
@@ -170,7 +177,8 @@ async def test_http_headers(streamable_http_server: str):
         )
     ) as client:
         raw_result = await client.read_resource("request://headers")
-        json_result = json.loads(raw_result[0].text)  # type: ignore[attr-defined]
+        assert isinstance(raw_result[0], TextResourceContents)
+        json_result = json.loads(raw_result[0].text)
         assert "x-demo-header" in json_result
         assert json_result["x-demo-header"] == "ABC"
 

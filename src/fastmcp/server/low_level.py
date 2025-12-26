@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import weakref
+from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack
 from typing import TYPE_CHECKING, Any
 
@@ -21,6 +22,7 @@ from mcp.server.session import ServerSession
 from mcp.server.stdio import stdio_server as stdio_server
 from mcp.shared.message import SessionMessage
 from mcp.shared.session import RequestResponder
+from pydantic import AnyUrl
 
 from fastmcp.utilities.logging import get_logger
 
@@ -106,7 +108,7 @@ class MiddlewareServerSession(ServerSession):
                 )
 
                 try:
-                    return await self.fastmcp._apply_middleware(
+                    return await self.fastmcp._run_middleware(
                         mw_context, call_original_handler
                     )
                 except McpError as e:
@@ -198,3 +200,91 @@ class LowLevelServer(_Server[LifespanResultT, RequestT]):
                         lifespan_context,
                         raise_exceptions,
                     )
+
+    def read_resource(
+        self,
+    ) -> Callable[
+        [
+            Callable[
+                [AnyUrl],
+                Awaitable[mcp.types.ReadResourceResult | mcp.types.CreateTaskResult],
+            ]
+        ],
+        Callable[
+            [AnyUrl],
+            Awaitable[mcp.types.ReadResourceResult | mcp.types.CreateTaskResult],
+        ],
+    ]:
+        """
+        Decorator for registering a read_resource handler with CreateTaskResult support.
+
+        The MCP SDK's read_resource decorator does not support returning CreateTaskResult
+        for background task execution. This decorator wraps the result in ServerResult.
+
+        This decorator can be removed once the MCP SDK adds native CreateTaskResult support
+        for resources.
+        """
+
+        def decorator(
+            func: Callable[
+                [AnyUrl],
+                Awaitable[mcp.types.ReadResourceResult | mcp.types.CreateTaskResult],
+            ],
+        ) -> Callable[
+            [AnyUrl],
+            Awaitable[mcp.types.ReadResourceResult | mcp.types.CreateTaskResult],
+        ]:
+            async def handler(
+                req: mcp.types.ReadResourceRequest,
+            ) -> mcp.types.ServerResult:
+                result = await func(req.params.uri)
+                return mcp.types.ServerResult(result)
+
+            self.request_handlers[mcp.types.ReadResourceRequest] = handler
+            return func
+
+        return decorator
+
+    def get_prompt(
+        self,
+    ) -> Callable[
+        [
+            Callable[
+                [str, dict[str, Any] | None],
+                Awaitable[mcp.types.GetPromptResult | mcp.types.CreateTaskResult],
+            ]
+        ],
+        Callable[
+            [str, dict[str, Any] | None],
+            Awaitable[mcp.types.GetPromptResult | mcp.types.CreateTaskResult],
+        ],
+    ]:
+        """
+        Decorator for registering a get_prompt handler with CreateTaskResult support.
+
+        The MCP SDK's get_prompt decorator does not support returning CreateTaskResult
+        for background task execution. This decorator wraps the result in ServerResult.
+
+        This decorator can be removed once the MCP SDK adds native CreateTaskResult support
+        for prompts.
+        """
+
+        def decorator(
+            func: Callable[
+                [str, dict[str, Any] | None],
+                Awaitable[mcp.types.GetPromptResult | mcp.types.CreateTaskResult],
+            ],
+        ) -> Callable[
+            [str, dict[str, Any] | None],
+            Awaitable[mcp.types.GetPromptResult | mcp.types.CreateTaskResult],
+        ]:
+            async def handler(
+                req: mcp.types.GetPromptRequest,
+            ) -> mcp.types.ServerResult:
+                result = await func(req.params.name, req.params.arguments)
+                return mcp.types.ServerResult(result)
+
+            self.request_handlers[mcp.types.GetPromptRequest] = handler
+            return func
+
+        return decorator

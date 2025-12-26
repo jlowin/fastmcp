@@ -1,6 +1,8 @@
 import json
 from urllib.parse import quote
 
+from mcp.types import TextContent, TextResourceContents
+
 from fastmcp.client.client import Client
 from fastmcp.server.server import FastMCP
 from fastmcp.tools.tool import FunctionTool, Tool
@@ -22,11 +24,13 @@ async def test_import_basic_functionality():
     await main_app.import_server(sub_app, "sub")
 
     # Verify the tool was imported with the prefix
-    assert "sub_sub_tool" in main_app._tool_manager._tools
-    assert "sub_tool" in sub_app._tool_manager._tools
+    main_tools = await main_app.get_tools()
+    sub_tools = await sub_app.get_tools()
+    assert any(t.name == "sub_sub_tool" for t in main_tools)
+    assert any(t.name == "sub_tool" for t in sub_tools)
 
     # Verify the original tool still exists in the sub-app
-    tool = await main_app._tool_manager.get_tool("sub_sub_tool")
+    tool = await main_app.get_tool("sub_sub_tool")
     assert tool is not None
     # import_server creates copies with prefixed names (unlike mount which proxies)
     assert tool.name == "sub_sub_tool"
@@ -55,8 +59,9 @@ async def test_import_multiple_apps():
     await main_app.import_server(news_app, "news")
 
     # Verify tools were imported with the correct prefixes
-    assert "weather_get_forecast" in main_app._tool_manager._tools
-    assert "news_get_headlines" in main_app._tool_manager._tools
+    tools = await main_app.get_tools()
+    assert any(t.name == "weather_get_forecast" for t in tools)
+    assert any(t.name == "news_get_headlines" for t in tools)
 
 
 async def test_import_combines_tools():
@@ -77,16 +82,18 @@ async def test_import_combines_tools():
 
     # Import first app
     await main_app.import_server(first_app, "api")
-    assert "api_first_tool" in main_app._tool_manager._tools
+    tools = await main_app.get_tools()
+    assert any(t.name == "api_first_tool" for t in tools)
 
     # Import second app to same prefix
     await main_app.import_server(second_app, "api")
 
     # Verify second tool is there
-    assert "api_second_tool" in main_app._tool_manager._tools
+    tools = await main_app.get_tools()
+    assert any(t.name == "api_second_tool" for t in tools)
 
     # Tools from both imports are combined
-    assert "api_first_tool" in main_app._tool_manager._tools
+    assert any(t.name == "api_first_tool" for t in tools)
 
 
 async def test_import_with_resources():
@@ -97,14 +104,15 @@ async def test_import_with_resources():
 
     # Add a resource to the data app
     @data_app.resource(uri="data://users")
-    async def get_users():
-        return ["user1", "user2"]
+    async def get_users() -> str:
+        return "user1, user2"
 
     # Import the data app
     await main_app.import_server(data_app, "data")
 
     # Verify the resource was imported with the prefix
-    assert "data://data/users" in main_app._resource_manager._resources
+    resources = await main_app.get_resources()
+    assert any(str(r.uri) == "data://data/users" for r in resources)
 
 
 async def test_import_with_resource_templates():
@@ -115,14 +123,19 @@ async def test_import_with_resource_templates():
 
     # Add a resource template to the user app
     @user_app.resource(uri="users://{user_id}/profile")
-    def get_user_profile(user_id: str) -> dict:
-        return {"id": user_id, "name": f"User {user_id}"}
+    def get_user_profile(user_id: str) -> str:
+        import json
+
+        return json.dumps(
+            {"id": user_id, "name": f"User {user_id}"}, separators=(",", ":")
+        )
 
     # Import the user app
     await main_app.import_server(user_app, "api")
 
     # Verify the template was imported with the prefix
-    assert "users://api/{user_id}/profile" in main_app._resource_manager._templates
+    templates = await main_app.get_resource_templates()
+    assert any(t.uri_template == "users://api/{user_id}/profile" for t in templates)
 
 
 async def test_import_with_prompts():
@@ -140,7 +153,8 @@ async def test_import_with_prompts():
     await main_app.import_server(assistant_app, "assistant")
 
     # Verify the prompt was imported with the prefix
-    assert "assistant_greeting" in main_app._prompt_manager._prompts
+    prompts = await main_app.get_prompts()
+    assert any(p.name == "assistant_greeting" for p in prompts)
 
 
 async def test_import_multiple_resource_templates():
@@ -164,8 +178,9 @@ async def test_import_multiple_resource_templates():
     await main_app.import_server(news_app, "content")
 
     # Verify templates were imported with correct prefixes
-    assert "weather://data/{city}" in main_app._resource_manager._templates
-    assert "news://content/{category}" in main_app._resource_manager._templates
+    templates = await main_app.get_resource_templates()
+    assert any(t.uri_template == "weather://data/{city}" for t in templates)
+    assert any(t.uri_template == "news://content/{category}" for t in templates)
 
 
 async def test_import_multiple_prompts():
@@ -189,8 +204,9 @@ async def test_import_multiple_prompts():
     await main_app.import_server(sql_app, "sql")
 
     # Verify prompts were imported with correct prefixes
-    assert "python_review_python" in main_app._prompt_manager._prompts
-    assert "sql_explain_sql" in main_app._prompt_manager._prompts
+    prompts = await main_app.get_prompts()
+    assert any(p.name == "python_review_python" for p in prompts)
+    assert any(p.name == "sql_explain_sql" for p in prompts)
 
 
 async def test_tool_custom_name_preserved_when_imported():
@@ -205,7 +221,7 @@ async def test_tool_custom_name_preserved_when_imported():
     await main_app.import_server(api_app, "api")
 
     # Check that the tool is accessible by its prefixed name
-    tool = await main_app._tool_manager.get_tool("api_get_data")
+    tool = await main_app.get_tool("api_get_data")
     assert tool is not None
 
     # Check that the function name is preserved
@@ -241,7 +257,7 @@ async def test_first_level_importing_with_custom_name():
     await service_app.import_server(provider_app, "provider")
 
     # Tool is accessible in the service app with the first prefix
-    tool = await service_app._tool_manager.get_tool("provider_compute")
+    tool = await service_app.get_tool("provider_compute")
     assert tool is not None
     assert isinstance(tool, FunctionTool)
     assert get_fn_name(tool.fn) == "calculate_value"
@@ -261,7 +277,7 @@ async def test_nested_importing_preserves_prefixes():
     await main_app.import_server(service_app, "service")
 
     # Tool is accessible in the main app with both prefixes
-    tool = await main_app._tool_manager.get_tool("service_provider_compute")
+    tool = await main_app.get_tool("service_provider_compute")
     assert tool is not None
 
 
@@ -328,7 +344,8 @@ async def test_import_with_proxy_prompts():
 
     async with Client(main_app) as client:
         result = await client.get_prompt("api_greeting", {"name": "World"})
-        assert result.messages[0].content.text == "Hello, World from API!"  # type: ignore[attr-defined]
+        assert isinstance(result.messages[0].content, TextContent)
+        assert result.messages[0].content.text == "Hello, World from API!"
         assert result.description == "Example greeting prompt."
 
 
@@ -345,11 +362,15 @@ async def test_import_with_proxy_resources():
 
     # Create a resource in the API app
     @api_app.resource(uri="config://settings")
-    def get_config():
-        return {
-            "api_key": "12345",
-            "base_url": "https://api.example.com",
-        }
+    def get_config() -> str:
+        import json
+
+        return json.dumps(
+            {
+                "api_key": "12345",
+                "base_url": "https://api.example.com",
+            }
+        )
 
     proxy_app = FastMCP.as_proxy(api_app)
     await main_app.import_server(proxy_app, "api")
@@ -357,7 +378,8 @@ async def test_import_with_proxy_resources():
     # Access the resource through the main app with the prefixed key
     async with Client(main_app) as client:
         result = await client.read_resource("config://api/settings")
-        content = json.loads(result[0].text)  # type: ignore[attr-defined]
+        assert isinstance(result[0], TextResourceContents)
+        content = json.loads(result[0].text)
         assert content["api_key"] == "12345"
         assert content["base_url"] == "https://api.example.com"
 
@@ -375,8 +397,10 @@ async def test_import_with_proxy_resource_templates():
 
     # Create a resource template in the API app
     @api_app.resource(uri="user://{name}/{email}")
-    def create_user(name: str, email: str):
-        return {"name": name, "email": email}
+    def create_user(name: str, email: str) -> str:
+        import json
+
+        return json.dumps({"name": name, "email": email})
 
     proxy_app = FastMCP.as_proxy(api_app)
     await main_app.import_server(proxy_app, "api")
@@ -387,7 +411,8 @@ async def test_import_with_proxy_resource_templates():
     quoted_email = quote("john@example.com", safe="")
     async with Client(main_app) as client:
         result = await client.read_resource(f"user://api/{quoted_name}/{quoted_email}")
-        content = json.loads(result[0].text)  # type: ignore[attr-defined]
+        assert isinstance(result[0], TextResourceContents)
+        content = json.loads(result[0].text)
         assert content["name"] == "John Doe"
         assert content["email"] == "john@example.com"
 
@@ -417,10 +442,14 @@ async def test_import_with_no_prefix():
     await main_app.import_server(sub_app)
 
     # Verify all component types are accessible with original names
-    assert "sub_tool" in main_app._tool_manager._tools
-    assert "data://config" in main_app._resource_manager._resources
-    assert "users://{user_id}/info" in main_app._resource_manager._templates
-    assert "sub_prompt" in main_app._prompt_manager._prompts
+    tools = await main_app.get_tools()
+    resources = await main_app.get_resources()
+    templates = await main_app.get_resource_templates()
+    prompts = await main_app.get_prompts()
+    assert any(t.name == "sub_tool" for t in tools)
+    assert any(str(r.uri) == "data://config" for r in resources)
+    assert any(t.uri_template == "users://{user_id}/info" for t in templates)
+    assert any(p.name == "sub_prompt" for p in prompts)
 
     # Test actual functionality through Client
     async with Client(main_app) as client:
@@ -430,16 +459,19 @@ async def test_import_with_no_prefix():
 
         # Test resource
         resource_result = await client.read_resource("data://config")
-        assert resource_result[0].text == "Sub resource data"  # type: ignore[attr-defined]
+        assert isinstance(resource_result[0], TextResourceContents)
+        assert resource_result[0].text == "Sub resource data"
 
         # Test template
         template_result = await client.read_resource("users://123/info")
-        assert template_result[0].text == "Sub template for user 123"  # type: ignore[attr-defined]
+        assert isinstance(template_result[0], TextResourceContents)
+        assert template_result[0].text == "Sub template for user 123"
 
         # Test prompt
         prompt_result = await client.get_prompt("sub_prompt", {})
         assert prompt_result.messages is not None
-        assert prompt_result.messages[0].content.text == "Sub prompt content"  # type: ignore[attr-defined]
+        assert isinstance(prompt_result.messages[0].content, TextContent)
+        assert prompt_result.messages[0].content.text == "Sub prompt content"
 
 
 async def test_import_conflict_resolution_tools():
@@ -497,7 +529,8 @@ async def test_import_conflict_resolution_resources():
         assert resource_uris.count("shared://data") == 1  # Should only appear once
 
         result = await client.read_resource("shared://data")
-        assert result[0].text == "Second app data"  # type: ignore[attr-defined]
+        assert isinstance(result[0], TextResourceContents)
+        assert result[0].text == "Second app data"
 
 
 async def test_import_conflict_resolution_templates():
@@ -528,7 +561,8 @@ async def test_import_conflict_resolution_templates():
         )  # Should only appear once
 
         result = await client.read_resource("users://123/profile")
-        assert result[0].text == "Second app user 123"  # type: ignore[attr-defined]
+        assert isinstance(result[0], TextResourceContents)
+        assert result[0].text == "Second app user 123"
 
 
 async def test_import_conflict_resolution_prompts():
@@ -558,7 +592,8 @@ async def test_import_conflict_resolution_prompts():
 
         result = await client.get_prompt("shared_prompt", {})
         assert result.messages is not None
-        assert result.messages[0].content.text == "Second app prompt"  # type: ignore[attr-defined]
+        assert isinstance(result.messages[0].content, TextContent)
+        assert result.messages[0].content.text == "Second app prompt"
 
 
 async def test_import_conflict_resolution_with_prefix():
@@ -605,7 +640,9 @@ async def test_import_server_resource_uri_prefixing():
 
     # Get resources and verify URI prefixing (name should NOT be prefixed)
     resources = await main_server.get_resources()
-    resource = resources["resource://imported/test_resource"]
+    resource = next(
+        r for r in resources if str(r.uri) == "resource://imported/test_resource"
+    )
     assert resource.name == "test_resource"
 
 
@@ -624,7 +661,9 @@ async def test_import_server_resource_template_uri_prefixing():
 
     # Get resource templates and verify URI prefixing (name should NOT be prefixed)
     templates = await main_server.get_resource_templates()
-    template = templates["resource://imported/data/{item_id}"]
+    template = next(
+        t for t in templates if t.uri_template == "resource://imported/data/{item_id}"
+    )
     assert template.name == "data_template"
 
 
@@ -653,17 +692,22 @@ async def test_import_server_with_new_prefix_format():
     resources = await target_server.get_resources()
     templates = await target_server.get_resource_templates()
 
-    assert "resource://imported/test-resource" in resources
-    assert "resource://imported//absolute/path" in resources
-    assert "resource://imported/{param}/template" in templates
+    assert any(str(r.uri) == "resource://imported/test-resource" for r in resources)
+    assert any(str(r.uri) == "resource://imported//absolute/path" for r in resources)
+    assert any(
+        t.uri_template == "resource://imported/{param}/template" for t in templates
+    )
 
     # Verify we can access the resources
     async with Client(target_server) as client:
         result = await client.read_resource("resource://imported/test-resource")
-        assert result[0].text == "Resource content"  # type: ignore[attr-defined]
+        assert isinstance(result[0], TextResourceContents)
+        assert result[0].text == "Resource content"
 
         result = await client.read_resource("resource://imported//absolute/path")
-        assert result[0].text == "Absolute resource content"  # type: ignore[attr-defined]
+        assert isinstance(result[0], TextResourceContents)
+        assert result[0].text == "Absolute resource content"
 
         result = await client.read_resource("resource://imported/param-value/template")
-        assert result[0].text == "Template resource with param-value"  # type: ignore[attr-defined]
+        assert isinstance(result[0], TextResourceContents)
+        assert result[0].text == "Template resource with param-value"
