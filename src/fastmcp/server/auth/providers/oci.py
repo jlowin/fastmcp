@@ -19,22 +19,22 @@ Example:
 
     import os
 
-    # Load configuration from environment
-    FASTMCP_SERVER_AUTH_OCI_CONFIG_URL = os.environ["FASTMCP_SERVER_AUTH_OCI_CONFIG_URL"]
-    FASTMCP_SERVER_AUTH_OCI_CLIENT_ID = os.environ["FASTMCP_SERVER_AUTH_OCI_CLIENT_ID"]
-    FASTMCP_SERVER_AUTH_OCI_CLIENT_SECRET = os.environ["FASTMCP_SERVER_AUTH_OCI_CLIENT_SECRET"]
-    FASTMCP_SERVER_AUTH_OCI_IAM_GUID = os.environ["FASTMCP_SERVER_AUTH_OCI_IAM_GUID"]
-
     import oci
     from oci.auth.signers import TokenExchangeSigner
 
     logger = get_logger(__name__)
 
+    # Load configuration from environment
+    config_url = os.environ.get("OCI_CONFIG_URL")  # OCI IAM Domain OIDC discovery URL
+    client_id = os.environ.get("OCI_CLIENT_ID")  # Client ID configured for the OCI IAM Domain Integrated Application
+    client_secret = os.environ.get("OCI_CLIENT_SECRET")  # Client secret configured for the OCI IAM Domain Integrated Application
+    iam_guid = os.environ.get("OCI_IAM_GUID")  # IAM GUID configured for the OCI IAM Domain
+
     # Simple OCI OIDC protection
     auth = OCIProvider(
-        config_url=FASTMCP_SERVER_AUTH_OCI_CONFIG_URL, #config URL is the OCI IAM Domain OIDC discovery URL.
-        client_id=FASTMCP_SERVER_AUTH_OCI_CLIENT_ID, #This is same as the client ID configured for the OCI IAM Domain Integrated Application
-        client_secret=FASTMCP_SERVER_AUTH_OCI_CLIENT_SECRET, #This is same as the client secret configured for the OCI IAM Domain Integrated Application
+        config_url=config_url,  # config URL is the OCI IAM Domain OIDC discovery URL
+        client_id=client_id,  # This is same as the client ID configured for the OCI IAM Domain Integrated Application
+        client_secret=client_secret,  # This is same as the client secret configured for the OCI IAM Domain Integrated Application
         required_scopes=["openid", "profile", "email"],
         redirect_path="/auth/callback",
         base_url="http://localhost:8000",
@@ -42,7 +42,7 @@ Example:
 
     # NOTE: For production use, replace this with a thread-safe cache implementation
     # such as threading.Lock-protected dict or a proper caching library
-    _global_token_cache = {} #In memory cache for OCI session token signer
+    _global_token_cache = {}  # In memory cache for OCI session token signer
 
     def get_oci_signer() -> TokenExchangeSigner:
 
@@ -50,20 +50,20 @@ Example:
         tokenID = authntoken.claims.get("jti")
         token = authntoken.token
 
-        #Check if the signer exists for the token ID in memory cache
+        # Check if the signer exists for the token ID in memory cache
         cached_signer = _global_token_cache.get(tokenID)
         logger.debug(f"Global cached signer: {cached_signer}")
         if cached_signer:
             logger.debug(f"Using globally cached signer for token ID: {tokenID}")
             return cached_signer
 
-        #If the signer is not yet created for the token then create new OCI signer object
+        # If the signer is not yet created for the token then create new OCI signer object
         logger.debug(f"Creating new signer for token ID: {tokenID}")
         signer = TokenExchangeSigner(
             jwt_or_func=token,
-            oci_domain_id=FASTMCP_SERVER_AUTH_OCI_IAM_GUID.split(".")[0],   #This is same as IAM GUID configured for the OCI IAM Domain
-            client_id=FASTMCP_SERVER_AUTH_OCI_CLIENT_ID, #This is same as the client ID configured for the OCI IAM Domain Integrated Application
-            client_secret=FASTMCP_SERVER_AUTH_OCI_CLIENT_SECRET #This is same as the client secret configured for the OCI IAM Domain Integrated Application
+            oci_domain_id=iam_guid.split(".")[0] if iam_guid else None,  # This is same as IAM GUID configured for the OCI IAM Domain
+            client_id=client_id,  # This is same as the client ID configured for the OCI IAM Domain Integrated Application
+            client_secret=client_secret,  # This is same as the client secret configured for the OCI IAM Domain Integrated Application
         )
         logger.debug(f"Signer {signer} created for token ID: {tokenID}")
 
@@ -98,11 +98,13 @@ class OCIProvider(OIDCProxy):
         from fastmcp import FastMCP
         from fastmcp.server.auth.providers.oci import OCIProvider
 
-        # Simple OCI OIDC protection
+        import os
+
+        # Load configuration from environment
         auth = OCIProvider(
-            config_url=FASTMCP_SERVER_AUTH_OCI_CONFIG_URL, #config URL is the OCI IAM Domain OIDC discovery URL.
-            client_id=FASTMCP_SERVER_AUTH_OCI_CLIENT_ID, #This is same as the client ID configured for the OCI IAM Domain Integrated Application
-            client_secret=FASTMCP_SERVER_AUTH_OCI_CLIENT_SECRET, #This is same as the client secret configured for the OCI IAM Domain Integrated Application
+            config_url=os.environ.get("OCI_CONFIG_URL"),  # OCI IAM Domain OIDC discovery URL
+            client_id=os.environ.get("OCI_CLIENT_ID"),  # Client ID configured for the OCI IAM Domain Integrated Application
+            client_secret=os.environ.get("OCI_CLIENT_SECRET"),  # Client secret configured for the OCI IAM Domain Integrated Application
             base_url="http://localhost:8000",
             required_scopes=["openid", "profile", "email"],
             redirect_path="/auth/callback",

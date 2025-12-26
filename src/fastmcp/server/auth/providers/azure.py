@@ -168,13 +168,14 @@ class AzureProvider(OAuthProxy):
         # NOT standard OIDC scopes (openid, profile, email, offline_access).
         # Filter out OIDC scopes from validation - they'll still be sent to Azure
         # during authorization (handled by _prefix_scopes_for_azure).
-        validation_scopes = (
-            [s for s in parsed_required_scopes if s not in OIDC_SCOPES]
-            if parsed_required_scopes
-            else None
-        )
-        # If all scopes were OIDC scopes, use None (no scope validation)
-        if validation_scopes == []:
+        if parsed_required_scopes:
+            validation_scopes = [
+                s for s in parsed_required_scopes if s not in OIDC_SCOPES
+            ]
+            # If all scopes were OIDC scopes, use None (no scope validation)
+            if not validation_scopes:
+                validation_scopes = None
+        else:
             validation_scopes = None
 
         token_verifier = JWTVerifier(
