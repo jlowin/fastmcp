@@ -97,14 +97,14 @@ class CachableToolResult(FastMCPBaseModel):
         )
 
 
-class CachableMessage(BaseModel):
+class CachableMessage(FastMCPBaseModel):
     """A wrapper for Message that can be cached."""
 
     role: str
     content: mcp.types.TextContent | mcp.types.EmbeddedResource
 
 
-class CachablePromptResult(BaseModel):
+class CachablePromptResult(FastMCPBaseModel):
     """A wrapper for PromptResult that can be cached."""
 
     messages: list[CachableMessage]
