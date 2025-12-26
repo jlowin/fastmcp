@@ -1177,8 +1177,9 @@ class FastMCP(Generic[LifespanResultT]):
             ToolError: If tool execution fails
             ValidationError: If arguments fail validation
         """
-        # Note: fn_key enrichment happens in Tool._run(), not here,
-        # so that provider wrappers can enrich with their namespaced key.
+        # Note: fn_key enrichment happens here after finding the tool.
+        # For mounted servers, the parent's provider sets fn_key to the
+        # namespaced key before delegating, ensuring correct Docket routing.
 
         async with fastmcp.server.context.Context(fastmcp=self) as ctx:
             if run_middleware:
@@ -1270,10 +1271,12 @@ class FastMCP(Generic[LifespanResultT]):
             NotFoundError: If resource not found or disabled
             ResourceError: If resource read fails
         """
-        # Note: fn_key enrichment happens in each component's _read() method,
-        # not here, because resources and templates use different key formats:
-        # - Resources use Resource.make_key(uri) for the concrete URI
-        # - Templates use self.key which is the template pattern
+        # Note: fn_key enrichment happens here after finding the resource/template.
+        # Resources and templates use different key formats:
+        # - Resources use resource.key (derived from the concrete URI)
+        # - Templates use template.key (the template pattern)
+        # For mounted servers, the parent's provider sets fn_key to the
+        # namespaced key before delegating, ensuring correct Docket routing.
 
         async with fastmcp.server.context.Context(fastmcp=self) as ctx:
             if run_middleware:
