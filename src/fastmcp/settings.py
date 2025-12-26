@@ -293,31 +293,6 @@ class Settings(BaseSettings):
         False  # If True, uses true stateless mode (new transport per request)
     )
 
-    include_tags: Annotated[
-        set[str] | None,
-        Field(
-            description=inspect.cleandoc(
-                """
-                If provided, only components that match these tags will be
-                exposed to clients. A component is considered to match if ANY of
-                its tags match ANY of the tags in the set.
-                """
-            ),
-        ),
-    ] = None
-    exclude_tags: Annotated[
-        set[str] | None,
-        Field(
-            description=inspect.cleandoc(
-                """
-                If provided, components that match these tags will be excluded
-                from the server. A component is considered to match if ANY of
-                its tags match ANY of the tags in the set.
-                """
-            ),
-        ),
-    ] = None
-
     include_fastmcp_meta: Annotated[
         bool,
         Field(
