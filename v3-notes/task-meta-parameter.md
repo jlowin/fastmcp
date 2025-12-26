@@ -80,6 +80,20 @@ async def call_tool(
 ) -> ToolResult | mcp.types.CreateTaskResult: ...
 ```
 
+## Middleware Runs Before Docket
+
+A key fix from #2663: background tasks now properly pass through all middleware stacks before being submitted to Docket. Previously, background task submission bypassed middleware entirely.
+
+The flow is now:
+1. MCP handler extracts task metadata from request
+2. Server method (`call_tool`, etc.) finds component via provider
+3. Server enriches `task_meta.fn_key` with component key
+4. Component's `_run()`/`_read()`/`_render()` is called
+5. Middleware runs (logging, auth, rate limiting, etc.)
+6. `check_background_task()` submits to Docket if task_meta present
+
+For mounted servers, the wrapper components delegate to the child server, which runs the child's middleware before the actual execution or Docket submission.
+
 ## Removed Dead Code
 
 - `_task_metadata` context variable
@@ -89,6 +103,7 @@ async def call_tool(
 
 ## Implementation PRs
 
+- #2663 - Components own execution; middleware runs before Docket
 - #2749 - `task_meta` for `call_tool()`
 - #2750 - `task_meta` for `read_resource()`
 - #2751 - `task_meta` for `render_prompt()` + fn_key centralization
