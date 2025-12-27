@@ -214,7 +214,6 @@ def log_server_banner(server: FastMCP[Any]) -> None:
     info_table.add_column(style="dim", justify="left")  # Value column
 
     info_table.add_row("🖥", "Server:", Text(server.name, style="dim"))
-    # info_table.add_row("📚", "Docs:", "https://gofastmcp.com")
     info_table.add_row("🚀", "Deploy free:", "https://fastmcp.cloud")
 
     # Create panel with logo, title, and information using Group
