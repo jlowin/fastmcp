@@ -64,10 +64,8 @@ class OpenAPITool(Tool):
         try:
             # Get base URL from client
             base_url = (
-                str(self._client.base_url)
-                if hasattr(self._client, "base_url") and self._client.base_url
-                else "http://localhost"
-            )
+                str(self._client.base_url) if hasattr(self._client, "base_url") else ""
+            ) or "http://localhost"
 
             # Get Headers from client
             cli_headers = (
