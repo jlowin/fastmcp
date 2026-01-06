@@ -1267,8 +1267,8 @@ class OAuthProxy(OAuthProvider):
             key=upstream_token_id,
             value=upstream_token_set,
             ttl=max(
-                refresh_expires_in or 0, expires_in
-            ),  # Keep until longest-lived token expires
+                refresh_expires_in or 0, expires_in, 1
+            ),  # Keep until longest-lived token expires (min 1s for safety)
         )
         logger.debug("Stored encrypted upstream tokens (jti=%s)", access_jti[:8])
 
@@ -1515,8 +1515,8 @@ class OAuthProxy(OAuthProvider):
             key=upstream_token_set.upstream_token_id,
             value=upstream_token_set,
             ttl=max(
-                refresh_ttl, new_expires_in
-            ),  # Keep until longest-lived token expires
+                refresh_ttl, new_expires_in, 1
+            ),  # Keep until longest-lived token expires (min 1s for safety)
         )
 
         # Issue new minimal FastMCP access token (just a reference via JTI)
