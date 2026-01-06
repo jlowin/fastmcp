@@ -1,5 +1,6 @@
-from starlette.routing import Route
 from mcp.server.auth.settings import ClientRegistrationOptions, RevocationOptions
+from starlette.routing import Route
+
 from fastmcp.server.auth.auth import OAuthProvider
 
 
