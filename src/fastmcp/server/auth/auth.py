@@ -523,13 +523,9 @@ class OAuthProvider(
     ) -> list[Route]:
         """Get well-known discovery routes with RFC 8414 path-aware support.
 
-        Overrides the base implementation to support path-aware authorization
-        server metadata discovery per RFC 8414. If issuer_url has a path component,
-        the authorization server metadata route is adjusted to include that path.
-
-        For example, if issuer_url is "http://example.com/api", the discovery
-        endpoint will be at "/.well-known/oauth-authorization-server/api" instead
-        of just "/.well-known/oauth-authorization-server".
+        Overrides the base implementation to return all well-known routes,
+        including those that have been modified for path-aware discovery
+        (e.g. /my-server/.well-known/...).
 
         Args:
             mcp_path: The path where the MCP endpoint is mounted (e.g., "/mcp")
@@ -537,30 +533,10 @@ class OAuthProvider(
         Returns:
             List of well-known discovery routes
         """
-        routes = super().get_well_known_routes(mcp_path)
-
-        # RFC 8414: If issuer_url has a path, use path-aware discovery
-        if self.issuer_url:
-            parsed = urlparse(str(self.issuer_url))
-            issuer_path = parsed.path.rstrip("/")
-
-            if issuer_path and issuer_path != "/":
-                # Replace /.well-known/oauth-authorization-server with path-aware version
-                new_routes = []
-                for route in routes:
-                    if route.path == "/.well-known/oauth-authorization-server":
-                        new_path = (
-                            f"/.well-known/oauth-authorization-server{issuer_path}"
-                        )
-                        new_routes.append(
-                            Route(
-                                new_path,
-                                endpoint=route.endpoint,
-                                methods=route.methods,
-                            )
-                        )
-                    else:
-                        new_routes.append(route)
-                return new_routes
-
-        return routes
+        # get_routes() handles all the RFC 8414 path rewriting logic now.
+        # We just need to return the subset of routes that are well-known endpoints.
+        return [
+            route
+            for route in self.get_routes(mcp_path)
+            if isinstance(route, Route) and "/.well-known/" in route.path
+        ]

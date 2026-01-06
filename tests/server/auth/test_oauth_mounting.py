@@ -306,7 +306,7 @@ class TestOAuthMounting:
 
         # The route should be path-aware (RFC 8414)
         assert (
-            auth_server_routes[0].path == "/.well-known/oauth-authorization-server/api"
+            auth_server_routes[0].path == "/api/.well-known/oauth-authorization-server"
         )
 
         # Find the protected resource metadata route for comparison
@@ -334,7 +334,7 @@ class TestOAuthMounting:
             base_url="https://api.example.com",
         ) as client:
             # Path-aware authorization server metadata should be accessible
-            response = await client.get("/.well-known/oauth-authorization-server/api")
+            response = await client.get("/api/.well-known/oauth-authorization-server")
             assert response.status_code == 200
 
             metadata = response.json()
