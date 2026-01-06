@@ -443,6 +443,34 @@ class OAuthProvider(
             revocation_options=self.revocation_options,
         )
 
+        # RFC 8414: If issuer_url has a path, use path-aware discovery for the metadata route
+        # create_auth_routes returns the metadata route at /.well-known/oauth-authorization-server
+        # We need to rewrite it if there's a path component in the issuer URL
+        if self.issuer_url:
+            parsed = urlparse(str(self.issuer_url))
+            issuer_path = parsed.path.rstrip("/")
+
+            if issuer_path and issuer_path != "/":
+                new_sdk_routes = []
+                for route in sdk_routes:
+                    if (
+                        isinstance(route, Route)
+                        and route.path == "/.well-known/oauth-authorization-server"
+                    ):
+                        new_path = (
+                            f"/.well-known/oauth-authorization-server{issuer_path}"
+                        )
+                        new_sdk_routes.append(
+                            Route(
+                                new_path,
+                                endpoint=route.endpoint,
+                                methods=route.methods,
+                            )
+                        )
+                    else:
+                        new_sdk_routes.append(route)
+                sdk_routes = new_sdk_routes
+
         # Replace the token endpoint with our custom handler that returns
         # proper OAuth 2.1 error codes (invalid_client instead of unauthorized_client)
         oauth_routes: list[Route] = []
