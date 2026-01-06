@@ -23,11 +23,13 @@ def test_path_aware_metadata_route():
     found_metadata = False
     for route in routes:
         if isinstance(route, Route) and "oauth-authorization-server" in route.path:
-            if route.path == "/.well-known/oauth-authorization-server/my-server":
+            if route.path == "/my-server/.well-known/oauth-authorization-server":
                 found_metadata = True
                 break
 
-    assert found_metadata, "Path-aware metadata route not found"
+    assert found_metadata, (
+        "Path-aware metadata route not found at /my-server/.well-known/oauth-authorization-server"
+    )
 
 
 def test_standard_metadata_route():

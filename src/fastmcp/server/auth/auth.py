@@ -458,7 +458,7 @@ class OAuthProvider(
                         and route.path == "/.well-known/oauth-authorization-server"
                     ):
                         new_path = (
-                            f"/.well-known/oauth-authorization-server{issuer_path}"
+                            f"{issuer_path}/.well-known/oauth-authorization-server"
                         )
                         new_sdk_routes.append(
                             Route(
