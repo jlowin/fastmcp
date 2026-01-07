@@ -2,6 +2,7 @@ import abc
 import asyncio
 import contextlib
 import datetime
+import gc
 import os
 import shutil
 import sys
@@ -472,7 +473,6 @@ async def _stdio_transport_connect_task(
 ):
     """A standalone connection task for a stdio transport. It is not a part of the StdioTransport class
     to ensure that the connection task does not hold a reference to the Transport object."""
-
     try:
         async with contextlib.AsyncExitStack() as stack:
             try:
@@ -509,6 +509,15 @@ async def _stdio_transport_connect_task(
             finally:
                 # Clean up client on exit
                 logger.debug("Stdio transport disconnected")
+
+        # After stdio_client context exits, force garbage collection while the
+        # event loop is still running. This helps prevent "Event loop is closed"
+        # warnings that can occur when asyncio's BaseSubprocessTransport.__del__
+        # is triggered by GC after pytest-asyncio closes the event loop.
+        # See: https://github.com/jlowin/fastmcp/issues/2792
+        gc.collect()
+        await asyncio.sleep(0)
+
     except Exception:
         # Ensure ready event is set even if connection fails
         ready_event.set()
