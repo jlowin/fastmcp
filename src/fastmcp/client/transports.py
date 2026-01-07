@@ -989,6 +989,7 @@ class MCPConfigTransport(ClientTransport):
     """
 
     def __init__(self, config: MCPConfig | dict, name_as_prefix: bool = True):
+        from fastmcp.client.client import Client
         from fastmcp.utilities.mcp_config import mcp_config_to_servers_and_transports
 
         if isinstance(config, dict):
@@ -996,6 +997,8 @@ class MCPConfigTransport(ClientTransport):
         self.config = config
 
         self._underlying_transports: list[ClientTransport] = []
+        # Store proxy clients so we can propagate timeout settings to them
+        self._proxy_clients: list[Client[Any]] = []
 
         # if there are no servers, raise an error
         if len(self.config.mcpServers) == 0:
@@ -1011,10 +1014,15 @@ class MCPConfigTransport(ClientTransport):
             name = FastMCP.generate_name("MCPRouter")
             self._composite_server = FastMCP[Any](name=name)
 
-            for name, server, transport in mcp_config_to_servers_and_transports(
-                self.config
-            ):
+            for (
+                name,
+                server,
+                transport,
+                proxy_client,
+            ) in mcp_config_to_servers_and_transports(self.config):
                 self._underlying_transports.append(transport)
+                if proxy_client is not None:
+                    self._proxy_clients.append(proxy_client)
                 self._composite_server.mount(
                     server, namespace=name if name_as_prefix else None
                 )
@@ -1025,6 +1033,13 @@ class MCPConfigTransport(ClientTransport):
     async def connect_session(
         self, **session_kwargs: Unpack[SessionKwargs]
     ) -> AsyncIterator[ClientSession]:
+        # Propagate timeout to proxy clients so their HTTP calls respect the timeout.
+        # Since Client.new() does a shallow copy, updating _session_kwargs on the base
+        # client will affect all clients created from the factory.
+        timeout = session_kwargs.get("read_timeout_seconds")
+        for proxy_client in self._proxy_clients:
+            proxy_client._session_kwargs["read_timeout_seconds"] = timeout
+
         async with self.transport.connect_session(**session_kwargs) as session:
             yield session
 

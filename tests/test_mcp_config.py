@@ -774,6 +774,66 @@ async def test_multi_client_with_elicitation(tmp_path: Path):
         assert result.data == 42
 
 
+async def test_multi_server_timeout_propagation(tmp_path: Path):
+    """
+    Tests that timeout is properly propagated to proxy clients when using
+    multiple servers in MCPConfig.
+
+    This is a regression test for https://github.com/jlowin/fastmcp/issues/2802
+    where timeout was ignored in multi-server configurations.
+    """
+    import datetime
+
+    server_script = inspect.cleandoc("""
+        import asyncio
+        from fastmcp import FastMCP
+
+        mcp = FastMCP()
+
+        @mcp.tool
+        async def slow_tool(delay: float) -> str:
+            await asyncio.sleep(delay)
+            return f"Completed after {delay}s"
+
+        if __name__ == '__main__':
+            mcp.run()
+        """)
+
+    script_path = tmp_path / "slow_server.py"
+    script_path.write_text(server_script)
+
+    config = {
+        "mcpServers": {
+            "server1": {
+                "command": "python",
+                "args": [str(script_path)],
+            },
+            "server2": {
+                "command": "python",
+                "args": [str(script_path)],
+            },
+        }
+    }
+
+    # Create client with a short timeout
+    client = Client(config, timeout=0.1)
+
+    # Verify the transport has proxy clients and they receive the timeout
+    assert isinstance(client.transport, MCPConfigTransport)
+    assert len(client.transport._proxy_clients) == 2
+
+    # Before connecting, proxy clients have no timeout set
+    for proxy_client in client.transport._proxy_clients:
+        assert proxy_client._session_kwargs.get("read_timeout_seconds") is None
+
+    # Verify timeout is propagated when connecting
+    async with client:
+        # After connecting, proxy clients should have the timeout propagated
+        for proxy_client in client.transport._proxy_clients:
+            timeout = proxy_client._session_kwargs.get("read_timeout_seconds")
+            assert timeout == datetime.timedelta(seconds=0.1)
+
+
 def sample_tool_fn(arg1: int, arg2: str) -> str:
     return f"Hello, world! {arg1} {arg2}"
 
