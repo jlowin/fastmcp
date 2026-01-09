@@ -502,13 +502,21 @@ async def run(
                 reload_cmd.append("--no-banner")
             reload_cmd.append("--no-reload")  # Prevent infinite spawning
             reload_cmd.append("--stateless")  # Stateless mode for reload compatibility
+
+            # If environment setup is needed, wrap with uv
+            test_cmd = ["test"]
+            needs_uv = (
+                config.environment.build_command(test_cmd) != test_cmd and not skip_env
+            )
+            if needs_uv:
+                # Add --skip-env to prevent nested uv runs (child would spawn another uv)
+                reload_cmd.append("--skip-env")
+
             if final_server_args:
                 reload_cmd.append("--")
                 reload_cmd.extend(final_server_args)
 
-            # If environment setup is needed, wrap with uv
-            test_cmd = ["test"]
-            if config.environment.build_command(test_cmd) != test_cmd and not skip_env:
+            if needs_uv:
                 reload_cmd = config.environment.build_command(reload_cmd)
 
             is_stdio = final_transport in ("stdio", None)
