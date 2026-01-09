@@ -355,6 +355,10 @@ async def run_with_reload(
                 )
                 await _terminate_process(process)
 
+    except KeyboardInterrupt:
+        # Handle Ctrl+C on Windows (where add_signal_handler isn't available)
+        logger.info("Received shutdown signal, stopping...")
+
     finally:
         # Clean up signal handlers
         if sys.platform != "win32":
