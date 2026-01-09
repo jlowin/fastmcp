@@ -197,8 +197,9 @@ class FastMCP(Generic[LifespanResultT]):
         # Resolve server default for background task support
         self._support_tasks_by_default: bool = tasks if tasks is not None else False
 
-        # Docket instance (set during lifespan for cross-task access)
+        # Docket and Worker instances (set during lifespan for cross-task access)
         self._docket = None
+        self._worker = None
 
         self._additional_http_routes: list[BaseRoute] = []
         self._mounted_servers: list[MountedServer] = []
@@ -486,6 +487,8 @@ class FastMCP(Generic[LifespanResultT]):
                         f"[{instance_id}] Creating Worker with kwargs={worker_kwargs}"
                     )
                     async with Worker(docket, **worker_kwargs) as worker:  # type: ignore[arg-type]
+                        # Store on server instance for cross-context access
+                        self._worker = worker
                         # Set Worker in ContextVar so CurrentWorker can access it
                         worker_token = _current_worker.set(worker)
                         logger.info(
@@ -514,6 +517,7 @@ class FastMCP(Generic[LifespanResultT]):
                                 f"[{instance_id}] _current_worker RESET (token={worker_token})"
                             )
                             _current_worker.reset(worker_token)
+                            self._worker = None
                 finally:
                     # Reset ContextVar
                     logger.info(
@@ -609,10 +613,32 @@ class FastMCP(Generic[LifespanResultT]):
         logger.info(f"[{instance_id}] _lifespan_manager ENTERING")
 
         if self._lifespan_result_set:
-            logger.info(
-                f"[{instance_id}] _lifespan_manager: already set, yielding without setup"
+            # Lifespan already ran in a parent async context. We need to set ContextVars
+            # again in THIS context because ContextVars don't propagate across different
+            # async contexts (e.g., Starlette's ASGI lifespan vs FastMCP's outer lifespan).
+            # Request handlers inherit from Starlette's context, so we must set here.
+            from fastmcp.server.dependencies import (
+                _current_docket,
+                _current_server,
+                _current_worker,
             )
-            yield
+
+            logger.info(
+                f"[{instance_id}] _lifespan_manager: already set, setting ContextVars "
+                f"for this context (docket={self._docket}, worker={self._worker})"
+            )
+
+            server_token = _current_server.set(weakref.ref(self))
+            docket_token = _current_docket.set(self._docket) if self._docket else None
+            worker_token = _current_worker.set(self._worker) if self._worker else None
+            try:
+                yield
+            finally:
+                _current_server.reset(server_token)
+                if docket_token is not None:
+                    _current_docket.reset(docket_token)
+                if worker_token is not None:
+                    _current_worker.reset(worker_token)
             return
 
         logger.info(
