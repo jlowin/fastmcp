@@ -14,6 +14,7 @@ Example:
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 from collections.abc import Sequence
 from pathlib import Path
@@ -67,6 +68,8 @@ class FileSystemProvider(LocalProvider):
         # Track files we've warned about: path -> mtime when warned
         # Re-warn if file changes (mtime differs)
         self._warned_files: dict[Path, float] = {}
+        # Lock for serializing reload operations (created lazily)
+        self._reload_lock: asyncio.Lock | None = None
 
         # Always load once at init to catch errors early
         self._load_components()
@@ -76,6 +79,7 @@ class FileSystemProvider(LocalProvider):
         # Clear existing components if reloading
         if self._loaded:
             self._components.clear()
+            self._tool_transformations.clear()
 
         result = discover_and_import(self._root)
 
@@ -99,7 +103,7 @@ class FileSystemProvider(LocalProvider):
 
         for file_path, func, meta in result.components:
             try:
-                self._register_component(func, meta, file_path)
+                self._register_component(func, meta)
             except Exception as e:
                 logger.warning(
                     f"Failed to register {func.__name__} from {file_path}: {e}"
@@ -111,7 +115,7 @@ class FileSystemProvider(LocalProvider):
         )
 
     def _register_component(
-        self, func: Any, meta: ToolMeta | ResourceMeta | PromptMeta, file_path: Path
+        self, func: Any, meta: ToolMeta | ResourceMeta | PromptMeta
     ) -> None:
         """Register a single component based on its metadata type."""
         if isinstance(meta, ToolMeta):
@@ -193,51 +197,64 @@ class FileSystemProvider(LocalProvider):
         )
         self.add_prompt(prompt)
 
-    def _ensure_loaded(self) -> None:
-        """Ensure components are loaded, reloading if in reload mode."""
-        if self._reload or not self._loaded:
-            self._load_components()
+    async def _ensure_loaded(self) -> None:
+        """Ensure components are loaded, reloading if in reload mode.
+
+        Uses a lock to serialize concurrent reload operations and runs
+        filesystem I/O off the event loop using asyncio.to_thread.
+        """
+        if not self._reload and self._loaded:
+            return
+
+        # Create lock lazily (can't create in __init__ without event loop)
+        if self._reload_lock is None:
+            self._reload_lock = asyncio.Lock()
+
+        async with self._reload_lock:
+            # Double-check after acquiring lock
+            if self._reload or not self._loaded:
+                await asyncio.to_thread(self._load_components)
 
     # Override provider methods to support reload mode
 
     async def list_tools(self) -> Sequence[Tool]:
         """Return all tools, reloading if in reload mode."""
-        self._ensure_loaded()
+        await self._ensure_loaded()
         return await super().list_tools()
 
     async def get_tool(self, name: str) -> Tool | None:
         """Get a tool by name, reloading if in reload mode."""
-        self._ensure_loaded()
+        await self._ensure_loaded()
         return await super().get_tool(name)
 
     async def list_resources(self) -> Sequence[Resource]:
         """Return all resources, reloading if in reload mode."""
-        self._ensure_loaded()
+        await self._ensure_loaded()
         return await super().list_resources()
 
     async def get_resource(self, uri: str) -> Resource | None:
         """Get a resource by URI, reloading if in reload mode."""
-        self._ensure_loaded()
+        await self._ensure_loaded()
         return await super().get_resource(uri)
 
     async def list_resource_templates(self) -> Sequence[ResourceTemplate]:
         """Return all resource templates, reloading if in reload mode."""
-        self._ensure_loaded()
+        await self._ensure_loaded()
         return await super().list_resource_templates()
 
     async def get_resource_template(self, uri: str) -> ResourceTemplate | None:
         """Get a resource template, reloading if in reload mode."""
-        self._ensure_loaded()
+        await self._ensure_loaded()
         return await super().get_resource_template(uri)
 
     async def list_prompts(self) -> Sequence[Prompt]:
         """Return all prompts, reloading if in reload mode."""
-        self._ensure_loaded()
+        await self._ensure_loaded()
         return await super().list_prompts()
 
     async def get_prompt(self, name: str) -> Prompt | None:
         """Get a prompt by name, reloading if in reload mode."""
-        self._ensure_loaded()
+        await self._ensure_loaded()
         return await super().get_prompt(name)
 
     def __repr__(self) -> str:

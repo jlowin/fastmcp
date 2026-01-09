@@ -140,7 +140,10 @@ def import_module_from_file(file_path: Path) -> ModuleType:
             sys.path.insert(0, package_parent)
 
         # Import using standard import machinery
+        # If already imported, reload to pick up changes (for reload mode)
         try:
+            if module_name in sys.modules:
+                return importlib.reload(sys.modules[module_name])
             return importlib.import_module(module_name)
         except ImportError as e:
             raise ImportError(

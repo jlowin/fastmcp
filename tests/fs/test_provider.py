@@ -164,7 +164,7 @@ def added() -> str:
         # Still only one component
         assert len(provider._components) == 1
 
-    def test_reload_true_rescans(self, tmp_path: Path):
+    async def test_reload_true_rescans(self, tmp_path: Path):
         """With reload=True, components are rescanned on each request."""
         (tmp_path / "tool.py").write_text(
             """\
@@ -194,10 +194,10 @@ def added() -> str:
         )
 
         # With reload=True, _ensure_loaded re-scans
-        provider._ensure_loaded()
+        await provider._ensure_loaded()
         assert len(provider._components) == 2
 
-    def test_warning_deduplication_same_file(self, tmp_path: Path, capsys):
+    async def test_warning_deduplication_same_file(self, tmp_path: Path, capsys):
         """Warnings for the same broken file should not repeat."""
         bad_file = tmp_path / "bad.py"
         bad_file.write_text("1/0  # division by zero")
@@ -209,11 +209,11 @@ def added() -> str:
         assert "bad.py" in captured.err
 
         # Second load (same file, unchanged) - should NOT warn again
-        provider._ensure_loaded()
+        await provider._ensure_loaded()
         captured = capsys.readouterr()
         assert "bad.py" not in captured.err
 
-    def test_warning_on_file_change(self, tmp_path: Path, capsys):
+    async def test_warning_on_file_change(self, tmp_path: Path, capsys):
         """Warnings should reappear when a broken file changes."""
         bad_file = tmp_path / "bad.py"
         bad_file.write_text("1/0  # division by zero")
@@ -229,11 +229,11 @@ def added() -> str:
         bad_file.write_text("syntax error here !!!")
 
         # Next load - should warn again (file changed)
-        provider._ensure_loaded()
+        await provider._ensure_loaded()
         captured = capsys.readouterr()
         assert "bad.py" in captured.err
 
-    def test_warning_cleared_when_fixed(self, tmp_path: Path, capsys):
+    async def test_warning_cleared_when_fixed(self, tmp_path: Path, capsys):
         """Warnings should clear when a file is fixed, and reappear if broken again."""
         bad_file = tmp_path / "tool.py"
         bad_file.write_text("1/0  # broken")
@@ -257,7 +257,7 @@ def my_tool() -> str:
         )
 
         # Load again - should NOT warn, file is fixed
-        provider._ensure_loaded()
+        await provider._ensure_loaded()
         captured = capsys.readouterr()
         assert "tool.py" not in captured.err
         assert len(provider._components) == 1
@@ -267,7 +267,7 @@ def my_tool() -> str:
         bad_file.write_text("1/0  # broken again")
 
         # Should warn again
-        provider._ensure_loaded()
+        await provider._ensure_loaded()
         captured = capsys.readouterr()
         assert "tool.py" in captured.err
 

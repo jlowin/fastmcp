@@ -148,6 +148,26 @@ MAIN_VALUE = HELPER_VALUE * 2
         module = import_module_from_file(pkg / "main.py")
         assert module.MAIN_VALUE == 246
 
+    def test_import_package_module_reload(self, tmp_path: Path):
+        """Re-importing a package module should return updated content."""
+        # Create package (use unique name to avoid conflicts)
+        pkg = tmp_path / "testpkg_reload"
+        pkg.mkdir()
+        (pkg / "__init__.py").write_text("")
+        module_file = pkg / "reloadable.py"
+        module_file.write_text("VALUE = 'original'")
+
+        # First import
+        module = import_module_from_file(module_file)
+        assert module.VALUE == "original"
+
+        # Modify the file
+        module_file.write_text("VALUE = 'updated'")
+
+        # Re-import should see the updated value
+        module = import_module_from_file(module_file)
+        assert module.VALUE == "updated"
+
 
 class TestExtractComponents:
     """Tests for extract_components function."""
