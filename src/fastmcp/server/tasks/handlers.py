@@ -63,21 +63,27 @@ async def handle_tool_as_task(
     ctx = get_context()
     session_id = ctx.session_id
 
+    # Try ContextVar first, fall back to server instance attribute.
+    # ContextVars don't propagate to request handlers in ASGI servers because
+    # request tasks are created from the main event loop, not the lifespan context.
     docket = _current_docket.get()
+    if docket is None:
+        docket = server._docket
     _logger.info(
         f"[{instance_id}] handle_tool_as_task: tool={tool_name}, "
-        f"_current_docket.get()={docket}, server._docket={server._docket}"
+        f"_current_docket.get()={_current_docket.get()}, server._docket={server._docket}, "
+        f"using docket={docket}"
     )
     if docket is None:
         _logger.error(
-            f"[{instance_id}] handle_tool_as_task FAILED: _current_docket is None! "
+            f"[{instance_id}] handle_tool_as_task FAILED: no Docket available! "
             f"server._started.is_set()={server._started.is_set()}"
         )
         raise McpError(
             ErrorData(
                 code=INTERNAL_ERROR,
                 message=f"Background tasks require a running FastMCP server context "
-                f"(instance={instance_id}, server._docket={server._docket})",
+                f"(instance={instance_id})",
             )
         )
 
@@ -183,7 +189,10 @@ async def handle_prompt_as_task(
     ctx = get_context()
     session_id = ctx.session_id
 
+    # Try ContextVar first, fall back to server instance attribute
     docket = _current_docket.get()
+    if docket is None:
+        docket = server._docket
     if docket is None:
         raise McpError(
             ErrorData(
@@ -292,7 +301,10 @@ async def handle_resource_as_task(
     ctx = get_context()
     session_id = ctx.session_id
 
+    # Try ContextVar first, fall back to server instance attribute
     docket = _current_docket.get()
+    if docket is None:
+        docket = server._docket
     if docket is None:
         raise McpError(
             ErrorData(
