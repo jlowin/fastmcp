@@ -111,6 +111,36 @@ class TestDereferenceRefs:
         assert result.get("type") == "object"
         assert "$defs" in result  # $defs preserved for circular refs
 
+    def test_preserves_sibling_keywords(self):
+        """Test that sibling keywords (default, description) are preserved.
+
+        Pydantic places description, default, examples as siblings to $ref.
+        These should not be lost during dereferencing.
+        """
+        schema = {
+            "$defs": {
+                "Status": {"type": "string", "enum": ["active", "inactive"]},
+            },
+            "properties": {
+                "status": {
+                    "$ref": "#/$defs/Status",
+                    "default": "active",
+                    "description": "The user status",
+                },
+            },
+            "type": "object",
+        }
+        result = dereference_refs(schema)
+
+        # $ref should be inlined with siblings preserved
+        status = result["properties"]["status"]
+        assert status["type"] == "string"
+        assert status["enum"] == ["active", "inactive"]
+        assert status["default"] == "active"
+        assert status["description"] == "The user status"
+        # $defs should be removed
+        assert "$defs" not in result
+
 
 class TestCompressSchema:
     """Tests for the compress_schema function."""

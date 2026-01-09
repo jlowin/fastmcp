@@ -10,8 +10,11 @@ def dereference_refs(schema: dict[str, Any]) -> dict[str, Any]:
     """Resolve all $ref references in a JSON schema by inlining definitions.
 
     This function resolves $ref references that point to $defs, replacing them
-    with the actual definition content. This is necessary because some MCP clients
-    (e.g., VS Code Copilot) don't properly handle $ref in tool input schemas.
+    with the actual definition content while preserving sibling keywords (like
+    description, default, examples) that Pydantic places alongside $ref.
+
+    This is necessary because some MCP clients (e.g., VS Code Copilot) don't
+    properly handle $ref in tool input schemas.
 
     For self-referencing/circular schemas where full dereferencing is not possible,
     this function falls back to resolving only the root-level $ref while preserving
@@ -27,10 +30,10 @@ def dereference_refs(schema: dict[str, Any]) -> dict[str, Any]:
     Example:
         >>> schema = {
         ...     "$defs": {"Category": {"enum": ["a", "b"], "type": "string"}},
-        ...     "properties": {"cat": {"$ref": "#/$defs/Category"}}
+        ...     "properties": {"cat": {"$ref": "#/$defs/Category", "default": "a"}}
         ... }
         >>> resolved = dereference_refs(schema)
-        >>> # Result: {"properties": {"cat": {"enum": ["a", "b"], "type": "string"}}}
+        >>> # Result: {"properties": {"cat": {"enum": ["a", "b"], "type": "string", "default": "a"}}}
     """
     try:
         # Use jsonref to resolve all $ref references
@@ -38,8 +41,15 @@ def dereference_refs(schema: dict[str, Any]) -> dict[str, Any]:
         # lazy_load=False resolves immediately
         dereferenced = replace_refs(schema, proxies=False, lazy_load=False)
 
+        # Merge sibling keywords that were lost during dereferencing
+        # Pydantic puts description, default, examples as siblings to $ref
+        merged = _merge_ref_siblings(schema, dereferenced)
+        # Type assertion: top-level schema is always a dict
+        assert isinstance(merged, dict)
+        dereferenced = merged
+
         # Remove $defs since all references have been resolved
-        if isinstance(dereferenced, dict) and "$defs" in dereferenced:
+        if "$defs" in dereferenced:
             dereferenced = {k: v for k, v in dereferenced.items() if k != "$defs"}
 
         return dereferenced
@@ -48,6 +58,57 @@ def dereference_refs(schema: dict[str, Any]) -> dict[str, Any]:
         # Self-referencing/circular schemas can't be fully dereferenced
         # Fall back to resolving only root-level $ref (for MCP spec compliance)
         return resolve_root_ref(schema)
+
+
+def _merge_ref_siblings(
+    original: dict[str, Any] | list | Any,
+    dereferenced: dict[str, Any] | list | Any,
+) -> dict[str, Any] | list | Any:
+    """Merge sibling keywords from original $ref nodes into dereferenced schema.
+
+    When jsonref resolves $ref, it replaces the entire node with the referenced
+    definition, losing any sibling keywords like description, default, or examples.
+    This function walks both trees in parallel and merges those siblings back.
+
+    Args:
+        original: The original schema with $ref and potential siblings
+        dereferenced: The schema after jsonref processing
+
+    Returns:
+        The dereferenced schema with sibling keywords restored
+    """
+    if isinstance(original, dict) and isinstance(dereferenced, dict):
+        # Check if original had a $ref with siblings
+        if "$ref" in original:
+            siblings = {k: v for k, v in original.items() if k not in ("$ref", "$defs")}
+            if siblings:
+                # Merge siblings into dereferenced, siblings take precedence
+                # (local description overrides referenced definition's description)
+                merged = dict(dereferenced)
+                merged.update(siblings)
+                return merged
+
+        # Recurse into nested structures
+        result = {}
+        for key, value in dereferenced.items():
+            if key in original:
+                result[key] = _merge_ref_siblings(original[key], value)
+            else:
+                result[key] = value
+        return result
+
+    elif isinstance(original, list) and isinstance(dereferenced, list):
+        # Process list items in parallel
+        return [
+            _merge_ref_siblings(o, d) if i < len(original) else d
+            for i, (o, d) in enumerate(
+                zip(original, dereferenced, strict=False)
+                if len(original) <= len(dereferenced)
+                else zip(original[: len(dereferenced)], dereferenced, strict=False)
+            )
+        ] + (dereferenced[len(original) :] if len(dereferenced) > len(original) else [])
+
+    return dereferenced
 
 
 def resolve_root_ref(schema: dict[str, Any]) -> dict[str, Any]:
@@ -89,7 +150,7 @@ def resolve_root_ref(schema: dict[str, Any]) -> dict[str, Any]:
     return schema
 
 
-def _prune_param(schema: dict, param: str) -> dict:
+def _prune_param(schema: dict[str, Any], param: str) -> dict[str, Any]:
     """Return a new schema with *param* removed from `properties`, `required`,
     and (if no longer referenced) `$defs`.
     """
@@ -111,11 +172,11 @@ def _prune_param(schema: dict, param: str) -> dict:
 
 
 def _single_pass_optimize(
-    schema: dict,
+    schema: dict[str, Any],
     prune_titles: bool = False,
     prune_additional_properties: bool = False,
     prune_defs: bool = True,
-) -> dict:
+) -> dict[str, Any]:
     """
     Optimize JSON schemas in a single traversal for better performance.
 
@@ -284,11 +345,11 @@ def _single_pass_optimize(
 
 
 def compress_schema(
-    schema: dict,
+    schema: dict[str, Any],
     prune_params: list[str] | None = None,
     prune_additional_properties: bool = True,
     prune_titles: bool = False,
-) -> dict:
+) -> dict[str, Any]:
     """
     Compress and optimize a JSON schema for MCP compatibility.
 
