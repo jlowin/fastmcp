@@ -62,10 +62,11 @@ def dereference_refs(schema: dict[str, Any]) -> dict[str, Any]:
 
 
 def _merge_ref_siblings(
-    original: dict[str, Any] | list | Any,
-    dereferenced: dict[str, Any] | list | Any,
+    original: Any,
+    dereferenced: Any,
     defs: dict[str, Any],
-) -> dict[str, Any] | list | Any:
+    visited: set[str] | None = None,
+) -> Any:
     """Merge sibling keywords from original $ref nodes into dereferenced schema.
 
     When jsonref resolves $ref, it replaces the entire node with the referenced
@@ -76,10 +77,14 @@ def _merge_ref_siblings(
         original: The original schema with $ref and potential siblings
         dereferenced: The schema after jsonref processing
         defs: The $defs from the original schema, for looking up referenced definitions
+        visited: Set of definition names already being processed (prevents cycles)
 
     Returns:
         The dereferenced schema with sibling keywords restored
     """
+    if visited is None:
+        visited = set()
+
     if isinstance(original, dict) and isinstance(dereferenced, dict):
         # Check if original had a $ref
         if "$ref" in original:
@@ -89,10 +94,11 @@ def _merge_ref_siblings(
             # Look up the referenced definition to process its nested siblings
             if isinstance(ref, str) and ref.startswith("#/$defs/"):
                 def_name = ref.split("/")[-1]
-                if def_name in defs:
+                # Prevent infinite recursion on circular references
+                if def_name in defs and def_name not in visited:
                     # Recursively process the definition's content for nested siblings
                     dereferenced = _merge_ref_siblings(
-                        defs[def_name], dereferenced, defs
+                        defs[def_name], dereferenced, defs, visited | {def_name}
                     )
 
             if siblings:
@@ -106,21 +112,18 @@ def _merge_ref_siblings(
         result = {}
         for key, value in dereferenced.items():
             if key in original:
-                result[key] = _merge_ref_siblings(original[key], value, defs)
+                result[key] = _merge_ref_siblings(original[key], value, defs, visited)
             else:
                 result[key] = value
         return result
 
     elif isinstance(original, list) and isinstance(dereferenced, list):
         # Process list items in parallel
+        min_len = min(len(original), len(dereferenced))
         return [
-            _merge_ref_siblings(o, d, defs) if i < len(original) else d
-            for i, (o, d) in enumerate(
-                zip(original, dereferenced, strict=False)
-                if len(original) <= len(dereferenced)
-                else zip(original[: len(dereferenced)], dereferenced, strict=False)
-            )
-        ] + (dereferenced[len(original) :] if len(dereferenced) > len(original) else [])
+            _merge_ref_siblings(o, d, defs, visited)
+            for o, d in zip(original[:min_len], dereferenced[:min_len], strict=False)
+        ] + dereferenced[min_len:]
 
     return dereferenced
 
