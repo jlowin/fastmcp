@@ -44,6 +44,13 @@ async def handle_tool_as_task(
     Returns:
         CallToolResult: Task stub with task metadata in _meta
     """
+    import socket
+
+    from fastmcp.utilities.logging import get_logger
+
+    _logger = get_logger(__name__)
+    instance_id = f"{socket.gethostname()}#{id(server)}"
+
     # Generate server-side task ID per SEP-1686 final spec (line 375-377)
     # Server MUST generate task IDs, clients no longer provide them
     server_task_id = str(uuid.uuid4())
@@ -57,11 +64,20 @@ async def handle_tool_as_task(
     session_id = ctx.session_id
 
     docket = _current_docket.get()
+    _logger.info(
+        f"[{instance_id}] handle_tool_as_task: tool={tool_name}, "
+        f"_current_docket.get()={docket}, server._docket={server._docket}"
+    )
     if docket is None:
+        _logger.error(
+            f"[{instance_id}] handle_tool_as_task FAILED: _current_docket is None! "
+            f"server._started.is_set()={server._started.is_set()}"
+        )
         raise McpError(
             ErrorData(
                 code=INTERNAL_ERROR,
-                message="Background tasks require a running FastMCP server context",
+                message=f"Background tasks require a running FastMCP server context "
+                f"(instance={instance_id}, server._docket={server._docket})",
             )
         )
 
