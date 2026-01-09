@@ -77,10 +77,12 @@ async def tasks_get_handler(server: FastMCP, params: dict[str, Any]) -> GetTaskR
             )
 
         # Look up full task key and creation timestamp from Redis
-        redis_key = f"fastmcp:task:{session_id}:{client_task_id}"
-        created_at_key = f"fastmcp:task:{session_id}:{client_task_id}:created_at"
+        task_meta_key = docket.key(f"fastmcp:task:{session_id}:{client_task_id}")
+        created_at_key = docket.key(
+            f"fastmcp:task:{session_id}:{client_task_id}:created_at"
+        )
         async with docket.redis() as redis:
-            task_key_bytes = await redis.get(redis_key)
+            task_key_bytes = await redis.get(task_meta_key)
             created_at_bytes = await redis.get(created_at_key)
 
         task_key = None if task_key_bytes is None else task_key_bytes.decode("utf-8")
@@ -176,9 +178,9 @@ async def tasks_result_handler(server: FastMCP, params: dict[str, Any]) -> Any:
             )
 
         # Look up full task key from Redis
-        redis_key = f"fastmcp:task:{session_id}:{client_task_id}"
+        task_meta_key = docket.key(f"fastmcp:task:{session_id}:{client_task_id}")
         async with docket.redis() as redis:
-            task_key_bytes = await redis.get(redis_key)
+            task_key_bytes = await redis.get(task_meta_key)
 
         task_key = None if task_key_bytes is None else task_key_bytes.decode("utf-8")
 
@@ -309,10 +311,12 @@ async def tasks_cancel_handler(
             )
 
         # Look up full task key and creation timestamp from Redis
-        redis_key = f"fastmcp:task:{session_id}:{client_task_id}"
-        created_at_key = f"fastmcp:task:{session_id}:{client_task_id}:created_at"
+        task_meta_key = docket.key(f"fastmcp:task:{session_id}:{client_task_id}")
+        created_at_key = docket.key(
+            f"fastmcp:task:{session_id}:{client_task_id}:created_at"
+        )
         async with docket.redis() as redis:
-            task_key_bytes = await redis.get(redis_key)
+            task_key_bytes = await redis.get(task_meta_key)
             created_at_bytes = await redis.get(created_at_key)
 
         task_key = None if task_key_bytes is None else task_key_bytes.decode("utf-8")
