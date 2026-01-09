@@ -42,13 +42,23 @@ async def subscribe_to_task_updates(
         session: MCP ServerSession for sending notifications
         docket: Docket instance for subscribing to execution events
     """
+    logger.info(
+        f"subscribe_to_task_updates STARTING: task_id={task_id}, task_key={task_key}"
+    )
     try:
+        logger.info(
+            f"subscribe_to_task_updates: About to call docket.get_execution({task_key})"
+        )
         execution = await docket.get_execution(task_key)
+        logger.info(
+            f"subscribe_to_task_updates: docket.get_execution returned {execution}"
+        )
         if execution is None:
             logger.warning(f"No execution found for task {task_id}")
             return
 
         # Subscribe to state and progress events from Docket
+        logger.info("subscribe_to_task_updates: About to subscribe to execution events")
         async for event in execution.subscribe():
             if event["type"] == "state":
                 # Send notifications/tasks/status when state changes
@@ -70,7 +80,12 @@ async def subscribe_to_task_updates(
                 )
 
     except Exception as e:
-        logger.warning(f"Subscription task failed for {task_id}: {e}", exc_info=True)
+        import traceback
+
+        logger.error(
+            f"subscribe_to_task_updates FAILED for {task_id}: {type(e).__name__}: {e}\n"
+            f"Traceback:\n{traceback.format_exc()}"
+        )
 
 
 async def _send_status_notification(

@@ -139,18 +139,38 @@ async def handle_tool_as_task(
 
     # Queue function to Docket by name (result storage via execution_ttl)
     # Use tool.key which matches what was registered - prefixed for mounted tools
-    await docket.add(
-        tool.key,
-        key=task_key,
-    )(**arguments)
+    _logger.info(
+        f"[{instance_id}] About to call docket.add: tool.key={tool.key}, "
+        f"task_key={task_key}, arguments={arguments}"
+    )
+    try:
+        await docket.add(
+            tool.key,
+            key=task_key,
+        )(**arguments)
+        _logger.info(f"[{instance_id}] docket.add completed successfully")
+    except Exception as e:
+        import traceback
+
+        _logger.error(
+            f"[{instance_id}] docket.add FAILED: {type(e).__name__}: {e}\n"
+            f"Traceback:\n{traceback.format_exc()}"
+        )
+        raise
 
     # Spawn subscription task to send status notifications (SEP-1686 optional feature)
     from fastmcp.server.tasks.subscriptions import subscribe_to_task_updates
 
     # Start subscription in session's task group (persists for connection lifetime)
+    _logger.info(
+        f"[{instance_id}] Checking for subscription task group: "
+        f"hasattr={hasattr(ctx.session, '_subscription_task_group')}"
+    )
     if hasattr(ctx.session, "_subscription_task_group"):
         tg = ctx.session._subscription_task_group  # type: ignore[attr-defined]
+        _logger.info(f"[{instance_id}] Task group: {tg}")
         if tg:
+            _logger.info(f"[{instance_id}] Starting subscription task")
             tg.start_soon(  # type: ignore[union-attr]
                 subscribe_to_task_updates,
                 server_task_id,
@@ -158,7 +178,9 @@ async def handle_tool_as_task(
                 ctx.session,
                 docket,
             )
+            _logger.info(f"[{instance_id}] Subscription task started")
 
+    _logger.info(f"[{instance_id}] About to return task stub")
     # Return task stub
     # Tasks MUST begin in "working" status per SEP-1686 final spec (line 381)
     return mcp.types.CallToolResult(
