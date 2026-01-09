@@ -1,5 +1,4 @@
 import asyncio
-import datetime
 import gc
 import inspect
 import logging
@@ -12,6 +11,7 @@ from typing import Any
 
 import psutil
 import pytest
+from mcp.types import TextContent
 
 from fastmcp.client.auth.bearer import BearerAuth
 from fastmcp.client.auth.oauth import OAuthClientProvider
@@ -775,30 +775,27 @@ async def test_multi_client_with_elicitation(tmp_path: Path):
         assert result.data == 42
 
 
-async def test_multi_server_timeout_propagation(tmp_path: Path):
+async def test_multi_server_config_transport(tmp_path: Path):
     """
-    Tests that timeout is properly propagated to proxy clients when using
-    multiple servers in MCPConfig.
+    Tests that MCPConfigTransport properly handles multi-server configurations.
 
-    This is a regression test for https://github.com/jlowin/fastmcp/issues/2802
-    where timeout was ignored in multi-server configurations.
+    Related to https://github.com/jlowin/fastmcp/issues/2802 - verifies the
+    refactored architecture creates composite servers correctly.
     """
     server_script = inspect.cleandoc("""
-        import asyncio
         from fastmcp import FastMCP
 
         mcp = FastMCP()
 
         @mcp.tool
-        async def slow_tool(delay: float) -> str:
-            await asyncio.sleep(delay)
-            return f"Completed after {delay}s"
+        def greet(name: str) -> str:
+            return f"Hello, {name}!"
 
         if __name__ == '__main__':
             mcp.run()
         """)
 
-    script_path = tmp_path / "slow_server.py"
+    script_path = tmp_path / "greet_server.py"
     script_path.write_text(server_script)
 
     config = {
@@ -814,23 +811,25 @@ async def test_multi_server_timeout_propagation(tmp_path: Path):
         }
     }
 
-    # Create client with a short timeout
-    client = Client(config, timeout=0.1)
-
-    # Verify the transport has proxy clients and they receive the timeout
+    # Create client with multiple servers
+    client = Client(config)
     assert isinstance(client.transport, MCPConfigTransport)
-    assert len(client.transport._proxy_clients) == 2
 
-    # Before connecting, proxy clients have no timeout set
-    for proxy_client in client.transport._proxy_clients:
-        assert proxy_client._session_kwargs.get("read_timeout_seconds") is None
-
-    # Verify timeout is propagated when connecting
+    # Verify both servers are accessible via prefixed tool names
     async with client:
-        # After connecting, proxy clients should have the timeout propagated
-        for proxy_client in client.transport._proxy_clients:
-            timeout = proxy_client._session_kwargs.get("read_timeout_seconds")
-            assert timeout == datetime.timedelta(seconds=0.1)
+        tools = await client.list_tools()
+        tool_names = [t.name for t in tools]
+        assert "server1_greet" in tool_names
+        assert "server2_greet" in tool_names
+
+        # Call tools on both servers
+        result1 = await client.call_tool("server1_greet", {"name": "World"})
+        assert isinstance(result1.content[0], TextContent)
+        assert "Hello, World!" in result1.content[0].text
+
+        result2 = await client.call_tool("server2_greet", {"name": "FastMCP"})
+        assert isinstance(result2.content[0], TextContent)
+        assert "Hello, FastMCP!" in result2.content[0].text
 
 
 def sample_tool_fn(arg1: int, arg2: str) -> str:

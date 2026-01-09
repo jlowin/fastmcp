@@ -33,7 +33,15 @@ from typing_extensions import TypedDict, Unpack
 import fastmcp
 from fastmcp.client.auth.bearer import BearerAuth
 from fastmcp.client.auth.oauth import OAuth
-from fastmcp.mcp_config import MCPConfig, infer_transport_type_from_url
+from fastmcp.mcp_config import (
+    MCPConfig,
+    MCPServerTypes,
+    RemoteMCPServer,
+    StdioMCPServer,
+    TransformingRemoteMCPServer,
+    TransformingStdioMCPServer,
+    infer_transport_type_from_url,
+)
 from fastmcp.server.dependencies import get_http_headers
 from fastmcp.server.server import FastMCP
 from fastmcp.server.tasks.capabilities import get_task_capabilities
@@ -959,7 +967,6 @@ class MCPConfigTransport(ClientTransport):
     Examples:
         ```python
         from fastmcp import Client
-        from fastmcp.utilities.mcp_config import MCPConfig
 
         # Create a config with multiple servers
         config = {
@@ -989,62 +996,86 @@ class MCPConfigTransport(ClientTransport):
     """
 
     def __init__(self, config: MCPConfig | dict, name_as_prefix: bool = True):
-        from fastmcp.client.client import Client
-        from fastmcp.utilities.mcp_config import mcp_config_to_servers_and_transports
-
         if isinstance(config, dict):
             config = MCPConfig.from_dict(config)
         self.config = config
+        self.name_as_prefix = name_as_prefix
+        self._transports: list[ClientTransport] = []
 
-        self._underlying_transports: list[ClientTransport] = []
-        # Store proxy clients so we can propagate timeout settings to them
-        self._proxy_clients: list[Client[Any]] = []
-
-        # if there are no servers, raise an error
-        if len(self.config.mcpServers) == 0:
+        if not self.config.mcpServers:
             raise ValueError("No MCP servers defined in the config")
 
-        # if there's exactly one server, create a client for that server
-        elif len(self.config.mcpServers) == 1:
+        # For single server, create transport eagerly so it can be inspected
+        if len(self.config.mcpServers) == 1:
             self.transport = next(iter(self.config.mcpServers.values())).to_transport()
-            self._underlying_transports.append(self.transport)
-
-        # otherwise create a composite client
-        else:
-            name = FastMCP.generate_name("MCPRouter")
-            self._composite_server = FastMCP[Any](name=name)
-
-            for (
-                name,
-                server,
-                transport,
-                proxy_client,
-            ) in mcp_config_to_servers_and_transports(self.config):
-                self._underlying_transports.append(transport)
-                if proxy_client is not None:
-                    self._proxy_clients.append(proxy_client)
-                self._composite_server.mount(
-                    server, namespace=name if name_as_prefix else None
-                )
-
-            self.transport = FastMCPTransport(mcp=self._composite_server)
+            self._transports.append(self.transport)
 
     @contextlib.asynccontextmanager
     async def connect_session(
         self, **session_kwargs: Unpack[SessionKwargs]
     ) -> AsyncIterator[ClientSession]:
-        # Propagate timeout to proxy clients so their HTTP calls respect the timeout.
-        # Since Client.new() does a shallow copy, updating _session_kwargs on the base
-        # client will affect all clients created from the factory.
-        timeout = session_kwargs.get("read_timeout_seconds")
-        for proxy_client in self._proxy_clients:
-            proxy_client._session_kwargs["read_timeout_seconds"] = timeout
+        # Single server - delegate directly to pre-created transport
+        if len(self.config.mcpServers) == 1:
+            async with self.transport.connect_session(**session_kwargs) as session:
+                yield session
+            return
 
-        async with self.transport.connect_session(**session_kwargs) as session:
+        # Multiple servers - create composite with mounted proxies
+        # Clear any previous transports from prior connections
+        self._transports = []
+        timeout = session_kwargs.get("read_timeout_seconds")
+        composite = FastMCP[Any](name="MCPRouter")
+
+        for name, server_config in self.config.mcpServers.items():
+            transport, proxy = self._create_proxy(name, server_config, timeout)
+            self._transports.append(transport)
+            composite.mount(proxy, namespace=name if self.name_as_prefix else None)
+
+        async with FastMCPTransport(mcp=composite).connect_session(
+            **session_kwargs
+        ) as session:
             yield session
 
+    def _create_proxy(
+        self,
+        name: str,
+        config: MCPServerTypes,
+        timeout: datetime.timedelta | None,
+    ) -> tuple[ClientTransport, FastMCP[Any]]:
+        """Create underlying transport and proxy server for a single backend."""
+        # Import here to avoid circular dependency
+        from fastmcp.server.providers.proxy import ProxyClient
+
+        tool_transforms = None
+        include_tags = None
+        exclude_tags = None
+
+        # Handle transforming servers - call base class to_transport() for underlying transport
+        if isinstance(config, TransformingStdioMCPServer):
+            transport = StdioMCPServer.to_transport(config)
+            tool_transforms = config.tools
+            include_tags = config.include_tags
+            exclude_tags = config.exclude_tags
+        elif isinstance(config, TransformingRemoteMCPServer):
+            transport = RemoteMCPServer.to_transport(config)
+            tool_transforms = config.tools
+            include_tags = config.include_tags
+            exclude_tags = config.exclude_tags
+        else:
+            transport = config.to_transport()
+
+        client = ProxyClient(transport=transport, timeout=timeout)
+        proxy = FastMCP.as_proxy(
+            name=f"Proxy-{name}",
+            backend=client,
+            tool_transformations=tool_transforms,
+            include_tags=include_tags,
+            exclude_tags=exclude_tags,
+        )
+        return transport, proxy
+
     async def close(self):
-        for transport in self._underlying_transports:
+        for transport in self._transports:
             await transport.close()
 
     def __repr__(self) -> str:
