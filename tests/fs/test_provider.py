@@ -206,12 +206,13 @@ def added() -> str:
 
         # First load - should warn
         captured = capsys.readouterr()
-        assert "bad.py" in captured.err
+        # Check for warning indicator (rich may truncate long paths)
+        assert "WARNING" in captured.err and "Failed to import" in captured.err
 
         # Second load (same file, unchanged) - should NOT warn again
         await provider._ensure_loaded()
         captured = capsys.readouterr()
-        assert "bad.py" not in captured.err
+        assert "Failed to import" not in captured.err
 
     async def test_warning_on_file_change(self, tmp_path: Path, capsys):
         """Warnings should reappear when a broken file changes."""
@@ -222,7 +223,8 @@ def added() -> str:
 
         # First load - should warn
         captured = capsys.readouterr()
-        assert "bad.py" in captured.err
+        # Check for warning indicator (rich may truncate long paths)
+        assert "WARNING" in captured.err and "Failed to import" in captured.err
 
         # Modify the file (different error) - need to ensure mtime changes
         time.sleep(0.01)  # Ensure mtime differs
@@ -231,7 +233,8 @@ def added() -> str:
         # Next load - should warn again (file changed)
         await provider._ensure_loaded()
         captured = capsys.readouterr()
-        assert "bad.py" in captured.err
+        # Check for warning indicator (rich may truncate long paths)
+        assert "WARNING" in captured.err and "Failed to import" in captured.err
 
     async def test_warning_cleared_when_fixed(self, tmp_path: Path, capsys):
         """Warnings should clear when a file is fixed, and reappear if broken again."""
@@ -242,7 +245,8 @@ def added() -> str:
 
         # First load - should warn
         captured = capsys.readouterr()
-        assert "tool.py" in captured.err
+        # Check for warning indicator (rich may truncate long paths)
+        assert "WARNING" in captured.err and "Failed to import" in captured.err
 
         # Fix the file
         time.sleep(0.01)
@@ -259,7 +263,7 @@ def my_tool() -> str:
         # Load again - should NOT warn, file is fixed
         await provider._ensure_loaded()
         captured = capsys.readouterr()
-        assert "tool.py" not in captured.err
+        assert "Failed to import" not in captured.err
         assert len(provider._components) == 1
 
         # Break it again
@@ -269,7 +273,8 @@ def my_tool() -> str:
         # Should warn again
         await provider._ensure_loaded()
         captured = capsys.readouterr()
-        assert "tool.py" in captured.err
+        # Check for warning indicator (rich may truncate long paths)
+        assert "WARNING" in captured.err and "Failed to import" in captured.err
 
 
 class TestFileSystemProviderIntegration:
