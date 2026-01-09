@@ -1,4 +1,5 @@
 import asyncio
+import datetime
 import gc
 import inspect
 import logging
@@ -782,8 +783,6 @@ async def test_multi_server_timeout_propagation(tmp_path: Path):
     This is a regression test for https://github.com/jlowin/fastmcp/issues/2802
     where timeout was ignored in multi-server configurations.
     """
-    import datetime
-
     server_script = inspect.cleandoc("""
         import asyncio
         from fastmcp import FastMCP
