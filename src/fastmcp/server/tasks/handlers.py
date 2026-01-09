@@ -101,9 +101,23 @@ async def handle_tool_as_task(
     ttl_seconds = int(
         docket.execution_ttl.total_seconds() + TASK_MAPPING_TTL_BUFFER_SECONDS
     )
-    async with docket.redis() as redis:
-        await redis.set(task_meta_key, task_key, ex=ttl_seconds)
-        await redis.set(created_at_key, created_at, ex=ttl_seconds)
+    _logger.info(
+        f"[{instance_id}] About to write to Redis: task_meta_key={task_meta_key}, "
+        f"created_at_key={created_at_key}, ttl={ttl_seconds}"
+    )
+    try:
+        async with docket.redis() as redis:
+            await redis.set(task_meta_key, task_key, ex=ttl_seconds)
+            await redis.set(created_at_key, created_at, ex=ttl_seconds)
+        _logger.info(f"[{instance_id}] Redis write successful")
+    except Exception as e:
+        import traceback
+
+        _logger.error(
+            f"[{instance_id}] Redis write FAILED: {type(e).__name__}: {e}\n"
+            f"Traceback:\n{traceback.format_exc()}"
+        )
+        raise
 
     # Send notifications/tasks/created per SEP-1686 (mandatory)
     # Send BEFORE queuing to avoid race where task completes before notification
