@@ -141,6 +141,57 @@ class TestDereferenceRefs:
         # $defs should be removed
         assert "$defs" not in result
 
+    def test_preserves_siblings_in_lists(self):
+        """Test that siblings are preserved for $refs inside lists (allOf, anyOf, etc)."""
+        schema = {
+            "$defs": {
+                "StringType": {"type": "string"},
+                "IntType": {"type": "integer"},
+            },
+            "properties": {
+                "field": {
+                    "anyOf": [
+                        {"$ref": "#/$defs/StringType", "description": "As string"},
+                        {"$ref": "#/$defs/IntType", "description": "As integer"},
+                    ]
+                },
+            },
+        }
+        result = dereference_refs(schema)
+
+        # Both items in anyOf should have their siblings preserved
+        any_of = result["properties"]["field"]["anyOf"]
+        assert any_of[0]["type"] == "string"
+        assert any_of[0]["description"] == "As string"
+        assert any_of[1]["type"] == "integer"
+        assert any_of[1]["description"] == "As integer"
+        assert "$defs" not in result
+
+    def test_preserves_nested_siblings(self):
+        """Test that siblings on nested $refs are preserved."""
+        schema = {
+            "$defs": {
+                "Address": {
+                    "type": "object",
+                    "properties": {
+                        "country": {"$ref": "#/$defs/Country", "default": "US"},
+                    },
+                },
+                "Country": {"type": "string", "enum": ["US", "UK", "CA"]},
+            },
+            "properties": {
+                "home_address": {"$ref": "#/$defs/Address"},
+            },
+        }
+        result = dereference_refs(schema)
+
+        # The nested $ref's sibling (default) should be preserved
+        country = result["properties"]["home_address"]["properties"]["country"]
+        assert country["type"] == "string"
+        assert country["enum"] == ["US", "UK", "CA"]
+        assert country["default"] == "US"
+        assert "$defs" not in result
+
 
 class TestCompressSchema:
     """Tests for the compress_schema function."""

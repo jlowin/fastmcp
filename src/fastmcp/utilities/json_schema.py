@@ -43,7 +43,8 @@ def dereference_refs(schema: dict[str, Any]) -> dict[str, Any]:
 
         # Merge sibling keywords that were lost during dereferencing
         # Pydantic puts description, default, examples as siblings to $ref
-        merged = _merge_ref_siblings(schema, dereferenced)
+        defs = schema.get("$defs", {})
+        merged = _merge_ref_siblings(schema, dereferenced, defs)
         # Type assertion: top-level schema is always a dict
         assert isinstance(merged, dict)
         dereferenced = merged
@@ -63,6 +64,7 @@ def dereference_refs(schema: dict[str, Any]) -> dict[str, Any]:
 def _merge_ref_siblings(
     original: dict[str, Any] | list | Any,
     dereferenced: dict[str, Any] | list | Any,
+    defs: dict[str, Any],
 ) -> dict[str, Any] | list | Any:
     """Merge sibling keywords from original $ref nodes into dereferenced schema.
 
@@ -73,26 +75,38 @@ def _merge_ref_siblings(
     Args:
         original: The original schema with $ref and potential siblings
         dereferenced: The schema after jsonref processing
+        defs: The $defs from the original schema, for looking up referenced definitions
 
     Returns:
         The dereferenced schema with sibling keywords restored
     """
     if isinstance(original, dict) and isinstance(dereferenced, dict):
-        # Check if original had a $ref with siblings
+        # Check if original had a $ref
         if "$ref" in original:
+            ref = original["$ref"]
             siblings = {k: v for k, v in original.items() if k not in ("$ref", "$defs")}
+
+            # Look up the referenced definition to process its nested siblings
+            if isinstance(ref, str) and ref.startswith("#/$defs/"):
+                def_name = ref.split("/")[-1]
+                if def_name in defs:
+                    # Recursively process the definition's content for nested siblings
+                    dereferenced = _merge_ref_siblings(
+                        defs[def_name], dereferenced, defs
+                    )
+
             if siblings:
-                # Merge siblings into dereferenced, siblings take precedence
-                # (local description overrides referenced definition's description)
+                # Merge local siblings, which take precedence
                 merged = dict(dereferenced)
                 merged.update(siblings)
                 return merged
+            return dereferenced
 
         # Recurse into nested structures
         result = {}
         for key, value in dereferenced.items():
             if key in original:
-                result[key] = _merge_ref_siblings(original[key], value)
+                result[key] = _merge_ref_siblings(original[key], value, defs)
             else:
                 result[key] = value
         return result
@@ -100,7 +114,7 @@ def _merge_ref_siblings(
     elif isinstance(original, list) and isinstance(dereferenced, list):
         # Process list items in parallel
         return [
-            _merge_ref_siblings(o, d) if i < len(original) else d
+            _merge_ref_siblings(o, d, defs) if i < len(original) else d
             for i, (o, d) in enumerate(
                 zip(original, dereferenced, strict=False)
                 if len(original) <= len(dereferenced)
