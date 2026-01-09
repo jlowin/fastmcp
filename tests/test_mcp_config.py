@@ -6,13 +6,16 @@ import os
 import sys
 import tempfile
 from collections.abc import AsyncGenerator
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock, patch
 
 import psutil
 import pytest
 from mcp.types import TextContent
 
+from fastmcp import FastMCP
 from fastmcp.client.auth.bearer import BearerAuth
 from fastmcp.client.auth.oauth import OAuthClientProvider
 from fastmcp.client.client import Client
@@ -830,6 +833,70 @@ async def test_multi_server_config_transport(tmp_path: Path):
         result2 = await client.call_tool("server2_greet", {"name": "FastMCP"})
         assert isinstance(result2.content[0], TextContent)
         assert "Hello, FastMCP!" in result2.content[0].text
+
+
+async def test_multi_server_timeout_propagation():
+    """Test that timeout is correctly propagated to proxy clients in multi-server configs."""
+    # Create a config with multiple servers
+    config = MCPConfig(
+        mcpServers={
+            "server1": StdioMCPServer(command="echo", args=["test"]),
+            "server2": StdioMCPServer(command="echo", args=["test"]),
+        }
+    )
+
+    transport = MCPConfigTransport(config)
+    timeout = timedelta(seconds=42)
+
+    # Patch _create_proxy to verify timeout is passed correctly
+    with (
+        patch("fastmcp.client.transports.FastMCP.as_proxy") as mock_as_proxy,
+        patch.object(
+            transport, "_create_proxy", wraps=transport._create_proxy
+        ) as mock_create_proxy,
+    ):
+        # Make as_proxy return a mock FastMCP
+        mock_proxy = FastMCP(name="MockProxy")
+        mock_as_proxy.return_value = mock_proxy
+
+        # Mock connect_session on FastMCPTransport to avoid actual connection
+        with patch(
+            "fastmcp.client.transports.FastMCPTransport.connect_session"
+        ) as mock_connect:
+            mock_session = AsyncMock()
+            mock_connect.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_connect.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            async with transport.connect_session(read_timeout_seconds=timeout):
+                pass
+
+        # Verify _create_proxy was called with the timeout for each server
+        assert mock_create_proxy.call_count == 2
+        for call in mock_create_proxy.call_args_list:
+            _, kwargs = call.args, call.kwargs if call.kwargs else {}
+            # Third positional arg is timeout
+            call_timeout = call[0][2] if len(call[0]) > 2 else kwargs.get("timeout")
+            assert call_timeout == timeout, (
+                f"Expected timeout {timeout}, got {call_timeout}"
+            )
+
+
+async def test_single_server_config_transport():
+    """Test that single-server configs delegate directly without creating a composite."""
+    config = MCPConfig(
+        mcpServers={
+            "only_server": StdioMCPServer(command="echo", args=["test"]),
+        }
+    )
+
+    transport = MCPConfigTransport(config)
+
+    # Single server should have transport created eagerly (not at connect time)
+    assert hasattr(transport, "transport")
+    assert isinstance(transport.transport, StdioTransport)
+
+    # _transports should already contain the single transport
+    assert len(transport._transports) == 1
 
 
 def sample_tool_fn(arg1: int, arg2: str) -> str:
