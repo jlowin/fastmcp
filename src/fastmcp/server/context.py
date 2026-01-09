@@ -175,14 +175,25 @@ class Context:
 
     async def __aenter__(self) -> Context:
         """Enter the context manager and set this context as the current context."""
+        import socket
+
+        from fastmcp.utilities.logging import get_logger
+
+        logger = get_logger(__name__)
+        instance_id = f"{socket.gethostname()}#{id(self.fastmcp)}"
+
+        logger.info(f"[{instance_id}] Context.__aenter__ ENTERING")
+
         parent_context = _current_context.get(None)
         if parent_context is not None:
             # Inherit state from parent context
             self._state = copy.deepcopy(parent_context._state)
+            logger.info(f"[{instance_id}] Context: inherited state from parent context")
 
         # Always set this context and save the token
         token = _current_context.set(self)
         self._tokens.append(token)
+        logger.info(f"[{instance_id}] Context: _current_context SET (token={token})")
 
         # Set current server for dependency injection (use weakref to avoid reference cycles)
         from fastmcp.server.dependencies import (
@@ -192,20 +203,55 @@ class Context:
         )
 
         self._server_token = _current_server.set(weakref.ref(self.fastmcp))
+        logger.info(
+            f"[{instance_id}] Context: _current_server SET (token={self._server_token})"
+        )
 
         # Set docket/worker from server instance for this request's context.
         # This ensures ContextVars work even in environments (like Lambda) where
         # lifespan ContextVars don't propagate to request handlers.
         server = self.fastmcp
+        logger.info(
+            f"[{instance_id}] Context: server._docket={server._docket}, "
+            f"server._worker={server._worker}, "
+            f"_current_docket.get() BEFORE={_current_docket.get()}"
+        )
         if server._docket is not None:
             self._docket_token = _current_docket.set(server._docket)
+            logger.info(
+                f"[{instance_id}] Context: _current_docket SET from server._docket "
+                f"(token={self._docket_token}), _current_docket.get() AFTER={_current_docket.get()}"
+            )
+        else:
+            logger.warning(
+                f"[{instance_id}] Context: server._docket is None, skipping _current_docket.set()"
+            )
+
         if server._worker is not None:
             self._worker_token = _current_worker.set(server._worker)
+            logger.info(
+                f"[{instance_id}] Context: _current_worker SET from server._worker "
+                f"(token={self._worker_token})"
+            )
+        else:
+            logger.warning(
+                f"[{instance_id}] Context: server._worker is None, skipping _current_worker.set()"
+            )
 
+        logger.info(f"[{instance_id}] Context.__aenter__ COMPLETE")
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
         """Exit the context manager and reset the most recent token."""
+        import socket
+
+        from fastmcp.utilities.logging import get_logger
+
+        logger = get_logger(__name__)
+        instance_id = f"{socket.gethostname()}#{id(self.fastmcp)}"
+
+        logger.info(f"[{instance_id}] Context.__aexit__ ENTERING (exc_type={exc_type})")
+
         # Flush any remaining notifications before exiting
         await self._flush_notifications()
 
@@ -217,19 +263,33 @@ class Context:
         )
 
         if hasattr(self, "_worker_token"):
+            logger.info(
+                f"[{instance_id}] Context: resetting _current_worker (token={self._worker_token})"
+            )
             _current_worker.reset(self._worker_token)
             delattr(self, "_worker_token")
         if hasattr(self, "_docket_token"):
+            logger.info(
+                f"[{instance_id}] Context: resetting _current_docket (token={self._docket_token})"
+            )
             _current_docket.reset(self._docket_token)
             delattr(self, "_docket_token")
         if hasattr(self, "_server_token"):
+            logger.info(
+                f"[{instance_id}] Context: resetting _current_server (token={self._server_token})"
+            )
             _current_server.reset(self._server_token)
             delattr(self, "_server_token")
 
         # Reset context token
         if self._tokens:
             token = self._tokens.pop()
+            logger.info(
+                f"[{instance_id}] Context: resetting _current_context (token={token})"
+            )
             _current_context.reset(token)
+
+        logger.info(f"[{instance_id}] Context.__aexit__ COMPLETE")
 
     @property
     def request_context(self) -> RequestContext[ServerSession, Any, Request] | None:
