@@ -235,7 +235,7 @@ class TestPingMiddlewareIntegration:
             assert len(middleware._active_sessions) == 1
 
         # After disconnect, give a moment for cleanup
-        await anyio.sleep(0.1)
+        await anyio.sleep(0.01)
 
         # Session should be cleaned up
         assert len(middleware._active_sessions) == 0
