@@ -95,9 +95,15 @@ class TestWriteCache:
 
 class TestFetchLatestVersion:
     def test_fetch_success(self):
-        """Successful fetch returns version."""
+        """Successful fetch returns highest stable version."""
         mock_response = MagicMock()
-        mock_response.json.return_value = {"info": {"version": "2.5.0"}}
+        mock_response.json.return_value = {
+            "releases": {
+                "2.5.0": [],
+                "2.4.0": [],
+                "2.6.0b1": [],  # prerelease should be skipped
+            }
+        }
 
         with patch("httpx.get", return_value=mock_response) as mock_get:
             version = _fetch_latest_version()
