@@ -64,7 +64,7 @@ class TestServerLifespan:
         @mcp.tool
         def get_db_info(ctx: Context) -> str:
             # Access the server lifespan context
-            assert ctx.request_context is not None
+            assert ctx.request_context is not None  # type narrowing for type checker
             lifespan_context = ctx.request_context.lifespan_context
             return lifespan_context.get("db_connection", "no_db")
 
@@ -92,6 +92,7 @@ class TestComposableLifespans:
 
         @mcp.tool
         def get_info(ctx: Context) -> str:
+            assert ctx.request_context is not None
             lifespan_context = ctx.request_context.lifespan_context
             return lifespan_context.get("key", "missing")
 
@@ -129,6 +130,7 @@ class TestComposableLifespans:
 
         @mcp.tool
         def get_both(ctx: Context) -> dict:
+            assert ctx.request_context is not None
             return dict(ctx.request_context.lifespan_context)
 
         async with Client(mcp) as client:
@@ -174,6 +176,7 @@ class TestComposableLifespans:
 
         @mcp.tool
         def get_all(ctx: Context) -> dict:
+            assert ctx.request_context is not None
             return dict(ctx.request_context.lifespan_context)
 
         async with Client(mcp) as client:
@@ -206,6 +209,7 @@ class TestComposableLifespans:
 
         @mcp.tool
         def get_context(ctx: Context) -> dict:
+            assert ctx.request_context is not None
             return dict(ctx.request_context.lifespan_context)
 
         async with Client(mcp) as client:
@@ -238,11 +242,13 @@ class TestComposableLifespans:
                 events.append("decorated_exit")
 
         # function | Lifespan should work via __ror__
-        composed = regular_lifespan | decorated_lifespan  # type: ignore[unsupported-operator]
+        # type checkers don't understand __ror__ when left operand lacks __or__
+        composed = regular_lifespan | decorated_lifespan  # type: ignore[operator]
         mcp = FastMCP("TestServer", lifespan=composed)
 
         @mcp.tool
         def get_context(ctx: Context) -> dict:
+            assert ctx.request_context is not None
             return dict(ctx.request_context.lifespan_context)
 
         async with Client(mcp) as client:
@@ -267,11 +273,52 @@ class TestComposableLifespans:
 
         @mcp.tool
         def get_context(ctx: Context) -> dict:
+            assert ctx.request_context is not None
             return dict(ctx.request_context.lifespan_context)
 
         async with Client(mcp) as client:
             result = await client.call_tool("get_context", {})
             assert result.data == {"old_style": True}
+
+    async def test_lifespan_or_with_asynccontextmanager(self):
+        """Test that Lifespan | @asynccontextmanager works via __or__."""
+        events: list[str] = []
+
+        @lifespan
+        async def decorated_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
+            events.append("decorated_enter")
+            try:
+                yield {"decorated": True}
+            finally:
+                events.append("decorated_exit")
+
+        @asynccontextmanager
+        async def regular_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
+            events.append("regular_enter")
+            try:
+                yield {"regular": True}
+            finally:
+                events.append("regular_exit")
+
+        # Lifespan | function should work via __or__
+        composed = decorated_lifespan | regular_lifespan
+        mcp = FastMCP("TestServer", lifespan=composed)
+
+        @mcp.tool
+        def get_context(ctx: Context) -> dict:
+            assert ctx.request_context is not None
+            return dict(ctx.request_context.lifespan_context)
+
+        async with Client(mcp) as client:
+            result = await client.call_tool("get_context", {})
+            assert result.data == {"decorated": True, "regular": True}
+
+        assert events == [
+            "decorated_enter",
+            "regular_enter",
+            "regular_exit",
+            "decorated_exit",
+        ]
 
 
 class TestCombineLifespans:

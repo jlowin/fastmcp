@@ -427,11 +427,11 @@ async def app_lifespan(app: FastAPI):
 
 # Create MCP server
 mcp = FastMCP("Tools")
-mcp_app = mcp.http_app(path='/mcp')
+mcp_app = mcp.http_app()
 
 # Combine both lifespans
 app = FastAPI(lifespan=combine_lifespans(app_lifespan, mcp_app.lifespan))
-app.mount("/mcp", mcp_app)
+app.mount("/mcp", mcp_app)  # MCP endpoint at /mcp
 ```
 
 `combine_lifespans` enters lifespans in order and exits in reverse order.

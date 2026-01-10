@@ -69,17 +69,23 @@ class Lifespan:
         async with asynccontextmanager(self._fn)(server) as result:
             yield result if result is not None else {}
 
-    def __or__(self, other: Lifespan | LifespanFn) -> ComposedLifespan:
+    def __or__(
+        self, other: Lifespan | LifespanFn | LifespanContextManagerFn
+    ) -> ComposedLifespan:
         """Compose with another lifespan using the | operator.
 
         Args:
-            other: Another Lifespan or async generator function.
+            other: Another Lifespan, async generator function, or context manager factory.
 
         Returns:
             A ComposedLifespan that runs both lifespans.
         """
         if not isinstance(other, Lifespan):
-            other = Lifespan(other)
+            # Check if it's an @asynccontextmanager decorated function
+            if hasattr(other, "__wrapped__"):
+                other = ContextManagerLifespan(cast(LifespanContextManagerFn, other))
+            else:
+                other = Lifespan(cast(LifespanFn, other))
         return ComposedLifespan(self, other)
 
     def __ror__(self, other: LifespanFn) -> ComposedLifespan:

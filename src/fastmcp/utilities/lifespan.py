@@ -30,10 +30,10 @@ def combine_lifespans(
         from fastapi import FastAPI
 
         mcp = FastMCP("Tools")
-        mcp_app = mcp.http_app(path='/mcp')
+        mcp_app = mcp.http_app()
 
         app = FastAPI(lifespan=combine_lifespans(app_lifespan, mcp_app.lifespan))
-        app.mount("/mcp", mcp_app)
+        app.mount("/mcp", mcp_app)  # MCP endpoint at /mcp
         ```
 
     Args:
