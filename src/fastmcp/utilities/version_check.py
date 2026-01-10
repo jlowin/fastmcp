@@ -9,7 +9,6 @@ from pathlib import Path
 import httpx
 from packaging.version import Version
 
-import fastmcp
 from fastmcp.utilities.logging import get_logger
 
 logger = get_logger(__name__)
@@ -21,6 +20,8 @@ REQUEST_TIMEOUT_SECONDS = 2.0
 
 def _get_cache_path(include_prereleases: bool = False) -> Path:
     """Get the path to the version cache file."""
+    import fastmcp
+
     suffix = "_prerelease" if include_prereleases else ""
     return fastmcp.settings.home / f"version_cache{suffix}.json"
 
@@ -69,11 +70,6 @@ def _fetch_latest_version(include_prereleases: bool = False) -> str | None:
         response.raise_for_status()
         data = response.json()
 
-        if not include_prereleases:
-            # Use the stable version from info
-            return data.get("info", {}).get("version")
-
-        # Find the highest version including prereleases
         releases = data.get("releases", {})
         if not releases:
             return None
@@ -81,7 +77,11 @@ def _fetch_latest_version(include_prereleases: bool = False) -> str | None:
         versions = []
         for version_str in releases:
             try:
-                versions.append(Version(version_str))
+                v = Version(version_str)
+                # Skip prereleases if not requested
+                if not include_prereleases and v.is_prerelease:
+                    continue
+                versions.append(v)
             except ValueError:
                 logger.debug(f"Skipping invalid version string: {version_str}")
                 continue
@@ -127,6 +127,8 @@ def check_for_newer_version() -> str | None:
     Returns:
         The latest version string if newer than current, None otherwise.
     """
+    import fastmcp
+
     setting = fastmcp.settings.check_for_updates
     if setting == "off":
         return None
