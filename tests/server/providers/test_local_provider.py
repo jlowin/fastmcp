@@ -644,6 +644,28 @@ class TestProviderToolTransformations:
         tool = await transformed.get_tool("my_tool")
         assert tool is None
 
+    def test_tool_transforms_duplicate_target_name_raises_error(self):
+        """Test that tool_transforms with duplicate target names raises ValueError."""
+        from fastmcp.tools.tool_transform import ToolTransformConfig
+
+        provider = LocalProvider()
+
+        @provider.tool
+        def tool_a() -> str:
+            return "a"
+
+        @provider.tool
+        def tool_b() -> str:
+            return "b"
+
+        with pytest.raises(ValueError, match="duplicate target name"):
+            provider.with_transforms(
+                tool_transforms={
+                    "tool_a": ToolTransformConfig(name="same_name"),
+                    "tool_b": ToolTransformConfig(name="same_name"),
+                }
+            )
+
 
 class TestLocalProviderTaskRegistration:
     """Tests for task registration in LocalProvider."""

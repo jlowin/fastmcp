@@ -47,7 +47,7 @@ class TransformingProvider(Provider):
             namespace="api",
             tool_renames={"verbose_tool_name": "short"},
             tool_transforms={"short": ToolTransformConfig(
-                args={"old_arg": ArgTransform(name="new_arg")}
+                arguments={"old_arg": ArgTransformConfig(name="new_arg")}
             )}
         )
 
@@ -101,9 +101,16 @@ class TransformingProvider(Provider):
 
         # Build reverse mapping for tool_transforms that rename tools
         # Maps: final_name -> pre_transform_name (the key in tool_transforms)
+        # Also validate no duplicate target names
         self._tool_transforms_name_reverse: dict[str, str] = {}
         for pre_transform_name, config in self.tool_transforms.items():
             if config.name is not None:
+                if config.name in self._tool_transforms_name_reverse:
+                    raise ValueError(
+                        f"tool_transforms has duplicate target name {config.name!r}: "
+                        f"both {self._tool_transforms_name_reverse[config.name]!r} "
+                        f"and {pre_transform_name!r} rename to it"
+                    )
                 self._tool_transforms_name_reverse[config.name] = pre_transform_name
 
     # -------------------------------------------------------------------------

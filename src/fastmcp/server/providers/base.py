@@ -111,7 +111,7 @@ class Provider:
             # Apply schema transforms to modify tool arguments
             provider = MyProvider().with_transforms(
                 tool_transforms={"my_tool": ToolTransformConfig(
-                    args={"old_arg": ArgTransform(name="new_arg")}
+                    arguments={"old_arg": ArgTransformConfig(name="new_arg")}
                 )}
             )
 
