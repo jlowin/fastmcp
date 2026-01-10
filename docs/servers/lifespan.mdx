@@ -127,15 +127,22 @@ combined = ContextManagerLifespan(legacy_lifespan) | new_lifespan
 When mounting FastMCP into FastAPI, use `combine_lifespans` to run both your app's lifespan and the MCP server's lifespan:
 
 ```python
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastmcp import FastMCP
 from fastmcp.utilities.lifespan import combine_lifespans
+
+@asynccontextmanager
+async def app_lifespan(app):
+    # Your FastAPI app setup
+    yield
 
 mcp = FastMCP("Tools")
 mcp_app = mcp.http_app()
 
 app = FastAPI(lifespan=combine_lifespans(app_lifespan, mcp_app.lifespan))
-app.mount("/mcp", mcp_app)  # MCP endpoint at /mcp
+app.mount("/mcp", mcp_app)
 ```
 
 See the [FastAPI integration guide](/integrations/fastapi#combining-lifespans) for full details.
