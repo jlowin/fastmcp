@@ -34,7 +34,7 @@ Always use `try/finally` for cleanup code to ensure it runs even if the server i
 
 ## Accessing Lifespan Context
 
-Access the lifespan context in tools via `ctx.request_context.lifespan_context`:
+Access the lifespan context in tools via `ctx.lifespan_context`:
 
 ```python
 from fastmcp import FastMCP, Context
@@ -52,7 +52,7 @@ mcp = FastMCP("MyServer", lifespan=app_lifespan)
 
 @mcp.tool
 def get_cached_data(ctx: Context, key: str) -> str:
-    cache = ctx.request_context.lifespan_context["cache"]
+    cache = ctx.lifespan_context["cache"]
     return cache.get(key)
 ```
 
