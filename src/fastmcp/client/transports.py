@@ -1026,10 +1026,17 @@ class MCPConfigTransport(ClientTransport):
         timeout = session_kwargs.get("read_timeout_seconds")
         composite = FastMCP[Any](name="MCPRouter")
 
-        for name, server_config in self.config.mcpServers.items():
-            transport, proxy = self._create_proxy(name, server_config, timeout)
-            self._transports.append(transport)
-            composite.mount(proxy, namespace=name if self.name_as_prefix else None)
+        try:
+            for name, server_config in self.config.mcpServers.items():
+                transport, proxy = self._create_proxy(name, server_config, timeout)
+                self._transports.append(transport)
+                composite.mount(proxy, namespace=name if self.name_as_prefix else None)
+        except Exception:
+            # Clean up any transports created before the failure
+            for t in self._transports:
+                await t.close()
+            self._transports = []
+            raise
 
         async with FastMCPTransport(mcp=composite).connect_session(
             **session_kwargs
