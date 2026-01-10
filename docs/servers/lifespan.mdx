@@ -91,7 +91,7 @@ Composed lifespans:
 
 ## Backwards Compatibility
 
-Existing `@asynccontextmanager` lifespans still work:
+Existing `@asynccontextmanager` lifespans still work when passed directly to FastMCP:
 
 ```python
 from contextlib import asynccontextmanager
@@ -104,17 +104,22 @@ async def legacy_lifespan(server):
 mcp = FastMCP("MyServer", lifespan=legacy_lifespan)
 ```
 
-To compose with other lifespans, use `|` - the `@asynccontextmanager` function will be wrapped automatically:
+To compose an `@asynccontextmanager` function with `@lifespan` functions, wrap it with `ContextManagerLifespan`:
 
 ```python
-from fastmcp.server.lifespan import lifespan
+from contextlib import asynccontextmanager
+from fastmcp.server.lifespan import lifespan, ContextManagerLifespan
+
+@asynccontextmanager
+async def legacy_lifespan(server):
+    yield {"legacy": True}
 
 @lifespan
 async def new_lifespan(server):
     yield {"new": True}
 
-# Can compose @asynccontextmanager functions with @lifespan functions
-combined = legacy_lifespan | new_lifespan
+# Wrap the legacy lifespan explicitly for composition
+combined = ContextManagerLifespan(legacy_lifespan) | new_lifespan
 ```
 
 ## With FastAPI

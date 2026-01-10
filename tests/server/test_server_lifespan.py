@@ -4,9 +4,11 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
+import pytest
+
 from fastmcp import Client, FastMCP
 from fastmcp.server.context import Context
-from fastmcp.server.lifespan import lifespan
+from fastmcp.server.lifespan import ContextManagerLifespan, lifespan
 from fastmcp.utilities.lifespan import combine_lifespans
 
 
@@ -221,29 +223,28 @@ class TestComposableLifespans:
                 "only_second": "yes",
             }
 
-    async def test_lifespan_ror_with_function(self):
-        """Test that a function can be composed on the left via __ror__."""
+    async def test_lifespan_composition_with_context_manager_lifespan(self):
+        """Test composing with ContextManagerLifespan for @asynccontextmanager functions."""
         events: list[str] = []
 
         @asynccontextmanager
-        async def regular_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
-            events.append("regular_enter")
+        async def legacy_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
+            events.append("legacy_enter")
             try:
-                yield {"regular": True}
+                yield {"legacy": True}
             finally:
-                events.append("regular_exit")
+                events.append("legacy_exit")
 
         @lifespan
-        async def decorated_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
-            events.append("decorated_enter")
+        async def new_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
+            events.append("new_enter")
             try:
-                yield {"decorated": True}
+                yield {"new": True}
             finally:
-                events.append("decorated_exit")
+                events.append("new_exit")
 
-        # function | Lifespan should work via __ror__
-        # type checkers don't understand __ror__ when left operand lacks __or__
-        composed = regular_lifespan | decorated_lifespan  # type: ignore[operator]
+        # Wrap the @asynccontextmanager function explicitly
+        composed = ContextManagerLifespan(legacy_lifespan) | new_lifespan
         mcp = FastMCP("TestServer", lifespan=composed)
 
         @mcp.tool
@@ -253,13 +254,13 @@ class TestComposableLifespans:
 
         async with Client(mcp) as client:
             result = await client.call_tool("get_context", {})
-            assert result.data == {"regular": True, "decorated": True}
+            assert result.data == {"legacy": True, "new": True}
 
         assert events == [
-            "regular_enter",
-            "decorated_enter",
-            "decorated_exit",
-            "regular_exit",
+            "legacy_enter",
+            "new_enter",
+            "new_exit",
+            "legacy_exit",
         ]
 
     async def test_backwards_compatibility_asynccontextmanager(self):
@@ -280,45 +281,22 @@ class TestComposableLifespans:
             result = await client.call_tool("get_context", {})
             assert result.data == {"old_style": True}
 
-    async def test_lifespan_or_with_asynccontextmanager(self):
-        """Test that Lifespan | @asynccontextmanager works via __or__."""
-        events: list[str] = []
+    async def test_lifespan_or_requires_lifespan_instance(self):
+        """Test that | operator requires Lifespan instances and gives helpful error."""
 
         @lifespan
-        async def decorated_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
-            events.append("decorated_enter")
-            try:
-                yield {"decorated": True}
-            finally:
-                events.append("decorated_exit")
+        async def my_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
+            yield {"key": "value"}
 
         @asynccontextmanager
         async def regular_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
-            events.append("regular_enter")
-            try:
-                yield {"regular": True}
-            finally:
-                events.append("regular_exit")
+            yield {"regular": True}
 
-        # Lifespan | function should work via __or__
-        composed = decorated_lifespan | regular_lifespan
-        mcp = FastMCP("TestServer", lifespan=composed)
+        # Composing with non-Lifespan should raise TypeError with helpful message
+        with pytest.raises(TypeError) as exc_info:
+            my_lifespan | regular_lifespan  # type: ignore[operator]
 
-        @mcp.tool
-        def get_context(ctx: Context) -> dict:
-            assert ctx.request_context is not None
-            return dict(ctx.request_context.lifespan_context)
-
-        async with Client(mcp) as client:
-            result = await client.call_tool("get_context", {})
-            assert result.data == {"decorated": True, "regular": True}
-
-        assert events == [
-            "decorated_enter",
-            "regular_enter",
-            "regular_exit",
-            "decorated_exit",
-        ]
+        assert "ContextManagerLifespan" in str(exc_info.value)
 
 
 class TestCombineLifespans:

@@ -6,7 +6,7 @@ that can be combined using the `|` operator.
 Example:
     ```python
     from fastmcp import FastMCP
-    from fastmcp.server import lifespan
+    from fastmcp.server.lifespan import lifespan
 
     @lifespan
     async def db_lifespan(server):
@@ -22,13 +22,31 @@ Example:
 
     mcp = FastMCP("server", lifespan=db_lifespan | cache_lifespan)
     ```
+
+To compose with existing `@asynccontextmanager` lifespans, wrap them explicitly:
+
+    ```python
+    from contextlib import asynccontextmanager
+    from fastmcp.server.lifespan import lifespan, ContextManagerLifespan
+
+    @asynccontextmanager
+    async def legacy_lifespan(server):
+        yield {"legacy": True}
+
+    @lifespan
+    async def new_lifespan(server):
+        yield {"new": True}
+
+    # Wrap the legacy lifespan explicitly
+    combined = ContextManagerLifespan(legacy_lifespan) | new_lifespan
+    ```
 """
 
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from fastmcp.server.server import FastMCP
@@ -69,43 +87,24 @@ class Lifespan:
         async with asynccontextmanager(self._fn)(server) as result:
             yield result if result is not None else {}
 
-    def __or__(
-        self, other: Lifespan | LifespanFn | LifespanContextManagerFn
-    ) -> ComposedLifespan:
+    def __or__(self, other: Lifespan) -> ComposedLifespan:
         """Compose with another lifespan using the | operator.
 
         Args:
-            other: Another Lifespan, async generator function, or context manager factory.
+            other: Another Lifespan instance.
 
         Returns:
             A ComposedLifespan that runs both lifespans.
+
+        Raises:
+            TypeError: If other is not a Lifespan instance.
         """
         if not isinstance(other, Lifespan):
-            # Check if it's an @asynccontextmanager decorated function
-            if hasattr(other, "__wrapped__"):
-                other = ContextManagerLifespan(cast(LifespanContextManagerFn, other))
-            else:
-                other = Lifespan(cast(LifespanFn, other))
+            raise TypeError(
+                f"Cannot compose Lifespan with {type(other).__name__}. "
+                f"Use @lifespan decorator or wrap with ContextManagerLifespan()."
+            )
         return ComposedLifespan(self, other)
-
-    def __ror__(self, other: LifespanFn) -> ComposedLifespan:
-        """Handle reverse composition when left operand is a function.
-
-        Args:
-            other: An async generator function or context manager factory.
-
-        Returns:
-            A ComposedLifespan that runs the function first, then this lifespan.
-        """
-        if callable(other):
-            # Check if it's an @asynccontextmanager decorated function
-            # These have a special attribute set by the decorator
-            if hasattr(other, "__wrapped__"):
-                return ComposedLifespan(
-                    ContextManagerLifespan(cast(LifespanContextManagerFn, other)), self
-                )
-            return ComposedLifespan(Lifespan(other), self)
-        raise TypeError(f"Cannot compose {type(other)} with Lifespan")
 
 
 class ContextManagerLifespan(Lifespan):
