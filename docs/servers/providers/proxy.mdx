@@ -40,13 +40,9 @@ Create a proxy using `create_proxy()`:
 
 ```python
 from fastmcp.server import create_proxy
-from fastmcp.server.providers.proxy import ProxyClient
 
-# Create a proxy to a remote server
-proxy = create_proxy(
-    ProxyClient("http://example.com/mcp"),
-    name="MyProxy"
-)
+# create_proxy() accepts URLs, file paths, and transports directly
+proxy = create_proxy("http://example.com/mcp", name="MyProxy")
 
 if __name__ == "__main__":
     proxy.run()
@@ -57,19 +53,19 @@ This gives you:
 - Automatic forwarding of MCP features (sampling, elicitation, etc.)
 - Session isolation to prevent context mixing
 
+<Tip>
+To mount a proxy inside another FastMCP server, see [Mounting External Servers](/servers/providers/mounting#mounting-external-servers).
+</Tip>
+
 ## Transport Bridging
 
 A common use case is bridging transports - making a remote server available locally:
 
 ```python
 from fastmcp.server import create_proxy
-from fastmcp.server.providers.proxy import ProxyClient
 
 # Bridge remote HTTP to local stdio
-remote_proxy = create_proxy(
-    ProxyClient("http://example.com/mcp/sse"),
-    name="Remote-to-Local"
-)
+remote_proxy = create_proxy("http://example.com/mcp/sse", name="Remote-to-Local")
 
 # Run locally via stdio for Claude Desktop
 if __name__ == "__main__":
@@ -79,11 +75,10 @@ if __name__ == "__main__":
 Or expose a local server via HTTP:
 
 ```python
+from fastmcp.server import create_proxy
+
 # Bridge local server to HTTP
-local_proxy = create_proxy(
-    ProxyClient("local_server.py"),
-    name="Local-to-HTTP"
-)
+local_proxy = create_proxy("local_server.py", name="Local-to-HTTP")
 
 if __name__ == "__main__":
     local_proxy.run(transport="http", host="0.0.0.0", port=8080)
@@ -93,14 +88,13 @@ if __name__ == "__main__":
 
 <VersionBadge version="2.10.3" />
 
-ProxyClient provides session isolation - each request gets its own isolated backend session:
+`create_proxy()` provides session isolation - each request gets its own isolated backend session:
 
 ```python
 from fastmcp.server import create_proxy
-from fastmcp.server.providers.proxy import ProxyClient
 
 # Each request creates a fresh backend session (recommended)
-proxy = create_proxy(ProxyClient("backend_server.py"))
+proxy = create_proxy("backend_server.py")
 
 # Multiple clients can use this proxy simultaneously:
 # - Client A calls a tool → gets isolated session
@@ -131,7 +125,7 @@ Shared sessions may cause context mixing in concurrent scenarios. Use only in si
 
 <VersionBadge version="2.10.3" />
 
-ProxyClient automatically forwards MCP protocol features:
+Proxies automatically forward MCP protocol features:
 
 | Feature | Description |
 |---------|-------------|
@@ -143,11 +137,9 @@ ProxyClient automatically forwards MCP protocol features:
 
 ```python
 from fastmcp.server import create_proxy
-from fastmcp.server.providers.proxy import ProxyClient
 
 # All features forwarded automatically
-backend = ProxyClient("advanced_backend.py")
-proxy = create_proxy(backend)
+proxy = create_proxy("advanced_backend.py")
 
 # When the backend:
 # - Requests LLM sampling → forwarded to your client
