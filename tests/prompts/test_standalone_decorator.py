@@ -7,6 +7,8 @@ discovered by FileSystemProvider.
 
 import pytest
 
+from fastmcp import FastMCP
+from fastmcp.client import Client
 from fastmcp.prompts import FunctionPrompt, prompt
 
 
@@ -101,3 +103,21 @@ class TestPromptDecorator:
             @prompt("name1", name="name2")  # type: ignore[call-overload]
             def my_prompt() -> str:
                 return "hello"
+
+    async def test_prompt_added_to_server(self):
+        """Prompt created by @prompt should work when added to a server."""
+
+        @prompt
+        def analyze(topic: str) -> str:
+            """Analyze a topic."""
+            return f"Please analyze: {topic}"
+
+        mcp = FastMCP("Test")
+        mcp.add_prompt(analyze)
+
+        async with Client(mcp) as client:
+            prompts = await client.list_prompts()
+            assert any(p.name == "analyze" for p in prompts)
+
+            result = await client.get_prompt("analyze", {"topic": "Python"})
+            assert "Python" in str(result)

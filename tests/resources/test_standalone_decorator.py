@@ -7,6 +7,8 @@ server.add_resource() / server.add_template() or discovered by FileSystemProvide
 
 import pytest
 
+from fastmcp import FastMCP
+from fastmcp.client import Client
 from fastmcp.resources import FunctionResource, resource
 from fastmcp.resources.template import FunctionResourceTemplate
 
@@ -97,3 +99,43 @@ class TestResourceDecorator:
                 @classmethod
                 def get_config(cls) -> str:
                     return "{}"
+
+    async def test_resource_added_to_server(self):
+        """Resource created by @resource should work when added to a server."""
+
+        @resource("config://app")
+        def get_config() -> str:
+            """Get config."""
+            return '{"version": "1.0"}'
+
+        assert isinstance(get_config, FunctionResource)
+
+        mcp = FastMCP("Test")
+        mcp.add_resource(get_config)
+
+        async with Client(mcp) as client:
+            resources = await client.list_resources()
+            assert any(str(r.uri) == "config://app" for r in resources)
+
+            result = await client.read_resource("config://app")
+            assert "1.0" in str(result)
+
+    async def test_template_added_to_server(self):
+        """Template created by @resource should work when added to a server."""
+
+        @resource("users://{user_id}/profile")
+        def get_profile(user_id: str) -> str:
+            """Get user profile."""
+            return f'{{"id": "{user_id}"}}'
+
+        assert isinstance(get_profile, FunctionResourceTemplate)
+
+        mcp = FastMCP("Test")
+        mcp.add_template(get_profile)
+
+        async with Client(mcp) as client:
+            templates = await client.list_resource_templates()
+            assert any(t.uriTemplate == "users://{user_id}/profile" for t in templates)
+
+            result = await client.read_resource("users://123/profile")
+            assert "123" in str(result)

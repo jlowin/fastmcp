@@ -7,6 +7,8 @@ discovered by FileSystemProvider.
 
 import pytest
 
+from fastmcp import FastMCP
+from fastmcp.client import Client
 from fastmcp.tools import FunctionTool, tool
 
 
@@ -101,3 +103,21 @@ class TestToolDecorator:
             @tool("name1", name="name2")  # type: ignore[call-overload]
             def my_tool() -> str:
                 return "hello"
+
+    async def test_tool_added_to_server(self):
+        """Tool created by @tool should work when added to a server."""
+
+        @tool
+        def greet(name: str) -> str:
+            """Greet someone."""
+            return f"Hello, {name}!"
+
+        mcp = FastMCP("Test")
+        mcp.add_tool(greet)
+
+        async with Client(mcp) as client:
+            tools = await client.list_tools()
+            assert any(t.name == "greet" for t in tools)
+
+            result = await client.call_tool("greet", {"name": "World"})
+            assert result.data == "Hello, World!"
