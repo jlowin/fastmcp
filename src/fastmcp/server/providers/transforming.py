@@ -216,7 +216,11 @@ class TransformingProvider(Provider):
         tool = await self._wrapped.get_tool(original)
         if tool:
             # Apply transforms using the pre_transform_name (the key in tool_transforms)
-            return self._apply_tool_transform(tool, pre_transform_name)
+            transformed = self._apply_tool_transform(tool, pre_transform_name)
+            # Only return if requested name matches the final transformed name
+            # This prevents accessing tools by their pre-transform name
+            if transformed.name == name:
+                return transformed
         return None
 
     # -------------------------------------------------------------------------

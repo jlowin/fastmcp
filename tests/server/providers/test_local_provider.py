@@ -620,6 +620,30 @@ class TestProviderToolTransformations:
         transformed_tools = await transformed.list_tools()
         assert transformed_tools[0].name == "renamed"
 
+    async def test_renamed_tool_not_accessible_by_old_name(self):
+        """Test that a renamed tool cannot be accessed by its pre-transform name."""
+        from fastmcp.tools.tool_transform import ToolTransformConfig
+
+        provider = LocalProvider()
+
+        @provider.tool
+        def my_tool(x: int) -> int:
+            return x
+
+        # Wrap with a rename transform
+        transformed = provider.with_transforms(
+            tool_transforms={"my_tool": ToolTransformConfig(name="renamed")}
+        )
+
+        # Should be accessible by new name
+        tool = await transformed.get_tool("renamed")
+        assert tool is not None
+        assert tool.name == "renamed"
+
+        # Should NOT be accessible by old name
+        tool = await transformed.get_tool("my_tool")
+        assert tool is None
+
 
 class TestLocalProviderTaskRegistration:
     """Tests for task registration in LocalProvider."""
