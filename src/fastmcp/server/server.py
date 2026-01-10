@@ -2595,7 +2595,7 @@ def create_proxy(
     """Create a FastMCP proxy server for the given target.
 
     This is the recommended way to create a proxy server. For lower-level control,
-    use `create_proxy_provider()` from `fastmcp.server.providers.proxy`.
+    use `FastMCPProxy` or `ProxyProvider` directly from `fastmcp.server.providers.proxy`.
 
     Args:
         target: The backend to proxy to. Can be:

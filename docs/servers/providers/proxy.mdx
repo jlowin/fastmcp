@@ -152,6 +152,8 @@ proxy = create_proxy("advanced_backend.py")
 Selectively disable forwarding:
 
 ```python
+from fastmcp.server.providers.proxy import ProxyClient
+
 backend = ProxyClient(
     "backend_server.py",
     sampling_handler=None,  # Disable LLM sampling
