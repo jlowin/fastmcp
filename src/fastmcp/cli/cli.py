@@ -129,7 +129,7 @@ def version(
             console.print(
                 f"[bold]🎉 FastMCP update available:[/bold] [green]{newer_version}[/green]"
             )
-            console.print("[dim]Run: uv pip install --upgrade fastmcp[/dim]")
+            console.print("[dim]Run: pip install --upgrade fastmcp[/dim]")
 
 
 @app.command
