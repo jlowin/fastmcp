@@ -16,7 +16,7 @@ from docket.execution import ExecutionState
 from mcp.types import TaskStatusNotification, TaskStatusNotificationParams
 
 from fastmcp.server.tasks.keys import parse_task_key
-from fastmcp.server.tasks.requests import _get_docket_to_mcp_state_map
+from fastmcp.server.tasks.requests import DOCKET_TO_MCP_STATE
 from fastmcp.utilities.logging import get_logger
 
 if TYPE_CHECKING:
@@ -102,7 +102,7 @@ async def _send_status_notification(
         poll_interval_ms: Poll interval in milliseconds
     """
     # Map Docket state to MCP status
-    state_map = _get_docket_to_mcp_state_map()
+    state_map = DOCKET_TO_MCP_STATE
     mcp_status = state_map.get(state, "failed")
 
     # Extract session_id from task_key for Redis lookup
@@ -176,7 +176,7 @@ async def _send_progress_notification(
         return
 
     # Map Docket state to MCP status
-    state_map = _get_docket_to_mcp_state_map()
+    state_map = DOCKET_TO_MCP_STATE
     mcp_status = state_map.get(execution.state, "failed")
 
     # Extract session_id from task_key for Redis lookup

@@ -35,18 +35,16 @@ if TYPE_CHECKING:
     from fastmcp.server.server import FastMCP
 
 
-def _get_docket_to_mcp_state_map() -> dict[ExecutionState, str]:
-    """Get the mapping from Docket execution states to MCP task status strings."""
-    # Map Docket execution states to MCP task status strings
-    # Per SEP-1686 final spec (line 381): tasks MUST begin in "working" status
-    return {
-        ExecutionState.SCHEDULED: "working",  # Initial state per spec
-        ExecutionState.QUEUED: "working",  # Initial state per spec
-        ExecutionState.RUNNING: "working",
-        ExecutionState.COMPLETED: "completed",
-        ExecutionState.FAILED: "failed",
-        ExecutionState.CANCELLED: "cancelled",
-    }
+# Map Docket execution states to MCP task status strings
+# Per SEP-1686 final spec (line 381): tasks MUST begin in "working" status
+DOCKET_TO_MCP_STATE: dict[ExecutionState, str] = {
+    ExecutionState.SCHEDULED: "working",  # Initial state per spec
+    ExecutionState.QUEUED: "working",  # Initial state per spec
+    ExecutionState.RUNNING: "working",
+    ExecutionState.COMPLETED: "completed",
+    ExecutionState.FAILED: "failed",
+    ExecutionState.CANCELLED: "cancelled",
+}
 
 
 async def _lookup_task_execution(
@@ -156,7 +154,7 @@ async def tasks_get_handler(server: FastMCP, params: dict[str, Any]) -> GetTaskR
         await execution.sync()
 
         # Map Docket state to MCP state
-        state_map = _get_docket_to_mcp_state_map()
+        state_map = DOCKET_TO_MCP_STATE
         mcp_state: Literal[
             "working", "input_required", "completed", "failed", "cancelled"
         ] = state_map.get(execution.state, "failed")  # type: ignore[assignment]
@@ -262,7 +260,7 @@ async def tasks_result_handler(server: FastMCP, params: dict[str, Any]) -> Any:
         await execution.sync()
 
         # Check if completed
-        state_map = _get_docket_to_mcp_state_map()
+        state_map = DOCKET_TO_MCP_STATE
         if execution.state not in (ExecutionState.COMPLETED, ExecutionState.FAILED):
             mcp_state = state_map.get(execution.state, "failed")
             raise McpError(
