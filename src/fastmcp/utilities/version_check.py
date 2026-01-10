@@ -82,7 +82,8 @@ def _fetch_latest_version(include_prereleases: bool = False) -> str | None:
         for version_str in releases:
             try:
                 versions.append(Version(version_str))
-            except Exception:
+            except ValueError:
+                logger.debug(f"Skipping invalid version string: {version_str}")
                 continue
 
         if not versions:
@@ -141,8 +142,10 @@ def check_for_newer_version() -> str | None:
 
         if latest > current:
             return latest_version
-    except Exception:
-        # Invalid version strings, ignore
-        pass
+    except ValueError:
+        logger.debug(
+            f"Could not compare versions: current={fastmcp.__version__!r}, "
+            f"latest={latest_version!r}"
+        )
 
     return None
