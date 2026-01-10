@@ -1,0 +1,136 @@
+---
+title: Lifespans
+description: Server-level setup and teardown with composable lifespans
+---
+
+Lifespans let you run code once when the server starts and clean up when it stops. Unlike per-session handlers, lifespans run exactly once regardless of how many clients connect.
+
+## Basic Usage
+
+Use the `@lifespan` decorator to define a lifespan:
+
+```python
+from fastmcp import FastMCP
+from fastmcp.server.lifespan import lifespan
+
+@lifespan
+async def db_lifespan(server):
+    # Setup: runs once when server starts
+    db = await connect_database()
+    try:
+        yield {"db": db}
+    finally:
+        # Teardown: runs when server stops
+        await db.close()
+
+mcp = FastMCP("MyServer", lifespan=db_lifespan)
+```
+
+The dict you yield becomes the **lifespan context**, accessible from tools.
+
+<Note>
+Always use `try/finally` for cleanup code to ensure it runs even if the server is cancelled.
+</Note>
+
+## Accessing Lifespan Context
+
+Access the lifespan context in tools via `ctx.request_context.lifespan_context`:
+
+```python
+from fastmcp import FastMCP, Context
+from fastmcp.server.lifespan import lifespan
+
+@lifespan
+async def app_lifespan(server):
+    cache = await connect_cache()
+    try:
+        yield {"cache": cache}
+    finally:
+        await cache.close()
+
+mcp = FastMCP("MyServer", lifespan=app_lifespan)
+
+@mcp.tool
+def get_cached_data(ctx: Context, key: str) -> str:
+    cache = ctx.request_context.lifespan_context["cache"]
+    return cache.get(key)
+```
+
+## Composing Lifespans
+
+Compose multiple lifespans with the `|` operator:
+
+```python
+from fastmcp import FastMCP
+from fastmcp.server.lifespan import lifespan
+
+@lifespan
+async def db_lifespan(server):
+    db = await connect_db()
+    try:
+        yield {"db": db}
+    finally:
+        await db.close()
+
+@lifespan
+async def cache_lifespan(server):
+    cache = await connect_cache()
+    try:
+        yield {"cache": cache}
+    finally:
+        await cache.close()
+
+# Compose with |
+mcp = FastMCP("MyServer", lifespan=db_lifespan | cache_lifespan)
+```
+
+Composed lifespans:
+- Enter in order (left to right)
+- Exit in reverse order (right to left)
+- Merge their context dicts (later values overwrite earlier on conflict)
+
+## Backwards Compatibility
+
+Existing `@asynccontextmanager` lifespans still work:
+
+```python
+from contextlib import asynccontextmanager
+from fastmcp import FastMCP
+
+@asynccontextmanager
+async def legacy_lifespan(server):
+    yield {"key": "value"}
+
+mcp = FastMCP("MyServer", lifespan=legacy_lifespan)
+```
+
+To compose with other lifespans, use `|` - the `@asynccontextmanager` function will be wrapped automatically:
+
+```python
+from fastmcp.server.lifespan import lifespan
+
+@lifespan
+async def new_lifespan(server):
+    yield {"new": True}
+
+# Can compose @asynccontextmanager functions with @lifespan functions
+combined = legacy_lifespan | new_lifespan
+```
+
+## With FastAPI
+
+When mounting FastMCP into FastAPI, use `combine_lifespans` to run both your app's lifespan and the MCP server's lifespan:
+
+```python
+from fastapi import FastAPI
+from fastmcp import FastMCP
+from fastmcp.utilities.lifespan import combine_lifespans
+
+mcp = FastMCP("Tools")
+mcp_app = mcp.http_app(path='/mcp')
+
+app = FastAPI(lifespan=combine_lifespans(app_lifespan, mcp_app.lifespan))
+app.mount("/mcp", mcp_app)
+```
+
+See the [FastAPI integration guide](/integrations/fastapi#combining-lifespans) for full details.
