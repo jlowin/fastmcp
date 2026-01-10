@@ -60,8 +60,8 @@ The `FastMCP` constructor accepts several arguments:
   Authentication provider for securing HTTP-based transports. See [Authentication](/servers/auth/authentication) for configuration options
 </ParamField>
 
-<ParamField body="lifespan" type="AsyncContextManager | None">
-  An async context manager function for server startup and shutdown logic
+<ParamField body="lifespan" type="Lifespan | AsyncContextManager | None">
+  Server-level setup and teardown logic. See [Lifespans](/servers/lifespan) for composable lifespans
 </ParamField>
 
 <ParamField body="tools" type="list[Tool | Callable] | None">
@@ -288,17 +288,18 @@ main.mount(sub, namespace="sub")
 
 <VersionBadge version="2.0.0" />
 
-FastMCP can act as a proxy for any MCP server (local or remote) using `FastMCP.as_proxy`, letting you bridge transports or add a frontend to existing servers. For example, you can expose a remote SSE server locally via stdio, or vice versa.
+FastMCP can act as a proxy for any MCP server (local or remote) using `create_proxy`, letting you bridge transports or add a frontend to existing servers. For example, you can expose a remote SSE server locally via stdio, or vice versa.
 
 Proxies automatically handle concurrent operations safely by creating fresh sessions for each request when using disconnected clients.
 
 See the [Remote Proxies](/servers/providers/proxy) guide for details and advanced usage.
 
 ```python
-from fastmcp import FastMCP, Client
+from fastmcp import Client
+from fastmcp.server import create_proxy
 
 backend = Client("http://example.com/mcp/sse")
-proxy = FastMCP.as_proxy(backend, name="ProxyServer")
+proxy = create_proxy(backend, name="ProxyServer")
 # Now use the proxy like any FastMCP server
 ```
 
