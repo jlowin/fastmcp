@@ -535,11 +535,11 @@ class TestLocalProviderDecorators:
             assert "Hello, World!" in str(result)
 
 
-class TestLocalProviderToolTransformations:
-    """Tests for tool transformations in LocalProvider."""
+class TestProviderToolTransformations:
+    """Tests for tool transformations via with_transforms()."""
 
-    def test_add_tool_transformation(self):
-        """Test adding a tool transformation."""
+    async def test_with_transforms_applies_tool_transforms(self):
+        """Test that with_transforms applies tool transformations."""
         from fastmcp.tools.tool_transform import ToolTransformConfig
 
         provider = LocalProvider()
@@ -548,10 +548,14 @@ class TestLocalProviderToolTransformations:
         def my_tool(x: int) -> int:
             return x
 
-        config = ToolTransformConfig(name="renamed_tool")
-        provider.add_tool_transformation("my_tool", config)
+        # Wrap with transforms
+        transformed = provider.with_transforms(
+            tool_transforms={"my_tool": ToolTransformConfig(name="renamed_tool")}
+        )
 
-        assert provider.get_tool_transformation("my_tool") is config
+        tools = await transformed.list_tools()
+        assert len(tools) == 1
+        assert tools[0].name == "renamed_tool"
 
     async def test_list_tools_applies_transformations(self):
         """Test that list_tools applies transformations."""
@@ -563,10 +567,13 @@ class TestLocalProviderToolTransformations:
         def original_tool(x: int) -> int:
             return x
 
-        config = ToolTransformConfig(name="transformed_tool")
-        provider.add_tool_transformation("original_tool", config)
+        transformed = provider.with_transforms(
+            tool_transforms={
+                "original_tool": ToolTransformConfig(name="transformed_tool")
+            }
+        )
 
-        tools = await provider.list_tools()
+        tools = await transformed.list_tools()
         assert len(tools) == 1
         assert tools[0].name == "transformed_tool"
 
@@ -580,15 +587,18 @@ class TestLocalProviderToolTransformations:
         def my_tool(x: int) -> int:
             return x
 
-        config = ToolTransformConfig(description="New description")
-        provider.add_tool_transformation("my_tool", config)
+        transformed = provider.with_transforms(
+            tool_transforms={
+                "my_tool": ToolTransformConfig(description="New description")
+            }
+        )
 
-        tool = await provider.get_tool("my_tool")
+        tool = await transformed.get_tool("my_tool")
         assert tool is not None
         assert tool.description == "New description"
 
-    def test_remove_tool_transformation(self):
-        """Test removing a tool transformation."""
+    async def test_original_provider_unchanged(self):
+        """Test that the original provider is not modified by with_transforms."""
         from fastmcp.tools.tool_transform import ToolTransformConfig
 
         provider = LocalProvider()
@@ -597,11 +607,18 @@ class TestLocalProviderToolTransformations:
         def my_tool(x: int) -> int:
             return x
 
-        config = ToolTransformConfig(name="renamed")
-        provider.add_tool_transformation("my_tool", config)
-        provider.remove_tool_transformation("my_tool")
+        # Wrap with transforms
+        transformed = provider.with_transforms(
+            tool_transforms={"my_tool": ToolTransformConfig(name="renamed")}
+        )
 
-        assert provider.get_tool_transformation("my_tool") is None
+        # Original should still have original name
+        original_tools = await provider.list_tools()
+        assert original_tools[0].name == "my_tool"
+
+        # Transformed should have new name
+        transformed_tools = await transformed.list_tools()
+        assert transformed_tools[0].name == "renamed"
 
 
 class TestLocalProviderTaskRegistration:

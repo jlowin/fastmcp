@@ -254,14 +254,16 @@ class FastMCP(Generic[LifespanResultT]):
             on_duplicate=self._on_duplicate
         )
 
-        # Apply tool transformations to LocalProvider
+        # Create the served provider (may be wrapped with tool transforms)
+        served_local: Provider = self._local_provider
         if tool_transformations:
-            for tool_name, transformation in tool_transformations.items():
-                self._local_provider.add_tool_transformation(tool_name, transformation)
+            served_local = self._local_provider.with_transforms(
+                tool_transforms=dict(tool_transformations)
+            )
 
-        # LocalProvider is always first in the provider list
+        # Served local provider is always first in the provider list
         self._providers: list[Provider] = [
-            self._local_provider,
+            served_local,
             *(providers or []),
         ]
 
@@ -1690,16 +1692,6 @@ class FastMCP(Generic[LifespanResultT]):
         except KeyError:
             raise NotFoundError(f"Tool {name!r} not found") from None
 
-    def add_tool_transformation(
-        self, tool_name: str, transformation: ToolTransformConfig
-    ) -> None:
-        """Add a tool transformation."""
-        self._local_provider.add_tool_transformation(tool_name, transformation)
-
-    def remove_tool_transformation(self, tool_name: str) -> None:
-        """Remove a tool transformation."""
-        self._local_provider.remove_tool_transformation(tool_name)
-
     @overload
     def tool(
         self,
@@ -2440,6 +2432,7 @@ class FastMCP(Generic[LifespanResultT]):
         mcp_names: dict[str, str] | None = None,
         tags: set[str] | None = None,
         timeout: float | None = None,
+        tool_transforms: dict[str, ToolTransformConfig] | None = None,
         **settings: Any,
     ) -> Self:
         """
@@ -2455,6 +2448,8 @@ class FastMCP(Generic[LifespanResultT]):
             mcp_names: Optional dictionary mapping operationId to component names
             tags: Optional set of tags to add to all components
             timeout: Optional timeout (in seconds) for all requests
+            tool_transforms: Optional dict of tool_name to ToolTransformConfig for
+                schema modifications (arg renames, hidden args, etc.)
             **settings: Additional settings passed to FastMCP
 
         Returns:
@@ -2462,7 +2457,7 @@ class FastMCP(Generic[LifespanResultT]):
         """
         from .providers.openapi import OpenAPIProvider
 
-        provider = OpenAPIProvider(
+        provider: Provider = OpenAPIProvider(
             openapi_spec=openapi_spec,
             client=client,
             route_maps=route_maps,
@@ -2472,6 +2467,8 @@ class FastMCP(Generic[LifespanResultT]):
             tags=tags,
             timeout=timeout,
         )
+        if tool_transforms:
+            provider = provider.with_transforms(tool_transforms=tool_transforms)
         return cls(name=name, providers=[provider], **settings)
 
     @classmethod
@@ -2486,6 +2483,7 @@ class FastMCP(Generic[LifespanResultT]):
         httpx_client_kwargs: dict[str, Any] | None = None,
         tags: set[str] | None = None,
         timeout: float | None = None,
+        tool_transforms: dict[str, ToolTransformConfig] | None = None,
         **settings: Any,
     ) -> Self:
         """
@@ -2501,6 +2499,8 @@ class FastMCP(Generic[LifespanResultT]):
             httpx_client_kwargs: Optional kwargs passed to httpx.AsyncClient
             tags: Optional set of tags to add to all components
             timeout: Optional timeout (in seconds) for all requests
+            tool_transforms: Optional dict of tool_name to ToolTransformConfig for
+                schema modifications (arg renames, hidden args, etc.)
             **settings: Additional settings passed to FastMCP
 
         Returns:
@@ -2519,7 +2519,7 @@ class FastMCP(Generic[LifespanResultT]):
 
         server_name = name or app.title
 
-        provider = OpenAPIProvider(
+        provider: Provider = OpenAPIProvider(
             openapi_spec=app.openapi(),
             client=client,
             route_maps=route_maps,
@@ -2529,6 +2529,8 @@ class FastMCP(Generic[LifespanResultT]):
             tags=tags,
             timeout=timeout,
         )
+        if tool_transforms:
+            provider = provider.with_transforms(tool_transforms=tool_transforms)
         return cls(name=server_name, providers=[provider], **settings)
 
     @classmethod
@@ -2595,6 +2597,7 @@ def create_proxy(
         | dict[str, Any]
         | str
     ),
+    tool_transforms: dict[str, ToolTransformConfig] | None = None,
     **settings: Any,
 ) -> FastMCPProxy:
     """Create a FastMCP proxy server for the given target.
@@ -2610,6 +2613,8 @@ def create_proxy(
             - A URL string or AnyUrl
             - A Path to a server script
             - An MCPConfig or dict
+        tool_transforms: Optional dict of tool_name to ToolTransformConfig for
+            schema modifications (arg renames, hidden args, etc.)
         **settings: Additional settings passed to FastMCPProxy (name, etc.)
 
     Returns:
@@ -2632,4 +2637,8 @@ def create_proxy(
     )
 
     client_factory = _create_client_factory(target)
-    return FastMCPProxy(client_factory=client_factory, **settings)
+    return FastMCPProxy(
+        client_factory=client_factory,
+        tool_transforms=tool_transforms,
+        **settings,
+    )

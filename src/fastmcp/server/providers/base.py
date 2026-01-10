@@ -30,6 +30,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
+from typing import TYPE_CHECKING
 
 from fastmcp.prompts.prompt import Prompt
 from fastmcp.resources.resource import Resource
@@ -38,6 +39,9 @@ from fastmcp.tools.tool import Tool
 from fastmcp.utilities.async_utils import gather
 from fastmcp.utilities.components import FastMCPComponent
 from fastmcp.utilities.visibility import VisibilityFilter
+
+if TYPE_CHECKING:
+    from fastmcp.tools.tool_transform import ToolTransformConfig
 
 
 class Provider:
@@ -69,6 +73,7 @@ class Provider:
         *,
         namespace: str | None = None,
         tool_renames: dict[str, str] | None = None,
+        tool_transforms: dict[str, ToolTransformConfig] | None = None,
     ) -> Provider:
         """Apply transformations to this provider's components.
 
@@ -81,6 +86,9 @@ class Provider:
                 for resources ("protocol://namespace/path").
             tool_renames: Map of original_name → final_name. Tools in this map
                 use the specified name instead of namespace prefixing.
+            tool_transforms: Map of tool_name → ToolTransformConfig for schema
+                modifications (arg renames, hidden args, custom functions, etc.).
+                Applied after namespace/rename transformations.
 
         Returns:
             A TransformingProvider wrapping this provider.
@@ -100,6 +108,13 @@ class Provider:
             # "verbose_tool_name" → "short" (explicit rename)
             # "other_tool" → "api_other_tool" (namespace applied)
 
+            # Apply schema transforms to modify tool arguments
+            provider = MyProvider().with_transforms(
+                tool_transforms={"my_tool": ToolTransformConfig(
+                    args={"old_arg": ArgTransform(name="new_arg")}
+                )}
+            )
+
             # Stacking composes transformations
             provider = (
                 MyProvider()
@@ -112,7 +127,10 @@ class Provider:
         from fastmcp.server.providers.transforming import TransformingProvider
 
         return TransformingProvider(
-            self, namespace=namespace, tool_renames=tool_renames
+            self,
+            namespace=namespace,
+            tool_renames=tool_renames,
+            tool_transforms=tool_transforms,
         )
 
     def with_namespace(self, namespace: str) -> Provider:

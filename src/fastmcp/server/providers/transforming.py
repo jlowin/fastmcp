@@ -16,6 +16,7 @@ from fastmcp.resources.resource import Resource
 from fastmcp.resources.template import ResourceTemplate
 from fastmcp.server.providers.base import Provider
 from fastmcp.tools.tool import Tool
+from fastmcp.tools.tool_transform import ToolTransformConfig
 from fastmcp.utilities.components import FastMCPComponent
 
 if TYPE_CHECKING:
@@ -37,13 +38,17 @@ class TransformingProvider(Provider):
         - Tools/prompts with explicit renames use the rename (bypasses namespace)
         - Tools/prompts without renames get namespace prefix: "namespace_name"
         - Resources get path-style namespace: "protocol://namespace/path"
+        - tool_transforms apply schema modifications (arg renames, hidden args, etc.)
 
     Example:
         ```python
         # Via with_transforms() method (preferred)
         provider = SomeProvider().with_transforms(
             namespace="api",
-            tool_renames={"verbose_tool_name": "short"}
+            tool_renames={"verbose_tool_name": "short"},
+            tool_transforms={"short": ToolTransformConfig(
+                args={"old_arg": ArgTransform(name="new_arg")}
+            )}
         )
 
         # Stacking composes transformations:
@@ -62,6 +67,7 @@ class TransformingProvider(Provider):
         *,
         namespace: str | None = None,
         tool_renames: dict[str, str] | None = None,
+        tool_transforms: dict[str, ToolTransformConfig] | None = None,
     ):
         """Initialize a TransformingProvider.
 
@@ -70,11 +76,15 @@ class TransformingProvider(Provider):
             namespace: Prefix for tools/prompts, path segment for resources.
             tool_renames: Map of original_name → final_name. Tools in this map
                 use the specified name instead of namespace prefixing.
+            tool_transforms: Map of tool_name → ToolTransformConfig for schema
+                modifications (arg renames, hidden args, custom functions, etc.).
+                Applied after namespace/rename transformations.
         """
         super().__init__()
         self._wrapped: Provider = provider
         self.namespace = namespace
         self.tool_renames = tool_renames or {}
+        self.tool_transforms = tool_transforms or {}
 
         # Validate that renames are reversible (no duplicate target names)
         if len(self.tool_renames) != len(set(self.tool_renames.values())):
@@ -88,6 +98,13 @@ class TransformingProvider(Provider):
                 seen[renamed] = orig
 
         self._tool_renames_reverse = {v: k for k, v in self.tool_renames.items()}
+
+        # Build reverse mapping for tool_transforms that rename tools
+        # Maps: final_name -> pre_transform_name (the key in tool_transforms)
+        self._tool_transforms_name_reverse: dict[str, str] = {}
+        for pre_transform_name, config in self.tool_transforms.items():
+            if config.name is not None:
+                self._tool_transforms_name_reverse[config.name] = pre_transform_name
 
     # -------------------------------------------------------------------------
     # Tool name transformation
@@ -166,22 +183,40 @@ class TransformingProvider(Provider):
     # Tool methods
     # -------------------------------------------------------------------------
 
+    def _apply_tool_transform(self, tool: Tool, name: str) -> Tool:
+        """Apply namespace/rename and schema transforms to a tool."""
+        # First apply namespace/rename
+        t = tool.model_copy(update={"name": name})
+
+        # Then apply schema transform if present
+        if name in self.tool_transforms:
+            t = self.tool_transforms[name].apply(t)
+
+        return t
+
     async def list_tools(self) -> Sequence[Tool]:
         """List tools with transformations applied."""
         tools = await self._wrapped.list_tools()
         return [
-            t.model_copy(update={"name": self._transform_tool_name(t.name)})
+            self._apply_tool_transform(t, self._transform_tool_name(t.name))
             for t in tools
         ]
 
     async def get_tool(self, name: str) -> Tool | None:
         """Get tool by transformed name."""
-        original = self._reverse_tool_name(name)
+        # First check if name was transformed by tool_transforms (e.g., renamed)
+        # If so, get the pre-transform name (the key in tool_transforms)
+        pre_transform_name = self._tool_transforms_name_reverse.get(name, name)
+
+        # Now reverse the namespace/rename transformation
+        original = self._reverse_tool_name(pre_transform_name)
         if original is None:
             return None
+
         tool = await self._wrapped.get_tool(original)
         if tool:
-            return tool.model_copy(update={"name": name})
+            # Apply transforms using the pre_transform_name (the key in tool_transforms)
+            return self._apply_tool_transform(tool, pre_transform_name)
         return None
 
     # -------------------------------------------------------------------------
@@ -266,11 +301,8 @@ class TransformingProvider(Provider):
 
         for component in await self._wrapped.get_tasks():
             if isinstance(component, Tool):
-                transformed.append(
-                    component.model_copy(
-                        update={"name": self._transform_tool_name(component.name)}
-                    )
-                )
+                name = self._transform_tool_name(component.name)
+                transformed.append(self._apply_tool_transform(component, name))
             elif isinstance(component, ResourceTemplate):
                 transformed.append(
                     component.model_copy(
