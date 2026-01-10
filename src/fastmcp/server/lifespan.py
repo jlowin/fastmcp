@@ -52,7 +52,7 @@ if TYPE_CHECKING:
     from fastmcp.server.server import FastMCP
 
 
-LifespanFn = Callable[["FastMCP[Any]"], AsyncIterator[dict[str, Any]]]
+LifespanFn = Callable[["FastMCP[Any]"], AsyncIterator[dict[str, Any] | None]]
 LifespanContextManagerFn = Callable[
     ["FastMCP[Any]"], AbstractAsyncContextManager[dict[str, Any] | None]
 ]

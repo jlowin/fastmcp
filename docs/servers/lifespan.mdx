@@ -14,16 +14,16 @@ from fastmcp import FastMCP
 from fastmcp.server.lifespan import lifespan
 
 @lifespan
-async def db_lifespan(server):
+async def app_lifespan(server):
     # Setup: runs once when server starts
-    db = await connect_database()
+    print("Starting up...")
     try:
-        yield {"db": db}
+        yield {"started_at": "2024-01-01"}
     finally:
         # Teardown: runs when server stops
-        await db.close()
+        print("Shutting down...")
 
-mcp = FastMCP("MyServer", lifespan=db_lifespan)
+mcp = FastMCP("MyServer", lifespan=app_lifespan)
 ```
 
 The dict you yield becomes the **lifespan context**, accessible from tools.
@@ -42,18 +42,16 @@ from fastmcp.server.lifespan import lifespan
 
 @lifespan
 async def app_lifespan(server):
-    cache = await connect_cache()
-    try:
-        yield {"cache": cache}
-    finally:
-        await cache.close()
+    # Initialize shared state
+    data = {"users": ["alice", "bob"]}
+    yield {"data": data}
 
 mcp = FastMCP("MyServer", lifespan=app_lifespan)
 
 @mcp.tool
-def get_cached_data(ctx: Context, key: str) -> str:
-    cache = ctx.lifespan_context["cache"]
-    return cache.get(key)
+def list_users(ctx: Context) -> list[str]:
+    data = ctx.lifespan_context["data"]
+    return data["users"]
 ```
 
 ## Composing Lifespans
@@ -65,23 +63,17 @@ from fastmcp import FastMCP
 from fastmcp.server.lifespan import lifespan
 
 @lifespan
-async def db_lifespan(server):
-    db = await connect_db()
-    try:
-        yield {"db": db}
-    finally:
-        await db.close()
+async def config_lifespan(server):
+    config = {"debug": True, "version": "1.0"}
+    yield {"config": config}
 
 @lifespan
-async def cache_lifespan(server):
-    cache = await connect_cache()
-    try:
-        yield {"cache": cache}
-    finally:
-        await cache.close()
+async def data_lifespan(server):
+    data = {"items": []}
+    yield {"data": data}
 
 # Compose with |
-mcp = FastMCP("MyServer", lifespan=db_lifespan | cache_lifespan)
+mcp = FastMCP("MyServer", lifespan=config_lifespan | data_lifespan)
 ```
 
 Composed lifespans:
@@ -135,8 +127,9 @@ from fastmcp.utilities.lifespan import combine_lifespans
 
 @asynccontextmanager
 async def app_lifespan(app):
-    # Your FastAPI app setup
+    print("FastAPI starting...")
     yield
+    print("FastAPI shutting down...")
 
 mcp = FastMCP("Tools")
 mcp_app = mcp.http_app()
