@@ -145,17 +145,15 @@ main.mount(subserver, namespace="api")
 
 ### Proxy Mounting
 
-The parent server treats the mounted server as a separate entity:
+<Warning>
+The `as_proxy` parameter is deprecated. Mounted servers now always have their lifespan and middleware invoked. To create a proxy server explicitly, use `create_proxy()` from `fastmcp.server`.
+</Warning>
 
-```python
-main.mount(subserver, namespace="api", as_proxy=True)
-```
+Previously, the parent server could treat the mounted server as a separate entity with its own lifecycle. This behavior is now the default for all mounted servers:
 
 - Full client lifecycle events on mounted server
 - Mounted server's lifespan is executed
 - Communication via in-memory Client transport
-
-FastMCP automatically uses proxy mounting when the mounted server has a custom lifespan. Override with `as_proxy=True` or `as_proxy=False`.
 
 ## Tag Filtering
 

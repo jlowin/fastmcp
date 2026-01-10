@@ -14,7 +14,13 @@ from fastmcp.client import Client
 from fastmcp.client.transports import FastMCPTransport, StreamableHttpTransport
 from fastmcp.exceptions import ToolError
 from fastmcp.resources import ResourceContent, ResourceResult
-from fastmcp.server.providers.proxy import FastMCPProxy, ProxyClient
+from fastmcp.server import create_proxy
+from fastmcp.server.providers.proxy import (
+    FastMCPProxy,
+    ProxyClient,
+    ProxyProvider,
+    create_proxy_provider,
+)
 from fastmcp.tools.tool import ToolResult
 from fastmcp.tools.tool_transform import (
     ToolTransformConfig,
@@ -131,44 +137,109 @@ def fastmcp_server():
 @pytest.fixture
 async def proxy_server(fastmcp_server):
     """Fixture that creates a FastMCP proxy server."""
-    return FastMCP.as_proxy(ProxyClient(transport=FastMCPTransport(fastmcp_server)))
+    return create_proxy(ProxyClient(transport=FastMCPTransport(fastmcp_server)))
 
 
-async def test_create_proxy(fastmcp_server):
-    """Test that the proxy server properly forwards requests to the original server."""
-    # Create a client
+async def test_create_proxy_with_client(fastmcp_server):
+    """Test create_proxy with a Client."""
     client = ProxyClient(transport=FastMCPTransport(fastmcp_server))
-
-    server = FastMCPProxy.as_proxy(client)
+    server = create_proxy(client)
 
     assert isinstance(server, FastMCPProxy)
     assert isinstance(server, FastMCP)
     assert server.name.startswith("FastMCPProxy-")
 
 
-async def test_as_proxy_with_server(fastmcp_server):
-    """FastMCP.as_proxy should accept a FastMCP instance."""
-    proxy = FastMCP.as_proxy(fastmcp_server)
+async def test_create_proxy_with_server(fastmcp_server):
+    """create_proxy should accept a FastMCP instance."""
+    proxy = create_proxy(fastmcp_server)
     async with Client(proxy) as client:
         result = await client.call_tool("greet", {"name": "Test"})
         assert result.data == "Hello, Test!"
 
 
-async def test_as_proxy_with_transport(fastmcp_server):
-    """FastMCP.as_proxy should accept a ClientTransport."""
-    proxy = FastMCP.as_proxy(FastMCPTransport(fastmcp_server))
+async def test_create_proxy_with_transport(fastmcp_server):
+    """create_proxy should accept a ClientTransport."""
+    proxy = create_proxy(FastMCPTransport(fastmcp_server))
     async with Client(proxy) as client:
         result = await client.call_tool("greet", {"name": "Test"})
         assert result.data == "Hello, Test!"
 
 
-def test_as_proxy_with_url():
-    """FastMCP.as_proxy should accept a URL without connecting."""
-    proxy = FastMCP.as_proxy("http://example.com/mcp/")
+def test_create_proxy_with_url():
+    """create_proxy should accept a URL without connecting."""
+    proxy = create_proxy("http://example.com/mcp/")
     assert isinstance(proxy, FastMCPProxy)
     client = cast(Client, proxy.client_factory())
     assert isinstance(client.transport, StreamableHttpTransport)
     assert client.transport.url == "http://example.com/mcp/"
+
+
+# --- create_proxy_provider tests ---
+
+
+async def test_create_proxy_provider_with_server(fastmcp_server):
+    """create_proxy_provider should return a ProxyProvider."""
+    provider = create_proxy_provider(fastmcp_server)
+    assert isinstance(provider, ProxyProvider)
+
+    # Add provider to a new server and verify it works
+    server = FastMCP("TestWithProvider")
+    server.add_provider(provider)
+
+    async with Client(server) as client:
+        result = await client.call_tool("greet", {"name": "Provider"})
+        assert result.data == "Hello, Provider!"
+
+
+async def test_create_proxy_provider_with_tool_transformations(fastmcp_server):
+    """create_proxy_provider should support tool transformations."""
+    provider = create_proxy_provider(
+        fastmcp_server,
+        tool_transformations={"greet": ToolTransformConfig(name="say_hello")},
+    )
+    assert isinstance(provider, ProxyProvider)
+
+    server = FastMCP("TestWithTransforms")
+    server.add_provider(provider)
+
+    async with Client(server) as client:
+        tools = await client.list_tools()
+        tool_names = [t.name for t in tools]
+        assert "say_hello" in tool_names
+        assert "greet" not in tool_names
+
+
+# --- Deprecated as_proxy tests (verify backwards compatibility) ---
+
+
+async def test_as_proxy_deprecated_with_server(fastmcp_server):
+    """FastMCP.as_proxy should work but emit deprecation warning."""
+    import warnings
+
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        proxy = FastMCP.as_proxy(fastmcp_server)
+        assert len(w) == 1
+        assert issubclass(w[0].category, DeprecationWarning)
+        assert "create_proxy" in str(w[0].message)
+
+    async with Client(proxy) as client:
+        result = await client.call_tool("greet", {"name": "Test"})
+        assert result.data == "Hello, Test!"
+
+
+def test_as_proxy_deprecated_with_url():
+    """FastMCP.as_proxy should work but emit deprecation warning."""
+    import warnings
+
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        proxy = FastMCP.as_proxy("http://example.com/mcp/")
+        assert len(w) == 1
+        assert issubclass(w[0].category, DeprecationWarning)
+
+    assert isinstance(proxy, FastMCPProxy)
 
 
 async def test_proxy_with_async_client_factory():
