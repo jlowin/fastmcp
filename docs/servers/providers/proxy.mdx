@@ -284,13 +284,13 @@ proxy = FastMCPProxy(client_factory=create_client)
 
 This gives you full control over session creation and reuse strategies.
 
-### Adding Proxy Provider to Existing Server
+### Adding Proxied Components to Existing Server
 
-Use `create_proxy_provider()` to add proxied components to an existing server:
+Mount a proxy to add remote components to an existing server:
 
 ```python
 from fastmcp import FastMCP
-from fastmcp.server.providers.proxy import create_proxy_provider
+from fastmcp.server import create_proxy
 
 server = FastMCP("My Server")
 
@@ -299,9 +299,9 @@ server = FastMCP("My Server")
 def local_tool() -> str:
     return "Local result"
 
-# Add proxied tools from remote server
-provider = create_proxy_provider("http://remote-server/mcp")
-server.add_provider(provider)
+# Mount proxied tools from remote server
+remote = create_proxy("http://remote-server/mcp")
+server.mount(remote)
 
 # Now server has both local and proxied tools
 ```

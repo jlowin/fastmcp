@@ -629,55 +629,6 @@ def _create_client_factory(
         return proxy_client_factory
 
 
-def create_proxy_provider(
-    target: (
-        Client[ClientTransportT]
-        | ClientTransport
-        | FastMCP[Any]
-        | FastMCP1Server
-        | AnyUrl
-        | Path
-        | MCPConfig
-        | dict[str, Any]
-        | str
-    ),
-    *,
-    tool_transformations: dict[str, ToolTransformConfig] | None = None,
-) -> ProxyProvider:
-    """Create a ProxyProvider for the given target.
-
-    This is the lower-level function for users who want to add a proxy provider
-    to an existing FastMCP server.
-
-    Args:
-        target: The backend to proxy to. Can be:
-            - A Client instance (connected or disconnected)
-            - A ClientTransport
-            - A FastMCP server instance
-            - A URL string or AnyUrl
-            - A Path to a server script
-            - An MCPConfig or dict
-        tool_transformations: Optional tool transformations to apply to proxy tools.
-
-    Returns:
-        A ProxyProvider that proxies to the target.
-
-    Example:
-        ```python
-        from fastmcp import FastMCP
-        from fastmcp.server.providers.proxy import create_proxy_provider
-
-        server = FastMCP("My Server")
-        provider = create_proxy_provider("http://remote-server/mcp")
-        server.add_provider(provider)
-        ```
-    """
-    client_factory = _create_client_factory(target)
-    return ProxyProvider(
-        client_factory=client_factory, tool_transformations=tool_transformations
-    )
-
-
 # -----------------------------------------------------------------------------
 # FastMCPProxy - Convenience Wrapper
 # -----------------------------------------------------------------------------

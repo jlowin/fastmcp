@@ -18,8 +18,6 @@ from fastmcp.server import create_proxy
 from fastmcp.server.providers.proxy import (
     FastMCPProxy,
     ProxyClient,
-    ProxyProvider,
-    create_proxy_provider,
 )
 from fastmcp.tools.tool import ToolResult
 from fastmcp.tools.tool_transform import (
@@ -173,41 +171,6 @@ def test_create_proxy_with_url():
     client = cast(Client, proxy.client_factory())
     assert isinstance(client.transport, StreamableHttpTransport)
     assert client.transport.url == "http://example.com/mcp/"
-
-
-# --- create_proxy_provider tests ---
-
-
-async def test_create_proxy_provider_with_server(fastmcp_server):
-    """create_proxy_provider should return a ProxyProvider."""
-    provider = create_proxy_provider(fastmcp_server)
-    assert isinstance(provider, ProxyProvider)
-
-    # Add provider to a new server and verify it works
-    server = FastMCP("TestWithProvider")
-    server.add_provider(provider)
-
-    async with Client(server) as client:
-        result = await client.call_tool("greet", {"name": "Provider"})
-        assert result.data == "Hello, Provider!"
-
-
-async def test_create_proxy_provider_with_tool_transformations(fastmcp_server):
-    """create_proxy_provider should support tool transformations."""
-    provider = create_proxy_provider(
-        fastmcp_server,
-        tool_transformations={"greet": ToolTransformConfig(name="say_hello")},
-    )
-    assert isinstance(provider, ProxyProvider)
-
-    server = FastMCP("TestWithTransforms")
-    server.add_provider(provider)
-
-    async with Client(server) as client:
-        tools = await client.list_tools()
-        tool_names = [t.name for t in tools]
-        assert "say_hello" in tool_names
-        assert "greet" not in tool_names
 
 
 # --- Deprecated as_proxy tests (verify backwards compatibility) ---
