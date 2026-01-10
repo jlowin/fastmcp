@@ -267,7 +267,7 @@ def log_server_banner(server: FastMCP[Any]) -> None:
             ("🎉 Update available: ", "bold"),
             (newer_version, "bold green"),
         )
-        update_line2 = Text("Run: uv pip install --upgrade fastmcp", style="dim")
+        update_line2 = Text("Run: pip install --upgrade fastmcp", style="dim")
         update_notice = Panel(
             Group(Align.center(update_line1), Align.center(update_line2)),
             border_style="blue",
