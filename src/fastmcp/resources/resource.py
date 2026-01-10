@@ -565,7 +565,7 @@ def resource(
 
     def decorator(fn: AnyFunction) -> Resource | ResourceTemplate:
         if isinstance(fn, classmethod):
-            raise ValueError(
+            raise TypeError(
                 inspect.cleandoc(
                     """
                     To decorate a classmethod, first define the method and then call
@@ -603,7 +603,7 @@ def resource(
                 meta=meta,
                 task=supports_task,
             )
-        elif not has_uri_params and not has_func_params:
+        else:
             return Resource.from_function(
                 fn=fn,
                 uri=uri,
@@ -616,11 +616,6 @@ def resource(
                 annotations=annotations,
                 meta=meta,
                 task=supports_task,
-            )
-        else:
-            raise ValueError(
-                "Invalid resource or template definition due to a "
-                "mismatch between URI parameters and function parameters."
             )
 
     return decorator

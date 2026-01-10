@@ -88,7 +88,7 @@ class TestPromptDecorator:
 
     def test_prompt_rejects_classmethod_decorator(self):
         """@prompt should reject classmethod-decorated functions."""
-        with pytest.raises(ValueError, match="classmethod"):
+        with pytest.raises(TypeError, match="classmethod"):
 
             class MyClass:
                 @prompt  # type: ignore[arg-type]

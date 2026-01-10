@@ -88,7 +88,7 @@ class TestToolDecorator:
 
     def test_tool_rejects_classmethod_decorator(self):
         """@tool should reject classmethod-decorated functions."""
-        with pytest.raises(ValueError, match="classmethod"):
+        with pytest.raises(TypeError, match="classmethod"):
 
             class MyClass:
                 @tool  # type: ignore[arg-type]

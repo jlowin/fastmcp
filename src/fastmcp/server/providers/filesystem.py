@@ -129,9 +129,11 @@ class FileSystemProvider(LocalProvider):
         for file_path, component in result.components:
             try:
                 self._register_component(component)
-            except Exception as e:
-                logger.warning(
-                    f"Failed to register {component.name} from {file_path}: {e}"
+            except Exception:
+                logger.exception(
+                    "Failed to register %s from %s",
+                    getattr(component, "name", repr(component)),
+                    file_path,
                 )
 
         self._loaded = True
@@ -144,12 +146,13 @@ class FileSystemProvider(LocalProvider):
         if isinstance(component, Tool):
             self.add_tool(component)
         elif isinstance(component, ResourceTemplate):
-            # Check ResourceTemplate before Resource since it's a subclass
             self.add_template(component)
         elif isinstance(component, Resource):
             self.add_resource(component)
         elif isinstance(component, Prompt):
             self.add_prompt(component)
+        else:
+            logger.debug("Ignoring unknown component type: %r", type(component))
 
     async def _ensure_loaded(self) -> None:
         """Ensure components are loaded, reloading if in reload mode.

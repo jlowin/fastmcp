@@ -712,7 +712,7 @@ def prompt(
         ```
     """
     if isinstance(name_or_fn, classmethod):
-        raise ValueError(
+        raise TypeError(
             inspect.cleandoc(
                 """
                 To decorate a classmethod, first define the method and then call

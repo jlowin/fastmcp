@@ -92,7 +92,7 @@ class TestResourceDecorator:
 
     def test_resource_rejects_classmethod_decorator(self):
         """@resource should reject classmethod-decorated functions."""
-        with pytest.raises(ValueError, match="classmethod"):
+        with pytest.raises(TypeError, match="classmethod"):
 
             class MyClass:
                 @resource("config://app")  # type: ignore[arg-type]
