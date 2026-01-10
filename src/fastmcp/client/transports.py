@@ -1021,7 +1021,9 @@ class MCPConfigTransport(ClientTransport):
             return
 
         # Multiple servers - create composite with mounted proxies
-        # Clear any previous transports from prior connections
+        # Close any previous transports from prior connections to avoid leaking
+        for t in self._transports:
+            await t.close()
         self._transports = []
         timeout = session_kwargs.get("read_timeout_seconds")
         composite = FastMCP[Any](name="MCPRouter")
