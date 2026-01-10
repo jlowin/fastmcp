@@ -37,6 +37,7 @@ class PingMiddleware(Middleware):
             raise ValueError("interval_ms must be positive")
         self.interval_ms = interval_ms
         self._active_sessions: set[int] = set()
+        self._lock = anyio.Lock()
 
     async def on_message(self, context: MiddlewareContext, call_next: CallNext) -> Any:
         """Start ping task on first message from a session."""
@@ -49,12 +50,13 @@ class PingMiddleware(Middleware):
         session = context.fastmcp_context.session
         session_id = id(session)
 
-        if session_id not in self._active_sessions:
-            # _subscription_task_group is added by MiddlewareServerSession
-            tg = session._subscription_task_group  # type: ignore[attr-defined]
-            if tg is not None:
-                self._active_sessions.add(session_id)
-                tg.start_soon(self._ping_loop, session, session_id)
+        async with self._lock:
+            if session_id not in self._active_sessions:
+                # _subscription_task_group is added by MiddlewareServerSession
+                tg = session._subscription_task_group  # type: ignore[attr-defined]
+                if tg is not None:
+                    self._active_sessions.add(session_id)
+                    tg.start_soon(self._ping_loop, session, session_id)
 
         return await call_next(context)
 
