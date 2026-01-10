@@ -654,8 +654,9 @@ class _CurrentDocket(Dependency):  # type: ignore[misc]
         docket = _current_docket.get()
         if docket is None:
             raise RuntimeError(
-                "No Docket instance found. Docket is only available within "
-                "a running FastMCP server context."
+                "No Docket instance found. Docket is only initialized when there are "
+                "task-enabled components (task=True). Add task=True to a component "
+                "to enable Docket infrastructure."
             )
         return docket
 
@@ -698,8 +699,9 @@ class _CurrentWorker(Dependency):  # type: ignore[misc]
         worker = _current_worker.get()
         if worker is None:
             raise RuntimeError(
-                "No Worker instance found. Worker is only available within "
-                "a running FastMCP server context."
+                "No Worker instance found. Worker is only initialized when there are "
+                "task-enabled components (task=True). Add task=True to a component "
+                "to enable Docket infrastructure."
             )
         return worker
 
@@ -867,37 +869,40 @@ class InMemoryProgress:
 class Progress(Dependency):  # type: ignore[misc]
     """FastMCP Progress dependency that works in both server and worker contexts.
 
-    Extends Docket's Progress to handle two execution modes:
-    - In Docket worker: Uses the execution's progress (standard Docket behavior)
-    - In FastMCP server: Uses in-memory progress (not observable remotely)
+    Handles three execution modes:
+    - In Docket worker: Uses the execution's progress (observable via Redis)
+    - In FastMCP server with Docket: Falls back to in-memory progress
+    - In FastMCP server without Docket: Uses in-memory progress
 
     This allows tools to use Progress() regardless of whether they're called
-    immediately or as background tasks.
-
-    Requires fastmcp[tasks] to be installed.
+    immediately or as background tasks, and regardless of whether pydocket
+    is installed.
     """
 
     async def __aenter__(self) -> ProgressLike:
-        require_docket("Progress()")
+        # Check if we're in a FastMCP server context
+        server_ref = _current_server.get()
+        if server_ref is None or server_ref() is None:
+            raise RuntimeError("Progress dependency requires a FastMCP server context.")
 
-        # Import DocketProgress here since we've verified docket is available
-        from docket.dependencies import Progress as DocketProgress
+        # If pydocket is installed, try to use Docket's progress
+        if is_docket_available():
+            from docket.dependencies import Progress as DocketProgress
 
-        # Try to get execution from Docket worker context
-        try:
-            # Create a temporary DocketProgress to use its __aenter__
-            docket_progress = DocketProgress()
-            return await docket_progress.__aenter__()
-        except LookupError:
-            # Not in worker context - return in-memory progress
-            docket = _current_docket.get()
-            if docket is None:
-                raise RuntimeError(
-                    "Progress dependency requires a FastMCP server context."
-                ) from None
+            # Try to get execution from Docket worker context
+            try:
+                docket_progress = DocketProgress()
+                return await docket_progress.__aenter__()
+            except LookupError:
+                # Not in worker context - fall through to in-memory progress
+                pass
 
-            # Return in-memory progress for immediate execution
-            return InMemoryProgress()
+        # Return in-memory progress for immediate execution
+        # This is used when:
+        # 1. pydocket is not installed
+        # 2. Docket is not running (no task-enabled components)
+        # 3. In server context (not worker context)
+        return InMemoryProgress()
 
     async def __aexit__(self, *args: object) -> None:
         pass

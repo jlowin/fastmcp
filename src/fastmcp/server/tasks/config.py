@@ -51,6 +51,11 @@ class TaskConfig:
     - "required": Component requires task execution. Clients must request task
       augmentation; server returns -32601 if they don't.
 
+    Important:
+        Task-enabled components must be available at server startup to be
+        registered with all Docket workers. Components added dynamically after
+        startup will not be registered for background execution.
+
     Example:
         ```python
         from fastmcp import FastMCP

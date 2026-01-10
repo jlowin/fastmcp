@@ -460,8 +460,12 @@ class FastMCP(Generic[LifespanResultT]):
     async def _docket_lifespan(self) -> AsyncIterator[None]:
         """Manage Docket instance and Worker for background task execution.
 
-        If pydocket is not installed, only sets up the server ContextVar without
-        task infrastructure.
+        Docket infrastructure is only initialized if:
+        1. pydocket is installed (fastmcp[tasks] extra)
+        2. There are task-enabled components (task_config.mode != 'forbidden')
+
+        This means users with pydocket installed but no task-enabled components
+        won't spin up Docket/Worker infrastructure.
         """
         from fastmcp.server.dependencies import _current_server, is_docket_available
 
@@ -475,7 +479,31 @@ class FastMCP(Generic[LifespanResultT]):
                 yield
                 return
 
-            # Docket is available - set up full task infrastructure
+            # Collect task-enabled components from all providers at startup.
+            # Components must be available now to be registered with Docket workers;
+            # dynamically added components after startup won't be registered.
+            task_results = await gather(
+                *[p.get_tasks() for p in self._providers],
+                return_exceptions=True,
+            )
+
+            # Flatten and filter results, collecting components and errors
+            task_components: list[FastMCPComponent] = []
+            for i, result in enumerate(task_results):
+                if isinstance(result, BaseException):
+                    provider = self._providers[i]
+                    logger.warning(f"Failed to get tasks from {provider}: {result}")
+                    if fastmcp.settings.mounted_components_raise_on_load_error:
+                        raise result
+                    continue
+                task_components.extend(result)
+
+            # If no task-enabled components, skip Docket infrastructure entirely
+            if not task_components:
+                yield
+                return
+
+            # Docket is available AND there are task-enabled components
             from docket import Docket, Worker
 
             from fastmcp import settings
@@ -492,23 +520,9 @@ class FastMCP(Generic[LifespanResultT]):
                 # Store on server instance for cross-task access (FastMCPTransport)
                 self._docket = docket
 
-                # Register task-enabled components from all providers in parallel
-                task_results = await gather(
-                    *[p.get_tasks() for p in self._providers],
-                    return_exceptions=True,
-                )
-
-                for i, result in enumerate(task_results):
-                    if isinstance(result, BaseException):
-                        provider = self._providers[i]
-                        logger.warning(
-                            f"Failed to register tasks from {provider}: {result}"
-                        )
-                        if fastmcp.settings.mounted_components_raise_on_load_error:
-                            raise result
-                        continue
-                    for component in result:
-                        component.register_with_docket(docket)
+                # Register task-enabled components with Docket
+                for component in task_components:
+                    component.register_with_docket(docket)
 
                 # Set Docket in ContextVar so CurrentDocket can access it
                 docket_token = _current_docket.set(docket)
