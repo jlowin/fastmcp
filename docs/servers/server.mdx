@@ -295,10 +295,10 @@ Proxies automatically handle concurrent operations safely by creating fresh sess
 See the [Remote Proxies](/servers/providers/proxy) guide for details and advanced usage.
 
 ```python
-from fastmcp import FastMCP, Client
+from fastmcp import FastMCP
 
-backend = Client("http://example.com/mcp/sse")
-proxy = FastMCP.as_proxy(backend, name="ProxyServer")
+# as_proxy() accepts URLs, file paths, and commands directly
+proxy = FastMCP.as_proxy("http://example.com/mcp/sse", name="ProxyServer")
 # Now use the proxy like any FastMCP server
 ```
 
