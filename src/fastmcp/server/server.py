@@ -30,7 +30,6 @@ import anyio
 import httpx
 import mcp.types
 import uvicorn
-from docket import Docket, Worker
 from mcp.server.lowlevel.server import LifespanResultT, NotificationOptions
 from mcp.server.stdio import stdio_server
 from mcp.shared.exceptions import McpError
@@ -94,6 +93,8 @@ from fastmcp.utilities.types import NotSet, NotSetT
 from fastmcp.utilities.visibility import VisibilityFilter
 
 if TYPE_CHECKING:
+    from docket import Docket
+
     from fastmcp.client import Client
     from fastmcp.client.client import FastMCP1Server
     from fastmcp.client.sampling import SamplingHandler
@@ -457,19 +458,32 @@ class FastMCP(Generic[LifespanResultT]):
 
     @asynccontextmanager
     async def _docket_lifespan(self) -> AsyncIterator[None]:
-        """Manage Docket instance and Worker for background task execution."""
-        from fastmcp import settings
+        """Manage Docket instance and Worker for background task execution.
 
-        # Set FastMCP server in ContextVar so CurrentFastMCP can access it (use weakref to avoid reference cycles)
-        from fastmcp.server.dependencies import (
-            _current_docket,
-            _current_server,
-            _current_worker,
-        )
+        If pydocket is not installed, only sets up the server ContextVar without
+        task infrastructure.
+        """
+        from fastmcp.server.dependencies import _current_server, is_docket_available
 
+        # Set FastMCP server in ContextVar so CurrentFastMCP can access it
+        # (use weakref to avoid reference cycles)
         server_token = _current_server.set(weakref.ref(self))
 
         try:
+            # If docket is not available, skip task infrastructure
+            if not is_docket_available():
+                yield
+                return
+
+            # Docket is available - set up full task infrastructure
+            from docket import Docket, Worker
+
+            from fastmcp import settings
+            from fastmcp.server.dependencies import (
+                _current_docket,
+                _current_worker,
+            )
+
             # Create Docket instance using configured name and URL
             async with Docket(
                 name=settings.docket.name,
@@ -638,7 +652,16 @@ class FastMCP(Generic[LifespanResultT]):
         self._setup_task_protocol_handlers()
 
     def _setup_task_protocol_handlers(self) -> None:
-        """Register SEP-1686 task protocol handlers with SDK."""
+        """Register SEP-1686 task protocol handlers with SDK.
+
+        Only registers handlers if docket is installed. Without docket,
+        task protocol requests will return "method not found" errors.
+        """
+        from fastmcp.server.dependencies import is_docket_available
+
+        if not is_docket_available():
+            return
+
         from mcp.types import (
             CancelTaskRequest,
             GetTaskPayloadRequest,

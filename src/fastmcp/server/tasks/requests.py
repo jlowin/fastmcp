@@ -2,6 +2,8 @@
 
 Handles MCP task protocol requests: tasks/get, tasks/result, tasks/list, tasks/cancel.
 These handlers query and manage existing tasks (contrast with handlers.py which creates tasks).
+
+This module requires fastmcp[tasks] (pydocket). It is only imported when docket is available.
 """
 
 from __future__ import annotations
@@ -21,22 +23,30 @@ from mcp.types import (
     ListTasksResult,
 )
 
+import fastmcp.server.context
+from fastmcp.prompts.prompt import Prompt
+from fastmcp.resources.resource import Resource
+from fastmcp.resources.template import ResourceTemplate
 from fastmcp.server.tasks.config import DEFAULT_POLL_INTERVAL_MS, DEFAULT_TTL_MS
 from fastmcp.server.tasks.keys import parse_task_key
+from fastmcp.tools.tool import Tool
 
 if TYPE_CHECKING:
     from fastmcp.server.server import FastMCP
 
-# Map Docket execution states to MCP task status strings
-# Per SEP-1686 final spec (line 381): tasks MUST begin in "working" status
-DOCKET_TO_MCP_STATE: dict[ExecutionState, str] = {
-    ExecutionState.SCHEDULED: "working",  # Initial state per spec
-    ExecutionState.QUEUED: "working",  # Initial state per spec
-    ExecutionState.RUNNING: "working",
-    ExecutionState.COMPLETED: "completed",
-    ExecutionState.FAILED: "failed",
-    ExecutionState.CANCELLED: "cancelled",
-}
+
+def _get_docket_to_mcp_state_map() -> dict[ExecutionState, str]:
+    """Get the mapping from Docket execution states to MCP task status strings."""
+    # Map Docket execution states to MCP task status strings
+    # Per SEP-1686 final spec (line 381): tasks MUST begin in "working" status
+    return {
+        ExecutionState.SCHEDULED: "working",  # Initial state per spec
+        ExecutionState.QUEUED: "working",  # Initial state per spec
+        ExecutionState.RUNNING: "working",
+        ExecutionState.COMPLETED: "completed",
+        ExecutionState.FAILED: "failed",
+        ExecutionState.CANCELLED: "cancelled",
+    }
 
 
 async def _lookup_task_execution(
@@ -115,8 +125,6 @@ async def tasks_get_handler(server: FastMCP, params: dict[str, Any]) -> GetTaskR
     Returns:
         GetTaskResult: Task status response with spec-compliant fields
     """
-    import fastmcp.server.context
-
     async with fastmcp.server.context.Context(fastmcp=server) as ctx:
         client_task_id = params.get("taskId")
         if not client_task_id:
@@ -148,9 +156,10 @@ async def tasks_get_handler(server: FastMCP, params: dict[str, Any]) -> GetTaskR
         await execution.sync()
 
         # Map Docket state to MCP state
+        state_map = _get_docket_to_mcp_state_map()
         mcp_state: Literal[
             "working", "input_required", "completed", "failed", "cancelled"
-        ] = DOCKET_TO_MCP_STATE.get(execution.state, "failed")  # type: ignore[assignment]
+        ] = state_map.get(execution.state, "failed")  # type: ignore[assignment]
 
         # Build response (use default ttl since we don't track per-task values)
         # createdAt is REQUIRED per SEP-1686 final spec (line 430)
@@ -203,8 +212,6 @@ async def tasks_result_handler(server: FastMCP, params: dict[str, Any]) -> Any:
     Returns:
         MCP result (CallToolResult, GetPromptResult, or ReadResourceResult)
     """
-    import fastmcp.server.context
-
     async with fastmcp.server.context.Context(fastmcp=server) as ctx:
         client_task_id = params.get("taskId")
         if not client_task_id:
@@ -255,8 +262,9 @@ async def tasks_result_handler(server: FastMCP, params: dict[str, Any]) -> Any:
         await execution.sync()
 
         # Check if completed
+        state_map = _get_docket_to_mcp_state_map()
         if execution.state not in (ExecutionState.COMPLETED, ExecutionState.FAILED):
-            mcp_state = DOCKET_TO_MCP_STATE.get(execution.state, "failed")
+            mcp_state = state_map.get(execution.state, "failed")
             raise McpError(
                 ErrorData(
                     code=INVALID_PARAMS,
@@ -284,11 +292,6 @@ async def tasks_result_handler(server: FastMCP, params: dict[str, Any]) -> Any:
         component_key = key_parts["component_identifier"]
 
         # Look up component by its prefixed key
-        from fastmcp.prompts.prompt import Prompt
-        from fastmcp.resources.resource import Resource
-        from fastmcp.resources.template import ResourceTemplate
-        from fastmcp.tools.tool import Tool
-
         component = await server.get_component(component_key)
 
         # Build related-task metadata
@@ -378,8 +381,6 @@ async def tasks_cancel_handler(
     Returns:
         CancelTaskResult: Task status response showing cancelled state
     """
-    import fastmcp.server.context
-
     async with fastmcp.server.context.Context(fastmcp=server) as ctx:
         client_task_id = params.get("taskId")
         if not client_task_id:
