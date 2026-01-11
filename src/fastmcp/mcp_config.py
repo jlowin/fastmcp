@@ -108,8 +108,8 @@ class _TransformingMCPServerMixin(FastMCPBaseModel):
 
         wrapped_mcp_server = create_proxy(
             client,
+            tool_transforms=self.tools,
             name=server_name,
-            tool_transformations=self.tools,
             include_tags=self.include_tags,
             exclude_tags=self.exclude_tags,
         )

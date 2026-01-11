@@ -1037,8 +1037,8 @@ class MCPConfigTransport(ClientTransport):
         client = ProxyClient(transport=transport, timeout=timeout)
         proxy = create_proxy(
             client,
+            tool_transforms=tool_transforms,
             name=f"Proxy-{name}",
-            tool_transformations=tool_transforms,
             include_tags=include_tags,
             exclude_tags=exclude_tags,
         )

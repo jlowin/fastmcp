@@ -235,27 +235,39 @@ class TestTools:
         assert greet_tool.meta == {"_fastmcp": {"tags": ["greet"]}}
         assert greet_tool.icons == [Icon(src="https://example.com/greet-icon.png")]
 
-    async def test_get_transformed_tools(
-        self, fastmcp_server: FastMCP, proxy_server: FastMCPProxy
-    ):
-        """An explicit None description should change the tool description to None."""
-
-        fastmcp_server.add_tool_transformation(
-            "add", ToolTransformConfig(name="add_transformed")
+    async def test_get_transformed_tools(self):
+        """Test that tool transformations are applied to proxied tools."""
+        # Create server with transformation
+        server = FastMCP(
+            "TestServer",
+            tool_transformations={"add": ToolTransformConfig(name="add_transformed")},
         )
-        tools = await proxy_server.get_tools()
+
+        @server.tool
+        def add(a: int, b: int) -> int:
+            """Add two numbers together."""
+            return a + b
+
+        proxy = create_proxy(server)
+        tools = await proxy.get_tools()
         assert any(t.name == "add_transformed" for t in tools)
         assert not any(t.name == "add" for t in tools)
 
-    async def test_call_transformed_tools(
-        self, fastmcp_server: FastMCP, proxy_server: FastMCPProxy
-    ):
-        """An explicit None description should change the tool description to None."""
-
-        fastmcp_server.add_tool_transformation(
-            "add", ToolTransformConfig(name="add_transformed")
+    async def test_call_transformed_tools(self):
+        """Test calling a transformed tool through a proxy."""
+        # Create server with transformation
+        server = FastMCP(
+            "TestServer",
+            tool_transformations={"add": ToolTransformConfig(name="add_transformed")},
         )
-        async with Client(proxy_server) as client:
+
+        @server.tool
+        def add(a: int, b: int) -> int:
+            """Add two numbers together."""
+            return a + b
+
+        proxy = create_proxy(server)
+        async with Client(proxy) as client:
             result = await client.call_tool("add_transformed", {"a": 1, "b": 2})
         assert result.data == 3
 
