@@ -79,13 +79,13 @@ from fastmcp.server.lifespan import Lifespan
 from fastmcp.server.low_level import LowLevelServer
 from fastmcp.server.middleware import Middleware, MiddlewareContext
 from fastmcp.server.providers import LocalProvider, Provider
+from fastmcp.server.providers.aggregate import AggregateProvider
 from fastmcp.server.tasks.capabilities import get_task_capabilities
 from fastmcp.server.tasks.config import TaskConfig, TaskMeta
 from fastmcp.settings import DuplicateBehavior as DuplicateBehaviorSetting
 from fastmcp.settings import Settings
 from fastmcp.tools.tool import FunctionTool, Tool, ToolResult
 from fastmcp.tools.tool_transform import ToolTransformConfig
-from fastmcp.utilities.async_utils import gather
 from fastmcp.utilities.cli import log_server_banner
 from fastmcp.utilities.components import FastMCPComponent
 from fastmcp.utilities.logging import get_logger, temporary_log_level
@@ -208,7 +208,9 @@ class FastMCP(Generic[LifespanResultT]):
         lifespan: LifespanCallable | Lifespan | None = None,
         mask_error_details: bool | None = None,
         tools: Sequence[Tool | Callable[..., Any]] | None = None,
-        tool_transformations: Mapping[str, ToolTransformConfig] | None = None,
+        tool_transforms: Mapping[str, ToolTransformConfig] | None = None,
+        tool_transformations: Mapping[str, ToolTransformConfig]
+        | None = None,  # deprecated
         tool_serializer: ToolResultSerializerType | None = None,
         include_tags: Collection[str] | None = None,
         exclude_tags: Collection[str] | None = None,
@@ -255,16 +257,30 @@ class FastMCP(Generic[LifespanResultT]):
             on_duplicate=self._on_duplicate
         )
 
-        # Create the served provider (may be wrapped with tool transforms)
-        served_local: Provider = self._local_provider
-        if tool_transformations:
-            served_local = self._local_provider.with_transforms(
-                tool_transforms=dict(tool_transformations)
-            )
+        # Handle deprecated tool_transformations kwarg
+        if tool_transformations is not None:
+            if fastmcp.settings.deprecation_warnings:
+                warnings.warn(
+                    "The 'tool_transformations' parameter is deprecated. "
+                    "Use 'tool_transforms' instead.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+            if tool_transforms is not None:
+                raise ValueError(
+                    "Cannot specify both 'tool_transforms' and 'tool_transformations'. "
+                    "Use 'tool_transforms' only."
+                )
+            tool_transforms = tool_transformations
 
-        # Served local provider is always first in the provider list
+        # Store tool transforms for server-level application
+        self._tool_transforms: dict[str, ToolTransformConfig] = dict(
+            tool_transforms or {}
+        )
+
+        # Local provider is always first in the provider list
         self._providers: list[Provider] = [
-            served_local,
+            self._local_provider,
             *(providers or []),
         ]
 
@@ -481,24 +497,18 @@ class FastMCP(Generic[LifespanResultT]):
                 yield
                 return
 
-            # Collect task-enabled components from all providers at startup.
+            # Collect task-enabled components via root provider at startup.
+            # Uses _get_root_provider() to include server-level tool_transforms.
             # Components must be available now to be registered with Docket workers;
             # dynamically added components after startup won't be registered.
-            task_results = await gather(
-                *[p.get_tasks() for p in self._providers],
-                return_exceptions=True,
-            )
-
-            # Flatten and filter results, collecting components and errors
-            task_components: list[FastMCPComponent] = []
-            for i, result in enumerate(task_results):
-                if isinstance(result, BaseException):
-                    provider = self._providers[i]
-                    logger.warning(f"Failed to get tasks from {provider}: {result}")
-                    if fastmcp.settings.mounted_components_raise_on_load_error:
-                        raise result
-                    continue
-                task_components.extend(result)
+            try:
+                root_provider = self._get_root_provider()
+                task_components = list(await root_provider.get_tasks())
+            except Exception as e:
+                logger.warning(f"Failed to get tasks: {e}")
+                if fastmcp.settings.mounted_components_raise_on_load_error:
+                    raise
+                task_components = []
 
             # If no task-enabled components, skip Docket infrastructure entirely
             if not task_components:
@@ -755,6 +765,87 @@ class FastMCP(Generic[LifespanResultT]):
         self._providers.append(provider)
 
     # -------------------------------------------------------------------------
+    # Tool Transforms
+    # -------------------------------------------------------------------------
+
+    def _get_root_provider(self) -> Provider:
+        """Get the root provider with server-level transforms applied.
+
+        Returns an AggregateProvider wrapping all providers, optionally wrapped
+        with TransformingProvider if tool_transforms are configured.
+        """
+        aggregate: Provider = AggregateProvider(self._providers)
+        if self._tool_transforms:
+            aggregate = aggregate.with_transforms(tool_transforms=self._tool_transforms)
+        return aggregate
+
+    @property
+    def tool_transforms(self) -> dict[str, ToolTransformConfig]:
+        """Get current tool transforms.
+
+        Returns a copy of the tool transforms dict.
+        """
+        return dict(self._tool_transforms)
+
+    def add_tool_transform(self, name: str, config: ToolTransformConfig) -> None:
+        """Add or update a tool transform.
+
+        Server-level transforms apply to ALL tools from all providers
+        (local tools, mounted servers, proxies, etc.).
+
+        Args:
+            name: The original tool name to transform.
+            config: The transformation configuration.
+
+        Example:
+            ```python
+            mcp = FastMCP("Server")
+
+            @mcp.tool
+            def my_tool() -> str:
+                return "hello"
+
+            # Rename the tool as seen by clients
+            mcp.add_tool_transform(
+                "my_tool",
+                ToolTransformConfig(name="better_name")
+            )
+            ```
+        """
+        self._tool_transforms[name] = config
+
+    def remove_tool_transform(self, name: str) -> None:
+        """Remove a tool transform.
+
+        Args:
+            name: The original tool name whose transform should be removed.
+        """
+        self._tool_transforms.pop(name, None)
+
+    # Deprecated aliases
+    def add_tool_transformation(self, name: str, config: ToolTransformConfig) -> None:
+        """Deprecated: Use add_tool_transform() instead."""
+        if fastmcp.settings.deprecation_warnings:
+            warnings.warn(
+                "add_tool_transformation() is deprecated. "
+                "Use add_tool_transform() instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        self.add_tool_transform(name, config)
+
+    def remove_tool_transformation(self, name: str) -> None:
+        """Deprecated: Use remove_tool_transform() instead."""
+        if fastmcp.settings.deprecation_warnings:
+            warnings.warn(
+                "remove_tool_transformation() is deprecated. "
+                "Use remove_tool_transform() instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        self.remove_tool_transform(name)
+
+    # -------------------------------------------------------------------------
     # Enable/Disable
     # -------------------------------------------------------------------------
 
@@ -829,8 +920,8 @@ class FastMCP(Generic[LifespanResultT]):
     async def get_tools(self, *, run_middleware: bool = False) -> list[Tool]:
         """Get all enabled tools from providers.
 
-        Queries all providers in parallel and collects tools.
-        First provider wins for duplicate keys. Filters by server blocklist.
+        Queries all providers via the root provider (which applies server-level
+        transforms). First provider wins for duplicate keys. Filters by visibility.
 
         Args:
             run_middleware: If True, apply the middleware chain before
@@ -852,52 +943,32 @@ class FastMCP(Generic[LifespanResultT]):
                     )
                 )
 
-        results = await gather(
-            *[p.list_tools() for p in self._providers],
-            return_exceptions=True,
-        )
+        # Get tools via root provider (applies server-level transforms)
+        tools = await self._get_root_provider().list_tools()
 
+        # Deduplicate by key (first wins) and filter by visibility
         all_tools: dict[str, Tool] = {}
-        for i, result in enumerate(results):
-            if isinstance(result, BaseException):
-                provider = self._providers[i]
-                logger.exception(f"Error listing tools from provider {provider}")
-                if fastmcp.settings.mounted_components_raise_on_load_error:
-                    raise result
-                continue
-            for tool in result:
-                if self._is_component_enabled(tool) and tool.key not in all_tools:
-                    all_tools[tool.key] = tool
+        for tool in tools:
+            if self._is_component_enabled(tool) and tool.key not in all_tools:
+                all_tools[tool.key] = tool
         return list(all_tools.values())
 
     async def get_tool(self, name: str) -> Tool:
         """Get an enabled tool by name.
 
-        Queries all providers in parallel to find the tool.
-        First provider wins. Returns only if enabled.
+        Queries via root provider (which applies server-level transforms).
+        Returns only if enabled.
         """
-        results = await gather(
-            *[p.get_tool(name) for p in self._providers],
-            return_exceptions=True,
-        )
-
-        for i, result in enumerate(results):
-            if isinstance(result, BaseException):
-                if not isinstance(result, NotFoundError):
-                    logger.debug(
-                        f"Error getting tool from {self._providers[i]}: {result}"
-                    )
-                continue
-            if isinstance(result, Tool) and self._is_component_enabled(result):
-                return result
-
+        tool = await self._get_root_provider().get_tool(name)
+        if tool is not None and self._is_component_enabled(tool):
+            return tool
         raise NotFoundError(f"Unknown tool: {name!r}")
 
     async def get_resources(self, *, run_middleware: bool = False) -> list[Resource]:
         """Get all enabled resources from providers.
 
-        Queries all providers in parallel and collects resources.
-        First provider wins for duplicate keys. Filters by server blocklist.
+        Queries all providers via the root provider. First provider wins for
+        duplicate keys. Filters by visibility.
 
         Args:
             run_middleware: If True, apply the middleware chain before
@@ -921,48 +992,27 @@ class FastMCP(Generic[LifespanResultT]):
                     )
                 )
 
-        results = await gather(
-            *[p.list_resources() for p in self._providers],
-            return_exceptions=True,
-        )
+        # Get resources via root provider
+        resources = await self._get_root_provider().list_resources()
 
+        # Deduplicate by key (first wins) and filter by visibility
         all_resources: dict[str, Resource] = {}
-        for i, result in enumerate(results):
-            if isinstance(result, BaseException):
-                provider = self._providers[i]
-                logger.exception(f"Error listing resources from provider {provider}")
-                if fastmcp.settings.mounted_components_raise_on_load_error:
-                    raise result
-                continue
-            for resource in result:
-                if (
-                    self._is_component_enabled(resource)
-                    and resource.key not in all_resources
-                ):
-                    all_resources[resource.key] = resource
+        for resource in resources:
+            if (
+                self._is_component_enabled(resource)
+                and resource.key not in all_resources
+            ):
+                all_resources[resource.key] = resource
         return list(all_resources.values())
 
     async def get_resource(self, uri: str) -> Resource:
         """Get an enabled resource by URI.
 
-        Queries all providers in parallel to find the resource.
-        First provider wins. Returns only if enabled.
+        Queries via root provider. Returns only if enabled.
         """
-        results = await gather(
-            *[p.get_resource(uri) for p in self._providers],
-            return_exceptions=True,
-        )
-
-        for i, result in enumerate(results):
-            if isinstance(result, BaseException):
-                if not isinstance(result, NotFoundError):
-                    logger.debug(
-                        f"Error getting resource from {self._providers[i]}: {result}"
-                    )
-                continue
-            if isinstance(result, Resource) and self._is_component_enabled(result):
-                return result
-
+        resource = await self._get_root_provider().get_resource(uri)
+        if resource is not None and self._is_component_enabled(resource):
+            return resource
         raise NotFoundError(f"Unknown resource: {uri}")
 
     async def get_resource_templates(
@@ -970,8 +1020,8 @@ class FastMCP(Generic[LifespanResultT]):
     ) -> list[ResourceTemplate]:
         """Get all enabled resource templates from providers.
 
-        Queries all providers in parallel and collects templates.
-        First provider wins for duplicate keys. Filters by server blocklist.
+        Queries all providers via the root provider. First provider wins for
+        duplicate keys. Filters by visibility.
 
         Args:
             run_middleware: If True, apply the middleware chain before
@@ -995,59 +1045,34 @@ class FastMCP(Generic[LifespanResultT]):
                     )
                 )
 
-        results = await gather(
-            *[p.list_resource_templates() for p in self._providers],
-            return_exceptions=True,
-        )
+        # Get templates via root provider
+        templates = await self._get_root_provider().list_resource_templates()
 
+        # Deduplicate by key (first wins) and filter by visibility
         all_templates: dict[str, ResourceTemplate] = {}
-        for i, result in enumerate(results):
-            if isinstance(result, BaseException):
-                provider = self._providers[i]
-                logger.exception(
-                    f"Error listing resource templates from provider {provider}"
-                )
-                if fastmcp.settings.mounted_components_raise_on_load_error:
-                    raise result
-                continue
-            for template in result:
-                if (
-                    self._is_component_enabled(template)
-                    and template.key not in all_templates
-                ):
-                    all_templates[template.key] = template
+        for template in templates:
+            if (
+                self._is_component_enabled(template)
+                and template.key not in all_templates
+            ):
+                all_templates[template.key] = template
         return list(all_templates.values())
 
     async def get_resource_template(self, uri: str) -> ResourceTemplate:
         """Get an enabled resource template that matches the given URI.
 
-        Queries all providers in parallel to find the template.
-        First provider wins. Returns only if enabled.
+        Queries via root provider. Returns only if enabled.
         """
-        results = await gather(
-            *[p.get_resource_template(uri) for p in self._providers],
-            return_exceptions=True,
-        )
-
-        for i, result in enumerate(results):
-            if isinstance(result, BaseException):
-                if not isinstance(result, NotFoundError):
-                    logger.debug(
-                        f"Error getting template from {self._providers[i]}: {result}"
-                    )
-                continue
-            if isinstance(result, ResourceTemplate) and self._is_component_enabled(
-                result
-            ):
-                return result
-
+        template = await self._get_root_provider().get_resource_template(uri)
+        if template is not None and self._is_component_enabled(template):
+            return template
         raise NotFoundError(f"Unknown resource template: {uri}")
 
     async def get_prompts(self, *, run_middleware: bool = False) -> list[Prompt]:
         """Get all enabled prompts from providers.
 
-        Queries all providers in parallel and collects prompts.
-        First provider wins for duplicate keys. Filters by server blocklist.
+        Queries all providers via the root provider. First provider wins for
+        duplicate keys. Filters by visibility.
 
         Args:
             run_middleware: If True, apply the middleware chain before
@@ -1071,45 +1096,24 @@ class FastMCP(Generic[LifespanResultT]):
                     )
                 )
 
-        results = await gather(
-            *[p.list_prompts() for p in self._providers],
-            return_exceptions=True,
-        )
+        # Get prompts via root provider
+        prompts = await self._get_root_provider().list_prompts()
 
+        # Deduplicate by key (first wins) and filter by visibility
         all_prompts: dict[str, Prompt] = {}
-        for i, result in enumerate(results):
-            if isinstance(result, BaseException):
-                provider = self._providers[i]
-                logger.exception(f"Error listing prompts from provider {provider}")
-                if fastmcp.settings.mounted_components_raise_on_load_error:
-                    raise result
-                continue
-            for prompt in result:
-                if self._is_component_enabled(prompt) and prompt.key not in all_prompts:
-                    all_prompts[prompt.key] = prompt
+        for prompt in prompts:
+            if self._is_component_enabled(prompt) and prompt.key not in all_prompts:
+                all_prompts[prompt.key] = prompt
         return list(all_prompts.values())
 
     async def get_prompt(self, name: str) -> Prompt:
         """Get an enabled prompt by name.
 
-        Queries all providers in parallel to find the prompt.
-        First provider wins. Returns only if enabled.
+        Queries via root provider. Returns only if enabled.
         """
-        results = await gather(
-            *[p.get_prompt(name) for p in self._providers],
-            return_exceptions=True,
-        )
-
-        for i, result in enumerate(results):
-            if isinstance(result, BaseException):
-                if not isinstance(result, NotFoundError):
-                    logger.debug(
-                        f"Error getting prompt from {self._providers[i]}: {result}"
-                    )
-                continue
-            if isinstance(result, Prompt) and self._is_component_enabled(result):
-                return result
-
+        prompt = await self._get_root_provider().get_prompt(name)
+        if prompt is not None and self._is_component_enabled(prompt):
+            return prompt
         raise NotFoundError(f"Unknown prompt: {name}")
 
     async def get_component(
@@ -1117,8 +1121,7 @@ class FastMCP(Generic[LifespanResultT]):
     ) -> Tool | Resource | ResourceTemplate | Prompt:
         """Get a component by its prefixed key.
 
-        Queries all providers in parallel to find the component.
-        First provider wins.
+        Queries via root provider (which applies server-level transforms).
 
         Args:
             key: The prefixed key (e.g., "tool:name", "resource:uri", "template:uri").
@@ -1129,21 +1132,9 @@ class FastMCP(Generic[LifespanResultT]):
         Raises:
             NotFoundError: If no component is found with the given key.
         """
-        results = await gather(
-            *[p.get_component(key) for p in self._providers],
-            return_exceptions=True,
-        )
-
-        for i, result in enumerate(results):
-            if isinstance(result, BaseException):
-                if not isinstance(result, NotFoundError):
-                    logger.debug(
-                        f"Error getting component from {self._providers[i]}: {result}"
-                    )
-                continue
-            if isinstance(result, FastMCPComponent):
-                return result
-
+        component = await self._get_root_provider().get_component(key)
+        if component is not None:
+            return component
         raise NotFoundError(f"Unknown component: {key}")
 
     @overload
