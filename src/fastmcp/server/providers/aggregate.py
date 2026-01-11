@@ -13,6 +13,7 @@ from collections.abc import AsyncIterator, Sequence
 from contextlib import AsyncExitStack, asynccontextmanager
 from typing import TypeVar
 
+from fastmcp.exceptions import NotFoundError
 from fastmcp.prompts.prompt import Prompt
 from fastmcp.resources.resource import Resource
 from fastmcp.resources.template import ResourceTemplate
@@ -29,7 +30,7 @@ class AggregateProvider(Provider):
     """Presents multiple providers as a single provider.
 
     Components are aggregated from all providers. For get_* operations,
-    providers are queried in order and the first non-None result is returned.
+    providers are queried in parallel and the first non-None result is returned.
 
     Errors from individual providers are logged and skipped (graceful degradation).
     This matches the behavior of FastMCP's original provider iteration.
@@ -44,20 +45,37 @@ class AggregateProvider(Provider):
         super().__init__()
         self._providers = list(providers)
 
-    def _collect_results(
+    def _collect_list_results(
         self, results: list[Sequence[T] | BaseException], operation: str
     ) -> list[T]:
-        """Collect successful results, logging any exceptions."""
+        """Collect successful list results, logging any exceptions."""
         collected: list[T] = []
         for i, result in enumerate(results):
             if isinstance(result, BaseException):
-                logger.warning(
+                logger.debug(
                     f"Error during {operation} from provider "
                     f"{self._providers[i]}: {result}"
                 )
                 continue
             collected.extend(result)
         return collected
+
+    def _get_first_result(
+        self, results: list[T | None | BaseException], operation: str
+    ) -> T | None:
+        """Get first successful non-None result, logging non-NotFoundError exceptions."""
+        for i, result in enumerate(results):
+            if isinstance(result, BaseException):
+                # NotFoundError is expected - don't log it
+                if not isinstance(result, NotFoundError):
+                    logger.debug(
+                        f"Error during {operation} from provider "
+                        f"{self._providers[i]}: {result}"
+                    )
+                continue
+            if result is not None:
+                return result
+        return None
 
     def __repr__(self) -> str:
         return f"AggregateProvider(providers={self._providers!r})"
@@ -71,19 +89,14 @@ class AggregateProvider(Provider):
         results = await asyncio.gather(
             *[p.list_tools() for p in self._providers], return_exceptions=True
         )
-        return self._collect_results(results, "list_tools")
+        return self._collect_list_results(results, "list_tools")
 
     async def get_tool(self, name: str) -> Tool | None:
         """Get tool by name from first provider that has it."""
-        for provider in self._providers:
-            try:
-                tool = await provider.get_tool(name)
-                if tool is not None:
-                    return tool
-            except Exception as e:
-                logger.warning(f"Error getting tool {name!r} from {provider}: {e}")
-                continue
-        return None
+        results = await asyncio.gather(
+            *[p.get_tool(name) for p in self._providers], return_exceptions=True
+        )
+        return self._get_first_result(results, f"get_tool({name!r})")
 
     # -------------------------------------------------------------------------
     # Resources
@@ -94,19 +107,14 @@ class AggregateProvider(Provider):
         results = await asyncio.gather(
             *[p.list_resources() for p in self._providers], return_exceptions=True
         )
-        return self._collect_results(results, "list_resources")
+        return self._collect_list_results(results, "list_resources")
 
     async def get_resource(self, uri: str) -> Resource | None:
         """Get resource by URI from first provider that has it."""
-        for provider in self._providers:
-            try:
-                resource = await provider.get_resource(uri)
-                if resource is not None:
-                    return resource
-            except Exception as e:
-                logger.warning(f"Error getting resource {uri!r} from {provider}: {e}")
-                continue
-        return None
+        results = await asyncio.gather(
+            *[p.get_resource(uri) for p in self._providers], return_exceptions=True
+        )
+        return self._get_first_result(results, f"get_resource({uri!r})")
 
     # -------------------------------------------------------------------------
     # Resource Templates
@@ -118,21 +126,15 @@ class AggregateProvider(Provider):
             *[p.list_resource_templates() for p in self._providers],
             return_exceptions=True,
         )
-        return self._collect_results(results, "list_resource_templates")
+        return self._collect_list_results(results, "list_resource_templates")
 
     async def get_resource_template(self, uri: str) -> ResourceTemplate | None:
         """Get resource template by URI from first provider that has it."""
-        for provider in self._providers:
-            try:
-                template = await provider.get_resource_template(uri)
-                if template is not None:
-                    return template
-            except Exception as e:
-                logger.warning(
-                    f"Error getting resource template {uri!r} from {provider}: {e}"
-                )
-                continue
-        return None
+        results = await asyncio.gather(
+            *[p.get_resource_template(uri) for p in self._providers],
+            return_exceptions=True,
+        )
+        return self._get_first_result(results, f"get_resource_template({uri!r})")
 
     # -------------------------------------------------------------------------
     # Prompts
@@ -143,19 +145,14 @@ class AggregateProvider(Provider):
         results = await asyncio.gather(
             *[p.list_prompts() for p in self._providers], return_exceptions=True
         )
-        return self._collect_results(results, "list_prompts")
+        return self._collect_list_results(results, "list_prompts")
 
     async def get_prompt(self, name: str) -> Prompt | None:
         """Get prompt by name from first provider that has it."""
-        for provider in self._providers:
-            try:
-                prompt = await provider.get_prompt(name)
-                if prompt is not None:
-                    return prompt
-            except Exception as e:
-                logger.warning(f"Error getting prompt {name!r} from {provider}: {e}")
-                continue
-        return None
+        results = await asyncio.gather(
+            *[p.get_prompt(name) for p in self._providers], return_exceptions=True
+        )
+        return self._get_first_result(results, f"get_prompt({name!r})")
 
     # -------------------------------------------------------------------------
     # Components
@@ -165,15 +162,10 @@ class AggregateProvider(Provider):
         self, key: str
     ) -> Tool | Resource | ResourceTemplate | Prompt | None:
         """Get component by key from first provider that has it."""
-        for provider in self._providers:
-            try:
-                component = await provider.get_component(key)
-                if component is not None:
-                    return component
-            except Exception as e:
-                logger.warning(f"Error getting component {key!r} from {provider}: {e}")
-                continue
-        return None
+        results = await asyncio.gather(
+            *[p.get_component(key) for p in self._providers], return_exceptions=True
+        )
+        return self._get_first_result(results, f"get_component({key!r})")
 
     # -------------------------------------------------------------------------
     # Tasks
@@ -184,7 +176,7 @@ class AggregateProvider(Provider):
         results = await asyncio.gather(
             *[p.get_tasks() for p in self._providers], return_exceptions=True
         )
-        return self._collect_results(results, "get_tasks")
+        return self._collect_list_results(results, "get_tasks")
 
     # -------------------------------------------------------------------------
     # Lifecycle
