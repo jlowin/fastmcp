@@ -44,13 +44,6 @@ async def handle_tool_as_task(
     Returns:
         CallToolResult: Task stub with task metadata in _meta
     """
-    import socket
-
-    from fastmcp.utilities.logging import get_logger
-
-    _logger = get_logger(__name__)
-    instance_id = f"{socket.gethostname()}#{id(server)}"
-
     # Generate server-side task ID per SEP-1686 final spec (line 375-377)
     # Server MUST generate task IDs, clients no longer provide them
     server_task_id = str(uuid.uuid4())
@@ -65,20 +58,11 @@ async def handle_tool_as_task(
 
     # Get Docket from ContextVar (set by Context.__aenter__ at request time)
     docket = _current_docket.get()
-    _logger.info(
-        f"[{instance_id}] handle_tool_as_task: tool={tool_name}, "
-        f"_current_docket.get()={docket}"
-    )
     if docket is None:
-        _logger.error(
-            f"[{instance_id}] handle_tool_as_task FAILED: no Docket available! "
-            f"server._started.is_set()={server._started.is_set()}"
-        )
         raise McpError(
             ErrorData(
                 code=INTERNAL_ERROR,
-                message=f"Background tasks require a running FastMCP server context "
-                f"(instance={instance_id})",
+                message="Background tasks require a running FastMCP server context",
             )
         )
 
@@ -96,23 +80,9 @@ async def handle_tool_as_task(
     ttl_seconds = int(
         docket.execution_ttl.total_seconds() + TASK_MAPPING_TTL_BUFFER_SECONDS
     )
-    _logger.info(
-        f"[{instance_id}] About to write to Redis: task_meta_key={task_meta_key}, "
-        f"created_at_key={created_at_key}, ttl={ttl_seconds}"
-    )
-    try:
-        async with docket.redis() as redis:
-            await redis.set(task_meta_key, task_key, ex=ttl_seconds)
-            await redis.set(created_at_key, created_at, ex=ttl_seconds)
-        _logger.info(f"[{instance_id}] Redis write successful")
-    except Exception as e:
-        import traceback
-
-        _logger.error(
-            f"[{instance_id}] Redis write FAILED: {type(e).__name__}: {e}\n"
-            f"Traceback:\n{traceback.format_exc()}"
-        )
-        raise
+    async with docket.redis() as redis:
+        await redis.set(task_meta_key, task_key, ex=ttl_seconds)
+        await redis.set(created_at_key, created_at, ex=ttl_seconds)
 
     # Send notifications/tasks/created per SEP-1686 (mandatory)
     # Send BEFORE queuing to avoid race where task completes before notification
@@ -134,38 +104,18 @@ async def handle_tool_as_task(
 
     # Queue function to Docket by name (result storage via execution_ttl)
     # Use tool.key which matches what was registered - prefixed for mounted tools
-    _logger.info(
-        f"[{instance_id}] About to call docket.add: tool.key={tool.key}, "
-        f"task_key={task_key}, arguments={arguments}"
-    )
-    try:
-        await docket.add(
-            tool.key,
-            key=task_key,
-        )(**arguments)
-        _logger.info(f"[{instance_id}] docket.add completed successfully")
-    except Exception as e:
-        import traceback
-
-        _logger.error(
-            f"[{instance_id}] docket.add FAILED: {type(e).__name__}: {e}\n"
-            f"Traceback:\n{traceback.format_exc()}"
-        )
-        raise
+    await docket.add(
+        tool.key,
+        key=task_key,
+    )(**arguments)
 
     # Spawn subscription task to send status notifications (SEP-1686 optional feature)
     from fastmcp.server.tasks.subscriptions import subscribe_to_task_updates
 
     # Start subscription in session's task group (persists for connection lifetime)
-    _logger.info(
-        f"[{instance_id}] Checking for subscription task group: "
-        f"hasattr={hasattr(ctx.session, '_subscription_task_group')}"
-    )
     if hasattr(ctx.session, "_subscription_task_group"):
         tg = ctx.session._subscription_task_group  # type: ignore[attr-defined]
-        _logger.info(f"[{instance_id}] Task group: {tg}")
         if tg:
-            _logger.info(f"[{instance_id}] Starting subscription task")
             tg.start_soon(  # type: ignore[union-attr]
                 subscribe_to_task_updates,
                 server_task_id,
@@ -173,9 +123,7 @@ async def handle_tool_as_task(
                 ctx.session,
                 docket,
             )
-            _logger.info(f"[{instance_id}] Subscription task started")
 
-    _logger.info(f"[{instance_id}] About to return task stub")
     # Return task stub
     # Tasks MUST begin in "working" status per SEP-1686 final spec (line 381)
     return mcp.types.CallToolResult(
@@ -208,13 +156,6 @@ async def handle_prompt_as_task(
     Returns:
         GetPromptResult: Task stub with task metadata in _meta
     """
-    import socket
-
-    from fastmcp.utilities.logging import get_logger
-
-    _logger = get_logger(__name__)
-    instance_id = f"{socket.gethostname()}#{id(server)}"
-
     # Generate server-side task ID per SEP-1686 final spec (line 375-377)
     # Server MUST generate task IDs, clients no longer provide them
     server_task_id = str(uuid.uuid4())
@@ -229,20 +170,11 @@ async def handle_prompt_as_task(
 
     # Get Docket from ContextVar (set by Context.__aenter__ at request time)
     docket = _current_docket.get()
-    _logger.info(
-        f"[{instance_id}] handle_prompt_as_task: prompt={prompt_name}, "
-        f"_current_docket.get()={docket}"
-    )
     if docket is None:
-        _logger.error(
-            f"[{instance_id}] handle_prompt_as_task FAILED: no Docket available! "
-            f"server._started.is_set()={server._started.is_set()}"
-        )
         raise McpError(
             ErrorData(
                 code=INTERNAL_ERROR,
-                message=f"Background tasks require a running FastMCP server context "
-                f"(instance={instance_id})",
+                message="Background tasks require a running FastMCP server context",
             )
         )
 
@@ -260,23 +192,9 @@ async def handle_prompt_as_task(
     ttl_seconds = int(
         docket.execution_ttl.total_seconds() + TASK_MAPPING_TTL_BUFFER_SECONDS
     )
-    _logger.info(
-        f"[{instance_id}] About to write to Redis: task_meta_key={task_meta_key}, "
-        f"created_at_key={created_at_key}, ttl={ttl_seconds}"
-    )
-    try:
-        async with docket.redis() as redis:
-            await redis.set(task_meta_key, task_key, ex=ttl_seconds)
-            await redis.set(created_at_key, created_at, ex=ttl_seconds)
-        _logger.info(f"[{instance_id}] Redis write successful")
-    except Exception as e:
-        import traceback
-
-        _logger.error(
-            f"[{instance_id}] Redis write FAILED: {type(e).__name__}: {e}\n"
-            f"Traceback:\n{traceback.format_exc()}"
-        )
-        raise
+    async with docket.redis() as redis:
+        await redis.set(task_meta_key, task_key, ex=ttl_seconds)
+        await redis.set(created_at_key, created_at, ex=ttl_seconds)
 
     # Send notifications/tasks/created per SEP-1686 (mandatory)
     # Send BEFORE queuing to avoid race where task completes before notification
@@ -295,38 +213,18 @@ async def handle_prompt_as_task(
 
     # Queue function to Docket by name (result storage via execution_ttl)
     # Use prompt.key which matches what was registered - prefixed for mounted prompts
-    _logger.info(
-        f"[{instance_id}] About to call docket.add: prompt.key={prompt.key}, "
-        f"task_key={task_key}, arguments={arguments}"
-    )
-    try:
-        await docket.add(
-            prompt.key,
-            key=task_key,
-        )(**(arguments or {}))
-        _logger.info(f"[{instance_id}] docket.add completed successfully")
-    except Exception as e:
-        import traceback
-
-        _logger.error(
-            f"[{instance_id}] docket.add FAILED: {type(e).__name__}: {e}\n"
-            f"Traceback:\n{traceback.format_exc()}"
-        )
-        raise
+    await docket.add(
+        prompt.key,
+        key=task_key,
+    )(**(arguments or {}))
 
     # Spawn subscription task to send status notifications (SEP-1686 optional feature)
     from fastmcp.server.tasks.subscriptions import subscribe_to_task_updates
 
     # Start subscription in session's task group (persists for connection lifetime)
-    _logger.info(
-        f"[{instance_id}] Checking for subscription task group: "
-        f"hasattr={hasattr(ctx.session, '_subscription_task_group')}"
-    )
     if hasattr(ctx.session, "_subscription_task_group"):
         tg = ctx.session._subscription_task_group  # type: ignore[attr-defined]
-        _logger.info(f"[{instance_id}] Task group: {tg}")
         if tg:
-            _logger.info(f"[{instance_id}] Starting subscription task")
             tg.start_soon(  # type: ignore[union-attr]
                 subscribe_to_task_updates,
                 server_task_id,
@@ -334,9 +232,7 @@ async def handle_prompt_as_task(
                 ctx.session,
                 docket,
             )
-            _logger.info(f"[{instance_id}] Subscription task started")
 
-    _logger.info(f"[{instance_id}] About to return task stub")
     # Return task stub
     # Tasks MUST begin in "working" status per SEP-1686 final spec (line 381)
     return mcp.types.GetPromptResult(
@@ -370,13 +266,6 @@ async def handle_resource_as_task(
     Returns:
         ServerResult with ReadResourceResult stub
     """
-    import socket
-
-    from fastmcp.utilities.logging import get_logger
-
-    _logger = get_logger(__name__)
-    instance_id = f"{socket.gethostname()}#{id(server)}"
-
     # Generate server-side task ID per SEP-1686 final spec (line 375-377)
     # Server MUST generate task IDs, clients no longer provide them
     server_task_id = str(uuid.uuid4())
@@ -391,20 +280,11 @@ async def handle_resource_as_task(
 
     # Get Docket from ContextVar (set by Context.__aenter__ at request time)
     docket = _current_docket.get()
-    _logger.info(
-        f"[{instance_id}] handle_resource_as_task: uri={uri}, "
-        f"_current_docket.get()={docket}"
-    )
     if docket is None:
-        _logger.error(
-            f"[{instance_id}] handle_resource_as_task FAILED: no Docket available! "
-            f"server._started.is_set()={server._started.is_set()}"
-        )
         raise McpError(
             ErrorData(
                 code=INTERNAL_ERROR,
-                message=f"Background tasks require a running FastMCP server context "
-                f"(instance={instance_id})",
+                message="Background tasks require a running FastMCP server context",
             )
         )
 
@@ -419,23 +299,9 @@ async def handle_resource_as_task(
     ttl_seconds = int(
         docket.execution_ttl.total_seconds() + TASK_MAPPING_TTL_BUFFER_SECONDS
     )
-    _logger.info(
-        f"[{instance_id}] About to write to Redis: task_meta_key={task_meta_key}, "
-        f"created_at_key={created_at_key}, ttl={ttl_seconds}"
-    )
-    try:
-        async with docket.redis() as redis:
-            await redis.set(task_meta_key, task_key, ex=ttl_seconds)
-            await redis.set(created_at_key, created_at, ex=ttl_seconds)
-        _logger.info(f"[{instance_id}] Redis write successful")
-    except Exception as e:
-        import traceback
-
-        _logger.error(
-            f"[{instance_id}] Redis write FAILED: {type(e).__name__}: {e}\n"
-            f"Traceback:\n{traceback.format_exc()}"
-        )
-        raise
+    async with docket.redis() as redis:
+        await redis.set(task_meta_key, task_key, ex=ttl_seconds)
+        await redis.set(created_at_key, created_at, ex=ttl_seconds)
 
     # Send notifications/tasks/created per SEP-1686 (mandatory)
     # Send BEFORE queuing to avoid race where task completes before notification
@@ -459,57 +325,23 @@ async def handle_resource_as_task(
 
     if isinstance(resource, FunctionResourceTemplate):
         params = match_uri_template(uri, resource.uri_template) or {}
-        _logger.info(
-            f"[{instance_id}] About to call docket.add: resource.name={resource.name}, "
-            f"task_key={task_key}, params={params} (template)"
-        )
-        try:
-            await docket.add(
-                resource.name,
-                key=task_key,
-            )(**params)
-            _logger.info(f"[{instance_id}] docket.add completed successfully")
-        except Exception as e:
-            import traceback
-
-            _logger.error(
-                f"[{instance_id}] docket.add FAILED: {type(e).__name__}: {e}\n"
-                f"Traceback:\n{traceback.format_exc()}"
-            )
-            raise
+        await docket.add(
+            resource.name,
+            key=task_key,
+        )(**params)
     else:
-        _logger.info(
-            f"[{instance_id}] About to call docket.add: resource.name={resource.name}, "
-            f"task_key={task_key} (static resource)"
-        )
-        try:
-            await docket.add(
-                resource.name,
-                key=task_key,
-            )()
-            _logger.info(f"[{instance_id}] docket.add completed successfully")
-        except Exception as e:
-            import traceback
-
-            _logger.error(
-                f"[{instance_id}] docket.add FAILED: {type(e).__name__}: {e}\n"
-                f"Traceback:\n{traceback.format_exc()}"
-            )
-            raise
+        await docket.add(
+            resource.name,
+            key=task_key,
+        )()
 
     # Spawn subscription task to send status notifications (SEP-1686 optional feature)
     from fastmcp.server.tasks.subscriptions import subscribe_to_task_updates
 
     # Start subscription in session's task group (persists for connection lifetime)
-    _logger.info(
-        f"[{instance_id}] Checking for subscription task group: "
-        f"hasattr={hasattr(ctx.session, '_subscription_task_group')}"
-    )
     if hasattr(ctx.session, "_subscription_task_group"):
         tg = ctx.session._subscription_task_group  # type: ignore[attr-defined]
-        _logger.info(f"[{instance_id}] Task group: {tg}")
         if tg:
-            _logger.info(f"[{instance_id}] Starting subscription task")
             tg.start_soon(  # type: ignore[union-attr]
                 subscribe_to_task_updates,
                 server_task_id,
@@ -517,9 +349,7 @@ async def handle_resource_as_task(
                 ctx.session,
                 docket,
             )
-            _logger.info(f"[{instance_id}] Subscription task started")
 
-    _logger.info(f"[{instance_id}] About to return task stub")
     # Return task stub
     # Tasks MUST begin in "working" status per SEP-1686 final spec (line 381)
     return mcp.types.ServerResult(
