@@ -158,6 +158,23 @@ LifespanCallable = Callable[
 ]
 
 
+def _get_auth_context() -> tuple[bool, Any]:
+    """Get auth context for the current request.
+
+    Returns a tuple of (skip_auth, token) where:
+    - skip_auth=True means auth checks should be skipped (STDIO transport)
+    - token is the access token for HTTP transports (may be None if unauthenticated)
+
+    Uses late import to avoid circular import with context.py.
+    """
+    from fastmcp.server.context import _current_transport
+
+    is_stdio = _current_transport.get() == "stdio"
+    if is_stdio:
+        return (True, None)
+    return (False, get_access_token())
+
+
 @asynccontextmanager
 async def default_lifespan(server: FastMCP[LifespanResultT]) -> AsyncIterator[Any]:
     """Default lifespan context manager that does nothing.
@@ -861,13 +878,8 @@ class FastMCP(Generic[LifespanResultT]):
             return_exceptions=True,
         )
 
-        # Get token once for auth filtering (only applies to HTTP transports)
-        # STDIO has no auth concept, so skip auth checks entirely
-        # Late import to avoid circular import with context.py
-        from fastmcp.server.context import _current_transport
-
-        is_stdio = _current_transport.get() == "stdio"
-        token = None if is_stdio else get_access_token()
+        # Get auth context (skip_auth=True for STDIO which has no auth concept)
+        skip_auth, token = _get_auth_context()
 
         all_tools: dict[str, Tool] = {}
         for i, result in enumerate(results):
@@ -881,7 +893,7 @@ class FastMCP(Generic[LifespanResultT]):
                 if not self._is_component_enabled(tool) or tool.key in all_tools:
                     continue
                 # Check tool-level auth (skip for STDIO)
-                if not is_stdio and tool.auth is not None:
+                if not skip_auth and tool.auth is not None:
                     ctx = AuthContext(token=token, component=tool)
                     try:
                         if not run_auth_checks(tool.auth, ctx):
@@ -903,12 +915,8 @@ class FastMCP(Generic[LifespanResultT]):
             return_exceptions=True,
         )
 
-        # STDIO has no auth concept, so skip auth checks entirely
-        # Late import to avoid circular import with context.py
-        from fastmcp.server.context import _current_transport
-
-        is_stdio = _current_transport.get() == "stdio"
-        token = None if is_stdio else get_access_token()
+        # Get auth context (skip_auth=True for STDIO which has no auth concept)
+        skip_auth, token = _get_auth_context()
 
         for i, result in enumerate(results):
             if isinstance(result, BaseException):
@@ -919,7 +927,7 @@ class FastMCP(Generic[LifespanResultT]):
                 continue
             if isinstance(result, Tool) and self._is_component_enabled(result):
                 # Check tool-level auth (skip for STDIO)
-                if not is_stdio and result.auth is not None:
+                if not skip_auth and result.auth is not None:
                     ctx = AuthContext(token=token, component=result)
                     if not run_auth_checks(result.auth, ctx):
                         continue
@@ -960,12 +968,8 @@ class FastMCP(Generic[LifespanResultT]):
             return_exceptions=True,
         )
 
-        # STDIO has no auth concept, so skip auth checks entirely
-        # Late import to avoid circular import with context.py
-        from fastmcp.server.context import _current_transport
-
-        is_stdio = _current_transport.get() == "stdio"
-        token = None if is_stdio else get_access_token()
+        # Get auth context (skip_auth=True for STDIO which has no auth concept)
+        skip_auth, token = _get_auth_context()
 
         all_resources: dict[str, Resource] = {}
         for i, result in enumerate(results):
@@ -981,7 +985,7 @@ class FastMCP(Generic[LifespanResultT]):
                 if resource.key in all_resources:
                     continue
                 # Check resource-level auth (skip for STDIO)
-                if not is_stdio and resource.auth is not None:
+                if not skip_auth and resource.auth is not None:
                     ctx = AuthContext(token=token, component=resource)
                     try:
                         if not run_auth_checks(resource.auth, ctx):
@@ -1003,12 +1007,8 @@ class FastMCP(Generic[LifespanResultT]):
             return_exceptions=True,
         )
 
-        # STDIO has no auth concept, so skip auth checks entirely
-        # Late import to avoid circular import with context.py
-        from fastmcp.server.context import _current_transport
-
-        is_stdio = _current_transport.get() == "stdio"
-        token = None if is_stdio else get_access_token()
+        # Get auth context (skip_auth=True for STDIO which has no auth concept)
+        skip_auth, token = _get_auth_context()
 
         for i, result in enumerate(results):
             if isinstance(result, BaseException):
@@ -1019,7 +1019,7 @@ class FastMCP(Generic[LifespanResultT]):
                 continue
             if isinstance(result, Resource) and self._is_component_enabled(result):
                 # Check resource-level auth (skip for STDIO)
-                if not is_stdio and result.auth is not None:
+                if not skip_auth and result.auth is not None:
                     ctx = AuthContext(token=token, component=result)
                     if not run_auth_checks(result.auth, ctx):
                         continue
@@ -1062,12 +1062,8 @@ class FastMCP(Generic[LifespanResultT]):
             return_exceptions=True,
         )
 
-        # STDIO has no auth concept, so skip auth checks entirely
-        # Late import to avoid circular import with context.py
-        from fastmcp.server.context import _current_transport
-
-        is_stdio = _current_transport.get() == "stdio"
-        token = None if is_stdio else get_access_token()
+        # Get auth context (skip_auth=True for STDIO which has no auth concept)
+        skip_auth, token = _get_auth_context()
 
         all_templates: dict[str, ResourceTemplate] = {}
         for i, result in enumerate(results):
@@ -1085,7 +1081,7 @@ class FastMCP(Generic[LifespanResultT]):
                 if template.key in all_templates:
                     continue
                 # Check template-level auth (skip for STDIO)
-                if not is_stdio and template.auth is not None:
+                if not skip_auth and template.auth is not None:
                     ctx = AuthContext(token=token, component=template)
                     try:
                         if not run_auth_checks(template.auth, ctx):
@@ -1107,12 +1103,8 @@ class FastMCP(Generic[LifespanResultT]):
             return_exceptions=True,
         )
 
-        # STDIO has no auth concept, so skip auth checks entirely
-        # Late import to avoid circular import with context.py
-        from fastmcp.server.context import _current_transport
-
-        is_stdio = _current_transport.get() == "stdio"
-        token = None if is_stdio else get_access_token()
+        # Get auth context (skip_auth=True for STDIO which has no auth concept)
+        skip_auth, token = _get_auth_context()
 
         for i, result in enumerate(results):
             if isinstance(result, BaseException):
@@ -1125,7 +1117,7 @@ class FastMCP(Generic[LifespanResultT]):
                 result
             ):
                 # Check template-level auth (skip for STDIO)
-                if not is_stdio and result.auth is not None:
+                if not skip_auth and result.auth is not None:
                     ctx = AuthContext(token=token, component=result)
                     if not run_auth_checks(result.auth, ctx):
                         continue
@@ -1166,12 +1158,8 @@ class FastMCP(Generic[LifespanResultT]):
             return_exceptions=True,
         )
 
-        # STDIO has no auth concept, so skip auth checks entirely
-        # Late import to avoid circular import with context.py
-        from fastmcp.server.context import _current_transport
-
-        is_stdio = _current_transport.get() == "stdio"
-        token = None if is_stdio else get_access_token()
+        # Get auth context (skip_auth=True for STDIO which has no auth concept)
+        skip_auth, token = _get_auth_context()
 
         all_prompts: dict[str, Prompt] = {}
         for i, result in enumerate(results):
@@ -1187,7 +1175,7 @@ class FastMCP(Generic[LifespanResultT]):
                 if prompt.key in all_prompts:
                     continue
                 # Check prompt-level auth (skip for STDIO)
-                if not is_stdio and prompt.auth is not None:
+                if not skip_auth and prompt.auth is not None:
                     ctx = AuthContext(token=token, component=prompt)
                     try:
                         if not run_auth_checks(prompt.auth, ctx):
@@ -1209,12 +1197,8 @@ class FastMCP(Generic[LifespanResultT]):
             return_exceptions=True,
         )
 
-        # STDIO has no auth concept, so skip auth checks entirely
-        # Late import to avoid circular import with context.py
-        from fastmcp.server.context import _current_transport
-
-        is_stdio = _current_transport.get() == "stdio"
-        token = None if is_stdio else get_access_token()
+        # Get auth context (skip_auth=True for STDIO which has no auth concept)
+        skip_auth, token = _get_auth_context()
 
         for i, result in enumerate(results):
             if isinstance(result, BaseException):
@@ -1225,7 +1209,7 @@ class FastMCP(Generic[LifespanResultT]):
                 continue
             if isinstance(result, Prompt) and self._is_component_enabled(result):
                 # Check prompt-level auth (skip for STDIO)
-                if not is_stdio and result.auth is not None:
+                if not skip_auth and result.auth is not None:
                     ctx = AuthContext(token=token, component=result)
                     if not run_auth_checks(result.auth, ctx):
                         continue

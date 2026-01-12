@@ -378,6 +378,7 @@ class FunctionResourceTemplate(ResourceTemplate):
             mime_type=self.mime_type,
             tags=self.tags,
             task=self.task_config,
+            auth=self.auth,
         )
 
     async def read(self, arguments: dict[str, Any]) -> str | bytes | ResourceResult:
