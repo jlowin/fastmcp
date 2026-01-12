@@ -41,7 +41,7 @@ from fastmcp.resources.resource import resource as standalone_resource
 from fastmcp.resources.template import ResourceTemplate
 from fastmcp.server.providers.base import Provider
 from fastmcp.server.tasks.config import TaskConfig
-from fastmcp.tools.tool import FunctionTool, Tool
+from fastmcp.tools.tool import AuthCheckCallable, FunctionTool, Tool
 from fastmcp.tools.tool_transform import (
     ToolTransformConfig,
     apply_transformations_to_tools,
@@ -363,6 +363,7 @@ class LocalProvider(Provider):
         enabled: bool = True,
         task: bool | TaskConfig | None = None,
         serializer: ToolResultSerializerType | None = None,  # Deprecated
+        auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
     ) -> FunctionTool: ...
 
     @overload
@@ -382,6 +383,7 @@ class LocalProvider(Provider):
         enabled: bool = True,
         task: bool | TaskConfig | None = None,
         serializer: ToolResultSerializerType | None = None,  # Deprecated
+        auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
     ) -> Callable[[AnyFunction], FunctionTool]: ...
 
     # NOTE: This method mirrors fastmcp.tools.tool() but adds registration,
@@ -404,6 +406,7 @@ class LocalProvider(Provider):
         enabled: bool = True,
         task: bool | TaskConfig | None = None,
         serializer: ToolResultSerializerType | None = None,  # Deprecated
+        auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
     ) -> (
         Callable[[AnyFunction], FunctionTool]
         | FunctionTool
@@ -496,6 +499,7 @@ class LocalProvider(Provider):
                 meta=meta,
                 serializer=serializer,
                 task=supports_task,
+                auth=auth,
             )
             self.add_tool(tool_obj)
             # If disabled, add to blocklist
@@ -534,6 +538,7 @@ class LocalProvider(Provider):
             enabled=enabled,
             task=task,
             serializer=serializer,
+            auth=auth,
         )
 
     def resource(

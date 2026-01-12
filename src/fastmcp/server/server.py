@@ -68,7 +68,8 @@ from fastmcp.prompts import Prompt
 from fastmcp.prompts.prompt import FunctionPrompt, PromptResult
 from fastmcp.resources.resource import Resource, ResourceResult
 from fastmcp.resources.template import ResourceTemplate
-from fastmcp.server.auth import AuthProvider
+from fastmcp.server.auth import AuthContext, AuthProvider, run_auth_checks
+from fastmcp.server.dependencies import get_access_token
 from fastmcp.server.event_store import EventStore
 from fastmcp.server.http import (
     StarletteWithLifespan,
@@ -83,7 +84,7 @@ from fastmcp.server.tasks.capabilities import get_task_capabilities
 from fastmcp.server.tasks.config import TaskConfig, TaskMeta
 from fastmcp.settings import DuplicateBehavior as DuplicateBehaviorSetting
 from fastmcp.settings import Settings
-from fastmcp.tools.tool import FunctionTool, Tool, ToolResult
+from fastmcp.tools.tool import AuthCheckCallable, FunctionTool, Tool, ToolResult
 from fastmcp.tools.tool_transform import ToolTransformConfig
 from fastmcp.utilities.async_utils import gather
 from fastmcp.utilities.cli import log_server_banner
@@ -859,6 +860,14 @@ class FastMCP(Generic[LifespanResultT]):
             return_exceptions=True,
         )
 
+        # Get token once for auth filtering (only applies to HTTP transports)
+        # STDIO has no auth concept, so skip auth checks entirely
+        # Late import to avoid circular import with context.py
+        from fastmcp.server.context import _current_transport
+
+        is_stdio = _current_transport.get() == "stdio"
+        token = None if is_stdio else get_access_token()
+
         all_tools: dict[str, Tool] = {}
         for i, result in enumerate(results):
             if isinstance(result, BaseException):
@@ -868,20 +877,33 @@ class FastMCP(Generic[LifespanResultT]):
                     raise result
                 continue
             for tool in result:
-                if self._is_component_enabled(tool) and tool.key not in all_tools:
-                    all_tools[tool.key] = tool
+                if not self._is_component_enabled(tool) or tool.key in all_tools:
+                    continue
+                # Check tool-level auth (skip for STDIO)
+                if not is_stdio and tool.auth is not None:
+                    ctx = AuthContext(token=token, tool=tool)
+                    if not run_auth_checks(tool.auth, ctx):
+                        continue
+                all_tools[tool.key] = tool
         return list(all_tools.values())
 
     async def get_tool(self, name: str) -> Tool:
         """Get an enabled tool by name.
 
         Queries all providers in parallel to find the tool.
-        First provider wins. Returns only if enabled.
+        First provider wins. Returns only if enabled and authorized.
         """
         results = await gather(
             *[p.get_tool(name) for p in self._providers],
             return_exceptions=True,
         )
+
+        # STDIO has no auth concept, so skip auth checks entirely
+        # Late import to avoid circular import with context.py
+        from fastmcp.server.context import _current_transport
+
+        is_stdio = _current_transport.get() == "stdio"
+        token = None if is_stdio else get_access_token()
 
         for i, result in enumerate(results):
             if isinstance(result, BaseException):
@@ -891,6 +913,11 @@ class FastMCP(Generic[LifespanResultT]):
                     )
                 continue
             if isinstance(result, Tool) and self._is_component_enabled(result):
+                # Check tool-level auth (skip for STDIO)
+                if not is_stdio and result.auth is not None:
+                    ctx = AuthContext(token=token, tool=result)
+                    if not run_auth_checks(result.auth, ctx):
+                        continue
                 return result
 
         raise NotFoundError(f"Unknown tool: {name!r}")
@@ -1756,6 +1783,7 @@ class FastMCP(Generic[LifespanResultT]):
         exclude_args: list[str] | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
+        auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
     ) -> FunctionTool: ...
 
     @overload
@@ -1773,6 +1801,7 @@ class FastMCP(Generic[LifespanResultT]):
         exclude_args: list[str] | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
+        auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
     ) -> Callable[[AnyFunction], FunctionTool]: ...
 
     def tool(
@@ -1789,6 +1818,7 @@ class FastMCP(Generic[LifespanResultT]):
         exclude_args: list[str] | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
+        auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
     ) -> (
         Callable[[AnyFunction], FunctionTool]
         | FunctionTool
@@ -1856,6 +1886,7 @@ class FastMCP(Generic[LifespanResultT]):
             meta=meta,
             task=task if task is not None else self._support_tasks_by_default,
             serializer=self._tool_serializer,
+            auth=auth,
         )
 
         return result
