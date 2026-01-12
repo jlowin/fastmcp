@@ -269,3 +269,25 @@ class TestTransportIntegration:
                 assert result.data == "stdio"
         finally:
             reset_transport(token)
+
+    async def test_transport_set_via_http_middleware(self):
+        """Test that transport is set per-request via HTTP middleware."""
+        from fastmcp import Client
+        from fastmcp.client.transports import StreamableHttpTransport
+        from fastmcp.utilities.tests import run_server_async
+
+        mcp = FastMCP("test")
+        observed_transport = None
+
+        @mcp.tool
+        def get_transport(ctx: Context) -> str:
+            nonlocal observed_transport
+            observed_transport = ctx.transport
+            return observed_transport or "none"
+
+        async with run_server_async(mcp, transport="streamable-http") as url:
+            transport = StreamableHttpTransport(url=url)
+            async with Client(transport=transport) as client:
+                result = await client.call_tool("get_transport", {})
+                assert observed_transport == "streamable-http"
+                assert result.data == "streamable-http"
