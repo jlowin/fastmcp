@@ -248,8 +248,9 @@ class FastMCP(Generic[LifespanResultT]):
         # Resolve server default for background task support
         self._support_tasks_by_default: bool = tasks if tasks is not None else False
 
-        # Docket instance (set during lifespan for cross-task access)
+        # Docket and Worker instances (set during lifespan for cross-task access)
         self._docket = None
+        self._worker = None
 
         self._additional_http_routes: list[BaseRoute] = []
 
@@ -532,6 +533,8 @@ class FastMCP(Generic[LifespanResultT]):
 
                     # Create and start Worker
                     async with Worker(docket, **worker_kwargs) as worker:  # type: ignore[arg-type]
+                        # Store on server instance for cross-context access
+                        self._worker = worker
                         # Set Worker in ContextVar so CurrentWorker can access it
                         worker_token = _current_worker.set(worker)
                         try:
@@ -544,6 +547,7 @@ class FastMCP(Generic[LifespanResultT]):
                                     await worker_task
                         finally:
                             _current_worker.reset(worker_token)
+                            self._worker = None
                 finally:
                     # Reset ContextVar
                     _current_docket.reset(docket_token)
@@ -2194,32 +2198,38 @@ class FastMCP(Generic[LifespanResultT]):
             log_level: Log level for the server
             stateless: Whether to run in stateless mode (no session initialization)
         """
+        from fastmcp.server.context import reset_transport, set_transport
+
         # Display server banner
         if show_banner:
             log_server_banner(server=self)
 
-        with temporary_log_level(log_level):
-            async with self._lifespan_manager():
-                async with stdio_server() as (read_stream, write_stream):
-                    mode = " (stateless)" if stateless else ""
-                    logger.info(
-                        f"Starting MCP server {self.name!r} with transport 'stdio'{mode}"
-                    )
+        token = set_transport("stdio")
+        try:
+            with temporary_log_level(log_level):
+                async with self._lifespan_manager():
+                    async with stdio_server() as (read_stream, write_stream):
+                        mode = " (stateless)" if stateless else ""
+                        logger.info(
+                            f"Starting MCP server {self.name!r} with transport 'stdio'{mode}"
+                        )
 
-                    # Build experimental capabilities
-                    experimental_capabilities = get_task_capabilities()
+                        # Build experimental capabilities
+                        experimental_capabilities = get_task_capabilities()
 
-                    await self._mcp_server.run(
-                        read_stream,
-                        write_stream,
-                        self._mcp_server.create_initialization_options(
-                            notification_options=NotificationOptions(
-                                tools_changed=True
+                        await self._mcp_server.run(
+                            read_stream,
+                            write_stream,
+                            self._mcp_server.create_initialization_options(
+                                notification_options=NotificationOptions(
+                                    tools_changed=True
+                                ),
+                                experimental_capabilities=experimental_capabilities,
                             ),
-                            experimental_capabilities=experimental_capabilities,
-                        ),
-                        stateless=stateless,
-                    )
+                            stateless=stateless,
+                        )
+        finally:
+            reset_transport(token)
 
     async def run_http_async(
         self,
