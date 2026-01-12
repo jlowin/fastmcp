@@ -283,7 +283,7 @@ def update_record(id: str, data: str) -> str:
 
 @mcp.tool
 def read_record(id: str) -> str:
-    """No tag restrictions, accessible to all authenticated users."""
+    """No tag restrictions, accessible to all (no auth required by this middleware)."""
     return f"Record {id}"
 ```
 

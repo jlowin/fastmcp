@@ -28,7 +28,7 @@ from collections.abc import Sequence
 
 import mcp.types as mt
 
-from fastmcp.exceptions import AuthorizationError
+from fastmcp.exceptions import AuthorizationError, NotFoundError
 from fastmcp.prompts.prompt import Prompt, PromptResult
 from fastmcp.resources.resource import Resource, ResourceResult
 from fastmcp.resources.template import ResourceTemplate
@@ -196,10 +196,14 @@ class AuthMiddleware(Middleware):
                 f"Authorization failed for resource '{uri}': missing context"
             )
 
-        resource = await fastmcp.fastmcp.get_resource(str(uri))
+        # Try concrete resource first, then template (for template-backed URIs)
+        try:
+            component = await fastmcp.fastmcp.get_resource(str(uri))
+        except NotFoundError:
+            component = await fastmcp.fastmcp.get_resource_template(str(uri))
 
         token = get_access_token()
-        ctx = AuthContext(token=token, component=resource)
+        ctx = AuthContext(token=token, component=component)
 
         if not run_auth_checks(self.auth, ctx):
             raise AuthorizationError(
