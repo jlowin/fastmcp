@@ -1,7 +1,9 @@
 from .resource import (
+    DecoratedResource,
     FunctionResource,
     Resource,
     ResourceContent,
+    ResourceMeta,
     ResourceResult,
     resource,
 )
@@ -16,12 +18,14 @@ from .types import (
 
 __all__ = [
     "BinaryResource",
+    "DecoratedResource",
     "DirectoryResource",
     "FileResource",
     "FunctionResource",
     "HttpResource",
     "Resource",
     "ResourceContent",
+    "ResourceMeta",
     "ResourceResult",
     "ResourceTemplate",
     "TextResource",

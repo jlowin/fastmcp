@@ -1052,7 +1052,9 @@ class TestEnableDisable:
         def add(x: int, y: int = 10) -> int:
             return x + y
 
-        new_add = Tool.from_tool(add, name="new_add")
+        # Get the registered Tool object from the server
+        add_tool = await mcp._local_provider.get_component("tool:add")
+        new_add = Tool.from_tool(add_tool, name="new_add")
         mcp.add_tool(new_add)
 
         # Disable original tool, but new_add should still work
@@ -1076,7 +1078,9 @@ class TestEnableDisable:
         def add(x: int, y: int = 10) -> int:
             return x + y
 
-        new_add = Tool.from_tool(add, name="new_add")
+        # Get the registered Tool object from the server
+        add_tool = await mcp._local_provider.get_component("tool:add")
+        new_add = Tool.from_tool(add_tool, name="new_add")
         mcp.add_tool(new_add)
 
         # Disable both tools via server

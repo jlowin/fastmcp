@@ -348,3 +348,19 @@ class Settings(BaseSettings):
             ),
         ),
     ] = "stable"
+
+    decorator_mode: Annotated[
+        Literal["function", "object"],
+        Field(
+            description=inspect.cleandoc(
+                """
+                Controls what decorators (@tool, @resource, @prompt) return.
+
+                - "function" (default): Decorators return the original function unchanged.
+                  The function remains callable and is registered with the server normally.
+                - "object": Decorators return component objects (FunctionTool, FunctionResource,
+                  FunctionPrompt). This was the default behavior in v2.
+                """
+            ),
+        ),
+    ] = "function"

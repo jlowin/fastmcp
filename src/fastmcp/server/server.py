@@ -1703,14 +1703,14 @@ class FastMCP(Generic[LifespanResultT]):
         except NotFoundError:
             raise
 
-    def add_tool(self, tool: Tool) -> Tool:
+    def add_tool(self, tool: Tool | Callable[..., Any]) -> Tool:
         """Add a tool to the server.
 
         The tool function can optionally request a Context object by adding a parameter
         with the Context type annotation. See the @tool decorator for examples.
 
         Args:
-            tool: The Tool instance to register
+            tool: The Tool instance or @tool-decorated function to register
 
         Returns:
             The tool instance that was added to the server.
@@ -1860,11 +1860,13 @@ class FastMCP(Generic[LifespanResultT]):
 
         return result
 
-    def add_resource(self, resource: Resource) -> Resource:
+    def add_resource(
+        self, resource: Resource | Callable[..., Any]
+    ) -> Resource | ResourceTemplate:
         """Add a resource to the server.
 
         Args:
-            resource: A Resource instance to add
+            resource: A Resource instance or @resource-decorated function to add
 
         Returns:
             The resource instance that was added to the server.
@@ -1895,7 +1897,7 @@ class FastMCP(Generic[LifespanResultT]):
         annotations: Annotations | dict[str, Any] | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
-    ) -> Callable[[AnyFunction], Resource | ResourceTemplate]:
+    ) -> Callable[[AnyFunction], Resource | ResourceTemplate | AnyFunction]:
         """Decorator to register a function as a resource.
 
         The function will be called when the resource is read to generate its content.
@@ -1961,16 +1963,16 @@ class FastMCP(Generic[LifespanResultT]):
             task=task if task is not None else self._support_tasks_by_default,
         )
 
-        def decorator(fn: AnyFunction) -> Resource | ResourceTemplate:
+        def decorator(fn: AnyFunction) -> Resource | ResourceTemplate | AnyFunction:
             return inner_decorator(fn)
 
         return decorator
 
-    def add_prompt(self, prompt: Prompt) -> Prompt:
+    def add_prompt(self, prompt: Prompt | Callable[..., Any]) -> Prompt:
         """Add a prompt to the server.
 
         Args:
-            prompt: A Prompt instance to add
+            prompt: A Prompt instance or @prompt-decorated function to add
 
         Returns:
             The prompt instance that was added to the server.
