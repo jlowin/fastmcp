@@ -242,8 +242,14 @@ def create_sse_app(
 
     @asynccontextmanager
     async def lifespan(app: Starlette) -> AsyncGenerator[None, None]:
-        async with server._lifespan_manager():
-            yield
+        from fastmcp.server.context import reset_transport, set_transport
+
+        token = set_transport("sse")
+        try:
+            async with server._lifespan_manager():
+                yield
+        finally:
+            reset_transport(token)
 
     # Create and return the app
     app = create_base_app(
@@ -354,8 +360,14 @@ def create_streamable_http_app(
     # Create a lifespan manager to start and stop the session manager
     @asynccontextmanager
     async def lifespan(app: Starlette) -> AsyncGenerator[None, None]:
-        async with server._lifespan_manager(), session_manager.run():
-            yield
+        from fastmcp.server.context import reset_transport, set_transport
+
+        token = set_transport("streamable-http")
+        try:
+            async with server._lifespan_manager(), session_manager.run():
+                yield
+        finally:
+            reset_transport(token)
 
     # Create and return the app with lifespan
     app = create_base_app(
