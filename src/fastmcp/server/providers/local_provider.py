@@ -555,6 +555,7 @@ class LocalProvider(Provider):
         annotations: Annotations | dict[str, Any] | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
+        auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
     ) -> Callable[[AnyFunction], Resource | ResourceTemplate]:
         """Decorator to register a function as a resource.
 
@@ -573,6 +574,7 @@ class LocalProvider(Provider):
             annotations: Optional annotations about the resource's behavior
             meta: Optional meta information about the resource
             task: Optional task configuration for background execution
+            auth: Optional authorization checks for the resource
 
         Returns:
             A decorator function.
@@ -605,6 +607,7 @@ class LocalProvider(Provider):
             annotations=annotations,
             meta=meta,
             task=supports_task,
+            auth=auth,
         )
 
         def decorator(fn: AnyFunction) -> Resource | ResourceTemplate:
@@ -635,6 +638,7 @@ class LocalProvider(Provider):
         enabled: bool = True,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
+        auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
     ) -> FunctionPrompt: ...
 
     @overload
@@ -650,6 +654,7 @@ class LocalProvider(Provider):
         enabled: bool = True,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
+        auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
     ) -> Callable[[AnyFunction], FunctionPrompt]: ...
 
     def prompt(
@@ -664,6 +669,7 @@ class LocalProvider(Provider):
         enabled: bool = True,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
+        auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
     ) -> (
         Callable[[AnyFunction], FunctionPrompt]
         | FunctionPrompt
@@ -688,6 +694,7 @@ class LocalProvider(Provider):
             enabled: Whether the prompt is enabled (default True). If False, adds to blocklist.
             meta: Optional meta information about the prompt
             task: Optional task configuration for background execution
+            auth: Optional authorization checks for the prompt
 
         Returns:
             The registered FunctionPrompt or a decorator function.
@@ -728,6 +735,7 @@ class LocalProvider(Provider):
             tags=tags,
             meta=meta,
             task=supports_task,
+            auth=auth,
         )
 
         # If standalone returned a FunctionPrompt directly (@prompt without parens),

@@ -55,6 +55,7 @@ from typing_extensions import Self
 import fastmcp
 import fastmcp.server
 from fastmcp.exceptions import (
+    AuthorizationError,
     DisabledError,
     FastMCPError,
     NotFoundError,
@@ -881,8 +882,12 @@ class FastMCP(Generic[LifespanResultT]):
                     continue
                 # Check tool-level auth (skip for STDIO)
                 if not is_stdio and tool.auth is not None:
-                    ctx = AuthContext(token=token, tool=tool)
-                    if not run_auth_checks(tool.auth, ctx):
+                    ctx = AuthContext(token=token, component=tool)
+                    try:
+                        if not run_auth_checks(tool.auth, ctx):
+                            continue
+                    except AuthorizationError:
+                        # Treat auth errors as denials in list operations
                         continue
                 all_tools[tool.key] = tool
         return list(all_tools.values())
@@ -915,7 +920,7 @@ class FastMCP(Generic[LifespanResultT]):
             if isinstance(result, Tool) and self._is_component_enabled(result):
                 # Check tool-level auth (skip for STDIO)
                 if not is_stdio and result.auth is not None:
-                    ctx = AuthContext(token=token, tool=result)
+                    ctx = AuthContext(token=token, component=result)
                     if not run_auth_checks(result.auth, ctx):
                         continue
                 return result
@@ -955,6 +960,13 @@ class FastMCP(Generic[LifespanResultT]):
             return_exceptions=True,
         )
 
+        # STDIO has no auth concept, so skip auth checks entirely
+        # Late import to avoid circular import with context.py
+        from fastmcp.server.context import _current_transport
+
+        is_stdio = _current_transport.get() == "stdio"
+        token = None if is_stdio else get_access_token()
+
         all_resources: dict[str, Resource] = {}
         for i, result in enumerate(results):
             if isinstance(result, BaseException):
@@ -964,23 +976,39 @@ class FastMCP(Generic[LifespanResultT]):
                     raise result
                 continue
             for resource in result:
-                if (
-                    self._is_component_enabled(resource)
-                    and resource.key not in all_resources
-                ):
-                    all_resources[resource.key] = resource
+                if not self._is_component_enabled(resource):
+                    continue
+                if resource.key in all_resources:
+                    continue
+                # Check resource-level auth (skip for STDIO)
+                if not is_stdio and resource.auth is not None:
+                    ctx = AuthContext(token=token, component=resource)
+                    try:
+                        if not run_auth_checks(resource.auth, ctx):
+                            continue
+                    except AuthorizationError:
+                        # Treat auth errors as denials in list operations
+                        continue
+                all_resources[resource.key] = resource
         return list(all_resources.values())
 
     async def get_resource(self, uri: str) -> Resource:
         """Get an enabled resource by URI.
 
         Queries all providers in parallel to find the resource.
-        First provider wins. Returns only if enabled.
+        First provider wins. Returns only if enabled and authorized.
         """
         results = await gather(
             *[p.get_resource(uri) for p in self._providers],
             return_exceptions=True,
         )
+
+        # STDIO has no auth concept, so skip auth checks entirely
+        # Late import to avoid circular import with context.py
+        from fastmcp.server.context import _current_transport
+
+        is_stdio = _current_transport.get() == "stdio"
+        token = None if is_stdio else get_access_token()
 
         for i, result in enumerate(results):
             if isinstance(result, BaseException):
@@ -990,6 +1018,11 @@ class FastMCP(Generic[LifespanResultT]):
                     )
                 continue
             if isinstance(result, Resource) and self._is_component_enabled(result):
+                # Check resource-level auth (skip for STDIO)
+                if not is_stdio and result.auth is not None:
+                    ctx = AuthContext(token=token, component=result)
+                    if not run_auth_checks(result.auth, ctx):
+                        continue
                 return result
 
         raise NotFoundError(f"Unknown resource: {uri}")
@@ -1029,6 +1062,13 @@ class FastMCP(Generic[LifespanResultT]):
             return_exceptions=True,
         )
 
+        # STDIO has no auth concept, so skip auth checks entirely
+        # Late import to avoid circular import with context.py
+        from fastmcp.server.context import _current_transport
+
+        is_stdio = _current_transport.get() == "stdio"
+        token = None if is_stdio else get_access_token()
+
         all_templates: dict[str, ResourceTemplate] = {}
         for i, result in enumerate(results):
             if isinstance(result, BaseException):
@@ -1040,23 +1080,39 @@ class FastMCP(Generic[LifespanResultT]):
                     raise result
                 continue
             for template in result:
-                if (
-                    self._is_component_enabled(template)
-                    and template.key not in all_templates
-                ):
-                    all_templates[template.key] = template
+                if not self._is_component_enabled(template):
+                    continue
+                if template.key in all_templates:
+                    continue
+                # Check template-level auth (skip for STDIO)
+                if not is_stdio and template.auth is not None:
+                    ctx = AuthContext(token=token, component=template)
+                    try:
+                        if not run_auth_checks(template.auth, ctx):
+                            continue
+                    except AuthorizationError:
+                        # Treat auth errors as denials in list operations
+                        continue
+                all_templates[template.key] = template
         return list(all_templates.values())
 
     async def get_resource_template(self, uri: str) -> ResourceTemplate:
         """Get an enabled resource template that matches the given URI.
 
         Queries all providers in parallel to find the template.
-        First provider wins. Returns only if enabled.
+        First provider wins. Returns only if enabled and authorized.
         """
         results = await gather(
             *[p.get_resource_template(uri) for p in self._providers],
             return_exceptions=True,
         )
+
+        # STDIO has no auth concept, so skip auth checks entirely
+        # Late import to avoid circular import with context.py
+        from fastmcp.server.context import _current_transport
+
+        is_stdio = _current_transport.get() == "stdio"
+        token = None if is_stdio else get_access_token()
 
         for i, result in enumerate(results):
             if isinstance(result, BaseException):
@@ -1068,6 +1124,11 @@ class FastMCP(Generic[LifespanResultT]):
             if isinstance(result, ResourceTemplate) and self._is_component_enabled(
                 result
             ):
+                # Check template-level auth (skip for STDIO)
+                if not is_stdio and result.auth is not None:
+                    ctx = AuthContext(token=token, component=result)
+                    if not run_auth_checks(result.auth, ctx):
+                        continue
                 return result
 
         raise NotFoundError(f"Unknown resource template: {uri}")
@@ -1105,6 +1166,13 @@ class FastMCP(Generic[LifespanResultT]):
             return_exceptions=True,
         )
 
+        # STDIO has no auth concept, so skip auth checks entirely
+        # Late import to avoid circular import with context.py
+        from fastmcp.server.context import _current_transport
+
+        is_stdio = _current_transport.get() == "stdio"
+        token = None if is_stdio else get_access_token()
+
         all_prompts: dict[str, Prompt] = {}
         for i, result in enumerate(results):
             if isinstance(result, BaseException):
@@ -1114,20 +1182,39 @@ class FastMCP(Generic[LifespanResultT]):
                     raise result
                 continue
             for prompt in result:
-                if self._is_component_enabled(prompt) and prompt.key not in all_prompts:
-                    all_prompts[prompt.key] = prompt
+                if not self._is_component_enabled(prompt):
+                    continue
+                if prompt.key in all_prompts:
+                    continue
+                # Check prompt-level auth (skip for STDIO)
+                if not is_stdio and prompt.auth is not None:
+                    ctx = AuthContext(token=token, component=prompt)
+                    try:
+                        if not run_auth_checks(prompt.auth, ctx):
+                            continue
+                    except AuthorizationError:
+                        # Treat auth errors as denials in list operations
+                        continue
+                all_prompts[prompt.key] = prompt
         return list(all_prompts.values())
 
     async def get_prompt(self, name: str) -> Prompt:
         """Get an enabled prompt by name.
 
         Queries all providers in parallel to find the prompt.
-        First provider wins. Returns only if enabled.
+        First provider wins. Returns only if enabled and authorized.
         """
         results = await gather(
             *[p.get_prompt(name) for p in self._providers],
             return_exceptions=True,
         )
+
+        # STDIO has no auth concept, so skip auth checks entirely
+        # Late import to avoid circular import with context.py
+        from fastmcp.server.context import _current_transport
+
+        is_stdio = _current_transport.get() == "stdio"
+        token = None if is_stdio else get_access_token()
 
         for i, result in enumerate(results):
             if isinstance(result, BaseException):
@@ -1137,6 +1224,11 @@ class FastMCP(Generic[LifespanResultT]):
                     )
                 continue
             if isinstance(result, Prompt) and self._is_component_enabled(result):
+                # Check prompt-level auth (skip for STDIO)
+                if not is_stdio and result.auth is not None:
+                    ctx = AuthContext(token=token, component=result)
+                    if not run_auth_checks(result.auth, ctx):
+                        continue
                 return result
 
         raise NotFoundError(f"Unknown prompt: {name}")
@@ -1926,6 +2018,7 @@ class FastMCP(Generic[LifespanResultT]):
         annotations: Annotations | dict[str, Any] | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
+        auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
     ) -> Callable[[AnyFunction], Resource | ResourceTemplate]:
         """Decorator to register a function as a resource.
 
@@ -1990,6 +2083,7 @@ class FastMCP(Generic[LifespanResultT]):
             annotations=annotations,
             meta=meta,
             task=task if task is not None else self._support_tasks_by_default,
+            auth=auth,
         )
 
         def decorator(fn: AnyFunction) -> Resource | ResourceTemplate:
@@ -2020,6 +2114,7 @@ class FastMCP(Generic[LifespanResultT]):
         tags: set[str] | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
+        auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
     ) -> FunctionPrompt: ...
 
     @overload
@@ -2034,6 +2129,7 @@ class FastMCP(Generic[LifespanResultT]):
         tags: set[str] | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
+        auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
     ) -> Callable[[AnyFunction], FunctionPrompt]: ...
 
     def prompt(
@@ -2047,6 +2143,7 @@ class FastMCP(Generic[LifespanResultT]):
         tags: set[str] | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
+        auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
     ) -> (
         Callable[[AnyFunction], FunctionPrompt]
         | FunctionPrompt
@@ -2130,6 +2227,7 @@ class FastMCP(Generic[LifespanResultT]):
             tags=tags,
             meta=meta,
             task=task if task is not None else self._support_tasks_by_default,
+            auth=auth,
         )
 
     async def run_stdio_async(
