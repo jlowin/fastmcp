@@ -253,13 +253,13 @@ class StreamableHttpTransport(ClientTransport):
         # need to be forwarded to the remote server.
         headers = get_http_headers() | self.headers
 
-        # Configure timeout if provided (convert timedelta to httpx.Timeout)
+        # Configure timeout if provided, preserving MCP's 30s connect default
         timeout: httpx.Timeout | None = None
         if session_kwargs.get("read_timeout_seconds") is not None:
             read_timeout_seconds = cast(
                 datetime.timedelta, session_kwargs.get("read_timeout_seconds")
             )
-            timeout = httpx.Timeout(read_timeout_seconds.total_seconds())
+            timeout = httpx.Timeout(30.0, read=read_timeout_seconds.total_seconds())
 
         # Create httpx client from factory or use default with MCP-appropriate timeouts
         # create_mcp_http_client uses 30s connect/5min read timeout by default,
