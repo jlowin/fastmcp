@@ -232,7 +232,7 @@ class Resource(FastMCPComponent):
     ] = None
     auth: Annotated[
         AuthCheckCallable | list[AuthCheckCallable] | None,
-        Field(description="Authorization checks for this resource"),
+        Field(description="Authorization checks for this resource", exclude=True),
     ] = None
 
     @staticmethod

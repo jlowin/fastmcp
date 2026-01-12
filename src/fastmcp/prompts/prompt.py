@@ -202,7 +202,7 @@ class Prompt(FastMCPComponent):
         default=None, description="Arguments that can be passed to the prompt"
     )
     auth: AuthCheckCallable | list[AuthCheckCallable] | None = Field(
-        default=None, description="Authorization checks for this prompt"
+        default=None, description="Authorization checks for this prompt", exclude=True
     )
 
     def to_mcp_prompt(

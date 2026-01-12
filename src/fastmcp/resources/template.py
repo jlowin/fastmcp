@@ -116,7 +116,9 @@ class ResourceTemplate(FastMCPComponent):
         default=None, description="Optional annotations about the resource's behavior"
     )
     auth: AuthCheckCallable | list[AuthCheckCallable] | None = Field(
-        default=None, description="Authorization checks for this resource template"
+        default=None,
+        description="Authorization checks for this resource template",
+        exclude=True,
     )
 
     def __repr__(self) -> str:

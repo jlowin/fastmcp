@@ -172,7 +172,7 @@ class Tool(FastMCPComponent):
     ] = None
     auth: Annotated[
         AuthCheckCallable | list[AuthCheckCallable] | None,
-        Field(description="Authorization checks for this tool"),
+        Field(description="Authorization checks for this tool", exclude=True),
     ] = None
 
     @model_validator(mode="after")
