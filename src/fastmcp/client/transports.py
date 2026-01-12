@@ -25,7 +25,7 @@ from mcp.client.sse import sse_client
 from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamable_http_client
 from mcp.server.fastmcp import FastMCP as FastMCP1Server
-from mcp.shared._httpx_utils import McpHttpClientFactory
+from mcp.shared._httpx_utils import McpHttpClientFactory, create_mcp_http_client
 from mcp.shared.memory import create_client_server_memory_streams
 from pydantic import AnyUrl
 from typing_extensions import TypedDict, Unpack
@@ -284,25 +284,31 @@ class StreamableHttpTransport(ClientTransport):
         # need to be forwarded to the remote server.
         headers = get_http_headers() | self.headers
 
-        # Build httpx client configuration
-        httpx_client_kwargs: dict[str, Any] = {
-            "headers": headers,
-            "auth": self.auth,
-            "follow_redirects": True,
-        }
-
-        # Configure timeout if provided (convert timedelta to seconds for httpx)
+        # Configure timeout if provided, preserving MCP's 30s connect default
+        timeout: httpx.Timeout | None = None
         if session_kwargs.get("read_timeout_seconds") is not None:
             read_timeout_seconds = cast(
                 datetime.timedelta, session_kwargs.get("read_timeout_seconds")
             )
-            httpx_client_kwargs["timeout"] = read_timeout_seconds.total_seconds()
+            timeout = httpx.Timeout(30.0, read=read_timeout_seconds.total_seconds())
 
-        # Create httpx client from factory or use default
+        # Create httpx client from factory or use default with MCP-appropriate timeouts
+        # create_mcp_http_client uses 30s connect/5min read timeout by default,
+        # and always enables follow_redirects
         if self.httpx_client_factory is not None:
-            http_client = self.httpx_client_factory(**httpx_client_kwargs)
+            # Factory clients get the full kwargs for backwards compatibility
+            http_client = self.httpx_client_factory(
+                headers=headers,
+                auth=self.auth,
+                follow_redirects=True,
+                **({"timeout": timeout} if timeout else {}),
+            )
         else:
-            http_client = httpx.AsyncClient(**httpx_client_kwargs)
+            http_client = create_mcp_http_client(
+                headers=headers,
+                timeout=timeout,
+                auth=self.auth,
+            )
 
         # Ensure httpx client is closed after use
         async with (
