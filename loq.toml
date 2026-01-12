@@ -119,10 +119,6 @@ path = "src/fastmcp/server/auth/auth.py"
 max_lines = 558
 
 [[rules]]
-path = "docs/patterns/tool-transformation.mdx"
-max_lines = 694
-
-[[rules]]
 path = "tests/server/providers/test_local_provider_resources.py"
 max_lines = 974
 
@@ -180,7 +176,7 @@ max_lines = 550
 
 [[rules]]
 path = "src/fastmcp/server/providers/local_provider.py"
-max_lines = 738
+max_lines = 703
 
 [[rules]]
 path = "tests/client/test_notifications.py"
@@ -216,7 +212,7 @@ max_lines = 1722
 
 [[rules]]
 path = "src/fastmcp/server/providers/proxy.py"
-max_lines = 841
+max_lines = 823
 
 [[rules]]
 path = "src/fastmcp/tools/tool.py"
@@ -300,7 +296,7 @@ max_lines = 1205
 
 [[rules]]
 path = "docs/docs.json"
-max_lines = 592
+max_lines = 588
 
 [[rules]]
 path = "src/fastmcp/cli/cli.py"
