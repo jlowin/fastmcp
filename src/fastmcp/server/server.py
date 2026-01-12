@@ -613,32 +613,13 @@ class FastMCP(Generic[LifespanResultT]):
         logger.info(f"[{instance_id}] _lifespan_manager ENTERING")
 
         if self._lifespan_result_set:
-            # Lifespan already ran in a parent async context. We need to set ContextVars
-            # again in THIS context because ContextVars don't propagate across different
-            # async contexts (e.g., Starlette's ASGI lifespan vs FastMCP's outer lifespan).
-            # Request handlers inherit from Starlette's context, so we must set here.
-            from fastmcp.server.dependencies import (
-                _current_docket,
-                _current_server,
-                _current_worker,
-            )
-
+            # Lifespan already ran - ContextVars will be set by Context.__aenter__
+            # at request time, so we just yield here.
             logger.info(
-                f"[{instance_id}] _lifespan_manager: already set, setting ContextVars "
-                f"for this context (docket={self._docket}, worker={self._worker})"
+                f"[{instance_id}] _lifespan_manager: already set, yielding "
+                f"(ContextVars managed by Context at request time)"
             )
-
-            server_token = _current_server.set(weakref.ref(self))
-            docket_token = _current_docket.set(self._docket) if self._docket else None
-            worker_token = _current_worker.set(self._worker) if self._worker else None
-            try:
-                yield
-            finally:
-                _current_server.reset(server_token)
-                if docket_token is not None:
-                    _current_docket.reset(docket_token)
-                if worker_token is not None:
-                    _current_worker.reset(worker_token)
+            yield
             return
 
         logger.info(

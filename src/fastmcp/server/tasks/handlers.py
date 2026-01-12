@@ -63,16 +63,11 @@ async def handle_tool_as_task(
     ctx = get_context()
     session_id = ctx.session_id
 
-    # Try ContextVar first, fall back to server instance attribute.
-    # ContextVars don't propagate to request handlers in ASGI servers because
-    # request tasks are created from the main event loop, not the lifespan context.
+    # Get Docket from ContextVar (set by Context.__aenter__ at request time)
     docket = _current_docket.get()
-    if docket is None:
-        docket = server._docket
     _logger.info(
         f"[{instance_id}] handle_tool_as_task: tool={tool_name}, "
-        f"_current_docket.get()={_current_docket.get()}, server._docket={server._docket}, "
-        f"using docket={docket}"
+        f"_current_docket.get()={docket}"
     )
     if docket is None:
         _logger.error(
@@ -225,10 +220,8 @@ async def handle_prompt_as_task(
     ctx = get_context()
     session_id = ctx.session_id
 
-    # Try ContextVar first, fall back to server instance attribute
+    # Get Docket from ContextVar (set by Context.__aenter__ at request time)
     docket = _current_docket.get()
-    if docket is None:
-        docket = server._docket
     if docket is None:
         raise McpError(
             ErrorData(
@@ -337,10 +330,8 @@ async def handle_resource_as_task(
     ctx = get_context()
     session_id = ctx.session_id
 
-    # Try ContextVar first, fall back to server instance attribute
+    # Get Docket from ContextVar (set by Context.__aenter__ at request time)
     docket = _current_docket.get()
-    if docket is None:
-        docket = server._docket
     if docket is None:
         raise McpError(
             ErrorData(
