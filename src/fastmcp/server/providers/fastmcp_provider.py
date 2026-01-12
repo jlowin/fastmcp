@@ -521,67 +521,53 @@ class FastMCPProvider(Provider):
         """Return task-eligible components from the mounted server.
 
         Returns the child's ACTUAL components (not wrapped) so their actual
-        functions get registered with Docket. Applies this provider's layers
-        to transform component names for correct registration.
-
-        Iterates through all providers in the wrapped server (including its
-        LocalProvider) to collect task-eligible components.
+        functions get registered with Docket. Uses _source_get_tasks() to get
+        components with child server's transforms applied, then applies this
+        provider's transforms for correct registration keys.
         """
-        components: list[FastMCPComponent] = []
-        for provider in self.server._providers:
-            components.extend(await provider.get_tasks())
+        # Get tasks with child server's transforms already applied
+        components = list(await self.server._source_get_tasks())
 
-        # Apply this provider's layers to transform component names
+        # Separate by type for this provider's transform application
         tools = [c for c in components if isinstance(c, Tool)]
         resources = [c for c in components if isinstance(c, Resource)]
         templates = [c for c in components if isinstance(c, ResourceTemplate)]
         prompts = [c for c in components if isinstance(c, Prompt)]
 
-        # Apply transforms using call_next pattern
+        # Apply this provider's transforms using call_next pattern
 
-        # Transform tools
-        async def get_tools() -> Sequence[Tool]:
+        async def tools_base() -> Sequence[Tool]:
             return tools
 
-        tool_chain = get_tools
-        for layer in self._transforms:
-            tool_chain = partial(layer.list_tools, call_next=tool_chain)
-        transformed_tools = await tool_chain()
-
-        # Transform resources
-        async def get_resources() -> Sequence[Resource]:
+        async def resources_base() -> Sequence[Resource]:
             return resources
 
-        resource_chain = get_resources
-        for layer in self._transforms:
-            resource_chain = partial(layer.list_resources, call_next=resource_chain)
-        transformed_resources = await resource_chain()
-
-        # Transform templates
-        async def get_templates() -> Sequence[ResourceTemplate]:
+        async def templates_base() -> Sequence[ResourceTemplate]:
             return templates
 
-        template_chain = get_templates
-        for layer in self._transforms:
-            template_chain = partial(
-                layer.list_resource_templates, call_next=template_chain
-            )
-        transformed_templates = await template_chain()
-
-        # Transform prompts
-        async def get_prompts() -> Sequence[Prompt]:
+        async def prompts_base() -> Sequence[Prompt]:
             return prompts
 
-        prompt_chain = get_prompts
-        for layer in self._transforms:
-            prompt_chain = partial(layer.list_prompts, call_next=prompt_chain)
-        transformed_prompts = await prompt_chain()
+        tools_chain = tools_base
+        resources_chain = resources_base
+        templates_chain = templates_base
+        prompts_chain = prompts_base
+
+        for transform in self._transforms:
+            tools_chain = partial(transform.list_tools, call_next=tools_chain)
+            resources_chain = partial(
+                transform.list_resources, call_next=resources_chain
+            )
+            templates_chain = partial(
+                transform.list_resource_templates, call_next=templates_chain
+            )
+            prompts_chain = partial(transform.list_prompts, call_next=prompts_chain)
 
         return [
-            *transformed_tools,
-            *transformed_resources,
-            *transformed_templates,
-            *transformed_prompts,
+            *await tools_chain(),
+            *await resources_chain(),
+            *await templates_chain(),
+            *await prompts_chain(),
         ]
 
     # -------------------------------------------------------------------------

@@ -289,31 +289,6 @@ class Provider:
         prompts = await self.list_prompts()
         return next((p for p in prompts if p.name == name), None)
 
-    async def get_component(
-        self, key: str
-    ) -> Tool | Resource | ResourceTemplate | Prompt | None:
-        """Get a component by its prefixed key.
-
-        Args:
-            key: The prefixed key (e.g., "tool:name", "resource:uri", "template:uri").
-
-        Returns:
-            The component if found, or None to continue searching other providers.
-        """
-        # Default implementation: fetch all component types in parallel
-        # Exceptions propagate since return_exceptions=False
-        results = await gather(
-            self.list_tools(),
-            self.list_resources(),
-            self.list_resource_templates(),
-            self.list_prompts(),
-        )
-        for components in results:
-            for component in components:  # type: ignore[union-attr]
-                if component.key == key:
-                    return component
-        return None
-
     # -------------------------------------------------------------------------
     # Task registration
     # -------------------------------------------------------------------------
