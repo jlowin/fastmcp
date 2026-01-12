@@ -80,7 +80,7 @@ max_lines = 908
 
 [[rules]]
 path = "docs/changelog.mdx"
-max_lines = 2228
+max_lines = 2280
 
 [[rules]]
 path = "tests/server/tasks/test_task_mount.py"
@@ -152,7 +152,7 @@ max_lines = 1009
 
 [[rules]]
 path = "tests/server/providers/test_local_provider.py"
-max_lines = 738
+max_lines = 784
 
 [[rules]]
 path = "tests/server/middleware/test_caching.py"
@@ -160,7 +160,7 @@ max_lines = 616
 
 [[rules]]
 path = "tests/server/test_mount.py"
-max_lines = 1548
+max_lines = 1560
 
 [[rules]]
 path = "tests/utilities/test_inspect.py"
@@ -232,7 +232,7 @@ max_lines = 515
 
 [[rules]]
 path = "tests/server/providers/proxy/test_proxy_server.py"
-max_lines = 711
+max_lines = 729
 
 [[rules]]
 path = "tests/tools/test_tool_transform.py"
@@ -264,7 +264,7 @@ max_lines = 1538
 
 [[rules]]
 path = "src/fastmcp/server/providers/fastmcp_provider.py"
-max_lines = 542
+max_lines = 586
 
 [[rules]]
 path = "tests/server/middleware/test_error_handling.py"
@@ -284,7 +284,7 @@ max_lines = 1019
 
 [[rules]]
 path = "src/fastmcp/server/server.py"
-max_lines = 2682
+max_lines = 2777
 
 [[rules]]
 path = "tests/deprecated/test_import_server.py"
@@ -292,7 +292,7 @@ max_lines = 713
 
 [[rules]]
 path = "src/fastmcp/client/transports.py"
-max_lines = 1205
+max_lines = 1208
 
 [[rules]]
 path = "docs/docs.json"
