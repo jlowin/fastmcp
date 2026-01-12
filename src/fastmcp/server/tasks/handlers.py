@@ -56,6 +56,7 @@ async def handle_tool_as_task(
     ctx = get_context()
     session_id = ctx.session_id
 
+    # Get Docket from ContextVar (set by Context.__aenter__ at request time)
     docket = _current_docket.get()
     if docket is None:
         raise McpError(
@@ -167,6 +168,7 @@ async def handle_prompt_as_task(
     ctx = get_context()
     session_id = ctx.session_id
 
+    # Get Docket from ContextVar (set by Context.__aenter__ at request time)
     docket = _current_docket.get()
     if docket is None:
         raise McpError(
@@ -276,12 +278,13 @@ async def handle_resource_as_task(
     ctx = get_context()
     session_id = ctx.session_id
 
+    # Get Docket from ContextVar (set by Context.__aenter__ at request time)
     docket = _current_docket.get()
     if docket is None:
         raise McpError(
             ErrorData(
                 code=INTERNAL_ERROR,
-                message="Background tasks require Docket",
+                message="Background tasks require a running FastMCP server context",
             )
         )
 

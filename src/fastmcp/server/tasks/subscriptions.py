@@ -70,7 +70,7 @@ async def subscribe_to_task_updates(
                 )
 
     except Exception as e:
-        logger.warning(f"Subscription task failed for {task_id}: {e}", exc_info=True)
+        logger.error(f"subscribe_to_task_updates failed for {task_id}: {e}")
 
 
 async def _send_status_notification(
