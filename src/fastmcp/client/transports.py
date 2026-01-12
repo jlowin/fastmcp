@@ -208,6 +208,19 @@ class StreamableHttpTransport(ClientTransport):
         sse_read_timeout: datetime.timedelta | float | int | None = None,
         httpx_client_factory: McpHttpClientFactory | None = None,
     ):
+        """Initialize a Streamable HTTP transport.
+
+        Args:
+            url: The MCP server endpoint URL.
+            headers: Optional headers to include in requests.
+            auth: Authentication method - httpx.Auth, "oauth" for OAuth flow,
+                or a bearer token string.
+            sse_read_timeout: Deprecated. Use read_timeout_seconds in session_kwargs.
+            httpx_client_factory: Optional factory for creating httpx.AsyncClient.
+                If provided, must accept keyword arguments: headers, auth,
+                follow_redirects, and optionally timeout. Using **kwargs is
+                recommended to ensure forward compatibility.
+        """
         if isinstance(url, AnyUrl):
             url = str(url)
         if not isinstance(url, str) or not url.startswith("http"):
