@@ -50,7 +50,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from fastmcp.client.transports import ClientTransport
-    from fastmcp.tools.tool_transform import ToolTransformConfig
 
 logger = get_logger(__name__)
 
@@ -643,7 +642,6 @@ class FastMCPProxy(FastMCP):
         self,
         *,
         client_factory: ClientFactoryT,
-        tool_transforms: dict[str, ToolTransformConfig] | None = None,
         **kwargs,
     ):
         """Initialize the proxy server.
@@ -655,15 +653,11 @@ class FastMCPProxy(FastMCP):
             client_factory: A callable that returns a Client instance when called.
                            This gives you full control over session creation and reuse.
                            Can be either a synchronous or asynchronous function.
-            tool_transforms: Optional dict of tool_name to ToolTransformConfig for
-                schema modifications (arg renames, hidden args, etc.)
             **kwargs: Additional settings for the FastMCP server.
         """
         super().__init__(**kwargs)
         self.client_factory = client_factory
         provider: Provider = ProxyProvider(client_factory)
-        if tool_transforms:
-            provider = provider.with_transforms(tool_transforms=tool_transforms)
         self.add_provider(provider)
 
 

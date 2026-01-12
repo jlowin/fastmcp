@@ -237,16 +237,19 @@ class TestTools:
 
     async def test_get_transformed_tools(self):
         """Test that tool transformations are applied to proxied tools."""
+        from fastmcp.server.transforms import ToolTransform
+
         # Create server with transformation
-        server = FastMCP(
-            "TestServer",
-            tool_transformations={"add": ToolTransformConfig(name="add_transformed")},
-        )
+        server = FastMCP("TestServer")
 
         @server.tool
         def add(a: int, b: int) -> int:
             """Add two numbers together."""
             return a + b
+
+        server.add_transform(
+            ToolTransform({"add": ToolTransformConfig(name="add_transformed")})
+        )
 
         proxy = create_proxy(server)
         tools = await proxy.get_tools()
@@ -255,16 +258,19 @@ class TestTools:
 
     async def test_call_transformed_tools(self):
         """Test calling a transformed tool through a proxy."""
+        from fastmcp.server.transforms import ToolTransform
+
         # Create server with transformation
-        server = FastMCP(
-            "TestServer",
-            tool_transformations={"add": ToolTransformConfig(name="add_transformed")},
-        )
+        server = FastMCP("TestServer")
 
         @server.tool
         def add(a: int, b: int) -> int:
             """Add two numbers together."""
             return a + b
+
+        server.add_transform(
+            ToolTransform({"add": ToolTransformConfig(name="add_transformed")})
+        )
 
         proxy = create_proxy(server)
         async with Client(proxy) as client:

@@ -12,7 +12,6 @@ from collections.abc import (
     Awaitable,
     Callable,
     Collection,
-    Mapping,
     Sequence,
 )
 from contextlib import (
@@ -82,6 +81,12 @@ from fastmcp.server.providers import LocalProvider, Provider
 from fastmcp.server.providers.aggregate import AggregateProvider
 from fastmcp.server.tasks.capabilities import get_task_capabilities
 from fastmcp.server.tasks.config import TaskConfig, TaskMeta
+from fastmcp.server.transforms import (
+    Namespace,
+    ToolTransform,
+    Transform,
+    Visibility,
+)
 from fastmcp.settings import DuplicateBehavior as DuplicateBehaviorSetting
 from fastmcp.settings import Settings
 from fastmcp.tools.tool import FunctionTool, Tool, ToolResult
@@ -90,7 +95,6 @@ from fastmcp.utilities.cli import log_server_banner
 from fastmcp.utilities.components import FastMCPComponent
 from fastmcp.utilities.logging import get_logger, temporary_log_level
 from fastmcp.utilities.types import NotSet, NotSetT
-from fastmcp.utilities.visibility import VisibilityFilter
 
 if TYPE_CHECKING:
     from docket import Docket
@@ -208,9 +212,6 @@ class FastMCP(Generic[LifespanResultT]):
         lifespan: LifespanCallable | Lifespan | None = None,
         mask_error_details: bool | None = None,
         tools: Sequence[Tool | Callable[..., Any]] | None = None,
-        tool_transforms: Mapping[str, ToolTransformConfig] | None = None,
-        tool_transformations: Mapping[str, ToolTransformConfig]
-        | None = None,  # deprecated
         tool_serializer: ToolResultSerializerType | None = None,
         include_tags: Collection[str] | None = None,
         exclude_tags: Collection[str] | None = None,
@@ -257,26 +258,8 @@ class FastMCP(Generic[LifespanResultT]):
             on_duplicate=self._on_duplicate
         )
 
-        # Handle deprecated tool_transformations kwarg
-        if tool_transformations is not None:
-            if fastmcp.settings.deprecation_warnings:
-                warnings.warn(
-                    "The 'tool_transformations' parameter is deprecated. "
-                    "Use 'tool_transforms' instead.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-            if tool_transforms is not None:
-                raise ValueError(
-                    "Cannot specify both 'tool_transforms' and 'tool_transformations'. "
-                    "Use 'tool_transforms' only."
-                )
-            tool_transforms = tool_transformations
-
-        # Store tool transforms for server-level application
-        self._tool_transforms: dict[str, ToolTransformConfig] = dict(
-            tool_transforms or {}
-        )
+        # Server-level transforms (applied after provider aggregation)
+        self._transforms: list[Transform] = []
 
         # Local provider is always first in the provider list
         self._providers: list[Provider] = [
@@ -331,8 +314,8 @@ class FastMCP(Generic[LifespanResultT]):
                     tool = Tool.from_function(tool, serializer=self._tool_serializer)
                 self.add_tool(tool)
 
-        # Server-level visibility filter for runtime enable/disable
-        self._visibility = VisibilityFilter()
+        # Server-level visibility for runtime enable/disable
+        self._visibility = Visibility()
 
         # Emit deprecation warnings for include_tags and exclude_tags
         if include_tags is not None:
@@ -497,13 +480,12 @@ class FastMCP(Generic[LifespanResultT]):
                 yield
                 return
 
-            # Collect task-enabled components via root provider at startup.
-            # Uses _get_root_provider() to include server-level tool_transforms.
+            # Collect task-enabled components at startup with all transforms applied.
+            # Uses _source_get_tasks() to include both provider and server-level transforms.
             # Components must be available now to be registered with Docket workers;
             # dynamically added components after startup won't be registered.
             try:
-                root_provider = self._get_root_provider()
-                task_components = list(await root_provider.get_tasks())
+                task_components = list(await self._source_get_tasks())
             except Exception as e:
                 logger.warning(f"Failed to get tasks: {e}")
                 if fastmcp.settings.mounted_components_raise_on_load_error:
@@ -768,82 +750,201 @@ class FastMCP(Generic[LifespanResultT]):
     # Tool Transforms
     # -------------------------------------------------------------------------
 
-    def _get_root_provider(self) -> Provider:
-        """Get the root provider with server-level transforms applied.
+    def _get_root_provider(self) -> AggregateProvider:
+        """Get the root provider (aggregate of all providers).
 
-        Returns an AggregateProvider wrapping all providers, optionally wrapped
-        with TransformingProvider if tool_transforms are configured.
+        Returns an AggregateProvider wrapping all providers. Each provider
+        applies its own transforms and provider-level visibility.
+        Server-level transforms and visibility are applied by _source_* methods.
         """
-        aggregate: Provider = AggregateProvider(self._providers)
-        if self._tool_transforms:
-            aggregate = aggregate.with_transforms(tool_transforms=self._tool_transforms)
-        return aggregate
+        return AggregateProvider(self._providers)
 
-    @property
-    def tool_transforms(self) -> dict[str, ToolTransformConfig]:
-        """Get current tool transforms.
+    def _get_all_transforms(self) -> list[Transform]:
+        """Get all server-level transforms (including visibility as last)."""
+        return [*self._transforms, self._visibility]
 
-        Returns a copy of the tool transforms dict.
+    # -------------------------------------------------------------------------
+    # Server-level transform chain building
+    # -------------------------------------------------------------------------
+
+    async def _source_list_tools(self) -> Sequence[Tool]:
+        """List tools with all transforms applied (provider + server)."""
+        root = self._get_root_provider()
+
+        async def base() -> Sequence[Tool]:
+            return await root.list_tools()
+
+        chain = base
+        for transform in self._get_all_transforms():
+            chain = partial(transform.list_tools, call_next=chain)
+
+        return await chain()
+
+    async def _source_get_tool(self, name: str) -> Tool | None:
+        """Get tool by name with all transforms applied (provider + server)."""
+        root = self._get_root_provider()
+
+        async def base(n: str) -> Tool | None:
+            return await root.get_tool(n)
+
+        chain = base
+        for transform in self._get_all_transforms():
+            chain = partial(transform.get_tool, call_next=chain)
+
+        return await chain(name)
+
+    async def _source_list_resources(self) -> Sequence[Resource]:
+        """List resources with all transforms applied (provider + server)."""
+        root = self._get_root_provider()
+
+        async def base() -> Sequence[Resource]:
+            return await root.list_resources()
+
+        chain = base
+        for transform in self._get_all_transforms():
+            chain = partial(transform.list_resources, call_next=chain)
+
+        return await chain()
+
+    async def _source_get_resource(self, uri: str) -> Resource | None:
+        """Get resource by URI with all transforms applied (provider + server)."""
+        root = self._get_root_provider()
+
+        async def base(u: str) -> Resource | None:
+            return await root.get_resource(u)
+
+        chain = base
+        for transform in self._get_all_transforms():
+            chain = partial(transform.get_resource, call_next=chain)
+
+        return await chain(uri)
+
+    async def _source_list_resource_templates(self) -> Sequence[ResourceTemplate]:
+        """List resource templates with all transforms applied (provider + server)."""
+        root = self._get_root_provider()
+
+        async def base() -> Sequence[ResourceTemplate]:
+            return await root.list_resource_templates()
+
+        chain = base
+        for transform in self._get_all_transforms():
+            chain = partial(transform.list_resource_templates, call_next=chain)
+
+        return await chain()
+
+    async def _source_get_resource_template(self, uri: str) -> ResourceTemplate | None:
+        """Get resource template by URI with all transforms applied (provider + server)."""
+        root = self._get_root_provider()
+
+        async def base(u: str) -> ResourceTemplate | None:
+            return await root.get_resource_template(u)
+
+        chain = base
+        for transform in self._get_all_transforms():
+            chain = partial(transform.get_resource_template, call_next=chain)
+
+        return await chain(uri)
+
+    async def _source_list_prompts(self) -> Sequence[Prompt]:
+        """List prompts with all transforms applied (provider + server)."""
+        root = self._get_root_provider()
+
+        async def base() -> Sequence[Prompt]:
+            return await root.list_prompts()
+
+        chain = base
+        for transform in self._get_all_transforms():
+            chain = partial(transform.list_prompts, call_next=chain)
+
+        return await chain()
+
+    async def _source_get_prompt(self, name: str) -> Prompt | None:
+        """Get prompt by name with all transforms applied (provider + server)."""
+        root = self._get_root_provider()
+
+        async def base(n: str) -> Prompt | None:
+            return await root.get_prompt(n)
+
+        chain = base
+        for transform in self._get_all_transforms():
+            chain = partial(transform.get_prompt, call_next=chain)
+
+        return await chain(name)
+
+    async def _source_get_tasks(self) -> Sequence[FastMCPComponent]:
+        """Get tasks with all transforms applied (provider + server).
+
+        Collects task-eligible components from all providers and applies
+        server-level transforms to ensure task registration uses transformed names.
         """
-        return dict(self._tool_transforms)
+        root = self._get_root_provider()
+        components = list(await root.get_tasks())
 
-    def add_tool_transform(self, name: str, config: ToolTransformConfig) -> None:
-        """Add or update a tool transform.
+        # Separate by component type for transform application
+        tools = [c for c in components if isinstance(c, Tool)]
+        resources = [c for c in components if isinstance(c, Resource)]
+        templates = [c for c in components if isinstance(c, ResourceTemplate)]
+        prompts = [c for c in components if isinstance(c, Prompt)]
 
-        Server-level transforms apply to ALL tools from all providers
-        (local tools, mounted servers, proxies, etc.).
+        # Apply server-level transforms using call_next pattern
+        async def tools_base() -> Sequence[Tool]:
+            return tools
+
+        async def resources_base() -> Sequence[Resource]:
+            return resources
+
+        async def templates_base() -> Sequence[ResourceTemplate]:
+            return templates
+
+        async def prompts_base() -> Sequence[Prompt]:
+            return prompts
+
+        tools_chain = tools_base
+        resources_chain = resources_base
+        templates_chain = templates_base
+        prompts_chain = prompts_base
+
+        for transform in self._get_all_transforms():
+            tools_chain = partial(transform.list_tools, call_next=tools_chain)
+            resources_chain = partial(
+                transform.list_resources, call_next=resources_chain
+            )
+            templates_chain = partial(
+                transform.list_resource_templates, call_next=templates_chain
+            )
+            prompts_chain = partial(transform.list_prompts, call_next=prompts_chain)
+
+        transformed_tools = await tools_chain()
+        transformed_resources = await resources_chain()
+        transformed_templates = await templates_chain()
+        transformed_prompts = await prompts_chain()
+
+        return [
+            *transformed_tools,
+            *transformed_resources,
+            *transformed_templates,
+            *transformed_prompts,
+        ]
+
+    def add_transform(self, transform: Transform) -> None:
+        """Add a server-level transform.
+
+        Server-level transforms are applied after all providers are aggregated.
+        They transform tools, resources, and prompts from ALL providers.
 
         Args:
-            name: The original tool name to transform.
-            config: The transformation configuration.
+            transform: The transform to add.
 
         Example:
             ```python
-            mcp = FastMCP("Server")
+            from fastmcp.server.transforms import Namespace
 
-            @mcp.tool
-            def my_tool() -> str:
-                return "hello"
-
-            # Rename the tool as seen by clients
-            mcp.add_tool_transform(
-                "my_tool",
-                ToolTransformConfig(name="better_name")
-            )
+            server = FastMCP("Server")
+            server.add_transform(Namespace("api"))
+            # All tools from all providers become "api_toolname"
             ```
         """
-        self._tool_transforms[name] = config
-
-    def remove_tool_transform(self, name: str) -> None:
-        """Remove a tool transform.
-
-        Args:
-            name: The original tool name whose transform should be removed.
-        """
-        self._tool_transforms.pop(name, None)
-
-    # Deprecated aliases
-    def add_tool_transformation(self, name: str, config: ToolTransformConfig) -> None:
-        """Deprecated: Use add_tool_transform() instead."""
-        if fastmcp.settings.deprecation_warnings:
-            warnings.warn(
-                "add_tool_transformation() is deprecated. "
-                "Use add_tool_transform() instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-        self.add_tool_transform(name, config)
-
-    def remove_tool_transformation(self, name: str) -> None:
-        """Deprecated: Use remove_tool_transform() instead."""
-        if fastmcp.settings.deprecation_warnings:
-            warnings.warn(
-                "remove_tool_transformation() is deprecated. "
-                "Use remove_tool_transform() instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-        self.remove_tool_transform(name)
+        self._transforms.append(transform)
 
     # -------------------------------------------------------------------------
     # Enable/Disable
@@ -920,8 +1021,8 @@ class FastMCP(Generic[LifespanResultT]):
     async def get_tools(self, *, run_middleware: bool = False) -> list[Tool]:
         """Get all enabled tools from providers.
 
-        Queries all providers via the root provider (which applies server-level
-        transforms). First provider wins for duplicate keys. Filters by visibility.
+        Queries all providers via the root provider (which applies provider transforms,
+        server transforms, and visibility filtering). First provider wins for duplicate keys.
 
         Args:
             run_middleware: If True, apply the middleware chain before
@@ -943,32 +1044,31 @@ class FastMCP(Generic[LifespanResultT]):
                     )
                 )
 
-        # Get tools via root provider (applies server-level transforms)
-        tools = await self._get_root_provider().list_tools()
+        # Query through full transform chain (provider transforms + server transforms + visibility)
+        tools = await self._source_list_tools()
 
-        # Deduplicate by key (first wins) and filter by visibility
-        all_tools: dict[str, Tool] = {}
+        # Deduplicate by key (first wins)
+        seen: dict[str, Tool] = {}
         for tool in tools:
-            if self._is_component_enabled(tool) and tool.key not in all_tools:
-                all_tools[tool.key] = tool
-        return list(all_tools.values())
+            if tool.key not in seen:
+                seen[tool.key] = tool
+        return list(seen.values())
 
     async def get_tool(self, name: str) -> Tool:
         """Get an enabled tool by name.
 
-        Queries via root provider (which applies server-level transforms).
-        Returns only if enabled.
+        Queries providers with full transform chain (provider transforms + server transforms + visibility).
         """
-        tool = await self._get_root_provider().get_tool(name)
-        if tool is not None and self._is_component_enabled(tool):
-            return tool
-        raise NotFoundError(f"Unknown tool: {name!r}")
+        tool = await self._source_get_tool(name)
+        if tool is None:
+            raise NotFoundError(f"Unknown tool: {name!r}")
+        return tool
 
     async def get_resources(self, *, run_middleware: bool = False) -> list[Resource]:
         """Get all enabled resources from providers.
 
-        Queries all providers via the root provider. First provider wins for
-        duplicate keys. Filters by visibility.
+        Queries all providers via the root provider (which applies provider transforms,
+        server transforms, and visibility filtering). First provider wins for duplicate keys.
 
         Args:
             run_middleware: If True, apply the middleware chain before
@@ -992,27 +1092,25 @@ class FastMCP(Generic[LifespanResultT]):
                     )
                 )
 
-        # Get resources via root provider
-        resources = await self._get_root_provider().list_resources()
+        # Query through full transform chain (provider transforms + server transforms + visibility)
+        resources = await self._source_list_resources()
 
-        # Deduplicate by key (first wins) and filter by visibility
-        all_resources: dict[str, Resource] = {}
+        # Deduplicate by key (first wins)
+        seen: dict[str, Resource] = {}
         for resource in resources:
-            if (
-                self._is_component_enabled(resource)
-                and resource.key not in all_resources
-            ):
-                all_resources[resource.key] = resource
-        return list(all_resources.values())
+            if resource.key not in seen:
+                seen[resource.key] = resource
+        return list(seen.values())
 
     async def get_resource(self, uri: str) -> Resource:
         """Get an enabled resource by URI.
 
-        Queries via root provider. Returns only if enabled.
+        Queries providers with full transform chain (provider transforms + server transforms + visibility).
         """
-        resource = await self._get_root_provider().get_resource(uri)
-        if resource is not None and self._is_component_enabled(resource):
+        resource = await self._source_get_resource(uri)
+        if resource is not None:
             return resource
+
         raise NotFoundError(f"Unknown resource: {uri}")
 
     async def get_resource_templates(
@@ -1020,8 +1118,8 @@ class FastMCP(Generic[LifespanResultT]):
     ) -> list[ResourceTemplate]:
         """Get all enabled resource templates from providers.
 
-        Queries all providers via the root provider. First provider wins for
-        duplicate keys. Filters by visibility.
+        Queries all providers via the root provider (which applies provider transforms,
+        server transforms, and visibility filtering). First provider wins for duplicate keys.
 
         Args:
             run_middleware: If True, apply the middleware chain before
@@ -1045,34 +1143,31 @@ class FastMCP(Generic[LifespanResultT]):
                     )
                 )
 
-        # Get templates via root provider
-        templates = await self._get_root_provider().list_resource_templates()
+        # Query through full transform chain (provider transforms + server transforms + visibility)
+        templates = await self._source_list_resource_templates()
 
-        # Deduplicate by key (first wins) and filter by visibility
-        all_templates: dict[str, ResourceTemplate] = {}
+        # Deduplicate by key (first wins)
+        seen: dict[str, ResourceTemplate] = {}
         for template in templates:
-            if (
-                self._is_component_enabled(template)
-                and template.key not in all_templates
-            ):
-                all_templates[template.key] = template
-        return list(all_templates.values())
+            if template.key not in seen:
+                seen[template.key] = template
+        return list(seen.values())
 
     async def get_resource_template(self, uri: str) -> ResourceTemplate:
         """Get an enabled resource template that matches the given URI.
 
-        Queries via root provider. Returns only if enabled.
+        Queries providers with full transform chain (provider transforms + server transforms + visibility).
         """
-        template = await self._get_root_provider().get_resource_template(uri)
-        if template is not None and self._is_component_enabled(template):
-            return template
-        raise NotFoundError(f"Unknown resource template: {uri}")
+        template = await self._source_get_resource_template(uri)
+        if template is None:
+            raise NotFoundError(f"Unknown resource template: {uri}")
+        return template
 
     async def get_prompts(self, *, run_middleware: bool = False) -> list[Prompt]:
         """Get all enabled prompts from providers.
 
-        Queries all providers via the root provider. First provider wins for
-        duplicate keys. Filters by visibility.
+        Queries all providers via the root provider (which applies provider transforms,
+        server transforms, and visibility filtering). First provider wins for duplicate keys.
 
         Args:
             run_middleware: If True, apply the middleware chain before
@@ -1096,32 +1191,32 @@ class FastMCP(Generic[LifespanResultT]):
                     )
                 )
 
-        # Get prompts via root provider
-        prompts = await self._get_root_provider().list_prompts()
+        # Query through full transform chain (provider transforms + server transforms + visibility)
+        prompts = await self._source_list_prompts()
 
-        # Deduplicate by key (first wins) and filter by visibility
-        all_prompts: dict[str, Prompt] = {}
+        # Deduplicate by key (first wins)
+        seen: dict[str, Prompt] = {}
         for prompt in prompts:
-            if self._is_component_enabled(prompt) and prompt.key not in all_prompts:
-                all_prompts[prompt.key] = prompt
-        return list(all_prompts.values())
+            if prompt.key not in seen:
+                seen[prompt.key] = prompt
+        return list(seen.values())
 
     async def get_prompt(self, name: str) -> Prompt:
         """Get an enabled prompt by name.
 
-        Queries via root provider. Returns only if enabled.
+        Queries providers with full transform chain (provider transforms + server transforms + visibility).
         """
-        prompt = await self._get_root_provider().get_prompt(name)
-        if prompt is not None and self._is_component_enabled(prompt):
-            return prompt
-        raise NotFoundError(f"Unknown prompt: {name}")
+        prompt = await self._source_get_prompt(name)
+        if prompt is None:
+            raise NotFoundError(f"Unknown prompt: {name}")
+        return prompt
 
     async def get_component(
         self, key: str
     ) -> Tool | Resource | ResourceTemplate | Prompt:
         """Get a component by its prefixed key.
 
-        Queries via root provider (which applies server-level transforms).
+        Routes to the appropriate get_* method which applies server-level layers.
 
         Args:
             key: The prefixed key (e.g., "tool:name", "resource:uri", "template:uri").
@@ -1132,9 +1227,15 @@ class FastMCP(Generic[LifespanResultT]):
         Raises:
             NotFoundError: If no component is found with the given key.
         """
-        component = await self._get_root_provider().get_component(key)
-        if component is not None:
-            return component
+        # Parse key and delegate to specific methods which apply layers
+        if key.startswith("tool:"):
+            return await self.get_tool(key[5:])
+        elif key.startswith("resource:"):
+            return await self.get_resource(key[9:])
+        elif key.startswith("template:"):
+            return await self.get_resource_template(key[9:])
+        elif key.startswith("prompt:"):
+            return await self.get_prompt(key[7:])
         raise NotFoundError(f"Unknown component: {key}")
 
     @overload
@@ -2341,12 +2442,20 @@ class FastMCP(Generic[LifespanResultT]):
                 if not isinstance(server, FastMCPProxy):
                     server = FastMCP.as_proxy(server)
 
-        # Create provider with optional transformations
+        # Create provider with optional transforms
         provider: Provider = FastMCPProvider(server)
-        if namespace or tool_names:
-            provider = provider.with_transforms(
-                namespace=namespace, tool_renames=tool_names
-            )
+        if namespace:
+            provider.add_transform(Namespace(namespace))
+        if tool_names:
+            # Tool renames are implemented as a ToolTransform
+            # Keys must use the namespaced names (after Namespace transform)
+            transforms = {
+                (
+                    f"{namespace}_{old_name}" if namespace else old_name
+                ): ToolTransformConfig(name=new_name)
+                for old_name, new_name in tool_names.items()
+            }
+            provider.add_transform(ToolTransform(transforms))
         self._providers.append(provider)
 
     async def import_server(
@@ -2460,7 +2569,6 @@ class FastMCP(Generic[LifespanResultT]):
         mcp_names: dict[str, str] | None = None,
         tags: set[str] | None = None,
         timeout: float | None = None,
-        tool_transforms: dict[str, ToolTransformConfig] | None = None,
         **settings: Any,
     ) -> Self:
         """
@@ -2476,8 +2584,6 @@ class FastMCP(Generic[LifespanResultT]):
             mcp_names: Optional dictionary mapping operationId to component names
             tags: Optional set of tags to add to all components
             timeout: Optional timeout (in seconds) for all requests
-            tool_transforms: Optional dict of tool_name to ToolTransformConfig for
-                schema modifications (arg renames, hidden args, etc.)
             **settings: Additional settings passed to FastMCP
 
         Returns:
@@ -2495,8 +2601,6 @@ class FastMCP(Generic[LifespanResultT]):
             tags=tags,
             timeout=timeout,
         )
-        if tool_transforms:
-            provider = provider.with_transforms(tool_transforms=tool_transforms)
         return cls(name=name, providers=[provider], **settings)
 
     @classmethod
@@ -2511,7 +2615,6 @@ class FastMCP(Generic[LifespanResultT]):
         httpx_client_kwargs: dict[str, Any] | None = None,
         tags: set[str] | None = None,
         timeout: float | None = None,
-        tool_transforms: dict[str, ToolTransformConfig] | None = None,
         **settings: Any,
     ) -> Self:
         """
@@ -2527,8 +2630,6 @@ class FastMCP(Generic[LifespanResultT]):
             httpx_client_kwargs: Optional kwargs passed to httpx.AsyncClient
             tags: Optional set of tags to add to all components
             timeout: Optional timeout (in seconds) for all requests
-            tool_transforms: Optional dict of tool_name to ToolTransformConfig for
-                schema modifications (arg renames, hidden args, etc.)
             **settings: Additional settings passed to FastMCP
 
         Returns:
@@ -2557,8 +2658,6 @@ class FastMCP(Generic[LifespanResultT]):
             tags=tags,
             timeout=timeout,
         )
-        if tool_transforms:
-            provider = provider.with_transforms(tool_transforms=tool_transforms)
         return cls(name=server_name, providers=[provider], **settings)
 
     @classmethod
@@ -2625,7 +2724,6 @@ def create_proxy(
         | dict[str, Any]
         | str
     ),
-    tool_transforms: dict[str, ToolTransformConfig] | None = None,
     **settings: Any,
 ) -> FastMCPProxy:
     """Create a FastMCP proxy server for the given target.
@@ -2641,8 +2739,6 @@ def create_proxy(
             - A URL string or AnyUrl
             - A Path to a server script
             - An MCPConfig or dict
-        tool_transforms: Optional dict of tool_name to ToolTransformConfig for
-            schema modifications (arg renames, hidden args, etc.)
         **settings: Additional settings passed to FastMCPProxy (name, etc.)
 
     Returns:
@@ -2667,6 +2763,5 @@ def create_proxy(
     client_factory = _create_client_factory(target)
     return FastMCPProxy(
         client_factory=client_factory,
-        tool_transforms=tool_transforms,
         **settings,
     )

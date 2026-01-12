@@ -1,13 +1,12 @@
 """AggregateProvider for combining multiple providers into one.
 
 This module provides `AggregateProvider` which presents multiple providers
-as a single unified provider. Used internally by FastMCP for applying
-server-level transforms across all providers.
+as a single unified provider. Used internally by FastMCP for aggregating
+components from all providers.
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from collections.abc import AsyncIterator, Sequence
 from contextlib import AsyncExitStack, asynccontextmanager
@@ -19,6 +18,7 @@ from fastmcp.resources.resource import Resource
 from fastmcp.resources.template import ResourceTemplate
 from fastmcp.server.providers.base import Provider
 from fastmcp.tools.tool import Tool
+from fastmcp.utilities.async_utils import gather
 from fastmcp.utilities.components import FastMCPComponent
 
 logger = logging.getLogger(__name__)
@@ -85,16 +85,18 @@ class AggregateProvider(Provider):
     # -------------------------------------------------------------------------
 
     async def list_tools(self) -> Sequence[Tool]:
-        """List all tools from all providers."""
-        results = await asyncio.gather(
-            *[p.list_tools() for p in self._providers], return_exceptions=True
+        """List all tools from all providers (with transforms applied)."""
+        results = await gather(
+            *[p._list_tools() for p in self._providers],
+            return_exceptions=True,
         )
         return self._collect_list_results(results, "list_tools")
 
     async def get_tool(self, name: str) -> Tool | None:
-        """Get tool by name from first provider that has it."""
-        results = await asyncio.gather(
-            *[p.get_tool(name) for p in self._providers], return_exceptions=True
+        """Get tool by name from first provider that has it (with transforms applied)."""
+        results = await gather(
+            *[p._get_tool(name) for p in self._providers],
+            return_exceptions=True,
         )
         return self._get_first_result(results, f"get_tool({name!r})")
 
@@ -103,16 +105,18 @@ class AggregateProvider(Provider):
     # -------------------------------------------------------------------------
 
     async def list_resources(self) -> Sequence[Resource]:
-        """List all resources from all providers."""
-        results = await asyncio.gather(
-            *[p.list_resources() for p in self._providers], return_exceptions=True
+        """List all resources from all providers (with transforms applied)."""
+        results = await gather(
+            *[p._list_resources() for p in self._providers],
+            return_exceptions=True,
         )
         return self._collect_list_results(results, "list_resources")
 
     async def get_resource(self, uri: str) -> Resource | None:
-        """Get resource by URI from first provider that has it."""
-        results = await asyncio.gather(
-            *[p.get_resource(uri) for p in self._providers], return_exceptions=True
+        """Get resource by URI from first provider that has it (with transforms applied)."""
+        results = await gather(
+            *[p._get_resource(uri) for p in self._providers],
+            return_exceptions=True,
         )
         return self._get_first_result(results, f"get_resource({uri!r})")
 
@@ -121,17 +125,17 @@ class AggregateProvider(Provider):
     # -------------------------------------------------------------------------
 
     async def list_resource_templates(self) -> Sequence[ResourceTemplate]:
-        """List all resource templates from all providers."""
-        results = await asyncio.gather(
-            *[p.list_resource_templates() for p in self._providers],
+        """List all resource templates from all providers (with transforms applied)."""
+        results = await gather(
+            *[p._list_resource_templates() for p in self._providers],
             return_exceptions=True,
         )
         return self._collect_list_results(results, "list_resource_templates")
 
     async def get_resource_template(self, uri: str) -> ResourceTemplate | None:
-        """Get resource template by URI from first provider that has it."""
-        results = await asyncio.gather(
-            *[p.get_resource_template(uri) for p in self._providers],
+        """Get resource template by URI from first provider that has it (with transforms applied)."""
+        results = await gather(
+            *[p._get_resource_template(uri) for p in self._providers],
             return_exceptions=True,
         )
         return self._get_first_result(results, f"get_resource_template({uri!r})")
@@ -141,16 +145,18 @@ class AggregateProvider(Provider):
     # -------------------------------------------------------------------------
 
     async def list_prompts(self) -> Sequence[Prompt]:
-        """List all prompts from all providers."""
-        results = await asyncio.gather(
-            *[p.list_prompts() for p in self._providers], return_exceptions=True
+        """List all prompts from all providers (with transforms applied)."""
+        results = await gather(
+            *[p._list_prompts() for p in self._providers],
+            return_exceptions=True,
         )
         return self._collect_list_results(results, "list_prompts")
 
     async def get_prompt(self, name: str) -> Prompt | None:
-        """Get prompt by name from first provider that has it."""
-        results = await asyncio.gather(
-            *[p.get_prompt(name) for p in self._providers], return_exceptions=True
+        """Get prompt by name from first provider that has it (with transforms applied)."""
+        results = await gather(
+            *[p._get_prompt(name) for p in self._providers],
+            return_exceptions=True,
         )
         return self._get_first_result(results, f"get_prompt({name!r})")
 
@@ -161,11 +167,21 @@ class AggregateProvider(Provider):
     async def get_component(
         self, key: str
     ) -> Tool | Resource | ResourceTemplate | Prompt | None:
-        """Get component by key from first provider that has it."""
-        results = await asyncio.gather(
-            *[p.get_component(key) for p in self._providers], return_exceptions=True
-        )
-        return self._get_first_result(results, f"get_component({key!r})")
+        """Get component by key from first provider that has it (with transforms applied).
+
+        Parses the key prefix and delegates to the appropriate get_* method
+        so that transforms are applied correctly.
+        """
+        # Parse key prefix to route to correct method
+        if key.startswith("tool:"):
+            return await self.get_tool(key[5:])
+        elif key.startswith("resource:"):
+            return await self.get_resource(key[9:])
+        elif key.startswith("template:"):
+            return await self.get_resource_template(key[9:])
+        elif key.startswith("prompt:"):
+            return await self.get_prompt(key[7:])
+        return None
 
     # -------------------------------------------------------------------------
     # Tasks
@@ -173,7 +189,7 @@ class AggregateProvider(Provider):
 
     async def get_tasks(self) -> Sequence[FastMCPComponent]:
         """Get all task-eligible components from all providers."""
-        results = await asyncio.gather(
+        results = await gather(
             *[p.get_tasks() for p in self._providers], return_exceptions=True
         )
         return self._collect_list_results(results, "get_tasks")

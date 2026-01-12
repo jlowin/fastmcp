@@ -24,7 +24,7 @@ class Provider:
 Providers support:
 - **Lifecycle management**: `async def lifespan()` for setup/teardown
 - **Visibility control**: `enable()` / `disable()` with keys, tags, and allowlist mode
-- **Transformation chaining**: `provider.with_transforms(namespace=..., tool_renames=...)`
+- **Transform stacking**: `provider.add_transform(Namespace(...))`, `provider.add_transform(ToolTransform(...))`
 
 ### LocalProvider
 
@@ -91,27 +91,32 @@ def greet(name: str) -> str:
     return f"Hello, {name}!"
 
 # Mount with namespace
-main.add_provider(FastMCPProvider(sub).with_namespace("sub"))
+provider = FastMCPProvider(sub)
+provider.add_transform(Namespace("sub"))
+main.add_provider(provider)
 # Tool accessible as "sub_greet"
 ```
 
-### TransformingProvider
+### Transforms
 
-`TransformingProvider` (`src/fastmcp/server/providers/transforming.py`) wraps any provider to apply namespace prefixes and tool renames. Usually accessed via `provider.with_transforms()`.
+Transforms modify components (tools, resources, prompts) as they flow through the system. Available transforms:
+
+- `Namespace` - adds prefixes to names and path segments to URIs
+- `ToolTransform` - modifies tool schemas (rename, description, tags)
+- `Visibility` - filters components (internal, backs enable/disable API)
 
 ```python
-provider = SomeProvider().with_transforms(
-    namespace="api",
-    tool_renames={"verbose_tool_name": "short"}
-)
+from fastmcp.server.transforms import Namespace, ToolTransform
+from fastmcp.tools.tool_transform import ToolTransformConfig
+
+provider = SomeProvider()
+provider.add_transform(Namespace("api"))
+provider.add_transform(ToolTransform({
+    "api_verbose_tool_name": ToolTransformConfig(name="short")
+}))
 
 # Stacking composes transformations
-provider = (
-    SomeProvider()
-    .with_transforms(namespace="api")
-    .with_transforms(tool_renames={"api_foo": "bar"})
-)
-# "foo" → "api_foo" → "bar"
+# "foo" → "api_foo" (namespace) → could rename further with ToolTransform
 ```
 
 ---

@@ -1,7 +1,7 @@
 ---
 title: Namespacing
 sidebarTitle: Namespacing
-description: Namespace and rename components with TransformingProvider
+description: Namespace and transform components with transforms
 icon: wand-magic-sparkles
 ---
 
@@ -9,7 +9,7 @@ import { VersionBadge } from '/snippets/version-badge.mdx'
 
 <VersionBadge version="3.0.0" />
 
-`TransformingProvider` wraps another provider and modifies its components, enabling namespacing and renaming. When you use `mount(namespace="...")`, `TransformingProvider` is used under the hood.
+Transforms modify components as they flow through your server. They're the mechanism behind `mount(namespace="...")` and can be used directly for custom transformations.
 
 ## Why Transform
 
@@ -61,14 +61,13 @@ Tools and prompts get an underscore prefix. Resources get a path-style prefix.
 
 ## Tool Renaming
 
-For more control, rename specific tools explicitly:
+For more control, rename specific tools with `tool_names`:
 
 ```python
-from fastmcp.server.providers import FastMCPProvider
-
-provider = FastMCPProvider(weather_server).with_transforms(
+main.mount(
+    weather_server,
     namespace="weather",
-    tool_renames={"verbose_tool_name": "short"}
+    tool_names={"verbose_tool_name": "short"}
 )
 
 # "verbose_tool_name" → "short" (explicit rename, bypasses namespace)
@@ -77,57 +76,97 @@ provider = FastMCPProvider(weather_server).with_transforms(
 
 Explicit renames take precedence over namespacing.
 
-## Direct Provider Usage
+## Transform API
 
-You can use `TransformingProvider` directly via `with_transforms()`:
+Under the hood, namespacing and tool renaming use **transforms**. You can use transforms directly for more control.
+
+### Available Transforms
+
+| Transform | Purpose |
+|-----------|---------|
+| `Namespace` | Adds prefixes to names and path segments to URIs |
+| `ToolTransform` | Modifies tool schemas (rename, description, tags) |
+
+### Server-Level Transforms
+
+Add transforms to your server with `add_transform()`. Server transforms apply to all components from all providers:
 
 ```python
-from fastmcp.server.providers import LocalProvider
+from fastmcp import FastMCP
+from fastmcp.server.transforms import ToolTransform, Namespace
+from fastmcp.tools.tool_transform import ToolTransformConfig
 
-provider = LocalProvider()
+mcp = FastMCP("Server")
 
-@provider.tool
-def greet(name: str) -> str:
-    return f"Hello, {name}!"
+@mcp.tool
+def my_tool() -> str:
+    return "hello"
 
-# Apply transformations
-namespaced = provider.with_transforms(namespace="api")
+# Rename a tool
+mcp.add_transform(ToolTransform({
+    "my_tool": ToolTransformConfig(name="better_name")
+}))
 
-# Or use shorthand
-namespaced = provider.with_namespace("api")
+# Add a namespace to everything
+mcp.add_transform(Namespace("api"))
+```
 
-# Register with server
-mcp = FastMCP("Server", providers=[namespaced])
+### Provider-Level Transforms
+
+You can also add transforms to individual providers:
+
+```python
+from fastmcp.server.providers import FastMCPProvider
+from fastmcp.server.transforms import Namespace
+
+sub_server = FastMCP("Sub")
+
+@sub_server.tool
+def greet() -> str:
+    return "hello"
+
+# Create provider with namespace transform
+provider = FastMCPProvider(sub_server)
+provider.add_transform(Namespace("api"))
+
+# Register with main server
+main = FastMCP("Main", providers=[provider])
 # Tool is now: api_greet
 ```
 
-## Stacking Transformations
+### Transform Stacking
 
-Transformations can be stacked - each `with_transforms()` creates a new wrapper:
-
-```python
-provider = (
-    LocalProvider()
-    .with_transforms(namespace="inner")
-    .with_transforms(namespace="outer")
-)
-
-# Tool "foo" becomes:
-# 1. inner_foo (first transform)
-# 2. outer_inner_foo (second transform)
-```
-
-You can also combine namespacing with renaming at different levels:
+Transforms stack - first added is innermost:
 
 ```python
-provider = (
-    LocalProvider()
-    .with_transforms(namespace="api")
-    .with_transforms(tool_renames={"api_verbose": "short"})
-)
+from fastmcp.server.transforms import Namespace, ToolTransform
+from fastmcp.tools.tool_transform import ToolTransformConfig
+
+provider = FastMCPProvider(server)
+provider.add_transform(Namespace("api"))  # Applied first
+provider.add_transform(ToolTransform({   # Sees namespaced names
+    "api_verbose": ToolTransformConfig(name="short")
+}))
 
 # "verbose" → "api_verbose" (namespace) → "short" (rename)
 ```
+
+## ToolTransformConfig Options
+
+When using `ToolTransform`, each tool can be configured with:
+
+```python
+from fastmcp.tools.tool_transform import ToolTransformConfig
+
+config = ToolTransformConfig(
+    name="new_name",           # Rename the tool
+    description="New desc",    # Change description
+    tags={"admin"},           # Add tags
+    # ... and more
+)
+```
+
+See [Tool Transformation](/patterns/tool-transformation) for argument-level transforms using `Tool.from_tool()`.
 
 ## Use Cases
 
@@ -150,10 +189,8 @@ main.mount(v2_server, namespace="v2")
 ### Aliasing Long Names
 
 ```python
-provider = FastMCPProvider(server).with_transforms(
-    tool_renames={
-        "get_user_authentication_status": "auth_status",
-        "retrieve_configuration_settings": "get_config"
-    }
-)
+mcp.add_transform(ToolTransform({
+    "get_user_authentication_status": ToolTransformConfig(name="auth_status"),
+    "retrieve_configuration_settings": ToolTransformConfig(name="get_config"),
+}))
 ```

@@ -21,7 +21,7 @@ FastMCP v3 introduces a unified provider architecture for sourcing components. A
 - **LocalProvider** stores decorator-registered components (`@mcp.tool`, etc.)
 - **FastMCPProvider** wraps another FastMCP server for composition
 - **ProxyProvider** connects to remote MCP servers
-- **TransformingProvider** adds namespacing and renaming
+- **Transforms** modify components (namespacing, renaming) via `add_transform()`
 
 See [Providers](/servers/providers/overview) for the complete documentation.
 

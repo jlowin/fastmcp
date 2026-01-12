@@ -536,10 +536,11 @@ class TestLocalProviderDecorators:
 
 
 class TestProviderToolTransformations:
-    """Tests for tool transformations via with_transforms()."""
+    """Tests for tool transformations via add_transform()."""
 
-    async def test_with_transforms_applies_tool_transforms(self):
-        """Test that with_transforms applies tool transformations."""
+    async def test_add_transform_applies_tool_transforms(self):
+        """Test that add_transform with ToolTransform applies tool transformations."""
+        from fastmcp.server.transforms import ToolTransform
         from fastmcp.tools.tool_transform import ToolTransformConfig
 
         provider = LocalProvider()
@@ -548,17 +549,21 @@ class TestProviderToolTransformations:
         def my_tool(x: int) -> int:
             return x
 
-        # Wrap with transforms
-        transformed = provider.with_transforms(
-            tool_transforms={"my_tool": ToolTransformConfig(name="renamed_tool")}
-        )
+        # Add transform layer
+        layer = ToolTransform({"my_tool": ToolTransformConfig(name="renamed_tool")})
+        provider.add_transform(layer)
 
-        tools = await transformed.list_tools()
-        assert len(tools) == 1
-        assert tools[0].name == "renamed_tool"
+        # Use call_next pattern
+        async def get_tools():
+            return await provider.list_tools()
 
-    async def test_list_tools_applies_transformations(self):
-        """Test that list_tools applies transformations."""
+        transformed_tools = await layer.list_tools(get_tools)
+        assert len(transformed_tools) == 1
+        assert transformed_tools[0].name == "renamed_tool"
+
+    async def test_transform_layer_get_tool(self):
+        """Test that ToolTransform.get_tool works correctly."""
+        from fastmcp.server.transforms import ToolTransform
         from fastmcp.tools.tool_transform import ToolTransformConfig
 
         provider = LocalProvider()
@@ -567,18 +572,25 @@ class TestProviderToolTransformations:
         def original_tool(x: int) -> int:
             return x
 
-        transformed = provider.with_transforms(
-            tool_transforms={
-                "original_tool": ToolTransformConfig(name="transformed_tool")
-            }
+        layer = ToolTransform(
+            {"original_tool": ToolTransformConfig(name="transformed_tool")}
         )
 
-        tools = await transformed.list_tools()
-        assert len(tools) == 1
-        assert tools[0].name == "transformed_tool"
+        # Get tool through layer with call_next
+        async def get_tool(name: str):
+            return await provider.get_tool(name)
 
-    async def test_get_tool_applies_transformation(self):
-        """Test that get_tool applies transformation."""
+        tool = await layer.get_tool("transformed_tool", get_tool)
+        assert tool is not None
+        assert tool.name == "transformed_tool"
+
+        # Original name should not work
+        tool = await layer.get_tool("original_tool", get_tool)
+        assert tool is None
+
+    async def test_transform_layer_description_change(self):
+        """Test that ToolTransform can change description."""
+        from fastmcp.server.transforms import ToolTransform
         from fastmcp.tools.tool_transform import ToolTransformConfig
 
         provider = LocalProvider()
@@ -587,18 +599,20 @@ class TestProviderToolTransformations:
         def my_tool(x: int) -> int:
             return x
 
-        transformed = provider.with_transforms(
-            tool_transforms={
-                "my_tool": ToolTransformConfig(description="New description")
-            }
+        layer = ToolTransform(
+            {"my_tool": ToolTransformConfig(description="New description")}
         )
 
-        tool = await transformed.get_tool("my_tool")
+        async def get_tool(name: str):
+            return await provider.get_tool(name)
+
+        tool = await layer.get_tool("my_tool", get_tool)
         assert tool is not None
         assert tool.description == "New description"
 
-    async def test_original_provider_unchanged(self):
-        """Test that the original provider is not modified by with_transforms."""
+    async def test_provider_unaffected_by_transforms(self):
+        """Test that provider's own tools are unchanged by layers stored on it."""
+        from fastmcp.server.transforms import ToolTransform
         from fastmcp.tools.tool_transform import ToolTransformConfig
 
         provider = LocalProvider()
@@ -607,60 +621,29 @@ class TestProviderToolTransformations:
         def my_tool(x: int) -> int:
             return x
 
-        # Wrap with transforms
-        transformed = provider.with_transforms(
-            tool_transforms={"my_tool": ToolTransformConfig(name="renamed")}
-        )
+        # Add layer to provider (layers are applied by server, not list_tools)
+        layer = ToolTransform({"my_tool": ToolTransformConfig(name="renamed")})
+        provider.add_transform(layer)
 
-        # Original should still have original name
+        # Provider's list_tools returns raw tools (transforms applied when queried via chain)
         original_tools = await provider.list_tools()
         assert original_tools[0].name == "my_tool"
 
-        # Transformed should have new name
-        transformed_tools = await transformed.list_tools()
+        # Transform modifies them when applied via call_next
+        async def get_tools():
+            return original_tools
+
+        transformed_tools = await layer.list_tools(get_tools)
         assert transformed_tools[0].name == "renamed"
 
-    async def test_renamed_tool_not_accessible_by_old_name(self):
-        """Test that a renamed tool cannot be accessed by its pre-transform name."""
+    def test_transform_layer_duplicate_target_name_raises_error(self):
+        """Test that ToolTransform with duplicate target names raises ValueError."""
+        from fastmcp.server.transforms import ToolTransform
         from fastmcp.tools.tool_transform import ToolTransformConfig
-
-        provider = LocalProvider()
-
-        @provider.tool
-        def my_tool(x: int) -> int:
-            return x
-
-        # Wrap with a rename transform
-        transformed = provider.with_transforms(
-            tool_transforms={"my_tool": ToolTransformConfig(name="renamed")}
-        )
-
-        # Should be accessible by new name
-        tool = await transformed.get_tool("renamed")
-        assert tool is not None
-        assert tool.name == "renamed"
-
-        # Should NOT be accessible by old name
-        tool = await transformed.get_tool("my_tool")
-        assert tool is None
-
-    def test_tool_transforms_duplicate_target_name_raises_error(self):
-        """Test that tool_transforms with duplicate target names raises ValueError."""
-        from fastmcp.tools.tool_transform import ToolTransformConfig
-
-        provider = LocalProvider()
-
-        @provider.tool
-        def tool_a() -> str:
-            return "a"
-
-        @provider.tool
-        def tool_b() -> str:
-            return "b"
 
         with pytest.raises(ValueError, match="duplicate target name"):
-            provider.with_transforms(
-                tool_transforms={
+            ToolTransform(
+                {
                     "tool_a": ToolTransformConfig(name="same_name"),
                     "tool_b": ToolTransformConfig(name="same_name"),
                 }
