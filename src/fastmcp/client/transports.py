@@ -306,8 +306,8 @@ class StreamableHttpTransport(ClientTransport):
         else:
             http_client = create_mcp_http_client(
                 headers=headers,
-                timeout=timeout,
                 auth=self.auth,
+                **({"timeout": timeout} if timeout is not None else {}),
             )
 
         # Ensure httpx client is closed after use
