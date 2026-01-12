@@ -32,6 +32,7 @@ async def streamable_http_server():
 
 
 @pytest.mark.integration
+@pytest.mark.timeout(15)
 async def test_slow_tool_with_http_transport(streamable_http_server: str):
     """Test that tools taking >5 seconds work correctly with HTTP transport.
 
