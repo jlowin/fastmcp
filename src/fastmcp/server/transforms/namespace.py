@@ -89,7 +89,7 @@ class Namespace(Transform):
             protocol, path = match.groups()
             prefix = f"{self._prefix}/"
             if path.startswith(prefix):
-                return f"{protocol}{path[len(prefix):]}"
+                return f"{protocol}{path[len(prefix) :]}"
             return None
         return None
 
@@ -100,7 +100,9 @@ class Namespace(Transform):
     async def list_tools(self, call_next: ListToolsNext) -> Sequence[Tool]:
         """Prefix tool names with namespace."""
         tools = await call_next()
-        return [t.model_copy(update={"name": self._transform_name(t.name)}) for t in tools]
+        return [
+            t.model_copy(update={"name": self._transform_name(t.name)}) for t in tools
+        ]
 
     async def get_tool(self, name: str, call_next: GetToolNext) -> Tool | None:
         """Get tool by namespaced name."""
@@ -124,7 +126,9 @@ class Namespace(Transform):
             for r in resources
         ]
 
-    async def get_resource(self, uri: str, call_next: GetResourceNext) -> Resource | None:
+    async def get_resource(
+        self, uri: str, call_next: GetResourceNext
+    ) -> Resource | None:
         """Get resource by namespaced URI."""
         original = self._reverse_uri(uri)
         if original is None:

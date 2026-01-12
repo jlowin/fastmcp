@@ -112,7 +112,9 @@ class Transform:
         """
         return await call_next()
 
-    async def get_resource(self, uri: str, call_next: GetResourceNext) -> Resource | None:
+    async def get_resource(
+        self, uri: str, call_next: GetResourceNext
+    ) -> Resource | None:
         """Get a resource by URI.
 
         Args:
@@ -183,22 +185,22 @@ class Transform:
         return await call_next(name)
 
 
-# Re-export built-in transforms
-from fastmcp.server.transforms.namespace import Namespace
-from fastmcp.server.transforms.tool_transform import ToolTransform
-from fastmcp.server.transforms.visibility import Visibility
+# Re-export built-in transforms (must be after Transform class to avoid circular imports)
+from fastmcp.server.transforms.namespace import Namespace  # noqa: E402
+from fastmcp.server.transforms.tool_transform import ToolTransform  # noqa: E402
+from fastmcp.server.transforms.visibility import Visibility  # noqa: E402
 
 __all__ = [
-    "Transform",
+    "GetPromptNext",
+    "GetResourceNext",
+    "GetResourceTemplateNext",
+    "GetToolNext",
+    "ListPromptsNext",
+    "ListResourceTemplatesNext",
+    "ListResourcesNext",
+    "ListToolsNext",
     "Namespace",
     "ToolTransform",
+    "Transform",
     "Visibility",
-    "ListToolsNext",
-    "GetToolNext",
-    "ListResourcesNext",
-    "GetResourceNext",
-    "ListResourceTemplatesNext",
-    "GetResourceTemplateNext",
-    "ListPromptsNext",
-    "GetPromptNext",
 ]

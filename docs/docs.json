@@ -111,8 +111,8 @@
                   "servers/providers/local",
                   "servers/providers/filesystem",
                   "servers/providers/mounting",
-                  "servers/providers/namespacing",
                   "servers/providers/proxy",
+                  "servers/providers/transforms",
                   "servers/providers/custom"
                 ]
               },
@@ -120,6 +120,7 @@
                 "group": "Features",
                 "icon": "stars",
                 "pages": [
+                  "servers/visibility",
                   "servers/tasks",
                   "servers/context",
                   "servers/elicitation",
@@ -262,7 +263,6 @@
           {
             "group": "Patterns",
             "pages": [
-              "patterns/tool-transformation",
               "patterns/decorating-methods",
               "patterns/cli",
               "patterns/contrib",
@@ -571,6 +571,14 @@
     {
       "destination": "/servers/providers/mounting",
       "source": "/servers/composition"
+    },
+    {
+      "destination": "/servers/providers/transforms",
+      "source": "/servers/providers/namespacing"
+    },
+    {
+      "destination": "/servers/providers/transforms",
+      "source": "/patterns/tool-transformation"
     }
   ],
   "search": {

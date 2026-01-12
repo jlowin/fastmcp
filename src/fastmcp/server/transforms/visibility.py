@@ -258,7 +258,9 @@ class Visibility(Transform):
         resources = await call_next()
         return [r for r in resources if self.is_enabled(r)]
 
-    async def get_resource(self, uri: str, call_next: GetResourceNext) -> Resource | None:
+    async def get_resource(
+        self, uri: str, call_next: GetResourceNext
+    ) -> Resource | None:
         """Get resource if enabled, None otherwise."""
         resource = await call_next(uri)
         if resource is None or not self.is_enabled(resource):
