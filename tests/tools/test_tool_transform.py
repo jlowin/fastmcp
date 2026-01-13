@@ -1054,6 +1054,7 @@ class TestEnableDisable:
 
         # Get the registered Tool object from the server
         add_tool = await mcp._local_provider.get_component("tool:add")
+        assert isinstance(add_tool, Tool)
         new_add = Tool.from_tool(add_tool, name="new_add")
         mcp.add_tool(new_add)
 
@@ -1080,6 +1081,7 @@ class TestEnableDisable:
 
         # Get the registered Tool object from the server
         add_tool = await mcp._local_provider.get_component("tool:add")
+        assert isinstance(add_tool, Tool)
         new_add = Tool.from_tool(add_tool, name="new_add")
         mcp.add_tool(new_add)
 
