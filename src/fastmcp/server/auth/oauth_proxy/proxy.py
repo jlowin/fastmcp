@@ -53,6 +53,12 @@ from typing_extensions import override
 
 from fastmcp import settings
 from fastmcp.server.auth.auth import OAuthProvider, TokenVerifier
+from fastmcp.server.auth.cimd import (
+    CIMDFetcher,
+    CIMDFetchError,
+    CIMDTrustPolicy,
+    CIMDValidationError,
+)
 from fastmcp.server.auth.handlers.authorize import AuthorizationHandler
 from fastmcp.server.auth.jwt_issuer import (
     JWTIssuer,
@@ -248,6 +254,9 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
         consent_csp_policy: str | None = None,
         # Token expiry fallback
         fallback_access_token_expiry_seconds: int | None = None,
+        # CIMD (Client ID Metadata Document) configuration
+        enable_cimd: bool = True,
+        cimd_trust_policy: CIMDTrustPolicy | None = None,
     ):
         """Initialize the OAuth proxy provider.
 
@@ -302,6 +311,13 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
                 defaults: 1 hour if a refresh token is available (since we can refresh),
                 or 1 year if no refresh token (for API-key-style tokens like GitHub OAuth Apps).
                 Set explicitly to override these defaults.
+            enable_cimd: Whether to support CIMD (Client ID Metadata Documents) for client
+                authentication (default True). When enabled, clients can use HTTPS URLs as
+                client_ids instead of registering via DCR. The server fetches and validates
+                the CIMD document from the URL.
+            cimd_trust_policy: Trust policy for CIMD clients. Controls which domains can
+                skip consent, which are blocked, etc. If None, uses default policy with
+                trusted domains like claude.ai, cursor.com.
         """
 
         # Always enable DCR since we implement it locally for MCP clients
@@ -377,6 +393,18 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
         self._fallback_access_token_expiry_seconds: int | None = (
             fallback_access_token_expiry_seconds
         )
+
+        # CIMD configuration
+        self._enable_cimd: bool = enable_cimd
+        self._cimd_trust_policy: CIMDTrustPolicy = cimd_trust_policy or CIMDTrustPolicy()
+        self._cimd_fetcher: CIMDFetcher = CIMDFetcher(
+            trust_policy=self._cimd_trust_policy,
+        )
+        if enable_cimd:
+            logger.debug(
+                "CIMD support enabled with %d trusted domains",
+                len(self._cimd_trust_policy.trusted_domains),
+            )
 
         if jwt_signing_key is None:
             jwt_signing_key = derive_jwt_key(
@@ -555,17 +583,64 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
 
     @override
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
-        """Get client information by ID. This is generally the random ID
-        provided to the DCR client during registration, not the upstream client ID.
+        """Get client information by ID.
 
-        For unregistered clients, returns None (which will raise an error in the SDK).
+        For DCR clients, this is the random ID provided during registration.
+        For CIMD clients, this is the HTTPS URL where their metadata document is hosted.
+
+        For unregistered clients (and CIMD URLs when CIMD is disabled), returns None.
         """
-        # Load from storage
+        # Check if this looks like a CIMD URL
+        if self._enable_cimd and self._cimd_fetcher.is_cimd_client_id(client_id):
+            return await self._get_cimd_client(client_id)
+
+        # Load DCR client from storage
         if not (client := await self._client_store.get(key=client_id)):
             return None
 
         if client.allowed_redirect_uri_patterns is None:
             client.allowed_redirect_uri_patterns = self._allowed_client_redirect_uris
+
+        return client
+
+    async def _get_cimd_client(
+        self, client_id_url: str
+    ) -> OAuthClientInformationFull | None:
+        """Fetch and validate a CIMD document, returning synthetic client info.
+
+        Args:
+            client_id_url: The HTTPS URL to fetch as client_id
+
+        Returns:
+            OAuthClientInformationFull based on CIMD document, or None if fetch fails
+        """
+        try:
+            cimd_doc = await self._cimd_fetcher.fetch(client_id_url)
+        except (CIMDFetchError, CIMDValidationError) as e:
+            logger.warning("CIMD fetch failed for %s: %s", client_id_url, e)
+            return None
+
+        # Create synthetic client from CIMD document
+        # Use ProxyDCRClient to get redirect_uri pattern matching support
+        client = ProxyDCRClient(
+            client_id=client_id_url,
+            client_secret=None,  # CIMD clients don't use secrets
+            redirect_uris=cimd_doc.redirect_uris or [],
+            grant_types=cimd_doc.grant_types,
+            scope=cimd_doc.scope or self._default_scope_str,
+            token_endpoint_auth_method="none",  # CIMD requires "none" or "private_key_jwt"
+            allowed_redirect_uri_patterns=None,  # Use exact match from CIMD doc
+            client_name=cimd_doc.client_name,
+        )
+
+        # Store CIMD metadata on the client for consent screen use
+        client._cimd_document = cimd_doc  # type: ignore[attr-defined]
+
+        logger.debug(
+            "CIMD client resolved: %s (name=%s)",
+            client_id_url,
+            cimd_doc.client_name,
+        )
 
         return client
 
@@ -1437,6 +1512,22 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
                         methods=["GET", "POST"],
                     )
                 )
+            # Replace the metadata endpoint to add CIMD support flag
+            elif (
+                isinstance(route, Route)
+                and route.path.startswith("/.well-known/oauth-authorization-server")
+                and route.methods is not None
+                and "GET" in route.methods
+            ):
+                # Create a wrapper that adds CIMD support to the metadata
+                original_endpoint = route.endpoint
+                custom_routes.append(
+                    Route(
+                        path=route.path,
+                        endpoint=self._create_cimd_metadata_handler(original_endpoint),
+                        methods=route.methods,
+                    )
+                )
             else:
                 # Keep all other standard OAuth routes unchanged
                 custom_routes.append(route)
@@ -1459,6 +1550,91 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
         )
 
         return custom_routes
+
+    def _create_cimd_metadata_handler(
+        self, original_endpoint: Any
+    ) -> Any:
+        """Create a metadata endpoint handler that adds CIMD support flag.
+
+        Wraps the SDK's metadata handler to add client_id_metadata_document_supported=True
+        when CIMD is enabled.
+        """
+
+        async def cimd_metadata_handler(
+            scope: dict[str, Any], receive: Any, send: Any
+        ) -> None:
+            """ASGI handler that modifies metadata response to add CIMD flag."""
+            # Capture the response
+            response_body: list[bytes] = []
+            response_started = False
+            original_headers: list[tuple[bytes, bytes]] = []
+            original_status: int = 200
+
+            async def capture_send(message: dict[str, Any]) -> None:
+                nonlocal response_started, original_headers, original_status
+
+                if message["type"] == "http.response.start":
+                    response_started = True
+                    original_status = message["status"]
+                    original_headers = list(message.get("headers", []))
+                elif message["type"] == "http.response.body":
+                    body = message.get("body", b"")
+                    if body:
+                        response_body.append(body)
+
+            # Call original handler to capture response
+            await original_endpoint(scope, receive, capture_send)
+
+            # Parse and modify the response if it's JSON
+            if response_started and response_body:
+                try:
+                    full_body = b"".join(response_body)
+                    metadata_dict = json.loads(full_body.decode("utf-8"))
+
+                    # Add CIMD support flag if enabled
+                    if self._enable_cimd:
+                        metadata_dict["client_id_metadata_document_supported"] = True
+
+                    # Re-encode the modified response
+                    modified_body = json.dumps(metadata_dict).encode("utf-8")
+
+                    # Update Content-Length header
+                    new_headers = [
+                        (k, v)
+                        for k, v in original_headers
+                        if k.lower() != b"content-length"
+                    ]
+                    new_headers.append(
+                        (b"content-length", str(len(modified_body)).encode())
+                    )
+
+                    # Send modified response
+                    await send(
+                        {
+                            "type": "http.response.start",
+                            "status": original_status,
+                            "headers": new_headers,
+                        }
+                    )
+                    await send(
+                        {
+                            "type": "http.response.body",
+                            "body": modified_body,
+                        }
+                    )
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    # If we can't parse it, send original response
+                    await send(
+                        {
+                            "type": "http.response.start",
+                            "status": original_status,
+                            "headers": original_headers,
+                        }
+                    )
+                    for chunk in response_body:
+                        await send({"type": "http.response.body", "body": chunk})
+
+        return cimd_metadata_handler
 
     # -------------------------------------------------------------------------
     # IdP Callback Forwarding
