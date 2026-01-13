@@ -29,6 +29,7 @@ from pydantic import (
 from typing_extensions import Self
 
 from fastmcp.server.tasks.config import TaskConfig, TaskMeta
+from fastmcp.tools.tool import AuthCheckCallable
 from fastmcp.utilities.components import FastMCPComponent
 
 
@@ -224,6 +225,10 @@ class Resource(FastMCPComponent):
         Annotations | None,
         Field(description="Optional annotations about the resource's behavior"),
     ] = None
+    auth: Annotated[
+        AuthCheckCallable | list[AuthCheckCallable] | None,
+        Field(description="Authorization checks for this resource", exclude=True),
+    ] = None
 
     @classmethod
     def from_function(
@@ -240,6 +245,7 @@ class Resource(FastMCPComponent):
         annotations: Annotations | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
+        auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
     ) -> FunctionResource:
         from fastmcp.resources.function_resource import (
             FunctionResource,
@@ -257,6 +263,7 @@ class Resource(FastMCPComponent):
             annotations=annotations,
             meta=meta,
             task=task,
+            auth=auth,
         )
 
     @field_validator("mime_type", mode="before")

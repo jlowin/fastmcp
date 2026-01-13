@@ -14,6 +14,7 @@ from pydantic import AnyUrl
 import fastmcp
 from fastmcp.decorators import resolve_task_config
 from fastmcp.resources.resource import Resource, ResourceResult
+from fastmcp.tools.tool import AuthCheckCallable
 from fastmcp.server.dependencies import (
     transform_context_annotations,
     without_injected_parameters,
@@ -53,6 +54,7 @@ class ResourceMeta:
     annotations: Annotations | None = None
     meta: dict[str, Any] | None = None
     task: bool | TaskConfig | None = None
+    auth: AuthCheckCallable | list[AuthCheckCallable] | None = None
 
 
 class FunctionResource(Resource):
@@ -87,6 +89,7 @@ class FunctionResource(Resource):
         annotations: Annotations | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
+        auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
     ) -> FunctionResource:
         """Create a FunctionResource from a function.
 
@@ -112,6 +115,7 @@ class FunctionResource(Resource):
                     annotations,
                     meta,
                     task,
+                    auth,
                 ]
             )
             or uri is not None
@@ -138,6 +142,7 @@ class FunctionResource(Resource):
                 annotations=annotations,
                 meta=meta,
                 task=task,
+                auth=auth,
             )
 
         if isinstance(metadata.uri, str):
@@ -175,6 +180,7 @@ class FunctionResource(Resource):
             annotations=metadata.annotations,
             meta=metadata.meta,
             task_config=task_config,
+            auth=metadata.auth,
         )
 
     async def read(
@@ -216,6 +222,7 @@ def resource(
     annotations: Annotations | dict[str, Any] | None = None,
     meta: dict[str, Any] | None = None,
     task: bool | TaskConfig | None = None,
+    auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
 ) -> Callable[[F], F]:
     """Standalone decorator to mark a function as an MCP resource.
 
@@ -252,6 +259,7 @@ def resource(
             annotations=annotations,
             meta=meta,
             task=resolved,
+            auth=auth,
         )
 
         if has_uri_params or has_func_params:
@@ -268,6 +276,7 @@ def resource(
                 annotations=annotations,
                 meta=meta,
                 task=resolved,
+                auth=auth,
             )
         else:
             return FunctionResource.from_function(fn, metadata=resource_meta)
@@ -284,6 +293,7 @@ def resource(
             annotations=annotations,
             meta=meta,
             task=task,
+            auth=auth,
         )
         target = fn.__func__ if hasattr(fn, "__func__") else fn
         target.__fastmcp__ = metadata  # type: ignore[attr-defined]

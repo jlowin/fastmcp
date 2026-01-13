@@ -30,7 +30,7 @@ from fastmcp.server.dependencies import (
     without_injected_parameters,
 )
 from fastmcp.server.tasks.config import TaskConfig
-from fastmcp.tools.tool import Tool, ToolResult, ToolResultSerializerType
+from fastmcp.tools.tool import AuthCheckCallable, Tool, ToolResult, ToolResultSerializerType
 from fastmcp.utilities.json_schema import compress_schema
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.types import (
@@ -79,6 +79,7 @@ class ToolMeta:
     task: bool | TaskConfig | None = None
     exclude_args: list[str] | None = None
     serializer: Any | None = None
+    auth: AuthCheckCallable | list[AuthCheckCallable] | None = None
 
 
 @dataclass
@@ -293,6 +294,7 @@ class FunctionTool(Tool):
         serializer: ToolResultSerializerType | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
+        auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
     ) -> FunctionTool:
         """Create a FunctionTool from a function.
 
@@ -317,6 +319,7 @@ class FunctionTool(Tool):
                     meta,
                     task,
                     serializer,
+                    auth,
                 ]
             )
             or output_schema is not NotSet
@@ -343,6 +346,7 @@ class FunctionTool(Tool):
                 task=task,
                 exclude_args=exclude_args,
                 serializer=serializer,
+                auth=auth,
             )
 
         if metadata.serializer is not None and fastmcp.settings.deprecation_warnings:
@@ -404,6 +408,7 @@ class FunctionTool(Tool):
             serializer=metadata.serializer,
             meta=metadata.meta,
             task_config=task_config,
+            auth=metadata.auth,
         )
 
     async def run(self, arguments: dict[str, Any]) -> ToolResult:
@@ -468,6 +473,7 @@ def tool(
     task: bool | TaskConfig | None = None,
     exclude_args: list[str] | None = None,
     serializer: Any | None = None,
+    auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
 ) -> Callable[[F], F]: ...
 @overload
 def tool(
@@ -484,6 +490,7 @@ def tool(
     task: bool | TaskConfig | None = None,
     exclude_args: list[str] | None = None,
     serializer: Any | None = None,
+    auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
 ) -> Callable[[F], F]: ...
 
 
@@ -501,6 +508,7 @@ def tool(
     task: bool | TaskConfig | None = None,
     exclude_args: list[str] | None = None,
     serializer: Any | None = None,
+    auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
 ) -> Any:
     """Standalone decorator to mark a function as an MCP tool.
 
@@ -530,6 +538,7 @@ def tool(
             task=resolve_task_config(task),
             exclude_args=exclude_args,
             serializer=serializer,
+            auth=auth,
         )
         return FunctionTool.from_function(fn, metadata=tool_meta)
 
@@ -546,6 +555,7 @@ def tool(
             task=task,
             exclude_args=exclude_args,
             serializer=serializer,
+            auth=auth,
         )
         target = fn.__func__ if hasattr(fn, "__func__") else fn
         target.__fastmcp__ = metadata  # type: ignore[attr-defined]

@@ -36,6 +36,10 @@ from fastmcp.utilities.types import (
     NotSetT,
 )
 
+# Runtime type alias for auth checks to avoid circular imports with authorization.py
+# AuthCheck is Callable[[AuthContext], bool] but we use Any to avoid the import
+AuthCheckCallable: TypeAlias = Callable[[Any], bool]
+
 if TYPE_CHECKING:
     from docket import Docket
     from docket.execution import Execution
@@ -141,6 +145,10 @@ class Tool(FastMCPComponent):
             description="Deprecated. Return ToolResult from your tools for full control over serialization."
         ),
     ] = None
+    auth: Annotated[
+        AuthCheckCallable | list[AuthCheckCallable] | None,
+        Field(description="Authorization checks for this tool", exclude=True),
+    ] = None
 
     @model_validator(mode="after")
     def _validate_tool_name(self) -> Tool:
@@ -192,6 +200,7 @@ class Tool(FastMCPComponent):
         serializer: ToolResultSerializerType | None = None,  # Deprecated
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
+        auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
     ) -> FunctionTool:
         """Create a Tool from a function."""
         from fastmcp.tools.function_tool import FunctionTool
@@ -209,6 +218,7 @@ class Tool(FastMCPComponent):
             serializer=serializer,
             meta=meta,
             task=task,
+            auth=auth,
         )
 
     async def run(self, arguments: dict[str, Any]) -> ToolResult:
@@ -375,8 +385,6 @@ class Tool(FastMCPComponent):
             serializer=serializer,
             meta=meta,
         )
-
-
 def _serialize_with_fallback(
     result: Any, serializer: ToolResultSerializerType | None = None
 ) -> str:

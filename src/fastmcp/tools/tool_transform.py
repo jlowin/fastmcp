@@ -595,6 +595,7 @@ class TransformedTool(Tool):
             serializer=final_serializer,
             meta=final_meta,
             transform_args=transform_args,
+            auth=tool.auth,
         )
 
         return transformed_tool

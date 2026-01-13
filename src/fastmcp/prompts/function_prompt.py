@@ -24,6 +24,7 @@ import fastmcp
 from fastmcp.decorators import resolve_task_config
 from fastmcp.exceptions import PromptError
 from fastmcp.prompts.prompt import Prompt, PromptArgument, PromptResult
+from fastmcp.tools.tool import AuthCheckCallable
 from fastmcp.server.dependencies import (
     transform_context_annotations,
     without_injected_parameters,
@@ -63,6 +64,7 @@ class PromptMeta:
     tags: set[str] | None = None
     meta: dict[str, Any] | None = None
     task: bool | TaskConfig | None = None
+    auth: AuthCheckCallable | list[AuthCheckCallable] | None = None
 
 
 class FunctionPrompt(Prompt):
@@ -84,6 +86,7 @@ class FunctionPrompt(Prompt):
         tags: set[str] | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
+        auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
     ) -> FunctionPrompt:
         """Create a Prompt from a function.
 
@@ -101,7 +104,7 @@ class FunctionPrompt(Prompt):
         """
         # Check mutual exclusion
         individual_params_provided = any(
-            x is not None for x in [name, title, description, icons, tags, meta, task]
+            x is not None for x in [name, title, description, icons, tags, meta, task, auth]
         )
 
         if metadata is not None and individual_params_provided:
@@ -120,6 +123,7 @@ class FunctionPrompt(Prompt):
                 tags=tags,
                 meta=meta,
                 task=task,
+                auth=auth,
             )
 
         func_name = (
@@ -214,6 +218,7 @@ class FunctionPrompt(Prompt):
             fn=wrapped_fn,
             meta=metadata.meta,
             task_config=task_config,
+            auth=metadata.auth,
         )
 
     def _convert_string_arguments(self, kwargs: dict[str, Any]) -> dict[str, Any]:
@@ -339,6 +344,7 @@ def prompt(
     tags: set[str] | None = None,
     meta: dict[str, Any] | None = None,
     task: bool | TaskConfig | None = None,
+    auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
 ) -> Callable[[F], F]: ...
 @overload
 def prompt(
@@ -351,6 +357,7 @@ def prompt(
     tags: set[str] | None = None,
     meta: dict[str, Any] | None = None,
     task: bool | TaskConfig | None = None,
+    auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
 ) -> Callable[[F], F]: ...
 
 
@@ -364,6 +371,7 @@ def prompt(
     tags: set[str] | None = None,
     meta: dict[str, Any] | None = None,
     task: bool | TaskConfig | None = None,
+    auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
 ) -> Any:
     """Standalone decorator to mark a function as an MCP prompt.
 
@@ -388,6 +396,7 @@ def prompt(
             tags=tags,
             meta=meta,
             task=resolve_task_config(task),
+            auth=auth,
         )
         return FunctionPrompt.from_function(fn, metadata=prompt_meta)
 
@@ -400,6 +409,7 @@ def prompt(
             tags=tags,
             meta=meta,
             task=task,
+            auth=auth,
         )
         target = fn.__func__ if hasattr(fn, "__func__") else fn
         target.__fastmcp__ = metadata  # type: ignore[attr-defined]
