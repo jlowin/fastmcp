@@ -2,8 +2,6 @@
 
 import warnings
 
-import pytest
-
 from fastmcp import FastMCP
 from fastmcp.client import Client
 from fastmcp.tools.tool_transform import ToolTransformConfig
@@ -76,9 +74,7 @@ class TestAddToolTransformationDeprecated:
             warnings.simplefilter("always")
             FastMCP(
                 "test",
-                tool_transformations={
-                    "my_tool": ToolTransformConfig(name="renamed")
-                },
+                tool_transformations={"my_tool": ToolTransformConfig(name="renamed")},
             )
 
             assert len(w) == 1

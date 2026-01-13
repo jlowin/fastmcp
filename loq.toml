@@ -40,7 +40,7 @@ max_lines = 1132
 
 [[rules]]
 path = "src/fastmcp/tools/tool_transform.py"
-max_lines = 952
+max_lines = 953
 
 [[rules]]
 path = "tests/server/middleware/test_tool_injection.py"
@@ -96,7 +96,7 @@ max_lines = 641
 
 [[rules]]
 path = "src/fastmcp/prompts/prompt.py"
-max_lines = 779
+max_lines = 793
 
 [[rules]]
 path = "src/fastmcp/utilities/openapi/schemas.py"
@@ -136,7 +136,7 @@ max_lines = 842
 
 [[rules]]
 path = "src/fastmcp/resources/template.py"
-max_lines = 565
+max_lines = 576
 
 [[rules]]
 path = "tests/server/providers/openapi/test_comprehensive.py"
@@ -176,7 +176,7 @@ max_lines = 550
 
 [[rules]]
 path = "src/fastmcp/server/providers/local_provider.py"
-max_lines = 703
+max_lines = 716
 
 [[rules]]
 path = "tests/client/test_notifications.py"
@@ -216,7 +216,7 @@ max_lines = 823
 
 [[rules]]
 path = "src/fastmcp/tools/tool.py"
-max_lines = 950
+max_lines = 967
 
 [[rules]]
 path = "docs/python-sdk/fastmcp-server-server.mdx"
@@ -284,7 +284,7 @@ max_lines = 1019
 
 [[rules]]
 path = "src/fastmcp/server/server.py"
-max_lines = 2826
+max_lines = 2942
 
 [[rules]]
 path = "tests/deprecated/test_import_server.py"
@@ -296,7 +296,7 @@ max_lines = 1208
 
 [[rules]]
 path = "docs/docs.json"
-max_lines = 588
+max_lines = 589
 
 [[rules]]
 path = "src/fastmcp/cli/cli.py"
@@ -308,8 +308,12 @@ max_lines = 1584
 
 [[rules]]
 path = "docs/servers/context.mdx"
-max_lines = 648
+max_lines = 650
 
 [[rules]]
 path = "src/fastmcp/resources/resource.py"
-max_lines = 627
+max_lines = 640
+
+[[rules]]
+path = "tests/server/auth/test_authorization.py"
+max_lines = 604

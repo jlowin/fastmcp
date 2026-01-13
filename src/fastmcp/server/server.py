@@ -55,6 +55,7 @@ from typing_extensions import Self
 import fastmcp
 import fastmcp.server
 from fastmcp.exceptions import (
+    AuthorizationError,
     DisabledError,
     FastMCPError,
     NotFoundError,
@@ -68,7 +69,8 @@ from fastmcp.prompts import Prompt
 from fastmcp.prompts.prompt import FunctionPrompt, PromptResult
 from fastmcp.resources.resource import Resource, ResourceResult
 from fastmcp.resources.template import ResourceTemplate
-from fastmcp.server.auth import AuthProvider
+from fastmcp.server.auth import AuthContext, AuthProvider, run_auth_checks
+from fastmcp.server.dependencies import get_access_token
 from fastmcp.server.event_store import EventStore
 from fastmcp.server.http import (
     StarletteWithLifespan,
@@ -90,7 +92,7 @@ from fastmcp.server.transforms import (
 )
 from fastmcp.settings import DuplicateBehavior as DuplicateBehaviorSetting
 from fastmcp.settings import Settings
-from fastmcp.tools.tool import FunctionTool, Tool, ToolResult
+from fastmcp.tools.tool import AuthCheckCallable, FunctionTool, Tool, ToolResult
 from fastmcp.tools.tool_transform import ToolTransformConfig
 from fastmcp.utilities.cli import log_server_banner
 from fastmcp.utilities.components import FastMCPComponent
@@ -159,6 +161,23 @@ URI_PATTERN = re.compile(r"^([^:]+://)(.*?)$")
 LifespanCallable = Callable[
     ["FastMCP[LifespanResultT]"], AbstractAsyncContextManager[LifespanResultT]
 ]
+
+
+def _get_auth_context() -> tuple[bool, Any]:
+    """Get auth context for the current request.
+
+    Returns a tuple of (skip_auth, token) where:
+    - skip_auth=True means auth checks should be skipped (STDIO transport)
+    - token is the access token for HTTP transports (may be None if unauthenticated)
+
+    Uses late import to avoid circular import with context.py.
+    """
+    from fastmcp.server.context import _current_transport
+
+    is_stdio = _current_transport.get() == "stdio"
+    if is_stdio:
+        return (True, None)
+    return (False, get_access_token())
 
 
 @asynccontextmanager
@@ -1100,21 +1119,43 @@ class FastMCP(Generic[LifespanResultT]):
         # Query through full transform chain (provider transforms + server transforms + visibility)
         tools = await self._source_list_tools()
 
-        # Deduplicate by key (first wins)
+        # Get auth context (skip_auth=True for STDIO which has no auth concept)
+        skip_auth, token = _get_auth_context()
+
+        # Deduplicate by key (first wins) and apply authorization checks
         seen: dict[str, Tool] = {}
         for tool in tools:
-            if tool.key not in seen:
-                seen[tool.key] = tool
+            if tool.key in seen:
+                continue
+            # Check tool-level auth (skip for STDIO)
+            if not skip_auth and tool.auth is not None:
+                ctx = AuthContext(token=token, component=tool)
+                try:
+                    if not run_auth_checks(tool.auth, ctx):
+                        continue
+                except AuthorizationError:
+                    # Treat auth errors as denials in list operations
+                    continue
+            seen[tool.key] = tool
         return list(seen.values())
 
     async def get_tool(self, name: str) -> Tool:
         """Get an enabled tool by name.
 
         Queries providers with full transform chain (provider transforms + server transforms + visibility).
+        Returns only if enabled and authorized.
         """
         tool = await self._source_get_tool(name)
         if tool is None:
             raise NotFoundError(f"Unknown tool: {name!r}")
+
+        # Check tool-level auth (skip for STDIO)
+        skip_auth, token = _get_auth_context()
+        if not skip_auth and tool.auth is not None:
+            ctx = AuthContext(token=token, component=tool)
+            if not run_auth_checks(tool.auth, ctx):
+                raise NotFoundError(f"Unknown tool: {name!r}")
+
         return tool
 
     async def get_resources(self, *, run_middleware: bool = False) -> list[Resource]:
@@ -1148,23 +1189,44 @@ class FastMCP(Generic[LifespanResultT]):
         # Query through full transform chain (provider transforms + server transforms + visibility)
         resources = await self._source_list_resources()
 
-        # Deduplicate by key (first wins)
+        # Get auth context (skip_auth=True for STDIO which has no auth concept)
+        skip_auth, token = _get_auth_context()
+
+        # Deduplicate by key (first wins) and apply authorization checks
         seen: dict[str, Resource] = {}
         for resource in resources:
-            if resource.key not in seen:
-                seen[resource.key] = resource
+            if resource.key in seen:
+                continue
+            # Check resource-level auth (skip for STDIO)
+            if not skip_auth and resource.auth is not None:
+                ctx = AuthContext(token=token, component=resource)
+                try:
+                    if not run_auth_checks(resource.auth, ctx):
+                        continue
+                except AuthorizationError:
+                    # Treat auth errors as denials in list operations
+                    continue
+            seen[resource.key] = resource
         return list(seen.values())
 
     async def get_resource(self, uri: str) -> Resource:
         """Get an enabled resource by URI.
 
         Queries providers with full transform chain (provider transforms + server transforms + visibility).
+        Returns only if enabled and authorized.
         """
         resource = await self._source_get_resource(uri)
-        if resource is not None:
-            return resource
+        if resource is None:
+            raise NotFoundError(f"Unknown resource: {uri}")
 
-        raise NotFoundError(f"Unknown resource: {uri}")
+        # Check resource-level auth (skip for STDIO)
+        skip_auth, token = _get_auth_context()
+        if not skip_auth and resource.auth is not None:
+            ctx = AuthContext(token=token, component=resource)
+            if not run_auth_checks(resource.auth, ctx):
+                raise NotFoundError(f"Unknown resource: {uri}")
+
+        return resource
 
     async def get_resource_templates(
         self, *, run_middleware: bool = False
@@ -1199,21 +1261,43 @@ class FastMCP(Generic[LifespanResultT]):
         # Query through full transform chain (provider transforms + server transforms + visibility)
         templates = await self._source_list_resource_templates()
 
-        # Deduplicate by key (first wins)
+        # Get auth context (skip_auth=True for STDIO which has no auth concept)
+        skip_auth, token = _get_auth_context()
+
+        # Deduplicate by key (first wins) and apply authorization checks
         seen: dict[str, ResourceTemplate] = {}
         for template in templates:
-            if template.key not in seen:
-                seen[template.key] = template
+            if template.key in seen:
+                continue
+            # Check template-level auth (skip for STDIO)
+            if not skip_auth and template.auth is not None:
+                ctx = AuthContext(token=token, component=template)
+                try:
+                    if not run_auth_checks(template.auth, ctx):
+                        continue
+                except AuthorizationError:
+                    # Treat auth errors as denials in list operations
+                    continue
+            seen[template.key] = template
         return list(seen.values())
 
     async def get_resource_template(self, uri: str) -> ResourceTemplate:
         """Get an enabled resource template that matches the given URI.
 
         Queries providers with full transform chain (provider transforms + server transforms + visibility).
+        Returns only if enabled and authorized.
         """
         template = await self._source_get_resource_template(uri)
         if template is None:
             raise NotFoundError(f"Unknown resource template: {uri}")
+
+        # Check template-level auth (skip for STDIO)
+        skip_auth, token = _get_auth_context()
+        if not skip_auth and template.auth is not None:
+            ctx = AuthContext(token=token, component=template)
+            if not run_auth_checks(template.auth, ctx):
+                raise NotFoundError(f"Unknown resource template: {uri}")
+
         return template
 
     async def get_prompts(self, *, run_middleware: bool = False) -> list[Prompt]:
@@ -1247,21 +1331,43 @@ class FastMCP(Generic[LifespanResultT]):
         # Query through full transform chain (provider transforms + server transforms + visibility)
         prompts = await self._source_list_prompts()
 
-        # Deduplicate by key (first wins)
+        # Get auth context (skip_auth=True for STDIO which has no auth concept)
+        skip_auth, token = _get_auth_context()
+
+        # Deduplicate by key (first wins) and apply authorization checks
         seen: dict[str, Prompt] = {}
         for prompt in prompts:
-            if prompt.key not in seen:
-                seen[prompt.key] = prompt
+            if prompt.key in seen:
+                continue
+            # Check prompt-level auth (skip for STDIO)
+            if not skip_auth and prompt.auth is not None:
+                ctx = AuthContext(token=token, component=prompt)
+                try:
+                    if not run_auth_checks(prompt.auth, ctx):
+                        continue
+                except AuthorizationError:
+                    # Treat auth errors as denials in list operations
+                    continue
+            seen[prompt.key] = prompt
         return list(seen.values())
 
     async def get_prompt(self, name: str) -> Prompt:
         """Get an enabled prompt by name.
 
         Queries providers with full transform chain (provider transforms + server transforms + visibility).
+        Returns only if enabled and authorized.
         """
         prompt = await self._source_get_prompt(name)
         if prompt is None:
             raise NotFoundError(f"Unknown prompt: {name}")
+
+        # Check prompt-level auth (skip for STDIO)
+        skip_auth, token = _get_auth_context()
+        if not skip_auth and prompt.auth is not None:
+            ctx = AuthContext(token=token, component=prompt)
+            if not run_auth_checks(prompt.auth, ctx):
+                raise NotFoundError(f"Unknown prompt: {name}")
+
         return prompt
 
     async def get_component(
@@ -1889,6 +1995,7 @@ class FastMCP(Generic[LifespanResultT]):
         exclude_args: list[str] | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
+        auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
     ) -> FunctionTool: ...
 
     @overload
@@ -1906,6 +2013,7 @@ class FastMCP(Generic[LifespanResultT]):
         exclude_args: list[str] | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
+        auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
     ) -> Callable[[AnyFunction], FunctionTool]: ...
 
     def tool(
@@ -1922,6 +2030,7 @@ class FastMCP(Generic[LifespanResultT]):
         exclude_args: list[str] | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
+        auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
     ) -> (
         Callable[[AnyFunction], FunctionTool]
         | FunctionTool
@@ -1989,6 +2098,7 @@ class FastMCP(Generic[LifespanResultT]):
             meta=meta,
             task=task if task is not None else self._support_tasks_by_default,
             serializer=self._tool_serializer,
+            auth=auth,
         )
 
         return result
@@ -2028,6 +2138,7 @@ class FastMCP(Generic[LifespanResultT]):
         annotations: Annotations | dict[str, Any] | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
+        auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
     ) -> Callable[[AnyFunction], Resource | ResourceTemplate]:
         """Decorator to register a function as a resource.
 
@@ -2092,6 +2203,7 @@ class FastMCP(Generic[LifespanResultT]):
             annotations=annotations,
             meta=meta,
             task=task if task is not None else self._support_tasks_by_default,
+            auth=auth,
         )
 
         def decorator(fn: AnyFunction) -> Resource | ResourceTemplate:
@@ -2122,6 +2234,7 @@ class FastMCP(Generic[LifespanResultT]):
         tags: set[str] | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
+        auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
     ) -> FunctionPrompt: ...
 
     @overload
@@ -2136,6 +2249,7 @@ class FastMCP(Generic[LifespanResultT]):
         tags: set[str] | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
+        auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
     ) -> Callable[[AnyFunction], FunctionPrompt]: ...
 
     def prompt(
@@ -2149,6 +2263,7 @@ class FastMCP(Generic[LifespanResultT]):
         tags: set[str] | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
+        auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
     ) -> (
         Callable[[AnyFunction], FunctionPrompt]
         | FunctionPrompt
@@ -2232,6 +2347,7 @@ class FastMCP(Generic[LifespanResultT]):
             tags=tags,
             meta=meta,
             task=task if task is not None else self._support_tasks_by_default,
+            auth=auth,
         )
 
     async def run_stdio_async(
