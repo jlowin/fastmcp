@@ -196,9 +196,9 @@ class ParsedFunction:
                 # include_extras=True preserves Annotated metadata
                 type_hints = get_type_hints(fn, include_extras=True)
                 output_type = type_hints.get("return", output_type)
-            except Exception:
+            except Exception as e:
                 # If resolution fails, keep the string annotation
-                pass
+                logger.debug("Failed to resolve type hint for return annotation: %s", e)
 
         if output_type not in (inspect._empty, None, Any, ...):
             # there are a variety of types that we don't want to attempt to

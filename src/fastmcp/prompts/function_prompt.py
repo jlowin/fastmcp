@@ -198,9 +198,13 @@ class FunctionPrompt(Prompt):
                                 arg_description = f"{arg_description}\n\n{schema_note}"
                             else:
                                 arg_description = schema_note
-                        except Exception:
+                        except Exception as e:
                             # If schema generation fails, skip enhancement
-                            pass
+                            logger.debug(
+                                "Failed to generate schema for prompt argument %s: %s",
+                                param_name,
+                                e,
+                            )
 
                 arguments.append(
                     PromptArgument(
