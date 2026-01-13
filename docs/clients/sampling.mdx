@@ -109,6 +109,14 @@ The sampling handler receives three parameters:
     <ResponseField name="metadata" type="dict[str, Any] | None">
       Optional metadata to pass through to the LLM provider.
     </ResponseField>
+
+    <ResponseField name="tools" type="list[Tool] | None">
+      Optional list of tools the LLM can use during sampling. See [Using the OpenAI Handler](#using-the-openai-handler).
+    </ResponseField>
+
+    <ResponseField name="toolChoice" type="ToolChoice | None">
+      Optional control over tool usage behavior (`auto`, `required`, or `none`).
+    </ResponseField>
     </Expandable>
 
 </ResponseField>
@@ -154,3 +162,97 @@ client = Client(
 <Note>
 If the client doesn't provide a sampling handler, servers can optionally configure a fallback handler. See [Server Sampling](/servers/sampling#sampling-fallback-handler) for details.
 </Note>
+
+## Sampling Capabilities
+
+When you provide a `sampling_handler`, FastMCP automatically advertises full sampling capabilities to the server, including tool support. To disable tool support (for simpler handlers that don't support tools), pass `sampling_capabilities` explicitly:
+
+```python
+from mcp.types import SamplingCapability
+
+client = Client(
+    "my_mcp_server.py",
+    sampling_handler=basic_handler,
+    sampling_capabilities=SamplingCapability(),  # No tool support
+)
+```
+
+## Built-in Handlers
+
+FastMCP provides built-in sampling handlers for OpenAI and Anthropic APIs. These handlers support the full sampling API including tool use, handling message conversion and response formatting automatically.
+
+### OpenAI Handler
+
+<VersionBadge version="2.11.0" />
+
+The OpenAI handler works with OpenAI's API and any OpenAI-compatible provider:
+
+```python
+from fastmcp import Client
+from fastmcp.client.sampling.handlers.openai import OpenAISamplingHandler
+
+client = Client(
+    "my_mcp_server.py",
+    sampling_handler=OpenAISamplingHandler(default_model="gpt-4o"),
+)
+```
+
+For OpenAI-compatible APIs (like local models), pass a custom client:
+
+```python
+from openai import AsyncOpenAI
+
+client = Client(
+    "my_mcp_server.py",
+    sampling_handler=OpenAISamplingHandler(
+        default_model="llama-3.1-70b",
+        client=AsyncOpenAI(base_url="http://localhost:8000/v1"),
+    ),
+)
+```
+
+<Note>
+Install the OpenAI handler with `pip install fastmcp[openai]`.
+</Note>
+
+### Anthropic Handler
+
+<VersionBadge version="2.14.1" />
+
+The Anthropic handler uses Claude models via the Anthropic API:
+
+```python
+from fastmcp import Client
+from fastmcp.client.sampling.handlers.anthropic import AnthropicSamplingHandler
+
+client = Client(
+    "my_mcp_server.py",
+    sampling_handler=AnthropicSamplingHandler(default_model="claude-sonnet-4-5"),
+)
+```
+
+You can pass a custom client for advanced configuration:
+
+```python
+from anthropic import AsyncAnthropic
+
+client = Client(
+    "my_mcp_server.py",
+    sampling_handler=AnthropicSamplingHandler(
+        default_model="claude-sonnet-4-5",
+        client=AsyncAnthropic(),  # Uses ANTHROPIC_API_KEY env var
+    ),
+)
+```
+
+<Note>
+Install the Anthropic handler with `pip install fastmcp[anthropic]`.
+</Note>
+
+### Tool Execution
+
+Tool execution happens on the server side. The client's role is to pass tools to the LLM and return the LLM's response (which may include tool use requests). The server then executes the tools and may send follow-up sampling requests with tool results.
+
+<Tip>
+To implement a custom sampling handler, see the [handler source code](https://github.com/jlowin/fastmcp/tree/main/src/fastmcp/client/sampling/handlers) as a reference.
+</Tip>

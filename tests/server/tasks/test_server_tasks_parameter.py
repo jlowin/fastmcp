@@ -8,7 +8,6 @@ settings properly override the server default.
 
 from fastmcp import FastMCP
 from fastmcp.client import Client
-from fastmcp.utilities.tests import temporary_settings
 
 
 async def test_server_tasks_true_defaults_all_components():
@@ -29,11 +28,12 @@ async def test_server_tasks_true_defaults_all_components():
 
     async with Client(mcp) as client:
         # Verify all task-enabled components are registered with docket
+        # Components use prefixed keys: tool:name, prompt:name, resource:uri
         docket = mcp.docket
         assert docket is not None
-        assert "my_tool" in docket.tasks
-        assert "my_prompt" in docket.tasks
-        assert "my_resource" in docket.tasks
+        assert "tool:my_tool" in docket.tasks
+        assert "prompt:my_prompt" in docket.tasks
+        assert "resource:test://resource" in docket.tasks
 
         # Tool should support background execution
         tool_task = await client.call_tool("my_tool", task=True)
@@ -84,38 +84,21 @@ async def test_server_tasks_false_defaults_all_components():
             await client.read_resource("test://resource", task=True)
 
 
-async def test_server_tasks_none_uses_settings():
-    """Server with tasks=None (or omitted) uses global settings."""
-    # Test with enable_tasks=True in settings
-    with temporary_settings(enable_tasks=True):
-        mcp = FastMCP("test")  # tasks=None, should use settings
+async def test_server_tasks_none_defaults_to_false():
+    """Server with tasks=None (or omitted) defaults to False."""
+    mcp = FastMCP("test")  # tasks=None, defaults to False
 
-        @mcp.tool()
-        async def my_tool() -> str:
-            return "tool result"
+    @mcp.tool()
+    async def my_tool() -> str:
+        return "tool result"
 
-        async with Client(mcp) as client:
-            # Tool should support background execution (from settings)
-            tool_task = await client.call_tool("my_tool", task=True)
-            assert not tool_task.returned_immediately
-
-    # Test with enable_tasks=False in settings
-    with temporary_settings(enable_tasks=False):
-        mcp2 = FastMCP("test2")  # tasks=None, should use settings
-
-        @mcp2.tool()
-        async def my_tool2() -> str:
-            return "tool result"
-
-        async with Client(mcp2) as client:
-            # When enable_tasks=False, server doesn't advertise task capabilities.
-            # Client's task=True is ignored because server doesn't support tasks.
-            # Tool executes synchronously and succeeds.
-            tool_task = await client.call_tool("my_tool2", task=True)
-            assert tool_task.returned_immediately
-            result = await tool_task.result()
-            # Tool should execute successfully (synchronously)
-            assert "tool result" in str(result)
+    async with Client(mcp) as client:
+        # Tool should NOT support background execution (mode="forbidden" from default)
+        tool_task = await client.call_tool("my_tool", task=True)
+        assert tool_task.returned_immediately
+        result = await tool_task.result()
+        assert result.is_error
+        assert "does not support task-augmented execution" in str(result)
 
 
 async def test_component_explicit_false_overrides_server_true():
@@ -131,11 +114,13 @@ async def test_component_explicit_false_overrides_server_true():
         return "background result"
 
     async with Client(mcp) as client:
-        # Verify docket registration matches task settings
+        # Verify docket registration matches task settings (prefixed keys)
         docket = mcp.docket
         assert docket is not None
-        assert "no_task_tool" not in docket.tasks  # task=False means not registered
-        assert "default_tool" in docket.tasks  # Inherits tasks=True
+        assert (
+            "tool:no_task_tool" not in docket.tasks
+        )  # task=False means not registered
+        assert "tool:default_tool" in docket.tasks  # Inherits tasks=True
 
         # Explicit False (mode="forbidden") returns error when called with task=True
         no_task = await client.call_tool("no_task_tool", task=True)
@@ -162,11 +147,11 @@ async def test_component_explicit_true_overrides_server_false():
         return "immediate result"
 
     async with Client(mcp) as client:
-        # Verify docket registration matches task settings
+        # Verify docket registration matches task settings (prefixed keys)
         docket = mcp.docket
         assert docket is not None
-        assert "task_tool" in docket.tasks  # task=True means registered
-        assert "default_tool" not in docket.tasks  # Inherits tasks=False
+        assert "tool:task_tool" in docket.tasks  # task=True means registered
+        assert "tool:default_tool" not in docket.tasks  # Inherits tasks=False
 
         # Explicit True should support background execution despite server default
         task = await client.call_tool("task_tool", task=True)
@@ -216,17 +201,18 @@ async def test_mixed_explicit_and_inherited():
 
     async with Client(mcp) as client:
         # Verify docket registration matches task settings
+        # Components use prefixed keys: tool:name, prompt:name, resource:uri
         docket = mcp.docket
         assert docket is not None
-        # task=True (explicit or inherited) means registered
-        assert "inherited_tool" in docket.tasks
-        assert "explicit_true_tool" in docket.tasks
-        assert "inherited_prompt" in docket.tasks
-        assert "inherited_resource" in docket.tasks
+        # task=True (explicit or inherited) means registered (with prefixed keys)
+        assert "tool:inherited_tool" in docket.tasks
+        assert "tool:explicit_true_tool" in docket.tasks
+        assert "prompt:inherited_prompt" in docket.tasks
+        assert "resource:test://inherited" in docket.tasks
         # task=False means NOT registered
-        assert "explicit_false_tool" not in docket.tasks
-        assert "explicit_false_prompt" not in docket.tasks
-        assert "explicit_false_resource" not in docket.tasks
+        assert "tool:explicit_false_tool" not in docket.tasks
+        assert "prompt:explicit_false_prompt" not in docket.tasks
+        assert "resource:test://explicit_false" not in docket.tasks
 
         # Tools
         inherited = await client.call_tool("inherited_tool", task=True)
@@ -261,34 +247,32 @@ async def test_mixed_explicit_and_inherited():
 
 
 async def test_server_tasks_parameter_sets_component_defaults():
-    """Server tasks parameter sets component defaults but global settings gate protocol."""
-    # Server tasks=True sets component defaults, but enable_tasks must be True
-    with temporary_settings(enable_tasks=True):
-        mcp = FastMCP("test", tasks=True)
+    """Server tasks parameter sets component defaults."""
+    # Server tasks=True sets component defaults
+    mcp = FastMCP("test", tasks=True)
 
-        @mcp.tool()
-        async def tool_inherits_true() -> str:
-            return "tool result"
+    @mcp.tool()
+    async def tool_inherits_true() -> str:
+        return "tool result"
 
-        async with Client(mcp) as client:
-            # Tool inherits tasks=True from server
-            tool_task = await client.call_tool("tool_inherits_true", task=True)
-            assert not tool_task.returned_immediately
+    async with Client(mcp) as client:
+        # Tool inherits tasks=True from server
+        tool_task = await client.call_tool("tool_inherits_true", task=True)
+        assert not tool_task.returned_immediately
 
     # Server tasks=False sets component defaults
-    with temporary_settings(enable_tasks=True):
-        mcp2 = FastMCP("test2", tasks=False)
+    mcp2 = FastMCP("test2", tasks=False)
 
-        @mcp2.tool()
-        async def tool_inherits_false() -> str:
-            return "tool result"
+    @mcp2.tool()
+    async def tool_inherits_false() -> str:
+        return "tool result"
 
-        async with Client(mcp2) as client:
-            # Tool inherits tasks=False (mode="forbidden") - returns error
-            tool_task = await client.call_tool("tool_inherits_false", task=True)
-            assert tool_task.returned_immediately
-            result = await tool_task.result()
-            assert result.is_error
+    async with Client(mcp2) as client:
+        # Tool inherits tasks=False (mode="forbidden") - returns error
+        tool_task = await client.call_tool("tool_inherits_false", task=True)
+        assert tool_task.returned_immediately
+        result = await tool_task.result()
+        assert result.is_error
 
 
 async def test_resource_template_inherits_server_tasks_default():
@@ -328,3 +312,77 @@ async def test_multiple_components_same_name_different_tasks():
         # Prompt inheriting False (mode="forbidden") raises McpError
         with pytest.raises(McpError):
             await client.get_prompt("shared_name_prompt", task=True)
+
+
+async def test_task_with_custom_tool_name():
+    """Tools with custom names work correctly as tasks (issue #2642).
+
+    When a tool is registered with a custom name different from the function
+    name, task execution should use the custom name for Docket lookup.
+    """
+    mcp = FastMCP("test", tasks=True)
+
+    async def my_function() -> str:
+        return "result from custom-named tool"
+
+    mcp.tool(my_function, name="custom-tool-name")
+
+    async with Client(mcp) as client:
+        # Verify the tool is registered with its custom name in Docket (prefixed key)
+        docket = mcp.docket
+        assert docket is not None
+        assert "tool:custom-tool-name" in docket.tasks
+
+        # Call the tool as a task using its custom name
+        task = await client.call_tool("custom-tool-name", task=True)
+        assert not task.returned_immediately
+        result = await task
+        assert result.data == "result from custom-named tool"
+
+
+async def test_task_with_custom_resource_name():
+    """Resources with custom names work correctly as tasks.
+
+    Resources are registered/looked up by their .key (URI), not their name.
+    """
+    mcp = FastMCP("test", tasks=True)
+
+    @mcp.resource("test://resource", name="custom-resource-name")
+    async def my_resource_func() -> str:
+        return "result from custom-named resource"
+
+    async with Client(mcp) as client:
+        # Verify the resource is registered with its key (prefixed URI) in Docket
+        docket = mcp.docket
+        assert docket is not None
+        assert "resource:test://resource" in docket.tasks
+
+        # Call the resource as a task
+        task = await client.read_resource("test://resource", task=True)
+        assert not task.returned_immediately
+        result = await task.result()
+        assert result[0].text == "result from custom-named resource"
+
+
+async def test_task_with_custom_template_name():
+    """Resource templates with custom names work correctly as tasks.
+
+    Templates are registered/looked up by their .key (uri_template), not their name.
+    """
+    mcp = FastMCP("test", tasks=True)
+
+    @mcp.resource("test://{item_id}", name="custom-template-name")
+    async def my_template_func(item_id: str) -> str:
+        return f"result for {item_id}"
+
+    async with Client(mcp) as client:
+        # Verify the template is registered with its key (prefixed uri_template) in Docket
+        docket = mcp.docket
+        assert docket is not None
+        assert "template:test://{item_id}" in docket.tasks
+
+        # Call the template as a task
+        task = await client.read_resource("test://123", task=True)
+        assert not task.returned_immediately
+        result = await task.result()
+        assert result[0].text == "result for 123"

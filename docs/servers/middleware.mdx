@@ -108,6 +108,32 @@ This hierarchy allows you to target your middleware logic with the right level o
 The `on_initialize` hook receives the client's initialization request but **returns `None`** rather than a result. The initialization response is handled internally by the MCP protocol and cannot be modified by middleware. This hook is useful for client detection, logging connections, or initializing session state, but not for modifying the initialization handshake itself.
 </Note>
 
+**Example:**
+
+```python
+from fastmcp.server.middleware import Middleware, MiddlewareContext
+from mcp import McpError
+from mcp.types import ErrorData
+
+class InitializationMiddleware(Middleware):
+    async def on_initialize(self, context: MiddlewareContext, call_next):
+        # Check client capabilities before initialization
+        client_info = context.message.params.get("clientInfo", {})
+        client_name = client_info.get("name", "unknown")
+
+        # Reject unsupported clients BEFORE call_next
+        if client_name == "unsupported-client":
+            raise McpError(ErrorData(code=-32000, message="This client is not supported"))
+
+        # Log successful initialization
+        await call_next(context)
+        print(f"Client {client_name} initialized successfully")
+```
+
+<Warning>
+If you raise `McpError` in `on_initialize` **after** calling `call_next()`, the error will only be logged and will not be sent to the client. The initialization response has already been sent at that point. Always raise `McpError` **before** `call_next()` if you want to reject the initialization.
+</Warning>
+
 ### MCP Session Availability in Middleware
 
 <VersionBadge version="2.13.1" />
@@ -298,7 +324,7 @@ class ToolCallMiddleware(Middleware):
 ```
 
 <Tip>
-For more complex tool rewriting scenarios, consider using [Tool Transformation](/patterns/tool-transformation) patterns which provide a more structured approach to creating modified tool variants.
+For more complex tool rewriting scenarios, consider using [Transforms](/servers/providers/transforms) which provide a more structured approach to creating modified tool variants.
 </Tip>
 
 ### Anatomy of a Hook
@@ -410,7 +436,7 @@ This creates the following execution flow:
 
 ## Server Composition and Middleware
 
-When using [Server Composition](/servers/composition) with `mount` or `import_server`, middleware behavior follows these rules:
+When using [Mounting Servers](/servers/providers/mounting) with `mount` or `import_server`, middleware behavior follows these rules:
 
 1. **Parent server middleware** runs for all requests, including those routed to mounted servers
 2. **Mounted server middleware** only runs for requests handled by that specific server
@@ -432,7 +458,7 @@ def child_tool() -> str:
     return "from child"
 
 # Mount the child server
-parent.mount(child, prefix="child")
+parent.mount(child, namespace="child")
 ```
 
 When a client calls "child_tool", the request will flow through the parent's authentication middleware first, then route to the child server where it will go through the child's logging middleware.
@@ -590,6 +616,36 @@ mcp.add_middleware(middleware)
 stats = middleware.statistics()
 print(f"Total cache operations: {stats}")
 ```
+
+### Ping Middleware
+
+<VersionBadge version="3.0.0" />
+
+For long-lived connections, servers can send periodic pings to keep connections alive and prevent clients from dropping the connection due to inactivity. FastMCP provides ping middleware at `fastmcp.server.middleware.ping`.
+
+```python
+from fastmcp import FastMCP
+from fastmcp.server.middleware import PingMiddleware
+
+mcp = FastMCP("MyServer")
+mcp.add_middleware(PingMiddleware(interval_ms=5000))
+```
+
+The middleware starts a background ping task on the first message from each client session. Pings continue at the configured interval until the session ends. When the session closes, the ping task is automatically cancelled and cleaned up.
+
+Configure the ping interval based on your client's timeout settings:
+
+```python
+# Ping every 30 seconds (default)
+mcp.add_middleware(PingMiddleware())
+
+# Ping every 5 seconds for clients with short timeouts
+mcp.add_middleware(PingMiddleware(interval_ms=5000))
+```
+
+<Note>
+Ping middleware is most useful for stateful HTTP connections where clients maintain long-lived sessions. For stateless connections, pings have no effect since each request is independent.
+</Note>
 
 ### Logging Middleware
 

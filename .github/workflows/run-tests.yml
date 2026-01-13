@@ -30,6 +30,9 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
         python-version: ["3.10"]
+        include:
+          - os: ubuntu-latest
+            python-version: "3.13"
       fail-fast: false
     timeout-minutes: 10
 
@@ -48,7 +51,12 @@ jobs:
         run: uv sync --upgrade
 
       - name: Run tests (excluding integration and client_process)
-        run: uv run pytest --inline-snapshot=disable tests -m "not integration and not client_process" --numprocesses auto --maxprocesses 4 --dist worksteal
+        run: |
+          if [ "${{ matrix.os }}" == "windows-latest" ]; then
+            uv run pytest --inline-snapshot=disable tests -m "not integration and not client_process" -v
+          else
+            uv run pytest --inline-snapshot=disable tests -m "not integration and not client_process" --numprocesses auto --maxprocesses 4 --dist worksteal
+          fi
         shell: bash
 
       - name: Run client process tests separately

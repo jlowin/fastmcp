@@ -1,4 +1,5 @@
-from .resource import FunctionResource, Resource
+from .function_resource import FunctionResource, resource
+from .resource import Resource, ResourceContent, ResourceResult
 from .template import ResourceTemplate
 from .types import (
     BinaryResource,
@@ -7,7 +8,6 @@ from .types import (
     HttpResource,
     TextResource,
 )
-from .resource_manager import ResourceManager
 
 __all__ = [
     "BinaryResource",
@@ -16,7 +16,9 @@ __all__ = [
     "FunctionResource",
     "HttpResource",
     "Resource",
-    "ResourceManager",
+    "ResourceContent",
+    "ResourceResult",
     "ResourceTemplate",
     "TextResource",
+    "resource",
 ]

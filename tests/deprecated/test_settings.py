@@ -4,8 +4,6 @@ from unittest.mock import patch
 import pytest
 
 from fastmcp import FastMCP
-from fastmcp.settings import Settings
-from fastmcp.utilities.tests import caplog_for_fastmcp
 
 # reset deprecation warnings for this module
 pytestmark = pytest.mark.filterwarnings("default::DeprecationWarning")
@@ -175,9 +173,7 @@ class TestDeprecatedServerInitKwargs:
             server = FastMCP(
                 name="TestServer",
                 instructions="Test instructions",
-                on_duplicate_tools="warn",
-                on_duplicate_resources="error",
-                on_duplicate_prompts="replace",
+                on_duplicate="warn",  # New unified parameter
                 mask_error_details=True,
             )
 
@@ -190,6 +186,29 @@ class TestDeprecatedServerInitKwargs:
         # Verify server was created successfully
         assert server.name == "TestServer"
         assert server.instructions == "Test instructions"
+
+    def test_deprecated_duplicate_kwargs_raise_warnings(self):
+        """Test that deprecated on_duplicate_* kwargs raise warnings."""
+        with warnings.catch_warnings(record=True) as recorded_warnings:
+            warnings.simplefilter("always")
+            FastMCP(
+                name="TestServer",
+                on_duplicate_tools="warn",
+                on_duplicate_resources="error",
+                on_duplicate_prompts="replace",
+            )
+
+        # Should have 3 deprecation warnings (one for each deprecated param)
+        deprecation_warnings = [
+            w for w in recorded_warnings if issubclass(w.category, DeprecationWarning)
+        ]
+        assert len(deprecation_warnings) == 3
+
+        # Check warning messages
+        warning_messages = [str(w.message) for w in deprecation_warnings]
+        assert any("on_duplicate_tools" in msg for msg in warning_messages)
+        assert any("on_duplicate_resources" in msg for msg in warning_messages)
+        assert any("on_duplicate_prompts" in msg for msg in warning_messages)
 
     def test_none_values_no_warnings(self):
         """Test that None values for deprecated kwargs don't raise warnings."""
@@ -229,7 +248,6 @@ class TestDeprecatedServerInitKwargs:
                 "json_response": True,
                 "stateless_http": True,
             }
-            mock_settings.server_auth = None  # Add server_auth attribute
 
             server = FastMCP("TestServer")
 
@@ -259,7 +277,6 @@ class TestDeprecatedServerInitKwargs:
                 "json_response": True,
                 "stateless_http": True,
             }
-            mock_settings.server_auth = None  # Add server_auth attribute
 
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")  # Ignore warnings for this test
@@ -300,27 +317,3 @@ class TestDeprecatedServerInitKwargs:
         # This verifies the stacklevel is working as intended (pointing to constructor)
         warning = deprecation_warnings[0]
         assert "server.py" in warning.filename
-
-
-class TestDeprecatedSettingsProperty:
-    """Test deprecated settings property access."""
-
-    def test_settings_property_deprecation_warning(self, caplog):
-        """Test that accessing fastmcp.settings.settings logs a deprecation warning."""
-        from fastmcp import settings
-
-        with caplog_for_fastmcp(caplog):
-            # Access the deprecated property
-            deprecated_settings = settings.settings
-
-        # Check that a warning was logged
-        assert any(
-            "Using fastmcp.settings.settings is deprecated. Use fastmcp.settings instead."
-            in record.message
-            for record in caplog.records
-            if record.levelname == "WARNING"
-        )
-
-        # Verify it still returns the same settings object
-        assert deprecated_settings is settings
-        assert isinstance(deprecated_settings, Settings)

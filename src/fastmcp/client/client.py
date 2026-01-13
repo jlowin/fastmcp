@@ -6,7 +6,8 @@ import datetime
 import secrets
 import uuid
 import weakref
-from contextlib import AsyncExitStack, asynccontextmanager
+from collections.abc import Coroutine
+from contextlib import AsyncExitStack, asynccontextmanager, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Generic, Literal, TypeVar, cast, overload
@@ -16,7 +17,7 @@ import httpx
 import mcp.types
 import pydantic_core
 from exceptiongroup import catch
-from mcp import ClientSession
+from mcp import ClientSession, McpError
 from mcp.types import (
     CancelTaskRequest,
     CancelTaskRequestParams,
@@ -30,7 +31,7 @@ from mcp.types import (
     PaginatedRequestParams,
     TaskStatusNotification,
 )
-from pydantic import AnyUrl
+from pydantic import AnyUrl, RootModel
 
 import fastmcp
 from fastmcp.client.elicitation import ElicitationHandler, create_elicitation_callback
@@ -47,7 +48,6 @@ from fastmcp.client.roots import (
     create_roots_callback,
 )
 from fastmcp.client.sampling import (
-    ClientSamplingHandler,
     SamplingHandler,
     create_sampling_callback,
 )
@@ -56,7 +56,6 @@ from fastmcp.client.tasks import (
     ResourceTask,
     TaskNotificationHandler,
     ToolTask,
-    _task_capable_initialize,
 )
 from fastmcp.exceptions import ToolError
 from fastmcp.mcp_config import MCPConfig
@@ -83,7 +82,6 @@ from .transports import (
 
 __all__ = [
     "Client",
-    "ClientSamplingHandler",
     "ElicitationHandler",
     "LogHandler",
     "MessageHandler",
@@ -97,6 +95,7 @@ __all__ = [
 logger = get_logger(__name__)
 
 T = TypeVar("T", bound="ClientTransport")
+ResultT = TypeVar("ResultT")
 
 
 @dataclass
@@ -249,7 +248,8 @@ class Client(Generic[ClientTransportT]):
         ),
         name: str | None = None,
         roots: RootsList | RootsHandler | None = None,
-        sampling_handler: ClientSamplingHandler | None = None,
+        sampling_handler: SamplingHandler | None = None,
+        sampling_capabilities: mcp.types.SamplingCapability | None = None,
         elicitation_handler: ElicitationHandler | None = None,
         log_handler: LogHandler | None = None,
         message_handler: MessageHandlerT | MessageHandler | None = None,
@@ -296,7 +296,7 @@ class Client(Generic[ClientTransportT]):
             "list_roots_callback": None,
             "logging_callback": create_log_callback(log_handler),
             "message_handler": message_handler or TaskNotificationHandler(self),
-            "read_timeout_seconds": timeout,  # ty: ignore[invalid-argument-type]
+            "read_timeout_seconds": timeout,
             "client_info": client_info,
         }
 
@@ -306,6 +306,14 @@ class Client(Generic[ClientTransportT]):
         if sampling_handler is not None:
             self._session_kwargs["sampling_callback"] = create_sampling_callback(
                 sampling_handler
+            )
+            # Default to tools-enabled capabilities unless explicitly overridden
+            self._session_kwargs["sampling_capabilities"] = (
+                sampling_capabilities
+                if sampling_capabilities is not None
+                else mcp.types.SamplingCapability(
+                    tools=mcp.types.SamplingToolsCapability()
+                )
             )
 
         if elicitation_handler is not None:
@@ -324,6 +332,20 @@ class Client(Generic[ClientTransportT]):
         self._task_registry: dict[
             str, weakref.ref[ToolTask | PromptTask | ResourceTask]
         ] = {}
+
+    def _reset_session_state(self, full: bool = False) -> None:
+        """Reset session state after disconnect or cancellation.
+
+        Args:
+            full: If True, also resets session_task and nesting_counter.
+                  Use full=True for cancellation cleanup where the session
+                  task was started but never completed normally.
+        """
+        self._session_state.session = None
+        self._session_state.initialize_result = None
+        if full:
+            self._session_state.session_task = None
+            self._session_state.nesting_counter = 0
 
     @property
     def session(self) -> ClientSession:
@@ -344,10 +366,20 @@ class Client(Generic[ClientTransportT]):
         """Set the roots for the client. This does not automatically call `send_roots_list_changed`."""
         self._session_kwargs["list_roots_callback"] = create_roots_callback(roots)
 
-    def set_sampling_callback(self, sampling_callback: ClientSamplingHandler) -> None:
+    def set_sampling_callback(
+        self,
+        sampling_callback: SamplingHandler,
+        sampling_capabilities: mcp.types.SamplingCapability | None = None,
+    ) -> None:
         """Set the sampling callback for the client."""
         self._session_kwargs["sampling_callback"] = create_sampling_callback(
             sampling_callback
+        )
+        # Default to tools-enabled capabilities unless explicitly overridden
+        self._session_kwargs["sampling_capabilities"] = (
+            sampling_capabilities
+            if sampling_capabilities is not None
+            else mcp.types.SamplingCapability(tools=mcp.types.SamplingToolsCapability())
         )
 
     def set_elicitation_callback(
@@ -405,8 +437,7 @@ class Client(Generic[ClientTransportT]):
                 except anyio.ClosedResourceError as e:
                     raise RuntimeError("Server session was closed unexpectedly") from e
                 finally:
-                    self._session_state.session = None
-                    self._session_state.initialize_result = None
+                    self._reset_session_state()
 
     async def initialize(
         self,
@@ -458,15 +489,7 @@ class Client(Generic[ClientTransportT]):
 
         try:
             with anyio.fail_after(timeout):
-                if fastmcp.settings.enable_tasks:
-                    self._session_state.initialize_result = (
-                        await _task_capable_initialize(self.session)
-                    )
-                else:
-                    self._session_state.initialize_result = (
-                        await self.session.initialize()
-                    )
-
+                self._session_state.initialize_result = await self.session.initialize()
                 return self._session_state.initialize_result
         except TimeoutError as e:
             raise RuntimeError("Failed to initialize server session") from e
@@ -511,7 +534,48 @@ class Client(Generic[ClientTransportT]):
                 self._session_state.session_task = asyncio.create_task(
                     self._session_runner()
                 )
-                await self._session_state.ready_event.wait()
+                try:
+                    await self._session_state.ready_event.wait()
+                except asyncio.CancelledError:
+                    # Cancellation during initial connection startup can leave the
+                    # background session task running because __aexit__ is never invoked
+                    # when __aenter__ is cancelled. Since we hold the session lock here
+                    # and we know we started the session task, it's safe to tear it down
+                    # without impacting other active contexts.
+                    #
+                    # Note: session_task is an asyncio.Task (not anyio) because it needs
+                    # to outlive individual context manager scopes - anyio's structured
+                    # concurrency doesn't allow tasks to escape their task group.
+                    session_task = self._session_state.session_task
+                    if session_task is not None:
+                        # Request a graceful stop if the runner has already reached
+                        # its stop_event wait.
+                        self._session_state.stop_event.set()
+                        session_task.cancel()
+                        with anyio.CancelScope(shield=True):
+                            with anyio.move_on_after(3):
+                                try:
+                                    await session_task
+                                except asyncio.CancelledError:
+                                    pass
+                                except Exception as e:
+                                    logger.debug(
+                                        f"Error during cancelled session cleanup: {e}"
+                                    )
+
+                    # Reset session state so future callers can reconnect cleanly.
+                    self._reset_session_state(full=True)
+
+                    with anyio.CancelScope(shield=True):
+                        with anyio.move_on_after(3):
+                            try:
+                                await self.transport.close()
+                            except Exception as e:
+                                logger.debug(
+                                    f"Error closing transport after cancellation: {e}"
+                                )
+
+                    raise
 
                 if self._session_state.session_task.done():
                     exception = self._session_state.session_task.exception()
@@ -519,7 +583,8 @@ class Client(Generic[ClientTransportT]):
                         raise RuntimeError(
                             "Session task completed without exception but connection failed"
                         )
-                    if isinstance(exception, httpx.HTTPStatusError):
+                    # Preserve specific exception types that clients may want to handle
+                    if isinstance(exception, httpx.HTTPStatusError | McpError):
                         raise exception
                     raise RuntimeError(
                         f"Client failed to connect: {exception}"
@@ -592,6 +657,71 @@ class Client(Generic[ClientTransportT]):
             # Ensure ready event is set even if context manager entry fails
             self._session_state.ready_event.set()
 
+    async def _await_with_session_monitoring(
+        self, coro: Coroutine[Any, Any, ResultT]
+    ) -> ResultT:
+        """Await a coroutine while monitoring the session task for errors.
+
+        When using HTTP transports, server errors (4xx/5xx) are raised in the
+        background session task, not in the coroutine waiting for a response.
+        This causes the client to hang indefinitely since the response never
+        arrives. This method monitors the session task and propagates any
+        exceptions that occur, preventing the client from hanging.
+
+        Args:
+            coro: The coroutine to await (typically a session method call)
+
+        Returns:
+            The result of the coroutine
+
+        Raises:
+            The exception from the session task if it fails, or RuntimeError
+            if the session task completes unexpectedly without an exception.
+        """
+        session_task = self._session_state.session_task
+
+        # If no session task, just await directly
+        if session_task is None:
+            return await coro
+
+        # If session task already failed, raise immediately
+        if session_task.done():
+            # Close the coroutine to avoid "was never awaited" warning
+            coro.close()
+            exc = session_task.exception()
+            if exc:
+                raise exc
+            raise RuntimeError("Session task completed unexpectedly")
+
+        # Create task for our call
+        call_task = asyncio.create_task(coro)
+
+        try:
+            done, _ = await asyncio.wait(
+                {call_task, session_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+
+            if session_task in done:
+                # Session task completed (likely errored) before our call finished
+                call_task.cancel()
+                with anyio.CancelScope(shield=True), suppress(asyncio.CancelledError):
+                    await call_task
+
+                # Raise the session task exception
+                exc = session_task.exception()
+                if exc:
+                    raise exc
+                raise RuntimeError("Session task completed unexpectedly")
+
+            # Our call completed first - get the result
+            return call_task.result()
+        except asyncio.CancelledError:
+            call_task.cancel()
+            with anyio.CancelScope(shield=True), suppress(asyncio.CancelledError):
+                await call_task
+            raise
+
     def _handle_task_status_notification(
         self, notification: TaskStatusNotification
     ) -> None:
@@ -622,7 +752,7 @@ class Client(Generic[ClientTransportT]):
 
     async def ping(self) -> bool:
         """Send a ping request."""
-        result = await self.session.send_ping()
+        result = await self._await_with_session_monitoring(self.session.send_ping())
         return isinstance(result, mcp.types.EmptyResult)
 
     async def cancel(
@@ -656,7 +786,7 @@ class Client(Generic[ClientTransportT]):
 
     async def set_logging_level(self, level: mcp.types.LoggingLevel) -> None:
         """Send a logging/setLevel request."""
-        await self.session.set_logging_level(level)
+        await self._await_with_session_monitoring(self.session.set_logging_level(level))
 
     async def send_roots_list_changed(self) -> None:
         """Send a roots/list_changed notification."""
@@ -673,10 +803,13 @@ class Client(Generic[ClientTransportT]):
 
         Raises:
             RuntimeError: If called while the client is not connected.
+            McpError: If the request results in a TimeoutError | JSONRPCError
         """
         logger.debug(f"[{self.name}] called list_resources")
 
-        result = await self.session.list_resources()
+        result = await self._await_with_session_monitoring(
+            self.session.list_resources()
+        )
         return result
 
     async def list_resources(self) -> list[mcp.types.Resource]:
@@ -687,6 +820,7 @@ class Client(Generic[ClientTransportT]):
 
         Raises:
             RuntimeError: If called while the client is not connected.
+            McpError: If the request results in a TimeoutError | JSONRPCError
         """
         result = await self.list_resources_mcp()
         return result.resources
@@ -702,10 +836,13 @@ class Client(Generic[ClientTransportT]):
 
         Raises:
             RuntimeError: If called while the client is not connected.
+            McpError: If the request results in a TimeoutError | JSONRPCError
         """
         logger.debug(f"[{self.name}] called list_resource_templates")
 
-        result = await self.session.list_resource_templates()
+        result = await self._await_with_session_monitoring(
+            self.session.list_resource_templates()
+        )
         return result
 
     async def list_resource_templates(
@@ -718,6 +855,7 @@ class Client(Generic[ClientTransportT]):
 
         Raises:
             RuntimeError: If called while the client is not connected.
+            McpError: If the request results in a TimeoutError | JSONRPCError
         """
         result = await self.list_resource_templates_mcp()
         return result.resourceTemplates
@@ -737,6 +875,7 @@ class Client(Generic[ClientTransportT]):
 
         Raises:
             RuntimeError: If called while the client is not connected.
+            McpError: If the request results in a TimeoutError | JSONRPCError
         """
         logger.debug(f"[{self.name}] called read_resource: {uri}")
 
@@ -754,12 +893,16 @@ class Client(Generic[ClientTransportT]):
                     else None,  # SEP-1686: task as direct param (spec-compliant)
                 )
             )
-            result = await self.session.send_request(
-                request=request,  # type: ignore[arg-type]
-                result_type=mcp.types.ReadResourceResult,
+            result = await self._await_with_session_monitoring(
+                self.session.send_request(
+                    request=request,  # type: ignore[arg-type]
+                    result_type=mcp.types.ReadResourceResult,
+                )
             )
         else:
-            result = await self.session.read_resource(uri)
+            result = await self._await_with_session_monitoring(
+                self.session.read_resource(uri)
+            )
         return result
 
     @overload
@@ -805,6 +948,7 @@ class Client(Generic[ClientTransportT]):
 
         Raises:
             RuntimeError: If called while the client is not connected.
+            McpError: If the request results in a TimeoutError | JSONRPCError
         """
         if task:
             return await self._read_resource_as_task(uri, task_id, ttl)
@@ -838,41 +982,46 @@ class Client(Generic[ClientTransportT]):
             ResourceTask: Future-like object for accessing task status and results
         """
         # Per SEP-1686 final spec: client sends only ttl, server generates taskId
-        # Read resource with task metadata (no taskId sent)
-        result = await self.read_resource_mcp(
-            uri=uri,
-            meta={
-                "modelcontextprotocol.io/task": {
-                    "ttl": ttl,
-                }
-            },
+        if isinstance(uri, str):
+            uri = AnyUrl(uri)
+
+        request = mcp.types.ReadResourceRequest(
+            params=mcp.types.ReadResourceRequestParams(
+                uri=uri,
+                task=mcp.types.TaskMetadata(ttl=ttl),
+            )
         )
 
-        # Check if server accepted background execution
-        # If response includes task metadata with taskId, server accepted background mode
-        # If response includes returned_immediately=True, server declined and executed sync
-        task_meta = (result.meta or {}).get("modelcontextprotocol.io/task", {})
-        if task_meta.get("taskId"):
-            # Background execution accepted - extract server-generated taskId
-            server_task_id = task_meta["taskId"]
-            # Track this task ID for list_tasks()
+        # Server returns CreateTaskResult (task accepted) or ReadResourceResult (graceful degradation)
+        TaskResponseUnion = RootModel[
+            mcp.types.CreateTaskResult | mcp.types.ReadResourceResult
+        ]
+        wrapped_result = await self._await_with_session_monitoring(
+            self.session.send_request(
+                request=request,  # type: ignore[arg-type]
+                result_type=TaskResponseUnion,
+            )
+        )
+        raw_result = wrapped_result.root
+
+        if isinstance(raw_result, mcp.types.CreateTaskResult):
+            # Task was accepted - extract task info from CreateTaskResult
+            server_task_id = raw_result.task.taskId
             self._submitted_task_ids.add(server_task_id)
 
-            # Create task object
             task_obj = ResourceTask(
                 self, server_task_id, uri=str(uri), immediate_result=None
             )
-
-            # Register for notification routing
             self._task_registry[server_task_id] = weakref.ref(task_obj)  # type: ignore[assignment]
-
             return task_obj
         else:
-            # Server declined background execution (graceful degradation)
-            # Use a synthetic task ID for the immediate result
+            # Graceful degradation - server returned ReadResourceResult
             synthetic_task_id = task_id or str(uuid.uuid4())
             return ResourceTask(
-                self, synthetic_task_id, uri=str(uri), immediate_result=result.contents
+                self,
+                synthetic_task_id,
+                uri=str(uri),
+                immediate_result=raw_result.contents,
             )
 
     # async def subscribe_resource(self, uri: AnyUrl | str) -> None:
@@ -898,10 +1047,11 @@ class Client(Generic[ClientTransportT]):
 
         Raises:
             RuntimeError: If called while the client is not connected.
+            McpError: If the request results in a TimeoutError | JSONRPCError
         """
         logger.debug(f"[{self.name}] called list_prompts")
 
-        result = await self.session.list_prompts()
+        result = await self._await_with_session_monitoring(self.session.list_prompts())
         return result
 
     async def list_prompts(self) -> list[mcp.types.Prompt]:
@@ -912,6 +1062,7 @@ class Client(Generic[ClientTransportT]):
 
         Raises:
             RuntimeError: If called while the client is not connected.
+            McpError: If the request results in a TimeoutError | JSONRPCError
         """
         result = await self.list_prompts_mcp()
         return result.prompts
@@ -936,6 +1087,7 @@ class Client(Generic[ClientTransportT]):
 
         Raises:
             RuntimeError: If called while the client is not connected.
+            McpError: If the request results in a TimeoutError | JSONRPCError
         """
         logger.debug(f"[{self.name}] called get_prompt: {name}")
 
@@ -964,13 +1116,15 @@ class Client(Generic[ClientTransportT]):
                     else None,  # SEP-1686: task as direct param (spec-compliant)
                 )
             )
-            result = await self.session.send_request(
-                request=request,  # type: ignore[arg-type]
-                result_type=mcp.types.GetPromptResult,
+            result = await self._await_with_session_monitoring(
+                self.session.send_request(
+                    request=request,  # type: ignore[arg-type]
+                    result_type=mcp.types.GetPromptResult,
+                )
             )
         else:
-            result = await self.session.get_prompt(
-                name=name, arguments=serialized_arguments
+            result = await self._await_with_session_monitoring(
+                self.session.get_prompt(name=name, arguments=serialized_arguments)
             )
         return result
 
@@ -1018,6 +1172,7 @@ class Client(Generic[ClientTransportT]):
 
         Raises:
             RuntimeError: If called while the client is not connected.
+            McpError: If the request results in a TimeoutError | JSONRPCError
         """
         if task:
             return await self._get_prompt_as_task(name, arguments, task_id, ttl)
@@ -1046,42 +1201,53 @@ class Client(Generic[ClientTransportT]):
             PromptTask: Future-like object for accessing task status and results
         """
         # Per SEP-1686 final spec: client sends only ttl, server generates taskId
-        # Call prompt with task metadata (no taskId sent)
-        result = await self.get_prompt_mcp(
-            name=name,
-            arguments=arguments or {},
-            meta={
-                "modelcontextprotocol.io/task": {
-                    "ttl": ttl,
-                }
-            },
+        # Serialize arguments for MCP protocol
+        serialized_arguments: dict[str, str] | None = None
+        if arguments:
+            serialized_arguments = {}
+            for key, value in arguments.items():
+                if isinstance(value, str):
+                    serialized_arguments[key] = value
+                else:
+                    serialized_arguments[key] = pydantic_core.to_json(value).decode(
+                        "utf-8"
+                    )
+
+        request = mcp.types.GetPromptRequest(
+            params=mcp.types.GetPromptRequestParams(
+                name=name,
+                arguments=serialized_arguments,
+                task=mcp.types.TaskMetadata(ttl=ttl),
+            )
         )
 
-        # Check if server accepted background execution
-        # If response includes task metadata with taskId, server accepted background mode
-        # If response includes returned_immediately=True, server declined and executed sync
-        task_meta = (result.meta or {}).get("modelcontextprotocol.io/task", {})
-        if task_meta.get("taskId"):
-            # Background execution accepted - extract server-generated taskId
-            server_task_id = task_meta["taskId"]
-            # Track this task ID for list_tasks()
+        # Server returns CreateTaskResult (task accepted) or GetPromptResult (graceful degradation)
+        TaskResponseUnion = RootModel[
+            mcp.types.CreateTaskResult | mcp.types.GetPromptResult
+        ]
+        wrapped_result = await self._await_with_session_monitoring(
+            self.session.send_request(
+                request=request,  # type: ignore[arg-type]
+                result_type=TaskResponseUnion,
+            )
+        )
+        raw_result = wrapped_result.root
+
+        if isinstance(raw_result, mcp.types.CreateTaskResult):
+            # Task was accepted - extract task info from CreateTaskResult
+            server_task_id = raw_result.task.taskId
             self._submitted_task_ids.add(server_task_id)
 
-            # Create task object
             task_obj = PromptTask(
                 self, server_task_id, prompt_name=name, immediate_result=None
             )
-
-            # Register for notification routing
             self._task_registry[server_task_id] = weakref.ref(task_obj)  # type: ignore[assignment]
-
             return task_obj
         else:
-            # Server declined background execution (graceful degradation)
-            # Use a synthetic task ID for the immediate result
+            # Graceful degradation - server returned GetPromptResult
             synthetic_task_id = task_id or str(uuid.uuid4())
             return PromptTask(
-                self, synthetic_task_id, prompt_name=name, immediate_result=result
+                self, synthetic_task_id, prompt_name=name, immediate_result=raw_result
             )
 
     # --- Completion ---
@@ -1106,11 +1272,14 @@ class Client(Generic[ClientTransportT]):
 
         Raises:
             RuntimeError: If called while the client is not connected.
+            McpError: If the request results in a TimeoutError | JSONRPCError
         """
         logger.debug(f"[{self.name}] called complete: {ref}")
 
-        result = await self.session.complete(
-            ref=ref, argument=argument, context_arguments=context_arguments
+        result = await self._await_with_session_monitoring(
+            self.session.complete(
+                ref=ref, argument=argument, context_arguments=context_arguments
+            )
         )
         return result
 
@@ -1133,6 +1302,7 @@ class Client(Generic[ClientTransportT]):
 
         Raises:
             RuntimeError: If called while the client is not connected.
+            McpError: If the request results in a TimeoutError | JSONRPCError
         """
         result = await self.complete_mcp(
             ref=ref, argument=argument, context_arguments=context_arguments
@@ -1150,10 +1320,11 @@ class Client(Generic[ClientTransportT]):
 
         Raises:
             RuntimeError: If called while the client is not connected.
+            McpError: If the request results in a TimeoutError | JSONRPCError
         """
         logger.debug(f"[{self.name}] called list_tools")
 
-        result = await self.session.list_tools()
+        result = await self._await_with_session_monitoring(self.session.list_tools())
         return result
 
     async def list_tools(self) -> list[mcp.types.Tool]:
@@ -1164,6 +1335,7 @@ class Client(Generic[ClientTransportT]):
 
         Raises:
             RuntimeError: If called while the client is not connected.
+            McpError: If the request results in a TimeoutError | JSONRPCError
         """
         result = await self.list_tools_mcp()
         return result.tools
@@ -1199,6 +1371,7 @@ class Client(Generic[ClientTransportT]):
 
         Raises:
             RuntimeError: If called while the client is not connected.
+            McpError: If the tool call requests results in a TimeoutError | JSONRPCError
         """
         logger.debug(f"[{self.name}] called call_tool: {name}")
 
@@ -1206,33 +1379,15 @@ class Client(Generic[ClientTransportT]):
         if isinstance(timeout, int | float):
             timeout = datetime.timedelta(seconds=float(timeout))
 
-        # For task submissions, use send_request to bypass SDK validation
-        # Task acknowledgments don't have structured content, which would fail validation
-        if meta and "modelcontextprotocol.io/task" in meta:
-            task_dict = meta.get("modelcontextprotocol.io/task")
-            request = mcp.types.CallToolRequest(
-                params=mcp.types.CallToolRequestParams(
-                    name=name,
-                    arguments=arguments,
-                    task=mcp.types.TaskMetadata(**task_dict)
-                    if task_dict
-                    else None,  # SEP-1686: task as direct param (spec-compliant)
-                )
-            )
-            result = await self.session.send_request(
-                request=request,  # type: ignore[arg-type]
-                result_type=mcp.types.CallToolResult,
-                request_read_timeout_seconds=timeout,  # type: ignore[arg-type]
-                progress_callback=progress_handler or self._progress_handler,
-            )
-        else:
-            result = await self.session.call_tool(
+        result = await self._await_with_session_monitoring(
+            self.session.call_tool(
                 name=name,
                 arguments=arguments,
-                read_timeout_seconds=timeout,  # ty: ignore[invalid-argument-type]
+                read_timeout_seconds=timeout,
                 progress_callback=progress_handler or self._progress_handler,
                 meta=meta,
             )
+        )
         return result
 
     async def _parse_call_tool_result(
@@ -1352,6 +1507,7 @@ class Client(Generic[ClientTransportT]):
 
         Raises:
             ToolError: If the tool call results in an error.
+            McpError: If the tool call request results in a TimeoutError | JSONRPCError
             RuntimeError: If called while the client is not connected.
         """
         if task:
@@ -1391,42 +1547,41 @@ class Client(Generic[ClientTransportT]):
             ToolTask: Future-like object for accessing task status and results
         """
         # Per SEP-1686 final spec: client sends only ttl, server generates taskId
-        # Call tool with task metadata (no taskId sent)
-        result = await self.call_tool_mcp(
-            name=name,
-            arguments=arguments or {},
-            meta={
-                "modelcontextprotocol.io/task": {
-                    "ttl": ttl,
-                }
-            },
+        # Build request with task metadata
+        request = mcp.types.CallToolRequest(
+            params=mcp.types.CallToolRequestParams(
+                name=name,
+                arguments=arguments or {},
+                task=mcp.types.TaskMetadata(ttl=ttl),
+            )
         )
 
-        # Check if server accepted background execution
-        # If response includes task metadata with taskId, server accepted background mode
-        # If response includes returned_immediately=True, server declined and executed sync
-        task_meta = (result.meta or {}).get("modelcontextprotocol.io/task", {})
-        if task_meta.get("taskId"):
-            # Background execution accepted - extract server-generated taskId
-            server_task_id = task_meta["taskId"]
-            # Track this task ID for list_tasks()
+        # Server returns CreateTaskResult (task accepted) or CallToolResult (graceful degradation)
+        # Use RootModel with Union to handle both response types (SDK calls model_validate)
+        TaskResponseUnion = RootModel[
+            mcp.types.CreateTaskResult | mcp.types.CallToolResult
+        ]
+        wrapped_result = await self._await_with_session_monitoring(
+            self.session.send_request(
+                request=request,  # type: ignore[arg-type]
+                result_type=TaskResponseUnion,
+            )
+        )
+        raw_result = wrapped_result.root
+
+        if isinstance(raw_result, mcp.types.CreateTaskResult):
+            # Task was accepted - extract task info from CreateTaskResult
+            server_task_id = raw_result.task.taskId
             self._submitted_task_ids.add(server_task_id)
 
-            # Create task object
             task_obj = ToolTask(
                 self, server_task_id, tool_name=name, immediate_result=None
             )
-
-            # Register for notification routing
             self._task_registry[server_task_id] = weakref.ref(task_obj)  # type: ignore[assignment]
-
             return task_obj
         else:
-            # Server declined background execution (graceful degradation)
-            # or returned_immediately=True - executed synchronously
-            # Wrap the immediate result
-            parsed_result = await self._parse_call_tool_result(name, result)
-            # Use a synthetic task ID for the immediate result
+            # Graceful degradation - server returned CallToolResult
+            parsed_result = await self._parse_call_tool_result(name, raw_result)
             synthetic_task_id = task_id or str(uuid.uuid4())
             return ToolTask(
                 self, synthetic_task_id, tool_name=name, immediate_result=parsed_result
@@ -1445,11 +1600,14 @@ class Client(Generic[ClientTransportT]):
 
         Raises:
             RuntimeError: If client not connected
+            McpError: If the request results in a TimeoutError | JSONRPCError
         """
         request = GetTaskRequest(params=GetTaskRequestParams(taskId=task_id))
-        return await self.session.send_request(
-            request=request,  # type: ignore[arg-type]
-            result_type=GetTaskResult,  # type: ignore[arg-type]
+        return await self._await_with_session_monitoring(
+            self.session.send_request(
+                request=request,  # type: ignore[arg-type]
+                result_type=GetTaskResult,
+            )
         )
 
     async def get_task_result(self, task_id: str) -> Any:
@@ -1466,14 +1624,17 @@ class Client(Generic[ClientTransportT]):
 
         Raises:
             RuntimeError: If client not connected, task not found, or task failed
+            McpError: If the request results in a TimeoutError | JSONRPCError
         """
         request = GetTaskPayloadRequest(
             params=GetTaskPayloadRequestParams(taskId=task_id)
         )
         # Return raw result - Task classes handle type-specific parsing
-        result = await self.session.send_request(
-            request=request,  # type: ignore[arg-type]
-            result_type=GetTaskPayloadResult,  # type: ignore[arg-type]
+        result = await self._await_with_session_monitoring(
+            self.session.send_request(
+                request=request,  # type: ignore[arg-type]
+                result_type=GetTaskPayloadResult,
+            )
         )
         # Return as dict for compatibility with Task class parsing
         return result.model_dump(exclude_none=True, by_alias=True)
@@ -1500,13 +1661,16 @@ class Client(Generic[ClientTransportT]):
 
         Raises:
             RuntimeError: If client not connected
+            McpError: If the request results in a TimeoutError | JSONRPCError
         """
         # Send protocol request
-        params = PaginatedRequestParams(cursor=cursor, limit=limit)
+        params = PaginatedRequestParams(cursor=cursor, limit=limit)  # type: ignore[call-arg]  # Optional field in MCP SDK
         request = ListTasksRequest(params=params)
-        server_response = await self.session.send_request(
-            request=request,  # type: ignore[invalid-argument-type]
-            result_type=mcp.types.ListTasksResult,
+        server_response = await self._await_with_session_monitoring(
+            self.session.send_request(
+                request=request,  # type: ignore[invalid-argument-type]
+                result_type=mcp.types.ListTasksResult,
+            )
         )
 
         # If server returned tasks, use those
@@ -1539,11 +1703,14 @@ class Client(Generic[ClientTransportT]):
 
         Raises:
             RuntimeError: If task doesn't exist
+            McpError: If the request results in a TimeoutError | JSONRPCError
         """
         request = CancelTaskRequest(params=CancelTaskRequestParams(taskId=task_id))
-        return await self.session.send_request(
-            request=request,  # type: ignore[invalid-argument-type]
-            result_type=mcp.types.CancelTaskResult,
+        return await self._await_with_session_monitoring(
+            self.session.send_request(
+                request=request,  # type: ignore[invalid-argument-type]
+                result_type=mcp.types.CancelTaskResult,
+            )
         )
 
     @classmethod

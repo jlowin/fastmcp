@@ -13,7 +13,8 @@ from fastmcp import FastMCP
 from fastmcp.client.client import Client
 from fastmcp.exceptions import ToolError
 from fastmcp.tools import Tool, forward, forward_raw
-from fastmcp.tools.tool import FunctionTool, ToolResult
+from fastmcp.tools.function_tool import FunctionTool
+from fastmcp.tools.tool import ToolResult
 from fastmcp.tools.tool_transform import (
     ArgTransform,
     ToolTransformConfig,
@@ -129,7 +130,8 @@ async def test_hidden_arg_without_default_uses_parent_default(add_tool):
     assert sorted(new_tool.parameters["properties"]) == ["old_x"]
     # Should pass old_x=3 and let parent use its default old_y=10
     result = await new_tool.run(arguments={"old_x": 3})
-    assert result.content[0].text == "13"  # type: ignore[attr-defined]
+    assert isinstance(result.content[0], TextContent)
+    assert result.content[0].text == "13"
     assert result.structured_content == {"result": 13}
 
 
@@ -155,7 +157,8 @@ async def test_mixed_hidden_args_with_custom_function(add_tool):
     assert sorted(new_tool.parameters["properties"]) == ["visible_x"]
     # Should pass visible_x=7 as old_x=7 and old_y=25 to parent
     result = await new_tool.run(arguments={"visible_x": 7})
-    assert result.content[0].text == "32"  # type: ignore[attr-defined]
+    assert isinstance(result.content[0], TextContent)
+    assert result.content[0].text == "32"
     assert result.structured_content == {"result": 32}
 
 
@@ -216,10 +219,14 @@ async def test_hidden_param_prunes_defs():
     schema = new_tool.parameters
     # Only 'a' should be visible
     assert list(schema["properties"].keys()) == ["a"]
-    # $defs should only contain VisibleType, not HiddenType
-    defs = schema.get("$defs", {})
-    assert "VisibleType" in defs
-    assert "HiddenType" not in defs
+    # Schema should be fully dereferenced (no $defs)
+    assert "$defs" not in schema
+    # VisibleType should be inlined in the property
+    assert schema["properties"]["a"] == {
+        "properties": {"x": {"type": "integer"}},
+        "required": ["x"],
+        "type": "object",
+    }
 
 
 async def test_forward_with_argument_mapping(add_tool):
@@ -238,7 +245,8 @@ async def test_forward_with_argument_mapping(add_tool):
     )
 
     result = await new_tool.run(arguments={"new_x": 2, "new_y": 3})
-    assert result.content[0].text == "5"  # type: ignore[attr-defined]
+    assert isinstance(result.content[0], TextContent)
+    assert result.content[0].text == "5"
     assert result.structured_content == {"result": 5}
 
 
@@ -279,18 +287,21 @@ async def test_forward_raw_without_argument_mapping(add_tool):
     )
 
     result = await new_tool.run(arguments={"new_x": 2, "new_y": 3})
-    assert result.content[0].text == "5"  # type: ignore[attr-defined]
+    assert isinstance(result.content[0], TextContent)
+    assert result.content[0].text == "5"
     assert result.structured_content == {"result": 5}
 
 
 async def test_custom_fn_with_kwargs_and_no_transform_args(add_tool):
     async def custom_fn(extra: int, **kwargs) -> int:
         sum = await forward(**kwargs)
-        return int(sum.content[0].text) + extra  # type: ignore[attr-defined]
+        assert isinstance(sum.content[0], TextContent)
+        return int(sum.content[0].text) + extra
 
     new_tool = Tool.from_tool(add_tool, transform_fn=custom_fn)
     result = await new_tool.run(arguments={"extra": 1, "old_x": 2, "old_y": 3})
-    assert result.content[0].text == "6"  # type: ignore[attr-defined]
+    assert isinstance(result.content[0], TextContent)
+    assert result.content[0].text == "6"
     assert result.structured_content == {"result": 6}
     assert new_tool.parameters["required"] == IsList(
         "extra", "old_x", check_order=False
@@ -308,7 +319,8 @@ async def test_fn_with_kwargs_passes_through_original_args(add_tool):
 
     new_tool = Tool.from_tool(add_tool, transform_fn=custom_fn)
     result = await new_tool.run(arguments={"new_y": 2, "old_y": 3})
-    assert result.content[0].text == "5"  # type: ignore[attr-defined]
+    assert isinstance(result.content[0], TextContent)
+    assert result.content[0].text == "5"
     assert result.structured_content == {"result": 5}
 
 
@@ -327,7 +339,8 @@ async def test_fn_with_kwargs_receives_transformed_arg_names(add_tool):
         transform_args={"old_x": ArgTransform(name="new_x")},
     )
     result = await new_tool.run(arguments={"new_x": 2, "old_y": 3})
-    assert result.content[0].text == "5"  # type: ignore[attr-defined]
+    assert isinstance(result.content[0], TextContent)
+    assert result.content[0].text == "5"
     assert result.structured_content == {"result": 5}
 
 
@@ -350,7 +363,8 @@ async def test_fn_with_kwargs_handles_partial_explicit_args(add_tool):
     result = await new_tool.run(
         arguments={"new_x": 3, "old_y": 7, "some_other_param": "test"}
     )
-    assert result.content[0].text == "10"  # type: ignore[attr-defined]
+    assert isinstance(result.content[0], TextContent)
+    assert result.content[0].text == "10"
     assert result.structured_content == {"result": 10}
 
 
@@ -369,7 +383,8 @@ async def test_fn_with_kwargs_mixed_mapped_and_unmapped_args(add_tool):
         transform_args={"old_x": ArgTransform(name="new_x")},
     )  # only map 'a'
     result = await new_tool.run(arguments={"new_x": 1, "old_y": 5})
-    assert result.content[0].text == "6"  # type: ignore[attr-defined]
+    assert isinstance(result.content[0], TextContent)
+    assert result.content[0].text == "6"
     assert result.structured_content == {"result": 6}
 
 
@@ -393,7 +408,8 @@ async def test_fn_with_kwargs_dropped_args_not_in_kwargs(add_tool):
     )  # drop 'old_y'
     result = await new_tool.run(arguments={"new_x": 8})
     # 8 + 10 (default value of b in parent)
-    assert result.content[0].text == "18"  # type: ignore[attr-defined]
+    assert isinstance(result.content[0], TextContent)
+    assert result.content[0].text == "18"
 
 
 async def test_forward_outside_context_raises_error():
@@ -427,7 +443,10 @@ def test_transform_args_with_parent_defaults():
 
     new_tool = Tool.from_tool(tool)
 
-    assert new_tool.parameters["$defs"] == tool.parameters["$defs"]
+    # Both tools should have the same dereferenced schema
+    assert new_tool.parameters == tool.parameters
+    # Schema should be fully dereferenced (no $defs)
+    assert "$defs" not in new_tool.parameters
 
 
 def test_transform_args_validation_unknown_arg(add_tool):
@@ -531,18 +550,21 @@ async def test_tool_transform_chaining(add_tool):
     tool2 = Tool.from_tool(tool1, transform_args={"x": ArgTransform(name="final_x")})
 
     result = await tool2.run(arguments={"final_x": 5})
-    assert result.content[0].text == "15"  # type: ignore[attr-defined]
+    assert isinstance(result.content[0], TextContent)
+    assert result.content[0].text == "15"
 
     # Transform tool1 with custom function that handles all parameters
     async def custom(final_x: int, **kwargs) -> str:
         result = await forward(final_x=final_x, **kwargs)
-        return f"custom {result.content[0].text}"  # Extract text from content # type: ignore[attr-defined]
+        assert isinstance(result.content[0], TextContent)
+        return f"custom {result.content[0].text}"  # Extract text from content
 
     tool3 = Tool.from_tool(
         tool1, transform_fn=custom, transform_args={"x": ArgTransform(name="final_x")}
     )
     result = await tool3.run(arguments={"final_x": 3, "old_y": 5})
-    assert result.content[0].text == "custom 8"  # type: ignore[attr-defined]
+    assert isinstance(result.content[0], TextContent)
+    assert result.content[0].text == "custom 8"
 
 
 class MyModel(BaseModel):
@@ -670,7 +692,8 @@ async def test_arg_transform_precedence_over_function_with_kwargs():
     # Function signature has different types/defaults than ArgTransform
     async def custom_fn(x: str = "function_default", **kwargs) -> str:
         result = await forward(x=x, **kwargs)
-        return f"custom: {result.content[0].text}"  # type: ignore[attr-defined]
+        assert isinstance(result.content[0], TextContent)
+        return f"custom: {result.content[0].text}"
 
     tool = Tool.from_tool(
         base,
@@ -697,7 +720,8 @@ async def test_arg_transform_precedence_over_function_with_kwargs():
     # Test it works at runtime
     result = await tool.run(arguments={"y": "test"})
     # Should use ArgTransform default of 42
-    assert "42: test" in result.content[0].text  # type: ignore[attr-defined]
+    assert isinstance(result.content[0], TextContent)
+    assert "42: test" in result.content[0].text
 
 
 def test_arg_transform_combined_attributes():
@@ -742,7 +766,8 @@ async def test_arg_transform_type_precedence_runtime():
         # Convert string back to int for the original function
         result = await forward_raw(x=int(x), y=y)
         # Extract the text from the result
-        result_text = result.content[0].text  # type: ignore[attr-defined]
+        assert isinstance(result.content[0], TextContent)
+        result_text = result.content[0].text
         return f"String input '{x}' converted to result: {result_text}"
 
     tool = Tool.from_tool(
@@ -754,8 +779,9 @@ async def test_arg_transform_type_precedence_runtime():
 
     # Test it works with string input
     result = await tool.run(arguments={"x": "5", "y": 3})
-    assert "String input '5'" in result.content[0].text  # type: ignore[attr-defined]
-    assert "result: 8" in result.content[0].text  # type: ignore[attr-defined]
+    assert isinstance(result.content[0], TextContent)
+    assert "String input '5'" in result.content[0].text
+    assert "result: 8" in result.content[0].text
 
 
 class TestProxy:
@@ -790,7 +816,8 @@ class TestProxy:
         async with Client(proxy_server) as client:
             # The tool should be registered with its transformed name
             result = await client.call_tool("add_transformed", {"new_x": 1, "old_y": 2})
-            assert result.content[0].text == "3"  # type: ignore[attr-defined]
+            assert isinstance(result.content[0], TextContent)
+            assert result.content[0].text == "3"
 
 
 async def test_arg_transform_default_factory():
@@ -813,7 +840,8 @@ async def test_arg_transform_default_factory():
 
     # Should work without providing timestamp (gets value from factory)
     result = await new_tool.run(arguments={"x": 42})
-    assert result.content[0].text == "42_12345.0"  # type: ignore[attr-defined]
+    assert isinstance(result.content[0], TextContent)
+    assert result.content[0].text == "42_12345.0"
 
 
 async def test_arg_transform_default_factory_called_each_time():
@@ -841,11 +869,13 @@ async def test_arg_transform_default_factory_called_each_time():
 
     # First call
     result1 = await new_tool.run(arguments={"x": 1})
-    assert result1.content[0].text == "1_1"  # type: ignore[attr-defined]
+    assert isinstance(result1.content[0], TextContent)
+    assert result1.content[0].text == "1_1"
 
     # Second call should get a different value
     result2 = await new_tool.run(arguments={"x": 2})
-    assert result2.content[0].text == "2_2"  # type: ignore[attr-defined]
+    assert isinstance(result2.content[0], TextContent)
+    assert result2.content[0].text == "2_2"
 
 
 async def test_arg_transform_hidden_with_default_factory():
@@ -870,7 +900,8 @@ async def test_arg_transform_hidden_with_default_factory():
 
     # Should pass hidden request_id with factory value
     result = await new_tool.run(arguments={"x": 42})
-    assert result.content[0].text == "42_req_123"  # type: ignore[attr-defined]
+    assert isinstance(result.content[0], TextContent)
+    assert result.content[0].text == "42_req_123"
 
 
 async def test_arg_transform_default_and_factory_raises_error():
@@ -907,7 +938,8 @@ async def test_arg_transform_required_true():
 
     # Should work when parameter is provided
     result = await new_tool.run(arguments={"optional_param": 100})
-    assert result.content[0].text == "value: 100"  # type: ignore
+    assert isinstance(result.content[0], TextContent)
+    assert result.content[0].text == "value: 100"
 
     # Should fail when parameter is not provided
     with pytest.raises(TypeError, match="Missing required argument"):
@@ -925,9 +957,10 @@ async def test_arg_transform_required_false():
         ValueError,
         match="Cannot specify 'required=False'. Set a default value instead.",
     ):
+        # Intentionally passing invalid argument to test error handling
         Tool.from_tool(
             base_tool,
-            transform_args={"required_param": ArgTransform(required=False, default=99)},  # type: ignore
+            transform_args={"required_param": ArgTransform(required=False, default=99)},  # type: ignore[arg-type]
         )
 
 
@@ -954,7 +987,8 @@ async def test_arg_transform_required_with_rename():
 
     # Should work with new name
     result = await new_tool.run(arguments={"new_param": 200})
-    assert result.content[0].text == "value: 200"  # type: ignore
+    assert isinstance(result.content[0], TextContent)
+    assert result.content[0].text == "value: 200"
 
 
 async def test_arg_transform_required_true_with_default_raises_error():
@@ -996,7 +1030,8 @@ async def test_arg_transform_required_no_change():
 
     # Should work as expected
     result = await new_tool.run(arguments={"req": 1})
-    assert result.content[0].text == "values: 1, 42"  # type: ignore
+    assert isinstance(result.content[0], TextContent)
+    assert result.content[0].text == "values: 1, 42"
 
 
 async def test_arg_transform_hide_and_required_raises_error():
@@ -1010,30 +1045,30 @@ async def test_arg_transform_hide_and_required_raises_error():
 class TestEnableDisable:
     async def test_transform_disabled_tool(self):
         """
-        Tests that a transformed tool can run even if the parent tool is disabled
+        Tests that a transformed tool can run even if the parent tool is disabled via server.
         """
         mcp = FastMCP()
 
-        @mcp.tool(enabled=False)
+        @mcp.tool
         def add(x: int, y: int = 10) -> int:
             return x + y
 
-        new_add = Tool.from_tool(add, name="new_add")
+        # Get the registered Tool object from the server
+        add_tool = await mcp._local_provider.get_component("tool:add")
+        assert isinstance(add_tool, Tool)
+        new_add = Tool.from_tool(add_tool, name="new_add")
         mcp.add_tool(new_add)
 
-        # the new tool inherits the disabled state from the parent tool
-        assert new_add.enabled is False
-
-        new_add.enable()
-        assert new_add.enabled is True
-        assert add.enabled is False
+        # Disable original tool, but new_add should still work
+        mcp.disable(keys=["tool:add"])
 
         async with Client(mcp) as client:
             tools = await client.list_tools()
             assert {tool.name for tool in tools} == {"new_add"}
 
             result = await client.call_tool("new_add", {"x": 1, "y": 2})
-            assert result.content[0].text == "3"  # type: ignore[attr-defined]
+            assert isinstance(result.content[0], TextContent)
+            assert result.content[0].text == "3"
 
             with pytest.raises(ToolError):
                 await client.call_tool("add", {"x": 1, "y": 2})
@@ -1041,12 +1076,18 @@ class TestEnableDisable:
     async def test_disable_transformed_tool(self):
         mcp = FastMCP()
 
-        @mcp.tool(enabled=False)
+        @mcp.tool
         def add(x: int, y: int = 10) -> int:
             return x + y
 
-        new_add = Tool.from_tool(add, name="new_add", enabled=False)
+        # Get the registered Tool object from the server
+        add_tool = await mcp._local_provider.get_component("tool:add")
+        assert isinstance(add_tool, Tool)
+        new_add = Tool.from_tool(add_tool, name="new_add")
         mcp.add_tool(new_add)
+
+        # Disable both tools via server
+        mcp.disable(keys=["tool:add", "tool:new_add"])
 
         async with Client(mcp) as client:
             tools = await client.list_tools()
@@ -1109,7 +1150,8 @@ class TestTransformToolOutputSchema:
         result = await new_tool.run({"x": 5})
         # Even with output_schema=None, structured content should be generated via fallback logic
         assert result.structured_content == {"result": "Result: 5"}
-        assert result.content[0].text == "Result: 5"  # type: ignore[attr-defined]
+        assert isinstance(result.content[0], TextContent)
+        assert result.content[0].text == "Result: 5"
 
     def test_transform_with_explicit_output_schema_dict(self, base_string_tool):
         """Test that explicit output schema overrides parent."""
@@ -1130,14 +1172,16 @@ class TestTransformToolOutputSchema:
         result = await new_tool.run({"x": 10})
         # Non-object explicit schemas disable structured content
         assert result.structured_content is None
-        assert result.content[0].text == "Result: 10"  # type: ignore[attr-defined]
+        assert isinstance(result.content[0], TextContent)
+        assert result.content[0].text == "Result: 10"
 
     def test_transform_with_custom_function_inferred_schema(self, base_dict_tool):
         """Test that custom function's output schema is inferred."""
 
         async def custom_fn(x: int) -> str:
             result = await forward(x=x)
-            return f"Custom: {result.content[0].text}"  # type: ignore[attr-defined]
+            assert isinstance(result.content[0], TextContent)
+            return f"Custom: {result.content[0].text}"
 
         new_tool = Tool.from_tool(base_dict_tool, transform_fn=custom_fn)
 
@@ -1155,7 +1199,8 @@ class TestTransformToolOutputSchema:
 
         async def custom_fn(x: int) -> str:
             result = await forward(x=x)
-            return f"Custom: {result.content[0].text}"  # type: ignore[attr-defined]
+            assert isinstance(result.content[0], TextContent)
+            return f"Custom: {result.content[0].text}"
 
         new_tool = Tool.from_tool(base_dict_tool, transform_fn=custom_fn)
 
@@ -1202,7 +1247,8 @@ class TestTransformToolOutputSchema:
         # Object types should not be wrapped
         expected_schema = TypeAdapter(dict[str, int]).json_schema()
         assert new_tool.output_schema == expected_schema
-        assert "x-fastmcp-wrap-result" not in new_tool.output_schema  # type: ignore[attr-defined]
+        assert isinstance(new_tool.output_schema, dict)
+        assert "x-fastmcp-wrap-result" not in new_tool.output_schema
 
         result = await new_tool.run({"x": 4})
         # Direct value, not wrapped
@@ -1215,7 +1261,8 @@ class TestTransformToolOutputSchema:
         result = await new_tool.run({"x": 7})
         # Should wrap because parent schema has wrap marker
         assert result.structured_content == {"result": "Result: 7"}
-        assert "x-fastmcp-wrap-result" in new_tool.output_schema  # type: ignore[attr-defined]
+        assert isinstance(new_tool.output_schema, dict)
+        assert "x-fastmcp-wrap-result" in new_tool.output_schema
 
     def test_transform_chained_output_schema_inheritance(self, base_string_tool):
         """Test output schema inheritance through multiple transformations."""
@@ -1260,14 +1307,16 @@ class TestTransformToolOutputSchema:
         # Test ToolResult return
         result2 = await new_tool.run({"x": 2})
         assert result2.structured_content == {"custom_value": 2}
-        assert result2.content[0].text == "Custom: 2"  # type: ignore[attr-defined]
+        assert isinstance(result2.content[0], TextContent)
+        assert result2.content[0].text == "Custom: 2"
 
     def test_transform_output_schema_with_arg_transforms(self, base_string_tool):
         """Test that output schema works correctly with argument transformations."""
 
         async def custom_fn(new_x: int) -> dict[str, str]:
             result = await forward(new_x=new_x)
-            return {"transformed": result.content[0].text}  # type: ignore[attr-defined]
+            assert isinstance(result.content[0], TextContent)
+            return {"transformed": result.content[0].text}
 
         new_tool = Tool.from_tool(
             base_string_tool,
@@ -1299,7 +1348,9 @@ class TestTransformToolOutputSchema:
         assert result_explicit_none.structured_content == {
             "result": "Result: 5"
         }  # Generated via fallback logic
-        assert result_default.content[0].text == result_explicit_none.content[0].text  # type: ignore[attr-defined]
+        assert isinstance(result_default.content[0], TextContent)
+        assert isinstance(result_explicit_none.content[0], TextContent)
+        assert result_default.content[0].text == result_explicit_none.content[0].text
 
     async def test_transform_output_schema_with_tool_result_return(
         self, base_string_tool
@@ -1320,7 +1371,8 @@ class TestTransformToolOutputSchema:
 
         result = await new_tool.run({"x": 6})
         # Should use ToolResult content directly
-        assert result.content[0].text == "Direct: 6"  # type: ignore[attr-defined]
+        assert isinstance(result.content[0], TextContent)
+        assert result.content[0].text == "Direct: 6"
         assert result.structured_content == {"direct_value": 6, "doubled": 12}
 
 
@@ -1506,7 +1558,11 @@ class TestInputSchema:
         assert "examples" not in prop3
 
     def test_merge_schema_with_defs_precedence(self):
-        """Test _merge_schema_with_precedence merges $defs correctly."""
+        """Test _merge_schema_with_precedence merges $defs correctly.
+
+        Note: This tests the raw merge behavior before dereferencing.
+        The final schema output will be dereferenced by compress_schema.
+        """
         base_schema = {
             "type": "object",
             "properties": {"field1": {"$ref": "#/$defs/BaseType"}},
@@ -1529,26 +1585,27 @@ class TestInputSchema:
             base_schema, override_schema
         )
 
-        # SharedType should no longer be present on the schema
-        assert "SharedType" not in transformed_tool_schema["$defs"]
+        # SharedType should no longer be present on the schema (unused)
+        assert "SharedType" not in transformed_tool_schema.get("$defs", {})
 
+        # Schema is dereferenced so no $defs in final output
         assert transformed_tool_schema == snapshot(
             {
                 "type": "object",
                 "properties": {
-                    "field1": {"$ref": "#/$defs/BaseType"},
-                    "field2": {"$ref": "#/$defs/OverrideType"},
+                    "field1": {"type": "string", "description": "base"},
+                    "field2": {"type": "boolean"},
                 },
                 "required": [],
-                "$defs": {
-                    "BaseType": {"type": "string", "description": "base"},
-                    "OverrideType": {"type": "boolean"},
-                },
             }
         )
 
     def test_transform_tool_with_complex_defs_pruning(self):
-        """Test that tool transformation properly prunes unused $defs."""
+        """Test that tool transformation properly handles hidden params.
+
+        With schema dereferencing, unused types are automatically removed
+        since $defs is eliminated entirely.
+        """
 
         class UsedType(BaseModel):
             value: str
@@ -1567,25 +1624,25 @@ class TestInputSchema:
             complex_tool, transform_args={"unused_param": ArgTransform(hide=True)}
         )
 
-        assert "UnusedType" not in transformed_tool.parameters["$defs"]
+        # Schema is dereferenced - no $defs
+        assert "$defs" not in transformed_tool.parameters
 
         assert transformed_tool.parameters == snapshot(
             {
                 "type": "object",
-                "properties": {"used_param": {"$ref": "#/$defs/UsedType"}},
-                "required": ["used_param"],
-                "$defs": {
-                    "UsedType": {
+                "properties": {
+                    "used_param": {
                         "properties": {"value": {"type": "string"}},
                         "required": ["value"],
                         "type": "object",
                     }
                 },
+                "required": ["used_param"],
             }
         )
 
-    def test_transform_with_custom_function_preserves_needed_defs(self):
-        """Test that custom transform functions preserve necessary $defs."""
+    def test_transform_with_custom_function_preserves_needed_types(self):
+        """Test that custom transform functions preserve necessary types inline."""
 
         class InputType(BaseModel):
             data: str
@@ -1607,23 +1664,25 @@ class TestInputSchema:
             transform_args={"input_data": ArgTransform(name="renamed_input")},
         )
 
+        # Schema is dereferenced - types are inlined
+        assert "$defs" not in transformed.parameters
+
         assert transformed.parameters == snapshot(
             {
                 "type": "object",
-                "properties": {"renamed_input": {"$ref": "#/$defs/InputType"}},
-                "required": ["renamed_input"],
-                "$defs": {
-                    "InputType": {
+                "properties": {
+                    "renamed_input": {
                         "properties": {"data": {"type": "string"}},
                         "required": ["data"],
                         "type": "object",
                     }
                 },
+                "required": ["renamed_input"],
             }
         )
 
-    def test_chained_transforms_preserve_correct_defs(self):
-        """Test that chained transformations preserve correct $defs."""
+    def test_chained_transforms_inline_types(self):
+        """Test that chained transformations produce correct inlined schemas."""
 
         class TypeA(BaseModel):
             a: str
@@ -1644,30 +1703,27 @@ class TestInputSchema:
             transform_args={"param_c": ArgTransform(hide=True, default=TypeC(c=True))},
         )
 
+        # Schema is dereferenced - types are inlined
+        assert "$defs" not in transform1.parameters
+
         assert transform1.parameters == snapshot(
             {
                 "type": "object",
                 "properties": {
-                    "param_a": {"$ref": "#/$defs/TypeA"},
-                    "param_b": {"$ref": "#/$defs/TypeB"},
-                },
-                "required": IsList("param_b", "param_a", check_order=False),
-                "$defs": {
-                    "TypeA": {
+                    "param_a": {
                         "properties": {"a": {"type": "string"}},
                         "required": ["a"],
                         "type": "object",
                     },
-                    "TypeB": {
+                    "param_b": {
                         "properties": {"b": {"type": "integer"}},
                         "required": ["b"],
                         "type": "object",
                     },
                 },
+                "required": IsList("param_b", "param_a", check_order=False),
             }
         )
-
-        assert "TypeA" in transform1.parameters["$defs"]
 
         # Second transform: hide param_b
         transform2 = Tool.from_tool(
@@ -1675,19 +1731,18 @@ class TestInputSchema:
             transform_args={"param_b": ArgTransform(hide=True, default=TypeB(b=42))},
         )
 
-        assert "TypeB" not in transform2.parameters["$defs"]
+        assert "$defs" not in transform2.parameters
 
         assert transform2.parameters == snapshot(
             {
                 "type": "object",
-                "properties": {"param_a": {"$ref": "#/$defs/TypeA"}},
-                "required": ["param_a"],
-                "$defs": {
-                    "TypeA": {
+                "properties": {
+                    "param_a": {
                         "properties": {"a": {"type": "string"}},
                         "required": ["a"],
                         "type": "object",
                     }
                 },
+                "required": ["param_a"],
             }
         )

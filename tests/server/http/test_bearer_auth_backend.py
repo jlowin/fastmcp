@@ -4,7 +4,7 @@ import pytest
 from mcp.server.auth.middleware.bearer_auth import BearerAuthBackend
 from starlette.requests import HTTPConnection
 
-from fastmcp.server.auth import AccessToken
+from fastmcp.server.auth import AccessToken, TokenVerifier
 from fastmcp.server.auth.providers.jwt import JWTVerifier, RSAKeyPair
 
 
@@ -41,7 +41,8 @@ class TestBearerAuthBackendTokenVerifierIntegration:
         """Test that BearerAuthBackend constructor accepts TokenVerifier."""
         # This should not raise an error
         backend = BearerAuthBackend(jwt_verifier)
-        assert backend.token_verifier is jwt_verifier  # type: ignore[attr-defined]
+        assert isinstance(backend.token_verifier, TokenVerifier)
+        assert backend.token_verifier is jwt_verifier
 
     async def test_bearer_auth_backend_authenticate_with_valid_token(
         self, jwt_verifier: JWTVerifier, valid_token: str
@@ -139,7 +140,7 @@ class TestBearerAuthBackendWithMockVerifier:
             expires_at=None,
         )
         mock_verifier = MockTokenVerifier(return_value=mock_access_token)
-        backend = BearerAuthBackend(mock_verifier)  # type: ignore[arg-type]
+        backend = BearerAuthBackend(mock_verifier)
 
         scope = {
             "type": "http",
@@ -161,7 +162,7 @@ class TestBearerAuthBackendWithMockVerifier:
     async def test_backend_handles_verify_token_none_result(self):
         """Test that BearerAuthBackend handles None result from verify_token."""
         mock_verifier = MockTokenVerifier(return_value=None)
-        backend = BearerAuthBackend(mock_verifier)  # type: ignore[arg-type]
+        backend = BearerAuthBackend(mock_verifier)
 
         scope = {
             "type": "http",

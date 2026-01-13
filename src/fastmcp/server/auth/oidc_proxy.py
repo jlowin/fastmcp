@@ -226,6 +226,8 @@ class OIDCProxy(OAuthProxy):
         # Extra parameters
         extra_authorize_params: dict[str, str] | None = None,
         extra_token_params: dict[str, str] | None = None,
+        # Token expiry fallback
+        fallback_access_token_expiry_seconds: int | None = None,
     ) -> None:
         """Initialize the OIDC proxy provider.
 
@@ -247,8 +249,8 @@ class OIDCProxy(OAuthProxy):
             redirect_path: Redirect path configured in upstream OAuth app (defaults to "/auth/callback")
             allowed_client_redirect_uris: List of allowed redirect URI patterns for MCP clients.
                 Patterns support wildcards (e.g., "http://localhost:*", "https://*.example.com/*").
-                If None (default), only localhost redirect URIs are allowed.
-                If empty list, all redirect URIs are allowed (not recommended for production).
+                If None (default), all redirect URIs are allowed (for DCR compatibility).
+                If empty list, no redirect URIs are allowed.
                 These are for MCP clients performing loopback redirects, NOT for the upstream OAuth app.
             client_storage: Storage backend for OAuth state (client registrations, encrypted tokens).
                 If None, a DiskStore will be created in the data directory (derived from `platformdirs`). The
@@ -272,6 +274,10 @@ class OIDCProxy(OAuthProxy):
                 Example: {"prompt": "consent", "access_type": "offline"}
             extra_token_params: Additional parameters to forward to the upstream token endpoint.
                 Useful for provider-specific parameters during token exchange.
+            fallback_access_token_expiry_seconds: Expiry time to use when upstream provider
+                doesn't return `expires_in` in the token response. If not set, uses smart
+                defaults: 1 hour if a refresh token is available (since we can refresh),
+                or 1 year if no refresh token (for API-key-style tokens like GitHub OAuth Apps).
         """
         if not config_url:
             raise ValueError("Missing required config URL")
@@ -344,6 +350,7 @@ class OIDCProxy(OAuthProxy):
             "token_endpoint_auth_method": token_endpoint_auth_method,
             "require_authorization_consent": require_authorization_consent,
             "consent_csp_policy": consent_csp_policy,
+            "fallback_access_token_expiry_seconds": fallback_access_token_expiry_seconds,
         }
 
         if redirect_path:

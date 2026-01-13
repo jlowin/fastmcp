@@ -6,12 +6,16 @@ import os
 import sys
 import tempfile
 from collections.abc import AsyncGenerator
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock, patch
 
 import psutil
 import pytest
+from mcp.types import TextContent
 
+from fastmcp import FastMCP
 from fastmcp.client.auth.bearer import BearerAuth
 from fastmcp.client.auth.oauth import OAuthClientProvider
 from fastmcp.client.client import Client
@@ -32,6 +36,13 @@ from fastmcp.mcp_config import (
     TransformingStdioMCPServer,
 )
 from fastmcp.tools.tool import Tool as FastMCPTool
+
+# Skip all tests in this file on Windows - they spawn subprocess servers via stdio
+# which has process lifecycle issues on Windows
+pytestmark = pytest.mark.skipif(
+    sys.platform.startswith("win32"),
+    reason="Windows has process lifecycle issues with stdio subprocesses",
+)
 
 
 def running_under_debugger():
@@ -61,6 +72,37 @@ def test_parse_single_stdio_config():
     assert isinstance(transport, StdioTransport)
     assert transport.command == "echo"
     assert transport.args == ["hello"]
+
+
+def test_stdio_config_keep_alive_passthrough():
+    """Test that keep_alive parameter is passed through from StdioMCPServer to StdioTransport."""
+    # Test with keep_alive=False
+    server = StdioMCPServer(command="test", keep_alive=False)
+    assert server.keep_alive is False
+    transport = server.to_transport()
+    assert isinstance(transport, StdioTransport)
+    assert transport.keep_alive is False
+
+    # Test with keep_alive=True
+    server = StdioMCPServer(command="test", keep_alive=True)
+    assert server.keep_alive is True
+    transport = server.to_transport()
+    assert isinstance(transport, StdioTransport)
+    assert transport.keep_alive is True
+
+    # Test with keep_alive=None (should default to True in StdioTransport)
+    server = StdioMCPServer(command="test", keep_alive=None)
+    assert server.keep_alive is None
+    transport = server.to_transport()
+    assert isinstance(transport, StdioTransport)
+    assert transport.keep_alive is True  # StdioTransport defaults to True
+
+    # Test with keep_alive not specified (should default to None, then True in StdioTransport)
+    server = StdioMCPServer(command="test")
+    assert server.keep_alive is None
+    transport = server.to_transport()
+    assert isinstance(transport, StdioTransport)
+    assert transport.keep_alive is True  # StdioTransport defaults to True
 
 
 def test_parse_extra_keys():
@@ -288,8 +330,8 @@ async def test_multi_client_parallel_calls(tmp_path: Path):
 
 
 @pytest.mark.skipif(
-    running_under_debugger() or sys.platform.startswith("win32"),
-    reason="Debugger holds a reference to the transport; Windows has process lifecycle issues",
+    running_under_debugger(),
+    reason="Debugger holds a reference to the transport",
 )
 @pytest.mark.timeout(5)
 async def test_multi_client_lifespan(tmp_path: Path):
@@ -353,10 +395,6 @@ async def test_multi_client_lifespan(tmp_path: Path):
             await asyncio.sleep(0.01)
 
 
-@pytest.mark.skipif(
-    sys.platform.startswith("win32"),
-    reason="Windows has process lifecycle issues",
-)
 async def test_multi_client_force_close(tmp_path: Path):
     server_script = inspect.cleandoc("""
         from fastmcp import FastMCP
@@ -738,6 +776,127 @@ async def test_multi_client_with_elicitation(tmp_path: Path):
     async with Client(config, elicitation_handler=elicitation_handler) as client:
         result = await client.call_tool("test_server_elicit_test", {})
         assert result.data == 42
+
+
+async def test_multi_server_config_transport(tmp_path: Path):
+    """
+    Tests that MCPConfigTransport properly handles multi-server configurations.
+
+    Related to https://github.com/jlowin/fastmcp/issues/2802 - verifies the
+    refactored architecture creates composite servers correctly.
+    """
+    server_script = inspect.cleandoc("""
+        from fastmcp import FastMCP
+
+        mcp = FastMCP()
+
+        @mcp.tool
+        def greet(name: str) -> str:
+            return f"Hello, {name}!"
+
+        if __name__ == '__main__':
+            mcp.run()
+        """)
+
+    script_path = tmp_path / "greet_server.py"
+    script_path.write_text(server_script)
+
+    config = {
+        "mcpServers": {
+            "server1": {
+                "command": "python",
+                "args": [str(script_path)],
+            },
+            "server2": {
+                "command": "python",
+                "args": [str(script_path)],
+            },
+        }
+    }
+
+    # Create client with multiple servers
+    client = Client(config)
+    assert isinstance(client.transport, MCPConfigTransport)
+
+    # Verify both servers are accessible via prefixed tool names
+    async with client:
+        tools = await client.list_tools()
+        tool_names = [t.name for t in tools]
+        assert "server1_greet" in tool_names
+        assert "server2_greet" in tool_names
+
+        # Call tools on both servers
+        result1 = await client.call_tool("server1_greet", {"name": "World"})
+        assert isinstance(result1.content[0], TextContent)
+        assert "Hello, World!" in result1.content[0].text
+
+        result2 = await client.call_tool("server2_greet", {"name": "FastMCP"})
+        assert isinstance(result2.content[0], TextContent)
+        assert "Hello, FastMCP!" in result2.content[0].text
+
+
+async def test_multi_server_timeout_propagation():
+    """Test that timeout is correctly propagated to proxy clients in multi-server configs."""
+    # Create a config with multiple servers
+    config = MCPConfig(
+        mcpServers={
+            "server1": StdioMCPServer(command="echo", args=["test"]),
+            "server2": StdioMCPServer(command="echo", args=["test"]),
+        }
+    )
+
+    transport = MCPConfigTransport(config)
+    timeout = timedelta(seconds=42)
+
+    # Patch _create_proxy to verify timeout is passed correctly
+    with (
+        patch("fastmcp.client.transports.FastMCP.as_proxy") as mock_as_proxy,
+        patch.object(
+            transport, "_create_proxy", wraps=transport._create_proxy
+        ) as mock_create_proxy,
+    ):
+        # Make as_proxy return a mock FastMCP
+        mock_proxy = FastMCP(name="MockProxy")
+        mock_as_proxy.return_value = mock_proxy
+
+        # Mock connect_session on FastMCPTransport to avoid actual connection
+        with patch(
+            "fastmcp.client.transports.FastMCPTransport.connect_session"
+        ) as mock_connect:
+            mock_session = AsyncMock()
+            mock_connect.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_connect.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            async with transport.connect_session(read_timeout_seconds=timeout):
+                pass
+
+        # Verify _create_proxy was called with the timeout for each server
+        assert mock_create_proxy.call_count == 2
+        for call in mock_create_proxy.call_args_list:
+            _, kwargs = call.args, call.kwargs if call.kwargs else {}
+            # Third positional arg is timeout
+            call_timeout = call[0][2] if len(call[0]) > 2 else kwargs.get("timeout")
+            assert call_timeout == timeout, (
+                f"Expected timeout {timeout}, got {call_timeout}"
+            )
+
+
+async def test_single_server_config_transport():
+    """Test that single-server configs delegate directly without creating a composite."""
+    config = MCPConfig(
+        mcpServers={
+            "only_server": StdioMCPServer(command="echo", args=["test"]),
+        }
+    )
+
+    transport = MCPConfigTransport(config)
+
+    # Single server should have transport created eagerly (not at connect time)
+    assert hasattr(transport, "transport")
+    assert isinstance(transport.transport, StdioTransport)
+
+    # _transports should already contain the single transport
+    assert len(transport._transports) == 1
 
 
 def sample_tool_fn(arg1: int, arg2: str) -> str:

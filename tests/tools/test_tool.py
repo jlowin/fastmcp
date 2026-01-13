@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Annotated, Any
 
 import pytest
@@ -12,13 +13,13 @@ from mcp.types import (
     ResourceLink,
     TextContent,
     TextResourceContents,
+    ToolExecution,
 )
 from pydantic import AnyUrl, BaseModel, Field, TypeAdapter
 from typing_extensions import TypedDict
 
 from fastmcp.tools.tool import Tool, ToolResult, _convert_to_content
 from fastmcp.utilities.json_schema import compress_schema
-from fastmcp.utilities.tests import caplog_for_fastmcp
 from fastmcp.utilities.types import Audio, File, Image
 
 
@@ -37,7 +38,6 @@ class TestToolFromFunction:
                 "name": "add",
                 "description": "Add two numbers.",
                 "tags": set(),
-                "enabled": True,
                 "parameters": {
                     "properties": {
                         "a": {"type": "integer"},
@@ -53,7 +53,10 @@ class TestToolFromFunction:
                     "x-fastmcp-wrap-result": True,
                 },
                 "fn": HasName("add"),
-                "task_config": {"mode": "forbidden"},
+                "task_config": {
+                    "mode": "forbidden",
+                    "poll_interval": timedelta(seconds=5),
+                },
             }
         )
 
@@ -88,7 +91,6 @@ class TestToolFromFunction:
                 "name": "fetch_data",
                 "description": "Fetch data from URL.",
                 "tags": set(),
-                "enabled": True,
                 "parameters": {
                     "properties": {"url": {"type": "string"}},
                     "required": ["url"],
@@ -101,7 +103,10 @@ class TestToolFromFunction:
                     "x-fastmcp-wrap-result": True,
                 },
                 "fn": HasName("fetch_data"),
-                "task_config": {"mode": "forbidden"},
+                "task_config": {
+                    "mode": "forbidden",
+                    "poll_interval": timedelta(seconds=5),
+                },
             }
         )
 
@@ -120,7 +125,6 @@ class TestToolFromFunction:
                 "name": "Adder",
                 "description": "Adds two numbers.",
                 "tags": set(),
-                "enabled": True,
                 "parameters": {
                     "properties": {
                         "x": {"type": "integer"},
@@ -135,7 +139,10 @@ class TestToolFromFunction:
                     "type": "object",
                     "x-fastmcp-wrap-result": True,
                 },
-                "task_config": {"mode": "forbidden"},
+                "task_config": {
+                    "mode": "forbidden",
+                    "poll_interval": timedelta(seconds=5),
+                },
             }
         )
 
@@ -154,7 +161,6 @@ class TestToolFromFunction:
                 "name": "Adder",
                 "description": "Adds two numbers.",
                 "tags": set(),
-                "enabled": True,
                 "parameters": {
                     "properties": {
                         "x": {"type": "integer"},
@@ -169,7 +175,10 @@ class TestToolFromFunction:
                     "type": "object",
                     "x-fastmcp-wrap-result": True,
                 },
-                "task_config": {"mode": "forbidden"},
+                "task_config": {
+                    "mode": "forbidden",
+                    "poll_interval": timedelta(seconds=5),
+                },
             }
         )
 
@@ -191,20 +200,16 @@ class TestToolFromFunction:
                 "name": "create_user",
                 "description": "Create a new user.",
                 "tags": set(),
-                "enabled": True,
                 "parameters": {
-                    "$defs": {
-                        "UserInput": {
+                    "properties": {
+                        "user": {
                             "properties": {
                                 "name": {"type": "string"},
                                 "age": {"type": "integer"},
                             },
                             "required": ["name", "age"],
                             "type": "object",
-                        }
-                    },
-                    "properties": {
-                        "user": {"$ref": "#/$defs/UserInput"},
+                        },
                         "flag": {"type": "boolean"},
                     },
                     "required": ["user", "flag"],
@@ -212,7 +217,10 @@ class TestToolFromFunction:
                 },
                 "output_schema": {"additionalProperties": True, "type": "object"},
                 "fn": HasName("create_user"),
-                "task_config": {"mode": "forbidden"},
+                "task_config": {
+                    "mode": "forbidden",
+                    "poll_interval": timedelta(seconds=5),
+                },
             }
         )
 
@@ -268,13 +276,15 @@ class TestToolFromFunction:
             {
                 "name": "my_tool",
                 "tags": set(),
-                "enabled": True,
                 "parameters": {
                     "properties": {"x": {"title": "X"}},
                     "required": ["x"],
                     "type": "object",
                 },
-                "task_config": {"mode": "forbidden"},
+                "task_config": {
+                    "mode": "forbidden",
+                    "poll_interval": timedelta(seconds=5),
+                },
             }
         )
 
@@ -298,7 +308,6 @@ class TestToolFromFunction:
                 "name": "add",
                 "description": "Add two numbers.",
                 "tags": set(),
-                "enabled": True,
                 "parameters": {
                     "properties": {
                         "_a": {"type": "integer"},
@@ -307,7 +316,10 @@ class TestToolFromFunction:
                     "required": ["_a", "_b"],
                     "type": "object",
                 },
-                "task_config": {"mode": "forbidden"},
+                "task_config": {
+                    "mode": "forbidden",
+                    "poll_interval": timedelta(seconds=5),
+                },
             }
         )
 
@@ -347,7 +359,6 @@ class TestToolFromFunction:
                 "name": "add",
                 "description": "Add two numbers.",
                 "tags": set(),
-                "enabled": True,
                 "parameters": {
                     "properties": {
                         "x": {"type": "integer"},
@@ -362,7 +373,10 @@ class TestToolFromFunction:
                     "type": "object",
                     "x-fastmcp-wrap-result": True,
                 },
-                "task_config": {"mode": "forbidden"},
+                "task_config": {
+                    "mode": "forbidden",
+                    "poll_interval": timedelta(seconds=5),
+                },
             }
         )
 
@@ -407,24 +421,6 @@ class TestToolFromFunction:
         assert "x" in tool.parameters["properties"]
         assert "y" in tool.parameters["properties"]
 
-    async def test_tool_serializer(self):
-        """Test that a tool's serializer is used to serialize the result."""
-
-        def custom_serializer(data) -> str:
-            return f"Custom serializer: {data}"
-
-        def process_list(items: list[int]) -> int:
-            return sum(items)
-
-        tool = Tool.from_function(process_list, serializer=custom_serializer)
-
-        result = await tool.run(arguments={"items": [1, 2, 3, 4, 5]})
-        # Custom serializer affects unstructured content
-        assert isinstance(result.content[0], TextContent)
-        assert result.content[0].text == "Custom serializer: 15"
-        # Structured output should have the raw value
-        assert result.structured_content == {"result": 15}
-
 
 class TestToolFromFunctionOutputSchema:
     async def test_no_return_annotation(self):
@@ -454,7 +450,7 @@ class TestToolFromFunctionOutputSchema:
         ],
     )
     async def test_simple_return_annotation(self, annotation):
-        def func() -> annotation:  # type: ignore
+        def func() -> annotation:
             return 1
 
         tool = Tool.from_function(func)
@@ -488,7 +484,7 @@ class TestToolFromFunctionOutputSchema:
         ],
     )
     async def test_complex_return_annotation(self, annotation):
-        def func() -> annotation:  # type: ignore
+        def func() -> annotation:
             return 1
 
         tool = Tool.from_function(func)
@@ -528,7 +524,7 @@ class TestToolFromFunctionOutputSchema:
         ],
     )
     async def test_converted_return_annotation(self, annotation, expected):
-        def func() -> annotation:  # type: ignore
+        def func() -> annotation:
             return 1
 
         tool = Tool.from_function(func)
@@ -740,7 +736,8 @@ class TestToolFromFunctionOutputSchema:
         # Dict objects automatically become structured content even without schema
         assert result.structured_content == {"message": "Hello, world!"}
         assert len(result.content) == 1
-        assert result.content[0].text == '{"message":"Hello, world!"}'  # type: ignore[attr-defined]
+        assert isinstance(result.content[0], TextContent)
+        assert result.content[0].text == '{"message":"Hello, world!"}'
 
     async def test_output_schema_none_disables_structured_content(self):
         """Test that output_schema=None explicitly disables structured content."""
@@ -754,7 +751,8 @@ class TestToolFromFunctionOutputSchema:
         result = await tool.run({})
         assert result.structured_content is None
         assert len(result.content) == 1
-        assert result.content[0].text == "42"  # type: ignore[attr-defined]
+        assert isinstance(result.content[0], TextContent)
+        assert result.content[0].text == "42"
 
     async def test_output_schema_inferred_when_not_specified(self):
         """Test that output schema is inferred when not explicitly specified."""
@@ -794,7 +792,8 @@ class TestToolFromFunctionOutputSchema:
         result = await tool.run({})
         # Dict result with object schema is used directly
         assert result.structured_content == {"value": 42}
-        assert result.content[0].text == '{"value":42}'  # type: ignore[attr-defined]
+        assert isinstance(result.content[0], TextContent)
+        assert result.content[0].text == '{"value":42}'
 
     async def test_explicit_object_schema_with_non_dict_return_fails(self):
         """Test that explicit object schemas fail when function returns non-dict."""
@@ -848,7 +847,8 @@ class TestToolFromFunctionOutputSchema:
         result = await tool.run({})
         # Unstructured content
         assert len(result.content) == 1
-        assert result.content[0].text == "hello"  # type: ignore[attr-defined]
+        assert isinstance(result.content[0], TextContent)
+        assert result.content[0].text == "hello"
         # Structured content should be wrapped
         assert result.structured_content == {"result": "hello"}
 
@@ -916,7 +916,9 @@ class TestToolFromFunctionOutputSchema:
         assert result_default.structured_content == {
             "result": 123
         }  # Schema-based generation with wrapping
-        assert result_none.content[0].text == result_default.content[0].text == "123"  # type: ignore[attr-defined]
+        assert isinstance(result_none.content[0], TextContent)
+        assert isinstance(result_default.content[0], TextContent)
+        assert result_none.content[0].text == result_default.content[0].text == "123"
 
     async def test_non_object_output_schema_raises_error(self):
         """Test that providing a non-object output schema raises a ValueError."""
@@ -1167,34 +1169,6 @@ class TestConvertResultToContent:
         assert isinstance(result[0], TextContent)
         assert result[0].text == "{}"
 
-    def test_custom_serializer(self):
-        """Test that a custom serializer is used for non-MCP types."""
-
-        def custom_serializer(data):
-            return f"Serialized: {data}"
-
-        result = _convert_to_content({"a": 1}, serializer=custom_serializer)
-
-        assert result == snapshot(
-            [TextContent(type="text", text="Serialized: {'a': 1}")]
-        )
-
-    def test_custom_serializer_error_fallback(self, caplog):
-        """Test that if a custom serializer fails, it falls back to the default."""
-
-        def custom_serializer_that_fails(data):
-            raise ValueError("Serialization failed")
-
-        with caplog_for_fastmcp(caplog):
-            result = _convert_to_content(
-                {"a": 1}, serializer=custom_serializer_that_fails
-            )
-
-        assert isinstance(result, list)
-        assert result == snapshot([TextContent(type="text", text='{"a":1}')])
-
-        assert "Error serializing tool result" in caplog.text
-
 
 class TestAutomaticStructuredContent:
     """Tests for automatic structured content generation based on return types."""
@@ -1294,6 +1268,69 @@ class TestAutomaticStructuredContent:
             "value": 123,
             "stuff": [{"value": 456, "stuff": []}],
         }
+
+    async def test_self_referencing_pydantic_model_has_type_object_at_root(self):
+        """Test that self-referencing Pydantic models have type: object at root.
+
+        MCP spec requires outputSchema to have "type": "object" at the root level.
+        Pydantic generates schemas with $ref at root for self-referential models,
+        which violates this requirement. FastMCP should resolve the $ref.
+
+        Regression test for issue #2455.
+        """
+
+        class Issue(BaseModel):
+            id: str
+            title: str
+            dependencies: list["Issue"] = []
+            dependents: list["Issue"] = []
+
+        def get_issue(issue_id: str) -> Issue:
+            return Issue(id=issue_id, title="Test")
+
+        tool = Tool.from_function(get_issue)
+
+        # The output schema should have "type": "object" at root, not $ref
+        assert tool.output_schema is not None
+        assert tool.output_schema.get("type") == "object"
+        assert "properties" in tool.output_schema
+        # Should still have $defs for nested references
+        assert "$defs" in tool.output_schema
+        # Should NOT have $ref at root level
+        assert "$ref" not in tool.output_schema
+
+    async def test_self_referencing_model_outputschema_mcp_compliant(self):
+        """Test that self-referencing model schemas are MCP spec compliant.
+
+        The MCP spec requires:
+        - type: "object" at root level
+        - properties field
+        - required field (optional)
+
+        This ensures clients can properly validate the schema.
+
+        Regression test for issue #2455.
+        """
+
+        class Node(BaseModel):
+            id: str
+            children: list["Node"] = []
+
+        def get_node() -> Node:
+            return Node(id="1")
+
+        tool = Tool.from_function(get_node)
+
+        # Schema should be MCP-compliant
+        assert tool.output_schema is not None
+        assert tool.output_schema.get("type") == "object", (
+            "MCP spec requires 'type': 'object' at root"
+        )
+        assert "properties" in tool.output_schema
+        assert "id" in tool.output_schema["properties"]
+        assert "children" in tool.output_schema["properties"]
+        # Required should include 'id'
+        assert "id" in tool.output_schema.get("required", [])
 
     async def test_int_return_no_structured_content_without_schema(self):
         """Test that int returns don't create structured content without output schema."""
@@ -1557,28 +1594,18 @@ class TestSerializationAlias:
         # not the first validation alias 'id'
         assert tool.output_schema is not None
 
-        # For object types, the schema may use $ref at root (self-referencing types)
-        # or have properties directly. Check both cases.
-        if "$ref" in tool.output_schema:
-            # Schema uses $ref - resolve to get the actual definition
-            assert "$defs" in tool.output_schema
-            ref_path = tool.output_schema["$ref"].replace("#/$defs/", "")
-            component_def = tool.output_schema["$defs"][ref_path]
-        else:
-            # Schema has properties directly (wrapped case)
-            assert "properties" in tool.output_schema
-            assert "result" in tool.output_schema["properties"]
-            assert "$defs" in tool.output_schema
-            # Find the Component definition
-            component_def = list(tool.output_schema["$defs"].values())[0]
+        # Object schemas have properties directly at root (MCP spec compliance)
+        # Root-level $refs are resolved to ensure type: object at root
+        assert "properties" in tool.output_schema
+        assert tool.output_schema.get("type") == "object"
 
         # Should have 'componentId' not 'id' in properties
-        assert "componentId" in component_def["properties"]
-        assert "id" not in component_def["properties"]
+        assert "componentId" in tool.output_schema["properties"]
+        assert "id" not in tool.output_schema["properties"]
 
         # Should require 'componentId' not 'id'
-        assert "componentId" in component_def["required"]
-        assert "id" not in component_def.get("required", [])
+        assert "componentId" in tool.output_schema.get("required", [])
+        assert "id" not in tool.output_schema.get("required", [])
 
     async def test_tool_execution_with_serialization_alias(self):
         """Test that tool execution works correctly with serialization aliases."""
@@ -1813,3 +1840,84 @@ class TestToolNameValidation:
         assert tool.parameters is not None
         assert "a" in tool.parameters["properties"]
         assert "b" in tool.parameters["properties"]
+
+
+class TestToolExecutionField:
+    """Tests for the execution field on the base Tool class."""
+
+    def test_tool_with_execution_field(self):
+        """Test that Tool can store and return execution metadata."""
+        tool = Tool(
+            name="my_tool",
+            description="A tool with execution",
+            parameters={"type": "object", "properties": {}},
+            execution=ToolExecution(taskSupport="optional"),
+        )
+
+        mcp_tool = tool.to_mcp_tool()
+        assert mcp_tool.execution is not None
+        assert mcp_tool.execution.taskSupport == "optional"
+
+    def test_tool_without_execution_field(self):
+        """Test that Tool without execution returns None."""
+        tool = Tool(
+            name="my_tool",
+            description="A tool without execution",
+            parameters={"type": "object", "properties": {}},
+        )
+
+        mcp_tool = tool.to_mcp_tool()
+        assert mcp_tool.execution is None
+
+    def test_execution_override_takes_precedence(self):
+        """Test that explicit override takes precedence over field value."""
+        tool = Tool(
+            name="my_tool",
+            description="A tool",
+            parameters={"type": "object", "properties": {}},
+            execution=ToolExecution(taskSupport="optional"),
+        )
+
+        override_execution = ToolExecution(taskSupport="required")
+        mcp_tool = tool.to_mcp_tool(execution=override_execution)
+        assert mcp_tool.execution is not None
+        assert mcp_tool.execution.taskSupport == "required"
+
+    async def test_function_tool_task_config_still_works(self):
+        """FunctionTool should still derive execution from task_config."""
+
+        async def my_fn() -> str:
+            return "hello"
+
+        tool = Tool.from_function(my_fn, task=True)
+        mcp_tool = tool.to_mcp_tool()
+
+        # FunctionTool sets execution from task_config
+        assert mcp_tool.execution is not None
+        assert mcp_tool.execution.taskSupport == "optional"
+
+    def test_tool_execution_required_mode(self):
+        """Test that Tool can store required execution mode."""
+        tool = Tool(
+            name="my_tool",
+            description="A tool with required execution",
+            parameters={"type": "object", "properties": {}},
+            execution=ToolExecution(taskSupport="required"),
+        )
+
+        mcp_tool = tool.to_mcp_tool()
+        assert mcp_tool.execution is not None
+        assert mcp_tool.execution.taskSupport == "required"
+
+    def test_tool_execution_forbidden_mode(self):
+        """Test that Tool can store forbidden execution mode."""
+        tool = Tool(
+            name="my_tool",
+            description="A tool with forbidden execution",
+            parameters={"type": "object", "properties": {}},
+            execution=ToolExecution(taskSupport="forbidden"),
+        )
+
+        mcp_tool = tool.to_mcp_tool()
+        assert mcp_tool.execution is not None
+        assert mcp_tool.execution.taskSupport == "forbidden"

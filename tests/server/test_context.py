@@ -1,3 +1,4 @@
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -6,6 +7,8 @@ from mcp.types import ModelPreferences
 from fastmcp.server.context import (
     Context,
     _parse_model_preferences,
+    reset_transport,
+    set_transport,
 )
 from fastmcp.server.server import FastMCP
 
@@ -17,16 +20,16 @@ def context():
 
 class TestParseModelPreferences:
     def test_parse_model_preferences_string(self, context):
-        mp = _parse_model_preferences("claude-3-sonnet")
+        mp = _parse_model_preferences("claude-haiku-4-5")
         assert isinstance(mp, ModelPreferences)
         assert mp.hints is not None
-        assert mp.hints[0].name == "claude-3-sonnet"
+        assert mp.hints[0].name == "claude-haiku-4-5"
 
     def test_parse_model_preferences_list(self, context):
-        mp = _parse_model_preferences(["claude-3-sonnet", "claude"])
+        mp = _parse_model_preferences(["claude-haiku-4-5", "claude"])
         assert isinstance(mp, ModelPreferences)
         assert mp.hints is not None
-        assert [h.name for h in mp.hints] == ["claude-3-sonnet", "claude"]
+        assert [h.name for h in mp.hints] == ["claude-haiku-4-5", "claude"]
 
     def test_parse_model_preferences_object(self, context):
         obj = ModelPreferences(hints=[])
@@ -46,7 +49,7 @@ class TestSessionId:
         mock_headers = {"mcp-session-id": "test-session-123"}
 
         token = request_ctx.set(
-            RequestContext(  # type: ignore[arg-type]
+            RequestContext(
                 request_id=0,
                 meta=None,
                 session=MagicMock(wraps={}),
@@ -67,7 +70,7 @@ class TestSessionId:
         from mcp.shared.context import RequestContext
 
         token = request_ctx.set(
-            RequestContext(  # type: ignore[arg-type]
+            RequestContext(
                 request_id=0,
                 meta=None,
                 session=MagicMock(wraps={}),
@@ -144,9 +147,9 @@ class TestContextMeta:
         mock_meta = MockMeta()
 
         token = request_ctx.set(
-            RequestContext(  # type: ignore[arg-type]
+            RequestContext(
                 request_id=0,
-                meta=mock_meta,  # type: ignore[arg-type]
+                meta=cast(Any, mock_meta),  # Mock object for testing
                 session=MagicMock(wraps={}),
                 lifespan_context=MagicMock(),
             )
@@ -167,7 +170,7 @@ class TestContextMeta:
         from mcp.shared.context import RequestContext
 
         token = request_ctx.set(
-            RequestContext(  # type: ignore[arg-type]
+            RequestContext(
                 request_id=0,
                 meta=None,
                 session=MagicMock(wraps={}),
@@ -180,3 +183,112 @@ class TestContextMeta:
         assert retrieved_meta is None
 
         request_ctx.reset(token)
+
+
+class TestTransport:
+    """Test suite for Context transport property."""
+
+    def test_transport_returns_none_outside_server_context(self, context):
+        """Test that transport returns None when not in a server context."""
+        assert context.transport is None
+
+    def test_transport_returns_stdio(self, context):
+        """Test that transport returns 'stdio' when set."""
+        token = set_transport("stdio")
+        try:
+            assert context.transport == "stdio"
+        finally:
+            reset_transport(token)
+
+    def test_transport_returns_sse(self, context):
+        """Test that transport returns 'sse' when set."""
+        token = set_transport("sse")
+        try:
+            assert context.transport == "sse"
+        finally:
+            reset_transport(token)
+
+    def test_transport_returns_streamable_http(self, context):
+        """Test that transport returns 'streamable-http' when set."""
+        token = set_transport("streamable-http")
+        try:
+            assert context.transport == "streamable-http"
+        finally:
+            reset_transport(token)
+
+    def test_transport_reset(self, context):
+        """Test that transport resets correctly."""
+        assert context.transport is None
+        token = set_transport("stdio")
+        assert context.transport == "stdio"
+        reset_transport(token)
+        assert context.transport is None
+
+
+class TestTransportIntegration:
+    """Integration tests for transport property with actual server/client."""
+
+    async def test_transport_in_tool_via_client(self):
+        """Test that transport is accessible from within a tool via Client."""
+        from fastmcp import Client
+
+        mcp = FastMCP("test")
+        observed_transport = None
+
+        @mcp.tool
+        def get_transport(ctx: Context) -> str:
+            nonlocal observed_transport
+            observed_transport = ctx.transport
+            return observed_transport or "none"
+
+        # Client uses in-memory transport which doesn't set transport type
+        # so we expect None here (the transport is only set by run_* methods)
+        async with Client(mcp) as client:
+            result = await client.call_tool("get_transport", {})
+            assert observed_transport is None
+            assert result.data == "none"
+
+    async def test_transport_set_manually_is_visible_in_tool(self):
+        """Test that manually set transport is visible from within a tool."""
+        from fastmcp import Client
+
+        mcp = FastMCP("test")
+        observed_transport = None
+
+        @mcp.tool
+        def get_transport(ctx: Context) -> str:
+            nonlocal observed_transport
+            observed_transport = ctx.transport
+            return observed_transport or "none"
+
+        # Manually set transport before running
+        token = set_transport("stdio")
+        try:
+            async with Client(mcp) as client:
+                result = await client.call_tool("get_transport", {})
+                assert observed_transport == "stdio"
+                assert result.data == "stdio"
+        finally:
+            reset_transport(token)
+
+    async def test_transport_set_via_http_middleware(self):
+        """Test that transport is set per-request via HTTP middleware."""
+        from fastmcp import Client
+        from fastmcp.client.transports import StreamableHttpTransport
+        from fastmcp.utilities.tests import run_server_async
+
+        mcp = FastMCP("test")
+        observed_transport = None
+
+        @mcp.tool
+        def get_transport(ctx: Context) -> str:
+            nonlocal observed_transport
+            observed_transport = ctx.transport
+            return observed_transport or "none"
+
+        async with run_server_async(mcp, transport="streamable-http") as url:
+            transport = StreamableHttpTransport(url=url)
+            async with Client(transport=transport) as client:
+                result = await client.call_tool("get_transport", {})
+                assert observed_transport == "streamable-http"
+                assert result.data == "streamable-http"

@@ -1,14 +1,13 @@
 """Tests for Supabase Auth provider."""
 
-import os
 from collections.abc import Generator
-from unittest.mock import patch
 
 import httpx
 import pytest
 
 from fastmcp import Client, FastMCP
 from fastmcp.client.transports import StreamableHttpTransport
+from fastmcp.server.auth.providers.jwt import JWTVerifier
 from fastmcp.server.auth.providers.supabase import SupabaseProvider
 from fastmcp.utilities.tests import HeadlessOAuth, run_server_in_process
 
@@ -25,27 +24,6 @@ class TestSupabaseProvider:
 
         assert provider.project_url == "https://abc123.supabase.co"
         assert str(provider.base_url) == "https://myserver.com/"
-
-    @pytest.mark.parametrize(
-        "scopes_env",
-        [
-            "openid,email",
-            '["openid", "email"]',
-        ],
-    )
-    def test_init_with_env_vars(self, scopes_env):
-        """Test SupabaseProvider initialization from environment variables."""
-        with patch.dict(
-            os.environ,
-            {
-                "FASTMCP_SERVER_AUTH_SUPABASE_PROJECT_URL": "https://env123.supabase.co",
-                "FASTMCP_SERVER_AUTH_SUPABASE_BASE_URL": "https://envserver.com",
-            },
-        ):
-            provider = SupabaseProvider()
-
-            assert provider.project_url == "https://env123.supabase.co"
-            assert str(provider.base_url) == "https://envserver.com/"
 
     def test_environment_variable_loading(self):
         """Test that environment variables are loaded correctly."""
@@ -80,15 +58,14 @@ class TestSupabaseProvider:
             base_url="https://myserver.com",
         )
 
-        # Check that JWT verifier uses the correct endpoints
+        # Check that JWT verifier uses the correct endpoints (default auth_route)
+        assert isinstance(provider.token_verifier, JWTVerifier)
         assert (
-            provider.token_verifier.jwks_uri  # type: ignore[attr-defined]
+            provider.token_verifier.jwks_uri
             == "https://abc123.supabase.co/auth/v1/.well-known/jwks.json"
         )
-        assert (
-            provider.token_verifier.issuer == "https://abc123.supabase.co/auth/v1"  # type: ignore[attr-defined]
-        )
-        assert provider.token_verifier.algorithm == "ES256"  # type: ignore[attr-defined]
+        assert provider.token_verifier.issuer == "https://abc123.supabase.co/auth/v1"
+        assert provider.token_verifier.algorithm == "ES256"
 
     def test_jwt_verifier_with_required_scopes(self):
         """Test that JWT verifier respects required_scopes."""
@@ -98,7 +75,8 @@ class TestSupabaseProvider:
             required_scopes=["openid", "email"],
         )
 
-        assert provider.token_verifier.required_scopes == ["openid", "email"]  # type: ignore[attr-defined]
+        assert isinstance(provider.token_verifier, JWTVerifier)
+        assert provider.token_verifier.required_scopes == ["openid", "email"]
 
     def test_authorization_servers_configured(self):
         """Test that authorization servers list is configured correctly."""
@@ -125,7 +103,8 @@ class TestSupabaseProvider:
             algorithm=algorithm,
         )
 
-        assert provider.token_verifier.algorithm == algorithm  # type: ignore[attr-defined]
+        assert isinstance(provider.token_verifier, JWTVerifier)
+        assert provider.token_verifier.algorithm == algorithm
 
     def test_algorithm_default_es256(self):
         """Test that algorithm defaults to ES256 when not specified."""
@@ -134,21 +113,42 @@ class TestSupabaseProvider:
             base_url="https://myserver.com",
         )
 
-        assert provider.token_verifier.algorithm == "ES256"  # type: ignore[attr-defined]
+        assert isinstance(provider.token_verifier, JWTVerifier)
+        assert provider.token_verifier.algorithm == "ES256"
 
-    def test_algorithm_from_env_var(self):
-        """Test that algorithm can be configured via environment variable."""
-        with patch.dict(
-            os.environ,
-            {
-                "FASTMCP_SERVER_AUTH_SUPABASE_PROJECT_URL": "https://env123.supabase.co",
-                "FASTMCP_SERVER_AUTH_SUPABASE_BASE_URL": "https://envserver.com",
-                "FASTMCP_SERVER_AUTH_SUPABASE_ALGORITHM": "RS256",
-            },
-        ):
-            provider = SupabaseProvider()
+    def test_algorithm_from_parameter(self):
+        """Test that algorithm can be configured via parameter."""
+        provider = SupabaseProvider(
+            project_url="https://env123.supabase.co",
+            base_url="https://envserver.com",
+            algorithm="RS256",
+        )
 
-            assert provider.token_verifier.algorithm == "RS256"  # type: ignore[attr-defined]
+        assert isinstance(provider.token_verifier, JWTVerifier)
+        assert provider.token_verifier.algorithm == "RS256"
+
+    def test_custom_auth_route(self):
+        provider = SupabaseProvider(
+            project_url="https://abc123.supabase.co",
+            base_url="https://myserver.com",
+            auth_route="/custom/auth/route",
+        )
+
+        assert provider.auth_route == "custom/auth/route"
+        assert isinstance(provider.token_verifier, JWTVerifier)
+        assert (
+            provider.token_verifier.jwks_uri
+            == "https://abc123.supabase.co/custom/auth/route/.well-known/jwks.json"
+        )
+
+    def test_custom_auth_route_trailing_slash(self):
+        provider = SupabaseProvider(
+            project_url="https://abc123.supabase.co",
+            base_url="https://myserver.com",
+            auth_route="/custom/auth/route/",
+        )
+
+        assert provider.auth_route == "custom/auth/route"
 
 
 def run_mcp_server(host: str, port: int) -> None:

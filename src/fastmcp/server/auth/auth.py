@@ -47,19 +47,19 @@ class AccessToken(_SDKAccessToken):
 
 
 class TokenHandler(_SDKTokenHandler):
-    """TokenHandler that returns OAuth 2.1 compliant error responses.
+    """TokenHandler that returns MCP-compliant error responses.
 
-    The MCP SDK returns `unauthorized_client` for client authentication failures.
-    However, per RFC 6749 Section 5.2, authentication failures should return
-    `invalid_client` with HTTP 401, not `unauthorized_client`.
+    This handler addresses two SDK issues:
 
-    This distinction matters: `unauthorized_client` means "client exists but
-    can't do this", while `invalid_client` means "client doesn't exist or
-    credentials are wrong". Claude's OAuth client uses this to decide whether
-    to re-register.
+    1. Error code: The SDK returns `unauthorized_client` for client authentication
+       failures, but RFC 6749 Section 5.2 requires `invalid_client` with HTTP 401.
+       This distinction matters for client re-registration behavior.
 
-    This handler transforms 401 responses with `unauthorized_client` to use
-    `invalid_client` instead, making the error semantics correct per OAuth spec.
+    2. Status code: The SDK returns HTTP 400 for all token errors including
+       `invalid_grant` (expired/invalid tokens). However, the MCP spec requires:
+       "Invalid or expired tokens MUST receive a HTTP 401 response."
+
+    This handler transforms responses to be compliant with both OAuth 2.1 and MCP specs.
     """
 
     async def handle(self, request: Any):
@@ -74,6 +74,26 @@ class TokenHandler(_SDKTokenHandler):
                     return PydanticJSONResponse(
                         content=TokenErrorResponse(
                             error="invalid_client",
+                            error_description=body.get("error_description"),
+                        ),
+                        status_code=401,
+                        headers={
+                            "Cache-Control": "no-store",
+                            "Pragma": "no-cache",
+                        },
+                    )
+            except (json.JSONDecodeError, AttributeError):
+                pass  # Not JSON or unexpected format, return as-is
+
+        # Transform 400 invalid_grant -> 401 for expired/invalid tokens
+        # Per MCP spec: "Invalid or expired tokens MUST receive a HTTP 401 response."
+        if response.status_code == 400:
+            try:
+                body = json.loads(response.body)
+                if body.get("error") == "invalid_grant":
+                    return PydanticJSONResponse(
+                        content=TokenErrorResponse(
+                            error="invalid_grant",
                             error_description=body.get("error_description"),
                         ),
                         status_code=401,
@@ -114,6 +134,8 @@ class AuthProvider(TokenVerifierProtocol):
             base_url = AnyHttpUrl(base_url)
         self.base_url = base_url
         self.required_scopes = required_scopes or []
+        self._mcp_path: str | None = None
+        self._resource_url: AnyHttpUrl | None = None
 
     async def verify_token(self, token: str) -> AccessToken | None:
         """Verify a bearer token and return access info if valid.
@@ -127,6 +149,20 @@ class AuthProvider(TokenVerifierProtocol):
             AccessToken object if valid, None if invalid or expired
         """
         raise NotImplementedError("Subclasses must implement verify_token")
+
+    def set_mcp_path(self, mcp_path: str | None) -> None:
+        """Set the MCP endpoint path and compute resource URL.
+
+        This method is called by get_routes() to configure the expected
+        resource URL before route creation. Subclasses can override to
+        perform additional initialization that depends on knowing the
+        MCP endpoint path.
+
+        Args:
+            mcp_path: The path where the MCP endpoint is mounted (e.g., "/mcp")
+        """
+        self._mcp_path = mcp_path
+        self._resource_url = self._get_resource_url(mcp_path)
 
     def get_routes(
         self,
@@ -407,6 +443,8 @@ class OAuthProvider(
         Returns:
             List of OAuth routes
         """
+        # Configure resource URL before creating routes
+        self.set_mcp_path(mcp_path)
 
         # Create standard OAuth authorization server routes
         # Pass base_url as issuer_url to ensure metadata declares endpoints where
@@ -451,11 +489,8 @@ class OAuthProvider(
             else:
                 oauth_routes.append(route)
 
-        # Get the resource URL based on the MCP path
-        resource_url = self._get_resource_url(mcp_path)
-
         # Add protected resource routes if this server is also acting as a resource server
-        if resource_url:
+        if self._resource_url:
             supported_scopes = (
                 self.client_registration_options.valid_scopes
                 if self.client_registration_options
@@ -463,7 +498,7 @@ class OAuthProvider(
                 else self.required_scopes
             )
             protected_routes = create_protected_resource_routes(
-                resource_url=resource_url,
+                resource_url=self._resource_url,
                 authorization_servers=[cast(AnyHttpUrl, self.issuer_url)],
                 scopes_supported=supported_scopes,
             )

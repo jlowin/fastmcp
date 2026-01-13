@@ -7,19 +7,73 @@ sidebarTitle: json_schema
 
 ## Functions
 
-### `compress_schema` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/utilities/json_schema.py#L200" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+### `dereference_refs` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/utilities/json_schema.py#L9" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 ```python
-compress_schema(schema: dict, prune_params: list[str] | None = None, prune_defs: bool = True, prune_additional_properties: bool = True, prune_titles: bool = False) -> dict
+dereference_refs(schema: dict[str, Any]) -> dict[str, Any]
 ```
 
 
-Remove the given parameters from the schema.
+Resolve all $ref references in a JSON schema by inlining definitions.
+
+This function resolves $ref references that point to $defs, replacing them
+with the actual definition content while preserving sibling keywords (like
+description, default, examples) that Pydantic places alongside $ref.
+
+This is necessary because some MCP clients (e.g., VS Code Copilot) don't
+properly handle $ref in tool input schemas.
+
+For self-referencing/circular schemas where full dereferencing is not possible,
+this function falls back to resolving only the root-level $ref while preserving
+$defs for nested references.
+
+**Args:**
+- `schema`: JSON schema dict that may contain $ref references
+
+**Returns:**
+- A new schema dict with $ref resolved where possible and $defs removed
+- when no longer needed
+
+
+### `resolve_root_ref` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/utilities/json_schema.py#L131" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+resolve_root_ref(schema: dict[str, Any]) -> dict[str, Any]
+```
+
+
+Resolve $ref at root level to meet MCP spec requirements.
+
+MCP specification requires outputSchema to have "type": "object" at the root level.
+When Pydantic generates schemas for self-referential models, it uses $ref at the
+root level pointing to $defs. This function resolves such references by inlining
+the referenced definition while preserving $defs for nested references.
+
+**Args:**
+- `schema`: JSON schema dict that may have $ref at root level
+
+**Returns:**
+- A new schema dict with root-level $ref resolved, or the original schema
+- if no resolution is needed
+
+
+### `compress_schema` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/utilities/json_schema.py#L364" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+compress_schema(schema: dict[str, Any], prune_params: list[str] | None = None, prune_additional_properties: bool = True, prune_titles: bool = False) -> dict[str, Any]
+```
+
+
+Compress and optimize a JSON schema for MCP compatibility.
+
+This function dereferences all $ref entries (inlining definitions) to ensure
+compatibility with MCP clients that don't properly handle $ref in schemas
+(e.g., VS Code Copilot). It also applies various optimizations to reduce
+schema size.
 
 **Args:**
 - `schema`: The schema to compress
 - `prune_params`: List of parameter names to remove from properties
-- `prune_defs`: Whether to remove unused definitions
 - `prune_additional_properties`: Whether to remove additionalProperties\: false
 - `prune_titles`: Whether to remove title fields from the schema
 

@@ -6,7 +6,7 @@ import os
 import shutil
 import sys
 import warnings
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import Any, Literal, TextIO, TypeVar, cast, overload
 
@@ -23,9 +23,9 @@ from mcp.client.session import (
 )
 from mcp.client.sse import sse_client
 from mcp.client.stdio import stdio_client
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import streamable_http_client
 from mcp.server.fastmcp import FastMCP as FastMCP1Server
-from mcp.shared._httpx_utils import McpHttpClientFactory
+from mcp.shared._httpx_utils import McpHttpClientFactory, create_mcp_http_client
 from mcp.shared.memory import create_client_server_memory_streams
 from pydantic import AnyUrl
 from typing_extensions import TypedDict, Unpack
@@ -33,9 +33,18 @@ from typing_extensions import TypedDict, Unpack
 import fastmcp
 from fastmcp.client.auth.bearer import BearerAuth
 from fastmcp.client.auth.oauth import OAuth
-from fastmcp.mcp_config import MCPConfig, infer_transport_type_from_url
+from fastmcp.mcp_config import (
+    MCPConfig,
+    MCPServerTypes,
+    RemoteMCPServer,
+    StdioMCPServer,
+    TransformingRemoteMCPServer,
+    TransformingStdioMCPServer,
+    infer_transport_type_from_url,
+)
 from fastmcp.server.dependencies import get_http_headers
-from fastmcp.server.server import FastMCP
+from fastmcp.server.server import FastMCP, create_proxy
+from fastmcp.server.tasks.capabilities import get_task_capabilities
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.mcp_server_config.v1.environments.uv import UVEnvironment
 
@@ -65,6 +74,7 @@ class SessionKwargs(TypedDict, total=False):
 
     read_timeout_seconds: datetime.timedelta | None
     sampling_callback: SamplingFnT | None
+    sampling_capabilities: mcp.types.SamplingCapability | None
     list_roots_callback: ListRootsFnT | None
     logging_callback: LoggingFnT | None
     elicitation_callback: ElicitationFnT | None
@@ -103,7 +113,7 @@ class ClientTransport(abc.ABC):
             A mcp.ClientSession instance.
         """
         raise NotImplementedError
-        yield  # type: ignore
+        yield
 
     def __repr__(self) -> str:
         # Basic representation for subclasses
@@ -115,45 +125,6 @@ class ClientTransport(abc.ABC):
     def _set_auth(self, auth: httpx.Auth | Literal["oauth"] | str | None):
         if auth is not None:
             raise ValueError("This transport does not support auth")
-
-
-class WSTransport(ClientTransport):
-    """Transport implementation that connects to an MCP server via WebSockets."""
-
-    def __init__(self, url: str | AnyUrl):
-        # we never really used this transport, so it can be removed at any time
-        if fastmcp.settings.deprecation_warnings:
-            warnings.warn(
-                "WSTransport is a deprecated MCP transport and will be removed in a future version. Use StreamableHttpTransport instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-        if isinstance(url, AnyUrl):
-            url = str(url)
-        if not isinstance(url, str) or not url.startswith("ws"):
-            raise ValueError("Invalid WebSocket URL provided.")
-        self.url = url
-
-    @contextlib.asynccontextmanager
-    async def connect_session(
-        self, **session_kwargs: Unpack[SessionKwargs]
-    ) -> AsyncIterator[ClientSession]:
-        try:
-            from mcp.client.websocket import websocket_client
-        except ImportError as e:
-            raise ImportError(
-                "The websocket transport is not available. Please install fastmcp[websockets] or install the websockets package manually."
-            ) from e
-
-        async with websocket_client(self.url) as transport:
-            read_stream, write_stream = transport
-            async with ClientSession(
-                read_stream, write_stream, **session_kwargs
-            ) as session:
-                yield session
-
-    def __repr__(self) -> str:
-        return f"<WebSocketTransport(url='{self.url}')>"
 
 
 class SSETransport(ClientTransport):
@@ -237,6 +208,19 @@ class StreamableHttpTransport(ClientTransport):
         sse_read_timeout: datetime.timedelta | float | int | None = None,
         httpx_client_factory: McpHttpClientFactory | None = None,
     ):
+        """Initialize a Streamable HTTP transport.
+
+        Args:
+            url: The MCP server endpoint URL.
+            headers: Optional headers to include in requests.
+            auth: Authentication method - httpx.Auth, "oauth" for OAuth flow,
+                or a bearer token string.
+            sse_read_timeout: Deprecated. Use read_timeout_seconds in session_kwargs.
+            httpx_client_factory: Optional factory for creating httpx.AsyncClient.
+                If provided, must accept keyword arguments: headers, auth,
+                follow_redirects, and optionally timeout. Using **kwargs is
+                recommended to ensure forward compatibility.
+        """
         if isinstance(url, AnyUrl):
             url = str(url)
         if not isinstance(url, str) or not url.startswith("http"):
@@ -250,9 +234,21 @@ class StreamableHttpTransport(ClientTransport):
         self.httpx_client_factory = httpx_client_factory
         self._set_auth(auth)
 
+        if sse_read_timeout is not None:
+            if fastmcp.settings.deprecation_warnings:
+                warnings.warn(
+                    "The `sse_read_timeout` parameter is deprecated and no longer used. "
+                    "The new streamable_http_client API does not support this parameter. "
+                    "Use `read_timeout_seconds` in session_kwargs or configure timeout on "
+                    "the httpx client via `httpx_client_factory` instead.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
         if isinstance(sse_read_timeout, int | float):
             sse_read_timeout = datetime.timedelta(seconds=float(sse_read_timeout))
         self.sse_read_timeout = sse_read_timeout
+
+        self._get_session_id_cb: Callable[[], str | None] | None = None
 
     def _set_auth(self, auth: httpx.Auth | Literal["oauth"] | str | None):
         if auth == "oauth":
@@ -265,33 +261,60 @@ class StreamableHttpTransport(ClientTransport):
     async def connect_session(
         self, **session_kwargs: Unpack[SessionKwargs]
     ) -> AsyncIterator[ClientSession]:
-        client_kwargs: dict[str, Any] = {}
-
-        # load headers from an active HTTP request, if available. This will only be true
+        # Load headers from an active HTTP request, if available. This will only be true
         # if the client is used in a FastMCP Proxy, in which case the MCP client headers
         # need to be forwarded to the remote server.
-        client_kwargs["headers"] = get_http_headers() | self.headers
+        headers = get_http_headers() | self.headers
 
-        # sse_read_timeout has a default value set, so we can't pass None without overriding it
-        # instead we simply leave the kwarg out if it's not provided
-        if self.sse_read_timeout is not None:
-            client_kwargs["sse_read_timeout"] = self.sse_read_timeout
+        # Configure timeout if provided, preserving MCP's 30s connect default
+        timeout: httpx.Timeout | None = None
         if session_kwargs.get("read_timeout_seconds") is not None:
-            client_kwargs["timeout"] = session_kwargs.get("read_timeout_seconds")
+            read_timeout_seconds = cast(
+                datetime.timedelta, session_kwargs.get("read_timeout_seconds")
+            )
+            timeout = httpx.Timeout(30.0, read=read_timeout_seconds.total_seconds())
 
+        # Create httpx client from factory or use default with MCP-appropriate timeouts
+        # create_mcp_http_client uses 30s connect/5min read timeout by default,
+        # and always enables follow_redirects
         if self.httpx_client_factory is not None:
-            client_kwargs["httpx_client_factory"] = self.httpx_client_factory
+            # Factory clients get the full kwargs for backwards compatibility
+            http_client = self.httpx_client_factory(
+                headers=headers,
+                auth=self.auth,
+                follow_redirects=True,  # type: ignore[call-arg]
+                **({"timeout": timeout} if timeout else {}),
+            )
+        else:
+            http_client = create_mcp_http_client(
+                headers=headers,
+                timeout=timeout,
+                auth=self.auth,
+            )
 
-        async with streamablehttp_client(
-            self.url,
-            auth=self.auth,
-            **client_kwargs,
-        ) as transport:
-            read_stream, write_stream, _ = transport
+        # Ensure httpx client is closed after use
+        async with (
+            http_client,
+            streamable_http_client(self.url, http_client=http_client) as transport,
+        ):
+            read_stream, write_stream, get_session_id = transport
+            self._get_session_id_cb = get_session_id
             async with ClientSession(
                 read_stream, write_stream, **session_kwargs
             ) as session:
                 yield session
+
+    def get_session_id(self) -> str | None:
+        if self._get_session_id_cb:
+            try:
+                return self._get_session_id_cb()
+            except Exception:
+                return None
+        return None
+
+    async def close(self):
+        # Reset the session id callback
+        self._get_session_id_cb = None
 
     def __repr__(self) -> str:
         return f"<StreamableHttpTransport(url='{self.url}')>"
@@ -850,22 +873,17 @@ class FastMCPTransport(ClientTransport):
             client_read, client_write = client_streams
             server_read, server_write = server_streams
 
-            # Create a cancel scope for the server task
+            # Capture exceptions to re-raise after task group cleanup.
+            # anyio task groups can suppress exceptions when cancel_scope.cancel()
+            # is called during cleanup, so we capture and re-raise manually.
+            exception_to_raise: BaseException | None = None
+
             async with (
                 anyio.create_task_group() as tg,
                 _enter_server_lifespan(server=self.server),
             ):
                 # Build experimental capabilities
-                import fastmcp
-
-                experimental_capabilities = {}
-                if fastmcp.settings.enable_tasks:
-                    # Declare SEP-1686 task support
-                    experimental_capabilities["tasks"] = {
-                        "tools": True,
-                        "prompts": True,
-                        "resources": True,
-                    }
+                experimental_capabilities = get_task_capabilities()
 
                 tg.start_soon(
                     lambda: self.server._mcp_server.run(
@@ -885,8 +903,14 @@ class FastMCPTransport(ClientTransport):
                         **session_kwargs,
                     ) as client_session:
                         yield client_session
+                except BaseException as e:
+                    exception_to_raise = e
                 finally:
                     tg.cancel_scope.cancel()
+
+            # Re-raise after task group has exited cleanly
+            if exception_to_raise is not None:
+                raise exception_to_raise
 
     def __repr__(self) -> str:
         return f"<FastMCPTransport(server='{self.server.name}')>"
@@ -923,7 +947,6 @@ class MCPConfigTransport(ClientTransport):
     Examples:
         ```python
         from fastmcp import Client
-        from fastmcp.utilities.mcp_config import MCPConfig
 
         # Create a config with multiple servers
         config = {
@@ -953,47 +976,98 @@ class MCPConfigTransport(ClientTransport):
     """
 
     def __init__(self, config: MCPConfig | dict, name_as_prefix: bool = True):
-        from fastmcp.utilities.mcp_config import mcp_config_to_servers_and_transports
-
         if isinstance(config, dict):
             config = MCPConfig.from_dict(config)
         self.config = config
+        self.name_as_prefix = name_as_prefix
+        self._transports: list[ClientTransport] = []
 
-        self._underlying_transports: list[ClientTransport] = []
-
-        # if there are no servers, raise an error
-        if len(self.config.mcpServers) == 0:
+        if not self.config.mcpServers:
             raise ValueError("No MCP servers defined in the config")
 
-        # if there's exactly one server, create a client for that server
-        elif len(self.config.mcpServers) == 1:
+        # For single server, create transport eagerly so it can be inspected
+        if len(self.config.mcpServers) == 1:
             self.transport = next(iter(self.config.mcpServers.values())).to_transport()
-            self._underlying_transports.append(self.transport)
-
-        # otherwise create a composite client
-        else:
-            name = FastMCP.generate_name("MCPRouter")
-            self._composite_server = FastMCP[Any](name=name)
-
-            for name, server, transport in mcp_config_to_servers_and_transports(
-                self.config
-            ):
-                self._underlying_transports.append(transport)
-                self._composite_server.mount(
-                    server, prefix=name if name_as_prefix else None
-                )
-
-            self.transport = FastMCPTransport(mcp=self._composite_server)
+            self._transports.append(self.transport)
 
     @contextlib.asynccontextmanager
     async def connect_session(
         self, **session_kwargs: Unpack[SessionKwargs]
     ) -> AsyncIterator[ClientSession]:
-        async with self.transport.connect_session(**session_kwargs) as session:
+        # Single server - delegate directly to pre-created transport
+        if len(self.config.mcpServers) == 1:
+            async with self.transport.connect_session(**session_kwargs) as session:
+                yield session
+            return
+
+        # Multiple servers - create composite with mounted proxies
+        # Close any previous transports from prior connections to avoid leaking
+        for t in self._transports:
+            await t.close()
+        self._transports = []
+        timeout = session_kwargs.get("read_timeout_seconds")
+        composite = FastMCP[Any](name="MCPRouter")
+
+        try:
+            for name, server_config in self.config.mcpServers.items():
+                transport, proxy = self._create_proxy(name, server_config, timeout)
+                self._transports.append(transport)
+                composite.mount(proxy, namespace=name if self.name_as_prefix else None)
+        except Exception:
+            # Clean up any transports created before the failure
+            for t in self._transports:
+                await t.close()
+            self._transports = []
+            raise
+
+        async with FastMCPTransport(mcp=composite).connect_session(
+            **session_kwargs
+        ) as session:
             yield session
 
+    def _create_proxy(
+        self,
+        name: str,
+        config: MCPServerTypes,
+        timeout: datetime.timedelta | None,
+    ) -> tuple[ClientTransport, FastMCP[Any]]:
+        """Create underlying transport and proxy server for a single backend."""
+        # Import here to avoid circular dependency
+        from fastmcp.server.providers.proxy import ProxyClient
+
+        tool_transforms = None
+        include_tags = None
+        exclude_tags = None
+
+        # Handle transforming servers - call base class to_transport() for underlying transport
+        if isinstance(config, TransformingStdioMCPServer):
+            transport = StdioMCPServer.to_transport(config)
+            tool_transforms = config.tools
+            include_tags = config.include_tags
+            exclude_tags = config.exclude_tags
+        elif isinstance(config, TransformingRemoteMCPServer):
+            transport = RemoteMCPServer.to_transport(config)
+            tool_transforms = config.tools
+            include_tags = config.include_tags
+            exclude_tags = config.exclude_tags
+        else:
+            transport = config.to_transport()
+
+        client = ProxyClient(transport=transport, timeout=timeout)
+        proxy = create_proxy(
+            client,
+            name=f"Proxy-{name}",
+            include_tags=include_tags,
+            exclude_tags=exclude_tags,
+        )
+        if tool_transforms:
+            from fastmcp.server.transforms import ToolTransform
+
+            proxy.add_transform(ToolTransform(tool_transforms))
+        return transport, proxy
+
     async def close(self):
-        for transport in self._underlying_transports:
+        for transport in self._transports:
             await transport.close()
 
     def __repr__(self) -> str:

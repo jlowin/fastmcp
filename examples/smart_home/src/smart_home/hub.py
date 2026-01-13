@@ -1,3 +1,4 @@
+from mcp.types import ToolAnnotations
 from phue2 import Bridge
 
 from fastmcp import FastMCP
@@ -6,12 +7,12 @@ from smart_home.settings import settings
 
 hub_mcp = FastMCP("Smart Home Hub (phue2)")
 
-# Mount the lights service under the 'hue' prefix
-hub_mcp.mount(lights_mcp, prefix="hue")
+# Mount the lights service under the 'hue' namespace
+hub_mcp.mount(lights_mcp, namespace="hue")
 
 
 # Add a status check for the hub
-@hub_mcp.tool
+@hub_mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True))
 def hub_status() -> str:
     """Checks the status of the main hub and connections."""
     try:

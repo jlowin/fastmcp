@@ -60,8 +60,8 @@ The `FastMCP` constructor accepts several arguments:
   Authentication provider for securing HTTP-based transports. See [Authentication](/servers/auth/authentication) for configuration options
 </ParamField>
 
-<ParamField body="lifespan" type="AsyncContextManager | None">
-  An async context manager function for server startup and shutdown logic
+<ParamField body="lifespan" type="Lifespan | AsyncContextManager | None">
+  Server-level setup and teardown logic. See [Lifespans](/servers/lifespan) for composable lifespans
 </ParamField>
 
 <ParamField body="tools" type="list[Tool | Callable] | None">
@@ -266,7 +266,7 @@ For more complex web applications, consider [mounting your MCP server into a Fas
 
 FastMCP supports composing multiple servers together using `import_server` (static copy) and `mount` (live link). This allows you to organize large applications into modular components or reuse existing servers.
 
-See the [Server Composition](/servers/composition) guide for full details, best practices, and examples.
+See the [Mounting Servers](/servers/providers/mounting) guide for full details, best practices, and examples.
 
 ```python
 # Example: Importing a subserver
@@ -277,28 +277,29 @@ main = FastMCP(name="Main")
 sub = FastMCP(name="Sub")
 
 @sub.tool
-def hello(): 
+def hello():
     return "hi"
 
 # Mount directly
-main.mount(sub, prefix="sub")
+main.mount(sub, namespace="sub")
 ```
 
 ## Proxying Servers
 
 <VersionBadge version="2.0.0" />
 
-FastMCP can act as a proxy for any MCP server (local or remote) using `FastMCP.as_proxy`, letting you bridge transports or add a frontend to existing servers. For example, you can expose a remote SSE server locally via stdio, or vice versa.
+FastMCP can act as a proxy for any MCP server (local or remote) using `create_proxy`, letting you bridge transports or add a frontend to existing servers. For example, you can expose a remote SSE server locally via stdio, or vice versa.
 
 Proxies automatically handle concurrent operations safely by creating fresh sessions for each request when using disconnected clients.
 
-See the [Proxying Servers](/servers/proxy) guide for details and advanced usage.
+See the [Remote Proxies](/servers/providers/proxy) guide for details and advanced usage.
 
 ```python
-from fastmcp import FastMCP, Client
+from fastmcp import Client
+from fastmcp.server import create_proxy
 
 backend = Client("http://example.com/mcp/sse")
-proxy = FastMCP.as_proxy(backend, name="ProxyServer")
+proxy = create_proxy(backend, name="ProxyServer")
 # Now use the proxy like any FastMCP server
 ```
 
@@ -401,36 +402,3 @@ export FASTMCP_STRICT_INPUT_VALIDATION=False
 export FASTMCP_INCLUDE_FASTMCP_META=False
 ```
 
-### Custom Tool Serialization
-
-<VersionBadge version="2.2.7" />
-
-By default, FastMCP serializes tool return values to JSON when they need to be converted to text. You can customize this behavior by providing a `tool_serializer` function when creating your server:
-
-```python
-import yaml
-from fastmcp import FastMCP
-
-# Define a custom serializer that formats dictionaries as YAML
-def yaml_serializer(data):
-    return yaml.dump(data, sort_keys=False)
-
-# Create a server with the custom serializer
-mcp = FastMCP(name="MyServer", tool_serializer=yaml_serializer)
-
-@mcp.tool
-def get_config():
-    """Returns configuration in YAML format."""
-    return {"api_key": "abc123", "debug": True, "rate_limit": 100}
-```
-
-The serializer function takes any data object and returns a string representation. This is applied to **all non-string return values** from your tools. Tools that already return strings bypass the serializer.
-
-This customization is useful when you want to:
-- Format data in a specific way (like YAML or custom formats)
-- Control specific serialization options (like indentation or sorting)
-- Add metadata or transform data before sending it to clients
-
-<Tip>
-If the serializer function raises an exception, the tool will fall back to the default JSON serialization to avoid breaking the server.
-</Tip>

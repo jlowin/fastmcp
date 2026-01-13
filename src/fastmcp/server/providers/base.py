@@ -1,0 +1,440 @@
+"""Base Provider class for dynamic MCP components.
+
+This module provides the `Provider` abstraction for providing tools,
+resources, and prompts dynamically at runtime.
+
+Example:
+    ```python
+    from fastmcp import FastMCP
+    from fastmcp.server.providers import Provider
+    from fastmcp.tools import Tool
+
+    class DatabaseProvider(Provider):
+        def __init__(self, db_url: str):
+            super().__init__()
+            self.db = Database(db_url)
+
+        async def list_tools(self) -> list[Tool]:
+            rows = await self.db.fetch("SELECT * FROM tools")
+            return [self._make_tool(row) for row in rows]
+
+        async def get_tool(self, name: str) -> Tool | None:
+            row = await self.db.fetchone("SELECT * FROM tools WHERE name = ?", name)
+            return self._make_tool(row) if row else None
+
+    mcp = FastMCP("Server", providers=[DatabaseProvider(db_url)])
+    ```
+"""
+
+from __future__ import annotations
+
+from collections.abc import AsyncIterator, Sequence
+from contextlib import asynccontextmanager
+from functools import partial
+from typing import TYPE_CHECKING, cast
+
+from fastmcp.prompts.prompt import Prompt
+from fastmcp.resources.resource import Resource
+from fastmcp.resources.template import ResourceTemplate
+from fastmcp.server.transforms.visibility import Visibility
+from fastmcp.tools.tool import Tool
+from fastmcp.utilities.async_utils import gather
+from fastmcp.utilities.components import FastMCPComponent
+
+if TYPE_CHECKING:
+    from fastmcp.server.transforms import Transform
+
+
+class Provider:
+    """Base class for dynamic component providers.
+
+    Subclass and override whichever methods you need. Default implementations
+    return empty lists / None, so you only need to implement what your provider
+    supports.
+
+    Provider semantics:
+        - Return `None` from `get_*` methods to indicate "I don't have it" (search continues)
+        - Static components (registered via decorators) always take precedence over providers
+        - Providers are queried in registration order; first non-None wins
+        - Components execute themselves via run()/read()/render() - providers just source them
+
+    Error handling:
+        - `list_*` methods: Errors are logged and the provider returns empty (graceful degradation).
+          This allows other providers to still contribute their components.
+    """
+
+    def __init__(self) -> None:
+        # Visibility is the first (innermost) transform - closest to the base provider
+        self._visibility = Visibility()
+        self._transforms: list[Transform] = [self._visibility]
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}()"
+
+    def add_transform(self, transform: Transform) -> None:
+        """Add a transform to this provider.
+
+        Transforms modify components (tools, resources, prompts) as they flow
+        through the provider. They're applied in order - first added is innermost.
+
+        Args:
+            transform: The transform to add.
+
+        Example:
+            ```python
+            from fastmcp.server.transforms import Namespace
+
+            provider = MyProvider()
+            provider.add_transform(Namespace("api"))
+            # Tools become "api_toolname"
+            ```
+        """
+        self._transforms.append(transform)
+
+    # -------------------------------------------------------------------------
+    # Internal transform chain building
+    # -------------------------------------------------------------------------
+
+    async def _list_tools(self) -> Sequence[Tool]:
+        """List tools with all transforms applied.
+
+        Builds a middleware chain: base → transforms (in order).
+        Each transform wraps the previous via call_next.
+
+        Returns:
+            Transformed sequence of tools.
+        """
+
+        async def base() -> Sequence[Tool]:
+            return await self.list_tools()
+
+        chain = base
+        for transform in self._transforms:
+            chain = partial(transform.list_tools, call_next=chain)
+
+        return await chain()
+
+    async def _get_tool(self, name: str) -> Tool | None:
+        """Get tool by transformed name with all transforms applied.
+
+        Args:
+            name: The transformed tool name to look up.
+
+        Returns:
+            The tool if found and enabled, None otherwise.
+        """
+
+        async def base(n: str) -> Tool | None:
+            return await self.get_tool(n)
+
+        chain = base
+        for transform in self._transforms:
+            chain = partial(transform.get_tool, call_next=chain)
+
+        return await chain(name)
+
+    async def _list_resources(self) -> Sequence[Resource]:
+        """List resources with all transforms applied."""
+
+        async def base() -> Sequence[Resource]:
+            return await self.list_resources()
+
+        chain = base
+        for transform in self._transforms:
+            chain = partial(transform.list_resources, call_next=chain)
+
+        return await chain()
+
+    async def _get_resource(self, uri: str) -> Resource | None:
+        """Get resource by transformed URI with all transforms applied."""
+
+        async def base(u: str) -> Resource | None:
+            return await self.get_resource(u)
+
+        chain = base
+        for transform in self._transforms:
+            chain = partial(transform.get_resource, call_next=chain)
+
+        return await chain(uri)
+
+    async def _list_resource_templates(self) -> Sequence[ResourceTemplate]:
+        """List resource templates with all transforms applied."""
+
+        async def base() -> Sequence[ResourceTemplate]:
+            return await self.list_resource_templates()
+
+        chain = base
+        for transform in self._transforms:
+            chain = partial(transform.list_resource_templates, call_next=chain)
+
+        return await chain()
+
+    async def _get_resource_template(self, uri: str) -> ResourceTemplate | None:
+        """Get resource template by transformed URI with all transforms applied."""
+
+        async def base(u: str) -> ResourceTemplate | None:
+            return await self.get_resource_template(u)
+
+        chain = base
+        for transform in self._transforms:
+            chain = partial(transform.get_resource_template, call_next=chain)
+
+        return await chain(uri)
+
+    async def _list_prompts(self) -> Sequence[Prompt]:
+        """List prompts with all transforms applied."""
+
+        async def base() -> Sequence[Prompt]:
+            return await self.list_prompts()
+
+        chain = base
+        for transform in self._transforms:
+            chain = partial(transform.list_prompts, call_next=chain)
+
+        return await chain()
+
+    async def _get_prompt(self, name: str) -> Prompt | None:
+        """Get prompt by transformed name with all transforms applied."""
+
+        async def base(n: str) -> Prompt | None:
+            return await self.get_prompt(n)
+
+        chain = base
+        for transform in self._transforms:
+            chain = partial(transform.get_prompt, call_next=chain)
+
+        return await chain(name)
+
+    # -------------------------------------------------------------------------
+    # Public list/get methods (override these to provide components)
+    # -------------------------------------------------------------------------
+
+    async def list_tools(self) -> Sequence[Tool]:
+        """Return all available tools.
+
+        Override to provide tools dynamically.
+        """
+        return []
+
+    async def get_tool(self, name: str) -> Tool | None:
+        """Get a specific tool by name.
+
+        Default implementation lists all tools and finds by name.
+        Override for more efficient single-tool lookup.
+
+        Returns:
+            The Tool if found, or None to continue searching other providers.
+        """
+        tools = await self.list_tools()
+        return next((t for t in tools if t.name == name), None)
+
+    async def list_resources(self) -> Sequence[Resource]:
+        """Return all available resources.
+
+        Override to provide resources dynamically.
+        """
+        return []
+
+    async def get_resource(self, uri: str) -> Resource | None:
+        """Get a specific resource by URI.
+
+        Default implementation lists all resources and finds by URI.
+        Override for more efficient single-resource lookup.
+
+        Returns:
+            The Resource if found, or None to continue searching other providers.
+        """
+        resources = await self.list_resources()
+        return next((r for r in resources if str(r.uri) == uri), None)
+
+    async def list_resource_templates(self) -> Sequence[ResourceTemplate]:
+        """Return all available resource templates.
+
+        Override to provide resource templates dynamically.
+        """
+        return []
+
+    async def get_resource_template(self, uri: str) -> ResourceTemplate | None:
+        """Get a resource template that matches the given URI.
+
+        Default implementation lists all templates and finds one whose pattern
+        matches the URI.
+        Override for more efficient lookup.
+
+        Returns:
+            The ResourceTemplate if a matching one is found, or None to continue searching.
+        """
+        templates = await self.list_resource_templates()
+        return next(
+            (t for t in templates if t.matches(uri) is not None),
+            None,
+        )
+
+    async def list_prompts(self) -> Sequence[Prompt]:
+        """Return all available prompts.
+
+        Override to provide prompts dynamically.
+        """
+        return []
+
+    async def get_prompt(self, name: str) -> Prompt | None:
+        """Get a specific prompt by name.
+
+        Default implementation lists all prompts and finds by name.
+        Override for more efficient single-prompt lookup.
+
+        Returns:
+            The Prompt if found, or None to continue searching other providers.
+        """
+        prompts = await self.list_prompts()
+        return next((p for p in prompts if p.name == name), None)
+
+    # -------------------------------------------------------------------------
+    # Task registration
+    # -------------------------------------------------------------------------
+
+    async def get_tasks(self) -> Sequence[FastMCPComponent]:
+        """Return components that should be registered as background tasks.
+
+        Override to customize which components are task-eligible.
+        Default calls list_* methods, applies provider transforms, and filters
+        for components with task_config.mode != 'forbidden'.
+
+        Used by the server during startup to register functions with Docket.
+        """
+        # Fetch all component types in parallel
+        results = await gather(
+            self.list_tools(),
+            self.list_resources(),
+            self.list_resource_templates(),
+            self.list_prompts(),
+        )
+        tools = cast(Sequence[Tool], results[0])
+        resources = cast(Sequence[Resource], results[1])
+        templates = cast(Sequence[ResourceTemplate], results[2])
+        prompts = cast(Sequence[Prompt], results[3])
+
+        # Apply provider's own transforms to components using the chain pattern
+        # For tasks, we need the fully-transformed names, so use the list_ chain
+        # Note: We build mini-chains for each component type
+
+        async def tools_base() -> Sequence[Tool]:
+            return tools
+
+        async def resources_base() -> Sequence[Resource]:
+            return resources
+
+        async def templates_base() -> Sequence[ResourceTemplate]:
+            return templates
+
+        async def prompts_base() -> Sequence[Prompt]:
+            return prompts
+
+        # Apply transforms in order (first is innermost)
+        tools_chain = tools_base
+        resources_chain = resources_base
+        templates_chain = templates_base
+        prompts_chain = prompts_base
+
+        for transform in self._transforms:
+            tools_chain = partial(transform.list_tools, call_next=tools_chain)
+            resources_chain = partial(
+                transform.list_resources, call_next=resources_chain
+            )
+            templates_chain = partial(
+                transform.list_resource_templates, call_next=templates_chain
+            )
+            prompts_chain = partial(transform.list_prompts, call_next=prompts_chain)
+
+        transformed_tools = await tools_chain()
+        transformed_resources = await resources_chain()
+        transformed_templates = await templates_chain()
+        transformed_prompts = await prompts_chain()
+
+        return [
+            c
+            for c in [
+                *transformed_tools,
+                *transformed_resources,
+                *transformed_templates,
+                *transformed_prompts,
+            ]
+            if c.task_config.supports_tasks()
+        ]
+
+    # -------------------------------------------------------------------------
+    # Lifecycle methods
+    # -------------------------------------------------------------------------
+
+    @asynccontextmanager
+    async def lifespan(self) -> AsyncIterator[None]:
+        """User-overridable lifespan for custom setup and teardown.
+
+        Override this method to perform provider-specific initialization
+        like opening database connections, setting up external resources,
+        or other state management needed for the provider's lifetime.
+
+        The lifespan scope matches the server's lifespan - code before yield
+        runs at startup, code after yield runs at shutdown.
+
+        Example:
+            ```python
+            @asynccontextmanager
+            async def lifespan(self):
+                # Setup
+                self.db = await connect_database()
+                try:
+                    yield
+                finally:
+                    # Teardown
+                    await self.db.close()
+            ```
+        """
+        yield
+
+    # -------------------------------------------------------------------------
+    # Enable/Disable
+    # -------------------------------------------------------------------------
+
+    def enable(
+        self,
+        *,
+        keys: Sequence[str] | None = None,
+        tags: set[str] | None = None,
+        only: bool = False,
+    ) -> None:
+        """Enable components by removing from blocklist, or set allowlist with only=True.
+
+        Args:
+            keys: Keys to enable (e.g., "tool:my_tool").
+            tags: Tags to enable - components with these tags will be enabled.
+            only: If True, switches to allowlist mode - ONLY show these keys/tags.
+        """
+        self._visibility.enable(keys=keys, tags=tags, only=only)
+
+    def disable(
+        self,
+        *,
+        keys: Sequence[str] | None = None,
+        tags: set[str] | None = None,
+    ) -> None:
+        """Disable components by adding to the blocklist.
+
+        Args:
+            keys: Keys to disable (e.g., "tool:my_tool").
+            tags: Tags to disable - components with these tags will be disabled.
+        """
+        self._visibility.disable(keys=keys, tags=tags)
+
+    def _is_component_enabled(self, component: FastMCPComponent) -> bool:
+        """Check if a component is enabled.
+
+        Delegates to the visibility filter which handles blocklist and allowlist logic.
+
+        Args:
+            component: The component to check.
+
+        Returns:
+            True if the component should be served, False otherwise.
+        """
+        return self._visibility.is_enabled(component)

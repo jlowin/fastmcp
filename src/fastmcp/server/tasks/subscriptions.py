@@ -2,6 +2,8 @@
 
 Subscribes to Docket execution state changes and sends notifications/tasks/status
 to clients when their tasks change state.
+
+This module requires fastmcp[tasks] (pydocket). It is only imported when docket is available.
 """
 
 from __future__ import annotations
@@ -13,7 +15,8 @@ from typing import TYPE_CHECKING
 from docket.execution import ExecutionState
 from mcp.types import TaskStatusNotification, TaskStatusNotificationParams
 
-from fastmcp.server.tasks.protocol import DOCKET_TO_MCP_STATE
+from fastmcp.server.tasks.keys import parse_task_key
+from fastmcp.server.tasks.requests import DOCKET_TO_MCP_STATE
 from fastmcp.utilities.logging import get_logger
 
 if TYPE_CHECKING:
@@ -29,6 +32,7 @@ async def subscribe_to_task_updates(
     task_key: str,
     session: ServerSession,
     docket: Docket,
+    poll_interval_ms: int = 5000,
 ) -> None:
     """Subscribe to Docket execution events and send MCP notifications.
 
@@ -41,6 +45,7 @@ async def subscribe_to_task_updates(
         task_key: Internal Docket execution key (includes session, type, component)
         session: MCP ServerSession for sending notifications
         docket: Docket instance for subscribing to execution events
+        poll_interval_ms: Poll interval in milliseconds to include in notifications
     """
     try:
         execution = await docket.get_execution(task_key)
@@ -57,7 +62,8 @@ async def subscribe_to_task_updates(
                     task_id=task_id,
                     task_key=task_key,
                     docket=docket,
-                    state=event["state"],  # type: ignore[typeddict-item]
+                    state=event["state"],
+                    poll_interval_ms=poll_interval_ms,
                 )
             elif event["type"] == "progress":
                 # Send notification when progress message changes
@@ -67,6 +73,7 @@ async def subscribe_to_task_updates(
                     task_key=task_key,
                     docket=docket,
                     execution=execution,
+                    poll_interval_ms=poll_interval_ms,
                 )
 
     except Exception as e:
@@ -79,6 +86,7 @@ async def _send_status_notification(
     task_key: str,
     docket: Docket,
     state: ExecutionState,
+    poll_interval_ms: int = 5000,
 ) -> None:
     """Send notifications/tasks/status to client.
 
@@ -91,18 +99,17 @@ async def _send_status_notification(
         task_key: Internal task key (for metadata lookup)
         docket: Docket instance
         state: Docket execution state (enum)
+        poll_interval_ms: Poll interval in milliseconds
     """
     # Map Docket state to MCP status
-    mcp_status = DOCKET_TO_MCP_STATE.get(state, "failed")
+    state_map = DOCKET_TO_MCP_STATE
+    mcp_status = state_map.get(state, "failed")
 
     # Extract session_id from task_key for Redis lookup
-    from fastmcp.server.tasks.keys import parse_task_key
-
     key_parts = parse_task_key(task_key)
     session_id = key_parts["session_id"]
 
-    # Retrieve createdAt timestamp from Redis
-    created_at_key = f"fastmcp:task:{session_id}:{task_id}:created_at"
+    created_at_key = docket.key(f"fastmcp:task:{session_id}:{task_id}:created_at")
     async with docket.redis() as redis:
         created_at_bytes = await redis.get(created_at_key)
 
@@ -127,7 +134,7 @@ async def _send_status_notification(
         "createdAt": created_at,
         "lastUpdatedAt": datetime.now(timezone.utc).isoformat(),
         "ttl": 60000,
-        "pollInterval": 1000,
+        "pollInterval": poll_interval_ms,
     }
 
     if status_message:
@@ -149,6 +156,7 @@ async def _send_progress_notification(
     task_key: str,
     docket: Docket,
     execution: Execution,
+    poll_interval_ms: int = 5000,
 ) -> None:
     """Send notifications/tasks/status when progress updates.
 
@@ -158,6 +166,7 @@ async def _send_progress_notification(
         task_key: Internal task key
         docket: Docket instance
         execution: Execution object with current progress
+        poll_interval_ms: Poll interval in milliseconds
     """
     # Sync execution to get latest progress
     await execution.sync()
@@ -167,16 +176,14 @@ async def _send_progress_notification(
         return
 
     # Map Docket state to MCP status
-    mcp_status = DOCKET_TO_MCP_STATE.get(execution.state, "failed")
+    state_map = DOCKET_TO_MCP_STATE
+    mcp_status = state_map.get(execution.state, "failed")
 
     # Extract session_id from task_key for Redis lookup
-    from fastmcp.server.tasks.keys import parse_task_key
-
     key_parts = parse_task_key(task_key)
     session_id = key_parts["session_id"]
 
-    # Retrieve createdAt timestamp from Redis
-    created_at_key = f"fastmcp:task:{session_id}:{task_id}:created_at"
+    created_at_key = docket.key(f"fastmcp:task:{session_id}:{task_id}:created_at")
     async with docket.redis() as redis:
         created_at_bytes = await redis.get(created_at_key)
 
@@ -192,7 +199,7 @@ async def _send_progress_notification(
         "createdAt": created_at,
         "lastUpdatedAt": datetime.now(timezone.utc).isoformat(),
         "ttl": 60000,
-        "pollInterval": 1000,
+        "pollInterval": poll_interval_ms,
         "statusMessage": execution.progress.message,
     }
 

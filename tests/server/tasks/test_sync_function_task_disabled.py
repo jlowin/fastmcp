@@ -8,9 +8,9 @@ ValueError when task=True is used with a sync function.
 import pytest
 
 from fastmcp import FastMCP
-from fastmcp.prompts.prompt import FunctionPrompt
-from fastmcp.resources.resource import FunctionResource
-from fastmcp.tools.tool import FunctionTool
+from fastmcp.prompts.function_prompt import FunctionPrompt
+from fastmcp.resources.function_resource import FunctionResource
+from fastmcp.tools.function_tool import FunctionTool
 
 
 async def test_sync_tool_with_explicit_task_true_raises():
@@ -137,7 +137,7 @@ async def test_async_resource_with_task_true_remains_enabled():
         return "data"
 
     # Resource should have task mode="optional" and be a FunctionResource
-    resource = await mcp._resource_manager.get_resource("test://async")
+    resource = await mcp.get_resource("test://async")
     assert isinstance(resource, FunctionResource)
     assert resource.task_config.mode == "optional"
 
@@ -179,7 +179,7 @@ async def test_sync_resource_with_task_false_works():
         """A synchronous resource."""
         return "data"
 
-    resource = await mcp._resource_manager.get_resource("test://sync")
+    resource = await mcp.get_resource("test://sync")
     assert isinstance(resource, FunctionResource)
     assert resource.task_config.mode == "forbidden"
 

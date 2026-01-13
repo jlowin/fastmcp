@@ -1,5 +1,4 @@
 import functools
-import json
 from urllib.parse import quote
 
 import pytest
@@ -7,7 +6,7 @@ from pydantic import BaseModel
 
 from fastmcp import Context, FastMCP
 from fastmcp.resources import ResourceTemplate
-from fastmcp.resources.resource import FunctionResource
+from fastmcp.resources.function_resource import FunctionResource
 from fastmcp.resources.template import match_uri_template
 
 
@@ -168,8 +167,8 @@ class TestResourceTemplate:
     async def test_create_resource(self):
         """Test creating a resource from a template."""
 
-        def my_func(key: str, value: int) -> dict:
-            return {"key": key, "value": value}
+        def my_func(key: str, value: int) -> str:
+            return f"key={key}, value={value}"
 
         template = ResourceTemplate.from_function(
             fn=my_func,
@@ -183,10 +182,14 @@ class TestResourceTemplate:
         )
 
         assert isinstance(resource, FunctionResource)
-        content = await resource.read()
-        assert isinstance(content, str)
-        data = json.loads(content)
-        assert data == {"key": "foo", "value": 123}
+        # read() returns raw value from function
+        result = await resource.read()
+        assert result == "key=foo, value=123"
+
+        # _read() wraps in ResourceResult
+        resource_result = await resource._read()
+        assert len(resource_result.contents) == 1
+        assert resource_result.contents[0].content == "key=foo, value=123"
 
     async def test_async_text_resource(self):
         """Test creating a text resource from async function."""
@@ -206,8 +209,9 @@ class TestResourceTemplate:
         )
 
         assert isinstance(resource, FunctionResource)
-        content = await resource.read()
-        assert content == "Hello, world!"
+        # read() returns raw value
+        result = await resource.read()
+        assert result == "Hello, world!"
 
     async def test_async_binary_resource(self):
         """Test creating a binary resource from async function."""
@@ -227,8 +231,9 @@ class TestResourceTemplate:
         )
 
         assert isinstance(resource, FunctionResource)
-        content = await resource.read()
-        assert content == b"test"
+        # read() returns raw bytes
+        result = await resource.read()
+        assert result == b"test"
 
     async def test_basemodel_conversion(self):
         """Test handling of BaseModel types."""
@@ -252,9 +257,10 @@ class TestResourceTemplate:
         )
 
         assert isinstance(resource, FunctionResource)
-        content = await resource.read()
-        assert isinstance(content, str)
-        data = json.loads(content)
+        # read() returns raw BaseModel
+        result = await resource.read()
+        assert isinstance(result, MyModel)
+        data = result.model_dump()
         assert data == {"key": "foo", "value": 123}
 
     async def test_custom_type_conversion(self):
@@ -282,8 +288,10 @@ class TestResourceTemplate:
         )
 
         assert isinstance(resource, FunctionResource)
-        content = await resource.read()
-        assert content == '"hello"'
+        # read() returns raw CustomData object
+        result = await resource.read()
+        assert isinstance(result, CustomData)
+        assert str(result) == "hello"
 
     async def test_wildcard_param_can_create_resource(self):
         """Test that wildcard parameters are valid."""
@@ -392,8 +400,9 @@ class TestResourceTemplate:
         )
 
         assert isinstance(resource, FunctionResource)
-        content = await resource.read()
-        assert content == "X was foo"
+        # read() returns raw string from __call__
+        result = await resource.read()
+        assert result == "X was foo"
 
 
 class TestMatchUriTemplate:
@@ -678,8 +687,9 @@ class TestContextHandling:
             )
 
             assert isinstance(resource, FunctionResource)
-            content = await resource.read()
-            assert content == "42"
+            # read() returns the raw value
+            result = await resource.read()
+            assert result == "42"
 
     async def test_context_optional(self):
         """Test that context is optional when creating resources."""
@@ -704,8 +714,9 @@ class TestContextHandling:
             )
 
             assert isinstance(resource, FunctionResource)
-            content = await resource.read()
-            assert content == "42"
+            # read() returns the raw value
+            result = await resource.read()
+            assert result == "42"
 
     async def test_context_with_functools_wraps_decorator(self):
         """Regression test for #2524: decorated templates with Context should work."""
@@ -733,8 +744,9 @@ class TestContextHandling:
 
         async with context:
             resource = await template.create_resource("test://42", {"item_id": 42})
-            content = await resource.read()
-            assert content == "item: 42"
+            # read() returns the raw value
+            result = await resource.read()
+            assert result == "item: 42"
 
 
 class TestQueryParameterExtraction:
@@ -806,10 +818,11 @@ class TestQueryParameterTypeCoercion:
             {"resource": "docs", "page": "5"},
         )
 
-        content = await resource.read()
-        # TODO(ty): remove when ty supports `in` on str | bytes
-        assert '"page":5' in content  # type: ignore[operator]
-        assert '"type":"int"' in content  # type: ignore[operator]
+        # read() returns raw dict
+        result = await resource.read()
+        assert isinstance(result, dict)
+        assert result["page"] == 5
+        assert result["type"] == "int"
 
     async def test_bool_coercion(self):
         """Test boolean type coercion for query parameters."""
@@ -828,18 +841,19 @@ class TestQueryParameterTypeCoercion:
             "config://feature?enabled=true",
             {"name": "feature", "enabled": "true"},
         )
-        content = await resource.read()
-        # TODO(ty): remove when ty supports `in` on str | bytes
-        assert '"enabled":true' in content  # type: ignore[operator]
+        # read() returns raw dict
+        result = await resource.read()
+        assert isinstance(result, dict)
+        assert result["enabled"] is True
 
         # Test false value
         resource = await template.create_resource(
             "config://feature?enabled=false",
             {"name": "feature", "enabled": "false"},
         )
-        content = await resource.read()
-        # TODO(ty): remove when ty supports `in` on str | bytes
-        assert '"enabled":false' in content  # type: ignore[operator]
+        result = await resource.read()
+        assert isinstance(result, dict)
+        assert result["enabled"] is False
 
     async def test_float_coercion(self):
         """Test float type coercion for query parameters."""
@@ -862,10 +876,11 @@ class TestQueryParameterTypeCoercion:
             {"service": "api", "threshold": "0.95"},
         )
 
-        content = await resource.read()
-        # TODO(ty): remove when ty supports `in` on str | bytes
-        assert '"threshold":0.95' in content  # type: ignore[operator]
-        assert '"type":"float"' in content  # type: ignore[operator]
+        # read() returns raw dict
+        result = await resource.read()
+        assert isinstance(result, dict)
+        assert result["threshold"] == 0.95
+        assert result["type"] == "float"
 
 
 class TestQueryParameterValidation:
@@ -923,10 +938,11 @@ class TestQueryParameterWithDefaults:
             {"id": "123"},
         )
 
-        content = await resource.read()
-        # TODO(ty): remove when ty supports `in` on str | bytes
-        assert '"format":"json"' in content  # type: ignore[operator]
-        assert '"verbose":false' in content  # type: ignore[operator]
+        # read() returns raw dict
+        result = await resource.read()
+        assert isinstance(result, dict)
+        assert result["format"] == "json"
+        assert result["verbose"] is False
 
     async def test_partial_query_params(self):
         """Test providing only some query parameters."""
@@ -948,11 +964,12 @@ class TestQueryParameterWithDefaults:
             {"id": "123", "limit": "20"},
         )
 
-        content = await resource.read()
-        # TODO(ty): remove when ty supports `in` on str | bytes
-        assert '"format":"json"' in content  # type: ignore[operator]  # default
-        assert '"limit":20' in content  # type: ignore[operator]  # provided
-        assert '"offset":0' in content  # type: ignore[operator]  # default
+        # read() returns raw dict
+        result = await resource.read()
+        assert isinstance(result, dict)
+        assert result["format"] == "json"  # default
+        assert result["limit"] == 20  # provided
+        assert result["offset"] == 0  # default
 
 
 class TestQueryParameterWithWildcards:
@@ -984,8 +1001,9 @@ class TestQueryParameterWithWildcards:
             {"path": "src/test/data.txt", "lines": "50"},
         )
 
-        content = await resource.read()
-        # TODO(ty): remove when ty supports `in` on str | bytes
-        assert '"path":"src/test/data.txt"' in content  # type: ignore[operator]
-        assert '"encoding":"utf-8"' in content  # type: ignore[operator]  # default
-        assert '"lines":50' in content  # type: ignore[operator]  # provided
+        # read() returns raw dict
+        result = await resource.read()
+        assert isinstance(result, dict)
+        assert result["path"] == "src/test/data.txt"
+        assert result["encoding"] == "utf-8"  # default
+        assert result["lines"] == 50  # provided

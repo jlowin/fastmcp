@@ -164,7 +164,7 @@ def greet(name: str) -> str:
         server = await source.load_server()
         assert server.name == "TestServer"
         tools = await server.get_tools()
-        assert "greet" in tools
+        assert any(t.name == "greet" for t in tools)
 
     async def test_import_server_with_main_block(self, tmp_path):
         """Test importing server with if __name__ == '__main__' block."""
@@ -186,7 +186,7 @@ if __name__ == "__main__":
         server = await source.load_server()
         assert server.name == "MainServer"
         tools = await server.get_tools()
-        assert "calculate" in tools
+        assert any(t.name == "calculate" for t in tools)
 
     async def test_import_server_standard_names(self, tmp_path):
         """Test automatic detection of standard names (mcp, server, app)."""
@@ -240,7 +240,7 @@ def custom_tool() -> str:
         server = await source.load_server()
         assert server.name == "CustomServer"
         tools = await server.get_tools()
-        assert "custom_tool" in tools
+        assert any(t.name == "custom_tool" for t in tools)
 
     async def test_import_server_no_standard_names_fails(self, tmp_path):
         """Test importing server when no standard names exist fails."""
@@ -600,3 +600,29 @@ mcp = fastmcp.FastMCP("TestServer")
 
             # Verify prepare was NOT called
             prepare_mock.assert_not_called()
+
+
+class TestReloadFunctionality:
+    """Test reload functionality."""
+
+    def test_python_file_filter_accepts_py_files(self):
+        """Test that Python file filter accepts .py files."""
+        from watchfiles import Change
+
+        from fastmcp.cli.run import _python_file_filter
+
+        assert _python_file_filter(Change.modified, "/path/to/file.py") is True
+        assert _python_file_filter(Change.added, "server.py") is True
+        assert _python_file_filter(Change.deleted, "/some/dir/module.py") is True
+
+    def test_python_file_filter_rejects_non_py_files(self):
+        """Test that Python file filter rejects non-.py files."""
+        from watchfiles import Change
+
+        from fastmcp.cli.run import _python_file_filter
+
+        assert _python_file_filter(Change.modified, "/path/to/file.txt") is False
+        assert _python_file_filter(Change.modified, "/path/to/file.js") is False
+        assert _python_file_filter(Change.modified, "/path/to/file.pyc") is False
+        assert _python_file_filter(Change.modified, "/path/to/.py") is True  # Edge case
+        assert _python_file_filter(Change.modified, "Dockerfile") is False

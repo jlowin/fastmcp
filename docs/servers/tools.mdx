@@ -78,17 +78,14 @@ def search_products_implementation(query: str, category: str | None = None) -> l
 </ParamField>
 
 <ParamField body="enabled" type="bool" default="True">
-  A boolean to enable or disable the tool. See [Disabling Tools](#disabling-tools) for more information
+  <Warning>Deprecated in v3.0.0. Use `mcp.enable()` / `mcp.disable()` at the server level instead.</Warning>
+  A boolean to enable or disable the tool. See [Visibility Control](#visibility-control) for the recommended approach.
 </ParamField>
 
 <ParamField body="icons" type="list[Icon] | None">
   <VersionBadge version="2.13.0" />
 
   Optional list of icon representations for this tool. See [Icons](/servers/icons) for detailed examples
-</ParamField>
-
-<ParamField body="exclude_args" type="list[str] | None">
-  A list of argument names to exclude from the tool schema shown to the LLM. See [Excluding Arguments](#excluding-arguments) for more information
 </ParamField>
 
 <ParamField body="annotations" type="ToolAnnotations | dict | None">
@@ -115,10 +112,31 @@ def search_products_implementation(query: str, category: str | None = None) -> l
 <ParamField body="meta" type="dict[str, Any] | None">
   <VersionBadge version="2.11.0" />
   
-  Optional meta information about the tool. This data is passed through to the MCP client as the `_meta` field of the client-side tool object and can be used for custom metadata, versioning, or other application-specific purposes.
+  Optional meta information about the tool. This data is passed through to the MCP client as the `meta` field of the client-side tool object and can be used for custom metadata, versioning, or other application-specific purposes.
 </ParamField>
 </Card>
 
+### Using with Methods
+
+The `@mcp.tool` decorator registers tools immediately, which doesn't work with instance or class methods (you'd see `self` or `cls` as required parameters). For methods, use the standalone `@tool` decorator to attach metadata, then register the bound method:
+
+```python
+from fastmcp import FastMCP
+from fastmcp.tools import tool
+
+class Calculator:
+    def __init__(self, multiplier: int):
+        self.multiplier = multiplier
+
+    @tool()
+    def multiply(self, x: int) -> int:
+        """Multiply x by the instance multiplier."""
+        return x * self.multiplier
+
+calc = Calculator(multiplier=3)
+mcp = FastMCP()
+mcp.add_tool(calc.multiply)  # Registers with correct schema (only 'x', not 'self')
+```
 
 ### Async Support
 
@@ -176,6 +194,10 @@ def my_tool() -> None:
 ## Arguments
 
 By default, FastMCP converts Python functions into MCP tools by inspecting the function's signature and type annotations. This allows you to use standard Python type annotations for your tools. In general, the framework strives to "just work": idiomatic Python behaviors like parameter defaults and type annotations are automatically translated into MCP schemas. However, there are a number of ways to customize the behavior of your tools.
+
+<Note>
+FastMCP automatically dereferences `$ref` entries in tool schemas to ensure compatibility with MCP clients that don't fully support JSON Schema references (e.g., VS Code Copilot, Claude Desktop). This means complex Pydantic models with shared types are inlined in the schema rather than using `$defs` references.
+</Note>
 
 ### Type Annotations
 
@@ -345,33 +367,28 @@ Field provides several validation and documentation features:
 - `pattern`: Regex pattern for string validation
 - `default`: Default value if parameter is omitted
 
+### Hiding Parameters from the LLM
 
+<VersionBadge version="2.14.0" />
 
-
-### Excluding Arguments
-
-<VersionBadge version="2.6.0" /> 
-
-You can exclude certain arguments from the tool schema shown to the LLM. This is useful for arguments that are injected at runtime (such as `state`, `user_id`, or credentials) and should not be exposed to the LLM or client. Only arguments with default values can be excluded; attempting to exclude a required argument will raise an error.
-
-**Note:** `exclude_args` will be deprecated in FastMCP 2.14 in favor of dependency injection with `Depends()` for better lifecycle management and more explicit dependency handling. `exclude_args` will continue to work until then.
-
-Example with `exclude_args`:
+To inject values at runtime without exposing them to the LLM (such as `user_id`, credentials, or database connections), use dependency injection with `Depends()`. Parameters using `Depends()` are automatically excluded from the tool schema:
 
 ```python
-@mcp.tool(
-    name="get_user_details",
-    exclude_args=["user_id"]
-)
-def get_user_details(user_id: str = None) -> str:
-    # user_id will be injected by the server, not provided by the LLM
-    ...
+from fastmcp import FastMCP
+from fastmcp.dependencies import Depends
+
+mcp = FastMCP()
+
+def get_user_id() -> str:
+    return "user_123"  # Injected at runtime
+
+@mcp.tool
+def get_user_details(user_id: str = Depends(get_user_id)) -> str:
+    # user_id is injected by the server, not provided by the LLM
+    return f"Details for {user_id}"
 ```
 
-With this configuration, `user_id` will not appear in the tool's parameter schema, but can still be set by the server or framework at runtime.
-
-For more complex tool transformations, see [Transforming Tools](/patterns/tool-transformation).
-
+See [Custom Dependencies](/servers/context#custom-dependencies) for more details on dependency injection.
 
 ## Return Values
 
@@ -721,6 +738,31 @@ The `meta` field in `ToolResult` is for runtime metadata about tool execution (e
 
 When returning `ToolResult`, you have full control - FastMCP won't automatically wrap or transform your data. `ToolResult` can be returned with or without an output schema.
 
+### Custom Serialization
+
+When you need custom serialization (like YAML, Markdown tables, or specialized formats), return `ToolResult` with your serialized content. This makes the serialization explicit and visible in your tool's code:
+
+```python
+import yaml
+from fastmcp import FastMCP
+from fastmcp.tools.tool import ToolResult
+
+mcp = FastMCP("MyServer")
+
+@mcp.tool
+def get_config() -> ToolResult:
+    """Returns configuration as YAML."""
+    data = {"api_key": "abc123", "debug": True, "rate_limit": 100}
+    return ToolResult(
+        content=yaml.dump(data, sort_keys=False),
+        structured_content=data
+    )
+```
+
+<Tip>
+For reusable serialization across multiple tools, create a wrapper decorator that returns `ToolResult`. This lets you compose serializers with other behaviors (logging, validation, caching) and keeps the serialization visible at the tool definition. See [examples/custom_tool_serializer_decorator.py](https://github.com/jlowin/fastmcp/blob/main/examples/custom_tool_serializer_decorator.py) for a complete implementation.
+</Tip>
+
 ## Error Handling
 
 <VersionBadge version="2.4.1" />
@@ -759,32 +801,39 @@ def divide(a: float, b: float) -> float:
 
 When `mask_error_details=True`, only error messages from `ToolError` will include details, other exceptions will be converted to a generic message.
 
-## Disabling Tools
+## Visibility Control
 
-<VersionBadge version="2.8.0" />
+<VersionBadge version="3.0.0" />
 
-You can control the visibility and availability of tools by enabling or disabling them. This is useful for feature flagging, maintenance, or dynamically changing the toolset available to a client. Disabled tools will not appear in the list of available tools returned by `list_tools`, and attempting to call a disabled tool will result in an "Unknown tool" error, just as if the tool did not exist.
-
-By default, all tools are enabled. You can disable a tool upon creation using the `enabled` parameter in the decorator:
+You can control which tools are visible to clients using server-level visibility control. Disabled tools don't appear in `list_tools` and can't be called.
 
 ```python
-@mcp.tool(enabled=False)
-def maintenance_tool():
-    """This tool is currently under maintenance."""
-    return "This tool is disabled."
+from fastmcp import FastMCP
+
+mcp = FastMCP("MyServer")
+
+@mcp.tool(tags={"admin"})
+def admin_action() -> str:
+    """Admin-only action."""
+    return "Done"
+
+@mcp.tool(tags={"public"})
+def public_action() -> str:
+    """Public action."""
+    return "Done"
+
+# Disable specific tools by key
+mcp.disable(keys=["tool:admin_action"])
+
+# Disable tools by tag
+mcp.disable(tags={"admin"})
+
+# Or use allowlist mode - only show tools with specific tags
+mcp.enable(tags={"public"}, only=True)
 ```
 
-You can also toggle a tool's state programmatically after it has been created:
+See [Local Provider](/servers/providers/local#visibility-control) for the complete visibility control API including key formats and tag-based filtering.
 
-```python
-@mcp.tool
-def dynamic_tool():
-    return "I am a dynamic tool."
-
-# Disable and re-enable the tool
-dynamic_tool.disable()
-dynamic_tool.enable()
-```
 ## MCP Annotations
 
 <VersionBadge version="2.2.7" />
@@ -824,6 +873,57 @@ FastMCP supports these standard annotations:
 
 Remember that annotations help make better user experiences but should be treated as advisory hints. They help client applications present appropriate UI elements and safety controls, but won't enforce security boundaries on their own. Always focus on making your annotations accurately represent what your tool actually does.
 
+### Using Annotation Hints
+
+MCP clients like Claude and ChatGPT use annotation hints to determine when to skip confirmation prompts and how to present tools to users. The most commonly used hint is `readOnlyHint`, which signals that a tool only reads data without making changes.
+
+**Read-only tools** improve user experience by:
+- Skipping confirmation prompts for safe operations
+- Allowing broader access without security concerns
+- Enabling more aggressive batching and caching
+
+Mark a tool as read-only when it retrieves data, performs calculations, or checks status without modifying state:
+
+```python
+from fastmcp import FastMCP
+from mcp.types import ToolAnnotations
+
+mcp = FastMCP("Data Server")
+
+@mcp.tool(annotations={"readOnlyHint": True})
+def get_user(user_id: str) -> dict:
+    """Retrieve user information by ID."""
+    return {"id": user_id, "name": "Alice"}
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+        idempotentHint=True,  # Same result for repeated calls
+        openWorldHint=False   # Only internal data
+    )
+)
+def search_products(query: str) -> list[dict]:
+    """Search the product catalog."""
+    return [{"id": 1, "name": "Widget", "price": 29.99}]
+
+# Write operations - no readOnlyHint
+@mcp.tool()
+def update_user(user_id: str, name: str) -> dict:
+    """Update user information."""
+    return {"id": user_id, "name": name, "updated": True}
+
+@mcp.tool(annotations={"destructiveHint": True})
+def delete_user(user_id: str) -> dict:
+    """Permanently delete a user account."""
+    return {"deleted": user_id}
+```
+
+For tools that write to databases, send notifications, create/update/delete resources, or trigger workflows, omit `readOnlyHint` or set it to `False`. Use `destructiveHint=True` for operations that cannot be undone.
+
+Client-specific behavior:
+- **ChatGPT**: Skips confirmation prompts for read-only tools in Chat mode (see [ChatGPT integration](/integrations/chatgpt))
+- **Claude**: Uses hints to understand tool safety profiles and make better execution decisions
+
 ## Notifications
 
 <VersionBadge version="2.9.1" />
@@ -836,10 +936,10 @@ def example_tool() -> str:
     return "Hello!"
 
 # These operations trigger notifications:
-mcp.add_tool(example_tool)     # Sends tools/list_changed notification
-example_tool.disable()         # Sends tools/list_changed notification  
-example_tool.enable()          # Sends tools/list_changed notification
-mcp.remove_tool("example_tool") # Sends tools/list_changed notification
+mcp.add_tool(example_tool)              # Sends tools/list_changed notification
+mcp.disable(keys=["tool:example_tool"]) # Sends tools/list_changed notification
+mcp.enable(keys=["tool:example_tool"])  # Sends tools/list_changed notification
+mcp.remove_tool("example_tool")         # Sends tools/list_changed notification
 ```
 
 Notifications are only sent when these operations occur within an active MCP request context (e.g., when called from within a tool or other MCP operation). Operations performed during server initialization do not trigger notifications.

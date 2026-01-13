@@ -6,6 +6,7 @@ CurrentFastMCP(), and Depends() should be resolved in the worker context.
 """
 
 from contextlib import asynccontextmanager
+from typing import Any, cast
 
 import pytest
 
@@ -228,7 +229,7 @@ async def test_dependency_context_managers_cleaned_up_in_background():
             cleanup_called.append("exit")
 
     @mcp.tool(task=True)
-    async def use_connection(name: str, conn: str = Depends(tracked_connection)) -> str:
+    async def use_connection(name: str, conn: str = Depends(tracked_connection)) -> str:  # type: ignore[assignment]
         assert conn == "connection"
         assert "enter" in cleanup_called
         assert "exit" not in cleanup_called  # Still open during execution
@@ -252,7 +253,7 @@ async def test_dependency_errors_propagate_to_task_failure():
 
     @mcp.tool(task=True)
     async def tool_with_failing_dep(
-        value: str, dep: str = Depends(failing_dependency)
+        value: str, dep: str = cast(Any, Depends(failing_dependency))
     ) -> str:
         return f"Got: {dep}"
 

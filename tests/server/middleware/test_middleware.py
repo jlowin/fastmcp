@@ -439,13 +439,19 @@ class TestMiddlewareHooks:
             ):
                 # modify argument
                 if context.message.name == "add":
-                    context.message.arguments["a"] += 100  # type: ignore
+                    assert context.message.arguments is not None
+                    args = context.message.arguments
+                    assert isinstance(args["a"], int)
+                    args["a"] += 100
 
                 result = await call_next(context)
 
                 # modify result
                 if context.message.name == "add":
-                    result.structured_content["result"] += 5  # type: ignore
+                    assert result.structured_content is not None
+                    content = result.structured_content
+                    assert isinstance(content["result"], int)
+                    content["result"] += 5
 
                 return result
 
@@ -454,7 +460,166 @@ class TestMiddlewareHooks:
         async with Client(server) as client:
             result = await client.call_tool("add", {"a": 1, "b": 2})
 
-        assert result.structured_content["result"] == 108  # type: ignore
+        assert isinstance(result.structured_content["result"], int)
+        assert result.structured_content["result"] == 108
+
+
+class TestApplyMiddlewareParameter:
+    """Tests for run_middleware parameter on execution methods."""
+
+    async def test_call_tool_with_run_middleware_true(self):
+        """Middleware is applied when run_middleware=True (default)."""
+        recording = RecordingMiddleware()
+        server = FastMCP()
+
+        @server.tool
+        def add(a: int, b: int) -> int:
+            return a + b
+
+        server.add_middleware(recording)
+
+        result = await server.call_tool("add", {"a": 1, "b": 2})
+
+        assert result.structured_content["result"] == 3  # type: ignore[union-attr,index]
+        assert recording.assert_called(hook="on_call_tool", times=1)
+
+    async def test_call_tool_with_run_middleware_false(self):
+        """Middleware is NOT applied when run_middleware=False."""
+        recording = RecordingMiddleware()
+        server = FastMCP()
+
+        @server.tool
+        def add(a: int, b: int) -> int:
+            return a + b
+
+        server.add_middleware(recording)
+
+        result = await server.call_tool("add", {"a": 1, "b": 2}, run_middleware=False)
+
+        assert result.structured_content["result"] == 3  # type: ignore[union-attr,index]
+        # Middleware should not have been called
+        assert len(recording.calls) == 0
+
+    async def test_read_resource_with_run_middleware_true(self):
+        """Middleware is applied when run_middleware=True (default)."""
+        recording = RecordingMiddleware()
+        server = FastMCP()
+
+        @server.resource("resource://test")
+        def test_resource() -> str:
+            return "test content"
+
+        server.add_middleware(recording)
+
+        result = await server.read_resource("resource://test")
+
+        assert len(result.contents) == 1
+        assert result.contents[0].content == "test content"
+        assert recording.assert_called(hook="on_read_resource", times=1)
+
+    async def test_read_resource_with_run_middleware_false(self):
+        """Middleware is NOT applied when run_middleware=False."""
+        recording = RecordingMiddleware()
+        server = FastMCP()
+
+        @server.resource("resource://test")
+        def test_resource() -> str:
+            return "test content"
+
+        server.add_middleware(recording)
+
+        result = await server.read_resource("resource://test", run_middleware=False)
+
+        assert len(result.contents) == 1
+        assert result.contents[0].content == "test content"
+        # Middleware should not have been called
+        assert len(recording.calls) == 0
+
+    async def test_read_resource_template_with_run_middleware_false(self):
+        """Templates also skip middleware when run_middleware=False."""
+        recording = RecordingMiddleware()
+        server = FastMCP()
+
+        @server.resource("resource://items/{item_id}")
+        def get_item(item_id: int) -> str:
+            return f"item {item_id}"
+
+        server.add_middleware(recording)
+
+        result = await server.read_resource("resource://items/42", run_middleware=False)
+
+        assert len(result.contents) == 1
+        assert result.contents[0].content == "item 42"
+        assert len(recording.calls) == 0
+
+    async def test_render_prompt_with_run_middleware_true(self):
+        """Middleware is applied when run_middleware=True (default)."""
+        recording = RecordingMiddleware()
+        server = FastMCP()
+
+        @server.prompt
+        def greet(name: str) -> str:
+            return f"Hello, {name}!"
+
+        server.add_middleware(recording)
+
+        result = await server.render_prompt("greet", {"name": "World"})
+
+        assert len(result.messages) == 1
+        # content is TextContent | EmbeddedResource, but we know it's TextContent from the test
+        assert isinstance(result.messages[0].content, mcp.types.TextContent)
+        assert result.messages[0].content.text == "Hello, World!"
+        assert recording.assert_called(hook="on_get_prompt", times=1)
+
+    async def test_render_prompt_with_run_middleware_false(self):
+        """Middleware is NOT applied when run_middleware=False."""
+        recording = RecordingMiddleware()
+        server = FastMCP()
+
+        @server.prompt
+        def greet(name: str) -> str:
+            return f"Hello, {name}!"
+
+        server.add_middleware(recording)
+
+        result = await server.render_prompt(
+            "greet", {"name": "World"}, run_middleware=False
+        )
+
+        assert len(result.messages) == 1
+        # content is TextContent | EmbeddedResource, but we know it's TextContent from the test
+        assert isinstance(result.messages[0].content, mcp.types.TextContent)
+        assert result.messages[0].content.text == "Hello, World!"
+        # Middleware should not have been called
+        assert len(recording.calls) == 0
+
+    async def test_middleware_modification_skipped_when_run_middleware_false(self):
+        """Middleware that modifies args/results is skipped."""
+
+        class ModifyingMiddleware(Middleware):
+            async def on_call_tool(self, context: MiddlewareContext, call_next):
+                # Double the 'a' argument
+                assert context.message.arguments is not None
+                context.message.arguments["a"] *= 2
+                return await call_next(context)
+
+        server = FastMCP()
+
+        @server.tool
+        def add(a: int, b: int) -> int:
+            return a + b
+
+        server.add_middleware(ModifyingMiddleware())
+
+        # With middleware: a=5 becomes a=10, result = 10 + 3 = 13
+        result_with = await server.call_tool("add", {"a": 5, "b": 3})
+        assert result_with.structured_content["result"] == 13  # type: ignore[union-attr,index]
+
+        # Without middleware: a=5 stays a=5, result = 5 + 3 = 8
+        result_without = await server.call_tool(
+            "add", {"a": 5, "b": 3}, run_middleware=False
+        )
+        assert result_without.structured_content["result"] == 8  # type: ignore[union-attr,index]
 
 
 class TestNestedMiddlewareHooks:
@@ -506,7 +671,7 @@ class TestNestedMiddlewareHooks:
         recording_middleware: RecordingMiddleware,
         nested_middleware: RecordingMiddleware,
     ):
-        mcp_server.mount(nested_mcp_server, prefix="nested")
+        mcp_server.mount(nested_mcp_server, namespace="nested")
 
         async with Client(mcp_server) as client:
             await client.call_tool("add", {"a": 1, "b": 2})
@@ -526,7 +691,7 @@ class TestNestedMiddlewareHooks:
         recording_middleware: RecordingMiddleware,
         nested_middleware: RecordingMiddleware,
     ):
-        mcp_server.mount(nested_mcp_server, prefix="nested")
+        mcp_server.mount(nested_mcp_server, namespace="nested")
 
         async with Client(mcp_server) as client:
             await client.call_tool("nested_add", {"a": 1, "b": 2})
@@ -550,7 +715,7 @@ class TestNestedMiddlewareHooks:
         recording_middleware: RecordingMiddleware,
         nested_middleware: RecordingMiddleware,
     ):
-        mcp_server.mount(nested_mcp_server, prefix="nested")
+        mcp_server.mount(nested_mcp_server, namespace="nested")
 
         async with Client(mcp_server) as client:
             await client.read_resource("resource://test")
@@ -570,7 +735,7 @@ class TestNestedMiddlewareHooks:
         recording_middleware: RecordingMiddleware,
         nested_middleware: RecordingMiddleware,
     ):
-        mcp_server.mount(nested_mcp_server, prefix="nested")
+        mcp_server.mount(nested_mcp_server, namespace="nested")
 
         async with Client(mcp_server) as client:
             await client.read_resource("resource://nested/test")
@@ -594,7 +759,7 @@ class TestNestedMiddlewareHooks:
         recording_middleware: RecordingMiddleware,
         nested_middleware: RecordingMiddleware,
     ):
-        mcp_server.mount(nested_mcp_server, prefix="nested")
+        mcp_server.mount(nested_mcp_server, namespace="nested")
 
         async with Client(mcp_server) as client:
             await client.read_resource("resource://test-template/1")
@@ -614,7 +779,7 @@ class TestNestedMiddlewareHooks:
         recording_middleware: RecordingMiddleware,
         nested_middleware: RecordingMiddleware,
     ):
-        mcp_server.mount(nested_mcp_server, prefix="nested")
+        mcp_server.mount(nested_mcp_server, namespace="nested")
 
         async with Client(mcp_server) as client:
             await client.read_resource("resource://nested/test-template/1")
@@ -638,7 +803,7 @@ class TestNestedMiddlewareHooks:
         recording_middleware: RecordingMiddleware,
         nested_middleware: RecordingMiddleware,
     ):
-        mcp_server.mount(nested_mcp_server, prefix="nested")
+        mcp_server.mount(nested_mcp_server, namespace="nested")
 
         async with Client(mcp_server) as client:
             await client.get_prompt("test_prompt", {"x": "test"})
@@ -658,7 +823,7 @@ class TestNestedMiddlewareHooks:
         recording_middleware: RecordingMiddleware,
         nested_middleware: RecordingMiddleware,
     ):
-        mcp_server.mount(nested_mcp_server, prefix="nested")
+        mcp_server.mount(nested_mcp_server, namespace="nested")
 
         async with Client(mcp_server) as client:
             await client.get_prompt("nested_test_prompt", {"x": "test"})
@@ -682,7 +847,7 @@ class TestNestedMiddlewareHooks:
         recording_middleware: RecordingMiddleware,
         nested_middleware: RecordingMiddleware,
     ):
-        mcp_server.mount(nested_mcp_server, prefix="nested")
+        mcp_server.mount(nested_mcp_server, namespace="nested")
 
         async with Client(mcp_server) as client:
             await client.list_tools()
@@ -706,7 +871,7 @@ class TestNestedMiddlewareHooks:
         recording_middleware: RecordingMiddleware,
         nested_middleware: RecordingMiddleware,
     ):
-        mcp_server.mount(nested_mcp_server, prefix="nested")
+        mcp_server.mount(nested_mcp_server, namespace="nested")
 
         async with Client(mcp_server) as client:
             await client.list_resources()
@@ -730,7 +895,7 @@ class TestNestedMiddlewareHooks:
         recording_middleware: RecordingMiddleware,
         nested_middleware: RecordingMiddleware,
     ):
-        mcp_server.mount(nested_mcp_server, prefix="nested")
+        mcp_server.mount(nested_mcp_server, namespace="nested")
 
         async with Client(mcp_server) as client:
             await client.list_resource_templates()

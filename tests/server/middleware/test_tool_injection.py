@@ -5,7 +5,7 @@ import math
 import pytest
 from inline_snapshot import snapshot
 from mcp.types import TextContent
-from mcp.types import Tool as MCPTool
+from mcp.types import Tool as SDKTool
 
 from fastmcp import FastMCP
 from fastmcp.client import Client
@@ -16,7 +16,8 @@ from fastmcp.server.middleware.tool_injection import (
     ResourceToolMiddleware,
     ToolInjectionMiddleware,
 )
-from fastmcp.tools.tool import FunctionTool, Tool
+from fastmcp.tools.function_tool import FunctionTool
+from fastmcp.tools.tool import Tool
 
 
 def multiply_fn(a: int, b: int) -> int:
@@ -68,7 +69,7 @@ class TestToolInjectionMiddleware:
         base_server.add_middleware(middleware)
 
         async with Client[FastMCPTransport](base_server) as client:
-            tools: list[MCPTool] = await client.list_tools()
+            tools: list[SDKTool] = await client.list_tools()
 
         # Should have all tools: multiply, divide, add, subtract
         assert len(tools) == 4
@@ -93,7 +94,8 @@ class TestToolInjectionMiddleware:
             )
 
         assert result.structured_content is not None
-        assert result.structured_content["result"] == 42  # type: ignore[attr-defined]
+        assert isinstance(result.structured_content, dict)
+        assert result.structured_content["result"] == 42
 
     async def test_call_base_tool_still_works(self, base_server: FastMCP):
         """Test that base server tools still work after injecting tools."""
@@ -110,7 +112,8 @@ class TestToolInjectionMiddleware:
             )
 
         assert result.structured_content is not None
-        assert result.structured_content["result"] == 15  # type: ignore[attr-defined]
+        assert isinstance(result.structured_content, dict)
+        assert result.structured_content["result"] == 15
 
     async def test_injected_tool_error_handling(self, base_server: FastMCP):
         """Test that errors in injected tools are properly handled."""
@@ -161,11 +164,13 @@ class TestToolInjectionMiddleware:
         async with Client(base_server) as client:
             power_result = await client.call_tool("power", {"a": 2, "b": 3})
             assert power_result.structured_content is not None
-            assert power_result.structured_content["result"] == 8  # type: ignore[attr-defined]
+            assert isinstance(power_result.structured_content, dict)
+            assert power_result.structured_content["result"] == 8
 
             modulo_result = await client.call_tool("modulo", {"a": 10, "b": 3})
             assert modulo_result.structured_content is not None
-            assert modulo_result.structured_content["result"] == 1  # type: ignore[attr-defined]
+            assert isinstance(modulo_result.structured_content, dict)
+            assert modulo_result.structured_content["result"] == 1
 
     async def test_injected_tool_with_complex_return_type(self, base_server: FastMCP):
         """Test injected tools with complex return types."""
@@ -246,10 +251,10 @@ class TestToolInjectionMiddleware:
             tools=[multiply_tool]
         )
         base_server.add_middleware(middleware)
-        base_server.exclude_tags = {"math"}
+        base_server.disable(tags={"math"})
 
         async with Client[FastMCPTransport](base_server) as client:
-            tools: list[MCPTool] = await client.list_tools()
+            tools: list[SDKTool] = await client.list_tools()
             tool_names: list[str] = [tool.name for tool in tools]
             assert "multiply" in tool_names
 
@@ -259,7 +264,7 @@ class TestToolInjectionMiddleware:
         base_server.add_middleware(middleware)
 
         async with Client[FastMCPTransport](base_server) as client:
-            tools: list[MCPTool] = await client.list_tools()
+            tools: list[SDKTool] = await client.list_tools()
             result: CallToolResult = await client.call_tool(
                 name="add", arguments={"a": 3, "b": 4}
             )
@@ -270,7 +275,8 @@ class TestToolInjectionMiddleware:
         assert "add" in tool_names
         assert "subtract" in tool_names
         assert result.structured_content is not None
-        assert result.structured_content["result"] == 7  # type: ignore[attr-defined]
+        assert isinstance(result.structured_content, dict)
+        assert result.structured_content["result"] == 7
 
 
 class TestPromptToolMiddleware:
@@ -304,7 +310,7 @@ class TestPromptToolMiddleware:
         server_with_prompts.add_middleware(middleware)
 
         async with Client[FastMCPTransport](server_with_prompts) as client:
-            tools: list[MCPTool] = await client.list_tools()
+            tools: list[SDKTool] = await client.list_tools()
 
         tool_names: list[str] = [tool.name for tool in tools]
         # Should have: add, list_prompts, get_prompt
@@ -428,7 +434,7 @@ class TestResourceToolMiddleware:
         server_with_resources.add_middleware(middleware)
 
         async with Client[FastMCPTransport](server_with_resources) as client:
-            tools: list[MCPTool] = await client.list_tools()
+            tools: list[SDKTool] = await client.list_tools()
 
         tool_names: list[str] = [tool.name for tool in tools]
         # Should have: add, list_resources, read_resource
@@ -489,10 +495,15 @@ class TestResourceToolMiddleware:
             [
                 TextContent(
                     type="text",
-                    text='[{"content":"debug=true","mime_type":"text/plain"}]',
+                    text='{"contents":[{"content":"debug=true","mime_type":"text/plain","meta":null}],"meta":null}',
                 )
             ]
         )
         assert result.structured_content == snapshot(
-            {"result": [{"content": "debug=true", "mime_type": "text/plain"}]}
+            {
+                "contents": [
+                    {"content": "debug=true", "mime_type": "text/plain", "meta": None}
+                ],
+                "meta": None,
+            }
         )

@@ -1,5 +1,7 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 
+import anyio
 import mcp.types
 import pytest
 
@@ -15,6 +17,7 @@ class NotificationRecording:
 
     method: str
     notification: mcp.types.ServerNotification
+    timestamp: datetime = field(default_factory=datetime.now)
 
 
 class RecordingMessageHandler(MessageHandler):
@@ -26,7 +29,7 @@ class RecordingMessageHandler(MessageHandler):
         self.name = name
 
     async def on_notification(self, message: mcp.types.ServerNotification) -> None:
-        """Record all notifications."""
+        """Record all notifications with timestamp."""
         self.notifications.append(
             NotificationRecording(method=message.root.method, notification=message)
         )
@@ -84,24 +87,22 @@ def notification_test_server(recording_message_handler):
 
     # Tool to enable the target tool
     @mcp.tool
-    async def enable_target_tool(ctx: Context) -> str:
+    def enable_target_tool(ctx: Context) -> str:
         """Enable the target tool."""
         # Find and enable the target tool
         try:
-            tool = await ctx.fastmcp.get_tool("target_tool")
-            tool.enable()
+            ctx.fastmcp.enable(keys=["tool:target_tool"])
             return "Target tool enabled"
         except Exception:
             return "Target tool not found"
 
     # Tool to disable the target tool
     @mcp.tool
-    async def disable_target_tool(ctx: Context) -> str:
+    def disable_target_tool(ctx: Context) -> str:
         """Disable the target tool."""
         # Find and disable the target tool
         try:
-            tool = await ctx.fastmcp.get_tool("target_tool")
-            tool.disable()
+            ctx.fastmcp.disable(keys=["tool:target_tool"])
             return "Target tool disabled"
         except Exception:
             return "Target tool not found"
@@ -121,10 +122,13 @@ class TestToolNotifications:
         async with Client(
             notification_test_server, message_handler=recording_message_handler
         ) as client:
-            # Reset any initialization notifications
+            # First disable the tool so we can test enabling it
+            await client.call_tool("disable_target_tool", {})
+
+            # Reset any notifications from the disable
             recording_message_handler.reset()
 
-            # Enable the target tool
+            # Now enable the target tool - this should trigger a notification
             result = await client.call_tool("enable_target_tool", {})
             assert result.data == "Target tool enabled"
 
@@ -154,27 +158,48 @@ class TestToolNotifications:
                 "notifications/tools/list_changed", times=1
             )
 
-    async def test_multiple_tool_changes_deduplicates_notifications(
+    async def test_multiple_tool_changes_sends_notifications_per_change(
         self,
         notification_test_server: FastMCP,
         recording_message_handler: RecordingMessageHandler,
     ):
-        """Test that multiple rapid tool changes result in a single notification."""
+        """Test that notifications are only sent when state actually changes."""
         async with Client(
             notification_test_server, message_handler=recording_message_handler
         ) as client:
             # Reset any initialization notifications
             recording_message_handler.reset()
 
-            # Enable and disable multiple times in the same context
-            # This should result in deduplication
+            # Tool starts enabled, so first enable is a no-op (no notification)
             await client.call_tool("enable_target_tool", {})
+            # Disable changes state (notification)
             await client.call_tool("disable_target_tool", {})
+            # Enable changes state (notification)
             await client.call_tool("enable_target_tool", {})
 
-            # Should have 3 notifications (one per tool call context)
+            # Should have 2 notifications (only the actual state changes)
             recording_message_handler.assert_notification_sent(
-                "notifications/tools/list_changed", times=3
+                "notifications/tools/list_changed", times=2
+            )
+
+    async def test_no_notification_when_no_state_change(
+        self,
+        notification_test_server: FastMCP,
+        recording_message_handler: RecordingMessageHandler,
+    ):
+        """Test that no notification is sent when enable/disable doesn't change state."""
+        async with Client(
+            notification_test_server, message_handler=recording_message_handler
+        ) as client:
+            # Reset any initialization notifications
+            recording_message_handler.reset()
+
+            # Tool starts enabled, so enabling it again is a no-op
+            await client.call_tool("enable_target_tool", {})
+
+            # No notification should be sent
+            recording_message_handler.assert_notification_not_sent(
+                "notifications/tools/list_changed"
             )
 
 
@@ -191,22 +216,20 @@ def resource_notification_test_server(recording_message_handler):
 
     # Tool to enable the target resource
     @mcp.tool
-    async def enable_target_resource(ctx: Context) -> str:
+    def enable_target_resource(ctx: Context) -> str:
         """Enable the target resource."""
         try:
-            resource = await ctx.fastmcp.get_resource("resource://target")
-            resource.enable()
+            ctx.fastmcp.enable(keys=["resource:resource://target"])
             return "Target resource enabled"
         except Exception:
             return "Target resource not found"
 
     # Tool to disable the target resource
     @mcp.tool
-    async def disable_target_resource(ctx: Context) -> str:
+    def disable_target_resource(ctx: Context) -> str:
         """Disable the target resource."""
         try:
-            resource = await ctx.fastmcp.get_resource("resource://target")
-            resource.disable()
+            ctx.fastmcp.disable(keys=["resource:resource://target"])
             return "Target resource disabled"
         except Exception:
             return "Target resource not found"
@@ -226,10 +249,13 @@ class TestResourceNotifications:
         async with Client(
             resource_notification_test_server, message_handler=recording_message_handler
         ) as client:
-            # Reset any initialization notifications
+            # First disable the resource so we can test enabling it
+            await client.call_tool("disable_target_resource", {})
+
+            # Reset any notifications from the disable
             recording_message_handler.reset()
 
-            # Enable the target resource
+            # Now enable the target resource - this should trigger a notification
             result = await client.call_tool("enable_target_resource", {})
             assert result.data == "Target resource enabled"
 
@@ -273,22 +299,20 @@ def prompt_notification_test_server(recording_message_handler):
 
     # Tool to enable the target prompt
     @mcp.tool
-    async def enable_target_prompt(ctx: Context) -> str:
+    def enable_target_prompt(ctx: Context) -> str:
         """Enable the target prompt."""
         try:
-            prompt = await ctx.fastmcp.get_prompt("target_prompt")
-            prompt.enable()
+            ctx.fastmcp.enable(keys=["prompt:target_prompt"])
             return "Target prompt enabled"
         except Exception:
             return "Target prompt not found"
 
     # Tool to disable the target prompt
     @mcp.tool
-    async def disable_target_prompt(ctx: Context) -> str:
+    def disable_target_prompt(ctx: Context) -> str:
         """Disable the target prompt."""
         try:
-            prompt = await ctx.fastmcp.get_prompt("target_prompt")
-            prompt.disable()
+            ctx.fastmcp.disable(keys=["prompt:target_prompt"])
             return "Target prompt disabled"
         except Exception:
             return "Target prompt not found"
@@ -308,10 +332,13 @@ class TestPromptNotifications:
         async with Client(
             prompt_notification_test_server, message_handler=recording_message_handler
         ) as client:
-            # Reset any initialization notifications
+            # First disable the prompt so we can test enabling it
+            await client.call_tool("disable_target_prompt", {})
+
+            # Reset any notifications from the disable
             recording_message_handler.reset()
 
-            # Enable the target prompt
+            # Now enable the target prompt - this should trigger a notification
             result = await client.call_tool("enable_target_prompt", {})
             assert result.data == "Target prompt enabled"
 
@@ -356,8 +383,8 @@ class TestMessageHandlerGeneral:
         ) as client:
             recording_message_handler.reset()
 
-            # Trigger a tool notification
-            await client.call_tool("enable_target_tool", {})
+            # Trigger a tool notification by disabling (tool starts enabled)
+            await client.call_tool("disable_target_tool", {})
 
             # Verify the handler received the notification
             all_notifications = recording_message_handler.get_notifications()
@@ -375,9 +402,9 @@ class TestMessageHandlerGeneral:
         ) as client:
             recording_message_handler.reset()
 
-            # Trigger tool notifications
-            await client.call_tool("enable_target_tool", {})
+            # Trigger tool notifications (disable then enable to get 2 actual state changes)
             await client.call_tool("disable_target_tool", {})
+            await client.call_tool("enable_target_tool", {})
 
             # Test filtering
             tool_notifications = recording_message_handler.get_notifications(
@@ -402,8 +429,8 @@ class TestMessageHandlerGeneral:
         ) as client:
             recording_message_handler.reset()
 
-            # Trigger a notification
-            await client.call_tool("enable_target_tool", {})
+            # Trigger a notification by disabling (tool starts enabled)
+            await client.call_tool("disable_target_tool", {})
 
             # Check notification structure
             notifications = recording_message_handler.get_notifications(
@@ -419,4 +446,111 @@ class TestMessageHandlerGeneral:
             assert (
                 notification.notification.root.method
                 == "notifications/tools/list_changed"
+            )
+
+
+class TestNotificationAPI:
+    """Test the new unified notification API."""
+
+    async def test_send_notification_async(
+        self,
+        recording_message_handler: RecordingMessageHandler,
+    ):
+        """Test that send_notification sends immediately in async context."""
+        server = FastMCP(name="NotificationAPITestServer")
+
+        @server.tool
+        async def trigger_notification(ctx: Context) -> str:
+            """Send a notification using the async API."""
+            await ctx.send_notification(mcp.types.ToolListChangedNotification())
+            return "Notification sent"
+
+        async with Client(server, message_handler=recording_message_handler) as client:
+            recording_message_handler.reset()
+            await client.call_tool("trigger_notification", {})
+
+            recording_message_handler.assert_notification_sent(
+                "notifications/tools/list_changed", times=1
+            )
+
+    async def test_send_notification_sync(
+        self,
+        recording_message_handler: RecordingMessageHandler,
+    ):
+        """Test that send_notification_sync queues for background sending."""
+        server = FastMCP(name="NotificationAPITestServer")
+
+        @server.tool
+        def trigger_notification_sync(ctx: Context) -> str:
+            """Send a notification using the sync API."""
+            ctx.send_notification_sync(mcp.types.ToolListChangedNotification())
+            return "Notification queued"
+
+        async with Client(server, message_handler=recording_message_handler) as client:
+            recording_message_handler.reset()
+            await client.call_tool("trigger_notification_sync", {})
+
+            # Notification should have been sent by the background flusher or final flush
+            recording_message_handler.assert_notification_sent(
+                "notifications/tools/list_changed", times=1
+            )
+
+    async def test_send_notification_sync_background_flusher(
+        self,
+        recording_message_handler: RecordingMessageHandler,
+    ):
+        """Test that background flusher sends notifications within ~1 second."""
+        server = FastMCP(name="NotificationAPITestServer")
+
+        @server.tool
+        async def trigger_and_wait(ctx: Context) -> str:
+            """Queue a notification and wait, then return timestamp."""
+            ctx.send_notification_sync(mcp.types.ToolListChangedNotification())
+
+            # Wait 3 seconds - background flusher runs every 1 second
+            await anyio.sleep(3)
+
+            return datetime.now().isoformat()
+
+        async with Client(server, message_handler=recording_message_handler) as client:
+            recording_message_handler.reset()
+            result = await client.call_tool("trigger_and_wait", {})
+            tool_finished = datetime.fromisoformat(result.data)
+
+            # Notification should have been received at least 1.5s before tool finished
+            # (proves background flusher sent it, not final flush)
+            notifications = recording_message_handler.get_notifications(
+                "notifications/tools/list_changed"
+            )
+            assert len(notifications) == 1
+            gap = tool_finished - notifications[0].timestamp
+            assert gap >= timedelta(seconds=1.5)
+
+    async def test_send_multiple_notifications(
+        self,
+        recording_message_handler: RecordingMessageHandler,
+    ):
+        """Test sending multiple different notification types."""
+        server = FastMCP(name="NotificationAPITestServer")
+
+        @server.tool
+        async def trigger_all_notifications(ctx: Context) -> str:
+            """Send all notification types."""
+            await ctx.send_notification(mcp.types.ToolListChangedNotification())
+            await ctx.send_notification(mcp.types.ResourceListChangedNotification())
+            await ctx.send_notification(mcp.types.PromptListChangedNotification())
+            return "All notifications sent"
+
+        async with Client(server, message_handler=recording_message_handler) as client:
+            recording_message_handler.reset()
+            await client.call_tool("trigger_all_notifications", {})
+
+            recording_message_handler.assert_notification_sent(
+                "notifications/tools/list_changed", times=1
+            )
+            recording_message_handler.assert_notification_sent(
+                "notifications/resources/list_changed", times=1
+            )
+            recording_message_handler.assert_notification_sent(
+                "notifications/prompts/list_changed", times=1
             )
