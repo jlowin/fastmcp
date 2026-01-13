@@ -14,12 +14,12 @@ from pydantic import AnyUrl
 import fastmcp
 from fastmcp.decorators import resolve_task_config
 from fastmcp.resources.resource import Resource, ResourceResult
-from fastmcp.tools.tool import AuthCheckCallable
 from fastmcp.server.dependencies import (
     transform_context_annotations,
     without_injected_parameters,
 )
 from fastmcp.server.tasks.config import TaskConfig
+from fastmcp.tools.tool import AuthCheckCallable
 from fastmcp.utilities.types import get_fn_name
 
 if TYPE_CHECKING:

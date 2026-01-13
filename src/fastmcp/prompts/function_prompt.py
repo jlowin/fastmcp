@@ -24,12 +24,12 @@ import fastmcp
 from fastmcp.decorators import resolve_task_config
 from fastmcp.exceptions import PromptError
 from fastmcp.prompts.prompt import Prompt, PromptArgument, PromptResult
-from fastmcp.tools.tool import AuthCheckCallable
 from fastmcp.server.dependencies import (
     transform_context_annotations,
     without_injected_parameters,
 )
 from fastmcp.server.tasks.config import TaskConfig
+from fastmcp.tools.tool import AuthCheckCallable
 from fastmcp.utilities.json_schema import compress_schema
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.types import get_cached_typeadapter
@@ -104,7 +104,8 @@ class FunctionPrompt(Prompt):
         """
         # Check mutual exclusion
         individual_params_provided = any(
-            x is not None for x in [name, title, description, icons, tags, meta, task, auth]
+            x is not None
+            for x in [name, title, description, icons, tags, meta, task, auth]
         )
 
         if metadata is not None and individual_params_provided:

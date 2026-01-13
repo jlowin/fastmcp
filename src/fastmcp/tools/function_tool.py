@@ -30,7 +30,12 @@ from fastmcp.server.dependencies import (
     without_injected_parameters,
 )
 from fastmcp.server.tasks.config import TaskConfig
-from fastmcp.tools.tool import AuthCheckCallable, Tool, ToolResult, ToolResultSerializerType
+from fastmcp.tools.tool import (
+    AuthCheckCallable,
+    Tool,
+    ToolResult,
+    ToolResultSerializerType,
+)
 from fastmcp.utilities.json_schema import compress_schema
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.types import (

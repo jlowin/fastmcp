@@ -385,6 +385,8 @@ class Tool(FastMCPComponent):
             serializer=serializer,
             meta=meta,
         )
+
+
 def _serialize_with_fallback(
     result: Any, serializer: ToolResultSerializerType | None = None
 ) -> str:
