@@ -60,6 +60,7 @@ def dereference_refs(schema: dict[str, Any]) -> dict[str, Any]:
         # Fall back to resolving only root-level $ref (for MCP spec compliance)
         return resolve_root_ref(schema)
 
+
 def _merge_ref_siblings(
     original: Any,
     dereferenced: Any,
