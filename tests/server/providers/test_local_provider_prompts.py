@@ -249,7 +249,7 @@ class TestPromptDecorator:
         """Test that prompts can be registered via direct function call."""
         from typing import cast
 
-        from fastmcp.prompts import DecoratedPrompt
+        from fastmcp.prompts.function_prompt import DecoratedPrompt
 
         mcp = FastMCP()
 

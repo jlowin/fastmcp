@@ -11,7 +11,8 @@ import pytest
 
 from fastmcp import FastMCP
 from fastmcp.client import Client
-from fastmcp.tools import DecoratedTool, ToolMeta, tool
+from fastmcp.tools import tool
+from fastmcp.tools.function_tool import DecoratedTool, ToolMeta
 
 
 class TestToolDecorator:

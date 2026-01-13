@@ -34,13 +34,15 @@ import mcp.types
 from mcp.types import Annotations, AnyFunction, ToolAnnotations
 
 import fastmcp
-from fastmcp.prompts.prompt import FunctionPrompt, Prompt
+from fastmcp.prompts.function_prompt import FunctionPrompt
+from fastmcp.prompts.prompt import Prompt
+from fastmcp.resources.function_resource import resource as standalone_resource
 from fastmcp.resources.resource import Resource
-from fastmcp.resources.resource import resource as standalone_resource
 from fastmcp.resources.template import ResourceTemplate
 from fastmcp.server.providers.base import Provider
 from fastmcp.server.tasks.config import TaskConfig
-from fastmcp.tools.tool import FunctionTool, Tool
+from fastmcp.tools.function_tool import FunctionTool
+from fastmcp.tools.tool import Tool
 from fastmcp.tools.tool_transform import (
     ToolTransformConfig,
     apply_transformations_to_tools,

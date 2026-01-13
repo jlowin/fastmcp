@@ -1,12 +1,5 @@
-from .resource import (
-    DecoratedResource,
-    FunctionResource,
-    Resource,
-    ResourceContent,
-    ResourceMeta,
-    ResourceResult,
-    resource,
-)
+from .function_resource import FunctionResource, ResourceMeta, resource
+from .resource import Resource, ResourceContent, ResourceResult
 from .template import ResourceTemplate
 from .types import (
     BinaryResource,
@@ -18,7 +11,6 @@ from .types import (
 
 __all__ = [
     "BinaryResource",
-    "DecoratedResource",
     "DirectoryResource",
     "FileResource",
     "FunctionResource",

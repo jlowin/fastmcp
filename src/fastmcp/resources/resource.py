@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import base64
-import inspect
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, overload
 
@@ -12,6 +11,8 @@ import mcp.types
 if TYPE_CHECKING:
     from docket import Docket
     from docket.execution import Execution
+
+    from fastmcp.resources.function_resource import FunctionResource
 
 import pydantic
 import pydantic_core
@@ -27,19 +28,8 @@ from pydantic import (
 )
 from typing_extensions import Self
 
-# Re-export from function_resource module for backwards compatibility
-from fastmcp.resources.function_resource import (
-    DecoratedResource,
-    ResourceMeta,
-    resource,
-)
-from fastmcp.server.dependencies import (
-    transform_context_annotations,
-    without_injected_parameters,
-)
 from fastmcp.server.tasks.config import TaskConfig, TaskMeta
 from fastmcp.utilities.components import FastMCPComponent
-from fastmcp.utilities.types import get_fn_name
 
 
 class ResourceContent(pydantic.BaseModel):
@@ -235,10 +225,12 @@ class Resource(FastMCPComponent):
         Field(description="Optional annotations about the resource's behavior"),
     ] = None
 
-    @staticmethod
+    @classmethod
     def from_function(
+        cls,
         fn: Callable[..., Any],
         uri: str | AnyUrl,
+        *,
         name: str | None = None,
         title: str | None = None,
         description: str | None = None,
@@ -249,6 +241,10 @@ class Resource(FastMCPComponent):
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
     ) -> FunctionResource:
+        from fastmcp.resources.function_resource import (
+            FunctionResource,
+        )
+
         return FunctionResource.from_function(
             fn=fn,
             uri=uri,
@@ -407,102 +403,34 @@ class Resource(FastMCPComponent):
         return await docket.add(lookup_key, **kwargs)()
 
 
-class FunctionResource(Resource):
-    """A resource that defers data loading by wrapping a function.
-
-    The function is only called when the resource is read, allowing for lazy loading
-    of potentially expensive data. This is particularly useful when listing resources,
-    as the function won't be called until the resource is actually accessed.
-
-    The function can return:
-    - str for text content (default)
-    - bytes for binary content
-    - other types will be converted to JSON
-    """
-
-    fn: Callable[..., Any]
-
-    @classmethod
-    def from_function(
-        cls,
-        fn: Callable[..., Any],
-        uri: str | AnyUrl,
-        name: str | None = None,
-        title: str | None = None,
-        description: str | None = None,
-        icons: list[Icon] | None = None,
-        mime_type: str | None = None,
-        tags: set[str] | None = None,
-        annotations: Annotations | None = None,
-        meta: dict[str, Any] | None = None,
-        task: bool | TaskConfig | None = None,
-    ) -> FunctionResource:
-        """Create a FunctionResource from a function."""
-        if isinstance(uri, str):
-            uri = AnyUrl(uri)
-
-        func_name = name or get_fn_name(fn)
-
-        # Normalize task to TaskConfig and validate
-        if task is None:
-            task_config = TaskConfig(mode="forbidden")
-        elif isinstance(task, bool):
-            task_config = TaskConfig.from_bool(task)
-        else:
-            task_config = task
-        task_config.validate_function(fn, func_name)
-
-        # Transform Context type annotations to Depends() for unified DI
-        fn = transform_context_annotations(fn)
-
-        # Wrap fn to handle dependency resolution internally
-        wrapped_fn = without_injected_parameters(fn)
-
-        return cls(
-            fn=wrapped_fn,
-            uri=uri,
-            name=name or get_fn_name(fn),
-            title=title,
-            description=description or inspect.getdoc(fn),
-            icons=icons,
-            mime_type=mime_type or "text/plain",
-            tags=tags or set(),
-            annotations=annotations,
-            meta=meta,
-            task_config=task_config,
-        )
-
-    async def read(
-        self,
-    ) -> str | bytes | ResourceResult:
-        """Read the resource by calling the wrapped function."""
-        # self.fn is wrapped by without_injected_parameters which handles
-        # dependency resolution internally
-        result = self.fn()
-        if inspect.isawaitable(result):
-            result = await result
-
-        # If user returned another Resource, read it recursively
-        if isinstance(result, Resource):
-            return await result.read()
-
-        return result
-
-    def register_with_docket(self, docket: Docket) -> None:
-        """Register this resource with docket for background execution.
-
-        FunctionResource registers the underlying function, which has the user's
-        Depends parameters for docket to resolve.
-        """
-        if not self.task_config.supports_tasks():
-            return
-        docket.register(self.fn, names=[self.key])
-
-
 __all__ = [
-    "DecoratedResource",
     "Resource",
     "ResourceContent",
-    "ResourceMeta",
-    "resource",
+    "ResourceResult",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    """Deprecated re-exports for backwards compatibility."""
+    deprecated_exports = {
+        "FunctionResource": "FunctionResource",
+        "resource": "resource",
+    }
+
+    if name in deprecated_exports:
+        import warnings
+
+        import fastmcp
+
+        if fastmcp.settings.deprecation_warnings:
+            warnings.warn(
+                f"Importing {name} from fastmcp.resources.resource is deprecated. "
+                f"Import from fastmcp.resources.function_resource instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        from fastmcp.resources import function_resource
+
+        return getattr(function_resource, name)
+
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

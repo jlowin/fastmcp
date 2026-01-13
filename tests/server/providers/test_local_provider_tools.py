@@ -795,7 +795,7 @@ class TestToolOutputSchema:
     async def test_manual_structured_content(self):
         from typing import cast
 
-        from fastmcp.tools import DecoratedTool
+        from fastmcp.tools.function_tool import DecoratedTool
 
         mcp = FastMCP()
 
@@ -1323,7 +1323,7 @@ class TestToolDecorator:
         """Test that tools can be registered via direct function call."""
         from typing import cast
 
-        from fastmcp.tools import DecoratedTool
+        from fastmcp.tools.function_tool import DecoratedTool
 
         mcp = FastMCP()
 

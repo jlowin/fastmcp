@@ -65,7 +65,8 @@ from fastmcp.exceptions import (
 )
 from fastmcp.mcp_config import MCPConfig
 from fastmcp.prompts import Prompt
-from fastmcp.prompts.prompt import FunctionPrompt, PromptResult
+from fastmcp.prompts.function_prompt import FunctionPrompt
+from fastmcp.prompts.prompt import PromptResult
 from fastmcp.resources.resource import Resource, ResourceResult
 from fastmcp.resources.template import ResourceTemplate
 from fastmcp.server.auth import AuthProvider
@@ -83,7 +84,8 @@ from fastmcp.server.tasks.capabilities import get_task_capabilities
 from fastmcp.server.tasks.config import TaskConfig, TaskMeta
 from fastmcp.settings import DuplicateBehavior as DuplicateBehaviorSetting
 from fastmcp.settings import Settings
-from fastmcp.tools.tool import FunctionTool, Tool, ToolResult
+from fastmcp.tools.function_tool import FunctionTool
+from fastmcp.tools.tool import Tool, ToolResult
 from fastmcp.tools.tool_transform import ToolTransformConfig
 from fastmcp.utilities.async_utils import gather
 from fastmcp.utilities.cli import log_server_banner

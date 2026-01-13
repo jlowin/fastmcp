@@ -1,11 +1,13 @@
-from .tool import DecoratedTool, FunctionTool, Tool, ToolMeta, tool
+from .function_tool import FunctionTool, ParsedFunction, ToolMeta, tool
+from .tool import Tool, ToolResult
 from .tool_transform import forward, forward_raw
 
 __all__ = [
-    "DecoratedTool",
     "FunctionTool",
+    "ParsedFunction",
     "Tool",
     "ToolMeta",
+    "ToolResult",
     "forward",
     "forward_raw",
     "tool",

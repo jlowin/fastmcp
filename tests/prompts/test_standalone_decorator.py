@@ -11,7 +11,8 @@ import pytest
 
 from fastmcp import FastMCP
 from fastmcp.client import Client
-from fastmcp.prompts import DecoratedPrompt, PromptMeta, prompt
+from fastmcp.prompts import prompt
+from fastmcp.prompts.function_prompt import DecoratedPrompt, PromptMeta
 
 
 class TestPromptDecorator:

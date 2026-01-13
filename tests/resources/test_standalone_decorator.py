@@ -11,7 +11,8 @@ import pytest
 
 from fastmcp import FastMCP
 from fastmcp.client import Client
-from fastmcp.resources import DecoratedResource, ResourceMeta, resource
+from fastmcp.resources import resource
+from fastmcp.resources.function_resource import DecoratedResource, ResourceMeta
 
 
 class TestResourceDecorator:

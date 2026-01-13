@@ -1,19 +1,11 @@
-from .prompt import (
-    DecoratedPrompt,
-    FunctionPrompt,
-    Message,
-    Prompt,
-    PromptMessage,
-    PromptMeta,
-    PromptResult,
-    prompt,
-)
+from .function_prompt import FunctionPrompt, PromptMeta, prompt
+from .prompt import Message, Prompt, PromptArgument, PromptMessage, PromptResult
 
 __all__ = [
-    "DecoratedPrompt",
     "FunctionPrompt",
     "Message",
     "Prompt",
+    "PromptArgument",
     "PromptMessage",
     "PromptMeta",
     "PromptResult",

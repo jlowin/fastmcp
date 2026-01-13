@@ -3,21 +3,30 @@
 from __future__ import annotations
 
 import inspect
+import warnings
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeAlias, runtime_checkable
+from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeVar, runtime_checkable
 
 from mcp.types import Annotations, Icon
+from pydantic import AnyUrl
 
 import fastmcp
 from fastmcp.decorators import resolve_task_config
+from fastmcp.resources.resource import Resource, ResourceResult
+from fastmcp.server.dependencies import (
+    transform_context_annotations,
+    without_injected_parameters,
+)
 from fastmcp.server.tasks.config import TaskConfig
+from fastmcp.utilities.types import get_fn_name
 
 if TYPE_CHECKING:
-    from fastmcp.resources.resource import Resource
+    from docket import Docket
+
     from fastmcp.resources.template import ResourceTemplate
 
-AnyFunction: TypeAlias = Callable[..., Any]
+F = TypeVar("F", bound=Callable[..., Any])
 
 
 @runtime_checkable
@@ -46,6 +55,155 @@ class ResourceMeta:
     task: bool | TaskConfig | None = None
 
 
+class FunctionResource(Resource):
+    """A resource that defers data loading by wrapping a function.
+
+    The function is only called when the resource is read, allowing for lazy loading
+    of potentially expensive data. This is particularly useful when listing resources,
+    as the function won't be called until the resource is actually accessed.
+
+    The function can return:
+    - str for text content (default)
+    - bytes for binary content
+    - other types will be converted to JSON
+    """
+
+    fn: Callable[..., Any]
+
+    @classmethod
+    def from_function(
+        cls,
+        fn: Callable[..., Any],
+        uri: str | AnyUrl | None = None,
+        *,
+        metadata: ResourceMeta | None = None,
+        # Keep individual params for backwards compat
+        name: str | None = None,
+        title: str | None = None,
+        description: str | None = None,
+        icons: list[Icon] | None = None,
+        mime_type: str | None = None,
+        tags: set[str] | None = None,
+        annotations: Annotations | None = None,
+        meta: dict[str, Any] | None = None,
+        task: bool | TaskConfig | None = None,
+    ) -> FunctionResource:
+        """Create a FunctionResource from a function.
+
+        Args:
+            fn: The function to wrap
+            uri: The URI for the resource (required if metadata not provided)
+            metadata: ResourceMeta object with all configuration. If provided,
+                individual parameters must not be passed.
+            name, title, etc.: Individual parameters for backwards compatibility.
+                Cannot be used together with metadata parameter.
+        """
+        # Check mutual exclusion
+        individual_params_provided = (
+            any(
+                x is not None
+                for x in [
+                    name,
+                    title,
+                    description,
+                    icons,
+                    mime_type,
+                    tags,
+                    annotations,
+                    meta,
+                    task,
+                ]
+            )
+            or uri is not None
+        )
+
+        if metadata is not None and individual_params_provided:
+            raise TypeError(
+                "Cannot pass both 'metadata' and individual parameters to from_function(). "
+                "Use metadata alone or individual parameters alone."
+            )
+
+        # Build metadata from kwargs if not provided
+        if metadata is None:
+            if uri is None:
+                raise TypeError("uri is required when metadata is not provided")
+            metadata = ResourceMeta(
+                uri=str(uri),
+                name=name,
+                title=title,
+                description=description,
+                icons=icons,
+                tags=tags,
+                mime_type=mime_type,
+                annotations=annotations,
+                meta=meta,
+                task=task,
+            )
+
+        if isinstance(metadata.uri, str):
+            uri_obj = AnyUrl(metadata.uri)
+        else:
+            uri_obj = metadata.uri
+
+        func_name = metadata.name or get_fn_name(fn)
+
+        # Normalize task to TaskConfig and validate
+        task_value = metadata.task
+        if task_value is None:
+            task_config = TaskConfig(mode="forbidden")
+        elif isinstance(task_value, bool):
+            task_config = TaskConfig.from_bool(task_value)
+        else:
+            task_config = task_value
+        task_config.validate_function(fn, func_name)
+
+        # Transform Context type annotations to Depends() for unified DI
+        fn = transform_context_annotations(fn)
+
+        # Wrap fn to handle dependency resolution internally
+        wrapped_fn = without_injected_parameters(fn)
+
+        return cls(
+            fn=wrapped_fn,
+            uri=uri_obj,
+            name=metadata.name or get_fn_name(fn),
+            title=metadata.title,
+            description=metadata.description or inspect.getdoc(fn),
+            icons=metadata.icons,
+            mime_type=metadata.mime_type or "text/plain",
+            tags=metadata.tags or set(),
+            annotations=metadata.annotations,
+            meta=metadata.meta,
+            task_config=task_config,
+        )
+
+    async def read(
+        self,
+    ) -> str | bytes | ResourceResult:
+        """Read the resource by calling the wrapped function."""
+        # self.fn is wrapped by without_injected_parameters which handles
+        # dependency resolution internally
+        result = self.fn()
+        if inspect.isawaitable(result):
+            result = await result
+
+        # If user returned another Resource, read it recursively
+        if isinstance(result, Resource):
+            return await result.read()
+
+        return result
+
+    def register_with_docket(self, docket: Docket) -> None:
+        """Register this resource with docket for background execution.
+
+        FunctionResource registers the underlying function, which has the user's
+        Depends parameters for docket to resolve.
+        """
+        if not self.task_config.supports_tasks():
+            return
+        docket.register(self.fn, names=[self.key])
+
+
 def resource(
     uri: str,
     *,
@@ -58,7 +216,7 @@ def resource(
     annotations: Annotations | dict[str, Any] | None = None,
     meta: dict[str, Any] | None = None,
     task: bool | TaskConfig | None = None,
-) -> Callable[[AnyFunction], Resource | ResourceTemplate | AnyFunction]:
+) -> Callable[[F], F]:
     """Standalone decorator to mark a function as an MCP resource.
 
     Returns the original function with metadata attached. Register with a server
@@ -73,8 +231,7 @@ def resource(
             "Use @resource('uri') instead of @resource"
         )
 
-    def create_resource(fn: AnyFunction) -> Resource | ResourceTemplate:
-        from fastmcp.resources.resource import Resource as ResourceClass
+    def create_resource(fn: Callable[..., Any]) -> FunctionResource | ResourceTemplate:
         from fastmcp.resources.template import ResourceTemplate
         from fastmcp.server.dependencies import without_injected_parameters
 
@@ -83,7 +240,22 @@ def resource(
         wrapper_fn = without_injected_parameters(fn)
         has_func_params = bool(inspect.signature(wrapper_fn).parameters)
 
+        # Create metadata first
+        resource_meta = ResourceMeta(
+            uri=uri,
+            name=name,
+            title=title,
+            description=description,
+            icons=icons,
+            tags=tags,
+            mime_type=mime_type,
+            annotations=annotations,
+            meta=meta,
+            task=resolved,
+        )
+
         if has_uri_params or has_func_params:
+            # ResourceTemplate doesn't have metadata support yet, so pass individual params
             return ResourceTemplate.from_function(
                 fn=fn,
                 uri_template=uri,
@@ -98,21 +270,9 @@ def resource(
                 task=resolved,
             )
         else:
-            return ResourceClass.from_function(
-                fn=fn,
-                uri=uri,
-                name=name,
-                title=title,
-                description=description,
-                icons=icons,
-                mime_type=mime_type,
-                tags=tags,
-                annotations=annotations,
-                meta=meta,
-                task=resolved,
-            )
+            return FunctionResource.from_function(fn, metadata=resource_meta)
 
-    def attach_metadata(fn: AnyFunction) -> AnyFunction:
+    def attach_metadata(fn: F) -> F:
         metadata = ResourceMeta(
             uri=uri,
             name=name,
@@ -129,9 +289,15 @@ def resource(
         target.__fastmcp__ = metadata  # type: ignore[attr-defined]
         return fn
 
-    def decorator(fn: AnyFunction) -> Resource | ResourceTemplate | AnyFunction:
+    def decorator(fn: F) -> F:
         if fastmcp.settings.decorator_mode == "object":
-            return create_resource(fn)
+            warnings.warn(
+                "decorator_mode='object' is deprecated and will be removed in a future version. "
+                "Decorators now return the original function with metadata attached.",
+                DeprecationWarning,
+                stacklevel=3,
+            )
+            return create_resource(fn)  # type: ignore[return-value]
         return attach_metadata(fn)
 
     return decorator

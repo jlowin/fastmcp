@@ -358,8 +358,9 @@ class Settings(BaseSettings):
 
                 - "function" (default): Decorators return the original function unchanged.
                   The function remains callable and is registered with the server normally.
-                - "object": Decorators return component objects (FunctionTool, FunctionResource,
-                  FunctionPrompt). This was the default behavior in v2.
+                - "object" (deprecated): Decorators return component objects (FunctionTool,
+                  FunctionResource, FunctionPrompt). This was the default behavior in v2 and
+                  will be removed in a future version.
                 """
             ),
         ),
