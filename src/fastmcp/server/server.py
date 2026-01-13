@@ -12,6 +12,7 @@ from collections.abc import (
     Awaitable,
     Callable,
     Collection,
+    Mapping,
     Sequence,
 )
 from contextlib import (
@@ -236,6 +237,7 @@ class FastMCP(Generic[LifespanResultT]):
         stateless_http: bool | None = None,
         sampling_handler: SamplingHandler | None = None,
         sampling_handler_behavior: Literal["always", "fallback"] | None = None,
+        tool_transformations: Mapping[str, ToolTransformConfig] | None = None,
     ):
         # Resolve on_duplicate from deprecated params (delete when removing deprecation)
         self._on_duplicate: DuplicateBehaviorSetting = _resolve_on_duplicate(
@@ -335,6 +337,19 @@ class FastMCP(Generic[LifespanResultT]):
             )
             # For backwards compatibility, initialize blocklist from exclude_tags
             self._visibility.disable(tags=set(exclude_tags))
+
+        # Handle deprecated tool_transformations parameter
+        if tool_transformations:
+            if fastmcp.settings.deprecation_warnings:
+                warnings.warn(
+                    "The tool_transformations parameter is deprecated. Use "
+                    "server.add_transform(ToolTransform({...})) instead.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+            from fastmcp.server.transforms import ToolTransform
+
+            self._transforms.append(ToolTransform(dict(tool_transformations)))
 
         self.strict_input_validation: bool = (
             strict_input_validation
@@ -949,6 +964,40 @@ class FastMCP(Generic[LifespanResultT]):
             ```
         """
         self._transforms.append(transform)
+
+    def add_tool_transformation(
+        self, tool_name: str, transformation: ToolTransformConfig
+    ) -> None:
+        """Add a tool transformation.
+
+        .. deprecated::
+            Use ``add_transform(ToolTransform({...}))`` instead.
+        """
+        if fastmcp.settings.deprecation_warnings:
+            warnings.warn(
+                "add_tool_transformation is deprecated. Use "
+                "server.add_transform(ToolTransform({tool_name: config})) instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        from fastmcp.server.transforms import ToolTransform
+
+        self.add_transform(ToolTransform({tool_name: transformation}))
+
+    def remove_tool_transformation(self, tool_name: str) -> None:
+        """Remove a tool transformation.
+
+        .. deprecated::
+            Tool transformations are now immutable. Use visibility controls instead.
+        """
+        if fastmcp.settings.deprecation_warnings:
+            warnings.warn(
+                "remove_tool_transformation is deprecated and has no effect. "
+                "Transforms are immutable once added. Use server.disable(keys=[...]) "
+                "to hide tools instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
     # -------------------------------------------------------------------------
     # Enable/Disable
