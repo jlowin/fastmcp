@@ -22,7 +22,6 @@ from mcp.types import Icon, ToolAnnotations, ToolExecution
 import fastmcp
 from fastmcp.decorators import resolve_task_config
 from fastmcp.server.dependencies import (
-    transform_context_annotations,
     without_injected_parameters,
 )
 from fastmcp.server.tasks.config import TaskConfig
@@ -36,7 +35,6 @@ from fastmcp.tools.tool import (
 from fastmcp.utilities.types import (
     NotSet,
     NotSetT,
-    create_function_without_params,
     get_cached_typeadapter,
 )
 
@@ -382,7 +380,7 @@ def tool(
             auth=auth,
         )
         target = fn.__func__ if hasattr(fn, "__func__") else fn
-        target.__fastmcp__ = metadata  # type: ignore[attr-defined]
+        target.__fastmcp__ = metadata
         return fn
 
     def decorator(fn: F, tool_name: str | None) -> F:

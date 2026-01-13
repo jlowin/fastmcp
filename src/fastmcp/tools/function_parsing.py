@@ -5,7 +5,7 @@ from __future__ import annotations
 import inspect
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Generic, TypeVar, get_type_hints
+from typing import Any, Generic, get_type_hints
 
 import mcp.types
 from pydantic import PydanticSchemaGenerationError
@@ -153,7 +153,7 @@ class ParsedFunction:
             # we ensure that no output schema is automatically generated.
             clean_output_type = replace_type(
                 output_type,
-                dict.fromkeys(  # type: ignore[arg-type]
+                dict.fromkeys(
                     (
                         Image,
                         Audio,
