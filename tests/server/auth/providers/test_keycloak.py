@@ -98,11 +98,13 @@ class TestKeycloakAuthProvider:
         assert isinstance(provider.token_verifier, JWTVerifier)
         assert provider.token_verifier.required_scopes == TEST_REQUIRED_SCOPES
         # Verify hard-coded Keycloak-specific URL patterns
+        # Type assertion needed because token_verifier is typed as TokenVerifier base class
+        jwt_verifier = provider.token_verifier
+        assert isinstance(jwt_verifier, JWTVerifier)
         assert (
-            provider.token_verifier.jwks_uri
-            == f"{TEST_REALM_URL}/protocol/openid-connect/certs"
+            jwt_verifier.jwks_uri == f"{TEST_REALM_URL}/protocol/openid-connect/certs"
         )
-        assert provider.token_verifier.issuer == TEST_REALM_URL
+        assert jwt_verifier.issuer == TEST_REALM_URL
 
     def test_init_with_env_vars(self):
         """Test initialization with environment variables."""
@@ -164,11 +166,13 @@ class TestKeycloakHardCodedEndpoints:
         )
 
         # Verify hard-coded Keycloak-specific URL patterns
+        # Type assertion needed because token_verifier is typed as TokenVerifier base class
+        jwt_verifier = provider.token_verifier
+        assert isinstance(jwt_verifier, JWTVerifier)
         assert (
-            provider.token_verifier.jwks_uri
-            == f"{TEST_REALM_URL}/protocol/openid-connect/certs"
+            jwt_verifier.jwks_uri == f"{TEST_REALM_URL}/protocol/openid-connect/certs"
         )
-        assert provider.token_verifier.issuer == TEST_REALM_URL
+        assert jwt_verifier.issuer == TEST_REALM_URL
 
 
 class TestKeycloakRoutes:
