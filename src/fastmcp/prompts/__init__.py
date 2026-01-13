@@ -1,4 +1,4 @@
-from .function_prompt import FunctionPrompt, PromptMeta, prompt
+from .function_prompt import FunctionPrompt, prompt
 from .prompt import Message, Prompt, PromptArgument, PromptMessage, PromptResult
 
 __all__ = [
@@ -7,7 +7,6 @@ __all__ = [
     "Prompt",
     "PromptArgument",
     "PromptMessage",
-    "PromptMeta",
     "PromptResult",
     "prompt",
 ]

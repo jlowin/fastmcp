@@ -1,4 +1,4 @@
-from .function_resource import FunctionResource, ResourceMeta, resource
+from .function_resource import FunctionResource, resource
 from .resource import Resource, ResourceContent, ResourceResult
 from .template import ResourceTemplate
 from .types import (
@@ -17,7 +17,6 @@ __all__ = [
     "HttpResource",
     "Resource",
     "ResourceContent",
-    "ResourceMeta",
     "ResourceResult",
     "ResourceTemplate",
     "TextResource",
