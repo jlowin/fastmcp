@@ -1,32 +1,33 @@
 ---
 title: Authorization
 sidebarTitle: Authorization
-description: Control access to tools using callable-based authorization checks that filter visibility and enforce permissions.
+description: Control access to components using callable-based authorization checks that filter visibility and enforce permissions.
 icon: shield-halved
+tag: NEW
 ---
 
 import { VersionBadge } from "/snippets/version-badge.mdx"
 
 <VersionBadge version="3.0.0" />
 
-Authorization controls what authenticated users can do with your FastMCP server. While [authentication](/servers/auth/authentication) verifies identity (who you are), authorization determines access (what you can do). FastMCP provides a callable-based authorization system that works at both the tool level and globally via middleware.
+Authorization controls what authenticated users can do with your FastMCP server. While [authentication](/servers/auth/authentication) verifies identity (who you are), authorization determines access (what you can do). FastMCP provides a callable-based authorization system that works at both the component level and globally via middleware.
 
 The authorization model centers on a simple concept: callable functions that receive context about the current request and return `True` to allow access or `False` to deny it. Multiple checks combine with AND logic, meaning all checks must pass for access to be granted.
 
 <Note>
-Authorization relies on OAuth tokens which are only available with HTTP transports (SSE, Streamable HTTP). In STDIO mode, there's no OAuth mechanism, so `get_access_token()` returns `None`. Tools with auth checks like `require_auth` will be hidden from STDIO clients.
+Authorization relies on OAuth tokens which are only available with HTTP transports (SSE, Streamable HTTP). In STDIO mode, there's no OAuth mechanism, so `get_access_token()` returns `None` and all auth checks are skipped.
 </Note>
 
 ## Auth Checks
 
-An auth check is any callable that accepts an `AuthContext` and returns a boolean. The `AuthContext` provides access to the current token (if any) and the tool being accessed.
+An auth check is any callable that accepts an `AuthContext` and returns a boolean. The `AuthContext` provides access to the current token (if any) and the component being accessed.
 
 ```python
 from fastmcp.server.auth import AuthContext
 
 def my_custom_check(ctx: AuthContext) -> bool:
     # ctx.token is AccessToken | None
-    # ctx.tool is the Tool being accessed
+    # ctx.component is the Tool, Resource, or Prompt being accessed
     return ctx.token is not None and "special" in ctx.token.scopes
 ```
 
@@ -71,7 +72,7 @@ def read_write_operation() -> str:
 
 ### restrict_tag
 
-Tag-based restrictions apply scope requirements conditionally. If a tool has the specified tag, the token must have the required scopes. Tools without the tag are unaffected.
+Tag-based restrictions apply scope requirements conditionally. If a component has the specified tag, the token must have the required scopes. Components without the tag are unaffected.
 
 ```python
 from fastmcp import FastMCP
@@ -96,7 +97,7 @@ def public_tool() -> str:
     return "Anyone can access"
 ```
 
-## Combining Checks
+### Combining Checks
 
 Multiple auth checks can be combined by passing a list. All checks must pass for authorization to succeed (AND logic).
 
@@ -112,9 +113,9 @@ def secure_admin_action() -> str:
     return "Secure admin action"
 ```
 
-## Custom Auth Checks
+### Custom Auth Checks
 
-Any callable that accepts `AuthContext` and returns `bool` can serve as an auth check. This enables authorization logic based on token claims, tool metadata, or external systems.
+Any callable that accepts `AuthContext` and returns `bool` can serve as an auth check. This enables authorization logic based on token claims, component metadata, or external systems.
 
 ```python
 from fastmcp import FastMCP
@@ -148,84 +149,57 @@ def advanced_feature() -> str:
     return "Advanced feature"
 ```
 
-Lambda functions work for simple inline checks.
-
-```python
-from fastmcp import FastMCP
-
-mcp = FastMCP("Lambda Auth Server")
-
-@mcp.tool(auth=lambda ctx: ctx.token and ctx.token.claims.get("level", 0) >= 5)
-def level_restricted_tool() -> str:
-    """Requires level 5+ in token claims."""
-    return "High level access granted"
-```
-
-### Exception Handling in Auth Checks
-
 Auth checks can raise exceptions for explicit denial with custom messages:
 
 - **`AuthorizationError`**: Propagates with its custom message, useful for explaining why access was denied
 - **Other exceptions**: Masked for security (logged internally, treated as denial)
 
 ```python
-from fastmcp import FastMCP
 from fastmcp.server.auth import AuthContext
 from fastmcp.exceptions import AuthorizationError
-
-mcp = FastMCP("Exception Auth Server")
 
 def require_verified_email(ctx: AuthContext) -> bool:
     """Require verified email with explicit denial message."""
     if ctx.token is None:
         raise AuthorizationError("Authentication required")
     if not ctx.token.claims.get("email_verified"):
-        raise AuthorizationError("Email verification required to access this tool")
+        raise AuthorizationError("Email verification required")
     return True
-
-@mcp.tool(auth=require_verified_email)
-def sensitive_operation() -> str:
-    """Only accessible to users with verified email."""
-    return "Operation completed"
 ```
 
-This pattern is useful when you want to provide actionable feedback to clients about why authorization failed.
+## Component-Level Authorization
 
-## Tool-Level Authorization
-
-The `auth` parameter on `@mcp.tool` controls visibility of individual tools. When a tool has auth checks that fail for the current request, it is hidden from `list_tools` responses. The tool simply doesn't appear in the available tools list.
+The `auth` parameter on decorators controls visibility of individual components. When auth checks fail for the current request, the component is hidden from list responses—it simply doesn't appear.
 
 ```python
 from fastmcp import FastMCP
 from fastmcp.server.auth import require_auth, require_scopes
 
-mcp = FastMCP("Tool Auth Server")
-
-@mcp.tool
-def public_tool() -> str:
-    """Visible to everyone."""
-    return "Public"
+mcp = FastMCP("Component Auth Server")
 
 @mcp.tool(auth=require_auth)
 def authenticated_tool() -> str:
     """Only visible to authenticated users."""
     return "Authenticated"
 
-@mcp.tool(auth=require_scopes("admin"))
-def admin_tool() -> str:
+@mcp.resource("secret://data", auth=require_scopes("read"))
+def secret_resource() -> str:
+    """Only visible to users with 'read' scope."""
+    return "Secret data"
+
+@mcp.prompt(auth=require_scopes("admin"))
+def admin_prompt() -> str:
     """Only visible to users with 'admin' scope."""
-    return "Admin"
+    return "Admin prompt content"
 ```
 
-An unauthenticated client sees only `public_tool`. An authenticated client without the "admin" scope sees `public_tool` and `authenticated_tool`. An authenticated client with the "admin" scope sees all three tools.
-
 <Warning>
-Tool-level `auth` only controls visibility in `list_tools`. It does not block direct tool calls. If a client knows a tool name, they can attempt to call it directly. Use `AuthMiddleware` to enforce authorization on tool execution.
+Component-level `auth` only controls visibility in list operations. It does not block direct access. Use `AuthMiddleware` to enforce authorization on execution.
 </Warning>
 
-## AuthMiddleware
+## Server-Level Authorization
 
-For server-wide authorization enforcement, use `AuthMiddleware`. This middleware applies auth checks globally to all tools and provides two critical functions: filtering `list_tools` responses and enforcing authorization on `call_tool` requests.
+For server-wide authorization enforcement, use `AuthMiddleware`. This middleware applies auth checks globally to all components—filtering list responses and blocking unauthorized execution.
 
 ```python
 from fastmcp import FastMCP
@@ -245,18 +219,16 @@ def any_tool() -> str:
 
 ### Filtering vs Enforcement
 
-Understanding the difference between tool-level auth and `AuthMiddleware` is important for building secure servers:
+| Behavior | Component-level `auth` | `AuthMiddleware` |
+|----------|------------------------|------------------|
+| Filters list responses | Yes | Yes |
+| Blocks execution | No | Yes (raises `AuthorizationError`) |
 
-| Behavior | Tool-level `auth` | `AuthMiddleware` |
-|----------|-------------------|------------------|
-| Filters `list_tools` | Yes | Yes |
-| Blocks `call_tool` | No | Yes (raises `AuthorizationError`) |
-
-Tool-level auth is useful for hiding tools from unauthorized users while still allowing advanced clients to call them if needed. `AuthMiddleware` provides complete enforcement by raising `AuthorizationError` when unauthorized requests attempt to execute tools.
+Component-level auth is useful for hiding components from unauthorized users while still allowing advanced clients to access them directly. `AuthMiddleware` provides complete enforcement by raising `AuthorizationError` when unauthorized requests attempt execution.
 
 ### Tag-Based Global Authorization
 
-A common pattern uses `restrict_tag` with `AuthMiddleware` to apply scope requirements based on tool tags.
+A common pattern uses `restrict_tag` with `AuthMiddleware` to apply scope requirements based on component tags.
 
 ```python
 from fastmcp import FastMCP
@@ -283,7 +255,7 @@ def update_record(id: str, data: str) -> str:
 
 @mcp.tool
 def read_record(id: str) -> str:
-    """No tag restrictions, accessible to all (no auth required by this middleware)."""
+    """No tag restrictions, accessible to all."""
     return f"Record {id}"
 ```
 
@@ -323,7 +295,9 @@ def user_dashboard() -> dict:
     }
 ```
 
-## AccessToken
+## Reference
+
+### AccessToken
 
 The `AccessToken` object contains information extracted from the OAuth token.
 
@@ -335,48 +309,40 @@ The `AccessToken` object contains information extracted from the OAuth token.
 | `expires_at` | `datetime \| None` | Token expiration time |
 | `claims` | `dict[str, Any]` | All JWT claims or custom token data |
 
-The `claims` dictionary contains the full decoded token payload for JWT tokens, enabling authorization decisions based on any claim present in the token.
-
-## AuthContext
+### AuthContext
 
 The `AuthContext` dataclass is passed to all auth check functions.
 
 | Property | Type | Description |
 |----------|------|-------------|
 | `token` | `AccessToken \| None` | Current access token, or `None` if unauthenticated |
-| `tool` | `Tool` | The tool being accessed |
+| `component` | `Tool \| Resource \| Prompt` | The component being accessed |
 
-Access to the tool object enables authorization decisions based on tool metadata like tags, name, or custom properties.
+Access to the component object enables authorization decisions based on metadata like tags, name, or custom properties.
 
 ```python
 from fastmcp.server.auth import AuthContext
 
 def require_matching_tag(ctx: AuthContext) -> bool:
-    """Require a scope matching each of the tool's tags."""
+    """Require a scope matching each of the component's tags."""
     if ctx.token is None:
         return False
     user_scopes = set(ctx.token.scopes)
-    return ctx.tool.tags.issubset(user_scopes)
+    return ctx.component.tags.issubset(user_scopes)
 ```
 
-## Type Reference
-
-All authorization types are exported from `fastmcp.server.auth`:
+### Imports
 
 ```python
 from fastmcp.server.auth import (
     AccessToken,       # Token with .token, .client_id, .scopes, .expires_at, .claims
-    AuthContext,       # Context with .token, .tool
+    AuthContext,       # Context with .token, .component
     AuthCheck,         # Type alias: Callable[[AuthContext], bool]
     require_auth,      # Built-in: requires any valid token
     require_scopes,    # Built-in: requires specific scopes
     restrict_tag,      # Built-in: tag-based scope requirements
     run_auth_checks,   # Utility: run checks with AND logic
 )
-```
 
-The `AuthMiddleware` is exported from `fastmcp.server.middleware`:
-
-```python
 from fastmcp.server.middleware import AuthMiddleware
 ```
