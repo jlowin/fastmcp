@@ -526,7 +526,7 @@ def tool(
     if isinstance(name_or_fn, classmethod):
         raise TypeError(
             "To decorate a classmethod, use @classmethod above @tool. "
-            "See https://gofastmcp.com/patterns/decorating-methods"
+            "See https://gofastmcp.com/servers/tools#using-with-methods"
         )
 
     def create_tool(fn: Callable[..., Any], tool_name: str | None) -> FunctionTool:

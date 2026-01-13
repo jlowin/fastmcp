@@ -572,7 +572,7 @@ class LocalProvider(Provider):
         if isinstance(name_or_fn, classmethod):
             raise TypeError(
                 "To decorate a classmethod, use @classmethod above @tool. "
-                "See https://gofastmcp.com/patterns/decorating-methods"
+                "See https://gofastmcp.com/servers/tools#using-with-methods"
             )
 
         def decorate_and_register(
@@ -595,7 +595,7 @@ class LocalProvider(Provider):
                     f"            ...\n\n"
                     f"    obj = MyClass()\n"
                     f"    mcp.add_tool(obj.{fn_name})\n\n"
-                    f"See https://gofastmcp.com/patterns/decorating-methods"
+                    f"See https://gofastmcp.com/servers/tools#using-with-methods"
                 )
 
             resolved_task: bool | TaskConfig = task if task is not None else False
@@ -762,7 +762,7 @@ class LocalProvider(Provider):
                     f"            ...\n\n"
                     f"    obj = MyClass()\n"
                     f"    mcp.add_resource(obj.{fn_name})\n\n"
-                    f"See https://gofastmcp.com/patterns/decorating-methods"
+                    f"See https://gofastmcp.com/servers/tools#using-with-methods"
                 )
 
             if fastmcp.settings.decorator_mode == "object":
@@ -904,7 +904,7 @@ class LocalProvider(Provider):
         if isinstance(name_or_fn, classmethod):
             raise TypeError(
                 "To decorate a classmethod, use @classmethod above @prompt. "
-                "See https://gofastmcp.com/patterns/decorating-methods"
+                "See https://gofastmcp.com/servers/tools#using-with-methods"
             )
 
         def decorate_and_register(
@@ -927,7 +927,7 @@ class LocalProvider(Provider):
                     f"            ...\n\n"
                     f"    obj = MyClass()\n"
                     f"    mcp.add_prompt(obj.{fn_name})\n\n"
-                    f"See https://gofastmcp.com/patterns/decorating-methods"
+                    f"See https://gofastmcp.com/servers/tools#using-with-methods"
                 )
 
             resolved_task: bool | TaskConfig = task if task is not None else False
