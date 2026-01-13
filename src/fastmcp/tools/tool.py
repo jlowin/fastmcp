@@ -462,6 +462,7 @@ def __getattr__(name: str) -> Any:
     deprecated_exports = {
         "FunctionTool": "FunctionTool",
         "ParsedFunction": "ParsedFunction",
+        "tool": "tool",
     }
 
     if name in deprecated_exports:

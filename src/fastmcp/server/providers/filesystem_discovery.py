@@ -234,6 +234,7 @@ def extract_components(module: ModuleType) -> list[FastMCPComponent]:
                     task=resolved_task,
                     exclude_args=meta.exclude_args,
                     serializer=meta.serializer,
+                    auth=meta.auth,
                 )
                 components.append(tool)
             elif isinstance(meta, ResourceMeta):
@@ -255,6 +256,7 @@ def extract_components(module: ModuleType) -> list[FastMCPComponent]:
                         annotations=meta.annotations,
                         meta=meta.meta,
                         task=resolved_task,
+                        auth=meta.auth,
                     )
                 else:
                     resource = Resource.from_function(
@@ -269,6 +271,7 @@ def extract_components(module: ModuleType) -> list[FastMCPComponent]:
                         annotations=meta.annotations,
                         meta=meta.meta,
                         task=resolved_task,
+                        auth=meta.auth,
                     )
                 components.append(resource)
             elif isinstance(meta, PromptMeta):
@@ -282,6 +285,7 @@ def extract_components(module: ModuleType) -> list[FastMCPComponent]:
                     tags=meta.tags,
                     meta=meta.meta,
                     task=resolved_task,
+                    auth=meta.auth,
                 )
                 components.append(prompt)
 

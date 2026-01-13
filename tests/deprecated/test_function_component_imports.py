@@ -35,6 +35,17 @@ class TestDeprecatedFunctionToolImports:
 
             assert ParsedFunction is CanonicalParsedFunction
 
+    def test_tool_decorator_from_tool_module(self):
+        with temporary_settings(deprecation_warnings=True):
+            with pytest.warns(
+                DeprecationWarning, match="Import from fastmcp.tools.function_tool"
+            ):
+                from fastmcp.tools.tool import tool
+
+            from fastmcp.tools.function_tool import tool as canonical_tool
+
+            assert tool is canonical_tool
+
     def test_no_warning_when_disabled(self):
         with temporary_settings(deprecation_warnings=False):
             with warnings.catch_warnings():
