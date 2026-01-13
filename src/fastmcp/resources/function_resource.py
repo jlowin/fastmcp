@@ -145,11 +145,9 @@ class FunctionResource(Resource):
                 auth=auth,
             )
 
-        if isinstance(metadata.uri, str):
-            uri_obj = AnyUrl(metadata.uri)
-        else:
-            uri_obj = metadata.uri
+        uri_obj = AnyUrl(metadata.uri)
 
+        # Get function name before any transformations
         func_name = metadata.name or get_fn_name(fn)
 
         # Normalize task to TaskConfig and validate
@@ -171,7 +169,7 @@ class FunctionResource(Resource):
         return cls(
             fn=wrapped_fn,
             uri=uri_obj,
-            name=metadata.name or get_fn_name(fn),
+            name=func_name,
             title=metadata.title,
             description=metadata.description or inspect.getdoc(fn),
             icons=metadata.icons,
