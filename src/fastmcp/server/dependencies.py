@@ -29,6 +29,7 @@ from starlette.requests import Request
 from fastmcp.exceptions import FastMCPError
 from fastmcp.server.auth import AccessToken
 from fastmcp.server.http import _current_http_request
+from fastmcp.utilities.async_utils import call_sync_fn_in_threadpool
 from fastmcp.utilities.types import find_kwarg_by_type, is_class_member_of_type
 
 if TYPE_CHECKING:
@@ -46,6 +47,7 @@ __all__ = [
     "CurrentFastMCP",
     "CurrentWorker",
     "Progress",
+    "call_sync_fn_in_threadpool",
     "get_access_token",
     "get_context",
     "get_http_headers",
@@ -471,12 +473,15 @@ def without_injected_parameters(fn: Callable[..., Any]) -> Callable[..., Any]:
     new_sig = inspect.Signature(user_params)
 
     # Create async wrapper that handles dependency resolution
+    fn_is_async = inspect.iscoroutinefunction(fn)
+
     async def wrapper(**user_kwargs: Any) -> Any:
         async with resolve_dependencies(fn, user_kwargs) as resolved_kwargs:
-            result = fn(**resolved_kwargs)
-            if inspect.isawaitable(result):
-                result = await result
-            return result
+            if fn_is_async:
+                return await fn(**resolved_kwargs)
+            else:
+                # Run sync functions in threadpool to avoid blocking the event loop
+                return await call_sync_fn_in_threadpool(fn, **resolved_kwargs)
 
     # Set wrapper metadata (only parameter annotations, not return type)
     wrapper.__signature__ = new_sig  # type: ignore[attr-defined]
