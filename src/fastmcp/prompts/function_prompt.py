@@ -133,7 +133,8 @@ class FunctionPrompt(Prompt):
 
         if func_name == "<lambda>":
             raise ValueError("You must provide a name for lambda functions")
-            # Reject functions with *args or **kwargs
+
+        # Reject functions with *args or **kwargs
         sig = inspect.signature(fn)
         for param in sig.parameters.values():
             if param.kind == inspect.Parameter.VAR_POSITIONAL:
