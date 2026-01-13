@@ -233,11 +233,12 @@ class HeadlessOAuth(OAuth):
     def __init__(self, mcp_url: str, **kwargs):
         """Initialize HeadlessOAuth with stored response tracking."""
         self._stored_response = None
+        # Pass kwargs directly to session (same signature as OAuth config)
         super().__init__(mcp_url, **kwargs)
 
     async def redirect_handler(self, authorization_url: str) -> None:
         """Make HTTP request to authorization URL and store response for callback handler."""
-        async with httpx.AsyncClient() as client:
+        async with self.httpx_client_factory() as client:
             response = await client.get(authorization_url, follow_redirects=False)
             self._stored_response = response
 

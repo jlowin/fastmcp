@@ -204,7 +204,7 @@ max_lines = 731
 
 [[rules]]
 path = "src/fastmcp/client/client.py"
-max_lines = 1722
+max_lines = 1725
 
 [[rules]]
 path = "src/fastmcp/server/providers/proxy.py"
@@ -284,7 +284,7 @@ max_lines = 714
 
 [[rules]]
 path = "src/fastmcp/client/transports.py"
-max_lines = 1208
+max_lines = 1240
 
 [[rules]]
 path = "docs/docs.json"

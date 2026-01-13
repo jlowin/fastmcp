@@ -12,6 +12,7 @@ from key_value.aio.adapters.pydantic import PydanticAdapter
 from key_value.aio.protocols import AsyncKeyValue
 from key_value.aio.stores.memory import MemoryStore
 from mcp.client.auth import OAuthClientProvider, TokenStorage
+from mcp.client.auth.utils import is_valid_client_metadata_url
 from mcp.shared._httpx_utils import McpHttpClientFactory
 from mcp.shared.auth import (
     OAuthClientInformationFull,
@@ -135,35 +136,113 @@ class TokenStorageAdapter(TokenStorage):
         )
 
 
-class OAuth(OAuthClientProvider):
+class OAuth:
     """
-    OAuth client provider for MCP servers with browser-based authentication.
+    OAuth configuration for MCP client authentication.
 
-    This class provides OAuth authentication for FastMCP clients by opening
-    a browser for user authorization and running a local callback server.
+    This is a configuration object that specifies how OAuth authentication should
+    work. The actual authentication provider is created by the transport when
+    the client connects.
+
+    Supports two registration modes:
+    - Dynamic Client Registration (DCR): Traditional OAuth where the client
+      registers with the server and receives a client_id/secret. This is the
+      default when no client_metadata_url is provided.
+    - Client ID Metadata Document (CIMD): URL-based identity where the client
+      hosts a metadata document and uses that URL as its client_id. This is
+      recommended for production clients as it provides verifiable identity.
+
+    Example:
+        # DCR (quick scripts, testing)
+        client = Client("https://mcp.example.com", auth=OAuth())
+
+        # CIMD (recommended for production)
+        client = Client(
+            "https://mcp.example.com",
+            auth=OAuth(client_metadata_url="https://myapp.com/oauth/client.json"),
+        )
     """
 
     def __init__(
         self,
-        mcp_url: str,
         scopes: str | list[str] | None = None,
         client_name: str = "FastMCP Client",
+        client_metadata_url: str | None = None,
         token_storage: AsyncKeyValue | None = None,
         additional_client_metadata: dict[str, Any] | None = None,
         callback_port: int | None = None,
         httpx_client_factory: McpHttpClientFactory | None = None,
     ):
         """
-        Initialize OAuth client provider for an MCP server.
+        Initialize OAuth configuration.
 
         Args:
-            mcp_url: Full URL to the MCP endpoint (e.g. "http://host/mcp/sse/")
-            scopes: OAuth scopes to request. Can be a
-            space-separated string or a list of strings.
-            client_name: Name for this client during registration
-            token_storage: An AsyncKeyValue-compatible token store, tokens are stored in memory if not provided
-            additional_client_metadata: Extra fields for OAuthClientMetadata
-            callback_port: Fixed port for OAuth callback (default: random available port)
+            scopes: OAuth scopes to request. Can be a space-separated string
+                or a list of strings.
+            client_name: Name for this client during registration (DCR only).
+            client_metadata_url: URL-based client ID (CIMD). When provided and
+                the server advertises CIMD support, this URL is used as the
+                client_id instead of Dynamic Client Registration. Must be an
+                HTTPS URL with a non-root path (e.g., "https://myapp.com/oauth/client.json").
+            token_storage: An AsyncKeyValue-compatible token store. Tokens are
+                stored in memory if not provided (with a warning).
+            additional_client_metadata: Extra fields for OAuthClientMetadata.
+            callback_port: Fixed port for OAuth callback (default: random available port).
+            httpx_client_factory: Factory for creating httpx clients.
+        """
+        # Validate client_metadata_url if provided
+        if client_metadata_url is not None and not is_valid_client_metadata_url(
+            client_metadata_url
+        ):
+            raise ValueError(
+                f"client_metadata_url must be a valid HTTPS URL with a non-root pathname, "
+                f"got: {client_metadata_url}"
+            )
+
+        self.scopes = scopes
+        self.client_name = client_name
+        self.client_metadata_url = client_metadata_url
+        self.token_storage = token_storage
+        self.additional_client_metadata = additional_client_metadata
+        self.callback_port = callback_port
+        self.httpx_client_factory = httpx_client_factory
+
+
+class _OAuthSession(OAuthClientProvider):
+    """
+    Internal OAuth provider implementation.
+
+    This is the actual httpx.Auth implementation that handles the OAuth flow.
+    It is created by the transport from OAuth configuration values and the
+    target MCP URL.
+
+    Users should not instantiate this directly - use OAuth config with a transport.
+    """
+
+    def __init__(
+        self,
+        mcp_url: str,
+        *,
+        scopes: str | list[str] | None = None,
+        client_name: str = "FastMCP Client",
+        client_metadata_url: str | None = None,
+        token_storage: AsyncKeyValue | None = None,
+        additional_client_metadata: dict[str, Any] | None = None,
+        callback_port: int | None = None,
+        httpx_client_factory: McpHttpClientFactory | None = None,
+    ):
+        """
+        Initialize OAuth session for a specific MCP server.
+
+        Args:
+            mcp_url: Full URL to the MCP endpoint.
+            scopes: OAuth scopes to request.
+            client_name: Name for this client during registration.
+            client_metadata_url: URL-based client ID (CIMD).
+            token_storage: Token storage backend.
+            additional_client_metadata: Extra fields for OAuthClientMetadata.
+            callback_port: Fixed port for OAuth callback.
+            httpx_client_factory: Factory for creating httpx clients.
         """
         # Normalize the MCP URL (strip trailing slashes for consistency)
         mcp_url = mcp_url.rstrip("/")
@@ -186,7 +265,6 @@ class OAuth(OAuthClientProvider):
             redirect_uris=[AnyHttpUrl(redirect_uri)],
             grant_types=["authorization_code", "refresh_token"],
             response_types=["code"],
-            # token_endpoint_auth_method="client_secret_post",
             scope=scopes_str,
             **(additional_client_metadata or {}),
         )
@@ -201,7 +279,7 @@ class OAuth(OAuthClientProvider):
                 message="Using in-memory token storage -- tokens will be lost when the client restarts. "
                 + "For persistent storage across multiple MCP servers, provide an encrypted AsyncKeyValue backend. "
                 + "See https://gofastmcp.com/clients/auth/oauth#token-storage for details.",
-                stacklevel=2,
+                stacklevel=4,
             )
 
         # Use full URL for token storage to properly separate tokens per MCP endpoint
@@ -219,6 +297,7 @@ class OAuth(OAuthClientProvider):
             storage=self.token_storage_adapter,
             redirect_handler=self.redirect_handler,
             callback_handler=self.callback_handler,
+            client_metadata_url=client_metadata_url,
         )
 
     async def _initialize(self) -> None:
