@@ -27,11 +27,15 @@ class KeycloakAuthProvider(RemoteAuthProvider):
     solves a specific MCP compatibility issue. The proxy only intercepts DCR responses to fix
     a single field - all other OAuth operations go directly to Keycloak.
 
-    ## Why a Minimal Proxy is Needed
+    ## Why a Minimal Proxy is Needed (for older Keycloak versions)
 
-    Keycloak has a known limitation with Dynamic Client Registration: it ignores the client's
-    requested `token_endpoint_auth_method` parameter and always returns `client_secret_basic`,
-    even when clients explicitly request `client_secret_post` (which MCP requires per RFC 9110).
+    **Note:** Keycloak fixed this issue in PR #45309 (merged January 12, 2026). Once you upgrade
+    to a Keycloak version that includes this fix, the proxy workaround will no longer be necessary.
+
+    Older Keycloak versions have a known limitation with Dynamic Client Registration: they ignore
+    the client's requested `token_endpoint_auth_method` parameter and always return
+    `client_secret_basic`, even when clients explicitly request `client_secret_post` (which MCP
+    requires per RFC 9110).
 
     This minimal proxy works around this by:
     1. Advertising itself as the authorization server to MCP clients
@@ -42,6 +46,8 @@ class KeycloakAuthProvider(RemoteAuthProvider):
     - Authorization flows (users authenticate directly with Keycloak)
     - Token issuance (tokens come directly from Keycloak)
     - Token validation (JWT signatures verified against Keycloak's keys)
+
+    **Reference:** https://github.com/keycloak/keycloak/pull/45309
 
     ## Setup Requirements
 
@@ -182,6 +188,9 @@ class KeycloakAuthProvider(RemoteAuthProvider):
             token_endpoint_auth_method field in the response, changing "client_secret_basic"
             to "client_secret_post" for MCP compatibility. All other fields are passed through
             unchanged.
+
+            Note: This workaround is only needed for Keycloak versions prior to the fix in PR #45309
+            (merged January 12, 2026). Future Keycloak releases will respect the requested method.
             """
             try:
                 body = await request.body()

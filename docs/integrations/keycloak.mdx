@@ -13,7 +13,7 @@ import { VersionBadge } from "/snippets/version-badge.mdx"
 This guide shows you how to secure your FastMCP server using **Keycloak OAuth**. This integration uses the [**Remote OAuth**](/servers/auth/remote-oauth) pattern with Dynamic Client Registration (DCR), where Keycloak handles user login and your FastMCP server validates the tokens.
 
 <Note>
-**MCP Compatibility Note**: While Keycloak has built-in support for Dynamic Client Registration (DCR), there is an important MCP compatibility limitation. Keycloak ignores the client's requested `token_endpoint_auth_method` and always returns `client_secret_basic`, but the MCP specification requires `client_secret_post`. The KeycloakAuthProvider works around this issue by acting as a minimal proxy that intercepts DCR responses from Keycloak and fixes this field automatically. All other OAuth functionality (authorization, token issuance, user authentication) is handled directly by Keycloak.
+**MCP Compatibility Note**: Older Keycloak versions (prior to the fix in [PR #45309](https://github.com/keycloak/keycloak/pull/45309), merged January 12, 2026) have a limitation where they ignore the client's requested `token_endpoint_auth_method` and always return `client_secret_basic`, but the MCP specification requires `client_secret_post`. The KeycloakAuthProvider includes a minimal proxy workaround that intercepts DCR responses from Keycloak and fixes this field automatically. All other OAuth functionality (authorization, token issuance, user authentication) is handled directly by Keycloak. Once you upgrade to a Keycloak version that includes the fix, the proxy workaround will no longer have any effect.
 </Note>
 
 ## Configuration
