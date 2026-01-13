@@ -858,7 +858,9 @@ class OAuthProxy(OAuthProvider):
 
         # CIMD configuration
         self._enable_cimd: bool = enable_cimd
-        self._cimd_trust_policy: CIMDTrustPolicy = cimd_trust_policy or CIMDTrustPolicy()
+        self._cimd_trust_policy: CIMDTrustPolicy = (
+            cimd_trust_policy or CIMDTrustPolicy()
+        )
         self._cimd_fetcher: CIMDFetcher = CIMDFetcher(
             trust_policy=self._cimd_trust_policy,
         )
@@ -1084,14 +1086,16 @@ class OAuthProxy(OAuthProvider):
 
         # Create synthetic client from CIMD document
         # Use ProxyDCRClient to get redirect_uri pattern matching support
+        # CIMD redirect_uris may contain wildcards (e.g., http://localhost:*/callback),
+        # so we use allowed_redirect_uri_patterns for validation
         client = ProxyDCRClient(
             client_id=client_id_url,
             client_secret=None,  # CIMD clients don't use secrets
-            redirect_uris=cimd_doc.redirect_uris or [],
+            redirect_uris=None,  # Use patterns instead for wildcard support
             grant_types=cimd_doc.grant_types,
             scope=cimd_doc.scope or self._default_scope_str,
             token_endpoint_auth_method="none",  # CIMD requires "none" or "private_key_jwt"
-            allowed_redirect_uri_patterns=None,  # Use exact match from CIMD doc
+            allowed_redirect_uri_patterns=cimd_doc.redirect_uris,  # Patterns support wildcards
             client_name=cimd_doc.client_name,
         )
 
@@ -1898,22 +1902,6 @@ class OAuthProxy(OAuthProvider):
                         methods=["GET", "POST"],
                     )
                 )
-            # Replace the metadata endpoint to add CIMD support flag
-            elif (
-                isinstance(route, Route)
-                and route.path.startswith("/.well-known/oauth-authorization-server")
-                and route.methods is not None
-                and "GET" in route.methods
-            ):
-                # Create a wrapper that adds CIMD support to the metadata
-                original_endpoint = route.endpoint
-                custom_routes.append(
-                    Route(
-                        path=route.path,
-                        endpoint=self._create_cimd_metadata_handler(original_endpoint),
-                        methods=route.methods,
-                    )
-                )
             else:
                 # Keep all other standard OAuth routes unchanged
                 custom_routes.append(route)
@@ -1936,91 +1924,6 @@ class OAuthProxy(OAuthProvider):
         )
 
         return custom_routes
-
-    def _create_cimd_metadata_handler(
-        self, original_endpoint: Any
-    ) -> Any:
-        """Create a metadata endpoint handler that adds CIMD support flag.
-
-        Wraps the SDK's metadata handler to add client_id_metadata_document_supported=True
-        when CIMD is enabled.
-        """
-
-        async def cimd_metadata_handler(
-            scope: dict[str, Any], receive: Any, send: Any
-        ) -> None:
-            """ASGI handler that modifies metadata response to add CIMD flag."""
-            # Capture the response
-            response_body: list[bytes] = []
-            response_started = False
-            original_headers: list[tuple[bytes, bytes]] = []
-            original_status: int = 200
-
-            async def capture_send(message: dict[str, Any]) -> None:
-                nonlocal response_started, original_headers, original_status
-
-                if message["type"] == "http.response.start":
-                    response_started = True
-                    original_status = message["status"]
-                    original_headers = list(message.get("headers", []))
-                elif message["type"] == "http.response.body":
-                    body = message.get("body", b"")
-                    if body:
-                        response_body.append(body)
-
-            # Call original handler to capture response
-            await original_endpoint(scope, receive, capture_send)
-
-            # Parse and modify the response if it's JSON
-            if response_started and response_body:
-                try:
-                    full_body = b"".join(response_body)
-                    metadata_dict = json.loads(full_body.decode("utf-8"))
-
-                    # Add CIMD support flag if enabled
-                    if self._enable_cimd:
-                        metadata_dict["client_id_metadata_document_supported"] = True
-
-                    # Re-encode the modified response
-                    modified_body = json.dumps(metadata_dict).encode("utf-8")
-
-                    # Update Content-Length header
-                    new_headers = [
-                        (k, v)
-                        for k, v in original_headers
-                        if k.lower() != b"content-length"
-                    ]
-                    new_headers.append(
-                        (b"content-length", str(len(modified_body)).encode())
-                    )
-
-                    # Send modified response
-                    await send(
-                        {
-                            "type": "http.response.start",
-                            "status": original_status,
-                            "headers": new_headers,
-                        }
-                    )
-                    await send(
-                        {
-                            "type": "http.response.body",
-                            "body": modified_body,
-                        }
-                    )
-                except (json.JSONDecodeError, UnicodeDecodeError):
-                    # If we can't parse it, send original response
-                    await send(
-                        {
-                            "type": "http.response.start",
-                            "status": original_status,
-                            "headers": original_headers,
-                        }
-                    )
-                    for chunk in response_body:
-                        await send({"type": "http.response.body", "body": chunk})
-
-        return cimd_metadata_handler
 
     # -------------------------------------------------------------------------
     # IdP Callback Forwarding
@@ -2416,8 +2319,12 @@ class OAuthProxy(OAuthProvider):
         client_name = getattr(client, "client_name", None) if client else None
 
         # Check if this is a CIMD client
-        is_cimd_client = hasattr(client, "_cimd_document") and client._cimd_document is not None  # type: ignore[union-attr]
-        cimd_domain = self._cimd_fetcher.get_domain(txn["client_id"]) if is_cimd_client else None
+        is_cimd_client = (
+            hasattr(client, "_cimd_document") and client._cimd_document is not None
+        )  # type: ignore[union-attr]
+        cimd_domain = (
+            self._cimd_fetcher.get_domain(txn["client_id"]) if is_cimd_client else None
+        )
 
         # Extract server metadata from app state
         fastmcp = getattr(request.app.state, "fastmcp_server", None)

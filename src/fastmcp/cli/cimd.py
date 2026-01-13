@@ -117,7 +117,9 @@ def create_command(
             f.write("\n")
         console.print(f"[green]✓[/green] CIMD document written to {output}")
         console.print()
-        console.print("[yellow]Important:[/yellow] Before hosting, update the client_id field")
+        console.print(
+            "[yellow]Important:[/yellow] Before hosting, update the client_id field"
+        )
         console.print("to match the URL where you will host this document.")
     else:
         print(json_output)

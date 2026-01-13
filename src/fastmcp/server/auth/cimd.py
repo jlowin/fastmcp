@@ -18,7 +18,7 @@ from typing import Any, Literal
 from urllib.parse import urlparse
 
 import httpx
-from pydantic import AnyHttpUrl, AnyUrl, BaseModel, Field, field_validator
+from pydantic import AnyHttpUrl, BaseModel, Field, field_validator
 
 from fastmcp.utilities.logging import get_logger
 
@@ -60,9 +60,9 @@ class CIMDDocument(BaseModel):
         default=None,
         description="URL of the client's logo image",
     )
-    redirect_uris: list[AnyUrl] | None = Field(
+    redirect_uris: list[str] | None = Field(
         default=None,
-        description="Array of allowed redirect URIs",
+        description="Array of allowed redirect URIs (may include wildcards like http://localhost:*/callback)",
     )
     token_endpoint_auth_method: Literal["none", "private_key_jwt"] = Field(
         default="none",
@@ -257,7 +257,9 @@ class CIMDFetcher:
                 ".internal",
             ]
             return any(
-                hostname_lower == p or hostname_lower.startswith(p) or hostname_lower.endswith(p)
+                hostname_lower == p
+                or hostname_lower.startswith(p)
+                or hostname_lower.endswith(p)
                 for p in private_patterns
             )
 
@@ -273,9 +275,7 @@ class CIMDFetcher:
             raise CIMDValidationError(f"Invalid URL: {e}") from e
 
         if parsed.scheme != "https":
-            raise CIMDValidationError(
-                f"CIMD URLs must use HTTPS, got: {parsed.scheme}"
-            )
+            raise CIMDValidationError(f"CIMD URLs must use HTTPS, got: {parsed.scheme}")
 
         if not parsed.netloc:
             raise CIMDValidationError("CIMD URLs must have a host")
@@ -361,7 +361,9 @@ class CIMDFetcher:
                     follow_redirects=True,
                 )
         except httpx.TimeoutException as e:
-            raise CIMDFetchError(f"Timeout fetching CIMD document: {client_id_url}") from e
+            raise CIMDFetchError(
+                f"Timeout fetching CIMD document: {client_id_url}"
+            ) from e
         except httpx.RequestError as e:
             raise CIMDFetchError(f"Error fetching CIMD document: {e}") from e
 
@@ -401,9 +403,7 @@ class CIMDFetcher:
 
         return doc
 
-    def validate_redirect_uri(
-        self, doc: CIMDDocument, redirect_uri: str
-    ) -> bool:
+    def validate_redirect_uri(self, doc: CIMDDocument, redirect_uri: str) -> bool:
         """Validate that a redirect_uri is allowed by the CIMD document.
 
         Args:
@@ -421,7 +421,7 @@ class CIMDFetcher:
         redirect_uri = redirect_uri.rstrip("/")
 
         for allowed in doc.redirect_uris:
-            allowed_str = str(allowed).rstrip("/")
+            allowed_str = allowed.rstrip("/")
             if redirect_uri == allowed_str:
                 return True
 
@@ -429,6 +429,7 @@ class CIMDFetcher:
             if "*" in allowed_str:
                 # Simple wildcard matching for port
                 import fnmatch
+
                 if fnmatch.fnmatch(redirect_uri, allowed_str):
                     return True
 
