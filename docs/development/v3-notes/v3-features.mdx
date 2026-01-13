@@ -82,6 +82,7 @@ Features:
 ```python
 from fastmcp import FastMCP
 from fastmcp.server.providers import FastMCPProvider
+from fastmcp.server.transforms import Namespace
 
 main = FastMCP("Main")
 sub = FastMCP("Sub")
@@ -124,7 +125,9 @@ provider.add_transform(ToolTransform({
 **Custom transforms** subclass `Transform` and override needed methods:
 
 ```python
+from collections.abc import Sequence
 from fastmcp.server.transforms import Transform, ListToolsNext, GetToolNext
+from fastmcp.tools import Tool
 
 class TagFilter(Transform):
     def __init__(self, required_tags: set[str]):
