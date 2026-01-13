@@ -144,26 +144,33 @@ async def get_access_token_claims() -> dict:
 
 ## Testing
 
-To test your server, you can use the `fastmcp` CLI to run it locally. Assuming you've saved the above code to `server.py` (after replacing the realm URL and base URL with your actual values!), you can run the following command:
+### Running the Server
+
+Start your FastMCP server with HTTP transport to enable OAuth flows:
 
 ```bash
 fastmcp run server.py --transport http --port 8000
 ```
 
-Now, you can use a FastMCP client to test that you can reach your server after authenticating:
+Your server is now running and protected by Keycloak OAuth authentication.
 
-```python
-import asyncio
+### Testing with a Client
+
+Create a test client that authenticates with your Keycloak-protected server:
+
+```python test_client.py
 from fastmcp import Client
+import asyncio
 
 async def main():
-    async with Client("http://localhost:8000/mcp/", auth="oauth") as client:
+    # The client will automatically handle Keycloak OAuth
+    async with Client("http://localhost:8000/mcp", auth="oauth") as client:
         # First-time connection will open Keycloak login in your browser
         print("✓ Authenticated with Keycloak!")
 
         # Test the protected tool
         result = await client.call_tool("get_access_token_claims")
-        print(f"User: {result['preferred_username']}")
+        print(f"User: {result.data.get('preferred_username', 'N/A')}")
 
 if __name__ == "__main__":
     asyncio.run(main())
@@ -189,24 +196,118 @@ The [MCP Inspector](https://github.com/modelcontextprotocol/inspector) provides 
    npx -y @modelcontextprotocol/inspector
    ```
 
-2. In the Inspector UI (opens in your browser), enter your server URL: `http://localhost:8000/mcp`
-3. In the **Authentication** section's **OAuth 2.0 Flow** area, locate the **Scope** field
-4. In the **Scope** field, enter: `openid profile` (these must exactly match the `required_scopes` configured in your KeycloakAuthProvider)
-5. Click **Connect** - your browser will open for Keycloak authentication
-6. Log in with your test user credentials (e.g., `testuser` / `password123`)
-7. After successful authentication, the Inspector will connect to your server
+2. In the Inspector UI (opens in your browser):
+   - Enter server URL: `http://localhost:8000/mcp`
+   - In the **Authentication** section's **OAuth 2.0 Flow** area, locate the **Scope** field
+   - In the **Scope** field, enter: `openid profile` (these must match the `required_scopes` in your server configuration)
+   - Click **Connect**
+   - Your browser will open for Keycloak authentication
+   - Log in with your test user credentials (e.g., `testuser` / `password123`)
+   - After successful authentication, you can interactively explore available tools and test them
 
 <Note>
-The MCP Inspector requires explicit scope configuration because it doesn't automatically request the scopes defined in Keycloak's client policies. This is the correct OAuth behavior - clients should explicitly request the scopes they need.
+The MCP Inspector requires explicit scope configuration because it doesn't automatically request scopes. This is correct OAuth behavior - clients should explicitly request the scopes they need.
 </Note>
 
-### Automatic Client Re-registration
+The Inspector is particularly useful for:
+- Exploring the server's capabilities without writing code
+- Testing individual tools with custom inputs
+- Debugging authentication and authorization issues
+- Viewing request/response details
+
+## Production Configuration
+
+<VersionBadge version="2.13.0" />
+
+For production deployments with persistent token management across server restarts, configure `jwt_signing_key` and `client_storage`:
+
+```python server.py
+import os
+from fastmcp import FastMCP
+from fastmcp.server.auth.providers.keycloak import KeycloakAuthProvider
+from key_value.aio.stores.redis import RedisStore
+from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
+from cryptography.fernet import Fernet
+
+# Production setup with encrypted persistent token storage
+auth_provider = KeycloakAuthProvider(
+    realm_url="https://keycloak.company.com/realms/production",
+    base_url="https://your-production-domain.com",
+    required_scopes=["openid", "profile", "email"],
+    audience="https://your-production-domain.com",  # Important for production
+
+    # Production token management
+    jwt_signing_key=os.environ["JWT_SIGNING_KEY"],
+    client_storage=FernetEncryptionWrapper(
+        key_value=RedisStore(
+            host=os.environ["REDIS_HOST"],
+            port=int(os.environ["REDIS_PORT"])
+        ),
+        fernet=Fernet(os.environ["STORAGE_ENCRYPTION_KEY"])
+    )
+)
+
+mcp = FastMCP(name="Production Keycloak App", auth=auth_provider)
+```
+
+<Note>
+Parameters (`jwt_signing_key` and `client_storage`) work together to ensure tokens and client registrations survive server restarts. **Wrap your storage in `FernetEncryptionWrapper` to encrypt sensitive OAuth tokens at rest** - without it, tokens are stored in plaintext. Store secrets in environment variables and use a persistent storage backend like Redis for distributed deployments.
+
+For complete details on these parameters, see the [Remote OAuth documentation](/servers/auth/remote-oauth#configuration-parameters).
+</Note>
+
+## Features
+
+### Dynamic Client Registration (DCR)
+
+The Keycloak provider includes full Dynamic Client Registration support:
+
+- **Automatic Client Registration**: MCP clients automatically register with Keycloak on first connection
+- **MCP Compatibility Fix**: Automatically corrects Keycloak's `token_endpoint_auth_method` to meet MCP requirements
+- **Auto Re-registration**: If Keycloak is restarted or realm configuration changes, clients automatically re-register
 
 <Info>
 If you restart Keycloak or change the realm configuration, your FastMCP client will automatically detect if the cached OAuth client credentials are no longer valid and will re-register with Keycloak automatically. You don't need to manually clear any caches - just run your client again and it will handle the re-registration process seamlessly.
-
-This automatic retry mechanism ensures a smooth developer experience when working with Dynamic Client Registration (DCR).
 </Info>
+
+### JWT Token Validation
+
+The Keycloak provider includes robust JWT token validation:
+
+- **Signature Verification**: Validates tokens against Keycloak's public keys (JWKS)
+- **Expiration Checking**: Automatically rejects expired tokens
+- **Issuer Validation**: Ensures tokens come from your specific Keycloak realm
+- **Scope Enforcement**: Verifies required OAuth scopes are present
+- **Audience Validation**: Optional validation that tokens are intended for your server (configure `audience` parameter)
+
+### User Claims and Attributes
+
+Access rich user information from Keycloak JWT tokens:
+
+```python
+from fastmcp.server.dependencies import get_access_token
+
+@mcp.tool
+async def admin_only_tool() -> str:
+    """A tool only available to admin users."""
+    token = get_access_token()
+    user_roles = token.claims.get("realm_access", {}).get("roles", [])
+
+    if "admin" not in user_roles:
+        raise ValueError("This tool requires admin access")
+
+    return "Admin access granted!"
+```
+
+### Enterprise Integration
+
+Perfect for enterprise environments with:
+
+- **Single Sign-On (SSO)**: Integrate with corporate identity providers (LDAP, Active Directory, SAML)
+- **Multi-Factor Authentication (MFA)**: Leverage Keycloak's built-in MFA support
+- **Role-Based Access Control**: Use Keycloak roles and groups for fine-grained access control
+- **Custom Attributes**: Access custom user attributes defined in your Keycloak realm
+- **Compliance**: Meet enterprise security and compliance requirements
 
 ## Advanced Configuration
 
