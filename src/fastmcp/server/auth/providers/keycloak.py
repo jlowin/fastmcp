@@ -8,8 +8,7 @@ for seamless MCP client authentication.
 from __future__ import annotations
 
 import httpx
-from pydantic import AnyHttpUrl, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import AnyHttpUrl
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
@@ -17,27 +16,8 @@ from fastmcp.server.auth import RemoteAuthProvider, TokenVerifier
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 from fastmcp.utilities.auth import parse_scopes
 from fastmcp.utilities.logging import get_logger
-from fastmcp.utilities.types import NotSet, NotSetT
 
 logger = get_logger(__name__)
-
-
-class KeycloakProviderSettings(BaseSettings):
-    model_config = SettingsConfigDict(
-        env_prefix="FASTMCP_SERVER_AUTH_KEYCLOAK_",
-        env_file=".env",
-        extra="ignore",
-    )
-
-    realm_url: AnyHttpUrl
-    base_url: AnyHttpUrl
-    required_scopes: list[str] | None = None
-    audience: str | list[str] | None = None
-
-    @field_validator("required_scopes", mode="before")
-    @classmethod
-    def _parse_scopes(cls, v):
-        return parse_scopes(v)
 
 
 class KeycloakAuthProvider(RemoteAuthProvider):
@@ -95,10 +75,10 @@ class KeycloakAuthProvider(RemoteAuthProvider):
     def __init__(
         self,
         *,
-        realm_url: AnyHttpUrl | str | NotSetT = NotSet,
-        base_url: AnyHttpUrl | str | NotSetT = NotSet,
-        required_scopes: list[str] | None | NotSetT = NotSet,
-        audience: str | list[str] | None | NotSetT = NotSet,
+        realm_url: AnyHttpUrl | str,
+        base_url: AnyHttpUrl | str,
+        required_scopes: list[str] | str | None = None,
+        audience: str | list[str] | None = None,
         token_verifier: TokenVerifier | None = None,
     ):
         """Initialize Keycloak metadata provider.
@@ -106,27 +86,21 @@ class KeycloakAuthProvider(RemoteAuthProvider):
         Args:
             realm_url: Your Keycloak realm URL (e.g., "https://keycloak.example.com/realms/myrealm")
             base_url: Public URL of this FastMCP server
-            required_scopes: Optional list of scopes to require for all requests
+            required_scopes: Optional list of scopes to require for all requests.
+                Can be a list of strings or a comma/space-separated string.
             audience: Optional audience(s) for JWT validation. If not specified and no custom
                 verifier is provided, audience validation is disabled. For production use,
                 it's recommended to set this to your resource server identifier or base_url.
             token_verifier: Optional token verifier. If None, creates JWT verifier for Keycloak
         """
-        settings = KeycloakProviderSettings.model_validate(
-            {
-                k: v
-                for k, v in {
-                    "realm_url": realm_url,
-                    "base_url": base_url,
-                    "required_scopes": required_scopes,
-                    "audience": audience,
-                }.items()
-                if v is not NotSet
-            }
-        )
+        # Normalize URLs
+        if isinstance(base_url, str):
+            base_url = AnyHttpUrl(base_url)
+        self.base_url = AnyHttpUrl(str(base_url).rstrip("/"))
+        self.realm_url = str(realm_url).rstrip("/")
 
-        self.base_url = AnyHttpUrl(str(settings.base_url).rstrip("/"))
-        self.realm_url = str(settings.realm_url).rstrip("/")
+        # Parse scopes if provided as string
+        parsed_scopes = parse_scopes(required_scopes) if required_scopes else None
 
         # Create default JWT verifier if none provided
         if token_verifier is None:
@@ -135,8 +109,8 @@ class KeycloakAuthProvider(RemoteAuthProvider):
                 jwks_uri=f"{self.realm_url}/protocol/openid-connect/certs",
                 issuer=self.realm_url,
                 algorithm="RS256",
-                required_scopes=settings.required_scopes,
-                audience=settings.audience,
+                required_scopes=parsed_scopes,
+                audience=audience,
             )
 
         # Initialize RemoteAuthProvider with FastMCP as the authorization server

@@ -1,85 +1,13 @@
 """Unit tests for Keycloak OAuth provider - Minimal implementation."""
 
-import os
-from unittest.mock import patch
-
 import pytest
 
 from fastmcp.server.auth.providers.jwt import JWTVerifier
-from fastmcp.server.auth.providers.keycloak import (
-    KeycloakAuthProvider,
-    KeycloakProviderSettings,
-)
+from fastmcp.server.auth.providers.keycloak import KeycloakAuthProvider
 
 TEST_REALM_URL = "https://keycloak.example.com/realms/test"
 TEST_BASE_URL = "https://example.com:8000"
 TEST_REQUIRED_SCOPES = ["openid", "profile"]
-
-
-class TestKeycloakProviderSettings:
-    """Test settings for Keycloak OAuth provider."""
-
-    def test_settings_from_env_vars(self):
-        """Test that settings can be loaded from environment variables."""
-        with patch.dict(
-            os.environ,
-            {
-                "FASTMCP_SERVER_AUTH_KEYCLOAK_REALM_URL": TEST_REALM_URL,
-                "FASTMCP_SERVER_AUTH_KEYCLOAK_BASE_URL": TEST_BASE_URL,
-                "FASTMCP_SERVER_AUTH_KEYCLOAK_REQUIRED_SCOPES": ",".join(
-                    TEST_REQUIRED_SCOPES
-                ),
-            },
-        ):
-            # Let environment variables populate the settings
-            settings = KeycloakProviderSettings.model_validate({})
-
-            assert str(settings.realm_url) == TEST_REALM_URL
-            assert str(settings.base_url).rstrip("/") == TEST_BASE_URL
-            assert settings.required_scopes == TEST_REQUIRED_SCOPES
-
-    def test_settings_explicit_override_env(self):
-        """Test that explicit settings override environment variables."""
-        with patch.dict(
-            os.environ,
-            {
-                "FASTMCP_SERVER_AUTH_KEYCLOAK_REALM_URL": TEST_REALM_URL,
-                "FASTMCP_SERVER_AUTH_KEYCLOAK_BASE_URL": TEST_BASE_URL,
-            },
-        ):
-            settings = KeycloakProviderSettings.model_validate(
-                {
-                    "realm_url": "https://explicit.keycloak.com/realms/explicit",
-                    "base_url": "https://explicit.example.com",
-                }
-            )
-
-            assert (
-                str(settings.realm_url)
-                == "https://explicit.keycloak.com/realms/explicit"
-            )
-            assert str(settings.base_url).rstrip("/") == "https://explicit.example.com"
-
-    @pytest.mark.parametrize(
-        "scopes_env",
-        [
-            "openid,profile",
-            '["openid", "profile"]',
-        ],
-    )
-    def test_settings_parse_scopes(self, scopes_env):
-        """Test that scopes are parsed correctly from different formats."""
-        with patch.dict(
-            os.environ,
-            {
-                "FASTMCP_SERVER_AUTH_KEYCLOAK_REALM_URL": TEST_REALM_URL,
-                "FASTMCP_SERVER_AUTH_KEYCLOAK_BASE_URL": TEST_BASE_URL,
-                "FASTMCP_SERVER_AUTH_KEYCLOAK_REQUIRED_SCOPES": scopes_env,
-            },
-        ):
-            # Let environment variables populate the settings
-            settings = KeycloakProviderSettings.model_validate({})
-            assert settings.required_scopes == ["openid", "profile"]
 
 
 class TestKeycloakAuthProvider:
@@ -106,23 +34,15 @@ class TestKeycloakAuthProvider:
         )
         assert jwt_verifier.issuer == TEST_REALM_URL
 
-    def test_init_with_env_vars(self):
-        """Test initialization with environment variables."""
-        with patch.dict(
-            os.environ,
-            {
-                "FASTMCP_SERVER_AUTH_KEYCLOAK_REALM_URL": TEST_REALM_URL,
-                "FASTMCP_SERVER_AUTH_KEYCLOAK_BASE_URL": TEST_BASE_URL,
-                "FASTMCP_SERVER_AUTH_KEYCLOAK_REQUIRED_SCOPES": ",".join(
-                    TEST_REQUIRED_SCOPES
-                ),
-            },
-        ):
-            provider = KeycloakAuthProvider()
+    def test_init_with_string_scopes(self):
+        """Test initialization with scopes as comma-separated string."""
+        provider = KeycloakAuthProvider(
+            realm_url=TEST_REALM_URL,
+            base_url=TEST_BASE_URL,
+            required_scopes="openid,profile,email",
+        )
 
-            assert provider.realm_url == TEST_REALM_URL
-            assert str(provider.base_url) == TEST_BASE_URL + "/"
-            assert provider.token_verifier.required_scopes == TEST_REQUIRED_SCOPES
+        assert provider.token_verifier.required_scopes == ["openid", "profile", "email"]
 
     def test_init_with_custom_token_verifier(self):
         """Test initialization with custom token verifier."""

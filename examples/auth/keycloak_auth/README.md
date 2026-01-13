@@ -33,7 +33,7 @@ Manually import the realm:
 
 ### 3. Run the Example
 
-1. Set environment variables:
+1. (Optional) Set environment variables if you want to customize the configuration:
 
    ```bash
    export FASTMCP_SERVER_AUTH_KEYCLOAK_REALM_URL="http://localhost:8080/realms/fastmcp"
@@ -42,6 +42,8 @@ Manually import the realm:
    # For production, configure Keycloak audience mappers first, then uncomment:
    # export FASTMCP_SERVER_AUTH_KEYCLOAK_AUDIENCE="http://localhost:8000"
    ```
+
+   The server uses sensible defaults, so you can skip this step if you're using the local setup.
 
 2. Run the server:
 
@@ -77,7 +79,7 @@ Manually import the realm:
    2. In the Inspector UI (opens in your browser):
       - Enter server URL: `http://localhost:8000/mcp`
       - In the **Authentication** section's **OAuth 2.0 Flow** area, locate the **Scope** field
-      - In the **Scope** field, enter: `openid profile` (these must exactly match the `required_scopes` configured in your KeycloakAuthProvider or `FASTMCP_SERVER_AUTH_KEYCLOAK_REQUIRED_SCOPES` environment variable)
+      - In the **Scope** field, enter: `openid profile` (these must match the `required_scopes` in your server configuration)
       - Click **Connect**
       - Your browser will open for Keycloak authentication
       - Log in with your test user credentials (e.g., `testuser` / `password123`)

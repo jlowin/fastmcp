@@ -304,8 +304,14 @@ class TestKeycloakProviderEnvironmentConfiguration:
             mock_response.raise_for_status.return_value = None
             mock_get.return_value = mock_response
 
-            # Should work with no explicit parameters
-            provider = KeycloakAuthProvider()
+            # Explicitly read from environment and pass to provider
+            provider = KeycloakAuthProvider(
+                realm_url=os.environ["FASTMCP_SERVER_AUTH_KEYCLOAK_REALM_URL"],
+                base_url=os.environ["FASTMCP_SERVER_AUTH_KEYCLOAK_BASE_URL"],
+                required_scopes=os.environ[
+                    "FASTMCP_SERVER_AUTH_KEYCLOAK_REQUIRED_SCOPES"
+                ],
+            )
 
             assert provider.realm_url == TEST_REALM_URL
             assert str(provider.base_url) == TEST_BASE_URL + "/"
@@ -347,7 +353,14 @@ class TestKeycloakProviderEnvironmentConfiguration:
             mock_response.raise_for_status.return_value = None
             mock_get.return_value = mock_response
 
-            provider = KeycloakAuthProvider()
+            # Explicitly read from environment and pass to provider
+            provider = KeycloakAuthProvider(
+                realm_url=os.environ["FASTMCP_SERVER_AUTH_KEYCLOAK_REALM_URL"],
+                base_url=os.environ["FASTMCP_SERVER_AUTH_KEYCLOAK_BASE_URL"],
+                required_scopes=os.environ[
+                    "FASTMCP_SERVER_AUTH_KEYCLOAK_REQUIRED_SCOPES"
+                ],
+            )
             mcp = FastMCP("production-server", auth=provider)
             mcp_http_app = mcp.http_app()
 

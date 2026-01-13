@@ -2,16 +2,25 @@
 
 This example demonstrates how to protect a FastMCP server with Keycloak.
 
-Required environment variables:
-- FASTMCP_SERVER_AUTH_KEYCLOAK_REALM_URL: Your Keycloak realm URL
-- FASTMCP_SERVER_AUTH_KEYCLOAK_BASE_URL: Your FastMCP server base URL
+Configuration:
+    The example uses environment variables for convenience, but you can also
+    pass values directly to KeycloakAuthProvider. The following environment
+    variables can be set in a .env file:
 
-Optional environment variables:
-- FASTMCP_SERVER_AUTH_KEYCLOAK_REQUIRED_SCOPES: Required OAuth scopes (default: "openid,profile")
-- FASTMCP_SERVER_AUTH_KEYCLOAK_AUDIENCE: Audience for JWT validation (default: None for development)
+    - FASTMCP_SERVER_AUTH_KEYCLOAK_REALM_URL: Your Keycloak realm URL
+      (default: http://localhost:8080/realms/fastmcp)
+    - FASTMCP_SERVER_AUTH_KEYCLOAK_BASE_URL: Your FastMCP server base URL
+      (default: http://localhost:8000)
+    - FASTMCP_SERVER_AUTH_KEYCLOAK_REQUIRED_SCOPES: Required OAuth scopes
+      (default: openid,profile)
+    - FASTMCP_SERVER_AUTH_KEYCLOAK_AUDIENCE: Audience for JWT validation
+      (default: None for development)
 
 To run:
     python server.py
+
+    Or with custom configuration:
+    FASTMCP_SERVER_AUTH_KEYCLOAK_REALM_URL=https://your-keycloak.com/realms/myrealm python server.py
 """
 
 import os
@@ -31,6 +40,7 @@ load_dotenv(".env", override=True)
 # Configure FastMCP logging to INFO
 configure_logging(level="INFO")
 
+# Configuration - can be overridden with environment variables
 realm_url = os.getenv(
     "FASTMCP_SERVER_AUTH_KEYCLOAK_REALM_URL", "http://localhost:8080/realms/fastmcp"
 )
@@ -42,6 +52,7 @@ required_scopes = os.getenv(
 # For production, configure Keycloak audience mappers and set FASTMCP_SERVER_AUTH_KEYCLOAK_AUDIENCE
 audience = os.getenv("FASTMCP_SERVER_AUTH_KEYCLOAK_AUDIENCE")
 
+# Create Keycloak auth provider
 auth = KeycloakAuthProvider(
     realm_url=realm_url,
     base_url=base_url,
