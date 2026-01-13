@@ -299,6 +299,9 @@ class FunctionPrompt(Prompt):
             else:
                 # Run sync functions in threadpool to avoid blocking the event loop
                 result = await call_sync_fn_in_threadpool(self.fn, **kwargs)
+                # Handle sync wrappers that return awaitables (e.g., partial(async_fn))
+                if inspect.isawaitable(result):
+                    result = await result
 
             return self.convert_result(result)
         except Exception as e:

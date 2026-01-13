@@ -201,6 +201,9 @@ class FunctionResource(Resource):
         else:
             # Run sync functions in threadpool to avoid blocking the event loop
             result = await call_sync_fn_in_threadpool(self.fn)
+            # Handle sync wrappers that return awaitables (e.g., partial(async_fn))
+            if inspect.isawaitable(result):
+                result = await result
 
         # If user returned another Resource, read it recursively
         if isinstance(result, Resource):

@@ -245,6 +245,9 @@ class FunctionTool(Tool):
             result = await call_sync_fn_in_threadpool(
                 type_adapter.validate_python, arguments
             )
+            # Handle sync wrappers that return awaitables (e.g., partial(async_fn))
+            if inspect.isawaitable(result):
+                result = await result
 
         return self.convert_result(result)
 

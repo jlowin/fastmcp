@@ -47,7 +47,6 @@ __all__ = [
     "CurrentFastMCP",
     "CurrentWorker",
     "Progress",
-    "call_sync_fn_in_threadpool",
     "get_access_token",
     "get_context",
     "get_http_headers",
@@ -481,7 +480,11 @@ def without_injected_parameters(fn: Callable[..., Any]) -> Callable[..., Any]:
                 return await fn(**resolved_kwargs)
             else:
                 # Run sync functions in threadpool to avoid blocking the event loop
-                return await call_sync_fn_in_threadpool(fn, **resolved_kwargs)
+                result = await call_sync_fn_in_threadpool(fn, **resolved_kwargs)
+                # Handle sync wrappers that return awaitables (e.g., partial(async_fn))
+                if inspect.isawaitable(result):
+                    result = await result
+                return result
 
     # Set wrapper metadata (only parameter annotations, not return type)
     wrapper.__signature__ = new_sig  # type: ignore[attr-defined]
