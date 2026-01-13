@@ -366,8 +366,6 @@ class FastMCP(Generic[LifespanResultT]):
                     DeprecationWarning,
                     stacklevel=2,
                 )
-            from fastmcp.server.transforms import ToolTransform
-
             self._transforms.append(ToolTransform(dict(tool_transformations)))
 
         self.strict_input_validation: bool = (
@@ -999,11 +997,9 @@ class FastMCP(Generic[LifespanResultT]):
                 DeprecationWarning,
                 stacklevel=2,
             )
-        from fastmcp.server.transforms import ToolTransform
-
         self.add_transform(ToolTransform({tool_name: transformation}))
 
-    def remove_tool_transformation(self, tool_name: str) -> None:
+    def remove_tool_transformation(self, _tool_name: str) -> None:
         """Remove a tool transformation.
 
         .. deprecated::
