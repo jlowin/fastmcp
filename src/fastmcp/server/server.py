@@ -75,7 +75,6 @@ from fastmcp.server.http import (
 )
 from fastmcp.server.low_level import LowLevelServer
 from fastmcp.server.middleware import Middleware, MiddlewareContext
-from fastmcp.server.tasks.capabilities import get_task_capabilities
 from fastmcp.server.tasks.config import TaskConfig
 from fastmcp.server.tasks.handlers import (
     handle_prompt_as_task,
@@ -2508,9 +2507,6 @@ class FastMCP(Generic[LifespanResultT]):
                         f"Starting MCP server {self.name!r} with transport 'stdio'"
                     )
 
-                    # Build experimental capabilities
-                    experimental_capabilities = get_task_capabilities()
-
                     await self._mcp_server.run(
                         read_stream,
                         write_stream,
@@ -2518,7 +2514,6 @@ class FastMCP(Generic[LifespanResultT]):
                             notification_options=NotificationOptions(
                                 tools_changed=True
                             ),
-                            experimental_capabilities=experimental_capabilities,
                         ),
                     )
 
