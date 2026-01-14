@@ -273,7 +273,7 @@ class FunctionTool(Tool):
                         code=-32000,
                         message=f"Tool '{self.name}' execution timed out after {self.timeout}s",
                     )
-                )
+                ) from None
         else:
             # No timeout: use existing execution path
             if inspect.iscoroutinefunction(wrapper_fn):
