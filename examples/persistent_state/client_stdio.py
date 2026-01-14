@@ -5,12 +5,21 @@ Run directly:
 """
 
 import asyncio
+import sys
+from pathlib import Path
 
 from rich.console import Console
 
 from fastmcp import Client
 
-from server import server
+# Add parent directory to path for importing the server module
+examples_dir = Path(__file__).parent.parent.parent
+if str(examples_dir) not in sys.path:
+    sys.path.insert(0, str(examples_dir))
+
+import examples.persistent_state.server as server_module  # noqa: E402
+
+server = server_module.server
 
 console = Console()
 
