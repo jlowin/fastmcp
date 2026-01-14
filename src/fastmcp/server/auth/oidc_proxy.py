@@ -17,7 +17,6 @@ from pydantic import AnyHttpUrl, BaseModel, model_validator
 from typing_extensions import Self
 
 from fastmcp.server.auth import TokenVerifier
-from fastmcp.server.auth.cimd import CIMDTrustPolicy
 from fastmcp.server.auth.oauth_proxy import OAuthProxy
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 from fastmcp.utilities.logging import get_logger
@@ -231,7 +230,6 @@ class OIDCProxy(OAuthProxy):
         fallback_access_token_expiry_seconds: int | None = None,
         # CIMD configuration
         enable_cimd: bool = True,
-        cimd_trust_policy: CIMDTrustPolicy | None = None,
     ) -> None:
         """Initialize the OIDC proxy provider.
 
@@ -285,8 +283,6 @@ class OIDCProxy(OAuthProxy):
             enable_cimd: Whether to enable CIMD (Client ID Metadata Document) client support.
                 When True, clients can use their metadata document URL as client_id instead of
                 Dynamic Client Registration. Default is True.
-            cimd_trust_policy: Optional policy for controlling CIMD client trust. Configures
-                which domains can skip consent and which are blocked. If None, uses default policy.
         """
         if not config_url:
             raise ValueError("Missing required config URL")
@@ -361,7 +357,6 @@ class OIDCProxy(OAuthProxy):
             "consent_csp_policy": consent_csp_policy,
             "fallback_access_token_expiry_seconds": fallback_access_token_expiry_seconds,
             "enable_cimd": enable_cimd,
-            "cimd_trust_policy": cimd_trust_policy,
         }
 
         if redirect_path:

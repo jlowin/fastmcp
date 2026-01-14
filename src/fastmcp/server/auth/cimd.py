@@ -6,28 +6,24 @@ client_id. See the IETF draft: draft-parecki-oauth-client-id-metadata-document
 
 This module provides:
 - CIMDDocument: Pydantic model for CIMD document validation
-- CIMDFetcher: Fetch and validate CIMD documents with caching/security
-- CIMDTrustPolicy: Configurable trust levels for CIMD clients
+- CIMDFetcher: Fetch and validate CIMD documents with SSRF protection
+- CIMDClientManager: Manages CIMD client operations
 """
 
 from __future__ import annotations
 
 import fnmatch
 import ipaddress
+import json
 from typing import Any, Literal
 from urllib.parse import urlparse
 
 import httpx
 from pydantic import AnyHttpUrl, BaseModel, Field, field_validator
 
-from fastmcp.server.auth.trusted_cimd_domains import TRUSTED_CIMD_DOMAINS
 from fastmcp.utilities.logging import get_logger
 
 logger = get_logger(__name__)
-
-
-# Re-export for backwards compatibility
-DEFAULT_TRUSTED_CIMD_DOMAINS = TRUSTED_CIMD_DOMAINS
 
 
 class CIMDDocument(BaseModel):
@@ -119,41 +115,6 @@ class CIMDDocument(BaseModel):
         return v
 
 
-class CIMDTrustPolicy(BaseModel):
-    """Trust policy for CIMD clients.
-
-    Controls how CIMD clients are treated during authorization:
-    - Trusted domains can skip consent entirely
-    - Unknown domains show consent with verified badge
-    - Blocked domains are rejected
-    """
-
-    trusted_domains: list[str] = Field(
-        default_factory=lambda: list(DEFAULT_TRUSTED_CIMD_DOMAINS),
-        description="Domains that skip consent entirely (e.g., claude.ai)",
-    )
-    blocked_domains: list[str] = Field(
-        default_factory=list,
-        description="Domains that are always rejected",
-    )
-
-    def is_trusted(self, domain: str) -> bool:
-        """Check if a domain is in the trusted list."""
-        domain = domain.lower()
-        return any(
-            domain == trusted.lower() or domain.endswith("." + trusted.lower())
-            for trusted in self.trusted_domains
-        )
-
-    def is_blocked(self, domain: str) -> bool:
-        """Check if a domain is in the blocked list."""
-        domain = domain.lower()
-        return any(
-            domain == blocked.lower() or domain.endswith("." + blocked.lower())
-            for blocked in self.blocked_domains
-        )
-
-
 class CIMDValidationError(Exception):
     """Raised when CIMD document validation fails."""
 
@@ -181,7 +142,6 @@ class CIMDFetcher:
         min_cache_ttl: int = 300,  # Kept for backwards compatibility, unused
         max_cache_ttl: int = 86400,  # Kept for backwards compatibility, unused
         timeout: float = 10.0,
-        trust_policy: CIMDTrustPolicy | None = None,
     ):
         """Initialize the CIMD fetcher.
 
@@ -190,10 +150,8 @@ class CIMDFetcher:
             min_cache_ttl: Deprecated, unused (kept for compatibility)
             max_cache_ttl: Deprecated, unused (kept for compatibility)
             timeout: HTTP request timeout in seconds
-            trust_policy: Trust policy for domain handling
         """
         self.timeout = timeout
-        self.trust_policy = trust_policy or CIMDTrustPolicy()
 
     def is_cimd_client_id(self, client_id: str) -> bool:
         """Check if a client_id looks like a CIMD URL.
@@ -255,14 +213,29 @@ class CIMDFetcher:
                 for p in private_patterns
             )
 
-    def _validate_url(self, url: str) -> tuple[str, str]:
-        """Validate CIMD URL and return (hostname, path).
+    async def fetch(self, client_id_url: str) -> CIMDDocument:
+        """Fetch and validate a CIMD document with SSRF protection.
+
+        This method implements SSRF protection by:
+        1. Requiring HTTPS only
+        2. Blocking private/loopback IP addresses and hostnames
+        3. Limiting response size to 5KB (prevents DoS via streaming)
+        4. Disabling redirects (prevents redirect-based SSRF)
+        5. Using aggressive timeouts
+
+        Args:
+            client_id_url: The URL to fetch (also the expected client_id)
+
+        Returns:
+            Validated CIMDDocument
 
         Raises:
-            CIMDValidationError: If URL is invalid
+            CIMDValidationError: If document is invalid
+            CIMDFetchError: If document cannot be fetched
         """
+        # Parse and validate URL format
         try:
-            parsed = urlparse(url)
+            parsed = urlparse(client_id_url)
         except Exception as e:
             raise CIMDValidationError(f"Invalid URL: {e}") from e
 
@@ -278,40 +251,61 @@ class CIMDFetcher:
             )
 
         hostname = parsed.hostname or parsed.netloc
+        port = parsed.port
+
+        # Validate hostname is not private/loopback
         if self._is_private_ip(hostname):
             raise CIMDValidationError(
-                f"CIMD URLs cannot point to private/loopback addresses: {hostname}"
+                f"CIMD URLs cannot use private/loopback addresses: {hostname}"
             )
 
-        if self.trust_policy.is_blocked(hostname):
-            raise CIMDValidationError(f"Domain is blocked: {hostname}")
+        # Validate port - only allow standard HTTPS (443) or explicit non-standard
+        # Non-standard ports are allowed but logged for visibility
+        if port is not None and port != 443:
+            logger.warning(
+                "CIMD URL uses non-standard port %d: %s", port, client_id_url
+            )
 
-        return hostname, parsed.path
-
-    async def fetch(self, client_id_url: str) -> CIMDDocument:
-        """Fetch and validate a CIMD document.
-
-        Args:
-            client_id_url: The URL to fetch (also the expected client_id)
-
-        Returns:
-            Validated CIMDDocument
-
-        Raises:
-            CIMDValidationError: If document is invalid
-            CIMDFetchError: If document cannot be fetched
-        """
-        # Validate URL (also checks SSRF, blocked domains)
-        self._validate_url(client_id_url)
-
-        # Fetch document
+        # Fetch document with streaming to prevent memory exhaustion
+        max_size = 5120  # 5KB max for CIMD documents
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.get(
-                    client_id_url,
-                    headers={"Accept": "application/json"},
-                    follow_redirects=True,
-                )
+            async with (
+                httpx.AsyncClient(
+                    timeout=self.timeout,
+                    follow_redirects=False,  # Disable redirects to prevent SSRF bypass
+                ) as client,
+                client.stream("GET", client_id_url) as response,
+            ):
+                if response.status_code != 200:
+                    raise CIMDFetchError(
+                        f"CIMD document returned status {response.status_code}: {client_id_url}"
+                    )
+
+                # Check Content-Length header first if available
+                content_length = response.headers.get("content-length")
+                if content_length:
+                    try:
+                        size = int(content_length)
+                        if size > max_size:
+                            raise CIMDFetchError(
+                                f"Response too large: {size} bytes (max 5KB for CIMD documents)"
+                            )
+                    except ValueError:
+                        pass  # Invalid header, will check during streaming
+
+                # Stream response and enforce size limit
+                chunks = []
+                total_size = 0
+                async for chunk in response.aiter_bytes():
+                    total_size += len(chunk)
+                    if total_size > max_size:
+                        raise CIMDFetchError(
+                            f"Response too large: exceeded {max_size} bytes (max 5KB for CIMD documents)"
+                        )
+                    chunks.append(chunk)
+
+                content = b"".join(chunks)
+
         except httpx.TimeoutException as e:
             raise CIMDFetchError(
                 f"Timeout fetching CIMD document: {client_id_url}"
@@ -319,14 +313,9 @@ class CIMDFetcher:
         except httpx.RequestError as e:
             raise CIMDFetchError(f"Error fetching CIMD document: {e}") from e
 
-        if response.status_code != 200:
-            raise CIMDFetchError(
-                f"CIMD document returned status {response.status_code}: {client_id_url}"
-            )
-
         # Parse document
         try:
-            data = response.json()
+            data = json.loads(content)
         except Exception as e:
             raise CIMDValidationError(f"CIMD document is not valid JSON: {e}") from e
 
@@ -379,14 +368,6 @@ class CIMDFetcher:
                     return True
 
         return False
-
-    def get_domain(self, client_id_url: str) -> str | None:
-        """Extract domain from a CIMD URL."""
-        try:
-            parsed = urlparse(client_id_url)
-            return parsed.hostname
-        except Exception:
-            return None
 
 
 class CIMDAssertionValidator:
@@ -547,23 +528,21 @@ class CIMDClientManager:
     def __init__(
         self,
         enable_cimd: bool = True,
-        trust_policy: CIMDTrustPolicy | None = None,
         default_scope: str = "",
+        allowed_redirect_uri_patterns: list[str] | None = None,
     ):
         """Initialize CIMD client manager.
 
         Args:
             enable_cimd: Whether CIMD support is enabled
-            trust_policy: Policy for CIMD client trust (trusted/blocked domains)
             default_scope: Default scope for CIMD clients if not specified in document
+            allowed_redirect_uri_patterns: Allowed redirect URI patterns (proxy's config)
         """
         self.enabled = enable_cimd
-        self.trust_policy = trust_policy or CIMDTrustPolicy()
         self.default_scope = default_scope
+        self.allowed_redirect_uri_patterns = allowed_redirect_uri_patterns
 
-        self._fetcher = CIMDFetcher(
-            trust_policy=self.trust_policy,
-        )
+        self._fetcher = CIMDFetcher()
         self._assertion_validator = CIMDAssertionValidator()
         self.logger = get_logger(__name__)
 
@@ -604,6 +583,7 @@ class CIMDClientManager:
         from fastmcp.server.auth.oauth_proxy import OAuthProxyClient
 
         # Create synthetic client from CIMD document
+        # Use proxy's allowed_redirect_uri_patterns, NOT the CIMD document's redirect_uris
         client = OAuthProxyClient(
             client_id=client_id_url,
             client_secret=None,
@@ -611,7 +591,7 @@ class CIMDClientManager:
             grant_types=cimd_doc.grant_types,
             scope=cimd_doc.scope or self.default_scope,
             token_endpoint_auth_method=cimd_doc.token_endpoint_auth_method,
-            allowed_redirect_uri_patterns=cimd_doc.redirect_uris,
+            allowed_redirect_uri_patterns=self.allowed_redirect_uri_patterns,
             client_name=cimd_doc.client_name,
             cimd_document=cimd_doc,
         )
@@ -622,24 +602,6 @@ class CIMDClientManager:
             cimd_doc.client_name,
         )
         return client
-
-    def should_skip_consent(self, client_id: str) -> bool:
-        """Check if CIMD client is trusted and should skip consent.
-
-        Args:
-            client_id: Client ID (CIMD URL)
-
-        Returns:
-            True if client is from a trusted domain and consent should be skipped
-        """
-        if not self.enabled:
-            return False
-
-        domain = self._fetcher.get_domain(client_id)
-        if not domain:
-            return False
-
-        return self.trust_policy.is_trusted(domain)
 
     async def validate_private_key_jwt(
         self,
@@ -670,14 +632,3 @@ class CIMDClientManager:
         return await self._assertion_validator.validate_assertion(
             assertion, client.client_id, token_endpoint, cimd_doc
         )
-
-    def get_domain(self, client_id: str) -> str | None:
-        """Extract domain from CIMD URL.
-
-        Args:
-            client_id: CIMD URL
-
-        Returns:
-            Domain name or None if not a valid URL
-        """
-        return self._fetcher.get_domain(client_id)

@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import pytest
-from pydantic import ValidationError
+from pydantic import AnyHttpUrl, ValidationError
 
 from fastmcp.server.auth.cimd import (
-    DEFAULT_TRUSTED_CIMD_DOMAINS,
     CIMDDocument,
     CIMDFetcher,
     CIMDFetchError,
-    CIMDTrustPolicy,
     CIMDValidationError,
 )
 
@@ -21,7 +19,7 @@ class TestCIMDDocument:
     def test_valid_minimal_document(self):
         """Test that minimal valid document passes validation."""
         doc = CIMDDocument(
-            client_id="https://example.com/client.json",  # type: ignore[arg-type]
+            client_id=AnyHttpUrl("https://example.com/client.json"),
         )
         assert str(doc.client_id) == "https://example.com/client.json"
         assert doc.token_endpoint_auth_method == "none"
@@ -31,10 +29,10 @@ class TestCIMDDocument:
     def test_valid_full_document(self):
         """Test that full document passes validation."""
         doc = CIMDDocument(
-            client_id="https://example.com/client.json",  # type: ignore[arg-type]
+            client_id=AnyHttpUrl("https://example.com/client.json"),
             client_name="My App",
-            client_uri="https://example.com",  # type: ignore[arg-type]
-            logo_uri="https://example.com/logo.png",  # type: ignore[arg-type]
+            client_uri=AnyHttpUrl("https://example.com"),
+            logo_uri=AnyHttpUrl("https://example.com/logo.png"),
             redirect_uris=["http://localhost:3000/callback"],
             token_endpoint_auth_method="none",
             grant_types=["authorization_code", "refresh_token"],
@@ -47,9 +45,9 @@ class TestCIMDDocument:
     def test_private_key_jwt_auth_method_allowed(self):
         """Test that private_key_jwt is allowed for CIMD."""
         doc = CIMDDocument(
-            client_id="https://example.com/client.json",  # type: ignore[arg-type]
+            client_id=AnyHttpUrl("https://example.com/client.json"),
             token_endpoint_auth_method="private_key_jwt",
-            jwks_uri="https://example.com/.well-known/jwks.json",  # type: ignore[arg-type]
+            jwks_uri=AnyHttpUrl("https://example.com/.well-known/jwks.json"),
         )
         assert doc.token_endpoint_auth_method == "private_key_jwt"
 
@@ -57,8 +55,8 @@ class TestCIMDDocument:
         """Test that client_secret_basic is rejected for CIMD."""
         with pytest.raises(ValidationError) as exc_info:
             CIMDDocument(
-                client_id="https://example.com/client.json",  # type: ignore[arg-type]
-                token_endpoint_auth_method="client_secret_basic",  # type: ignore[arg-type]
+                client_id=AnyHttpUrl("https://example.com/client.json"),
+                token_endpoint_auth_method="client_secret_basic",  # type: ignore[arg-type] - testing invalid value
             )
         # Literal type rejects invalid values before custom validator
         assert "token_endpoint_auth_method" in str(exc_info.value)
@@ -67,8 +65,8 @@ class TestCIMDDocument:
         """Test that client_secret_post is rejected for CIMD."""
         with pytest.raises(ValidationError) as exc_info:
             CIMDDocument(
-                client_id="https://example.com/client.json",  # type: ignore[arg-type]
-                token_endpoint_auth_method="client_secret_post",  # type: ignore[arg-type]
+                client_id=AnyHttpUrl("https://example.com/client.json"),
+                token_endpoint_auth_method="client_secret_post",  # type: ignore[arg-type] - testing invalid value
             )
         assert "token_endpoint_auth_method" in str(exc_info.value)
 
@@ -76,41 +74,10 @@ class TestCIMDDocument:
         """Test that client_secret_jwt is rejected for CIMD."""
         with pytest.raises(ValidationError) as exc_info:
             CIMDDocument(
-                client_id="https://example.com/client.json",  # type: ignore[arg-type]
-                token_endpoint_auth_method="client_secret_jwt",  # type: ignore[arg-type]
+                client_id=AnyHttpUrl("https://example.com/client.json"),
+                token_endpoint_auth_method="client_secret_jwt",  # type: ignore[arg-type] - testing invalid value
             )
         assert "token_endpoint_auth_method" in str(exc_info.value)
-
-
-class TestCIMDTrustPolicy:
-    """Tests for CIMDTrustPolicy."""
-
-    def test_default_trusted_domains(self):
-        """Test that default trusted domains list is empty (opt-in only)."""
-        policy = CIMDTrustPolicy()
-        assert policy.trusted_domains == DEFAULT_TRUSTED_CIMD_DOMAINS
-        assert policy.trusted_domains == []  # No defaults - server operators configure
-
-    def test_is_trusted_exact_match(self):
-        """Test is_trusted with exact domain match."""
-        policy = CIMDTrustPolicy(trusted_domains=["example.com"])
-        assert policy.is_trusted("example.com")
-        assert policy.is_trusted("EXAMPLE.COM")  # Case insensitive
-        assert not policy.is_trusted("other.com")
-
-    def test_is_trusted_subdomain_match(self):
-        """Test is_trusted with subdomain match."""
-        policy = CIMDTrustPolicy(trusted_domains=["example.com"])
-        assert policy.is_trusted("sub.example.com")
-        assert policy.is_trusted("deep.sub.example.com")
-        assert not policy.is_trusted("notexample.com")
-
-    def test_is_blocked_exact_match(self):
-        """Test is_blocked with exact domain match."""
-        policy = CIMDTrustPolicy(blocked_domains=["evil.com"])
-        assert policy.is_blocked("evil.com")
-        assert policy.is_blocked("sub.evil.com")
-        assert not policy.is_blocked("good.com")
 
 
 class TestCIMDFetcher:
@@ -143,54 +110,12 @@ class TestCIMDFetcher:
         assert not fetcher.is_cimd_client_id("")
         assert not fetcher.is_cimd_client_id("not a url")
 
-    def test_validate_url_rejects_http(self, fetcher: CIMDFetcher):
-        """Test that HTTP URLs are rejected."""
-        with pytest.raises(CIMDValidationError) as exc_info:
-            fetcher._validate_url("http://example.com/client.json")
-        assert "HTTPS" in str(exc_info.value)
-
-    def test_validate_url_rejects_root_path(self, fetcher: CIMDFetcher):
-        """Test that URLs without path are rejected."""
-        with pytest.raises(CIMDValidationError) as exc_info:
-            fetcher._validate_url("https://example.com/")
-        assert "non-root path" in str(exc_info.value)
-
-    def test_validate_url_rejects_localhost(self, fetcher: CIMDFetcher):
-        """Test that localhost URLs are rejected (SSRF protection)."""
-        with pytest.raises(CIMDValidationError) as exc_info:
-            fetcher._validate_url("https://localhost/client.json")
-        assert "private" in str(exc_info.value).lower()
-
-    def test_validate_url_rejects_private_ip(self, fetcher: CIMDFetcher):
-        """Test that private IP URLs are rejected (SSRF protection)."""
-        with pytest.raises(CIMDValidationError) as exc_info:
-            fetcher._validate_url("https://192.168.1.1/client.json")
-        assert "private" in str(exc_info.value).lower()
-
-        with pytest.raises(CIMDValidationError) as exc_info:
-            fetcher._validate_url("https://10.0.0.1/client.json")
-        assert "private" in str(exc_info.value).lower()
-
-    def test_validate_url_rejects_blocked_domain(self, fetcher: CIMDFetcher):
-        """Test that blocked domains are rejected."""
-        fetcher.trust_policy = CIMDTrustPolicy(blocked_domains=["evil.com"])
-        with pytest.raises(CIMDValidationError) as exc_info:
-            fetcher._validate_url("https://evil.com/client.json")
-        assert "blocked" in str(exc_info.value).lower()
-
-    def test_get_domain_extracts_hostname(self, fetcher: CIMDFetcher):
-        """Test that get_domain extracts the hostname."""
-        assert fetcher.get_domain("https://example.com/client.json") == "example.com"
-        assert (
-            fetcher.get_domain("https://sub.example.com/path/client.json")
-            == "sub.example.com"
-        )
-        assert fetcher.get_domain("invalid") is None
+    # URL validation tests moved to test_cimd_ssrf_protection.py
 
     def test_validate_redirect_uri_exact_match(self, fetcher: CIMDFetcher):
         """Test redirect_uri validation with exact match."""
         doc = CIMDDocument(
-            client_id="https://example.com/client.json",  # type: ignore[arg-type]
+            client_id=AnyHttpUrl("https://example.com/client.json"),
             redirect_uris=["http://localhost:3000/callback"],
         )
         assert fetcher.validate_redirect_uri(doc, "http://localhost:3000/callback")
@@ -199,7 +124,7 @@ class TestCIMDFetcher:
     def test_validate_redirect_uri_wildcard_match(self, fetcher: CIMDFetcher):
         """Test redirect_uri validation with wildcard port."""
         doc = CIMDDocument(
-            client_id="https://example.com/client.json",  # type: ignore[arg-type]
+            client_id=AnyHttpUrl("https://example.com/client.json"),
             redirect_uris=["http://localhost:*/callback"],
         )
         assert fetcher.validate_redirect_uri(doc, "http://localhost:3000/callback")
@@ -209,7 +134,7 @@ class TestCIMDFetcher:
     def test_validate_redirect_uri_no_uris(self, fetcher: CIMDFetcher):
         """Test redirect_uri validation when no URIs specified."""
         doc = CIMDDocument(
-            client_id="https://example.com/client.json",  # type: ignore[arg-type]
+            client_id=AnyHttpUrl("https://example.com/client.json"),
             redirect_uris=None,
         )
         assert not fetcher.validate_redirect_uri(doc, "http://localhost:3000/callback")
@@ -232,10 +157,15 @@ class TestCIMDFetcherHTTP:
             "redirect_uris": ["http://localhost:3000/callback"],
             "token_endpoint_auth_method": "none",
         }
+
+        # Mock HTTP request
         httpx_mock.add_response(
             url=url,
             json=doc_data,
-            headers={"content-type": "application/json"},
+            headers={
+                "content-type": "application/json",
+                "content-length": "200",
+            },
         )
 
         doc = await fetcher.fetch(url)
@@ -249,7 +179,11 @@ class TestCIMDFetcherHTTP:
             "client_id": "https://other.com/client.json",  # Different URL
             "client_name": "Test App",
         }
-        httpx_mock.add_response(url=url, json=doc_data)
+        httpx_mock.add_response(
+            url="https://example.com/client.json",
+            json=doc_data,
+            headers={"content-length": "100"},
+        )
 
         with pytest.raises(CIMDValidationError) as exc_info:
             await fetcher.fetch(url)
@@ -258,7 +192,7 @@ class TestCIMDFetcherHTTP:
     async def test_fetch_http_error(self, fetcher: CIMDFetcher, httpx_mock):
         """Test handling of HTTP errors."""
         url = "https://example.com/client.json"
-        httpx_mock.add_response(url=url, status_code=404)
+        httpx_mock.add_response(url="https://example.com/client.json", status_code=404)
 
         with pytest.raises(CIMDFetchError) as exc_info:
             await fetcher.fetch(url)
@@ -267,7 +201,11 @@ class TestCIMDFetcherHTTP:
     async def test_fetch_invalid_json(self, fetcher: CIMDFetcher, httpx_mock):
         """Test handling of invalid JSON response."""
         url = "https://example.com/client.json"
-        httpx_mock.add_response(url=url, content=b"not json")
+        httpx_mock.add_response(
+            url="https://example.com/client.json",
+            content=b"not json",
+            headers={"content-length": "10"},
+        )
 
         with pytest.raises(CIMDValidationError) as exc_info:
             await fetcher.fetch(url)
@@ -280,7 +218,11 @@ class TestCIMDFetcherHTTP:
             "client_id": url,
             "token_endpoint_auth_method": "client_secret_basic",  # Not allowed
         }
-        httpx_mock.add_response(url=url, json=doc_data)
+        httpx_mock.add_response(
+            url="https://example.com/client.json",
+            json=doc_data,
+            headers={"content-length": "100"},
+        )
 
         with pytest.raises(CIMDValidationError) as exc_info:
             await fetcher.fetch(url)
@@ -349,16 +291,16 @@ class TestCIMDAssertionValidator:
     def cimd_doc_with_jwks_uri(self):
         """Create CIMD document with jwks_uri."""
         return CIMDDocument(
-            client_id="https://example.com/client.json",  # type: ignore[arg-type]
+            client_id=AnyHttpUrl("https://example.com/client.json"),
             token_endpoint_auth_method="private_key_jwt",
-            jwks_uri="https://example.com/.well-known/jwks.json",  # type: ignore[arg-type]
+            jwks_uri=AnyHttpUrl("https://example.com/.well-known/jwks.json"),
         )
 
     @pytest.fixture
     def cimd_doc_with_inline_jwks(self, jwks):
         """Create CIMD document with inline JWKS."""
         return CIMDDocument(
-            client_id="https://example.com/client.json",  # type: ignore[arg-type]
+            client_id=AnyHttpUrl("https://example.com/client.json"),
             token_endpoint_auth_method="private_key_jwt",
             jwks=jwks,
         )
@@ -620,15 +562,18 @@ class TestCIMDClientManager:
             "redirect_uris": ["http://localhost:3000/callback"],
             "token_endpoint_auth_method": "none",
         }
-        httpx_mock.add_response(url=url, json=doc_data)
+        httpx_mock.add_response(
+            url="https://example.com/client.json",
+            json=doc_data,
+            headers={"content-length": "200"},
+        )
 
         client = await manager.get_client(url)
         assert client is not None
         assert client.client_id == url
         assert client.client_name == "Test App"
-        assert client.allowed_redirect_uri_patterns == [
-            "http://localhost:3000/callback"
-        ]
+        # Verify it uses proxy's patterns (None by default), not document's redirect_uris
+        assert client.allowed_redirect_uri_patterns is None
 
     async def test_get_client_disabled(self, disabled_manager):
         """Test that get_client returns None when disabled."""
@@ -638,35 +583,9 @@ class TestCIMDClientManager:
     async def test_get_client_fetch_failure(self, manager, httpx_mock):
         """Test that get_client returns None on fetch failure."""
         url = "https://example.com/client.json"
-        httpx_mock.add_response(url=url, status_code=404)
+        httpx_mock.add_response(url="https://example.com/client.json", status_code=404)
 
         client = await manager.get_client(url)
         assert client is None
 
-    def test_should_skip_consent_for_trusted_domain(self, manager):
-        """Test that trusted domains skip consent."""
-        from fastmcp.server.auth.cimd import CIMDClientManager, CIMDTrustPolicy
-
-        manager = CIMDClientManager(
-            enable_cimd=True,
-            trust_policy=CIMDTrustPolicy(trusted_domains=["example.com"]),
-        )
-
-        assert manager.should_skip_consent("https://example.com/client.json")
-        assert manager.should_skip_consent("https://sub.example.com/client.json")
-        assert not manager.should_skip_consent("https://other.com/client.json")
-
-    def test_should_skip_consent_disabled(self, disabled_manager):
-        """Test that consent skip returns False when disabled."""
-        assert not disabled_manager.should_skip_consent(
-            "https://example.com/client.json"
-        )
-
-    def test_get_domain(self, manager):
-        """Test domain extraction from CIMD URL."""
-        assert manager.get_domain("https://example.com/client.json") == "example.com"
-        assert (
-            manager.get_domain("https://sub.example.com/path/client.json")
-            == "sub.example.com"
-        )
-        assert manager.get_domain("invalid-url") is None
+    # Trust policy and consent bypass tests removed - functionality removed from CIMD

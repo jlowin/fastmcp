@@ -56,10 +56,7 @@ from typing_extensions import override
 
 from fastmcp import settings
 from fastmcp.server.auth.auth import OAuthProvider, TokenVerifier
-from fastmcp.server.auth.cimd import (
-    CIMDDocument,
-    CIMDTrustPolicy,
-)
+from fastmcp.server.auth.cimd import CIMDDocument
 from fastmcp.server.auth.handlers.authorize import AuthorizationHandler
 from fastmcp.server.auth.jwt_issuer import (
     JWTIssuer,
@@ -715,7 +712,6 @@ class OAuthProxy(OAuthProvider):
         fallback_access_token_expiry_seconds: int | None = None,
         # CIMD (Client ID Metadata Document) configuration
         enable_cimd: bool = True,
-        cimd_trust_policy: CIMDTrustPolicy | None = None,
     ):
         """Initialize the OAuth proxy provider.
 
@@ -774,9 +770,6 @@ class OAuthProxy(OAuthProvider):
                 authentication (default True). When enabled, clients can use HTTPS URLs as
                 client_ids instead of registering via DCR. The server fetches and validates
                 the CIMD document from the URL.
-            cimd_trust_policy: Trust policy for CIMD clients. Controls which domains can
-                skip consent, which are blocked, etc. If None, uses default policy with
-                trusted domains like claude.ai, cursor.com.
         """
 
         # Always enable DCR since we implement it locally for MCP clients
@@ -858,14 +851,11 @@ class OAuthProxy(OAuthProvider):
 
         self._cimd = CIMDClientManager(
             enable_cimd=enable_cimd,
-            trust_policy=cimd_trust_policy,
             default_scope=self._default_scope_str,
+            allowed_redirect_uri_patterns=self._allowed_client_redirect_uris,
         )
         if enable_cimd:
-            logger.debug(
-                "CIMD support enabled with %d trusted domains",
-                len(self._cimd.trust_policy.trusted_domains),
-            )
+            logger.debug("CIMD support enabled")
 
         if jwt_signing_key is None:
             jwt_signing_key = derive_jwt_key(
@@ -2312,20 +2302,17 @@ class OAuthProxy(OAuthProvider):
         is_cimd_client = (
             hasattr(client, "cimd_document") and client.cimd_document is not None
         )  # type: ignore[union-attr]
-        cimd_domain = (
-            self._cimd.get_domain(txn["client_id"]) if is_cimd_client else None
-        )
 
-        # Check if this is a trusted CIMD domain that can skip consent
-        # Trusted domains bypass consent entirely
-        if self._cimd.should_skip_consent(txn["client_id"]):
-            logger.info(
-                "Auto-approving trusted CIMD client: %s (domain: %s)",
-                txn["client_id"],
-                cimd_domain,
-            )
-            upstream_url = self._build_upstream_authorize_url(txn_id, txn)
-            return RedirectResponse(url=upstream_url, status_code=302)
+        # Extract domain from CIMD URL for display in consent screen
+        cimd_domain = None
+        if is_cimd_client:
+            try:
+                from urllib.parse import urlparse
+
+                parsed = urlparse(txn["client_id"])
+                cimd_domain = parsed.hostname
+            except Exception:
+                pass
 
         # Need consent: issue CSRF token and show HTML
         csrf_token = secrets.token_urlsafe(32)
