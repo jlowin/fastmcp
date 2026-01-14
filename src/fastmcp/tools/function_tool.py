@@ -407,6 +407,7 @@ def tool(
             task=resolve_task_config(task),
             exclude_args=exclude_args,
             serializer=serializer,
+            timeout=timeout,
             auth=auth,
         )
         return FunctionTool.from_function(fn, metadata=tool_meta)
