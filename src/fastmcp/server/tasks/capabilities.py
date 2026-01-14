@@ -3,6 +3,7 @@
 from mcp.types import (
     ServerTasksCapability,
     ServerTasksRequestsCapability,
+    TasksCallCapability,
     TasksCancelCapability,
     TasksListCapability,
     TasksToolsCapability,
@@ -22,7 +23,7 @@ def get_task_capabilities() -> ServerTasksCapability:
         list=TasksListCapability(),
         cancel=TasksCancelCapability(),
         requests=ServerTasksRequestsCapability(
-            tools=TasksToolsCapability(call={}),
+            tools=TasksToolsCapability(call=TasksCallCapability()),
             prompts={"get": {}},
             resources={"read": {}},
         ),
