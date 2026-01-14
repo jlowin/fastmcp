@@ -25,7 +25,7 @@ import json
 import secrets
 import time
 from base64 import urlsafe_b64encode
-from typing import TYPE_CHECKING, Any, Final
+from typing import Any, Final
 from urllib.parse import urlencode, urlparse
 
 import httpx
@@ -57,10 +57,8 @@ from typing_extensions import override
 from fastmcp import settings
 from fastmcp.server.auth.auth import OAuthProvider, TokenVerifier
 from fastmcp.server.auth.cimd import (
-    CIMDFetcher,
-    CIMDFetchError,
+    CIMDDocument,
     CIMDTrustPolicy,
-    CIMDValidationError,
 )
 from fastmcp.server.auth.handlers.authorize import AuthorizationHandler
 from fastmcp.server.auth.jwt_issuer import (
@@ -82,9 +80,6 @@ from fastmcp.utilities.ui import (
     create_page,
     create_secure_html_response,
 )
-
-if TYPE_CHECKING:
-    pass
 
 logger = get_logger(__name__)
 
@@ -204,11 +199,12 @@ def _hash_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-class ProxyDCRClient(OAuthClientInformationFull):
-    """Client for DCR proxy with configurable redirect URI validation.
+class OAuthProxyClient(OAuthClientInformationFull):
+    """Client for OAuth proxy supporting both DCR and CIMD clients.
 
     This special client class is critical for the OAuth proxy to work correctly
-    with Dynamic Client Registration (DCR). Here's why it exists:
+    with both Dynamic Client Registration (DCR) and CIMD (Client ID Metadata
+    Document) clients. Here's why it exists:
 
     Problem:
     --------
@@ -232,6 +228,7 @@ class ProxyDCRClient(OAuthClientInformationFull):
 
     allowed_redirect_uri_patterns: list[str] | None = Field(default=None)
     client_name: str | None = Field(default=None)
+    cimd_document: CIMDDocument | None = Field(default=None, exclude=True)
 
     def validate_redirect_uri(self, redirect_uri: AnyUrl | None) -> AnyUrl:
         """Validate redirect URI against allowed patterns.
@@ -624,7 +621,7 @@ class OAuthProxy(OAuthProvider):
     ------------------------
     1. Client Registration (DCR):
        - Accept any client registration request
-       - Store ProxyDCRClient that accepts dynamic redirect URIs
+       - Store OAuthProxyClient that accepts dynamic redirect URIs
 
     2. Authorization:
        - Store transaction mapping client details to proxy flow
@@ -856,18 +853,18 @@ class OAuthProxy(OAuthProvider):
             fallback_access_token_expiry_seconds
         )
 
-        # CIMD configuration
-        self._enable_cimd: bool = enable_cimd
-        self._cimd_trust_policy: CIMDTrustPolicy = (
-            cimd_trust_policy or CIMDTrustPolicy()
-        )
-        self._cimd_fetcher: CIMDFetcher = CIMDFetcher(
-            trust_policy=self._cimd_trust_policy,
+        # CIMD configuration - delegate to manager
+        from fastmcp.server.auth.cimd import CIMDClientManager
+
+        self._cimd = CIMDClientManager(
+            enable_cimd=enable_cimd,
+            trust_policy=cimd_trust_policy,
+            default_scope=self._default_scope_str,
         )
         if enable_cimd:
             logger.debug(
                 "CIMD support enabled with %d trusted domains",
-                len(self._cimd_trust_policy.trusted_domains),
+                len(self._cimd.trust_policy.trusted_domains),
             )
 
         if jwt_signing_key is None:
@@ -924,11 +921,11 @@ class OAuthProxy(OAuthProvider):
             raise_on_validation_error=True,
         )
 
-        self._client_store: PydanticAdapter[ProxyDCRClient] = PydanticAdapter[
-            ProxyDCRClient
+        self._client_store: PydanticAdapter[OAuthProxyClient] = PydanticAdapter[
+            OAuthProxyClient
         ](
             key_value=self._client_storage,
-            pydantic_model=ProxyDCRClient,
+            pydantic_model=OAuthProxyClient,
             default_collection="mcp-oauth-proxy-clients",
             raise_on_validation_error=True,
         )
@@ -1054,80 +1051,53 @@ class OAuthProxy(OAuthProvider):
 
         For unregistered clients (and CIMD URLs when CIMD is disabled), returns None.
         """
-        # Check if this looks like a CIMD URL
-        if self._enable_cimd and self._cimd_fetcher.is_cimd_client_id(client_id):
-            return await self._get_cimd_client(client_id)
+        # Check storage first (both DCR and CIMD clients are stored)
+        if client := await self._client_store.get(key=client_id):
+            if client.allowed_redirect_uri_patterns is None:
+                client.allowed_redirect_uri_patterns = (
+                    self._allowed_client_redirect_uris
+                )
+            return client
 
-        # Load DCR client from storage
-        if not (client := await self._client_store.get(key=client_id)):
-            return None
+        # If not in storage and looks like CIMD URL, fetch and store it
+        if self._cimd.is_cimd_client_id(client_id):
+            if cimd_client := await self._get_cimd_client(client_id):
+                # Store CIMD client just like DCR clients
+                await self._client_store.put(key=client_id, value=cimd_client)
+                return cimd_client
 
-        if client.allowed_redirect_uri_patterns is None:
-            client.allowed_redirect_uri_patterns = self._allowed_client_redirect_uris
+        return None
 
-        return client
-
-    async def _get_cimd_client(
-        self, client_id_url: str
-    ) -> OAuthClientInformationFull | None:
+    async def _get_cimd_client(self, client_id_url: str) -> OAuthProxyClient | None:
         """Fetch and validate a CIMD document, returning synthetic client info.
 
         Args:
             client_id_url: The HTTPS URL to fetch as client_id
 
         Returns:
-            OAuthClientInformationFull based on CIMD document, or None if fetch fails
+            OAuthProxyClient based on CIMD document, or None if fetch fails
         """
-        try:
-            cimd_doc = await self._cimd_fetcher.fetch(client_id_url)
-        except (CIMDFetchError, CIMDValidationError) as e:
-            logger.warning("CIMD fetch failed for %s: %s", client_id_url, e)
-            return None
-
-        # Create synthetic client from CIMD document
-        # Use ProxyDCRClient to get redirect_uri pattern matching support
-        # CIMD redirect_uris may contain wildcards (e.g., http://localhost:*/callback),
-        # so we use allowed_redirect_uri_patterns for validation
-        client = ProxyDCRClient(
-            client_id=client_id_url,
-            client_secret=None,  # CIMD clients don't use secrets
-            redirect_uris=None,  # Use patterns instead for wildcard support
-            grant_types=cimd_doc.grant_types,
-            scope=cimd_doc.scope or self._default_scope_str,
-            token_endpoint_auth_method="none",  # CIMD requires "none" or "private_key_jwt"
-            allowed_redirect_uri_patterns=cimd_doc.redirect_uris,  # Patterns support wildcards
-            client_name=cimd_doc.client_name,
-        )
-
-        # Store CIMD metadata on the client for consent screen use
-        client._cimd_document = cimd_doc  # type: ignore[attr-defined]
-
-        logger.debug(
-            "CIMD client resolved: %s (name=%s)",
-            client_id_url,
-            cimd_doc.client_name,
-        )
-
-        return client
+        # Delegate to CIMD client manager
+        return await self._cimd.get_client(client_id_url)
 
     @override
     async def register_client(self, client_info: OAuthClientInformationFull) -> None:
         """Register a client locally
 
-        When a client registers, we create a ProxyDCRClient that is more
+        When a client registers, we create a OAuthProxyClient that is more
         forgiving about validating redirect URIs, since the DCR client's
         redirect URI will likely be localhost or unknown to the proxied IDP. The
         proxied IDP only knows about this server's fixed redirect URI.
         """
 
-        # Create a ProxyDCRClient with configured redirect URI validation
+        # Create a OAuthProxyClient with configured redirect URI validation
         if client_info.client_id is None:
             raise ValueError("client_id is required for client registration")
         # We use token_endpoint_auth_method="none" because the proxy handles
         # all upstream authentication. The client_secret must also be None
         # because the SDK requires secrets to be provided if they're set,
         # regardless of auth method.
-        proxy_client: ProxyDCRClient = ProxyDCRClient(
+        proxy_client: OAuthProxyClient = OAuthProxyClient(
             client_id=client_info.client_id,
             client_secret=None,
             redirect_uris=client_info.redirect_uris or [AnyUrl("http://localhost")],
@@ -1861,6 +1831,7 @@ class OAuthProxy(OAuthProvider):
         This method creates standard OAuth routes and replaces:
         - /authorize endpoint: Enhanced error responses for unregistered clients
         - /token endpoint: OAuth 2.1 compliant error codes
+        - /.well-known/oauth-authorization-server: Adds CIMD support metadata
 
         Args:
             mcp_path: The path where the MCP endpoint is mounted (e.g., "/mcp")
@@ -1900,6 +1871,56 @@ class OAuthProxy(OAuthProvider):
                         path="/authorize",
                         endpoint=authorize_handler.handle,
                         methods=["GET", "POST"],
+                    )
+                )
+            # Wrap metadata endpoint to add CIMD support field
+            elif (
+                isinstance(route, Route)
+                and route.path.startswith("/.well-known/oauth-authorization-server")
+                and route.methods is not None
+                and "GET" in route.methods
+            ):
+                # Wrap the original endpoint to add CIMD metadata
+                # Note: endpoint might be wrapped in CORS middleware
+
+                # Create wrapper function with explicit closure to avoid loop binding issues
+                def make_metadata_wrapper(endpoint):
+                    async def metadata_with_cimd(request):
+                        import json
+
+                        # Call the original endpoint (might be CORS wrapped)
+                        # We need to handle it as ASGI app
+                        from starlette.responses import JSONResponse
+
+                        body_parts = []
+
+                        async def receive():
+                            return {"type": "http.request", "body": b""}
+
+                        async def send(message):
+                            if message["type"] == "http.response.body":
+                                body_parts.append(message.get("body", b""))
+
+                        await endpoint(request.scope, receive, send)
+
+                        # Combine body parts
+                        body = b"".join(body_parts)
+                        metadata = json.loads(body)
+
+                        # Add CIMD field
+                        metadata["client_id_metadata_document_supported"] = (
+                            self._cimd.enabled
+                        )
+
+                        return JSONResponse(metadata)
+
+                    return metadata_with_cimd
+
+                custom_routes.append(
+                    Route(
+                        path=route.path,
+                        endpoint=make_metadata_wrapper(route.endpoint),
+                        methods=route.methods,
                     )
                 )
             else:
@@ -2283,21 +2304,28 @@ class OAuthProxy(OAuthProvider):
                 status_code=302,
             )
 
+        # Load client to check for CIMD and get client_name
+        client = await self.get_client(txn["client_id"])
+        client_name = getattr(client, "client_name", None) if client else None
+
+        # Check if this is a validated CIMD client (document was fetched and verified)
+        is_cimd_client = (
+            hasattr(client, "cimd_document") and client.cimd_document is not None
+        )  # type: ignore[union-attr]
+        cimd_domain = (
+            self._cimd.get_domain(txn["client_id"]) if is_cimd_client else None
+        )
+
         # Check if this is a trusted CIMD domain that can skip consent
-        if self._enable_cimd:
-            cimd_domain = self._cimd_fetcher.get_domain(txn["client_id"])
-            if (
-                cimd_domain
-                and self._cimd_trust_policy.auto_approve_trusted
-                and self._cimd_trust_policy.is_trusted(cimd_domain)
-            ):
-                logger.info(
-                    "Auto-approving trusted CIMD client: %s (domain: %s)",
-                    txn["client_id"],
-                    cimd_domain,
-                )
-                upstream_url = self._build_upstream_authorize_url(txn_id, txn)
-                return RedirectResponse(url=upstream_url, status_code=302)
+        # Trusted domains bypass consent entirely
+        if self._cimd.should_skip_consent(txn["client_id"]):
+            logger.info(
+                "Auto-approving trusted CIMD client: %s (domain: %s)",
+                txn["client_id"],
+                cimd_domain,
+            )
+            upstream_url = self._build_upstream_authorize_url(txn_id, txn)
+            return RedirectResponse(url=upstream_url, status_code=302)
 
         # Need consent: issue CSRF token and show HTML
         csrf_token = secrets.token_urlsafe(32)
@@ -2313,18 +2341,6 @@ class OAuthProxy(OAuthProvider):
         # Update dict for use in HTML generation
         txn["csrf_token"] = csrf_token
         txn["csrf_expires_at"] = csrf_expires_at
-
-        # Load client to get client_name and CIMD info if available
-        client = await self.get_client(txn["client_id"])
-        client_name = getattr(client, "client_name", None) if client else None
-
-        # Check if this is a CIMD client
-        is_cimd_client = (
-            hasattr(client, "_cimd_document") and client._cimd_document is not None
-        )  # type: ignore[union-attr]
-        cimd_domain = (
-            self._cimd_fetcher.get_domain(txn["client_id"]) if is_cimd_client else None
-        )
 
         # Extract server metadata from app state
         fastmcp = getattr(request.app.state, "fastmcp_server", None)

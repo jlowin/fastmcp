@@ -12,25 +12,22 @@ This module provides:
 
 from __future__ import annotations
 
+import fnmatch
 import ipaddress
-import time
 from typing import Any, Literal
 from urllib.parse import urlparse
 
 import httpx
 from pydantic import AnyHttpUrl, BaseModel, Field, field_validator
 
+from fastmcp.server.auth.trusted_cimd_domains import TRUSTED_CIMD_DOMAINS
 from fastmcp.utilities.logging import get_logger
 
 logger = get_logger(__name__)
 
 
-# Default trusted domains that can skip consent
-DEFAULT_TRUSTED_CIMD_DOMAINS: list[str] = [
-    "claude.ai",
-    "anthropic.com",
-    "cursor.com",
-]
+# Re-export for backwards compatibility
+DEFAULT_TRUSTED_CIMD_DOMAINS = TRUSTED_CIMD_DOMAINS
 
 
 class CIMDDocument(BaseModel):
@@ -133,19 +130,11 @@ class CIMDTrustPolicy(BaseModel):
 
     trusted_domains: list[str] = Field(
         default_factory=lambda: list(DEFAULT_TRUSTED_CIMD_DOMAINS),
-        description="Domains that can skip consent (e.g., claude.ai)",
+        description="Domains that skip consent entirely (e.g., claude.ai)",
     )
     blocked_domains: list[str] = Field(
         default_factory=list,
         description="Domains that are always rejected",
-    )
-    auto_approve_trusted: bool = Field(
-        default=True,
-        description="Whether trusted domains skip consent entirely",
-    )
-    require_consent_for_unknown: bool = Field(
-        default=True,
-        description="Whether unknown CIMD clients require consent",
     )
 
     def is_trusted(self, domain: str) -> bool:
@@ -174,50 +163,52 @@ class CIMDFetchError(Exception):
 
 
 class CIMDFetcher:
-    """Fetch and validate CIMD documents with caching and security.
+    """Fetch and validate CIMD documents with security.
 
     Handles:
     - URL validation (HTTPS, non-root path)
     - SSRF protection (block private/loopback addresses)
     - Document fetching with timeout
     - Validation that client_id matches URL
-    - Caching with configurable TTL
+
+    Note: CIMD clients are stored in persistent storage after first fetch,
+    so no in-memory caching is needed.
     """
 
     def __init__(
         self,
-        cache_ttl: int = 3600,
-        min_cache_ttl: int = 300,
-        max_cache_ttl: int = 86400,
+        cache_ttl: int = 3600,  # Kept for backwards compatibility, unused
+        min_cache_ttl: int = 300,  # Kept for backwards compatibility, unused
+        max_cache_ttl: int = 86400,  # Kept for backwards compatibility, unused
         timeout: float = 10.0,
         trust_policy: CIMDTrustPolicy | None = None,
     ):
         """Initialize the CIMD fetcher.
 
         Args:
-            cache_ttl: Default cache TTL in seconds (default 1 hour)
-            min_cache_ttl: Minimum cache TTL to prevent hammering (default 5 min)
-            max_cache_ttl: Maximum cache TTL per spec (default 24 hours)
+            cache_ttl: Deprecated, unused (kept for compatibility)
+            min_cache_ttl: Deprecated, unused (kept for compatibility)
+            max_cache_ttl: Deprecated, unused (kept for compatibility)
             timeout: HTTP request timeout in seconds
             trust_policy: Trust policy for domain handling
         """
-        self.cache_ttl = cache_ttl
-        self.min_cache_ttl = min_cache_ttl
-        self.max_cache_ttl = max_cache_ttl
         self.timeout = timeout
         self.trust_policy = trust_policy or CIMDTrustPolicy()
-        self._cache: dict[str, tuple[CIMDDocument, float]] = {}
 
     def is_cimd_client_id(self, client_id: str) -> bool:
         """Check if a client_id looks like a CIMD URL.
 
-        CIMD URLs must be HTTPS with a non-root path.
+        CIMD URLs must be HTTPS with a host and non-root path.
         """
         if not client_id:
             return False
         try:
             parsed = urlparse(client_id)
-            return parsed.scheme == "https" and parsed.path not in ("", "/")
+            return (
+                parsed.scheme == "https"
+                and bool(parsed.netloc)  # Must have a host
+                and parsed.path not in ("", "/")
+            )
         except Exception:
             return False
 
@@ -236,6 +227,7 @@ class CIMDFetcher:
                 "0.0.0.0",
                 "::1",
                 "10.",
+                "169.254.",  # Link-local
                 "172.16.",
                 "172.17.",
                 "172.18.",
@@ -296,41 +288,6 @@ class CIMDFetcher:
 
         return hostname, parsed.path
 
-    def _get_cached(self, url: str) -> CIMDDocument | None:
-        """Get cached document if still valid."""
-        if url in self._cache:
-            doc, expires_at = self._cache[url]
-            if time.time() < expires_at:
-                logger.debug("CIMD cache hit: %s", url)
-                return doc
-            else:
-                del self._cache[url]
-        return None
-
-    def _cache_document(
-        self, url: str, doc: CIMDDocument, cache_control: str | None = None
-    ) -> None:
-        """Cache document with appropriate TTL."""
-        ttl = self.cache_ttl
-
-        # Parse Cache-Control header if present
-        if cache_control:
-            for directive in cache_control.split(","):
-                directive = directive.strip().lower()
-                if directive.startswith("max-age="):
-                    parts = directive.split("=")
-                    if len(parts) >= 2 and parts[1].isdigit():
-                        ttl = int(parts[1])
-                elif directive in ("no-store", "no-cache"):
-                    ttl = self.min_cache_ttl  # Still cache briefly to prevent abuse
-
-        # Clamp TTL to bounds
-        ttl = max(self.min_cache_ttl, min(ttl, self.max_cache_ttl))
-
-        expires_at = time.time() + ttl
-        self._cache[url] = (doc, expires_at)
-        logger.debug("CIMD cached: %s (TTL=%ds)", url, ttl)
-
     async def fetch(self, client_id_url: str) -> CIMDDocument:
         """Fetch and validate a CIMD document.
 
@@ -344,11 +301,6 @@ class CIMDFetcher:
             CIMDValidationError: If document is invalid
             CIMDFetchError: If document cannot be fetched
         """
-        # Check cache first
-        cached = self._get_cached(client_id_url)
-        if cached:
-            return cached
-
         # Validate URL (also checks SSRF, blocked domains)
         self._validate_url(client_id_url)
 
@@ -391,10 +343,6 @@ class CIMDFetcher:
                 f"but was fetched from '{client_id_url}'"
             )
 
-        # Cache the document
-        cache_control = response.headers.get("cache-control")
-        self._cache_document(client_id_url, doc, cache_control)
-
         logger.info(
             "CIMD document fetched: %s (client_name=%s)",
             client_id_url,
@@ -427,9 +375,6 @@ class CIMDFetcher:
 
             # Check for wildcard port matching (http://localhost:*/callback)
             if "*" in allowed_str:
-                # Simple wildcard matching for port
-                import fnmatch
-
                 if fnmatch.fnmatch(redirect_uri, allowed_str):
                     return True
 
@@ -443,13 +388,296 @@ class CIMDFetcher:
         except Exception:
             return None
 
-    def clear_cache(self, url: str | None = None) -> None:
-        """Clear cached documents.
+
+class CIMDAssertionValidator:
+    """Validates JWT assertions for private_key_jwt CIMD clients.
+
+    Implements RFC 7523 (JSON Web Token (JWT) Profile for OAuth 2.0 Client
+    Authentication and Authorization Grants) for CIMD client authentication.
+    """
+
+    def __init__(self):
+        self._jti_cache: set[str] = set()
+        self._jti_cache_max_size = 10000
+        self.logger = get_logger(__name__)
+
+    async def validate_assertion(
+        self,
+        assertion: str,
+        client_id: str,
+        token_endpoint: str,
+        cimd_doc: CIMDDocument,
+    ) -> bool:
+        """Validate JWT assertion from client.
 
         Args:
-            url: Specific URL to clear, or None to clear all
+            assertion: The JWT assertion string
+            client_id: Expected client_id (must match iss and sub claims)
+            token_endpoint: Token endpoint URL (must match aud claim)
+            cimd_doc: CIMD document containing JWKS for key verification
+
+        Returns:
+            True if valid
+
+        Raises:
+            ValueError: If validation fails
         """
-        if url:
-            self._cache.pop(url, None)
+        from fastmcp.server.auth.providers.jwt import JWTVerifier
+
+        # 1. Validate CIMD document has key material
+        if cimd_doc.jwks_uri:
+            # Use JWTVerifier to handle JWKS fetching, caching, and JWT validation
+            verifier = JWTVerifier(
+                jwks_uri=str(cimd_doc.jwks_uri),
+                issuer=client_id,  # Must match client_id per RFC 7523
+                audience=token_endpoint,  # Must match token endpoint
+            )
+        elif cimd_doc.jwks:
+            # Extract public key from inline JWKS
+            public_key = self._extract_public_key_from_jwks(assertion, cimd_doc.jwks)
+            verifier = JWTVerifier(
+                public_key=public_key,
+                issuer=client_id,
+                audience=token_endpoint,
+            )
         else:
-            self._cache.clear()
+            raise ValueError(
+                "CIMD document must have jwks_uri or jwks for private_key_jwt"
+            )
+
+        # 2. Verify JWT using JWTVerifier (handles signature, exp, iss, aud)
+        access_token = await verifier.load_access_token(assertion)
+        if not access_token:
+            raise ValueError("Invalid JWT assertion")
+
+        claims = access_token.claims
+
+        # 3. Additional RFC 7523 validation: sub claim must equal client_id
+        if claims.get("sub") != client_id:
+            raise ValueError(f"Assertion sub claim must be {client_id}")
+
+        # 4. Check jti for replay attacks (RFC 7523 requirement)
+        jti = claims.get("jti")
+        if not jti:
+            raise ValueError("Assertion must include jti claim")
+        if jti in self._jti_cache:
+            raise ValueError(f"Assertion replay detected: jti {jti} already used")
+
+        # Add to cache (with size limit)
+        self._jti_cache.add(jti)
+        if len(self._jti_cache) > self._jti_cache_max_size:
+            # Evict arbitrary element to maintain bounded memory
+            self._jti_cache.pop()
+
+        self.logger.debug(
+            "JWT assertion validated successfully for client %s", client_id
+        )
+        return True
+
+    def _extract_public_key_from_jwks(self, token: str, jwks: dict) -> str:
+        """Extract public key from inline JWKS.
+
+        Args:
+            token: JWT token to extract kid from
+            jwks: JWKS document containing keys
+
+        Returns:
+            PEM-encoded public key
+
+        Raises:
+            ValueError: If key cannot be found or extracted
+        """
+        import base64
+        import json
+
+        from authlib.jose import JsonWebKey
+
+        # Extract kid from token header
+        try:
+            header_b64 = token.split(".")[0]
+            header_b64 += "=" * (4 - len(header_b64) % 4)  # Add padding
+            header = json.loads(base64.urlsafe_b64decode(header_b64))
+            kid = header.get("kid")
+        except Exception as e:
+            raise ValueError(f"Failed to extract key ID from token: {e}") from e
+
+        # Find matching key in JWKS
+        keys = jwks.get("keys", [])
+        if not keys:
+            raise ValueError("JWKS document contains no keys")
+
+        matching_key = None
+        for key in keys:
+            if kid and key.get("kid") == kid:
+                matching_key = key
+                break
+
+        if not matching_key:
+            # If no kid match, try first key as fallback
+            if len(keys) == 1:
+                matching_key = keys[0]
+                self.logger.warning(
+                    "No matching kid in JWKS, using single available key"
+                )
+            else:
+                raise ValueError(f"No matching key found for kid={kid} in JWKS")
+
+        # Convert JWK to PEM
+        try:
+            jwk = JsonWebKey.import_key(matching_key)
+            return jwk.as_pem().decode("utf-8")
+        except Exception as e:
+            raise ValueError(f"Failed to convert JWK to PEM: {e}") from e
+
+
+class CIMDClientManager:
+    """Manages all CIMD client operations for OAuth proxy.
+
+    This class encapsulates:
+    - CIMD client detection
+    - Document fetching and validation
+    - Synthetic OAuth client creation
+    - Trust policy enforcement
+    - Private key JWT assertion validation
+
+    This allows the OAuth proxy to delegate all CIMD-specific logic to a
+    single, focused manager class.
+    """
+
+    def __init__(
+        self,
+        enable_cimd: bool = True,
+        trust_policy: CIMDTrustPolicy | None = None,
+        default_scope: str = "",
+    ):
+        """Initialize CIMD client manager.
+
+        Args:
+            enable_cimd: Whether CIMD support is enabled
+            trust_policy: Policy for CIMD client trust (trusted/blocked domains)
+            default_scope: Default scope for CIMD clients if not specified in document
+        """
+        self.enabled = enable_cimd
+        self.trust_policy = trust_policy or CIMDTrustPolicy()
+        self.default_scope = default_scope
+
+        self._fetcher = CIMDFetcher(
+            trust_policy=self.trust_policy,
+        )
+        self._assertion_validator = CIMDAssertionValidator()
+        self.logger = get_logger(__name__)
+
+    def is_cimd_client_id(self, client_id: str) -> bool:
+        """Check if client_id is a CIMD URL.
+
+        Args:
+            client_id: Client ID to check
+
+        Returns:
+            True if client_id is an HTTPS URL (CIMD format)
+        """
+        return self.enabled and self._fetcher.is_cimd_client_id(client_id)
+
+    async def get_client(self, client_id_url: str):
+        """Fetch CIMD document and create synthetic OAuth client.
+
+        Args:
+            client_id_url: HTTPS URL pointing to CIMD document
+
+        Returns:
+            OAuthProxyClient with CIMD document attached, or None if fetch fails
+
+        Note:
+            Return type is left untyped to avoid circular import with oauth_proxy.
+            Returns OAuthProxyClient instance or None.
+        """
+        if not self.enabled:
+            return None
+
+        try:
+            cimd_doc = await self._fetcher.fetch(client_id_url)
+        except (CIMDFetchError, CIMDValidationError) as e:
+            self.logger.warning("CIMD fetch failed for %s: %s", client_id_url, e)
+            return None
+
+        # Import here to avoid circular dependency
+        from fastmcp.server.auth.oauth_proxy import OAuthProxyClient
+
+        # Create synthetic client from CIMD document
+        client = OAuthProxyClient(
+            client_id=client_id_url,
+            client_secret=None,
+            redirect_uris=None,
+            grant_types=cimd_doc.grant_types,
+            scope=cimd_doc.scope or self.default_scope,
+            token_endpoint_auth_method=cimd_doc.token_endpoint_auth_method,
+            allowed_redirect_uri_patterns=cimd_doc.redirect_uris,
+            client_name=cimd_doc.client_name,
+            cimd_document=cimd_doc,
+        )
+
+        self.logger.debug(
+            "CIMD client resolved: %s (name=%s)",
+            client_id_url,
+            cimd_doc.client_name,
+        )
+        return client
+
+    def should_skip_consent(self, client_id: str) -> bool:
+        """Check if CIMD client is trusted and should skip consent.
+
+        Args:
+            client_id: Client ID (CIMD URL)
+
+        Returns:
+            True if client is from a trusted domain and consent should be skipped
+        """
+        if not self.enabled:
+            return False
+
+        domain = self._fetcher.get_domain(client_id)
+        if not domain:
+            return False
+
+        return self.trust_policy.is_trusted(domain)
+
+    async def validate_private_key_jwt(
+        self,
+        assertion: str,
+        client,  # OAuthProxyClient, untyped to avoid circular import
+        token_endpoint: str,
+    ) -> bool:
+        """Validate JWT assertion for private_key_jwt auth.
+
+        Args:
+            assertion: JWT assertion string from client
+            client: OAuth proxy client (must have cimd_document)
+            token_endpoint: Token endpoint URL for aud validation
+
+        Returns:
+            True if assertion is valid
+
+        Raises:
+            ValueError: If client doesn't have CIMD document or validation fails
+        """
+        if not hasattr(client, "cimd_document") or not client.cimd_document:
+            raise ValueError("Client must have CIMD document for private_key_jwt")
+
+        cimd_doc = client.cimd_document
+        if cimd_doc.token_endpoint_auth_method != "private_key_jwt":
+            raise ValueError("CIMD document must specify private_key_jwt auth method")
+
+        return await self._assertion_validator.validate_assertion(
+            assertion, client.client_id, token_endpoint, cimd_doc
+        )
+
+    def get_domain(self, client_id: str) -> str | None:
+        """Extract domain from CIMD URL.
+
+        Args:
+            client_id: CIMD URL
+
+        Returns:
+            Domain name or None if not a valid URL
+        """
+        return self._fetcher.get_domain(client_id)
