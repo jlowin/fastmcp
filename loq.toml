@@ -12,11 +12,11 @@ exclude = [
 
 [[rules]]
 path = "src/fastmcp/server/auth/cimd.py"
-max_lines = 750
+max_lines = 683
 
 [[rules]]
 path = "src/fastmcp/server/auth/oauth_proxy.py"
-max_lines = 2540
+max_lines = 2456
 
 [[rules]]
 path = "tests/client/test_client.py"
@@ -64,7 +64,7 @@ max_lines = 809
 
 [[rules]]
 path = "docs/servers/auth/oauth-proxy.mdx"
-max_lines = 590
+max_lines = 710
 
 [[rules]]
 path = "src/fastmcp/server/context.py"
@@ -212,7 +212,7 @@ max_lines = 731
 
 [[rules]]
 path = "src/fastmcp/client/client.py"
-max_lines = 1725
+max_lines = 1723
 
 [[rules]]
 path = "src/fastmcp/server/providers/proxy.py"
@@ -248,7 +248,7 @@ max_lines = 878
 
 [[rules]]
 path = "docs/patterns/cli.mdx"
-max_lines = 581
+max_lines = 665
 
 [[rules]]
 path = "tests/cli/test_cli.py"
@@ -292,7 +292,7 @@ max_lines = 714
 
 [[rules]]
 path = "src/fastmcp/client/transports.py"
-max_lines = 1240
+max_lines = 1236
 
 [[rules]]
 path = "docs/docs.json"
@@ -300,7 +300,7 @@ max_lines = 589
 
 [[rules]]
 path = "src/fastmcp/cli/cli.py"
-max_lines = 962
+max_lines = 961
 
 [[rules]]
 path = "tests/utilities/test_json_schema_type.py"
@@ -316,7 +316,7 @@ max_lines = 604
 
 [[rules]]
 path = "docs/development/v3-notes/v3-features.mdx"
-max_lines = 540
+max_lines = 539
 
 [[rules]]
 path = "src/fastmcp/tools/function_tool.py"
