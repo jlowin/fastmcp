@@ -5,6 +5,7 @@ import time
 import anyio
 import pytest
 from mcp.shared.exceptions import McpError
+from mcp.types import TextContent
 
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
@@ -23,6 +24,7 @@ class TestToolTimeout:
             return "completed"
 
         result = await mcp.call_tool("quick_async_tool")
+        assert isinstance(result.content[0], TextContent)
         assert result.content[0].text == "completed"
 
     async def test_no_timeout_completes_normally_sync(self):
@@ -35,6 +37,7 @@ class TestToolTimeout:
             return "completed"
 
         result = await mcp.call_tool("quick_sync_tool")
+        assert isinstance(result.content[0], TextContent)
         assert result.content[0].text == "completed"
 
     async def test_timeout_not_reached_async(self):
@@ -47,6 +50,7 @@ class TestToolTimeout:
             return "completed"
 
         result = await mcp.call_tool("fast_async_tool")
+        assert isinstance(result.content[0], TextContent)
         assert result.content[0].text == "completed"
 
     async def test_timeout_not_reached_sync(self):
@@ -59,6 +63,7 @@ class TestToolTimeout:
             return "completed"
 
         result = await mcp.call_tool("fast_sync_tool")
+        assert isinstance(result.content[0], TextContent)
         assert result.content[0].text == "completed"
 
     async def test_async_timeout_exceeded(self):
@@ -166,6 +171,9 @@ class TestToolTimeout:
         result2 = await mcp.call_tool("long_timeout")
         result3 = await mcp.call_tool("no_timeout")
 
+        assert isinstance(result1.content[0], TextContent)
+        assert isinstance(result2.content[0], TextContent)
+        assert isinstance(result3.content[0], TextContent)
         assert result1.content[0].text == "short"
         assert result2.content[0].text == "long"
         assert result3.content[0].text == "none"
