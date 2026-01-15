@@ -120,6 +120,7 @@
                   "servers/authorization",
                   "servers/context",
                   "servers/elicitation",
+                  "servers/error-handling",
                   "servers/icons",
                   "servers/lifespan",
                   "servers/logging",
