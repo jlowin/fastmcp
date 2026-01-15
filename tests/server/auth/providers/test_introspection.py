@@ -415,6 +415,30 @@ class TestIntrospectionTokenVerifier:
 
         assert verifier.client_auth_method == "client_secret_basic"
 
+    def test_initialization_rejects_invalid_client_auth_method(self):
+        """Test that invalid client_auth_method values are rejected."""
+        # Test typo with trailing space
+        with pytest.raises(ValueError) as exc_info:
+            IntrospectionTokenVerifier(
+                introspection_url="https://auth.example.com/oauth/introspect",
+                client_id="test-client",
+                client_secret="test-secret",
+                client_auth_method="client_secret_basic ",  # ty: ignore[invalid-argument-type]
+            )
+        assert "Invalid client_auth_method" in str(exc_info.value)
+        assert "client_secret_basic " in str(exc_info.value)
+
+        # Test completely invalid value
+        with pytest.raises(ValueError) as exc_info:
+            IntrospectionTokenVerifier(
+                introspection_url="https://auth.example.com/oauth/introspect",
+                client_id="test-client",
+                client_secret="test-secret",
+                client_auth_method="basic",  # ty: ignore[invalid-argument-type]
+            )
+        assert "Invalid client_auth_method" in str(exc_info.value)
+        assert "basic" in str(exc_info.value)
+
     async def test_client_secret_post_includes_credentials_in_body(
         self, httpx_mock: HTTPXMock
     ):
