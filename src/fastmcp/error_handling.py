@@ -141,12 +141,12 @@ def handle_tool_errors(
                     # Re-raise ToolError as-is (user explicitly raised it)
                     raise
                 except Exception as e:
+                    func_name = getattr(func, "__name__", repr(func))
                     logger.exception(
-                        f"Error in tool {func.__name__!r} "
-                        f"(api_name={api_name!r}): {e}"
+                        f"Error in tool {func_name!r} (api_name={api_name!r}): {e}"
                     )
                     raise _handle_exception(
-                        e, api_name, func.__name__, mask_internal_errors
+                        e, api_name, func_name, mask_internal_errors
                     ) from e
 
             return async_wrapper  # type: ignore[return-value]
@@ -160,12 +160,12 @@ def handle_tool_errors(
                     # Re-raise ToolError as-is (user explicitly raised it)
                     raise
                 except Exception as e:
+                    func_name = getattr(func, "__name__", repr(func))
                     logger.exception(
-                        f"Error in tool {func.__name__!r} "
-                        f"(api_name={api_name!r}): {e}"
+                        f"Error in tool {func_name!r} (api_name={api_name!r}): {e}"
                     )
                     raise _handle_exception(
-                        e, api_name, func.__name__, mask_internal_errors
+                        e, api_name, func_name, mask_internal_errors
                     ) from e
 
             return sync_wrapper  # type: ignore[return-value]
