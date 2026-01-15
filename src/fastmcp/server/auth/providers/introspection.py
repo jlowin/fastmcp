@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import base64
 import time
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 import httpx
 from pydantic import AnyHttpUrl, SecretStr
@@ -108,7 +108,17 @@ class IntrospectionTokenVerifier(TokenVerifier):
             if isinstance(client_secret, SecretStr)
             else client_secret
         )
-        self.client_auth_method = client_auth_method
+
+        # Validate client_auth_method to catch typos/invalid values early
+        valid_methods = get_args(ClientAuthMethod)
+        if client_auth_method not in valid_methods:
+            options = " or ".join(f"'{m}'" for m in valid_methods)
+            raise ValueError(
+                f"Invalid client_auth_method: {client_auth_method!r}. "
+                f"Must be {options}."
+            )
+        self.client_auth_method: ClientAuthMethod = client_auth_method
+
         self.timeout_seconds = timeout_seconds
         self.logger = get_logger(__name__)
 
@@ -173,7 +183,7 @@ class IntrospectionTokenVerifier(TokenVerifier):
                 # Add client authentication based on method
                 if self.client_auth_method == "client_secret_basic":
                     headers["Authorization"] = self._create_basic_auth_header()
-                else:  # client_secret_post
+                elif self.client_auth_method == "client_secret_post":
                     data["client_id"] = self.client_id
                     data["client_secret"] = self.client_secret
 
