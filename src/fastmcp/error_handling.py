@@ -9,8 +9,8 @@ from __future__ import annotations
 import functools
 import inspect
 import logging
-from collections.abc import Callable
-from typing import TypeVar
+from collections.abc import Awaitable, Callable
+from typing import TypeVar, overload
 
 import httpx
 from typing_extensions import ParamSpec
@@ -76,6 +76,22 @@ def _handle_exception(
     else:
         message = f"An unexpected error occurred: {error}"
         return ToolError(_format_message(api_name, message))
+
+
+@overload
+def handle_tool_errors(
+    api_name: str | None = None,
+    *,
+    mask_internal_errors: bool = True,
+) -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]: ...
+
+
+@overload
+def handle_tool_errors(
+    api_name: str | None = None,
+    *,
+    mask_internal_errors: bool = True,
+) -> Callable[[Callable[P, R]], Callable[P, R]]: ...
 
 
 def handle_tool_errors(
