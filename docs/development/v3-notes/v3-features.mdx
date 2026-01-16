@@ -6,7 +6,7 @@ This document tracks major features in FastMCP v3.0 for release notes preparatio
 
 ## Provider-Based Architecture
 
-v3.0 introduces a provider-based component system that replaces v2's static-only registration. Providers dynamically source tools, resources, templates, and prompts at runtime.
+v3.0 introduces a provider-based component system that replaces v2's static-only registration ([#2622](https://github.com/jlowin/fastmcp/pull/2622)). Providers dynamically source tools, resources, templates, and prompts at runtime.
 
 **Core abstraction** (`src/fastmcp/server/providers/base.py`):
 ```python
@@ -100,7 +100,7 @@ main.add_provider(provider)
 
 ### Transforms
 
-Transforms modify components (tools, resources, prompts) as they flow from providers to clients. They use a middleware pattern where each transform receives a `call_next` callable to continue the chain.
+Transforms modify components (tools, resources, prompts) as they flow from providers to clients ([#2836](https://github.com/jlowin/fastmcp/pull/2836)). They use a middleware pattern where each transform receives a `call_next` callable to continue the chain.
 
 **Built-in transforms** (`src/fastmcp/server/transforms/`):
 
@@ -152,7 +152,7 @@ Documentation: `docs/servers/providers/transforms.mdx`, `docs/servers/visibility
 
 ## Visibility System
 
-Components can be dynamically enabled/disabled at runtime using the visibility system (`src/fastmcp/server/transforms/visibility.py`).
+Components can be dynamically enabled/disabled at runtime using the visibility system ([#2708](https://github.com/jlowin/fastmcp/pull/2708)).
 
 ```python
 mcp = FastMCP("Server")
@@ -176,7 +176,7 @@ Works at both server and provider level. Supports:
 
 ## Type-Safe Canonical Results
 
-v3.0 introduces type-safe result classes that provide explicit control over component responses while supporting MCP runtime metadata.
+v3.0 introduces type-safe result classes that provide explicit control over component responses while supporting MCP runtime metadata: `ToolResult` ([#2736](https://github.com/jlowin/fastmcp/pull/2736)), `ResourceResult` ([#2734](https://github.com/jlowin/fastmcp/pull/2734)), and `PromptResult` ([#2738](https://github.com/jlowin/fastmcp/pull/2738)).
 
 ### ToolResult
 
@@ -274,7 +274,7 @@ Requires Docket server for task scheduling and result polling.
 
 ## Decorators Return Functions
 
-v3.0 changes what decorators (`@tool`, `@resource`, `@prompt`) return. Decorators now return the original function unchanged, rather than transforming it into a component object.
+v3.0 changes what decorators (`@tool`, `@resource`, `@prompt`) return ([#2856](https://github.com/jlowin/fastmcp/pull/2856)). Decorators now return the original function unchanged, rather than transforming it into a component object.
 
 **v3 behavior (default):**
 ```python
@@ -306,7 +306,7 @@ Environment variable: `FASTMCP_DECORATOR_MODE=object`
 
 ## CLI Auto-Reload
 
-The `--reload` flag enables file watching with automatic server restarts for development.
+The `--reload` flag enables file watching with automatic server restarts for development ([#2816](https://github.com/jlowin/fastmcp/pull/2816)).
 
 ```bash
 # Watch for changes and restart
@@ -335,7 +335,7 @@ fastmcp dev server.py  # Includes --reload by default
 
 ## Component Authorization
 
-v3.0 introduces callable-based authorization for tools, resources, and prompts (`src/fastmcp/server/auth/authorization.py`).
+v3.0 introduces callable-based authorization for tools, resources, and prompts ([#2855](https://github.com/jlowin/fastmcp/pull/2855)).
 
 **Component-level auth**:
 
@@ -626,7 +626,7 @@ mcp.add_transform(ToolTransform({"name": config}))
 
 ### WSTransport Removed
 
-The deprecated `WSTransport` client transport has been removed. Use `StreamableHttpTransport` instead.
+The deprecated `WSTransport` client transport has been removed ([#2826](https://github.com/jlowin/fastmcp/pull/2826)). Use `StreamableHttpTransport` instead.
 
 ### Decorators Return Functions
 
@@ -704,7 +704,7 @@ def my_prompt() -> Message:
 
 ### Auth Provider Environment Variables Removed
 
-Auth providers no longer auto-load from environment variables:
+Auth providers no longer auto-load from environment variables ([#2752](https://github.com/jlowin/fastmcp/pull/2752)):
 
 ```python
 # v2.x - auto-loaded from FASTMCP_SERVER_AUTH_GITHUB_*
@@ -722,6 +722,6 @@ See `docs/development/v3-notes/auth-provider-env-vars.mdx` for rationale.
 
 ### Server Banner Environment Variable
 
-`FASTMCP_SHOW_CLI_BANNER` → `FASTMCP_SHOW_SERVER_BANNER`
+`FASTMCP_SHOW_CLI_BANNER` → `FASTMCP_SHOW_SERVER_BANNER` ([#2771](https://github.com/jlowin/fastmcp/pull/2771))
 
 Now applies to all server startup methods, not just the CLI.
