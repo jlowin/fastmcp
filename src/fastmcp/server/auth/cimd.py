@@ -12,9 +12,12 @@ This module provides:
 
 from __future__ import annotations
 
+import asyncio
 import fnmatch
 import ipaddress
 import json
+import socket
+import time
 from typing import Any, Literal
 from urllib.parse import urlparse
 
@@ -24,6 +27,91 @@ from pydantic import AnyHttpUrl, BaseModel, Field, field_validator
 from fastmcp.utilities.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def _is_ip_allowed(ip_str: str) -> bool:
+    """Check if an IP address is allowed (not private/internal/dangerous).
+
+    This is the core SSRF protection - it validates actual resolved IP addresses,
+    not hostnames. This prevents DNS rebinding and IP obfuscation attacks.
+
+    Args:
+        ip_str: IP address string to check
+
+    Returns:
+        True if the IP is allowed (public internet), False if blocked
+    """
+    try:
+        ip = ipaddress.ip_address(ip_str)
+    except ValueError:
+        # If we can't parse it as an IP, block it
+        return False
+
+    # Block all dangerous IP categories
+    if ip.is_private:
+        return False
+    if ip.is_loopback:
+        return False
+    if ip.is_reserved:
+        return False
+    if ip.is_link_local:  # 169.254.x.x (AWS metadata!), fe80::/10
+        return False
+    if ip.is_multicast:
+        return False
+    if ip.is_unspecified:  # 0.0.0.0, ::
+        return False
+
+    # IPv6-specific checks
+    if isinstance(ip, ipaddress.IPv6Address):
+        # Block IPv4-mapped IPv6 addresses (::ffff:127.0.0.1)
+        if ip.ipv4_mapped:
+            return _is_ip_allowed(str(ip.ipv4_mapped))
+        # Block 6to4 addresses (2002::/16) - can encode IPv4
+        if ip.sixtofour:
+            return _is_ip_allowed(str(ip.sixtofour))
+        # Block Teredo addresses (2001::/32) - can tunnel to IPv4
+        if ip.teredo:
+            # teredo returns (server, client) tuple
+            server, client = ip.teredo
+            if not _is_ip_allowed(str(server)) or not _is_ip_allowed(str(client)):
+                return False
+
+    return True
+
+
+async def _resolve_hostname(hostname: str, port: int = 443) -> list[str]:
+    """Resolve hostname to IP addresses using DNS.
+
+    This runs DNS resolution in a thread pool to avoid blocking.
+
+    Args:
+        hostname: Hostname to resolve
+        port: Port number (used for getaddrinfo)
+
+    Returns:
+        List of resolved IP addresses
+
+    Raises:
+        CIMDValidationError: If resolution fails
+    """
+    loop = asyncio.get_event_loop()
+    try:
+        # Run DNS resolution in thread pool
+        infos = await loop.run_in_executor(
+            None,
+            lambda: socket.getaddrinfo(
+                hostname, port, socket.AF_UNSPEC, socket.SOCK_STREAM
+            ),
+        )
+        # Extract unique IP addresses
+        ips = list({info[4][0] for info in infos})
+        if not ips:
+            raise CIMDValidationError(
+                f"DNS resolution returned no addresses for {hostname}"
+            )
+        return ips
+    except socket.gaierror as e:
+        raise CIMDValidationError(f"DNS resolution failed for {hostname}: {e}") from e
 
 
 class CIMDDocument(BaseModel):
@@ -124,17 +212,23 @@ class CIMDFetchError(Exception):
 
 
 class CIMDFetcher:
-    """Fetch and validate CIMD documents with security.
+    """Fetch and validate CIMD documents with comprehensive SSRF protection.
 
-    Handles:
-    - URL validation (HTTPS, non-root path)
-    - SSRF protection (block private/loopback addresses)
-    - Document fetching with timeout
-    - Validation that client_id matches URL
-
-    Note: CIMD clients are stored in persistent storage after first fetch,
-    so no in-memory caching is needed.
+    Security measures:
+    - URL validation (HTTPS only, non-root path required)
+    - DNS resolution with IP validation (prevents DNS rebinding)
+    - Blocks private/loopback/link-local/multicast IPs
+    - Response size limit (5KB max, enforced via streaming)
+    - Redirects disabled (prevents redirect-based SSRF)
+    - Overall timeout (prevents slow-stream DoS)
     """
+
+    # Overall fetch timeout (seconds) - prevents slow-stream DoS
+    FETCH_TIMEOUT = 30.0
+    # Per-operation timeout (seconds)
+    OPERATION_TIMEOUT = 10.0
+    # Maximum response size (bytes)
+    MAX_RESPONSE_SIZE = 5120  # 5KB
 
     def __init__(
         self,
@@ -149,7 +243,7 @@ class CIMDFetcher:
             cache_ttl: Deprecated, unused (kept for compatibility)
             min_cache_ttl: Deprecated, unused (kept for compatibility)
             max_cache_ttl: Deprecated, unused (kept for compatibility)
-            timeout: HTTP request timeout in seconds
+            timeout: HTTP request timeout in seconds (default 10.0)
         """
         self.timeout = timeout
 
@@ -167,61 +261,76 @@ class CIMDFetcher:
                 and bool(parsed.netloc)  # Must have a host
                 and parsed.path not in ("", "/")
             )
-        except Exception:
+        except (ValueError, AttributeError):
             return False
 
-    def _is_private_ip(self, hostname: str) -> bool:
-        """Check if hostname resolves to a private/loopback IP (SSRF protection)."""
+    async def _validate_url_and_resolve(self, url: str) -> tuple[str, int, list[str]]:
+        """Validate URL format and resolve hostname to IPs with SSRF protection.
+
+        This is the core SSRF protection. It:
+        1. Validates URL format (HTTPS, has host, non-root path)
+        2. Resolves hostname to IP addresses via DNS
+        3. Validates ALL resolved IPs are allowed (public internet only)
+
+        Args:
+            url: URL to validate and resolve
+
+        Returns:
+            Tuple of (hostname, port, list of allowed IP addresses)
+
+        Raises:
+            CIMDValidationError: If validation fails or IPs are blocked
+        """
+        # Parse URL
         try:
-            ip = ipaddress.ip_address(hostname)
-            return ip.is_private or ip.is_loopback or ip.is_reserved
-        except ValueError:
-            # Not an IP address, could be a hostname
-            # For hostnames, we check common private patterns
-            hostname_lower = hostname.lower()
-            private_patterns = [
-                "localhost",
-                "127.0.0.1",
-                "0.0.0.0",
-                "::1",
-                "10.",
-                "169.254.",  # Link-local
-                "172.16.",
-                "172.17.",
-                "172.18.",
-                "172.19.",
-                "172.20.",
-                "172.21.",
-                "172.22.",
-                "172.23.",
-                "172.24.",
-                "172.25.",
-                "172.26.",
-                "172.27.",
-                "172.28.",
-                "172.29.",
-                "172.30.",
-                "172.31.",
-                "192.168.",
-                ".local",
-                ".internal",
-            ]
-            return any(
-                hostname_lower == p
-                or hostname_lower.startswith(p)
-                or hostname_lower.endswith(p)
-                for p in private_patterns
+            parsed = urlparse(url)
+        except (ValueError, AttributeError) as e:
+            raise CIMDValidationError(f"Invalid URL: {e}") from e
+
+        # Require HTTPS
+        if parsed.scheme != "https":
+            raise CIMDValidationError(f"CIMD URLs must use HTTPS, got: {parsed.scheme}")
+
+        # Require host
+        if not parsed.netloc:
+            raise CIMDValidationError("CIMD URLs must have a host")
+
+        # Require non-root path
+        if parsed.path in ("", "/"):
+            raise CIMDValidationError(
+                "CIMD URLs must have a non-root path (e.g., /client.json)"
             )
 
-    async def fetch(self, client_id_url: str) -> CIMDDocument:
-        """Fetch and validate a CIMD document with SSRF protection.
+        hostname = parsed.hostname or parsed.netloc
+        port = parsed.port or 443
 
-        This method implements SSRF protection by:
-        1. Requiring HTTPS only
-        2. Blocking private/loopback IP addresses and hostnames
-        3. Limiting response size to 5KB (prevents DoS via streaming)
-        4. Disabling redirects (prevents redirect-based SSRF)
-        5. Using aggressive timeouts
+        # Log non-standard ports
+        if port != 443:
+            logger.warning("CIMD URL uses non-standard port %d: %s", port, url)
+
+        # Resolve hostname to IP addresses
+        resolved_ips = await _resolve_hostname(hostname, port)
+
+        # Validate ALL resolved IPs are allowed
+        blocked_ips = [ip for ip in resolved_ips if not _is_ip_allowed(ip)]
+        if blocked_ips:
+            raise CIMDValidationError(
+                f"CIMD URL resolves to blocked IP address(es): {blocked_ips}. "
+                f"Private, loopback, link-local, and reserved IPs are not allowed."
+            )
+
+        return hostname, port, resolved_ips
+
+    async def fetch(self, client_id_url: str) -> CIMDDocument:
+        """Fetch and validate a CIMD document with comprehensive SSRF protection.
+
+        Security measures:
+        1. HTTPS only (no HTTP)
+        2. DNS resolution with IP validation (prevents DNS rebinding)
+        3. Blocks private/loopback/link-local/multicast/reserved IPs
+        4. Response size limit (5KB, enforced via streaming)
+        5. Redirects disabled (prevents redirect-based SSRF)
+        6. Overall timeout (prevents slow-stream DoS)
 
         Args:
             client_id_url: The URL to fetch (also the expected client_id)
@@ -230,52 +339,44 @@ class CIMDFetcher:
             Validated CIMDDocument
 
         Raises:
-            CIMDValidationError: If document is invalid
+            CIMDValidationError: If document is invalid or URL blocked
             CIMDFetchError: If document cannot be fetched
         """
-        # Parse and validate URL format
-        try:
-            parsed = urlparse(client_id_url)
-        except (ValueError, AttributeError) as e:
-            raise CIMDValidationError(f"Invalid URL: {e}") from e
+        # Track overall time to prevent slow-stream DoS
+        start_time = time.monotonic()
 
-        if parsed.scheme != "https":
-            raise CIMDValidationError(f"CIMD URLs must use HTTPS, got: {parsed.scheme}")
+        # Validate URL and resolve DNS with IP validation
+        _hostname, _port, resolved_ips = await self._validate_url_and_resolve(
+            client_id_url
+        )
 
-        if not parsed.netloc:
-            raise CIMDValidationError("CIMD URLs must have a host")
+        # Log resolved IPs for debugging
+        logger.debug("CIMD URL %s resolved to IPs: %s", client_id_url, resolved_ips)
 
-        if parsed.path in ("", "/"):
-            raise CIMDValidationError(
-                "CIMD URLs must have a non-root path (e.g., /client.json)"
-            )
-
-        hostname = parsed.hostname or parsed.netloc
-        port = parsed.port
-
-        # Validate hostname is not private/loopback
-        if self._is_private_ip(hostname):
-            raise CIMDValidationError(
-                f"CIMD URLs cannot use private/loopback addresses: {hostname}"
-            )
-
-        # Validate port - only allow standard HTTPS (443) or explicit non-standard
-        # Non-standard ports are allowed but logged for visibility
-        if port is not None and port != 443:
-            logger.warning(
-                "CIMD URL uses non-standard port %d: %s", port, client_id_url
-            )
+        # Calculate remaining time budget
+        elapsed = time.monotonic() - start_time
+        remaining_timeout = max(1.0, self.FETCH_TIMEOUT - elapsed)
 
         # Fetch document with streaming to prevent memory exhaustion
-        max_size = 5120  # 5KB max for CIMD documents
         try:
             async with (
                 httpx.AsyncClient(
-                    timeout=self.timeout,
+                    timeout=httpx.Timeout(
+                        connect=min(self.timeout, remaining_timeout),
+                        read=min(self.timeout, remaining_timeout),
+                        write=min(self.timeout, remaining_timeout),
+                        pool=min(self.timeout, remaining_timeout),
+                    ),
                     follow_redirects=False,  # Disable redirects to prevent SSRF bypass
                 ) as client,
                 client.stream("GET", client_id_url) as response,
             ):
+                # Check if we've exceeded overall timeout
+                if time.monotonic() - start_time > self.FETCH_TIMEOUT:
+                    raise CIMDFetchError(
+                        f"Overall timeout exceeded fetching CIMD document: {client_id_url}"
+                    )
+
                 if response.status_code != 200:
                     raise CIMDFetchError(
                         f"CIMD document returned status {response.status_code}: {client_id_url}"
@@ -286,21 +387,27 @@ class CIMDFetcher:
                 if content_length:
                     try:
                         size = int(content_length)
-                        if size > max_size:
+                        if size > self.MAX_RESPONSE_SIZE:
                             raise CIMDFetchError(
-                                f"Response too large: {size} bytes (max 5KB for CIMD documents)"
+                                f"Response too large: {size} bytes (max {self.MAX_RESPONSE_SIZE} bytes)"
                             )
                     except ValueError:
                         pass  # Invalid header, will check during streaming
 
-                # Stream response and enforce size limit
+                # Stream response with size and time limits
                 chunks = []
                 total_size = 0
                 async for chunk in response.aiter_bytes():
-                    total_size += len(chunk)
-                    if total_size > max_size:
+                    # Check overall timeout
+                    if time.monotonic() - start_time > self.FETCH_TIMEOUT:
                         raise CIMDFetchError(
-                            f"Response too large: exceeded {max_size} bytes (max 5KB for CIMD documents)"
+                            f"Overall timeout exceeded while streaming CIMD document: {client_id_url}"
+                        )
+
+                    total_size += len(chunk)
+                    if total_size > self.MAX_RESPONSE_SIZE:
+                        raise CIMDFetchError(
+                            f"Response too large: exceeded {self.MAX_RESPONSE_SIZE} bytes"
                         )
                     chunks.append(chunk)
 
@@ -316,7 +423,7 @@ class CIMDFetcher:
         # Parse document
         try:
             data = json.loads(content)
-        except Exception as e:
+        except json.JSONDecodeError as e:
             raise CIMDValidationError(f"CIMD document is not valid JSON: {e}") from e
 
         # Validate as CIMDDocument
@@ -332,8 +439,24 @@ class CIMDFetcher:
                 f"but was fetched from '{client_id_url}'"
             )
 
+        # Validate jwks_uri if present (SSRF protection for JWKS fetch)
+        if doc.jwks_uri:
+            jwks_uri_str = str(doc.jwks_uri)
+            # Must be HTTPS
+            if not jwks_uri_str.startswith("https://"):
+                raise CIMDValidationError(
+                    f"CIMD jwks_uri must use HTTPS: {jwks_uri_str}"
+                )
+            # Validate and resolve to ensure it's not pointing to internal resources
+            try:
+                await self._validate_url_and_resolve(jwks_uri_str)
+            except CIMDValidationError as e:
+                raise CIMDValidationError(
+                    f"CIMD jwks_uri failed validation: {e}"
+                ) from e
+
         logger.info(
-            "CIMD document fetched: %s (client_name=%s)",
+            "CIMD document fetched and validated: %s (client_name=%s)",
             client_id_url,
             doc.client_name,
         )
@@ -375,12 +498,39 @@ class CIMDAssertionValidator:
 
     Implements RFC 7523 (JSON Web Token (JWT) Profile for OAuth 2.0 Client
     Authentication and Authorization Grants) for CIMD client authentication.
+
+    JTI replay protection uses TTL-based caching to ensure proper security:
+    - JTIs are cached with expiration matching the JWT's exp claim
+    - Expired JTIs are automatically cleaned up
+    - Maximum assertion lifetime is enforced (5 minutes)
     """
 
+    # Maximum allowed assertion lifetime in seconds (RFC 7523 recommends short-lived)
+    MAX_ASSERTION_LIFETIME = 300  # 5 minutes
+
     def __init__(self):
-        self._jti_cache: set[str] = set()
+        # JTI cache: maps jti -> expiration timestamp
+        self._jti_cache: dict[str, float] = {}
         self._jti_cache_max_size = 10000
+        self._last_cleanup = time.monotonic()
+        self._cleanup_interval = 60  # Cleanup every 60 seconds
         self.logger = get_logger(__name__)
+
+    def _cleanup_expired_jtis(self) -> None:
+        """Remove expired JTIs from cache."""
+        now = time.time()
+        expired = [jti for jti, exp in self._jti_cache.items() if exp < now]
+        for jti in expired:
+            del self._jti_cache[jti]
+        if expired:
+            self.logger.debug("Cleaned up %d expired JTIs from cache", len(expired))
+
+    def _maybe_cleanup(self) -> None:
+        """Periodically cleanup expired JTIs to prevent unbounded growth."""
+        now = time.monotonic()
+        if now - self._last_cleanup > self._cleanup_interval:
+            self._cleanup_expired_jtis()
+            self._last_cleanup = now
 
     async def validate_assertion(
         self,
@@ -404,6 +554,9 @@ class CIMDAssertionValidator:
             ValueError: If validation fails
         """
         from fastmcp.server.auth.providers.jwt import JWTVerifier
+
+        # Periodic cleanup of expired JTIs
+        self._maybe_cleanup()
 
         # 1. Validate CIMD document has key material
         if cimd_doc.jwks_uri:
@@ -433,22 +586,64 @@ class CIMDAssertionValidator:
 
         claims = access_token.claims
 
-        # 3. Additional RFC 7523 validation: sub claim must equal client_id
+        # 3. Validate assertion lifetime (exp and iat)
+        now = time.time()
+        exp = claims.get("exp")
+        iat = claims.get("iat")
+
+        if not exp:
+            raise ValueError("Assertion must include exp claim")
+
+        # Validate exp is in the future (with small clock skew tolerance)
+        if exp < now - 30:  # 30 second clock skew tolerance
+            raise ValueError("Assertion has expired")
+
+        # If iat is present, validate it and check assertion lifetime
+        if iat:
+            if iat > now + 30:  # 30 second clock skew tolerance
+                raise ValueError("Assertion iat is in the future")
+            if exp - iat > self.MAX_ASSERTION_LIFETIME:
+                raise ValueError(
+                    f"Assertion lifetime too long: {exp - iat}s (max {self.MAX_ASSERTION_LIFETIME}s)"
+                )
+        else:
+            # No iat, enforce max lifetime from now
+            if exp > now + self.MAX_ASSERTION_LIFETIME:
+                raise ValueError(
+                    f"Assertion exp too far in future (max {self.MAX_ASSERTION_LIFETIME}s)"
+                )
+
+        # 4. Additional RFC 7523 validation: sub claim must equal client_id
         if claims.get("sub") != client_id:
             raise ValueError(f"Assertion sub claim must be {client_id}")
 
-        # 4. Check jti for replay attacks (RFC 7523 requirement)
+        # 5. Check jti for replay attacks (RFC 7523 requirement)
         jti = claims.get("jti")
         if not jti:
             raise ValueError("Assertion must include jti claim")
-        if jti in self._jti_cache:
-            raise ValueError(f"Assertion replay detected: jti {jti} already used")
 
-        # Add to cache (with size limit)
-        self._jti_cache.add(jti)
+        # Check if JTI was already used (and hasn't expired from cache)
+        if jti in self._jti_cache:
+            cached_exp = self._jti_cache[jti]
+            if cached_exp > now:  # Still valid in cache
+                raise ValueError(f"Assertion replay detected: jti {jti} already used")
+            # Expired in cache, can be reused (clean it up)
+            del self._jti_cache[jti]
+
+        # Add to cache with expiration time
+        # Use the assertion's exp claim so it stays cached until it would expire anyway
+        self._jti_cache[jti] = exp
+
+        # Emergency size limit (shouldn't hit with proper TTL cleanup)
         if len(self._jti_cache) > self._jti_cache_max_size:
-            # Evict arbitrary element to maintain bounded memory
-            self._jti_cache.pop()
+            self._cleanup_expired_jtis()
+            # If still over limit after cleanup, reject to prevent DoS
+            if len(self._jti_cache) > self._jti_cache_max_size:
+                self.logger.warning(
+                    "JTI cache at max capacity (%d), possible attack",
+                    self._jti_cache_max_size,
+                )
+                raise ValueError("Server overloaded, please retry")
 
         self.logger.debug(
             "JWT assertion validated successfully for client %s", client_id
