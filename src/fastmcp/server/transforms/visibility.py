@@ -14,9 +14,13 @@ import mcp.types
 
 from fastmcp.server.transforms import (
     GetPromptNext,
+    GetPromptVersionsNext,
     GetResourceNext,
     GetResourceTemplateNext,
+    GetResourceTemplateVersionsNext,
+    GetResourceVersionsNext,
     GetToolNext,
+    GetToolVersionsNext,
     ListPromptsNext,
     ListResourcesNext,
     ListResourceTemplatesNext,
@@ -60,7 +64,7 @@ class Visibility(Transform):
     Example:
         ```python
         visibility = Visibility()
-        visibility.disable(keys=["tool:secret"])
+        visibility.disable(keys=["tool:secret@"])
         # Now visibility filters out the "secret" tool
         ```
     """
@@ -125,7 +129,7 @@ class Visibility(Transform):
         """Add to blocklist (hide components).
 
         Args:
-            keys: Component keys to hide (e.g., "tool:my_tool", "resource:file://x")
+            keys: Component keys to hide (e.g., "tool:my_tool@", "resource:file://x@")
             tags: Tags to hide - any component with these tags will be hidden
         """
         notifications: set[type[mcp.types.ServerNotificationType]] = set()
@@ -249,6 +253,13 @@ class Visibility(Transform):
             return None
         return tool
 
+    async def get_tool_versions(
+        self, name: str, call_next: GetToolVersionsNext
+    ) -> Sequence[Tool]:
+        """Get all enabled versions of a tool."""
+        tools = await call_next(name)
+        return [t for t in tools if self.is_enabled(t)]
+
     # -------------------------------------------------------------------------
     # Resources
     # -------------------------------------------------------------------------
@@ -266,6 +277,13 @@ class Visibility(Transform):
         if resource is None or not self.is_enabled(resource):
             return None
         return resource
+
+    async def get_resource_versions(
+        self, uri: str, call_next: GetResourceVersionsNext
+    ) -> Sequence[Resource]:
+        """Get all enabled versions of a resource."""
+        resources = await call_next(uri)
+        return [r for r in resources if self.is_enabled(r)]
 
     # -------------------------------------------------------------------------
     # Resource Templates
@@ -287,6 +305,13 @@ class Visibility(Transform):
             return None
         return template
 
+    async def get_resource_template_versions(
+        self, uri_template: str, call_next: GetResourceTemplateVersionsNext
+    ) -> Sequence[ResourceTemplate]:
+        """Get all enabled versions of a resource template."""
+        templates = await call_next(uri_template)
+        return [t for t in templates if self.is_enabled(t)]
+
     # -------------------------------------------------------------------------
     # Prompts
     # -------------------------------------------------------------------------
@@ -302,3 +327,10 @@ class Visibility(Transform):
         if prompt is None or not self.is_enabled(prompt):
             return None
         return prompt
+
+    async def get_prompt_versions(
+        self, name: str, call_next: GetPromptVersionsNext
+    ) -> Sequence[Prompt]:
+        """Get all enabled versions of a prompt."""
+        prompts = await call_next(name)
+        return [p for p in prompts if self.is_enabled(p)]

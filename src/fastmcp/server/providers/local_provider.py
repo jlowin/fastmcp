@@ -46,6 +46,7 @@ from fastmcp.tools.tool import AuthCheckCallable, Tool
 from fastmcp.utilities.components import FastMCPComponent
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.types import NotSet, NotSetT
+from fastmcp.utilities.versions import version_sort_key
 
 if TYPE_CHECKING:
     from fastmcp.tools.tool import ToolResultSerializerType
@@ -194,6 +195,7 @@ class LocalProvider(Provider):
                 tool = Tool.from_function(
                     tool,
                     name=meta.name,
+                    version=meta.version,
                     title=meta.title,
                     description=meta.description,
                     icons=meta.icons,
@@ -211,9 +213,33 @@ class LocalProvider(Provider):
                 tool = Tool.from_function(tool)
         return self._add_component(tool)
 
-    def remove_tool(self, name: str) -> None:
-        """Remove a tool from this provider's storage."""
-        self._remove_component(Tool.make_key(name))
+    def remove_tool(self, name: str, version: str | None = None) -> None:
+        """Remove tool(s) from this provider's storage.
+
+        Args:
+            name: The tool name.
+            version: If None, removes ALL versions. If specified, removes only that version.
+
+        Raises:
+            KeyError: If no matching tool is found.
+        """
+        if version is None:
+            # Remove all versions
+            keys_to_remove = [
+                k
+                for k, c in self._components.items()
+                if isinstance(c, Tool) and c.name == name
+            ]
+            if not keys_to_remove:
+                raise KeyError(f"Tool {name!r} not found")
+            for key in keys_to_remove:
+                self._remove_component(key)
+        else:
+            # Remove specific version - key format is "tool:name@version"
+            key = f"{Tool.make_key(name)}@{version}"
+            if key not in self._components:
+                raise KeyError(f"Tool {name!r} version {version!r} not found")
+            self._remove_component(key)
 
     def add_resource(
         self, resource: Resource | ResourceTemplate | Callable[..., Any]
@@ -239,6 +265,7 @@ class LocalProvider(Provider):
                         fn=resource,
                         uri_template=meta.uri,
                         name=meta.name,
+                        version=meta.version,
                         title=meta.title,
                         description=meta.description,
                         icons=meta.icons,
@@ -254,6 +281,7 @@ class LocalProvider(Provider):
                         fn=resource,
                         uri=meta.uri,
                         name=meta.name,
+                        version=meta.version,
                         title=meta.title,
                         description=meta.description,
                         icons=meta.icons,
@@ -271,17 +299,67 @@ class LocalProvider(Provider):
                 )
         return self._add_component(resource)
 
-    def remove_resource(self, uri: str) -> None:
-        """Remove a resource from this provider's storage."""
-        self._remove_component(Resource.make_key(uri))
+    def remove_resource(self, uri: str, version: str | None = None) -> None:
+        """Remove resource(s) from this provider's storage.
+
+        Args:
+            uri: The resource URI.
+            version: If None, removes ALL versions. If specified, removes only that version.
+
+        Raises:
+            KeyError: If no matching resource is found.
+        """
+        if version is None:
+            # Remove all versions
+            keys_to_remove = [
+                k
+                for k, c in self._components.items()
+                if isinstance(c, Resource) and str(c.uri) == uri
+            ]
+            if not keys_to_remove:
+                raise KeyError(f"Resource {uri!r} not found")
+            for key in keys_to_remove:
+                self._remove_component(key)
+        else:
+            # Remove specific version
+            key = f"{Resource.make_key(uri)}@{version}"
+            if key not in self._components:
+                raise KeyError(f"Resource {uri!r} version {version!r} not found")
+            self._remove_component(key)
 
     def add_template(self, template: ResourceTemplate) -> ResourceTemplate:
         """Add a resource template to this provider's storage."""
         return self._add_component(template)
 
-    def remove_template(self, uri_template: str) -> None:
-        """Remove a resource template from this provider's storage."""
-        self._remove_component(ResourceTemplate.make_key(uri_template))
+    def remove_template(self, uri_template: str, version: str | None = None) -> None:
+        """Remove resource template(s) from this provider's storage.
+
+        Args:
+            uri_template: The template URI pattern.
+            version: If None, removes ALL versions. If specified, removes only that version.
+
+        Raises:
+            KeyError: If no matching template is found.
+        """
+        if version is None:
+            # Remove all versions
+            keys_to_remove = [
+                k
+                for k, c in self._components.items()
+                if isinstance(c, ResourceTemplate) and c.uri_template == uri_template
+            ]
+            if not keys_to_remove:
+                raise KeyError(f"Template {uri_template!r} not found")
+            for key in keys_to_remove:
+                self._remove_component(key)
+        else:
+            # Remove specific version
+            key = f"{ResourceTemplate.make_key(uri_template)}@{version}"
+            if key not in self._components:
+                raise KeyError(
+                    f"Template {uri_template!r} version {version!r} not found"
+                )
+            self._remove_component(key)
 
     def add_prompt(self, prompt: Prompt | Callable[..., Any]) -> Prompt:
         """Add a prompt to this provider's storage.
@@ -298,6 +376,7 @@ class LocalProvider(Provider):
                 prompt = Prompt.from_function(
                     prompt,
                     name=meta.name,
+                    version=meta.version,
                     title=meta.title,
                     description=meta.description,
                     icons=meta.icons,
@@ -313,9 +392,33 @@ class LocalProvider(Provider):
                 )
         return self._add_component(prompt)
 
-    def remove_prompt(self, name: str) -> None:
-        """Remove a prompt from this provider's storage."""
-        self._remove_component(Prompt.make_key(name))
+    def remove_prompt(self, name: str, version: str | None = None) -> None:
+        """Remove prompt(s) from this provider's storage.
+
+        Args:
+            name: The prompt name.
+            version: If None, removes ALL versions. If specified, removes only that version.
+
+        Raises:
+            KeyError: If no matching prompt is found.
+        """
+        if version is None:
+            # Remove all versions
+            keys_to_remove = [
+                k
+                for k, c in self._components.items()
+                if isinstance(c, Prompt) and c.name == name
+            ]
+            if not keys_to_remove:
+                raise KeyError(f"Prompt {name!r} not found")
+            for key in keys_to_remove:
+                self._remove_component(key)
+        else:
+            # Remove specific version
+            key = f"{Prompt.make_key(name)}@{version}"
+            if key not in self._components:
+                raise KeyError(f"Prompt {name!r} version {version!r} not found")
+            self._remove_component(key)
 
     # =========================================================================
     # Provider interface implementation
@@ -329,16 +432,27 @@ class LocalProvider(Provider):
             if isinstance(v, Tool) and self._is_component_enabled(v)
         ]
 
-    async def get_tool(self, name: str) -> Tool | None:
-        """Get a tool by name."""
-        tool = self._get_component(Tool.make_key(name))
-        if (
-            tool is not None
-            and isinstance(tool, Tool)
-            and self._is_component_enabled(tool)
-        ):
-            return tool
-        return None
+    async def get_tool(self, name: str, version: str | None = None) -> Tool | None:
+        """Get a tool by name.
+
+        Args:
+            name: The tool name.
+            version: If None, returns highest version. If specified, returns that version.
+        """
+        versions = list(await self.get_tool_versions(name))
+        if not versions:
+            return None
+        if version is None:
+            return max(versions, key=version_sort_key)  # type: ignore[type-var]
+        return next((t for t in versions if t.version == version), None)
+
+    async def get_tool_versions(self, name: str) -> Sequence[Tool]:
+        """Get all versions of a tool by name."""
+        return [
+            v
+            for v in self._components.values()
+            if isinstance(v, Tool) and v.name == name and self._is_component_enabled(v)
+        ]
 
     async def list_resources(self) -> Sequence[Resource]:
         """Return all visible resources."""
@@ -348,12 +462,31 @@ class LocalProvider(Provider):
             if isinstance(v, Resource) and self._is_component_enabled(v)
         ]
 
-    async def get_resource(self, uri: str) -> Resource | None:
-        """Get a resource by URI if visible."""
-        component = self._components.get(Resource.make_key(uri))
-        if isinstance(component, Resource) and self._is_component_enabled(component):
-            return component
-        return None
+    async def get_resource(
+        self, uri: str, version: str | None = None
+    ) -> Resource | None:
+        """Get a resource by URI.
+
+        Args:
+            uri: The resource URI.
+            version: If None, returns highest version. If specified, returns that version.
+        """
+        versions = list(await self.get_resource_versions(uri))
+        if not versions:
+            return None
+        if version is None:
+            return max(versions, key=version_sort_key)  # type: ignore[type-var]
+        return next((r for r in versions if r.version == version), None)
+
+    async def get_resource_versions(self, uri: str) -> Sequence[Resource]:
+        """Get all versions of a resource by URI."""
+        return [
+            v
+            for v in self._components.values()
+            if isinstance(v, Resource)
+            and str(v.uri) == uri
+            and self._is_component_enabled(v)
+        ]
 
     async def list_resource_templates(self) -> Sequence[ResourceTemplate]:
         """Return all visible resource templates."""
@@ -363,16 +496,42 @@ class LocalProvider(Provider):
             if isinstance(v, ResourceTemplate) and self._is_component_enabled(v)
         ]
 
-    async def get_resource_template(self, uri: str) -> ResourceTemplate | None:
-        """Get a resource template that matches the given URI if visible."""
-        for component in self._components.values():
+    async def get_resource_template(
+        self, uri: str, version: str | None = None
+    ) -> ResourceTemplate | None:
+        """Get a resource template that matches the given URI.
+
+        Args:
+            uri: The URI to match against templates.
+            version: If None, returns highest version. If specified, returns that version.
+        """
+        # Find all templates that match the URI
+        matching = [
+            component
+            for component in self._components.values()
             if (
                 isinstance(component, ResourceTemplate)
                 and component.matches(uri) is not None
                 and self._is_component_enabled(component)
-            ):
-                return component
-        return None
+            )
+        ]
+        if not matching:
+            return None
+        if version is None:
+            return max(matching, key=version_sort_key)  # type: ignore[type-var]
+        return next((t for t in matching if t.version == version), None)
+
+    async def get_resource_template_versions(
+        self, uri_template: str
+    ) -> Sequence[ResourceTemplate]:
+        """Get all versions of a resource template by uri_template."""
+        return [
+            v
+            for v in self._components.values()
+            if isinstance(v, ResourceTemplate)
+            and v.uri_template == uri_template
+            and self._is_component_enabled(v)
+        ]
 
     async def list_prompts(self) -> Sequence[Prompt]:
         """Return all visible prompts."""
@@ -382,24 +541,29 @@ class LocalProvider(Provider):
             if isinstance(v, Prompt) and self._is_component_enabled(v)
         ]
 
-    async def get_prompt(self, name: str) -> Prompt | None:
-        """Get a prompt by name if visible."""
-        component = self._components.get(Prompt.make_key(name))
-        if isinstance(component, Prompt) and self._is_component_enabled(component):
-            return component
-        return None
+    async def get_prompt(self, name: str, version: str | None = None) -> Prompt | None:
+        """Get a prompt by name.
 
-    async def get_component(
-        self, key: str
-    ) -> Tool | Resource | ResourceTemplate | Prompt | None:
-        """Get a component by its prefixed key.
-
-        Efficient O(1) lookup in the unified components dict.
+        Args:
+            name: The prompt name.
+            version: If None, returns highest version. If specified, returns that version.
         """
-        component = self._get_component(key)
-        if component and self._is_component_enabled(component):
-            return component  # type: ignore[return-value]
-        return None
+        versions = list(await self.get_prompt_versions(name))
+        if not versions:
+            return None
+        if version is None:
+            return max(versions, key=version_sort_key)  # type: ignore[type-var]
+        return next((p for p in versions if p.version == version), None)
+
+    async def get_prompt_versions(self, name: str) -> Sequence[Prompt]:
+        """Get all versions of a prompt by name."""
+        return [
+            v
+            for v in self._components.values()
+            if isinstance(v, Prompt)
+            and v.name == name
+            and self._is_component_enabled(v)
+        ]
 
     # =========================================================================
     # Task registration
@@ -424,6 +588,7 @@ class LocalProvider(Provider):
         name_or_fn: AnyFunction,
         *,
         name: str | None = None,
+        version: str | int | None = None,
         title: str | None = None,
         description: str | None = None,
         icons: list[mcp.types.Icon] | None = None,
@@ -445,6 +610,7 @@ class LocalProvider(Provider):
         name_or_fn: str | None = None,
         *,
         name: str | None = None,
+        version: str | int | None = None,
         title: str | None = None,
         description: str | None = None,
         icons: list[mcp.types.Icon] | None = None,
@@ -469,6 +635,7 @@ class LocalProvider(Provider):
         name_or_fn: str | AnyFunction | None = None,
         *,
         name: str | None = None,
+        version: str | int | None = None,
         title: str | None = None,
         description: str | None = None,
         icons: list[mcp.types.Icon] | None = None,
@@ -573,6 +740,7 @@ class LocalProvider(Provider):
                 tool_obj = Tool.from_function(
                     fn,
                     name=tool_name,
+                    version=version,
                     title=title,
                     description=description,
                     icons=icons,
@@ -595,6 +763,7 @@ class LocalProvider(Provider):
 
                 metadata = ToolMeta(
                     name=tool_name,
+                    version=version,
                     title=title,
                     description=description,
                     icons=icons,
@@ -638,6 +807,7 @@ class LocalProvider(Provider):
         return partial(
             self.tool,
             name=tool_name,
+            version=version,
             title=title,
             description=description,
             icons=icons,
@@ -658,6 +828,7 @@ class LocalProvider(Provider):
         uri: str,
         *,
         name: str | None = None,
+        version: str | int | None = None,
         title: str | None = None,
         description: str | None = None,
         icons: list[mcp.types.Icon] | None = None,
@@ -741,6 +912,7 @@ class LocalProvider(Provider):
                 create_resource = standalone_resource(
                     uri,
                     name=name,
+                    version=version,
                     title=title,
                     description=description,
                     icons=icons,
@@ -767,6 +939,7 @@ class LocalProvider(Provider):
                 metadata = ResourceMeta(
                     uri=uri,
                     name=name,
+                    version=version,
                     title=title,
                     description=description,
                     icons=icons,
@@ -792,6 +965,7 @@ class LocalProvider(Provider):
         name_or_fn: AnyFunction,
         *,
         name: str | None = None,
+        version: str | int | None = None,
         title: str | None = None,
         description: str | None = None,
         icons: list[mcp.types.Icon] | None = None,
@@ -808,6 +982,7 @@ class LocalProvider(Provider):
         name_or_fn: str | None = None,
         *,
         name: str | None = None,
+        version: str | int | None = None,
         title: str | None = None,
         description: str | None = None,
         icons: list[mcp.types.Icon] | None = None,
@@ -823,6 +998,7 @@ class LocalProvider(Provider):
         name_or_fn: str | AnyFunction | None = None,
         *,
         name: str | None = None,
+        version: str | int | None = None,
         title: str | None = None,
         description: str | None = None,
         icons: list[mcp.types.Icon] | None = None,
@@ -908,6 +1084,7 @@ class LocalProvider(Provider):
                 prompt_obj = Prompt.from_function(
                     fn,
                     name=prompt_name,
+                    version=version,
                     title=title,
                     description=description,
                     icons=icons,
@@ -925,6 +1102,7 @@ class LocalProvider(Provider):
 
                 metadata = PromptMeta(
                     name=prompt_name,
+                    version=version,
                     title=title,
                     description=description,
                     icons=icons,
@@ -958,6 +1136,7 @@ class LocalProvider(Provider):
         return partial(
             self.prompt,
             name=prompt_name,
+            version=version,
             title=title,
             description=description,
             icons=icons,

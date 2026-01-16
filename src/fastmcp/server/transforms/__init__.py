@@ -32,15 +32,21 @@ if TYPE_CHECKING:
 # Type aliases for call_next signatures
 ListToolsNext = Callable[[], Awaitable[Sequence["Tool"]]]
 GetToolNext = Callable[[str], Awaitable["Tool | None"]]
+GetToolVersionsNext = Callable[[str], Awaitable[Sequence["Tool"]]]
 
 ListResourcesNext = Callable[[], Awaitable[Sequence["Resource"]]]
 GetResourceNext = Callable[[str], Awaitable["Resource | None"]]
+GetResourceVersionsNext = Callable[[str], Awaitable[Sequence["Resource"]]]
 
 ListResourceTemplatesNext = Callable[[], Awaitable[Sequence["ResourceTemplate"]]]
 GetResourceTemplateNext = Callable[[str], Awaitable["ResourceTemplate | None"]]
+GetResourceTemplateVersionsNext = Callable[
+    [str], Awaitable[Sequence["ResourceTemplate"]]
+]
 
 ListPromptsNext = Callable[[], Awaitable[Sequence["Prompt"]]]
 GetPromptNext = Callable[[str], Awaitable["Prompt | None"]]
+GetPromptVersionsNext = Callable[[str], Awaitable[Sequence["Prompt"]]]
 
 
 class Transform:
@@ -97,6 +103,20 @@ class Transform:
         """
         return await call_next(name)
 
+    async def get_tool_versions(
+        self, name: str, call_next: GetToolVersionsNext
+    ) -> Sequence[Tool]:
+        """Get all versions of a tool by name.
+
+        Args:
+            name: The requested tool name (may be transformed).
+            call_next: Callable to get tool versions from downstream.
+
+        Returns:
+            Sequence of tool versions (may be empty).
+        """
+        return await call_next(name)
+
     # -------------------------------------------------------------------------
     # Resources
     # -------------------------------------------------------------------------
@@ -123,6 +143,20 @@ class Transform:
 
         Returns:
             The resource if found, None otherwise.
+        """
+        return await call_next(uri)
+
+    async def get_resource_versions(
+        self, uri: str, call_next: GetResourceVersionsNext
+    ) -> Sequence[Resource]:
+        """Get all versions of a resource by URI.
+
+        Args:
+            uri: The requested resource URI (may be transformed).
+            call_next: Callable to get resource versions from downstream.
+
+        Returns:
+            Sequence of resource versions (may be empty).
         """
         return await call_next(uri)
 
@@ -157,6 +191,20 @@ class Transform:
         """
         return await call_next(uri)
 
+    async def get_resource_template_versions(
+        self, uri_template: str, call_next: GetResourceTemplateVersionsNext
+    ) -> Sequence[ResourceTemplate]:
+        """Get all versions of a resource template by uri_template.
+
+        Args:
+            uri_template: The requested template uri_template (may be transformed).
+            call_next: Callable to get template versions from downstream.
+
+        Returns:
+            Sequence of template versions (may be empty).
+        """
+        return await call_next(uri_template)
+
     # -------------------------------------------------------------------------
     # Prompts
     # -------------------------------------------------------------------------
@@ -184,17 +232,36 @@ class Transform:
         """
         return await call_next(name)
 
+    async def get_prompt_versions(
+        self, name: str, call_next: GetPromptVersionsNext
+    ) -> Sequence[Prompt]:
+        """Get all versions of a prompt by name.
+
+        Args:
+            name: The requested prompt name (may be transformed).
+            call_next: Callable to get prompt versions from downstream.
+
+        Returns:
+            Sequence of prompt versions (may be empty).
+        """
+        return await call_next(name)
+
 
 # Re-export built-in transforms (must be after Transform class to avoid circular imports)
 from fastmcp.server.transforms.namespace import Namespace  # noqa: E402
 from fastmcp.server.transforms.tool_transform import ToolTransform  # noqa: E402
+from fastmcp.server.transforms.version_filter import VersionFilter  # noqa: E402
 from fastmcp.server.transforms.visibility import Visibility  # noqa: E402
 
 __all__ = [
     "GetPromptNext",
+    "GetPromptVersionsNext",
     "GetResourceNext",
     "GetResourceTemplateNext",
+    "GetResourceTemplateVersionsNext",
+    "GetResourceVersionsNext",
     "GetToolNext",
+    "GetToolVersionsNext",
     "ListPromptsNext",
     "ListResourceTemplatesNext",
     "ListResourcesNext",
@@ -202,5 +269,6 @@ __all__ = [
     "Namespace",
     "ToolTransform",
     "Transform",
+    "VersionFilter",
     "Visibility",
 ]

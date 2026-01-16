@@ -51,9 +51,14 @@ class SimpleToolProvider(Provider):
         self.list_tools_call_count += 1
         return self._tools
 
-    async def get_tool(self, name: str) -> Tool | None:
+    async def get_tool(self, name: str, version: str | None = None) -> Tool | None:
         self.get_tool_call_count += 1
-        return next((t for t in self._tools if t.name == name), None)
+        matching = [t for t in self._tools if t.name == name]
+        if not matching:
+            return None
+        if version is None:
+            return matching[0]  # Return first (for testing simplicity)
+        return next((t for t in matching if t.version == version), None)
 
 
 class ListOnlyProvider(Provider):

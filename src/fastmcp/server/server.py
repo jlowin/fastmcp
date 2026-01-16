@@ -103,6 +103,7 @@ from fastmcp.utilities.cli import log_server_banner
 from fastmcp.utilities.components import FastMCPComponent
 from fastmcp.utilities.logging import get_logger, temporary_log_level
 from fastmcp.utilities.types import FastMCPBaseModel, NotSet, NotSetT
+from fastmcp.utilities.versions import version_sort_key
 
 if TYPE_CHECKING:
     from docket import Docket
@@ -825,7 +826,10 @@ class FastMCP(Generic[LifespanResultT]):
     # -------------------------------------------------------------------------
 
     async def _source_list_tools(self) -> Sequence[Tool]:
-        """List tools with all transforms applied (provider + server)."""
+        """List tools with all transforms applied (provider + server).
+
+        Deduplicates by name, keeping the highest version of each tool.
+        """
         root = self._get_root_provider()
 
         async def base() -> Sequence[Tool]:
@@ -835,14 +839,29 @@ class FastMCP(Generic[LifespanResultT]):
         for transform in self._get_all_transforms():
             chain = partial(transform.list_tools, call_next=chain)
 
-        return await chain()
+        tools = await chain()
 
-    async def _source_get_tool(self, name: str) -> Tool | None:
-        """Get tool by name with all transforms applied (provider + server)."""
+        # Deduplicate by name, keeping highest version
+        by_name: dict[str, Tool] = {}
+        for tool in tools:
+            existing = by_name.get(tool.name)
+            if existing is None or version_sort_key(tool) > version_sort_key(existing):
+                by_name[tool.name] = tool
+        return list(by_name.values())
+
+    async def _source_get_tool(
+        self, name: str, version: str | None = None
+    ) -> Tool | None:
+        """Get tool by name with all transforms applied (provider + server).
+
+        Args:
+            name: The tool name.
+            version: If None, returns highest version. If specified, returns that version.
+        """
         root = self._get_root_provider()
 
         async def base(n: str) -> Tool | None:
-            return await root.get_tool(n)
+            return await root.get_tool(n, version)
 
         chain = base
         for transform in self._get_all_transforms():
@@ -851,7 +870,10 @@ class FastMCP(Generic[LifespanResultT]):
         return await chain(name)
 
     async def _source_list_resources(self) -> Sequence[Resource]:
-        """List resources with all transforms applied (provider + server)."""
+        """List resources with all transforms applied (provider + server).
+
+        Deduplicates by URI, keeping the highest version of each resource.
+        """
         root = self._get_root_provider()
 
         async def base() -> Sequence[Resource]:
@@ -861,14 +883,32 @@ class FastMCP(Generic[LifespanResultT]):
         for transform in self._get_all_transforms():
             chain = partial(transform.list_resources, call_next=chain)
 
-        return await chain()
+        resources = await chain()
 
-    async def _source_get_resource(self, uri: str) -> Resource | None:
-        """Get resource by URI with all transforms applied (provider + server)."""
+        # Deduplicate by URI, keeping highest version
+        by_uri: dict[str, Resource] = {}
+        for resource in resources:
+            uri_str = str(resource.uri)
+            existing = by_uri.get(uri_str)
+            if existing is None or version_sort_key(resource) > version_sort_key(
+                existing
+            ):
+                by_uri[uri_str] = resource
+        return list(by_uri.values())
+
+    async def _source_get_resource(
+        self, uri: str, version: str | None = None
+    ) -> Resource | None:
+        """Get resource by URI with all transforms applied (provider + server).
+
+        Args:
+            uri: The resource URI.
+            version: If None, returns highest version. If specified, returns that version.
+        """
         root = self._get_root_provider()
 
         async def base(u: str) -> Resource | None:
-            return await root.get_resource(u)
+            return await root.get_resource(u, version)
 
         chain = base
         for transform in self._get_all_transforms():
@@ -877,7 +917,10 @@ class FastMCP(Generic[LifespanResultT]):
         return await chain(uri)
 
     async def _source_list_resource_templates(self) -> Sequence[ResourceTemplate]:
-        """List resource templates with all transforms applied (provider + server)."""
+        """List resource templates with all transforms applied (provider + server).
+
+        Deduplicates by uri_template, keeping the highest version of each template.
+        """
         root = self._get_root_provider()
 
         async def base() -> Sequence[ResourceTemplate]:
@@ -887,14 +930,31 @@ class FastMCP(Generic[LifespanResultT]):
         for transform in self._get_all_transforms():
             chain = partial(transform.list_resource_templates, call_next=chain)
 
-        return await chain()
+        templates = await chain()
 
-    async def _source_get_resource_template(self, uri: str) -> ResourceTemplate | None:
-        """Get resource template by URI with all transforms applied (provider + server)."""
+        # Deduplicate by uri_template, keeping highest version
+        by_uri_template: dict[str, ResourceTemplate] = {}
+        for template in templates:
+            existing = by_uri_template.get(template.uri_template)
+            if existing is None or version_sort_key(template) > version_sort_key(
+                existing
+            ):
+                by_uri_template[template.uri_template] = template
+        return list(by_uri_template.values())
+
+    async def _source_get_resource_template(
+        self, uri: str, version: str | None = None
+    ) -> ResourceTemplate | None:
+        """Get resource template by URI with all transforms applied (provider + server).
+
+        Args:
+            uri: The template URI to match.
+            version: If None, returns highest version. If specified, returns that version.
+        """
         root = self._get_root_provider()
 
         async def base(u: str) -> ResourceTemplate | None:
-            return await root.get_resource_template(u)
+            return await root.get_resource_template(u, version)
 
         chain = base
         for transform in self._get_all_transforms():
@@ -903,7 +963,10 @@ class FastMCP(Generic[LifespanResultT]):
         return await chain(uri)
 
     async def _source_list_prompts(self) -> Sequence[Prompt]:
-        """List prompts with all transforms applied (provider + server)."""
+        """List prompts with all transforms applied (provider + server).
+
+        Deduplicates by name, keeping the highest version of each prompt.
+        """
         root = self._get_root_provider()
 
         async def base() -> Sequence[Prompt]:
@@ -913,18 +976,89 @@ class FastMCP(Generic[LifespanResultT]):
         for transform in self._get_all_transforms():
             chain = partial(transform.list_prompts, call_next=chain)
 
-        return await chain()
+        prompts = await chain()
 
-    async def _source_get_prompt(self, name: str) -> Prompt | None:
-        """Get prompt by name with all transforms applied (provider + server)."""
+        # Deduplicate by name, keeping highest version
+        by_name: dict[str, Prompt] = {}
+        for prompt in prompts:
+            existing = by_name.get(prompt.name)
+            if existing is None or version_sort_key(prompt) > version_sort_key(
+                existing
+            ):
+                by_name[prompt.name] = prompt
+        return list(by_name.values())
+
+    async def _source_get_prompt(
+        self, name: str, version: str | None = None
+    ) -> Prompt | None:
+        """Get prompt by name with all transforms applied (provider + server).
+
+        Args:
+            name: The prompt name.
+            version: If None, returns highest version. If specified, returns that version.
+        """
         root = self._get_root_provider()
 
         async def base(n: str) -> Prompt | None:
-            return await root.get_prompt(n)
+            return await root.get_prompt(n, version)
 
         chain = base
         for transform in self._get_all_transforms():
             chain = partial(transform.get_prompt, call_next=chain)
+
+        return await chain(name)
+
+    async def _source_get_tool_versions(self, name: str) -> Sequence[Tool]:
+        """Get all versions of a tool with all transforms applied (provider + server)."""
+        root = self._get_root_provider()
+
+        async def base(n: str) -> Sequence[Tool]:
+            return await root._get_tool_versions(n)
+
+        chain = base
+        for transform in self._get_all_transforms():
+            chain = partial(transform.get_tool_versions, call_next=chain)
+
+        return await chain(name)
+
+    async def _source_get_resource_versions(self, uri: str) -> Sequence[Resource]:
+        """Get all versions of a resource with all transforms applied (provider + server)."""
+        root = self._get_root_provider()
+
+        async def base(u: str) -> Sequence[Resource]:
+            return await root._get_resource_versions(u)
+
+        chain = base
+        for transform in self._get_all_transforms():
+            chain = partial(transform.get_resource_versions, call_next=chain)
+
+        return await chain(uri)
+
+    async def _source_get_resource_template_versions(
+        self, uri_template: str
+    ) -> Sequence[ResourceTemplate]:
+        """Get all versions of a resource template with all transforms applied."""
+        root = self._get_root_provider()
+
+        async def base(u: str) -> Sequence[ResourceTemplate]:
+            return await root._get_resource_template_versions(u)
+
+        chain = base
+        for transform in self._get_all_transforms():
+            chain = partial(transform.get_resource_template_versions, call_next=chain)
+
+        return await chain(uri_template)
+
+    async def _source_get_prompt_versions(self, name: str) -> Sequence[Prompt]:
+        """Get all versions of a prompt with all transforms applied (provider + server)."""
+        root = self._get_root_provider()
+
+        async def base(n: str) -> Sequence[Prompt]:
+            return await root._get_prompt_versions(n)
+
+        chain = base
+        for transform in self._get_all_transforms():
+            chain = partial(transform.get_prompt_versions, call_next=chain)
 
         return await chain(name)
 
@@ -1049,7 +1183,7 @@ class FastMCP(Generic[LifespanResultT]):
         """Enable components by removing from blocklist, or set allowlist with only=True.
 
         Args:
-            keys: Keys to enable (e.g., ``"tool:my_tool"``).
+            keys: Keys to enable (e.g., ``"tool:my_tool@"`` for unversioned, ``"tool:my_tool@1.0"`` for versioned).
             tags: Tags to enable - components with these tags will be enabled.
             only: If True, switches to allowlist mode - ONLY show these keys/tags.
                 This clears existing allowlists and sets default visibility to False.
@@ -1064,7 +1198,7 @@ class FastMCP(Generic[LifespanResultT]):
             .. code-block:: python
 
                 # By key (prefixed)
-                server.enable(keys=["tool:my_tool"])
+                server.enable(keys=["tool:my_tool@"])
 
                 # By tag
                 server.enable(tags={"internal"})
@@ -1083,7 +1217,7 @@ class FastMCP(Generic[LifespanResultT]):
         """Disable components by adding to the blocklist.
 
         Args:
-            keys: Keys to disable (e.g., ``"tool:my_tool"``).
+            keys: Keys to disable (e.g., ``"tool:my_tool@"`` for unversioned, ``"tool:my_tool@1.0"`` for versioned).
             tags: Tags to disable - components with these tags will be disabled.
 
         Note:
@@ -1096,7 +1230,7 @@ class FastMCP(Generic[LifespanResultT]):
             .. code-block:: python
 
                 # By key (prefixed)
-                server.disable(keys=["tool:my_tool"])
+                server.disable(keys=["tool:my_tool@"])
 
                 # By tag
                 server.disable(tags={"dangerous", "internal"})
@@ -1156,24 +1290,57 @@ class FastMCP(Generic[LifespanResultT]):
             seen[tool.key] = tool
         return list(seen.values())
 
-    async def get_tool(self, name: str) -> Tool:
+    async def get_tool(self, name: str, version: str | None = None) -> Tool:
         """Get an enabled tool by name.
 
         Queries providers with full transform chain (provider transforms + server transforms + visibility).
         Returns only if enabled and authorized.
+
+        Args:
+            name: The tool name.
+            version: If None, returns highest version. If specified, returns that version.
         """
-        tool = await self._source_get_tool(name)
+        tool = await self._source_get_tool(name, version)
         if tool is None:
-            raise NotFoundError(f"Unknown tool: {name!r}")
+            if version is None:
+                raise NotFoundError(f"Unknown tool: {name!r}")
+            raise NotFoundError(f"Unknown tool: {name!r} version {version!r}")
 
         # Check tool-level auth (skip for STDIO)
         skip_auth, token = _get_auth_context()
         if not skip_auth and tool.auth is not None:
             ctx = AuthContext(token=token, component=tool)
             if not run_auth_checks(tool.auth, ctx):
-                raise NotFoundError(f"Unknown tool: {name!r}")
+                if version is None:
+                    raise NotFoundError(f"Unknown tool: {name!r}")
+                raise NotFoundError(f"Unknown tool: {name!r} version {version!r}")
 
         return tool
+
+    async def get_tool_versions(self, name: str) -> list[Tool]:
+        """Get all versions of a tool by name.
+
+        Returns all versions, not just the highest. Used by FastMCPProvider
+        to properly enumerate versions across mounted servers.
+
+        Args:
+            name: The tool name.
+
+        Returns:
+            List of all tool versions with the given name.
+        """
+        versions = await self._source_get_tool_versions(name)
+
+        # Apply auth checks to each version
+        skip_auth, token = _get_auth_context()
+        result = []
+        for tool in versions:
+            if not skip_auth and tool.auth is not None:
+                ctx = AuthContext(token=token, component=tool)
+                if not run_auth_checks(tool.auth, ctx):
+                    continue
+            result.append(tool)
+        return result
 
     async def get_resources(self, *, run_middleware: bool = False) -> list[Resource]:
         """Get all enabled resources from providers.
@@ -1226,24 +1393,57 @@ class FastMCP(Generic[LifespanResultT]):
             seen[resource.key] = resource
         return list(seen.values())
 
-    async def get_resource(self, uri: str) -> Resource:
+    async def get_resource(self, uri: str, version: str | None = None) -> Resource:
         """Get an enabled resource by URI.
 
         Queries providers with full transform chain (provider transforms + server transforms + visibility).
         Returns only if enabled and authorized.
+
+        Args:
+            uri: The resource URI.
+            version: If None, returns highest version. If specified, returns that version.
         """
-        resource = await self._source_get_resource(uri)
+        resource = await self._source_get_resource(uri, version)
         if resource is None:
-            raise NotFoundError(f"Unknown resource: {uri}")
+            if version is None:
+                raise NotFoundError(f"Unknown resource: {uri}")
+            raise NotFoundError(f"Unknown resource: {uri} version {version!r}")
 
         # Check resource-level auth (skip for STDIO)
         skip_auth, token = _get_auth_context()
         if not skip_auth and resource.auth is not None:
             ctx = AuthContext(token=token, component=resource)
             if not run_auth_checks(resource.auth, ctx):
-                raise NotFoundError(f"Unknown resource: {uri}")
+                if version is None:
+                    raise NotFoundError(f"Unknown resource: {uri}")
+                raise NotFoundError(f"Unknown resource: {uri} version {version!r}")
 
         return resource
+
+    async def get_resource_versions(self, uri: str) -> list[Resource]:
+        """Get all versions of a resource by URI.
+
+        Returns all versions, not just the highest. Used by FastMCPProvider
+        to properly enumerate versions across mounted servers.
+
+        Args:
+            uri: The resource URI.
+
+        Returns:
+            List of all resource versions with the given URI.
+        """
+        versions = await self._source_get_resource_versions(uri)
+
+        # Apply auth checks to each version
+        skip_auth, token = _get_auth_context()
+        result = []
+        for resource in versions:
+            if not skip_auth and resource.auth is not None:
+                ctx = AuthContext(token=token, component=resource)
+                if not run_auth_checks(resource.auth, ctx):
+                    continue
+            result.append(resource)
+        return result
 
     async def get_resource_templates(
         self, *, run_middleware: bool = False
@@ -1298,24 +1498,63 @@ class FastMCP(Generic[LifespanResultT]):
             seen[template.key] = template
         return list(seen.values())
 
-    async def get_resource_template(self, uri: str) -> ResourceTemplate:
+    async def get_resource_template(
+        self, uri: str, version: str | None = None
+    ) -> ResourceTemplate:
         """Get an enabled resource template that matches the given URI.
 
         Queries providers with full transform chain (provider transforms + server transforms + visibility).
         Returns only if enabled and authorized.
+
+        Args:
+            uri: The template URI to match.
+            version: If None, returns highest version. If specified, returns that version.
         """
-        template = await self._source_get_resource_template(uri)
+        template = await self._source_get_resource_template(uri, version)
         if template is None:
-            raise NotFoundError(f"Unknown resource template: {uri}")
+            if version is None:
+                raise NotFoundError(f"Unknown resource template: {uri}")
+            raise NotFoundError(f"Unknown resource template: {uri} version {version!r}")
 
         # Check template-level auth (skip for STDIO)
         skip_auth, token = _get_auth_context()
         if not skip_auth and template.auth is not None:
             ctx = AuthContext(token=token, component=template)
             if not run_auth_checks(template.auth, ctx):
-                raise NotFoundError(f"Unknown resource template: {uri}")
+                if version is None:
+                    raise NotFoundError(f"Unknown resource template: {uri}")
+                raise NotFoundError(
+                    f"Unknown resource template: {uri} version {version!r}"
+                )
 
         return template
+
+    async def get_resource_template_versions(
+        self, uri_template: str
+    ) -> list[ResourceTemplate]:
+        """Get all versions of a resource template by URI template.
+
+        Returns all versions, not just the highest. Used by FastMCPProvider
+        to properly enumerate versions across mounted servers.
+
+        Args:
+            uri_template: The resource URI template.
+
+        Returns:
+            List of all template versions with the given URI template.
+        """
+        versions = await self._source_get_resource_template_versions(uri_template)
+
+        # Apply auth checks to each version
+        skip_auth, token = _get_auth_context()
+        result = []
+        for template in versions:
+            if not skip_auth and template.auth is not None:
+                ctx = AuthContext(token=token, component=template)
+                if not run_auth_checks(template.auth, ctx):
+                    continue
+            result.append(template)
+        return result
 
     async def get_prompts(self, *, run_middleware: bool = False) -> list[Prompt]:
         """Get all enabled prompts from providers.
@@ -1368,51 +1607,57 @@ class FastMCP(Generic[LifespanResultT]):
             seen[prompt.key] = prompt
         return list(seen.values())
 
-    async def get_prompt(self, name: str) -> Prompt:
+    async def get_prompt(self, name: str, version: str | None = None) -> Prompt:
         """Get an enabled prompt by name.
 
         Queries providers with full transform chain (provider transforms + server transforms + visibility).
         Returns only if enabled and authorized.
+
+        Args:
+            name: The prompt name.
+            version: If None, returns highest version. If specified, returns that version.
         """
-        prompt = await self._source_get_prompt(name)
+        prompt = await self._source_get_prompt(name, version)
         if prompt is None:
-            raise NotFoundError(f"Unknown prompt: {name}")
+            if version is None:
+                raise NotFoundError(f"Unknown prompt: {name}")
+            raise NotFoundError(f"Unknown prompt: {name!r} version {version!r}")
 
         # Check prompt-level auth (skip for STDIO)
         skip_auth, token = _get_auth_context()
         if not skip_auth and prompt.auth is not None:
             ctx = AuthContext(token=token, component=prompt)
             if not run_auth_checks(prompt.auth, ctx):
-                raise NotFoundError(f"Unknown prompt: {name}")
+                if version is None:
+                    raise NotFoundError(f"Unknown prompt: {name}")
+                raise NotFoundError(f"Unknown prompt: {name!r} version {version!r}")
 
         return prompt
 
-    async def get_component(
-        self, key: str
-    ) -> Tool | Resource | ResourceTemplate | Prompt:
-        """Get a component by its prefixed key.
+    async def get_prompt_versions(self, name: str) -> list[Prompt]:
+        """Get all versions of a prompt by name.
 
-        Routes to the appropriate get_* method which applies server-level layers.
+        Returns all versions, not just the highest. Used by FastMCPProvider
+        to properly enumerate versions across mounted servers.
 
         Args:
-            key: The prefixed key (e.g., "tool:name", "resource:uri", "template:uri").
+            name: The prompt name.
 
         Returns:
-            The component if found.
-
-        Raises:
-            NotFoundError: If no component is found with the given key.
+            List of all prompt versions with the given name.
         """
-        # Parse key and delegate to specific methods which apply layers
-        if key.startswith("tool:"):
-            return await self.get_tool(key[5:])
-        elif key.startswith("resource:"):
-            return await self.get_resource(key[9:])
-        elif key.startswith("template:"):
-            return await self.get_resource_template(key[9:])
-        elif key.startswith("prompt:"):
-            return await self.get_prompt(key[7:])
-        raise NotFoundError(f"Unknown component: {key}")
+        versions = await self._source_get_prompt_versions(name)
+
+        # Apply auth checks to each version
+        skip_auth, token = _get_auth_context()
+        result = []
+        for prompt in versions:
+            if not skip_auth and prompt.auth is not None:
+                ctx = AuthContext(token=token, component=prompt)
+                if not run_auth_checks(prompt.auth, ctx):
+                    continue
+            result.append(prompt)
+        return result
 
     @overload
     async def call_tool(
@@ -1997,19 +2242,24 @@ class FastMCP(Generic[LifespanResultT]):
         """
         return self._local_provider.add_tool(tool)
 
-    def remove_tool(self, name: str) -> None:
-        """Remove a tool from the server.
+    def remove_tool(self, name: str, version: str | None = None) -> None:
+        """Remove tool(s) from the server.
 
         Args:
-            name: The name of the tool to remove
+            name: The name of the tool to remove.
+            version: If None, removes ALL versions. If specified, removes only that version.
 
         Raises:
-            NotFoundError: If the tool is not found
+            NotFoundError: If no matching tool is found.
         """
         try:
-            self._local_provider.remove_tool(name)
+            self._local_provider.remove_tool(name, version)
         except KeyError:
-            raise NotFoundError(f"Tool {name!r} not found") from None
+            if version is None:
+                raise NotFoundError(f"Tool {name!r} not found") from None
+            raise NotFoundError(
+                f"Tool {name!r} version {version!r} not found"
+            ) from None
 
     @overload
     def tool(
@@ -2017,6 +2267,7 @@ class FastMCP(Generic[LifespanResultT]):
         name_or_fn: AnyFunction,
         *,
         name: str | None = None,
+        version: str | int | None = None,
         title: str | None = None,
         description: str | None = None,
         icons: list[mcp.types.Icon] | None = None,
@@ -2036,6 +2287,7 @@ class FastMCP(Generic[LifespanResultT]):
         name_or_fn: str | None = None,
         *,
         name: str | None = None,
+        version: str | int | None = None,
         title: str | None = None,
         description: str | None = None,
         icons: list[mcp.types.Icon] | None = None,
@@ -2054,6 +2306,7 @@ class FastMCP(Generic[LifespanResultT]):
         name_or_fn: str | AnyFunction | None = None,
         *,
         name: str | None = None,
+        version: str | int | None = None,
         title: str | None = None,
         description: str | None = None,
         icons: list[mcp.types.Icon] | None = None,
@@ -2122,6 +2375,7 @@ class FastMCP(Generic[LifespanResultT]):
         result = self._local_provider.tool(
             name_or_fn,
             name=name,
+            version=version,
             title=title,
             description=description,
             icons=icons,
@@ -2167,6 +2421,7 @@ class FastMCP(Generic[LifespanResultT]):
         uri: str,
         *,
         name: str | None = None,
+        version: str | int | None = None,
         title: str | None = None,
         description: str | None = None,
         icons: list[mcp.types.Icon] | None = None,
@@ -2232,6 +2487,7 @@ class FastMCP(Generic[LifespanResultT]):
         inner_decorator = self._local_provider.resource(
             uri,
             name=name,
+            version=version,
             title=title,
             description=description,
             icons=icons,
@@ -2265,6 +2521,7 @@ class FastMCP(Generic[LifespanResultT]):
         name_or_fn: AnyFunction,
         *,
         name: str | None = None,
+        version: str | int | None = None,
         title: str | None = None,
         description: str | None = None,
         icons: list[mcp.types.Icon] | None = None,
@@ -2280,6 +2537,7 @@ class FastMCP(Generic[LifespanResultT]):
         name_or_fn: str | None = None,
         *,
         name: str | None = None,
+        version: str | int | None = None,
         title: str | None = None,
         description: str | None = None,
         icons: list[mcp.types.Icon] | None = None,
@@ -2294,6 +2552,7 @@ class FastMCP(Generic[LifespanResultT]):
         name_or_fn: str | AnyFunction | None = None,
         *,
         name: str | None = None,
+        version: str | int | None = None,
         title: str | None = None,
         description: str | None = None,
         icons: list[mcp.types.Icon] | None = None,
@@ -2378,6 +2637,7 @@ class FastMCP(Generic[LifespanResultT]):
         return self._local_provider.prompt(
             name_or_fn,
             name=name,
+            version=version,
             title=title,
             description=description,
             icons=icons,

@@ -178,40 +178,44 @@ class FileSystemProvider(LocalProvider):
         await self._ensure_loaded()
         return await super().list_tools()
 
-    async def get_tool(self, name: str) -> Tool | None:
+    async def get_tool(self, name: str, version: str | None = None) -> Tool | None:
         """Get a tool by name, reloading if in reload mode."""
         await self._ensure_loaded()
-        return await super().get_tool(name)
+        return await super().get_tool(name, version)
 
     async def list_resources(self) -> Sequence[Resource]:
         """Return all resources, reloading if in reload mode."""
         await self._ensure_loaded()
         return await super().list_resources()
 
-    async def get_resource(self, uri: str) -> Resource | None:
+    async def get_resource(
+        self, uri: str, version: str | None = None
+    ) -> Resource | None:
         """Get a resource by URI, reloading if in reload mode."""
         await self._ensure_loaded()
-        return await super().get_resource(uri)
+        return await super().get_resource(uri, version)
 
     async def list_resource_templates(self) -> Sequence[ResourceTemplate]:
         """Return all resource templates, reloading if in reload mode."""
         await self._ensure_loaded()
         return await super().list_resource_templates()
 
-    async def get_resource_template(self, uri: str) -> ResourceTemplate | None:
+    async def get_resource_template(
+        self, uri: str, version: str | None = None
+    ) -> ResourceTemplate | None:
         """Get a resource template, reloading if in reload mode."""
         await self._ensure_loaded()
-        return await super().get_resource_template(uri)
+        return await super().get_resource_template(uri, version)
 
     async def list_prompts(self) -> Sequence[Prompt]:
         """Return all prompts, reloading if in reload mode."""
         await self._ensure_loaded()
         return await super().list_prompts()
 
-    async def get_prompt(self, name: str) -> Prompt | None:
+    async def get_prompt(self, name: str, version: str | None = None) -> Prompt | None:
         """Get a prompt by name, reloading if in reload mode."""
         await self._ensure_loaded()
-        return await super().get_prompt(name)
+        return await super().get_prompt(name, version)
 
     def __repr__(self) -> str:
         return f"FileSystemProvider(root={self._root!r}, reload={self._reload})"

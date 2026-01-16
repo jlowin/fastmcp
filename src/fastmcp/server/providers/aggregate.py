@@ -20,6 +20,7 @@ from fastmcp.server.providers.base import Provider
 from fastmcp.tools.tool import Tool
 from fastmcp.utilities.async_utils import gather
 from fastmcp.utilities.components import FastMCPComponent
+from fastmcp.utilities.versions import version_sort_key
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +78,31 @@ class AggregateProvider(Provider):
                 return result
         return None
 
+    def _get_highest_version_result(
+        self,
+        results: list[FastMCPComponent | None | BaseException],
+        operation: str,
+    ) -> FastMCPComponent | None:
+        """Get the highest version from successful non-None results.
+
+        Used for versioned components where we want the highest version
+        across all providers rather than the first match.
+        """
+        valid: list[FastMCPComponent] = []
+        for i, result in enumerate(results):
+            if isinstance(result, BaseException):
+                if not isinstance(result, NotFoundError):
+                    logger.debug(
+                        f"Error during {operation} from provider "
+                        f"{self._providers[i]}: {result}"
+                    )
+                continue
+            if result is not None:
+                valid.append(result)
+        if not valid:
+            return None
+        return max(valid, key=version_sort_key)
+
     def __repr__(self) -> str:
         return f"AggregateProvider(providers={self._providers!r})"
 
@@ -92,13 +118,31 @@ class AggregateProvider(Provider):
         )
         return self._collect_list_results(results, "list_tools")
 
-    async def get_tool(self, name: str) -> Tool | None:
-        """Get tool by name from first provider that has it (with transforms applied)."""
+    async def get_tool(self, name: str, version: str | None = None) -> Tool | None:
+        """Get tool by name.
+
+        Args:
+            name: The tool name.
+            version: If None, returns highest version across all providers.
+                If specified, returns that specific version from any provider.
+        """
         results = await gather(
-            *[p._get_tool(name) for p in self._providers],
+            *[p._get_tool(name, version) for p in self._providers],
             return_exceptions=True,
         )
-        return self._get_first_result(results, f"get_tool({name!r})")
+        if version is None:
+            return self._get_highest_version_result(results, f"get_tool({name!r})")  # type: ignore[return-value]
+        return self._get_first_result(
+            results, f"get_tool({name!r}, version={version!r})"
+        )
+
+    async def get_tool_versions(self, name: str) -> Sequence[Tool]:
+        """Get all versions of a tool from all providers (with transforms applied)."""
+        results = await gather(
+            *[p._get_tool_versions(name) for p in self._providers],
+            return_exceptions=True,
+        )
+        return self._collect_list_results(results, f"get_tool_versions({name!r})")
 
     # -------------------------------------------------------------------------
     # Resources
@@ -112,13 +156,33 @@ class AggregateProvider(Provider):
         )
         return self._collect_list_results(results, "list_resources")
 
-    async def get_resource(self, uri: str) -> Resource | None:
-        """Get resource by URI from first provider that has it (with transforms applied)."""
+    async def get_resource(
+        self, uri: str, version: str | None = None
+    ) -> Resource | None:
+        """Get resource by URI.
+
+        Args:
+            uri: The resource URI.
+            version: If None, returns highest version across all providers.
+                If specified, returns that specific version from any provider.
+        """
         results = await gather(
-            *[p._get_resource(uri) for p in self._providers],
+            *[p._get_resource(uri, version) for p in self._providers],
             return_exceptions=True,
         )
-        return self._get_first_result(results, f"get_resource({uri!r})")
+        if version is None:
+            return self._get_highest_version_result(results, f"get_resource({uri!r})")  # type: ignore[return-value]
+        return self._get_first_result(
+            results, f"get_resource({uri!r}, version={version!r})"
+        )
+
+    async def get_resource_versions(self, uri: str) -> Sequence[Resource]:
+        """Get all versions of a resource from all providers (with transforms applied)."""
+        results = await gather(
+            *[p._get_resource_versions(uri) for p in self._providers],
+            return_exceptions=True,
+        )
+        return self._collect_list_results(results, f"get_resource_versions({uri!r})")
 
     # -------------------------------------------------------------------------
     # Resource Templates
@@ -132,13 +196,39 @@ class AggregateProvider(Provider):
         )
         return self._collect_list_results(results, "list_resource_templates")
 
-    async def get_resource_template(self, uri: str) -> ResourceTemplate | None:
-        """Get resource template by URI from first provider that has it (with transforms applied)."""
+    async def get_resource_template(
+        self, uri: str, version: str | None = None
+    ) -> ResourceTemplate | None:
+        """Get resource template by URI.
+
+        Args:
+            uri: The template URI to match.
+            version: If None, returns highest version across all providers.
+                If specified, returns that specific version from any provider.
+        """
         results = await gather(
-            *[p._get_resource_template(uri) for p in self._providers],
+            *[p._get_resource_template(uri, version) for p in self._providers],
             return_exceptions=True,
         )
-        return self._get_first_result(results, f"get_resource_template({uri!r})")
+        if version is None:
+            return self._get_highest_version_result(
+                results, f"get_resource_template({uri!r})"
+            )  # type: ignore[return-value]
+        return self._get_first_result(
+            results, f"get_resource_template({uri!r}, version={version!r})"
+        )
+
+    async def get_resource_template_versions(
+        self, uri_template: str
+    ) -> Sequence[ResourceTemplate]:
+        """Get all versions of a resource template from all providers (with transforms applied)."""
+        results = await gather(
+            *[p._get_resource_template_versions(uri_template) for p in self._providers],
+            return_exceptions=True,
+        )
+        return self._collect_list_results(
+            results, f"get_resource_template_versions({uri_template!r})"
+        )
 
     # -------------------------------------------------------------------------
     # Prompts
@@ -152,36 +242,31 @@ class AggregateProvider(Provider):
         )
         return self._collect_list_results(results, "list_prompts")
 
-    async def get_prompt(self, name: str) -> Prompt | None:
-        """Get prompt by name from first provider that has it (with transforms applied)."""
+    async def get_prompt(self, name: str, version: str | None = None) -> Prompt | None:
+        """Get prompt by name.
+
+        Args:
+            name: The prompt name.
+            version: If None, returns highest version across all providers.
+                If specified, returns that specific version from any provider.
+        """
         results = await gather(
-            *[p._get_prompt(name) for p in self._providers],
+            *[p._get_prompt(name, version) for p in self._providers],
             return_exceptions=True,
         )
-        return self._get_first_result(results, f"get_prompt({name!r})")
+        if version is None:
+            return self._get_highest_version_result(results, f"get_prompt({name!r})")  # type: ignore[return-value]
+        return self._get_first_result(
+            results, f"get_prompt({name!r}, version={version!r})"
+        )
 
-    # -------------------------------------------------------------------------
-    # Components
-    # -------------------------------------------------------------------------
-
-    async def get_component(
-        self, key: str
-    ) -> Tool | Resource | ResourceTemplate | Prompt | None:
-        """Get component by key from first provider that has it (with transforms applied).
-
-        Parses the key prefix and delegates to the appropriate get_* method
-        so that transforms are applied correctly.
-        """
-        # Parse key prefix to route to correct method
-        if key.startswith("tool:"):
-            return await self.get_tool(key[5:])
-        elif key.startswith("resource:"):
-            return await self.get_resource(key[9:])
-        elif key.startswith("template:"):
-            return await self.get_resource_template(key[9:])
-        elif key.startswith("prompt:"):
-            return await self.get_prompt(key[7:])
-        return None
+    async def get_prompt_versions(self, name: str) -> Sequence[Prompt]:
+        """Get all versions of a prompt from all providers (with transforms applied)."""
+        results = await gather(
+            *[p._get_prompt_versions(name) for p in self._providers],
+            return_exceptions=True,
+        )
+        return self._collect_list_results(results, f"get_prompt_versions({name!r})")
 
     # -------------------------------------------------------------------------
     # Tasks
