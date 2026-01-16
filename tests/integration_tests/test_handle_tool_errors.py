@@ -32,9 +32,7 @@ def create_test_server() -> FastMCP:
         """An async tool that simulates a 404 error."""
         request = httpx.Request("GET", "https://api.example.com/data")
         response = httpx.Response(404, request=request)
-        raise httpx.HTTPStatusError(
-            "Not Found", request=request, response=response
-        )
+        raise httpx.HTTPStatusError("Not Found", request=request, response=response)
 
     @mcp.tool
     @handle_tool_errors(api_name="Data API")
@@ -42,9 +40,7 @@ def create_test_server() -> FastMCP:
         """A sync tool that simulates a 404 error."""
         request = httpx.Request("GET", "https://api.example.com/data")
         response = httpx.Response(404, request=request)
-        raise httpx.HTTPStatusError(
-            "Not Found", request=request, response=response
-        )
+        raise httpx.HTTPStatusError("Not Found", request=request, response=response)
 
     @mcp.tool
     @handle_tool_errors(api_name="External API")
@@ -52,9 +48,7 @@ def create_test_server() -> FastMCP:
         """An async tool that simulates rate limiting."""
         request = httpx.Request("GET", "https://api.example.com/data")
         response = httpx.Response(429, request=request)
-        raise httpx.HTTPStatusError(
-            "Rate Limited", request=request, response=response
-        )
+        raise httpx.HTTPStatusError("Rate Limited", request=request, response=response)
 
     @mcp.tool
     @handle_tool_errors(api_name="External API")
@@ -62,9 +56,7 @@ def create_test_server() -> FastMCP:
         """An async tool that simulates a server error."""
         request = httpx.Request("GET", "https://api.example.com/data")
         response = httpx.Response(500, request=request)
-        raise httpx.HTTPStatusError(
-            "Server Error", request=request, response=response
-        )
+        raise httpx.HTTPStatusError("Server Error", request=request, response=response)
 
     @mcp.tool
     @handle_tool_errors(api_name="Network Service")
@@ -152,9 +144,7 @@ class TestAsyncToolsIntegration:
     async def test_async_tool_success(self, test_server: FastMCP):
         """Test that successful async tools return values correctly."""
         async with Client(test_server) as client:
-            result = await client.call_tool(
-                "async_tool_success", {"value": "test"}
-            )
+            result = await client.call_tool("async_tool_success", {"value": "test"})
             assert result.data == "Success: test"
 
 
@@ -180,9 +170,7 @@ class TestSyncToolsIntegration:
     async def test_sync_tool_success(self, test_server: FastMCP):
         """Test that successful sync tools return values correctly."""
         async with Client(test_server) as client:
-            result = await client.call_tool(
-                "sync_tool_success", {"value": "hello"}
-            )
+            result = await client.call_tool("sync_tool_success", {"value": "hello"})
             assert result.data == "Success: hello"
 
 
