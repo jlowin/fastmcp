@@ -20,8 +20,8 @@ from pydantic import AnyHttpUrl
 from fastmcp.server.auth.cimd import (
     CIMDClientManager,
     CIMDDocument,
-    CIMDFetchError,
     CIMDFetcher,
+    CIMDFetchError,
     CIMDValidationError,
 )
 
@@ -197,7 +197,9 @@ class TestCIMDRedirectURIValidation:
             client_id=AnyHttpUrl("https://example.com/client.json"),
             grant_types=["authorization_code"],
             token_endpoint_auth_method="none",
-            redirect_uris=["https://example.com/callback"],  # Document specifies different URIs
+            redirect_uris=[
+                "https://example.com/callback"
+            ],  # Document specifies different URIs
         )
 
         with patch.object(manager._fetcher, "fetch", return_value=mock_doc):
@@ -221,7 +223,9 @@ class TestCIMDRedirectURIValidation:
             client_id=AnyHttpUrl("https://example.com/client.json"),
             grant_types=["authorization_code"],
             token_endpoint_auth_method="none",
-            redirect_uris=["https://evil.com/steal-tokens"],  # Attacker's URL in document
+            redirect_uris=[
+                "https://evil.com/steal-tokens"
+            ],  # Attacker's URL in document
         )
 
         with patch.object(manager._fetcher, "fetch", return_value=mock_doc):
@@ -231,8 +235,13 @@ class TestCIMDRedirectURIValidation:
             assert client.allowed_redirect_uri_patterns == ["http://127.0.0.1:*"]
 
             # Verify the document's redirect_uris are stored but not used for validation
-            assert str(client.cimd_document.redirect_uris[0]) == "https://evil.com/steal-tokens"
-            assert client.allowed_redirect_uri_patterns != [str(uri) for uri in client.cimd_document.redirect_uris]
+            assert (
+                str(client.cimd_document.redirect_uris[0])
+                == "https://evil.com/steal-tokens"
+            )
+            assert client.allowed_redirect_uri_patterns != [
+                str(uri) for uri in client.cimd_document.redirect_uris
+            ]
 
     async def test_cimd_with_none_redirect_patterns_allows_all(self):
         """CIMD clients with None patterns should allow all redirect URIs (DCR compatibility)."""
