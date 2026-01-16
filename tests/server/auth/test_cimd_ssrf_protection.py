@@ -3,7 +3,7 @@
 This module tests the security measures implemented to prevent SSRF attacks
 in CIMD document fetching:
 
-1. Private IP address and hostname blocking
+1. Private IP address and hostname blocking (via DNS resolution validation)
 2. Response size limits via streaming (5KB max)
 3. HTTP redirect blocking
 4. HTTPS requirement
@@ -23,51 +23,137 @@ from fastmcp.server.auth.cimd import (
     CIMDFetcher,
     CIMDFetchError,
     CIMDValidationError,
+    _is_ip_allowed,
 )
 
 
+class TestIPAllowedFunction:
+    """Tests for the _is_ip_allowed function directly."""
+
+    def test_private_ipv4_blocked(self):
+        """Private IPv4 addresses should be blocked."""
+        assert _is_ip_allowed("192.168.1.1") is False
+        assert _is_ip_allowed("10.0.0.1") is False
+        assert _is_ip_allowed("172.16.0.1") is False
+        assert _is_ip_allowed("172.31.255.255") is False
+
+    def test_loopback_blocked(self):
+        """Loopback addresses should be blocked."""
+        assert _is_ip_allowed("127.0.0.1") is False
+        assert _is_ip_allowed("127.0.0.255") is False
+        assert _is_ip_allowed("::1") is False
+
+    def test_link_local_blocked(self):
+        """Link-local addresses (AWS metadata!) should be blocked."""
+        assert _is_ip_allowed("169.254.169.254") is False  # AWS metadata
+        assert _is_ip_allowed("169.254.0.1") is False
+
+    def test_multicast_blocked(self):
+        """Multicast addresses should be blocked."""
+        assert _is_ip_allowed("224.0.0.1") is False
+        assert _is_ip_allowed("239.255.255.255") is False
+
+    def test_unspecified_blocked(self):
+        """Unspecified addresses should be blocked."""
+        assert _is_ip_allowed("0.0.0.0") is False
+        assert _is_ip_allowed("::") is False
+
+    def test_public_ipv4_allowed(self):
+        """Public IPv4 addresses should be allowed."""
+        assert _is_ip_allowed("8.8.8.8") is True
+        assert _is_ip_allowed("1.1.1.1") is True
+        assert _is_ip_allowed("93.184.216.34") is True  # example.com
+
+    def test_ipv4_mapped_ipv6_blocked_if_private(self):
+        """IPv4-mapped IPv6 addresses should be validated for the inner IPv4."""
+        assert _is_ip_allowed("::ffff:127.0.0.1") is False
+        assert _is_ip_allowed("::ffff:192.168.1.1") is False
+
+    def test_invalid_ip_blocked(self):
+        """Invalid IP strings should be blocked."""
+        assert _is_ip_allowed("not-an-ip") is False
+        assert _is_ip_allowed("") is False
+
+
 class TestSSRFHostnameBlocking:
-    """Tests for blocking private/loopback hostnames."""
+    """Tests for blocking private/loopback hostnames via DNS resolution."""
 
     async def test_private_ip_hostname_rejected(self):
-        """Hostnames that are private IPs should be rejected."""
+        """Hostnames that resolve to private IPs should be rejected."""
         fetcher = CIMDFetcher()
 
-        with pytest.raises(CIMDValidationError, match="private/loopback"):
-            await fetcher.fetch("https://192.168.1.1/client.json")
+        # Mock DNS resolution to return a private IP
+        with patch(
+            "fastmcp.server.auth.cimd._resolve_hostname",
+            return_value=["192.168.1.1"],
+        ):
+            with pytest.raises(CIMDValidationError, match="blocked IP"):
+                await fetcher.fetch("https://example.com/client.json")
 
     async def test_localhost_hostname_rejected(self):
         """Localhost hostnames should be rejected."""
         fetcher = CIMDFetcher()
 
-        with pytest.raises(CIMDValidationError, match="private/loopback"):
-            await fetcher.fetch("https://localhost/client.json")
-
-        with pytest.raises(CIMDValidationError, match="private/loopback"):
-            await fetcher.fetch("https://127.0.0.1/client.json")
+        # Mock DNS resolution to return loopback
+        with patch(
+            "fastmcp.server.auth.cimd._resolve_hostname",
+            return_value=["127.0.0.1"],
+        ):
+            with pytest.raises(CIMDValidationError, match="blocked IP"):
+                await fetcher.fetch("https://localhost/client.json")
 
     async def test_loopback_hostname_rejected(self):
         """Loopback addresses should be rejected."""
         fetcher = CIMDFetcher()
 
-        with pytest.raises(CIMDValidationError, match="private/loopback"):
-            await fetcher.fetch("https://127.0.0.1/client.json")
+        with patch(
+            "fastmcp.server.auth.cimd._resolve_hostname",
+            return_value=["127.0.0.1"],
+        ):
+            with pytest.raises(CIMDValidationError, match="blocked IP"):
+                await fetcher.fetch("https://loopback.example.com/client.json")
 
     async def test_internal_hostname_patterns_rejected(self):
-        """Common internal hostname patterns should be rejected."""
+        """Hostnames resolving to internal IPs should be rejected."""
         fetcher = CIMDFetcher()
 
-        # These should all be rejected as potential internal hosts
-        internal_hosts = [
-            "https://internal.local/client.json",
-            "https://192.168.0.1/client.json",
-            "https://10.0.0.1/client.json",
-            "https://172.16.0.1/client.json",
+        # Test various private IP ranges
+        private_ips = [
+            "192.168.0.1",
+            "10.0.0.1",
+            "172.16.0.1",
         ]
 
-        for url in internal_hosts:
-            with pytest.raises(CIMDValidationError, match="private/loopback"):
-                await fetcher.fetch(url)
+        for private_ip in private_ips:
+            with patch(
+                "fastmcp.server.auth.cimd._resolve_hostname",
+                return_value=[private_ip],
+            ):
+                with pytest.raises(CIMDValidationError, match="blocked IP"):
+                    await fetcher.fetch("https://internal.example.com/client.json")
+
+    async def test_link_local_ip_rejected(self):
+        """Link-local IPs (AWS metadata endpoint) should be rejected."""
+        fetcher = CIMDFetcher()
+
+        with patch(
+            "fastmcp.server.auth.cimd._resolve_hostname",
+            return_value=["169.254.169.254"],  # AWS metadata
+        ):
+            with pytest.raises(CIMDValidationError, match="blocked IP"):
+                await fetcher.fetch("https://metadata.example.com/client.json")
+
+    async def test_dns_rebinding_prevented(self):
+        """DNS rebinding attack should be prevented by validating resolved IPs."""
+        fetcher = CIMDFetcher()
+
+        # Attacker's DNS returns private IP (simulating DNS rebinding)
+        with patch(
+            "fastmcp.server.auth.cimd._resolve_hostname",
+            return_value=["127.0.0.1"],
+        ):
+            with pytest.raises(CIMDValidationError, match="blocked IP"):
+                await fetcher.fetch("https://attacker.com/client.json")
 
 
 class TestSSRFResponseSizeLimits:
@@ -77,7 +163,13 @@ class TestSSRFResponseSizeLimits:
         """Responses with Content-Length > 5KB should be rejected before download."""
         fetcher = CIMDFetcher()
 
-        with patch("httpx.AsyncClient") as mock_client_class:
+        with (
+            patch(
+                "fastmcp.server.auth.cimd._resolve_hostname",
+                return_value=["93.184.216.34"],  # Public IP
+            ),
+            patch("httpx.AsyncClient") as mock_client_class,
+        ):
             mock_stream = MagicMock()
             mock_stream.status_code = 200
             mock_stream.headers = {"content-length": "10240"}  # 10KB
@@ -96,7 +188,13 @@ class TestSSRFResponseSizeLimits:
         """Responses exceeding 5KB during streaming should be aborted."""
         fetcher = CIMDFetcher()
 
-        with patch("httpx.AsyncClient") as mock_client_class:
+        with (
+            patch(
+                "fastmcp.server.auth.cimd._resolve_hostname",
+                return_value=["93.184.216.34"],  # Public IP
+            ),
+            patch("httpx.AsyncClient") as mock_client_class,
+        ):
             # Create a mock stream that yields chunks
             mock_stream = MagicMock()
             mock_stream.status_code = 200
@@ -124,7 +222,13 @@ class TestSSRFResponseSizeLimits:
         """Responses under 5KB should be accepted."""
         fetcher = CIMDFetcher()
 
-        with patch("httpx.AsyncClient") as mock_client_class:
+        with (
+            patch(
+                "fastmcp.server.auth.cimd._resolve_hostname",
+                return_value=["93.184.216.34"],  # Public IP
+            ),
+            patch("httpx.AsyncClient") as mock_client_class,
+        ):
             # Create valid CIMD document
             doc_content = b"""{
                 "client_id": "https://example.com/client.json",
@@ -160,7 +264,13 @@ class TestSSRFRedirectPrevention:
         """HTTP redirects should be disabled to prevent redirect-based SSRF."""
         fetcher = CIMDFetcher()
 
-        with patch("httpx.AsyncClient") as mock_client_class:
+        with (
+            patch(
+                "fastmcp.server.auth.cimd._resolve_hostname",
+                return_value=["93.184.216.34"],  # Public IP
+            ),
+            patch("httpx.AsyncClient") as mock_client_class,
+        ):
             # Verify follow_redirects=False is passed
             mock_stream = MagicMock()
             mock_stream.__aenter__ = AsyncMock(side_effect=httpx.RequestError("test"))
@@ -295,7 +405,13 @@ class TestSSRFPortHandling:
         """Non-standard HTTPS ports should be allowed (warning logged visually)."""
         fetcher = CIMDFetcher()
 
-        with patch("httpx.AsyncClient") as mock_client_class:
+        with (
+            patch(
+                "fastmcp.server.auth.cimd._resolve_hostname",
+                return_value=["93.184.216.34"],  # Public IP
+            ),
+            patch("httpx.AsyncClient") as mock_client_class,
+        ):
             # Create valid CIMD document
             doc_content = b"""{
                 "client_id": "https://example.com:8443/client.json",
@@ -327,7 +443,13 @@ class TestSSRFPortHandling:
         """Standard HTTPS port (443) should not trigger warnings."""
         fetcher = CIMDFetcher()
 
-        with patch("httpx.AsyncClient") as mock_client_class:
+        with (
+            patch(
+                "fastmcp.server.auth.cimd._resolve_hostname",
+                return_value=["93.184.216.34"],  # Public IP
+            ),
+            patch("httpx.AsyncClient") as mock_client_class,
+        ):
             # Create valid CIMD document
             doc_content = b"""{
                 "client_id": "https://example.com/client.json",

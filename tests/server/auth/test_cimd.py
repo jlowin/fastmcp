@@ -351,12 +351,13 @@ class TestCIMDAssertionValidator:
             url="https://example.com/.well-known/jwks.json", json=jwks
         )
 
-        # Create valid assertion
+        # Create valid assertion (use short lifetime for security compliance)
         assertion = key_pair.create_token(
             subject=client_id,
             issuer=client_id,
             audience=token_endpoint,
             additional_claims={"jti": "unique-jti-123"},
+            expires_in_seconds=60,  # 1 minute (max allowed is 300s)
             kid="test-key-1",
         )
 
@@ -372,12 +373,13 @@ class TestCIMDAssertionValidator:
         client_id = "https://example.com/client.json"
         token_endpoint = "https://oauth.example.com/token"
 
-        # Create valid assertion
+        # Create valid assertion (use short lifetime for security compliance)
         assertion = key_pair.create_token(
             subject=client_id,
             issuer=client_id,
             audience=token_endpoint,
             additional_claims={"jti": "unique-jti-456"},
+            expires_in_seconds=60,  # 1 minute (max allowed is 300s)
             kid="test-key-1",
         )
 
@@ -399,6 +401,7 @@ class TestCIMDAssertionValidator:
             issuer="https://attacker.com",  # Wrong!
             audience=token_endpoint,
             additional_claims={"jti": "unique-jti-789"},
+            expires_in_seconds=60,
             kid="test-key-1",
         )
 
@@ -421,6 +424,7 @@ class TestCIMDAssertionValidator:
             issuer=client_id,
             audience="https://wrong-endpoint.com/token",  # Wrong!
             additional_claims={"jti": "unique-jti-abc"},
+            expires_in_seconds=60,
             kid="test-key-1",
         )
 
@@ -443,6 +447,7 @@ class TestCIMDAssertionValidator:
             issuer=client_id,
             audience=token_endpoint,
             additional_claims={"jti": "unique-jti-def"},
+            expires_in_seconds=60,
             kid="test-key-1",
         )
 
@@ -465,6 +470,7 @@ class TestCIMDAssertionValidator:
             issuer=client_id,
             audience=token_endpoint,
             # No jti!
+            expires_in_seconds=60,
             kid="test-key-1",
         )
 
@@ -487,6 +493,7 @@ class TestCIMDAssertionValidator:
             issuer=client_id,
             audience=token_endpoint,
             additional_claims={"jti": "replayed-jti"},
+            expires_in_seconds=60,
             kid="test-key-1",
         )
 
