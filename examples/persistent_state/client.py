@@ -18,7 +18,7 @@ URL = "http://127.0.0.1:8000/mcp"
 console = Console()
 
 
-async def main():
+async def main() -> None:
     console.print()
     console.print("[dim italic]Each line below is a separate tool call[/dim italic]")
     console.print()

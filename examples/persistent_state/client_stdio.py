@@ -10,21 +10,21 @@ from pathlib import Path
 
 from rich.console import Console
 
-from fastmcp import Client
+from fastmcp import Client, FastMCP
 
 # Add parent directory to path for importing the server module
-examples_dir = Path(__file__).parent.parent.parent
+examples_dir: Path = Path(__file__).parent.parent.parent
 if str(examples_dir) not in sys.path:
     sys.path.insert(0, str(examples_dir))
 
 import examples.persistent_state.server as server_module  # noqa: E402
 
-server = server_module.server
+server: FastMCP = server_module.server
 
-console = Console()
+console: Console = Console()
 
 
-async def main():
+async def main() -> None:
     console.print()
     console.print("[dim italic]Each line below is a separate tool call[/dim italic]")
     console.print()

@@ -30,7 +30,7 @@ async def get_value(key: str, ctx: Context) -> str:
 
 
 @server.tool
-async def list_session_info(ctx: Context) -> dict:
+async def list_session_info(ctx: Context) -> dict[str, str | None]:
     """Get information about the current session."""
     return {
         "session_id": ctx.session_id,

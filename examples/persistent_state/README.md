@@ -28,7 +28,7 @@ uv run python client_stdio.py
 
 ## Example output
 
-```
+```text
 Each line below is a separate tool call
 
 Alice connects

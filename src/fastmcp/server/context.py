@@ -489,11 +489,11 @@ class Context:
         if request:
             session_id = request.headers.get("mcp-session-id")
 
-        # Generate a session ID if it doesn't exist.
+        # For STDIO/SSE (no mcp-session-id header), use id(session).
+        # This ensures consistency with state set during on_initialize
+        # (which also uses id(session) since request_context isn't available).
         if session_id is None:
-            from uuid import uuid4
-
-            session_id = str(uuid4())
+            session_id = str(id(session))
 
         # Save the session id to the session attributes
         session._fastmcp_id = session_id  # type: ignore[attr-defined]

@@ -58,29 +58,36 @@ class TestSessionId:
             )
         )
 
-        assert context.session_id == "test-session-123"
-
-        request_ctx.reset(token)
+        try:
+            assert context.session_id == "test-session-123"
+        finally:
+            request_ctx.reset(token)
 
     def test_session_id_without_http_headers(self, context):
-        """Test that session_id returns a UUID string when no HTTP headers are available."""
-        import uuid
+        """Test that session_id returns id(session) when no HTTP headers are available.
 
+        For STDIO/SSE transports, we use id(session) to ensure consistency with
+        state set during on_initialize (which also uses id(session)).
+        """
         from mcp.server.lowlevel.server import request_ctx
         from mcp.shared.context import RequestContext
 
+        mock_session = MagicMock(wraps={})
         token = request_ctx.set(
             RequestContext(
                 request_id=0,
                 meta=None,
-                session=MagicMock(wraps={}),
+                session=mock_session,
                 lifespan_context=MagicMock(),
             )
         )
 
-        assert uuid.UUID(context.session_id)
-
-        request_ctx.reset(token)
+        try:
+            # session_id should be str(id(session)) for non-HTTP transports
+            session_id = context.session_id
+            assert session_id == str(id(mock_session))
+        finally:
+            request_ctx.reset(token)
 
 
 class TestContextState:
@@ -218,10 +225,6 @@ class TestContextState:
         assert session_id_1 is not None
         assert session_id_2 is not None
         assert session_id_1 != session_id_2
-
-        # Verify they look like UUIDs (36 chars with dashes)
-        assert len(session_id_1) == 36
-        assert len(session_id_2) == 36
 
         # Client 1 reconnects and should still see their value
         async with Client(server) as client1_again:
