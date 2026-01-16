@@ -626,3 +626,20 @@ class TestVersionFilter:
 
         f3 = VersionFilter(version_gte="1.0")
         assert repr(f3) == "VersionFilter(version_gte='1.0')"
+
+
+class TestVersionValidation:
+    """Tests for version string validation."""
+
+    async def test_version_with_at_symbol_rejected(self):
+        """Version strings containing '@' should be rejected."""
+        import pytest
+        from pydantic import ValidationError
+
+        mcp = FastMCP()
+
+        with pytest.raises(ValidationError, match="cannot contain '@'"):
+
+            @mcp.tool(version="1.0@beta")
+            def my_tool() -> str:
+                return "test"

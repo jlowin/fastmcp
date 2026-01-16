@@ -32,10 +32,18 @@ def _convert_set_default_none(maybe_set: set[T] | Sequence[T] | None) -> set[T]:
 
 
 def _coerce_version(v: str | int | None) -> str | None:
-    """Coerce version to string, accepting int or str."""
+    """Coerce version to string, accepting int or str.
+
+    Raises ValueError if version contains '@' (used as key delimiter).
+    """
     if v is None:
         return None
-    return str(v)
+    version = str(v)
+    if "@" in version:
+        raise ValueError(
+            f"Version string cannot contain '@' (used as key delimiter): {version!r}"
+        )
+    return version
 
 
 class FastMCPComponent(FastMCPBaseModel):
