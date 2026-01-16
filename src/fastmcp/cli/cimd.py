@@ -37,7 +37,7 @@ def create_command(
     redirect_uri: Annotated[
         list[str],
         cyclopts.Parameter(
-            name="--redirect-uri",
+            name=["--redirect-uri", "-r"],
             help="Allowed redirect URIs (can specify multiple)",
         ),
     ],

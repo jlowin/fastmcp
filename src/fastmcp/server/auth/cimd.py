@@ -236,7 +236,7 @@ class CIMDFetcher:
         # Parse and validate URL format
         try:
             parsed = urlparse(client_id_url)
-        except Exception as e:
+        except (ValueError, AttributeError) as e:
             raise CIMDValidationError(f"Invalid URL: {e}") from e
 
         if parsed.scheme != "https":
