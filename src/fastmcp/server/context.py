@@ -167,10 +167,10 @@ class Context:
     the same MCP session. State is automatically keyed by session, ensuring
     isolation between different clients.
 
-    For STDIO and SSE transports, state set during `on_initialize` middleware
-    will persist to tool calls. For StreamableHTTP, state during `on_initialize`
-    is isolated because the session ID comes from request headers (not available
-    during init).
+    State set during `on_initialize` middleware will persist to subsequent tool
+    calls when using the same session object (STDIO, SSE, single-server HTTP).
+    For distributed/serverless HTTP deployments where different machines handle
+    the init and tool calls, state is isolated by the mcp-session-id header.
 
     The context parameter name can be anything as long as it's annotated with Context.
     The context is optional - tools that don't need it can omit the parameter.

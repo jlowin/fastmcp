@@ -259,7 +259,7 @@ Any backend compatible with the [py-key-value-aio](https://github.com/strawgate/
 
 #### State During Initialization
 
-For STDIO and SSE transports, state set during `on_initialize` middleware persists to subsequent tool calls (same session object). For StreamableHTTP, state during initialization is isolated because the session ID comes from request headers which aren't available during init.
+State set during `on_initialize` middleware persists to subsequent tool calls when using the same session object (STDIO, SSE, single-server HTTP). For distributed/serverless HTTP deployments where different machines handle init and tool calls, state is isolated by the `mcp-session-id` header.
 
 ### Change Notifications
 
