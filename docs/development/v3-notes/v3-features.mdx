@@ -386,6 +386,63 @@ STDIO transport bypasses all auth checks (no OAuth concept).
 
 ---
 
+## CIMD Support
+
+v3.0 adds support for Client ID Metadata Document (CIMD), an OAuth extension where clients use HTTPS URLs as their `client_id` instead of registering via Dynamic Client Registration (DCR).
+
+**How it works** (`src/fastmcp/server/auth/cimd.py`):
+
+1. Client provides metadata document URL as `client_id`: `https://example.com/client.json`
+2. Server fetches and validates the document
+3. Client authenticates using private key JWT (asymmetric) instead of client secret
+
+**Automatic SSRF Protection**:
+- HTTPS-only URLs
+- Private IP/hostname blocking
+- 5KB response size limit with streaming
+- Redirects disabled
+- No DNS rebinding vulnerability
+
+**Configuration**:
+
+```python
+from fastmcp.server.auth import OIDCProxy
+
+auth = OIDCProxy(
+    config_url="https://provider.com/.well-known/openid-configuration",
+    client_id="your-client-id",
+    client_secret="your-client-secret",
+    base_url="https://your-server.com",
+    enable_cimd=True,  # Enabled by default
+)
+
+mcp = FastMCP("Server", auth=auth)
+```
+
+**Redirect URI Validation**:
+
+CIMD clients validate against the proxy's `allowed_client_redirect_uris` patterns (same as DCR clients), not the CIMD document's `redirect_uris` field:
+
+```python
+auth = OIDCProxy(
+    ...,
+    allowed_client_redirect_uris=[
+        "http://localhost:*",
+        "https://*.example.com/*",
+    ],
+)
+```
+
+**Benefits over DCR**:
+- No client registration step (URL is the client ID)
+- Verified domain displayed in consent UI
+- Asymmetric authentication (private key JWT)
+- Standards-based (IETF draft)
+
+CIMD is implemented on `OAuthProxy` and `OIDCProxy` with full security hardening against SSRF attacks.
+
+---
+
 ## Deprecated Features
 
 These emit deprecation warnings but continue to work.

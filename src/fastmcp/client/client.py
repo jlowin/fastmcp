@@ -34,6 +34,7 @@ from mcp.types import (
 from pydantic import AnyUrl, RootModel
 
 import fastmcp
+from fastmcp.client.auth import OAuth
 from fastmcp.client.elicitation import ElicitationHandler, create_elicitation_callback
 from fastmcp.client.logging import (
     LogHandler,
@@ -260,7 +261,7 @@ class Client(Generic[ClientTransportT]):
         auto_initialize: bool = True,
         init_timeout: datetime.timedelta | float | int | None = None,
         client_info: mcp.types.Implementation | None = None,
-        auth: httpx.Auth | Literal["oauth"] | str | None = None,
+        auth: httpx.Auth | OAuth | Literal["oauth"] | str | None = None,
     ) -> None:
         self.name = name or self.generate_name()
 

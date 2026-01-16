@@ -19,6 +19,7 @@ from rich.table import Table
 
 import fastmcp
 from fastmcp.cli import run as run_module
+from fastmcp.cli.auth import auth_app
 from fastmcp.cli.install import install_app
 from fastmcp.cli.tasks import tasks_app
 from fastmcp.utilities.cli import is_already_in_uv_subprocess, load_and_merge_config
@@ -951,6 +952,9 @@ app.command(install_app)
 
 # Add tasks subcommand group
 app.command(tasks_app)
+
+# Add auth subcommand group (includes CIMD commands)
+app.command(auth_app)
 
 
 if __name__ == "__main__":

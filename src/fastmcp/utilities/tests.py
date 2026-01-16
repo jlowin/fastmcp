@@ -10,12 +10,11 @@ from contextlib import asynccontextmanager, contextmanager, suppress
 from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import parse_qs, urlparse
 
-import httpx
 import uvicorn
 from pytest import LogCaptureFixture
 
 from fastmcp import settings
-from fastmcp.client.auth.oauth import OAuth
+from fastmcp.client.auth.oauth import _OAuthSession
 from fastmcp.utilities.http import find_available_port
 
 if TYPE_CHECKING:
@@ -238,7 +237,7 @@ def caplog_for_fastmcp(
         logger.removeHandler(caplog.handler)
 
 
-class HeadlessOAuth(OAuth):
+class HeadlessOAuth(_OAuthSession):
     """
     OAuth provider that bypasses browser interaction for testing.
 
@@ -249,11 +248,12 @@ class HeadlessOAuth(OAuth):
     def __init__(self, mcp_url: str, **kwargs):
         """Initialize HeadlessOAuth with stored response tracking."""
         self._stored_response = None
+        # Pass kwargs directly to session (same signature as OAuth config)
         super().__init__(mcp_url, **kwargs)
 
     async def redirect_handler(self, authorization_url: str) -> None:
         """Make HTTP request to authorization URL and store response for callback handler."""
-        async with httpx.AsyncClient() as client:
+        async with self.httpx_client_factory() as client:
             response = await client.get(authorization_url, follow_redirects=False)
             self._stored_response = response
 

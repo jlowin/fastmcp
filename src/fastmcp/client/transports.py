@@ -32,7 +32,7 @@ from typing_extensions import TypedDict, Unpack
 
 import fastmcp
 from fastmcp.client.auth.bearer import BearerAuth
-from fastmcp.client.auth.oauth import OAuth
+from fastmcp.client.auth.oauth import OAuth, _OAuthSession
 from fastmcp.mcp_config import (
     MCPConfig,
     MCPServerTypes,
@@ -125,7 +125,7 @@ class ClientTransport(abc.ABC):
         """Get the session ID for this transport, if available."""
         return None
 
-    def _set_auth(self, auth: httpx.Auth | Literal["oauth"] | str | None):
+    def _set_auth(self, auth: httpx.Auth | OAuth | Literal["oauth"] | str | None):
         if auth is not None:
             raise ValueError("This transport does not support auth")
 
@@ -137,7 +137,7 @@ class SSETransport(ClientTransport):
         self,
         url: str | AnyUrl,
         headers: dict[str, str] | None = None,
-        auth: httpx.Auth | Literal["oauth"] | str | None = None,
+        auth: httpx.Auth | OAuth | Literal["oauth"] | str | None = None,
         sse_read_timeout: datetime.timedelta | float | int | None = None,
         httpx_client_factory: McpHttpClientFactory | None = None,
     ):
@@ -158,9 +158,23 @@ class SSETransport(ClientTransport):
             sse_read_timeout = datetime.timedelta(seconds=float(sse_read_timeout))
         self.sse_read_timeout = sse_read_timeout
 
-    def _set_auth(self, auth: httpx.Auth | Literal["oauth"] | str | None):
+    def _set_auth(self, auth: httpx.Auth | OAuth | Literal["oauth"] | str | None):
         if auth == "oauth":
-            auth = OAuth(self.url, httpx_client_factory=self.httpx_client_factory)
+            auth = OAuth()
+        if isinstance(auth, OAuth):
+            # Build OAuth session from config values + URL
+            # Transport's httpx_client_factory is used as fallback
+            auth = _OAuthSession(
+                self.url,
+                scopes=auth.scopes,
+                client_name=auth.client_name,
+                client_metadata_url=auth.client_metadata_url,
+                token_storage=auth.token_storage,
+                additional_client_metadata=auth.additional_client_metadata,
+                callback_port=auth.callback_port,
+                httpx_client_factory=auth.httpx_client_factory
+                or self.httpx_client_factory,
+            )
         elif isinstance(auth, str):
             auth = BearerAuth(auth)
         self.auth = auth
@@ -207,7 +221,7 @@ class StreamableHttpTransport(ClientTransport):
         self,
         url: str | AnyUrl,
         headers: dict[str, str] | None = None,
-        auth: httpx.Auth | Literal["oauth"] | str | None = None,
+        auth: httpx.Auth | OAuth | Literal["oauth"] | str | None = None,
         sse_read_timeout: datetime.timedelta | float | int | None = None,
         httpx_client_factory: McpHttpClientFactory | None = None,
     ):
@@ -253,9 +267,23 @@ class StreamableHttpTransport(ClientTransport):
 
         self._get_session_id_cb: Callable[[], str | None] | None = None
 
-    def _set_auth(self, auth: httpx.Auth | Literal["oauth"] | str | None):
+    def _set_auth(self, auth: httpx.Auth | OAuth | Literal["oauth"] | str | None):
         if auth == "oauth":
-            auth = OAuth(self.url, httpx_client_factory=self.httpx_client_factory)
+            auth = OAuth()
+        if isinstance(auth, OAuth):
+            # Build OAuth session from config values + URL
+            # Transport's httpx_client_factory is used as fallback
+            auth = _OAuthSession(
+                self.url,
+                scopes=auth.scopes,
+                client_name=auth.client_name,
+                client_metadata_url=auth.client_metadata_url,
+                token_storage=auth.token_storage,
+                additional_client_metadata=auth.additional_client_metadata,
+                callback_port=auth.callback_port,
+                httpx_client_factory=auth.httpx_client_factory
+                or self.httpx_client_factory,
+            )
         elif isinstance(auth, str):
             auth = BearerAuth(auth)
         self.auth = auth

@@ -407,7 +407,7 @@ class TestOAuthProxyClientRegistration:
     """Tests for OAuth proxy client registration (DCR)."""
 
     async def test_register_client(self, oauth_proxy):
-        """Test client registration creates ProxyDCRClient."""
+        """Test client registration creates OAuthProxyClient."""
         client_info = OAuthClientInformationFull(
             client_id="original-client",
             client_secret="original-secret",

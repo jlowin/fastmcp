@@ -2,7 +2,7 @@ from ssl import VerifyMode
 
 import httpx
 
-from fastmcp.client.auth.oauth import OAuth
+from fastmcp.client.auth.oauth import _OAuthSession
 from fastmcp.client.transports import SSETransport, StreamableHttpTransport
 
 
@@ -15,7 +15,7 @@ async def test_oauth_uses_same_client_as_transport_streamable_http():
         auth="oauth",
     )
 
-    assert isinstance(transport.auth, OAuth)
+    assert isinstance(transport.auth, _OAuthSession)
     async with transport.auth.httpx_client_factory() as httpx_client:
         assert httpx_client._transport is not None
         assert (
@@ -33,7 +33,7 @@ async def test_oauth_uses_same_client_as_transport_sse():
         auth="oauth",
     )
 
-    assert isinstance(transport.auth, OAuth)
+    assert isinstance(transport.auth, _OAuthSession)
     async with transport.auth.httpx_client_factory() as httpx_client:
         assert httpx_client._transport is not None
         assert (

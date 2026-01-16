@@ -5,7 +5,7 @@ from mcp.shared.auth import InvalidRedirectUriError
 from pydantic import AnyUrl
 
 from fastmcp.server.auth.auth import TokenVerifier
-from fastmcp.server.auth.oauth_proxy import OAuthProxy, ProxyDCRClient
+from fastmcp.server.auth.oauth_proxy import OAuthProxy, OAuthProxyClient
 
 
 class MockTokenVerifier(TokenVerifier):
@@ -18,12 +18,12 @@ class MockTokenVerifier(TokenVerifier):
         return {"sub": "test-user"}
 
 
-class TestProxyDCRClient:
-    """Test ProxyDCRClient redirect URI validation."""
+class TestOAuthProxyClient:
+    """Test OAuthProxyClient redirect URI validation."""
 
     def test_default_allows_all(self):
         """Test that default configuration allows all URIs for DCR compatibility."""
-        client = ProxyDCRClient(
+        client = OAuthProxyClient(
             client_id="test",
             client_secret="secret",
             redirect_uris=[AnyUrl("http://localhost:3000")],
@@ -48,7 +48,7 @@ class TestProxyDCRClient:
 
     def test_custom_patterns(self):
         """Test custom redirect URI patterns."""
-        client = ProxyDCRClient(
+        client = OAuthProxyClient(
             client_id="test",
             client_secret="secret",
             redirect_uris=[AnyUrl("http://localhost:3000")],
@@ -68,7 +68,7 @@ class TestProxyDCRClient:
 
     def test_empty_list_allows_none(self):
         """Test that empty pattern list allows no URIs."""
-        client = ProxyDCRClient(
+        client = OAuthProxyClient(
             client_id="test",
             client_secret="secret",
             redirect_uris=[AnyUrl("http://localhost:3000")],
@@ -87,7 +87,7 @@ class TestProxyDCRClient:
 
     def test_none_redirect_uri(self):
         """Test that None redirect URI uses default behavior."""
-        client = ProxyDCRClient(
+        client = OAuthProxyClient(
             client_id="test",
             client_secret="secret",
             redirect_uris=[AnyUrl("http://localhost:3000")],
@@ -178,7 +178,7 @@ class TestOAuthProxyRedirectValidation:
         registered = await proxy.get_client(
             "new-client"
         )  # Use the client ID we registered
-        assert isinstance(registered, ProxyDCRClient)
+        assert isinstance(registered, OAuthProxyClient)
         assert registered.allowed_redirect_uri_patterns == custom_patterns
 
     async def test_proxy_unregistered_client_returns_none(self):

@@ -7,6 +7,7 @@ from mcp.types import TextResourceContents
 
 from fastmcp.client import Client
 from fastmcp.client.auth import OAuth
+from fastmcp.client.auth.oauth import _OAuthSession
 from fastmcp.client.transports import StreamableHttpTransport
 from fastmcp.server.auth.auth import ClientRegistrationOptions
 from fastmcp.server.auth.providers.in_memory import InMemoryOAuthProvider
@@ -130,50 +131,90 @@ async def test_oauth_server_metadata_discovery(streamable_http_server: str):
         assert metadata["token_endpoint"].startswith(server_base_url)
 
 
-class TestOAuthClientUrlHandling:
-    """Tests for OAuth client URL handling (issue #2573)."""
+class TestOAuthConfig:
+    """Tests for OAuth configuration object."""
 
-    def test_oauth_preserves_full_url_with_path(self):
-        """OAuth client should preserve the full MCP URL including path components.
+    def test_oauth_config_stores_settings(self):
+        """OAuth config should store all settings."""
+        config = OAuth(
+            scopes=["read", "write"],
+            client_name="Test Client",
+            client_metadata_url="https://myapp.com/client.json",
+        )
+        assert config.scopes == ["read", "write"]
+        assert config.client_name == "Test Client"
+        assert config.client_metadata_url == "https://myapp.com/client.json"
+
+    def test_oauth_config_defaults(self):
+        """OAuth config should have sensible defaults."""
+        config = OAuth()
+        assert config.scopes is None
+        assert config.client_name == "FastMCP Client"
+        assert config.client_metadata_url is None
+        assert config.token_storage is None
+        assert config.callback_port is None
+
+    def test_oauth_config_validates_cimd_url(self):
+        """OAuth config should validate client_metadata_url."""
+        # Valid CIMD URL
+        config = OAuth(client_metadata_url="https://myapp.com/client.json")
+        assert config.client_metadata_url == "https://myapp.com/client.json"
+
+        # Invalid - HTTP not HTTPS
+        with pytest.raises(ValueError, match="HTTPS"):
+            OAuth(client_metadata_url="http://insecure.com/client.json")
+
+        # Invalid - root path
+        with pytest.raises(ValueError, match="non-root"):
+            OAuth(client_metadata_url="https://myapp.com/")
+
+        # Invalid - no path
+        with pytest.raises(ValueError, match="non-root"):
+            OAuth(client_metadata_url="https://myapp.com")
+
+
+class TestOAuthSessionUrlHandling:
+    """Tests for _OAuthSession URL handling (issue #2573)."""
+
+    def test_session_preserves_full_url_with_path(self):
+        """OAuth session should preserve the full MCP URL including path components.
 
         This is critical for servers hosted under path-based endpoints like
         mcp.example.com/server1/v1.0/mcp where OAuth metadata discovery needs
         the full path to find the correct .well-known endpoints.
         """
         mcp_url = "https://mcp.example.com/server1/v1.0/mcp"
-        oauth = OAuth(mcp_url=mcp_url)
+        session = _OAuthSession(mcp_url)
 
         # The full URL should be preserved for OAuth discovery
-        assert oauth.context.server_url == mcp_url
+        assert session.context.server_url == mcp_url
+        assert session.mcp_url == mcp_url
 
-        # The stored mcp_url should match
-        assert oauth.mcp_url == mcp_url
-
-    def test_oauth_preserves_root_url(self):
-        """OAuth client should work correctly with root-level URLs."""
+    def test_session_preserves_root_url(self):
+        """OAuth session should work correctly with root-level URLs."""
         mcp_url = "https://mcp.example.com"
-        oauth = OAuth(mcp_url=mcp_url)
+        session = _OAuthSession(mcp_url)
 
-        assert oauth.context.server_url == mcp_url
-        assert oauth.mcp_url == mcp_url
+        assert session.context.server_url == mcp_url
+        assert session.mcp_url == mcp_url
 
-    def test_oauth_normalizes_trailing_slash(self):
-        """OAuth client should normalize trailing slashes for consistency."""
+    def test_session_normalizes_trailing_slash(self):
+        """OAuth session should normalize trailing slashes for consistency."""
         mcp_url_with_slash = "https://mcp.example.com/api/mcp/"
-        oauth = OAuth(mcp_url=mcp_url_with_slash)
+        session = _OAuthSession(mcp_url_with_slash)
 
         # Trailing slash should be stripped
         expected = "https://mcp.example.com/api/mcp"
-        assert oauth.context.server_url == expected
-        assert oauth.mcp_url == expected
+        assert session.context.server_url == expected
+        assert session.mcp_url == expected
 
-    def test_oauth_token_storage_uses_full_url(self):
+    def test_session_token_storage_uses_full_url(self):
         """Token storage should use the full URL to separate tokens per endpoint."""
         mcp_url = "https://mcp.example.com/server1/v1.0/mcp"
-        oauth = OAuth(mcp_url=mcp_url)
+        session = _OAuthSession(mcp_url)
 
         # Token storage should key by the full URL, not just the host
-        assert oauth.token_storage_adapter._server_url == mcp_url
+        assert session.token_storage_adapter._server_url == mcp_url
 
 
 class TestOAuthGeneratorCleanup:
@@ -187,7 +228,7 @@ class TestOAuthGeneratorCleanup:
 
     async def test_generator_closed_on_successful_flow(self):
         """Verify aclose() is called on the parent generator after successful flow."""
-        oauth = OAuth(mcp_url="https://example.com")
+        session = _OAuthSession("https://example.com")
 
         # Track generator lifecycle using a wrapper class
         class TrackedGenerator:
@@ -220,10 +261,10 @@ class TestOAuthGeneratorCleanup:
 
         # Patch the parent class to return our tracked generator
         with patch.object(
-            OAuth.__bases__[0], "async_auth_flow", return_value=tracked_gen
+            _OAuthSession.__bases__[0], "async_auth_flow", return_value=tracked_gen
         ):
             # Drive the OAuth flow
-            flow = oauth.async_auth_flow(httpx.Request("GET", "https://example.com"))
+            flow = session.async_auth_flow(httpx.Request("GET", "https://example.com"))
             try:
                 # First asend(None) starts the generator per async generator protocol
                 await flow.asend(None)  # ty: ignore[invalid-argument-type]
@@ -240,7 +281,7 @@ class TestOAuthGeneratorCleanup:
 
     async def test_generator_closed_on_exception(self):
         """Verify aclose() is called even when an exception occurs mid-flow."""
-        oauth = OAuth(mcp_url="https://example.com")
+        session = _OAuthSession("https://example.com")
 
         class FailingGenerator:
             def __init__(self):
@@ -268,9 +309,9 @@ class TestOAuthGeneratorCleanup:
         tracked_gen = FailingGenerator()
 
         with patch.object(
-            OAuth.__bases__[0], "async_auth_flow", return_value=tracked_gen
+            _OAuthSession.__bases__[0], "async_auth_flow", return_value=tracked_gen
         ):
-            flow = oauth.async_auth_flow(httpx.Request("GET", "https://example.com"))
+            flow = session.async_auth_flow(httpx.Request("GET", "https://example.com"))
             with pytest.raises(ValueError, match="Simulated failure"):
                 await flow.asend(None)  # ty: ignore[invalid-argument-type]
                 await flow.asend(httpx.Response(200))
@@ -356,3 +397,81 @@ class TestTokenStorageTTL:
         stored = await adapter.get_tokens()
         assert stored is not None
         assert stored.refresh_token == "refresh-token-should-survive"
+
+
+class TestOAuthCIMDSupport:
+    """Tests for CIMD (Client ID Metadata Document) client support.
+
+    CIMD allows clients to use a hosted metadata document URL as their
+    client_id instead of Dynamic Client Registration (DCR).
+    """
+
+    def test_client_metadata_url_accepted(self):
+        """OAuth config accepts a valid client_metadata_url."""
+        config = OAuth(client_metadata_url="https://myapp.com/oauth/client.json")
+        assert config.client_metadata_url == "https://myapp.com/oauth/client.json"
+
+    def test_client_metadata_url_passed_to_session(self):
+        """The client_metadata_url should be passed through to the session."""
+        url = "https://myapp.example.com/.well-known/oauth-client.json"
+        session = _OAuthSession("https://server.example.com", client_metadata_url=url)
+
+        # The URL should be in the context for use during auth flow
+        assert session.context.client_metadata_url == url
+
+    def test_client_metadata_url_rejects_http(self):
+        """CIMD URLs must use HTTPS - HTTP should be rejected."""
+        with pytest.raises(ValueError, match="HTTPS"):
+            OAuth(client_metadata_url="http://insecure.com/client.json")
+
+    def test_client_metadata_url_rejects_root_path(self):
+        """CIMD URLs must have a non-root path - root URLs should be rejected."""
+        with pytest.raises(ValueError, match="non-root"):
+            OAuth(client_metadata_url="https://myapp.com/")
+
+    def test_client_metadata_url_rejects_no_path(self):
+        """CIMD URLs must have a path component."""
+        with pytest.raises(ValueError, match="non-root"):
+            OAuth(client_metadata_url="https://myapp.com")
+
+    def test_dcr_fallback_when_no_client_metadata_url(self):
+        """Without client_metadata_url, OAuth should use DCR (default behavior)."""
+        session = _OAuthSession("https://mcp.example.com")
+        assert session.context.client_metadata_url is None
+
+
+class TestTransportOAuthIntegration:
+    """Tests for OAuth integration with transports."""
+
+    def test_transport_accepts_oauth_config(self):
+        """Transport should accept OAuth config and build session internally."""
+        config = OAuth(scopes=["read"], client_name="Test App")
+        transport = StreamableHttpTransport(
+            "https://mcp.example.com",
+            auth=config,
+        )
+        # The transport should have converted the config to a session
+        assert isinstance(transport.auth, _OAuthSession)
+        assert transport.auth.mcp_url == "https://mcp.example.com"
+
+    def test_transport_oauth_shorthand(self):
+        """Transport should accept 'oauth' string shorthand."""
+        transport = StreamableHttpTransport(
+            "https://mcp.example.com",
+            auth="oauth",
+        )
+        # The transport should have created a session with default config
+        assert isinstance(transport.auth, _OAuthSession)
+
+    def test_transport_passes_cimd_url(self):
+        """Transport should pass client_metadata_url to session."""
+        config = OAuth(client_metadata_url="https://myapp.com/client.json")
+        transport = StreamableHttpTransport(
+            "https://mcp.example.com",
+            auth=config,
+        )
+        assert isinstance(transport.auth, _OAuthSession)
+        assert (
+            transport.auth.context.client_metadata_url
+            == "https://myapp.com/client.json"
+        )
