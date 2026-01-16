@@ -9,8 +9,8 @@ from __future__ import annotations
 import functools
 import inspect
 import logging
-from collections.abc import Awaitable, Callable
-from typing import TypeVar, overload
+from collections.abc import Callable, Coroutine
+from typing import Any, TypeVar, overload
 
 import httpx
 from typing_extensions import ParamSpec
@@ -83,7 +83,7 @@ def handle_tool_errors(
     api_name: str | None = None,
     *,
     mask_internal_errors: bool = True,
-) -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]: ...
+) -> Callable[[Callable[P, R]], Callable[P, R]]: ...
 
 
 @overload
@@ -91,14 +91,21 @@ def handle_tool_errors(
     api_name: str | None = None,
     *,
     mask_internal_errors: bool = True,
-) -> Callable[[Callable[P, R]], Callable[P, R]]: ...
+) -> Callable[
+    [Callable[P, Coroutine[Any, Any, R]]], Callable[P, Coroutine[Any, Any, R]]
+]: ...
 
 
 def handle_tool_errors(
     api_name: str | None = None,
     *,
     mask_internal_errors: bool = True,
-) -> Callable[[Callable[P, R]], Callable[P, R]]:
+) -> (
+    Callable[[Callable[P, R]], Callable[P, R]]
+    | Callable[
+        [Callable[P, Coroutine[Any, Any, R]]], Callable[P, Coroutine[Any, Any, R]]
+    ]
+):
     """Decorator that converts common HTTP/network exceptions into ToolError.
 
     This decorator automatically catches exceptions from HTTP client libraries
@@ -152,7 +159,7 @@ def handle_tool_errors(
             @functools.wraps(func)
             async def async_wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
                 try:
-                    return await func(*args, **kwargs)
+                    return await func(*args, **kwargs)  # type: ignore[await-not-coroutine]
                 except ToolError:
                     # Re-raise ToolError as-is (user explicitly raised it)
                     raise
