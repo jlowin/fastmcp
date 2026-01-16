@@ -47,6 +47,8 @@ def _handle_httpx_status_error(
     """Convert httpx HTTPStatusError to ToolError with appropriate message.
 
     Maps HTTP status codes to user-friendly error messages:
+    - 401: "Authentication failed or missing credentials"
+    - 403: "Access denied - insufficient permissions"
     - 404: "Resource not found"
     - 429: "Rate limit exceeded. Please retry later."
     - 5xx: "Server error. Please try again later."
@@ -61,7 +63,11 @@ def _handle_httpx_status_error(
     """
     status_code = error.response.status_code
 
-    if status_code == 404:
+    if status_code == 401:
+        message = "Authentication failed or missing credentials"
+    elif status_code == 403:
+        message = "Access denied - insufficient permissions"
+    elif status_code == 404:
         message = "Resource not found"
     elif status_code == 429:
         message = "Rate limit exceeded. Please retry later."
@@ -178,6 +184,8 @@ def handle_tool_errors(
         ```
 
     Built-in error mappings:
+        - httpx.HTTPStatusError (401): "Authentication failed or missing credentials"
+        - httpx.HTTPStatusError (403): "Access denied - insufficient permissions"
         - httpx.HTTPStatusError (404): "Resource not found"
         - httpx.HTTPStatusError (429): "Rate limit exceeded..."
         - httpx.HTTPStatusError (5xx): "Server error..."

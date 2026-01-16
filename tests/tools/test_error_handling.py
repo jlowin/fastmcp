@@ -80,7 +80,7 @@ class TestHTTPStatusErrorMapping:
         assert "Test API: Server error" in str(exc_info.value)
 
     async def test_401_error(self):
-        """Test that 401 status shows HTTP error with code."""
+        """Test that 401 status shows authentication failed message."""
 
         @handle_tool_errors(api_name="Test API")
         async def tool():
@@ -89,10 +89,12 @@ class TestHTTPStatusErrorMapping:
         with pytest.raises(ToolError) as exc_info:
             await tool()
 
-        assert "Test API: HTTP error 401" in str(exc_info.value)
+        assert "Test API: Authentication failed or missing credentials" in str(
+            exc_info.value
+        )
 
     async def test_403_error(self):
-        """Test that 403 status shows HTTP error with code."""
+        """Test that 403 status shows access denied message."""
 
         @handle_tool_errors(api_name="Test API")
         async def tool():
@@ -101,7 +103,9 @@ class TestHTTPStatusErrorMapping:
         with pytest.raises(ToolError) as exc_info:
             await tool()
 
-        assert "Test API: HTTP error 403" in str(exc_info.value)
+        assert "Test API: Access denied - insufficient permissions" in str(
+            exc_info.value
+        )
 
 
 class TestTimeoutExceptionMapping:

@@ -313,4 +313,5 @@ With this setup:
   
   **Cause:** The decorator explicitly re-raises `asyncio.CancelledError` to allow proper cancellation propagation.
   
-  **Solution:** Ensure your async code uses `await` properly and doesn't suppress `CancelledError`. The decorator handles this automatically—verify your underlying function respects cancellation tokens.</Accordion>
+    **Solution:** Ensure your async code uses `await` properly and doesn't suppress `CancelledError`. The decorator handles this automatically—verify your underlying function respects cancellation tokens.
+</Accordion>
