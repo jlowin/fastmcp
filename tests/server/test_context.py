@@ -64,11 +64,13 @@ class TestSessionId:
             request_ctx.reset(token)
 
     def test_session_id_without_http_headers(self, context):
-        """Test that session_id returns id(session) when no HTTP headers are available.
+        """Test that session_id returns a UUID when no HTTP headers are available.
 
-        For STDIO/SSE transports, we use id(session) to ensure consistency with
-        state set during on_initialize (which also uses id(session)).
+        For STDIO/SSE/in-memory transports, we generate a UUID and cache it
+        on the session for consistency with state operations.
         """
+        import uuid
+
         from mcp.server.lowlevel.server import request_ctx
         from mcp.shared.context import RequestContext
 
@@ -83,9 +85,11 @@ class TestSessionId:
         )
 
         try:
-            # session_id should be str(id(session)) for non-HTTP transports
+            # session_id should be a valid UUID for non-HTTP transports
             session_id = context.session_id
-            assert session_id == str(id(mock_session))
+            assert uuid.UUID(session_id)  # Valid UUID format
+            # Should be cached on session
+            assert mock_session._fastmcp_state_prefix == session_id
         finally:
             request_ctx.reset(token)
 

@@ -479,8 +479,8 @@ class Context:
             )
         session = request_ctx.session
 
-        # Try to get the session ID from the session attributes
-        session_id = getattr(session, "_fastmcp_id", None)
+        # Check for cached session ID (shared with _get_state_prefix for consistency)
+        session_id = getattr(session, "_fastmcp_state_prefix", None)
         if session_id is not None:
             return session_id
 
@@ -489,14 +489,14 @@ class Context:
         if request:
             session_id = request.headers.get("mcp-session-id")
 
-        # For STDIO/SSE (no mcp-session-id header), use id(session).
-        # This ensures consistency with state set during on_initialize
-        # (which also uses id(session) since request_context isn't available).
+        # For STDIO/SSE/in-memory, generate a UUID
         if session_id is None:
-            session_id = str(id(session))
+            from uuid import uuid4
 
-        # Save the session id to the session attributes
-        session._fastmcp_id = session_id  # type: ignore[attr-defined]
+            session_id = str(uuid4())
+
+        # Cache for consistency with state prefix
+        session._fastmcp_state_prefix = session_id  # type: ignore[attr-defined]
         return session_id
 
     @property
@@ -1113,19 +1113,38 @@ class Context:
     def _get_state_prefix(self) -> str:
         """Get the prefix for state keys.
 
-        Uses session_id when available (consistent with the public API).
-        Falls back to id(session) during on_initialize when session_id
-        isn't available yet.
+        Generates a unique prefix per session and caches it. This works during
+        both on_initialize (when request_context is None) and tool calls.
+        For HTTP, uses the mcp-session-id header if available.
         """
-        # When request_context is available, use session_id for consistency
+        from uuid import uuid4
+
+        # Get session from either source
         if self.request_context is not None:
-            return self.session_id
+            session = self.request_context.session
+        elif self._session is not None:
+            session = self._session
+        else:
+            raise RuntimeError("No session available for state operations")
 
-        # During on_initialize, fall back to id(session)
-        if self._session is not None:
-            return str(id(self._session))
+        # Check for cached prefix (set during init or previous call)
+        prefix = getattr(session, "_fastmcp_state_prefix", None)
+        if prefix is not None:
+            return prefix
 
-        raise RuntimeError("No session available for state operations")
+        # For HTTP, try to get from header
+        if self.request_context is not None:
+            request = self.request_context.request
+            if request:
+                header_id = request.headers.get("mcp-session-id")
+                if header_id:
+                    session._fastmcp_state_prefix = header_id  # type: ignore[attr-defined]
+                    return header_id
+
+        # Generate new prefix (UUID) for STDIO/SSE/in-memory
+        prefix = str(uuid4())
+        session._fastmcp_state_prefix = prefix  # type: ignore[attr-defined]
+        return prefix
 
     def _make_state_key(self, key: str) -> str:
         """Create session-prefixed key for state storage."""
