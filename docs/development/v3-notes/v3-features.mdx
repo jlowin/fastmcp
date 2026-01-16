@@ -446,7 +446,7 @@ trace.set_tracer_provider(provider)
 # Use fastmcp normally - spans export to your configured backend
 ```
 
-Components provide their own span attributes through a `get_span_attributes()` method that subclasses override—this lets LocalProvider, FastMCPProvider, and ProxyProvider each include relevant context (original names, backend URIs, etc).
+Components provide their own span attributes through a `get_span_attributes()` method that subclasses override—this lets LocalProvider, FastMCPProvider, and ProxyProvider each include relevant context (original names, backend URIs, etc.).
 
 Documentation: [Telemetry](/servers/telemetry)
 
@@ -551,6 +551,8 @@ Returns `Literal["stdio", "sse", "streamable-http"]` when running, or `None` out
 Synchronous tools, resources, and prompts now automatically run in a threadpool, preventing event loop blocking during concurrent requests ([#2865](https://github.com/jlowin/fastmcp/pull/2865)):
 
 ```python
+import time
+
 @mcp.tool
 def slow_tool():
     time.sleep(10)  # No longer blocks other requests
