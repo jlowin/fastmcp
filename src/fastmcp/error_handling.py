@@ -6,6 +6,7 @@ reducing boilerplate and ensuring consistent error messages.
 
 from __future__ import annotations
 
+import asyncio
 import functools
 import inspect
 import logging
@@ -26,7 +27,15 @@ R = TypeVar("R")
 
 
 def _format_message(api_name: str | None, message: str) -> str:
-    """Format error message with optional API name prefix."""
+    """Format error message with optional API name prefix.
+
+    Args:
+        api_name: Optional name of the API being called, used as prefix.
+        message: The base error message to format.
+
+    Returns:
+        Formatted message with API name prefix if provided.
+    """
     if api_name:
         return f"{api_name}: {message}"
     return message
@@ -35,7 +44,21 @@ def _format_message(api_name: str | None, message: str) -> str:
 def _handle_httpx_status_error(
     error: httpx.HTTPStatusError, api_name: str | None
 ) -> ToolError:
-    """Convert httpx HTTPStatusError to ToolError with appropriate message."""
+    """Convert httpx HTTPStatusError to ToolError with appropriate message.
+
+    Maps HTTP status codes to user-friendly error messages:
+    - 404: "Resource not found"
+    - 429: "Rate limit exceeded. Please retry later."
+    - 5xx: "Server error. Please try again later."
+    - Other: "HTTP error {status_code}"
+
+    Args:
+        error: The HTTPStatusError to convert.
+        api_name: Optional name of the API, included in formatted message.
+
+    Returns:
+        ToolError with appropriate user-friendly message.
+    """
     status_code = error.response.status_code
 
     if status_code == 404:
@@ -53,10 +76,21 @@ def _handle_httpx_status_error(
 def _handle_exception(
     error: Exception,
     api_name: str | None,
-    func_name: str,
     mask_internal_errors: bool,
 ) -> ToolError:
-    """Convert any exception to ToolError with appropriate message."""
+    """Convert any exception to ToolError with appropriate message.
+
+    Handles httpx-specific exceptions with user-friendly messages, and
+    generic exceptions with optional masking of internal error details.
+
+    Args:
+        error: The exception to convert.
+        api_name: Optional name of the API, included in formatted message.
+        mask_internal_errors: If True, mask internal exception details.
+
+    Returns:
+        ToolError with appropriate message based on exception type.
+    """
     # Handle httpx-specific exceptions
     if isinstance(error, httpx.HTTPStatusError):
         return _handle_httpx_status_error(error, api_name)
@@ -163,14 +197,15 @@ def handle_tool_errors(
                 except ToolError:
                     # Re-raise ToolError as-is (user explicitly raised it)
                     raise
+                except asyncio.CancelledError:
+                    # Let cancellations propagate (e.g., on client disconnect)
+                    raise
                 except Exception as e:
                     func_name = getattr(func, "__name__", repr(func))
                     logger.exception(
-                        f"Error in tool {func_name!r} (api_name={api_name!r}): {e}"
+                        "Error in tool %r (api_name=%r)", func_name, api_name
                     )
-                    raise _handle_exception(
-                        e, api_name, func_name, mask_internal_errors
-                    ) from e
+                    raise _handle_exception(e, api_name, mask_internal_errors) from e
 
             return async_wrapper  # type: ignore[return-value]
         else:
@@ -185,11 +220,9 @@ def handle_tool_errors(
                 except Exception as e:
                     func_name = getattr(func, "__name__", repr(func))
                     logger.exception(
-                        f"Error in tool {func_name!r} (api_name={api_name!r}): {e}"
+                        "Error in tool %r (api_name=%r)", func_name, api_name
                     )
-                    raise _handle_exception(
-                        e, api_name, func_name, mask_internal_errors
-                    ) from e
+                    raise _handle_exception(e, api_name, mask_internal_errors) from e
 
             return sync_wrapper  # type: ignore[return-value]
 

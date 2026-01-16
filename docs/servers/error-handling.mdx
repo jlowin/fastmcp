@@ -206,12 +206,15 @@ async def fetch_user(username: str) -> dict:
 
 Under the hood, `@handle_tool_errors` catches exceptions and converts them to `ToolError`. The `ToolError` exception is FastMCP's mechanism for passing user-friendly error messages to LLMs—it bypasses the server's error masking and delivers your message directly.
 
-The decorator:
-1. Wraps your function in a try/except block
-2. Catches httpx exceptions and maps them to appropriate messages
-3. Logs the original exception for debugging
-4. Raises `ToolError` with the user-friendly message
-5. Chains the original exception for debugging (`__cause__`)
+The decorator follows this sequence:
+
+<Steps>
+  <Step>Wraps your function in a try/except block</Step>
+  <Step>Catches httpx exceptions and maps them to appropriate messages</Step>
+  <Step>Logs the original exception for debugging</Step>
+  <Step>Raises `ToolError` with the user-friendly message</Step>
+  <Step>Chains the original exception for debugging (`__cause__`)</Step>
+</Steps>
 
 ## Complete Example
 
@@ -267,3 +270,47 @@ With this setup:
 - Rate limits show "News API: Rate limit exceeded. Please retry later."
 - Server errors show "Stock API: Server error. Please try again later."
 - All without any manual try/except blocks in your tool code!
+
+## Troubleshooting
+
+<Accordion title="AttributeError: module 'httpx' has no attribute...">
+  **Problem:** The decorator references httpx classes that don't exist in your version.
+  
+  **Solution:** Ensure httpx is installed and up-to-date:
+  ```bash
+  pip install --upgrade httpx
+  ```
+  Then verify the version supports the exceptions you're using.
+</Accordion>
+
+<Accordion title="Unexpected error: Got a non-200 response from API">
+  **Problem:** The decorator is catching the exception but showing a generic error instead of your custom message.
+  
+  **Cause:** By default, `mask_internal_errors=True` hides the specific error. The decorator correctly maps httpx.HTTPStatusError to user-friendly messages (404, 429, 5xx), but other exceptions are masked.
+  
+  **Solution:** Set `mask_internal_errors=False` during development to see full details:
+  ```python
+  @handle_tool_errors(api_name="MyAPI", mask_internal_errors=False)
+  ```
+  Or ensure you're raising `httpx.HTTPStatusError` via `response.raise_for_status()`.
+</Accordion>
+
+<Accordion title="Rate limiting isn't being caught">
+  **Problem:** Tool still hits rate limits without showing the friendly message.
+  
+  **Cause:** The API may not return HTTP 429, or exceptions are raised outside the decorated function.
+  
+  **Solution:** Verify your API returns 429 for rate limiting. Check logs to see the actual exception:
+  ```python
+  @handle_tool_errors(api_name="MyAPI", mask_internal_errors=False)
+  async def my_tool(...):
+      # Now logs will show the exact exception type
+  ```
+</Accordion>
+
+<Accordion title="Tool hangs or doesn't respond on cancellation">
+  **Problem:** Tool continues running after the client disconnects or timeout occurs.
+  
+  **Cause:** The decorator explicitly re-raises `asyncio.CancelledError` to allow proper cancellation propagation.
+  
+  **Solution:** Ensure your async code uses `await` properly and doesn't suppress `CancelledError`. The decorator handles this automatically—verify your underlying function respects cancellation tokens.</Accordion>
