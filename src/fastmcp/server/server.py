@@ -2562,21 +2562,25 @@ class FastMCP(Generic[LifespanResultT]):
             log_server_banner(server=self)
 
         token = set_transport("stdio")
-        
+
         # Set up signal handling for graceful shutdown
         shutdown_event = asyncio.Event()
         loop = asyncio.get_running_loop()
-        
+
         def signal_handler(sig: int) -> None:
             """Handle SIGINT/SIGTERM by setting shutdown event."""
             logger.info("Received shutdown signal, stopping server...")
             shutdown_event.set()
-        
+
         # Register signal handlers (Windows doesn't support add_signal_handler)
         if sys.platform != "win32":
-            loop.add_signal_handler(signal.SIGINT, lambda: signal_handler(signal.SIGINT))
-            loop.add_signal_handler(signal.SIGTERM, lambda: signal_handler(signal.SIGTERM))
-        
+            loop.add_signal_handler(
+                signal.SIGINT, lambda: signal_handler(signal.SIGINT)
+            )
+            loop.add_signal_handler(
+                signal.SIGTERM, lambda: signal_handler(signal.SIGTERM)
+            )
+
         try:
             with temporary_log_level(log_level):
                 async with self._lifespan_manager():
@@ -2599,20 +2603,20 @@ class FastMCP(Generic[LifespanResultT]):
                                 stateless=stateless,
                             )
                         )
-                        
+
                         # Wait for either server completion or shutdown signal
                         shutdown_task = asyncio.create_task(shutdown_event.wait())
                         done, pending = await asyncio.wait(
                             [server_task, shutdown_task],
                             return_when=asyncio.FIRST_COMPLETED,
                         )
-                        
+
                         # Cancel pending tasks
                         for task in pending:
                             task.cancel()
                             with suppress(asyncio.CancelledError):
                                 await task
-                        
+
                         # If server task completed, check for exceptions
                         if server_task in done:
                             # Propagate any exception from server task
