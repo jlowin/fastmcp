@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import secrets
 import signal
-import sys
 import warnings
 import weakref
 from collections.abc import (
@@ -680,6 +680,23 @@ class FastMCP(Generic[LifespanResultT]):
             show_banner: Whether to display the server banner. If None, uses the
                 FASTMCP_SHOW_SERVER_BANNER setting (default: True).
         """
+        # Track if we're already shutting down to prevent cascading interrupts
+        shutting_down = False
+
+        def handle_interrupt(signum: int, frame: Any) -> None:
+            """Handle SIGINT/SIGTERM during shutdown - ignore additional signals."""
+            nonlocal shutting_down
+            if not shutting_down:
+                shutting_down = True
+                # Raise KeyboardInterrupt for first signal
+                raise KeyboardInterrupt()
+            # Ignore subsequent signals during cleanup
+            logger.debug("Ignoring additional interrupt signal during shutdown")
+
+        # Install custom signal handlers to prevent cascading interrupts
+        old_sigint = signal.signal(signal.SIGINT, handle_interrupt)
+        old_sigterm = signal.signal(signal.SIGTERM, handle_interrupt)
+
         try:
             anyio.run(
                 partial(
@@ -692,7 +709,13 @@ class FastMCP(Generic[LifespanResultT]):
         except KeyboardInterrupt:
             # Suppress the traceback for clean exit on Ctrl-C
             logger.info("Server stopped")
-            sys.exit(0)
+            # Use os._exit to immediately terminate without cleanup
+            # This is necessary because stdio streams may be blocking
+            os._exit(0)
+        finally:
+            # Restore original signal handlers
+            signal.signal(signal.SIGINT, old_sigint)
+            signal.signal(signal.SIGTERM, old_sigterm)
 
     def _setup_handlers(self) -> None:
         """Set up core MCP protocol handlers.
@@ -2562,25 +2585,6 @@ class FastMCP(Generic[LifespanResultT]):
             log_server_banner(server=self)
 
         token = set_transport("stdio")
-
-        # Set up signal handling for graceful shutdown
-        shutdown_event = asyncio.Event()
-        loop = asyncio.get_running_loop()
-
-        def signal_handler(sig: int) -> None:
-            """Handle SIGINT/SIGTERM by setting shutdown event."""
-            logger.info("Received shutdown signal, stopping server...")
-            shutdown_event.set()
-
-        # Register signal handlers (Windows doesn't support add_signal_handler)
-        if sys.platform != "win32":
-            loop.add_signal_handler(
-                signal.SIGINT, lambda: signal_handler(signal.SIGINT)
-            )
-            loop.add_signal_handler(
-                signal.SIGTERM, lambda: signal_handler(signal.SIGTERM)
-            )
-
         try:
             with temporary_log_level(log_level):
                 async with self._lifespan_manager():
@@ -2590,45 +2594,21 @@ class FastMCP(Generic[LifespanResultT]):
                             f"Starting MCP server {self.name!r} with transport 'stdio'{mode}"
                         )
 
-                        # Create server run task
-                        server_task = asyncio.create_task(
-                            self._mcp_server.run(
-                                read_stream,
-                                write_stream,
-                                self._mcp_server.create_initialization_options(
-                                    notification_options=NotificationOptions(
-                                        tools_changed=True
-                                    ),
+                        await self._mcp_server.run(
+                            read_stream,
+                            write_stream,
+                            self._mcp_server.create_initialization_options(
+                                notification_options=NotificationOptions(
+                                    tools_changed=True
                                 ),
-                                stateless=stateless,
-                            )
+                            ),
+                            stateless=stateless,
                         )
-
-                        # Wait for either server completion or shutdown signal
-                        shutdown_task = asyncio.create_task(shutdown_event.wait())
-                        done, pending = await asyncio.wait(
-                            [server_task, shutdown_task],
-                            return_when=asyncio.FIRST_COMPLETED,
-                        )
-
-                        # Cancel pending tasks
-                        for task in pending:
-                            task.cancel()
-                            with suppress(asyncio.CancelledError):
-                                await task
-
-                        # If server task completed, check for exceptions
-                        if server_task in done:
-                            # Propagate any exception from server task
-                            await server_task
         except KeyboardInterrupt:
-            # Handle Ctrl+C on Windows (where add_signal_handler isn't available)
+            # Log clean message and suppress traceback at higher level
             logger.info("Received shutdown signal, stopping server...")
+            raise
         finally:
-            # Clean up signal handlers
-            if sys.platform != "win32":
-                loop.remove_signal_handler(signal.SIGINT)
-                loop.remove_signal_handler(signal.SIGTERM)
             reset_transport(token)
 
     async def run_http_async(
