@@ -104,7 +104,7 @@ class ProxyTool(Tool):
             output_schema=mcp_tool.outputSchema,
             icons=mcp_tool.icons,
             meta=mcp_tool.meta,
-            tags=(mcp_tool.meta or {}).get("_fastmcp", {}).get("tags", []),
+            tags=(mcp_tool.meta or {}).get("fastmcp", {}).get("tags", []),
         )
 
     async def run(
@@ -211,7 +211,7 @@ class ProxyResource(Resource):
             mime_type=mcp_resource.mimeType or "text/plain",
             icons=mcp_resource.icons,
             meta=mcp_resource.meta,
-            tags=(mcp_resource.meta or {}).get("_fastmcp", {}).get("tags", []),
+            tags=(mcp_resource.meta or {}).get("fastmcp", {}).get("tags", []),
             task_config=TaskConfig(mode="forbidden"),
         )
 
@@ -309,7 +309,7 @@ class ProxyTemplate(ResourceTemplate):
             icons=mcp_template.icons,
             parameters={},  # Remote templates don't have local parameters
             meta=mcp_template.meta,
-            tags=(mcp_template.meta or {}).get("_fastmcp", {}).get("tags", []),
+            tags=(mcp_template.meta or {}).get("fastmcp", {}).get("tags", []),
             task_config=TaskConfig(mode="forbidden"),
         )
 
@@ -371,7 +371,7 @@ class ProxyTemplate(ResourceTemplate):
             ].mimeType,  # Use first item's mimeType for backward compatibility
             icons=self.icons,
             meta=self.meta,
-            tags=(self.meta or {}).get("_fastmcp", {}).get("tags", []),
+            tags=(self.meta or {}).get("fastmcp", {}).get("tags", []),
             _cached_content=cached_content,
         )
 
@@ -429,7 +429,7 @@ class ProxyPrompt(Prompt):
             arguments=arguments,
             icons=mcp_prompt.icons,
             meta=mcp_prompt.meta,
-            tags=(mcp_prompt.meta or {}).get("_fastmcp", {}).get("tags", []),
+            tags=(mcp_prompt.meta or {}).get("fastmcp", {}).get("tags", []),
             task_config=TaskConfig(mode="forbidden"),
         )
 

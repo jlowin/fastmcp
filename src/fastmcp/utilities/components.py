@@ -7,7 +7,6 @@ from mcp.types import Icon
 from pydantic import BeforeValidator, Field
 from typing_extensions import Self, TypeVar
 
-import fastmcp
 from fastmcp.server.tasks.config import TaskConfig
 from fastmcp.utilities.types import FastMCPBaseModel
 
@@ -20,6 +19,7 @@ T = TypeVar("T", default=Any)
 
 class FastMCPMeta(TypedDict, total=False):
     tags: list[str]
+    version: str
 
 
 def _convert_set_default_none(maybe_set: set[T] | Sequence[T] | None) -> set[T]:
@@ -126,27 +126,24 @@ class FastMCPComponent(FastMCPBaseModel):
         base_key = self.make_key(self.name)
         return f"{base_key}@{self.version or ''}"
 
-    def get_meta(
-        self, include_fastmcp_meta: bool | None = None
-    ) -> dict[str, Any] | None:
+    def get_meta(self) -> dict[str, Any] | None:
         """
         Get the meta information about the component.
 
-        If include_fastmcp_meta is True, a `_fastmcp` key will be added to the
-        meta, containing a `tags` field with the tags of the component.
+        A `fastmcp` key will always be included in the meta, containing a `tags`
+        field with the tags of the component, and optionally a `version` field
+        if the component has a version.
         """
-
-        if include_fastmcp_meta is None:
-            include_fastmcp_meta = fastmcp.settings.include_fastmcp_meta
-
         meta = self.meta or {}
 
-        if include_fastmcp_meta:
-            fastmcp_meta = FastMCPMeta(tags=sorted(self.tags))
-            # overwrite any existing _fastmcp meta with keys from the new one
-            if upstream_meta := meta.get("_fastmcp"):
-                fastmcp_meta = upstream_meta | fastmcp_meta
-            meta["_fastmcp"] = fastmcp_meta
+        fastmcp_meta: FastMCPMeta = {"tags": sorted(self.tags)}
+        if self.version is not None:
+            fastmcp_meta["version"] = self.version
+
+        # overwrite any existing fastmcp meta with keys from the new one
+        if upstream_meta := meta.get("fastmcp"):
+            fastmcp_meta = upstream_meta | fastmcp_meta
+        meta["fastmcp"] = fastmcp_meta
 
         return meta or None
 
