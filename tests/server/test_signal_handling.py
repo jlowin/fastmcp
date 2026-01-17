@@ -1,8 +1,7 @@
 """Tests for signal handling in FastMCP server.run() method."""
 
-import signal
 import threading
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -17,11 +16,9 @@ class TestSignalHandling:
         server = FastMCP()
 
         # Mock anyio.run to prevent actual server execution
-        with patch("fastmcp.server.server.anyio.run") as mock_anyio:
+        with patch("fastmcp.server.server.anyio.run"):
             # Mock signal.signal to track calls
             with patch("signal.signal") as mock_signal:
-                old_sigint = signal.SIGINT
-                old_sigterm = signal.SIGTERM
                 mock_signal.return_value = lambda *args: None
 
                 try:
@@ -38,7 +35,7 @@ class TestSignalHandling:
         server = FastMCP()
 
         # Mock anyio.run to prevent actual server execution
-        with patch("fastmcp.server.server.anyio.run") as mock_anyio:
+        with patch("fastmcp.server.server.anyio.run"):
             # Mock signal.signal to track calls
             with patch("signal.signal") as mock_signal:
                 mock_signal.return_value = lambda *args: None
@@ -57,7 +54,7 @@ class TestSignalHandling:
         server = FastMCP()
 
         # Mock anyio.run to prevent actual server execution
-        with patch("fastmcp.server.server.anyio.run") as mock_anyio:
+        with patch("fastmcp.server.server.anyio.run"):
             # Mock signal.signal to track calls
             with patch("signal.signal") as mock_signal:
                 mock_signal.return_value = lambda *args: None
@@ -76,7 +73,7 @@ class TestSignalHandling:
         server = FastMCP()
 
         # Mock anyio.run to prevent actual server execution
-        with patch("fastmcp.server.server.anyio.run") as mock_anyio:
+        with patch("fastmcp.server.server.anyio.run"):
             # Mock signal.signal to track calls
             with patch("signal.signal") as mock_signal:
                 mock_signal.return_value = lambda *args: None
@@ -97,7 +94,7 @@ class TestSignalHandling:
 
         def run_in_thread():
             # Mock anyio.run to prevent actual server execution
-            with patch("fastmcp.server.server.anyio.run") as mock_anyio:
+            with patch("fastmcp.server.server.anyio.run"):
                 # Mock signal.signal to track calls
                 with patch("signal.signal") as mock_signal:
                     mock_signal.return_value = lambda *args: None
@@ -199,7 +196,7 @@ class TestSignalHandling:
         server = FastMCP()
 
         # Mock anyio.run to prevent actual server execution
-        with patch("fastmcp.server.server.anyio.run") as mock_anyio:
+        with patch("fastmcp.server.server.anyio.run"):
             # Mock signal.signal to track calls
             with patch("signal.signal") as mock_signal:
                 mock_signal.return_value = lambda *args: None
