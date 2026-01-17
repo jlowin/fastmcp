@@ -707,13 +707,22 @@ class FastMCP(Generic[LifespanResultT]):
                 )
             )
         except KeyboardInterrupt:
+            # Restore signal handlers before exiting
+            signal.signal(signal.SIGINT, old_sigint)
+            signal.signal(signal.SIGTERM, old_sigterm)
+
             # Suppress the traceback for clean exit on Ctrl-C
             logger.info("Server stopped")
-            # Use os._exit to immediately terminate without cleanup
-            # This is necessary because stdio streams may be blocking
+
+            # Use os._exit to immediately terminate without cleanup.
+            # This is necessary because stdio streams may be blocking indefinitely
+            # on stdin.read(). Normal cleanup (sys.exit/raise SystemExit) would
+            # wait for these blocking operations to complete.
+            # HTTP transport uses uvicorn which has proper async signal handling,
+            # so this only affects stdio transport where the blocking is unavoidable.
             os._exit(0)
         finally:
-            # Restore original signal handlers
+            # Restore original signal handlers (only reached if no exception)
             signal.signal(signal.SIGINT, old_sigint)
             signal.signal(signal.SIGTERM, old_sigterm)
 
