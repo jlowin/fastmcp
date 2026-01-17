@@ -124,6 +124,19 @@ class TestComponentVersioning:
         assert tools[0].version == "2"
         assert tools[0].key == "tool:my_tool@2"
 
+    async def test_tool_version_zero_is_truthy(self):
+        """Version 0 should become "0" (truthy string), not empty."""
+        mcp = FastMCP()
+
+        @mcp.tool(version=0)
+        def my_tool(x: int) -> int:
+            return x * 2
+
+        tools = await mcp.get_tools()
+        assert len(tools) == 1
+        assert tools[0].version == "0"
+        assert tools[0].key == "tool:my_tool@0"  # Not "tool:my_tool@"
+
     async def test_multiple_tool_versions_deduplicated(self):
         """Multiple versions of same tool should deduplicate to highest."""
         mcp = FastMCP()
