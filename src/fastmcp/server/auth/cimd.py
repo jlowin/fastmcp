@@ -1,5 +1,9 @@
 """CIMD (Client ID Metadata Document) support for FastMCP.
 
+.. warning::
+    **Beta Feature**: CIMD support is currently in beta. The API may change
+    in future releases. Please report any issues you encounter.
+
 CIMD is a simpler alternative to Dynamic Client Registration where clients
 host a static JSON document at an HTTPS URL, and that URL becomes their
 client_id. See the IETF draft: draft-parecki-oauth-client-id-metadata-document

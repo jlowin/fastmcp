@@ -855,7 +855,10 @@ class OAuthProxy(OAuthProvider):
             allowed_redirect_uri_patterns=self._allowed_client_redirect_uris,
         )
         if enable_cimd:
-            logger.debug("CIMD support enabled")
+            logger.warning(
+                "CIMD support is enabled (beta feature). "
+                "The CIMD API may change in future releases."
+            )
 
         if jwt_signing_key is None:
             jwt_signing_key = derive_jwt_key(
