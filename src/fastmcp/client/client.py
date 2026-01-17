@@ -902,7 +902,7 @@ class Client(Generic[ClientTransportT]):
                     params=mcp.types.ReadResourceRequestParams(
                         uri=uri,
                         task=mcp.types.TaskMetadata(**task_dict) if task_dict else None,
-                        _meta=propagated_meta,  # ty: ignore[unknown-argument]
+                        _meta=propagated_meta,  # type: ignore[unknown-argument]  # pydantic alias
                     )
                 )
                 result = await self._await_with_session_monitoring(
@@ -923,6 +923,7 @@ class Client(Generic[ClientTransportT]):
         uri: AnyUrl | str,
         *,
         version: str | None = None,
+        meta: dict[str, Any] | None = None,
         task: Literal[False] = False,
     ) -> list[mcp.types.TextResourceContents | mcp.types.BlobResourceContents]: ...
 
@@ -932,6 +933,7 @@ class Client(Generic[ClientTransportT]):
         uri: AnyUrl | str,
         *,
         version: str | None = None,
+        meta: dict[str, Any] | None = None,
         task: Literal[True],
         task_id: str | None = None,
         ttl: int = 60000,
@@ -942,6 +944,7 @@ class Client(Generic[ClientTransportT]):
         uri: AnyUrl | str,
         *,
         version: str | None = None,
+        meta: dict[str, Any] | None = None,
         task: bool = False,
         task_id: str | None = None,
         ttl: int = 60000,
@@ -954,6 +957,7 @@ class Client(Generic[ClientTransportT]):
         Args:
             uri (AnyUrl | str): The URI of the resource to read. Can be a string or an AnyUrl object.
             version (str | None): Specific version to read. If None, reads highest version.
+            meta (dict[str, Any] | None): Optional request-level metadata.
             task (bool): If True, execute as background task (SEP-1686). Defaults to False.
             task_id (str | None): Optional client-provided task ID (auto-generated if not provided).
             ttl (int): Time to keep results available in milliseconds (default 60s).
@@ -966,13 +970,18 @@ class Client(Generic[ClientTransportT]):
             RuntimeError: If called while the client is not connected.
             McpError: If the request results in a TimeoutError | JSONRPCError
         """
-        # Inject version into meta as _meta.fastmcp.version
-        meta: dict[str, Any] | None = None
+        # Merge version into request-level meta (not arguments)
+        request_meta = dict(meta) if meta else {}
         if version is not None:
-            meta = {"fastmcp": {"version": version}}
+            request_meta["fastmcp"] = {
+                **request_meta.get("fastmcp", {}),
+                "version": version,
+            }
 
         if task:
-            return await self._read_resource_as_task(uri, task_id, ttl, meta=meta)
+            return await self._read_resource_as_task(
+                uri, task_id, ttl, meta=request_meta or None
+            )
 
         if isinstance(uri, str):
             try:
@@ -981,7 +990,7 @@ class Client(Generic[ClientTransportT]):
                 raise ValueError(
                     f"Provided resource URI is invalid: {str(uri)!r}"
                 ) from e
-        result = await self.read_resource_mcp(uri, meta=meta)
+        result = await self.read_resource_mcp(uri, meta=request_meta or None)
         return result.contents
 
     async def _read_resource_as_task(
@@ -1012,7 +1021,7 @@ class Client(Generic[ClientTransportT]):
             params=mcp.types.ReadResourceRequestParams(
                 uri=uri,
                 task=mcp.types.TaskMetadata(ttl=ttl),
-                _meta=meta,  # ty: ignore[unknown-argument]
+                _meta=meta,  # type: ignore[unknown-argument]  # pydantic alias
             )
         )
 
@@ -1145,7 +1154,7 @@ class Client(Generic[ClientTransportT]):
                         name=name,
                         arguments=serialized_arguments,
                         task=mcp.types.TaskMetadata(**task_dict) if task_dict else None,
-                        _meta=propagated_meta,  # ty: ignore[unknown-argument]
+                        _meta=propagated_meta,  # type: ignore[unknown-argument]  # pydantic alias
                     )
                 )
                 result = await self._await_with_session_monitoring(
@@ -1167,6 +1176,7 @@ class Client(Generic[ClientTransportT]):
         arguments: dict[str, Any] | None = None,
         *,
         version: str | None = None,
+        meta: dict[str, Any] | None = None,
         task: Literal[False] = False,
     ) -> mcp.types.GetPromptResult: ...
 
@@ -1177,6 +1187,7 @@ class Client(Generic[ClientTransportT]):
         arguments: dict[str, Any] | None = None,
         *,
         version: str | None = None,
+        meta: dict[str, Any] | None = None,
         task: Literal[True],
         task_id: str | None = None,
         ttl: int = 60000,
@@ -1188,6 +1199,7 @@ class Client(Generic[ClientTransportT]):
         arguments: dict[str, Any] | None = None,
         *,
         version: str | None = None,
+        meta: dict[str, Any] | None = None,
         task: bool = False,
         task_id: str | None = None,
         ttl: int = 60000,
@@ -1198,6 +1210,7 @@ class Client(Generic[ClientTransportT]):
             name (str): The name of the prompt to retrieve.
             arguments (dict[str, Any] | None, optional): Arguments to pass to the prompt. Defaults to None.
             version (str | None, optional): Specific prompt version to get. If None, gets highest version.
+            meta (dict[str, Any] | None): Optional request-level metadata.
             task (bool): If True, execute as background task (SEP-1686). Defaults to False.
             task_id (str | None): Optional client-provided task ID (auto-generated if not provided).
             ttl (int): Time to keep results available in milliseconds (default 60s).
@@ -1210,21 +1223,22 @@ class Client(Generic[ClientTransportT]):
             RuntimeError: If called while the client is not connected.
             McpError: If the request results in a TimeoutError | JSONRPCError
         """
-        # Inject version into arguments as _meta.fastmcp.version
-        args = dict(arguments) if arguments else {}
+        # Merge version into request-level meta (not arguments)
+        request_meta = dict(meta) if meta else {}
         if version is not None:
-            args["_meta"] = {
-                **(args.get("_meta") or {}),
-                "fastmcp": {
-                    **((args.get("_meta") or {}).get("fastmcp") or {}),
-                    "version": version,
-                },
+            request_meta["fastmcp"] = {
+                **request_meta.get("fastmcp", {}),
+                "version": version,
             }
 
         if task:
-            return await self._get_prompt_as_task(name, args, task_id, ttl)
+            return await self._get_prompt_as_task(
+                name, arguments, task_id, ttl, meta=request_meta or None
+            )
 
-        result = await self.get_prompt_mcp(name=name, arguments=args if args else None)
+        result = await self.get_prompt_mcp(
+            name=name, arguments=arguments, meta=request_meta or None
+        )
         return result
 
     async def _get_prompt_as_task(
@@ -1233,6 +1247,7 @@ class Client(Generic[ClientTransportT]):
         arguments: dict[str, Any] | None = None,
         task_id: str | None = None,
         ttl: int = 60000,
+        meta: dict[str, Any] | None = None,
     ) -> PromptTask:
         """Get a prompt for background execution (SEP-1686).
 
@@ -1243,6 +1258,7 @@ class Client(Generic[ClientTransportT]):
             arguments: Prompt arguments
             task_id: Optional client-provided task ID (ignored, for backward compatibility)
             ttl: Time to keep results available in milliseconds (default 60s)
+            meta: Optional request metadata (e.g., version info)
 
         Returns:
             PromptTask: Future-like object for accessing task status and results
@@ -1265,6 +1281,7 @@ class Client(Generic[ClientTransportT]):
                 name=name,
                 arguments=serialized_arguments,
                 task=mcp.types.TaskMetadata(ttl=ttl),
+                _meta=meta,  # type: ignore[unknown-argument]  # pydantic alias
             )
         )
 
@@ -1570,26 +1587,25 @@ class Client(Generic[ClientTransportT]):
             McpError: If the tool call request results in a TimeoutError | JSONRPCError
             RuntimeError: If called while the client is not connected.
         """
-        # Inject version into arguments as _meta.fastmcp.version
-        args = dict(arguments) if arguments else {}
+        # Merge version into request-level meta (not arguments)
+        request_meta = dict(meta) if meta else {}
         if version is not None:
-            args["_meta"] = {
-                **(args.get("_meta") or {}),
-                "fastmcp": {
-                    **((args.get("_meta") or {}).get("fastmcp") or {}),
-                    "version": version,
-                },
+            request_meta["fastmcp"] = {
+                **request_meta.get("fastmcp", {}),
+                "version": version,
             }
 
         if task:
-            return await self._call_tool_as_task(name, args, task_id, ttl)
+            return await self._call_tool_as_task(
+                name, arguments, task_id, ttl, meta=request_meta or None
+            )
 
         result = await self.call_tool_mcp(
             name=name,
-            arguments=args,
+            arguments=arguments or {},
             timeout=timeout,
             progress_handler=progress_handler,
-            meta=meta,
+            meta=request_meta or None,
         )
         return await self._parse_call_tool_result(
             name, result, raise_on_error=raise_on_error
@@ -1601,6 +1617,7 @@ class Client(Generic[ClientTransportT]):
         arguments: dict[str, Any] | None = None,
         task_id: str | None = None,
         ttl: int = 60000,
+        meta: dict[str, Any] | None = None,
     ) -> ToolTask:
         """Call a tool for background execution (SEP-1686).
 
@@ -1613,6 +1630,7 @@ class Client(Generic[ClientTransportT]):
             arguments: Tool arguments
             task_id: Optional client-provided task ID (ignored, for backward compatibility)
             ttl: Time to keep results available in milliseconds (default 60s)
+            meta: Optional request metadata (e.g., version info)
 
         Returns:
             ToolTask: Future-like object for accessing task status and results
@@ -1624,6 +1642,7 @@ class Client(Generic[ClientTransportT]):
                 name=name,
                 arguments=arguments or {},
                 task=mcp.types.TaskMetadata(ttl=ttl),
+                _meta=meta,  # type: ignore[unknown-argument]  # pydantic alias
             )
         )
 

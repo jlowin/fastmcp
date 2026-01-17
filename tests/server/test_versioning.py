@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from mcp.types import GetPromptResult, TextContent
+from mcp.types import TextContent
 
 from fastmcp import FastMCP
 from fastmcp.utilities.versions import (
@@ -1157,11 +1157,28 @@ class TestVersionedCalls:
             await mcp.call_tool("mytool", {}, version="999.0")
 
 
-class TestVersionedCallsViaMeta:
-    """Tests for version selection via _meta in MCP handlers."""
+class TestClientVersionSelection:
+    """Tests for client-side version selection via the version parameter.
 
-    async def test_call_tool_via_meta(self):
-        """_call_tool_mcp should extract version from _meta.fastmcp.version."""
+    Version selection flows through request-level _meta, not arguments.
+    """
+
+    import pytest
+
+    @pytest.mark.parametrize(
+        "version,expected",
+        [
+            (None, 10),  # Default: highest version (2.0) -> 5 * 2
+            ("1.0", 6),  # v1.0 -> 5 + 1
+            ("2.0", 10),  # v2.0 -> 5 * 2
+        ],
+    )
+    async def test_call_tool_version_selection(
+        self, version: str | None, expected: int
+    ):
+        """Client.call_tool routes to correct version via request meta."""
+        from fastmcp import Client
+
         mcp = FastMCP()
 
         @mcp.tool(version="1.0")
@@ -1172,56 +1189,53 @@ class TestVersionedCallsViaMeta:
         def calc(x: int) -> int:  # noqa: F811
             return x * 2
 
-        # Call v1 via _meta - returns (content, structured_content) tuple
-        result = await mcp._call_tool_mcp(
-            "calc", {"x": 5, "_meta": {"fastmcp": {"version": "1.0"}}}
-        )
-        assert isinstance(result, tuple)
-        content = result[0]
-        assert isinstance(content[0], TextContent) and content[0].text == "6"  # 5 + 1
+        async with Client(mcp) as client:
+            result = await client.call_tool("calc", {"x": 5}, version=version)
+            assert result.data == expected
 
-        # Call v2 via _meta
-        result = await mcp._call_tool_mcp(
-            "calc", {"x": 5, "_meta": {"fastmcp": {"version": "2.0"}}}
-        )
-        assert isinstance(result, tuple)
-        content = result[0]
-        assert isinstance(content[0], TextContent) and content[0].text == "10"  # 5 * 2
+    @pytest.mark.parametrize(
+        "version,expected",
+        [
+            (None, "Hello world from v2"),  # Default: highest version
+            ("1.0", "Hello world from v1"),
+            ("2.0", "Hello world from v2"),
+        ],
+    )
+    async def test_get_prompt_version_selection(
+        self, version: str | None, expected: str
+    ):
+        """Client.get_prompt routes to correct version via request meta."""
+        from fastmcp import Client
 
-    async def test_get_prompt_via_meta(self):
-        """_get_prompt_mcp should extract version from _meta.fastmcp.version."""
         mcp = FastMCP()
 
         @mcp.prompt(version="1.0")
-        def msg() -> str:  # noqa: F811
-            return "v1 message"
+        def greet(name: str) -> str:  # noqa: F811
+            return f"Hello {name} from v1"
 
         @mcp.prompt(version="2.0")
-        def msg() -> str:  # noqa: F811
-            return "v2 message"
+        def greet(name: str) -> str:  # noqa: F811
+            return f"Hello {name} from v2"
 
-        # Get v1 via _meta
-        result = await mcp._get_prompt_mcp(
-            "msg", {"_meta": {"fastmcp": {"version": "1.0"}}}
-        )
-        assert isinstance(result, GetPromptResult)
-        content = result.messages[0].content
-        assert isinstance(content, TextContent) and content.text == "v1 message"
+        async with Client(mcp) as client:
+            result = await client.get_prompt(
+                "greet", {"name": "world"}, version=version
+            )
+            content = result.messages[0].content
+            assert isinstance(content, TextContent) and content.text == expected
 
-        # Get v2 via _meta
-        result = await mcp._get_prompt_mcp(
-            "msg", {"_meta": {"fastmcp": {"version": "2.0"}}}
-        )
-        assert isinstance(result, GetPromptResult)
-        content = result.messages[0].content
-        assert isinstance(content, TextContent) and content.text == "v2 message"
-
-
-class TestClientVersionParameter:
-    """Tests for client-side version parameter on tool/resource/prompt calls."""
-
-    async def test_client_read_resource_with_version(self):
-        """Client.read_resource should accept version parameter."""
+    @pytest.mark.parametrize(
+        "version,expected",
+        [
+            (None, "v2 data"),  # Default: highest version
+            ("1.0", "v1 data"),
+            ("2.0", "v2 data"),
+        ],
+    )
+    async def test_read_resource_version_selection(
+        self, version: str | None, expected: str
+    ):
+        """Client.read_resource routes to correct version via request meta."""
         from fastmcp import Client
 
         mcp = FastMCP()
@@ -1235,14 +1249,5 @@ class TestClientVersionParameter:
             return "v2 data"
 
         async with Client(mcp) as client:
-            # Default: highest version
-            result = await client.read_resource("data://info")
-            assert result[0].text == "v2 data"  # type: ignore[union-attr]
-
-            # Explicit v1.0
-            result = await client.read_resource("data://info", version="1.0")
-            assert result[0].text == "v1 data"  # type: ignore[union-attr]
-
-            # Explicit v2.0
-            result = await client.read_resource("data://info", version="2.0")
-            assert result[0].text == "v2 data"  # type: ignore[union-attr]
+            result = await client.read_resource("data://info", version=version)
+            assert result[0].text == expected  # type: ignore[union-attr]

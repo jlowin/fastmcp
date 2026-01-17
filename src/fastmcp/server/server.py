@@ -2055,31 +2055,17 @@ class FastMCP(Generic[LifespanResultT]):
         )
 
         try:
-            # Extract version from _meta.fastmcp.version if provided, then clean up
-            version: str | None = None
-            if arguments and "_meta" in arguments:
-                meta = arguments.get("_meta") or {}
-                fastmcp_meta = meta.get("fastmcp") or {}
-                version = fastmcp_meta.get("version")
-                # Remove only fastmcp.version, preserve other _meta content
-                if "version" in fastmcp_meta:
-                    fastmcp_meta = {
-                        k: v for k, v in fastmcp_meta.items() if k != "version"
-                    }
-                if fastmcp_meta:
-                    meta = {**meta, "fastmcp": fastmcp_meta}
-                else:
-                    meta = {k: v for k, v in meta.items() if k != "fastmcp"}
-                if meta:
-                    arguments = {**arguments, "_meta": meta}
-                else:
-                    arguments = {k: v for k, v in arguments.items() if k != "_meta"}
-
-            # Extract SEP-1686 task metadata from request context.
+            # Extract version and task metadata from request context.
             # fn_key is set by call_tool() after finding the tool.
+            version: str | None = None
             task_meta: TaskMeta | None = None
             try:
                 ctx = self._mcp_server.request_context
+                # Extract version from request-level _meta.fastmcp.version
+                if ctx.meta:
+                    meta_dict = ctx.meta.model_dump(exclude_none=True)
+                    version = meta_dict.get("fastmcp", {}).get("version")
+                # Extract SEP-1686 task metadata
                 if ctx.experimental.is_task:
                     mcp_task_meta = ctx.experimental.task_metadata
                     task_meta_dict = mcp_task_meta.model_dump(exclude_none=True)
@@ -2169,31 +2155,17 @@ class FastMCP(Generic[LifespanResultT]):
         )
 
         try:
-            # Extract version from _meta.fastmcp.version if provided, then clean up
-            version: str | None = None
-            if arguments and "_meta" in arguments:
-                meta = arguments.get("_meta") or {}
-                fastmcp_meta = meta.get("fastmcp") or {}
-                version = fastmcp_meta.get("version")
-                # Remove only fastmcp.version, preserve other _meta content
-                if "version" in fastmcp_meta:
-                    fastmcp_meta = {
-                        k: v for k, v in fastmcp_meta.items() if k != "version"
-                    }
-                if fastmcp_meta:
-                    meta = {**meta, "fastmcp": fastmcp_meta}
-                else:
-                    meta = {k: v for k, v in meta.items() if k != "fastmcp"}
-                if meta:
-                    arguments = {**arguments, "_meta": meta}
-                else:
-                    arguments = {k: v for k, v in arguments.items() if k != "_meta"}
-
-            # Extract SEP-1686 task metadata from request context.
+            # Extract version and task metadata from request context.
             # fn_key is set by render_prompt() after finding the prompt.
+            version: str | None = None
             task_meta: TaskMeta | None = None
             try:
                 ctx = self._mcp_server.request_context
+                # Extract version from request-level _meta.fastmcp.version
+                if ctx.meta:
+                    meta_dict = ctx.meta.model_dump(exclude_none=True)
+                    version = meta_dict.get("fastmcp", {}).get("version")
+                # Extract SEP-1686 task metadata
                 if ctx.experimental.is_task:
                     mcp_task_meta = ctx.experimental.task_metadata
                     task_meta_dict = mcp_task_meta.model_dump(exclude_none=True)
