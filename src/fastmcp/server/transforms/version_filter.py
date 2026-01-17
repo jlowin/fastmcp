@@ -7,20 +7,16 @@ from typing import TYPE_CHECKING
 
 from fastmcp.server.transforms import (
     GetPromptNext,
-    GetPromptVersionsNext,
     GetResourceNext,
     GetResourceTemplateNext,
-    GetResourceTemplateVersionsNext,
-    GetResourceVersionsNext,
     GetToolNext,
-    GetToolVersionsNext,
     ListPromptsNext,
     ListResourcesNext,
     ListResourceTemplatesNext,
     ListToolsNext,
     Transform,
 )
-from fastmcp.utilities.versions import VersionKey, parse_version_key
+from fastmcp.utilities.versions import VersionSpec
 
 if TYPE_CHECKING:
     from fastmcp.prompts.prompt import Prompt
@@ -63,12 +59,7 @@ class VersionFilter(Transform):
             )
         self.version_gte = version_gte
         self.version_lt = version_lt
-        self._gte_key: VersionKey | None = (
-            parse_version_key(version_gte) if version_gte else None
-        )
-        self._lt_key: VersionKey | None = (
-            parse_version_key(version_lt) if version_lt else None
-        )
+        self._spec = VersionSpec(gte=version_gte, lt=version_lt)
 
     def __repr__(self) -> str:
         parts = []
@@ -78,36 +69,18 @@ class VersionFilter(Transform):
             parts.append(f"version_lt={self.version_lt!r}")
         return f"VersionFilter({', '.join(parts)})"
 
-    def _in_range(self, version: str | None) -> bool:
-        """Check if version passes the filter."""
-        if version is None:
-            # Unversioned always passes
-            return True
-        key = parse_version_key(version)
-        if self._gte_key and key < self._gte_key:
-            return False
-        # key >= lt_key means out of range
-        return not (self._lt_key and not key < self._lt_key)
-
     # -------------------------------------------------------------------------
     # Tools
     # -------------------------------------------------------------------------
 
     async def list_tools(self, call_next: ListToolsNext) -> Sequence[Tool]:
         tools = await call_next()
-        return [t for t in tools if self._in_range(t.version)]
+        return [t for t in tools if self._spec.matches(t.version)]
 
-    async def get_tool(self, name: str, call_next: GetToolNext) -> Tool | None:
-        tool = await call_next(name)
-        if tool and not self._in_range(tool.version):
-            return None
-        return tool
-
-    async def get_tool_versions(
-        self, name: str, call_next: GetToolVersionsNext
-    ) -> Sequence[Tool]:
-        tools = await call_next(name)
-        return [t for t in tools if self._in_range(t.version)]
+    async def get_tool(
+        self, name: str, call_next: GetToolNext, *, version: VersionSpec | None = None
+    ) -> Tool | None:
+        return await call_next(name, version=self._spec.intersect(version))
 
     # -------------------------------------------------------------------------
     # Resources
@@ -115,21 +88,16 @@ class VersionFilter(Transform):
 
     async def list_resources(self, call_next: ListResourcesNext) -> Sequence[Resource]:
         resources = await call_next()
-        return [r for r in resources if self._in_range(r.version)]
+        return [r for r in resources if self._spec.matches(r.version)]
 
     async def get_resource(
-        self, uri: str, call_next: GetResourceNext
+        self,
+        uri: str,
+        call_next: GetResourceNext,
+        *,
+        version: VersionSpec | None = None,
     ) -> Resource | None:
-        resource = await call_next(uri)
-        if resource and not self._in_range(resource.version):
-            return None
-        return resource
-
-    async def get_resource_versions(
-        self, uri: str, call_next: GetResourceVersionsNext
-    ) -> Sequence[Resource]:
-        resources = await call_next(uri)
-        return [r for r in resources if self._in_range(r.version)]
+        return await call_next(uri, version=self._spec.intersect(version))
 
     # -------------------------------------------------------------------------
     # Resource Templates
@@ -139,21 +107,16 @@ class VersionFilter(Transform):
         self, call_next: ListResourceTemplatesNext
     ) -> Sequence[ResourceTemplate]:
         templates = await call_next()
-        return [t for t in templates if self._in_range(t.version)]
+        return [t for t in templates if self._spec.matches(t.version)]
 
     async def get_resource_template(
-        self, uri: str, call_next: GetResourceTemplateNext
+        self,
+        uri: str,
+        call_next: GetResourceTemplateNext,
+        *,
+        version: VersionSpec | None = None,
     ) -> ResourceTemplate | None:
-        template = await call_next(uri)
-        if template and not self._in_range(template.version):
-            return None
-        return template
-
-    async def get_resource_template_versions(
-        self, uri_template: str, call_next: GetResourceTemplateVersionsNext
-    ) -> Sequence[ResourceTemplate]:
-        templates = await call_next(uri_template)
-        return [t for t in templates if self._in_range(t.version)]
+        return await call_next(uri, version=self._spec.intersect(version))
 
     # -------------------------------------------------------------------------
     # Prompts
@@ -161,16 +124,9 @@ class VersionFilter(Transform):
 
     async def list_prompts(self, call_next: ListPromptsNext) -> Sequence[Prompt]:
         prompts = await call_next()
-        return [p for p in prompts if self._in_range(p.version)]
+        return [p for p in prompts if self._spec.matches(p.version)]
 
-    async def get_prompt(self, name: str, call_next: GetPromptNext) -> Prompt | None:
-        prompt = await call_next(name)
-        if prompt and not self._in_range(prompt.version):
-            return None
-        return prompt
-
-    async def get_prompt_versions(
-        self, name: str, call_next: GetPromptVersionsNext
-    ) -> Sequence[Prompt]:
-        prompts = await call_next(name)
-        return [p for p in prompts if self._in_range(p.version)]
+    async def get_prompt(
+        self, name: str, call_next: GetPromptNext, *, version: VersionSpec | None = None
+    ) -> Prompt | None:
+        return await call_next(name, version=self._spec.intersect(version))

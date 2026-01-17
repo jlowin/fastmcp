@@ -14,19 +14,16 @@ import mcp.types
 
 from fastmcp.server.transforms import (
     GetPromptNext,
-    GetPromptVersionsNext,
     GetResourceNext,
     GetResourceTemplateNext,
-    GetResourceTemplateVersionsNext,
-    GetResourceVersionsNext,
     GetToolNext,
-    GetToolVersionsNext,
     ListPromptsNext,
     ListResourcesNext,
     ListResourceTemplatesNext,
     ListToolsNext,
     Transform,
 )
+from fastmcp.utilities.versions import VersionSpec
 
 if TYPE_CHECKING:
     from fastmcp.prompts.prompt import Prompt
@@ -246,19 +243,14 @@ class Visibility(Transform):
         tools = await call_next()
         return [t for t in tools if self.is_enabled(t)]
 
-    async def get_tool(self, name: str, call_next: GetToolNext) -> Tool | None:
+    async def get_tool(
+        self, name: str, call_next: GetToolNext, *, version: VersionSpec | None = None
+    ) -> Tool | None:
         """Get tool if enabled, None otherwise."""
-        tool = await call_next(name)
+        tool = await call_next(name, version=version)
         if tool is None or not self.is_enabled(tool):
             return None
         return tool
-
-    async def get_tool_versions(
-        self, name: str, call_next: GetToolVersionsNext
-    ) -> Sequence[Tool]:
-        """Get all enabled versions of a tool."""
-        tools = await call_next(name)
-        return [t for t in tools if self.is_enabled(t)]
 
     # -------------------------------------------------------------------------
     # Resources
@@ -270,20 +262,17 @@ class Visibility(Transform):
         return [r for r in resources if self.is_enabled(r)]
 
     async def get_resource(
-        self, uri: str, call_next: GetResourceNext
+        self,
+        uri: str,
+        call_next: GetResourceNext,
+        *,
+        version: VersionSpec | None = None,
     ) -> Resource | None:
         """Get resource if enabled, None otherwise."""
-        resource = await call_next(uri)
+        resource = await call_next(uri, version=version)
         if resource is None or not self.is_enabled(resource):
             return None
         return resource
-
-    async def get_resource_versions(
-        self, uri: str, call_next: GetResourceVersionsNext
-    ) -> Sequence[Resource]:
-        """Get all enabled versions of a resource."""
-        resources = await call_next(uri)
-        return [r for r in resources if self.is_enabled(r)]
 
     # -------------------------------------------------------------------------
     # Resource Templates
@@ -297,20 +286,17 @@ class Visibility(Transform):
         return [t for t in templates if self.is_enabled(t)]
 
     async def get_resource_template(
-        self, uri: str, call_next: GetResourceTemplateNext
+        self,
+        uri: str,
+        call_next: GetResourceTemplateNext,
+        *,
+        version: VersionSpec | None = None,
     ) -> ResourceTemplate | None:
         """Get resource template if enabled, None otherwise."""
-        template = await call_next(uri)
+        template = await call_next(uri, version=version)
         if template is None or not self.is_enabled(template):
             return None
         return template
-
-    async def get_resource_template_versions(
-        self, uri_template: str, call_next: GetResourceTemplateVersionsNext
-    ) -> Sequence[ResourceTemplate]:
-        """Get all enabled versions of a resource template."""
-        templates = await call_next(uri_template)
-        return [t for t in templates if self.is_enabled(t)]
 
     # -------------------------------------------------------------------------
     # Prompts
@@ -321,16 +307,11 @@ class Visibility(Transform):
         prompts = await call_next()
         return [p for p in prompts if self.is_enabled(p)]
 
-    async def get_prompt(self, name: str, call_next: GetPromptNext) -> Prompt | None:
+    async def get_prompt(
+        self, name: str, call_next: GetPromptNext, *, version: VersionSpec | None = None
+    ) -> Prompt | None:
         """Get prompt if enabled, None otherwise."""
-        prompt = await call_next(name)
+        prompt = await call_next(name, version=version)
         if prompt is None or not self.is_enabled(prompt):
             return None
         return prompt
-
-    async def get_prompt_versions(
-        self, name: str, call_next: GetPromptVersionsNext
-    ) -> Sequence[Prompt]:
-        """Get all enabled versions of a prompt."""
-        prompts = await call_next(name)
-        return [p for p in prompts if self.is_enabled(p)]

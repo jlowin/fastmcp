@@ -58,6 +58,39 @@ VersionFilter(version_gte="2.0")
 VersionFilter(version_gte="2.0", version_lt="3.0")
 ```
 
+<Note>
+**Unversioned components are exempt from version filtering.** A `VersionFilter` only affects versioned components—unversioned components always pass through regardless of the filter's constraints. This ensures that adding version filtering to a server with mixed versioned and unversioned tools doesn't accidentally hide the unversioned ones. To prevent confusion, FastMCP forbids mixing versioned and unversioned components with the same name.
+</Note>
+
+### Filtering Mounted Servers
+
+When you mount child servers and apply a `VersionFilter` to the parent, the filter applies to components from mounted servers as well. Range filtering (`version_gte` and `version_lt`) is handled at the provider level, meaning mounted servers don't need to know about the parent's version constraints.
+
+```python
+from fastmcp import FastMCP
+from fastmcp.server.transforms import VersionFilter
+
+# Child server with versioned components
+child = FastMCP("Child")
+
+@child.tool(version="1.0")
+def process(data: str) -> str:
+    return data.upper()
+
+@child.tool(version="2.0")
+def process(data: str, mode: str = "default") -> str:
+    return data.upper() if mode == "default" else data.lower()
+
+# Parent server mounts child and applies version filter
+parent = FastMCP("Parent")
+parent.mount(child, namespace="child")
+parent.add_transform(VersionFilter(version_lt="2.0"))
+
+# Clients see only child_process v1.0
+```
+
+The parent's `VersionFilter` sees components after they've been namespaced, but filters based on version regardless of namespace. This lets you apply version policies consistently across your entire server hierarchy.
+
 ## Declaring Versions
 
 Add a `version` parameter to any component decorator. FastMCP stores versions as strings and groups components by their identifier (name for tools and prompts, URI for resources).
@@ -81,6 +114,30 @@ def process(data: str, mode: str = "default") -> str:
 ```
 
 Both versions are registered. When a client lists tools, they see only `process` with version 2.0 (the highest). When they invoke `process`, version 2.0 executes. The same pattern applies to resources and prompts.
+
+### Versioned vs Unversioned Components
+
+For any given component name, you must choose one approach: either version all implementations or version none of them. Mixing versioned and unversioned components with the same name raises an error at registration time.
+
+```python
+from fastmcp import FastMCP
+
+mcp = FastMCP()
+
+@mcp.tool
+def calculate(x: int, y: int) -> int:
+    """Unversioned tool."""
+    return x + y
+
+@mcp.tool(version="2.0")  # Raises ValueError
+def calculate(x: int, y: int, z: int = 0) -> int:
+    """Cannot mix versioned with unversioned."""
+    return x + y + z
+```
+
+The error message explains the conflict: "Cannot add versioned tool 'calculate' (version='2.0'): an unversioned tool with this name already exists. Either version all components or none."
+
+This restriction exists because unversioned components always pass through version filters. If you could mix versioned and unversioned components, you'd have no way to filter out the unversioned one using `VersionFilter`. By enforcing consistency at registration, FastMCP ensures version filtering behaves predictably.
 
 ```python
 @mcp.resource("config://app", version="1.0")
@@ -125,7 +182,7 @@ For other formats (dates, custom schemes), FastMCP falls back to lexicographic s
 "alpha" < "beta"             # Alphabetical order
 ```
 
-Unversioned components (`version=None`) always sort lowest. Any explicitly versioned component takes precedence over an unversioned one with the same identifier. The `v` prefix is stripped before comparison, so `"v1.0"` and `"1.0"` are treated as equal for sorting purposes.
+The `v` prefix is stripped before comparison, so `"v1.0"` and `"1.0"` are treated as equal for sorting purposes.
 
 ## Retrieving Specific Versions
 
@@ -155,16 +212,7 @@ tool_v1 = await mcp.get_tool("add", version="1.0")
 print(tool_v1.version)  # "1.0"
 ```
 
-To see every registered version of a component, use `get_tool_versions`, `get_resource_versions`, or `get_prompt_versions`. These return a list sorted by version.
-
-```python
-versions = await mcp.get_tool_versions("add")
-for tool in versions:
-    print(f"{tool.name} @ {tool.version}")
-# Output:
-# add @ 1.0
-# add @ 2.0
-```
+If the requested version doesn't exist, a `NotFoundError` is raised.
 
 ## Removing Versions
 
@@ -184,12 +232,16 @@ When you remove a specific version, other versions remain registered. When you r
 
 Versioning supports gradual migration when updating component behavior. You can deploy new versions alongside old ones, verify the new behavior works correctly, then clean up.
 
-Start with your existing implementation. When you're ready to update, register the new version alongside it. Since unversioned components sort lowest, the new versioned component automatically becomes the default.
+When migrating an existing unversioned component to use versioning, start by assigning an initial version to your existing implementation. Then add the new version alongside it.
 
 ```python
-@mcp.tool
+from fastmcp import FastMCP
+
+mcp = FastMCP()
+
+@mcp.tool(version="1.0")
 def process_data(input: str) -> str:
-    """Original implementation."""
+    """Original implementation, now versioned."""
     return legacy_process(input)
 
 @mcp.tool(version="2.0")
@@ -198,10 +250,10 @@ def process_data(input: str, options: dict | None = None) -> str:
     return modern_process(input, options or {})
 ```
 
-Clients now automatically use version 2.0. During the transition, your server code can still access the original implementation via `get_tool("process_data", version=None)`.
+Clients automatically see version 2.0 (the highest). During the transition, your server code can still access the original implementation via `get_tool("process_data", version="1.0")`.
 
 Once the migration is complete, remove the old version.
 
 ```python
-mcp.remove_tool("process_data", version=None)
+mcp.remove_tool("process_data", version="1.0")
 ```

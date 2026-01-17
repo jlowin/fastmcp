@@ -39,6 +39,7 @@ from fastmcp.server.providers.local_provider import LocalProvider
 from fastmcp.tools.tool import Tool
 from fastmcp.utilities.components import FastMCPComponent
 from fastmcp.utilities.logging import get_logger
+from fastmcp.utilities.versions import VersionSpec
 
 logger = get_logger(__name__)
 
@@ -178,7 +179,9 @@ class FileSystemProvider(LocalProvider):
         await self._ensure_loaded()
         return await super().list_tools()
 
-    async def get_tool(self, name: str, version: str | None = None) -> Tool | None:
+    async def get_tool(
+        self, name: str, version: VersionSpec | None = None
+    ) -> Tool | None:
         """Get a tool by name, reloading if in reload mode."""
         await self._ensure_loaded()
         return await super().get_tool(name, version)
@@ -189,7 +192,7 @@ class FileSystemProvider(LocalProvider):
         return await super().list_resources()
 
     async def get_resource(
-        self, uri: str, version: str | None = None
+        self, uri: str, version: VersionSpec | None = None
     ) -> Resource | None:
         """Get a resource by URI, reloading if in reload mode."""
         await self._ensure_loaded()
@@ -201,7 +204,7 @@ class FileSystemProvider(LocalProvider):
         return await super().list_resource_templates()
 
     async def get_resource_template(
-        self, uri: str, version: str | None = None
+        self, uri: str, version: VersionSpec | None = None
     ) -> ResourceTemplate | None:
         """Get a resource template, reloading if in reload mode."""
         await self._ensure_loaded()
@@ -212,7 +215,9 @@ class FileSystemProvider(LocalProvider):
         await self._ensure_loaded()
         return await super().list_prompts()
 
-    async def get_prompt(self, name: str, version: str | None = None) -> Prompt | None:
+    async def get_prompt(
+        self, name: str, version: VersionSpec | None = None
+    ) -> Prompt | None:
         """Get a prompt by name, reloading if in reload mode."""
         await self._ensure_loaded()
         return await super().get_prompt(name, version)

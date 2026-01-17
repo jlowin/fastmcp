@@ -21,7 +21,9 @@ Example:
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Sequence
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
+
+from fastmcp.utilities.versions import VersionSpec
 
 if TYPE_CHECKING:
     from fastmcp.prompts.prompt import Prompt
@@ -30,23 +32,44 @@ if TYPE_CHECKING:
     from fastmcp.tools.tool import Tool
 
 # Type aliases for call_next signatures
+# List methods are simple callables
 ListToolsNext = Callable[[], Awaitable[Sequence["Tool"]]]
-GetToolNext = Callable[[str], Awaitable["Tool | None"]]
-GetToolVersionsNext = Callable[[str], Awaitable[Sequence["Tool"]]]
-
 ListResourcesNext = Callable[[], Awaitable[Sequence["Resource"]]]
-GetResourceNext = Callable[[str], Awaitable["Resource | None"]]
-GetResourceVersionsNext = Callable[[str], Awaitable[Sequence["Resource"]]]
-
 ListResourceTemplatesNext = Callable[[], Awaitable[Sequence["ResourceTemplate"]]]
-GetResourceTemplateNext = Callable[[str], Awaitable["ResourceTemplate | None"]]
-GetResourceTemplateVersionsNext = Callable[
-    [str], Awaitable[Sequence["ResourceTemplate"]]
-]
-
 ListPromptsNext = Callable[[], Awaitable[Sequence["Prompt"]]]
-GetPromptNext = Callable[[str], Awaitable["Prompt | None"]]
-GetPromptVersionsNext = Callable[[str], Awaitable[Sequence["Prompt"]]]
+
+
+# Get methods use Protocol to express keyword-only version parameter
+class GetToolNext(Protocol):
+    """Protocol for get_tool call_next functions."""
+
+    def __call__(
+        self, name: str, *, version: VersionSpec | None = None
+    ) -> Awaitable[Tool | None]: ...
+
+
+class GetResourceNext(Protocol):
+    """Protocol for get_resource call_next functions."""
+
+    def __call__(
+        self, uri: str, *, version: VersionSpec | None = None
+    ) -> Awaitable[Resource | None]: ...
+
+
+class GetResourceTemplateNext(Protocol):
+    """Protocol for get_resource_template call_next functions."""
+
+    def __call__(
+        self, uri: str, *, version: VersionSpec | None = None
+    ) -> Awaitable[ResourceTemplate | None]: ...
+
+
+class GetPromptNext(Protocol):
+    """Protocol for get_prompt call_next functions."""
+
+    def __call__(
+        self, name: str, *, version: VersionSpec | None = None
+    ) -> Awaitable[Prompt | None]: ...
 
 
 class Transform:
@@ -66,9 +89,9 @@ class Transform:
                 tools = await call_next()  # Get tools from downstream
                 return [transform(t) for t in tools]  # Transform them
 
-            async def get_tool(self, name, call_next):
+            async def get_tool(self, name, call_next, *, version=None):
                 original = self.reverse_name(name)  # Map to original name
-                tool = await call_next(original)  # Get from downstream
+                tool = await call_next(original, version=version)  # Get from downstream
                 return transform(tool) if tool else None
         ```
     """
@@ -91,31 +114,20 @@ class Transform:
         """
         return await call_next()
 
-    async def get_tool(self, name: str, call_next: GetToolNext) -> Tool | None:
+    async def get_tool(
+        self, name: str, call_next: GetToolNext, *, version: VersionSpec | None = None
+    ) -> Tool | None:
         """Get a tool by name.
 
         Args:
             name: The requested tool name (may be transformed).
             call_next: Callable to get tool from downstream.
+            version: Optional version filter to apply.
 
         Returns:
             The tool if found, None otherwise.
         """
-        return await call_next(name)
-
-    async def get_tool_versions(
-        self, name: str, call_next: GetToolVersionsNext
-    ) -> Sequence[Tool]:
-        """Get all versions of a tool by name.
-
-        Args:
-            name: The requested tool name (may be transformed).
-            call_next: Callable to get tool versions from downstream.
-
-        Returns:
-            Sequence of tool versions (may be empty).
-        """
-        return await call_next(name)
+        return await call_next(name, version=version)
 
     # -------------------------------------------------------------------------
     # Resources
@@ -133,32 +145,23 @@ class Transform:
         return await call_next()
 
     async def get_resource(
-        self, uri: str, call_next: GetResourceNext
+        self,
+        uri: str,
+        call_next: GetResourceNext,
+        *,
+        version: VersionSpec | None = None,
     ) -> Resource | None:
         """Get a resource by URI.
 
         Args:
             uri: The requested resource URI (may be transformed).
             call_next: Callable to get resource from downstream.
+            version: Optional version filter to apply.
 
         Returns:
             The resource if found, None otherwise.
         """
-        return await call_next(uri)
-
-    async def get_resource_versions(
-        self, uri: str, call_next: GetResourceVersionsNext
-    ) -> Sequence[Resource]:
-        """Get all versions of a resource by URI.
-
-        Args:
-            uri: The requested resource URI (may be transformed).
-            call_next: Callable to get resource versions from downstream.
-
-        Returns:
-            Sequence of resource versions (may be empty).
-        """
-        return await call_next(uri)
+        return await call_next(uri, version=version)
 
     # -------------------------------------------------------------------------
     # Resource Templates
@@ -178,32 +181,23 @@ class Transform:
         return await call_next()
 
     async def get_resource_template(
-        self, uri: str, call_next: GetResourceTemplateNext
+        self,
+        uri: str,
+        call_next: GetResourceTemplateNext,
+        *,
+        version: VersionSpec | None = None,
     ) -> ResourceTemplate | None:
         """Get a resource template by URI.
 
         Args:
             uri: The requested template URI (may be transformed).
             call_next: Callable to get template from downstream.
+            version: Optional version filter to apply.
 
         Returns:
             The resource template if found, None otherwise.
         """
-        return await call_next(uri)
-
-    async def get_resource_template_versions(
-        self, uri_template: str, call_next: GetResourceTemplateVersionsNext
-    ) -> Sequence[ResourceTemplate]:
-        """Get all versions of a resource template by uri_template.
-
-        Args:
-            uri_template: The requested template uri_template (may be transformed).
-            call_next: Callable to get template versions from downstream.
-
-        Returns:
-            Sequence of template versions (may be empty).
-        """
-        return await call_next(uri_template)
+        return await call_next(uri, version=version)
 
     # -------------------------------------------------------------------------
     # Prompts
@@ -220,31 +214,20 @@ class Transform:
         """
         return await call_next()
 
-    async def get_prompt(self, name: str, call_next: GetPromptNext) -> Prompt | None:
+    async def get_prompt(
+        self, name: str, call_next: GetPromptNext, *, version: VersionSpec | None = None
+    ) -> Prompt | None:
         """Get a prompt by name.
 
         Args:
             name: The requested prompt name (may be transformed).
             call_next: Callable to get prompt from downstream.
+            version: Optional version filter to apply.
 
         Returns:
             The prompt if found, None otherwise.
         """
-        return await call_next(name)
-
-    async def get_prompt_versions(
-        self, name: str, call_next: GetPromptVersionsNext
-    ) -> Sequence[Prompt]:
-        """Get all versions of a prompt by name.
-
-        Args:
-            name: The requested prompt name (may be transformed).
-            call_next: Callable to get prompt versions from downstream.
-
-        Returns:
-            Sequence of prompt versions (may be empty).
-        """
-        return await call_next(name)
+        return await call_next(name, version=version)
 
 
 # Re-export built-in transforms (must be after Transform class to avoid circular imports)
@@ -255,13 +238,9 @@ from fastmcp.server.transforms.visibility import Visibility  # noqa: E402
 
 __all__ = [
     "GetPromptNext",
-    "GetPromptVersionsNext",
     "GetResourceNext",
     "GetResourceTemplateNext",
-    "GetResourceTemplateVersionsNext",
-    "GetResourceVersionsNext",
     "GetToolNext",
-    "GetToolVersionsNext",
     "ListPromptsNext",
     "ListResourceTemplatesNext",
     "ListResourcesNext",
@@ -270,5 +249,6 @@ __all__ = [
     "ToolTransform",
     "Transform",
     "VersionFilter",
+    "VersionSpec",
     "Visibility",
 ]

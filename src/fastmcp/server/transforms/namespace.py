@@ -8,19 +8,16 @@ from typing import TYPE_CHECKING
 
 from fastmcp.server.transforms import (
     GetPromptNext,
-    GetPromptVersionsNext,
     GetResourceNext,
     GetResourceTemplateNext,
-    GetResourceTemplateVersionsNext,
-    GetResourceVersionsNext,
     GetToolNext,
-    GetToolVersionsNext,
     ListPromptsNext,
     ListResourcesNext,
     ListResourceTemplatesNext,
     ListToolsNext,
     Transform,
 )
+from fastmcp.utilities.versions import VersionSpec
 
 if TYPE_CHECKING:
     from fastmcp.prompts.prompt import Prompt
@@ -108,25 +105,17 @@ class Namespace(Transform):
             t.model_copy(update={"name": self._transform_name(t.name)}) for t in tools
         ]
 
-    async def get_tool(self, name: str, call_next: GetToolNext) -> Tool | None:
+    async def get_tool(
+        self, name: str, call_next: GetToolNext, *, version: VersionSpec | None = None
+    ) -> Tool | None:
         """Get tool by namespaced name."""
         original = self._reverse_name(name)
         if original is None:
             return None
-        tool = await call_next(original)
+        tool = await call_next(original, version=version)
         if tool:
             return tool.model_copy(update={"name": name})
         return None
-
-    async def get_tool_versions(
-        self, name: str, call_next: GetToolVersionsNext
-    ) -> Sequence[Tool]:
-        """Get all versions of a tool by namespaced name."""
-        original = self._reverse_name(name)
-        if original is None:
-            return []
-        tools = await call_next(original)
-        return [t.model_copy(update={"name": name}) for t in tools]
 
     # -------------------------------------------------------------------------
     # Resources
@@ -141,26 +130,20 @@ class Namespace(Transform):
         ]
 
     async def get_resource(
-        self, uri: str, call_next: GetResourceNext
+        self,
+        uri: str,
+        call_next: GetResourceNext,
+        *,
+        version: VersionSpec | None = None,
     ) -> Resource | None:
         """Get resource by namespaced URI."""
         original = self._reverse_uri(uri)
         if original is None:
             return None
-        resource = await call_next(original)
+        resource = await call_next(original, version=version)
         if resource:
             return resource.model_copy(update={"uri": uri})
         return None
-
-    async def get_resource_versions(
-        self, uri: str, call_next: GetResourceVersionsNext
-    ) -> Sequence[Resource]:
-        """Get all versions of a resource by URI."""
-        original = self._reverse_uri(uri)
-        if original is None:
-            return []
-        resources = await call_next(original)
-        return [r.model_copy(update={"uri": uri}) for r in resources]
 
     # -------------------------------------------------------------------------
     # Resource Templates
@@ -177,31 +160,22 @@ class Namespace(Transform):
         ]
 
     async def get_resource_template(
-        self, uri: str, call_next: GetResourceTemplateNext
+        self,
+        uri: str,
+        call_next: GetResourceTemplateNext,
+        *,
+        version: VersionSpec | None = None,
     ) -> ResourceTemplate | None:
         """Get resource template by namespaced URI."""
         original = self._reverse_uri(uri)
         if original is None:
             return None
-        template = await call_next(original)
+        template = await call_next(original, version=version)
         if template:
             return template.model_copy(
                 update={"uri_template": self._transform_uri(template.uri_template)}
             )
         return None
-
-    async def get_resource_template_versions(
-        self, uri_template: str, call_next: GetResourceTemplateVersionsNext
-    ) -> Sequence[ResourceTemplate]:
-        """Get all versions of a resource template by uri_template."""
-        original = self._reverse_uri(uri_template)
-        if original is None:
-            return []
-        templates = await call_next(original)
-        return [
-            t.model_copy(update={"uri_template": self._transform_uri(t.uri_template)})
-            for t in templates
-        ]
 
     # -------------------------------------------------------------------------
     # Prompts
@@ -214,22 +188,14 @@ class Namespace(Transform):
             p.model_copy(update={"name": self._transform_name(p.name)}) for p in prompts
         ]
 
-    async def get_prompt(self, name: str, call_next: GetPromptNext) -> Prompt | None:
+    async def get_prompt(
+        self, name: str, call_next: GetPromptNext, *, version: VersionSpec | None = None
+    ) -> Prompt | None:
         """Get prompt by namespaced name."""
         original = self._reverse_name(name)
         if original is None:
             return None
-        prompt = await call_next(original)
+        prompt = await call_next(original, version=version)
         if prompt:
             return prompt.model_copy(update={"name": name})
         return None
-
-    async def get_prompt_versions(
-        self, name: str, call_next: GetPromptVersionsNext
-    ) -> Sequence[Prompt]:
-        """Get all versions of a prompt by namespaced name."""
-        original = self._reverse_name(name)
-        if original is None:
-            return []
-        prompts = await call_next(original)
-        return [p.model_copy(update={"name": name}) for p in prompts]

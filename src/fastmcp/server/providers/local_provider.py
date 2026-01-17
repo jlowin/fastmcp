@@ -46,7 +46,7 @@ from fastmcp.tools.tool import AuthCheckCallable, Tool
 from fastmcp.utilities.components import FastMCPComponent
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.types import NotSet, NotSetT
-from fastmcp.utilities.versions import version_sort_key
+from fastmcp.utilities.versions import VersionSpec, version_sort_key
 
 if TYPE_CHECKING:
     from fastmcp.tools.tool import ToolResultSerializerType
@@ -130,6 +130,71 @@ class LocalProvider(Provider):
     # Storage methods
     # =========================================================================
 
+    def _get_component_identity(self, component: FastMCPComponent) -> tuple[type, str]:
+        """Get the identity (type, name/uri) for a component.
+
+        Returns:
+            A tuple of (component_type, logical_name) where logical_name is
+            the name for tools/prompts or URI for resources/templates.
+        """
+        if isinstance(component, Tool):
+            return (Tool, component.name)
+        elif isinstance(component, ResourceTemplate):
+            return (ResourceTemplate, component.uri_template)
+        elif isinstance(component, Resource):
+            return (Resource, str(component.uri))
+        elif isinstance(component, Prompt):
+            return (Prompt, component.name)
+        else:
+            # Fall back to key without version suffix
+            key = component.key
+            base_key = key.rsplit("@", 1)[0] if "@" in key else key
+            return (type(component), base_key)
+
+    def _check_version_mixing(self, component: _C) -> None:
+        """Check that versioned and unversioned components aren't mixed.
+
+        LocalProvider enforces a simple rule: for any given name/URI, all
+        registered components must either be versioned or unversioned, not both.
+        This prevents confusing situations where unversioned components can't
+        be filtered out by version filters.
+
+        Args:
+            component: The component being added.
+
+        Raises:
+            ValueError: If adding would mix versioned and unversioned components.
+        """
+        comp_type, logical_name = self._get_component_identity(component)
+        is_versioned = component.version is not None
+
+        # Check all existing components of the same type and logical name
+        for existing in self._components.values():
+            if not isinstance(existing, comp_type):
+                continue
+
+            _, existing_name = self._get_component_identity(existing)
+            if existing_name != logical_name:
+                continue
+
+            existing_versioned = existing.version is not None
+            if is_versioned != existing_versioned:
+                type_name = comp_type.__name__.lower()
+                if is_versioned:
+                    raise ValueError(
+                        f"Cannot add versioned {type_name} {logical_name!r} "
+                        f"(version={component.version!r}): an unversioned "
+                        f"{type_name} with this name already exists. "
+                        f"Either version all components or none."
+                    )
+                else:
+                    raise ValueError(
+                        f"Cannot add unversioned {type_name} {logical_name!r}: "
+                        f"versioned {type_name}s with this name already exist "
+                        f"(e.g., version={existing.version!r}). "
+                        f"Either version all components or none."
+                    )
+
     def _add_component(self, component: _C) -> _C:
         """Add a component to unified storage.
 
@@ -148,6 +213,9 @@ class LocalProvider(Provider):
             elif self._on_duplicate == "ignore":
                 return existing  # type: ignore[return-value]
             # "replace" and "warn" fall through to add
+
+        # Check for versioned/unversioned mixing before adding
+        self._check_version_mixing(component)
 
         self._components[component.key] = component
         self._send_list_changed_notification(component)
@@ -432,27 +500,25 @@ class LocalProvider(Provider):
             if isinstance(v, Tool) and self._is_component_enabled(v)
         ]
 
-    async def get_tool(self, name: str, version: str | None = None) -> Tool | None:
+    async def get_tool(
+        self, name: str, version: VersionSpec | None = None
+    ) -> Tool | None:
         """Get a tool by name.
 
         Args:
             name: The tool name.
-            version: If None, returns highest version. If specified, returns that version.
+            version: Optional version filter. If None, returns highest version.
         """
-        versions = list(await self.get_tool_versions(name))
-        if not versions:
-            return None
-        if version is None:
-            return max(versions, key=version_sort_key)  # type: ignore[type-var]
-        return next((t for t in versions if t.version == version), None)
-
-    async def get_tool_versions(self, name: str) -> Sequence[Tool]:
-        """Get all versions of a tool by name."""
-        return [
+        matching = [
             v
             for v in self._components.values()
             if isinstance(v, Tool) and v.name == name and self._is_component_enabled(v)
         ]
+        if version:
+            matching = [t for t in matching if version.matches(t.version)]
+        if not matching:
+            return None
+        return max(matching, key=version_sort_key)  # type: ignore[type-var]
 
     async def list_resources(self) -> Sequence[Resource]:
         """Return all visible resources."""
@@ -463,30 +529,26 @@ class LocalProvider(Provider):
         ]
 
     async def get_resource(
-        self, uri: str, version: str | None = None
+        self, uri: str, version: VersionSpec | None = None
     ) -> Resource | None:
         """Get a resource by URI.
 
         Args:
             uri: The resource URI.
-            version: If None, returns highest version. If specified, returns that version.
+            version: Optional version filter. If None, returns highest version.
         """
-        versions = list(await self.get_resource_versions(uri))
-        if not versions:
-            return None
-        if version is None:
-            return max(versions, key=version_sort_key)  # type: ignore[type-var]
-        return next((r for r in versions if r.version == version), None)
-
-    async def get_resource_versions(self, uri: str) -> Sequence[Resource]:
-        """Get all versions of a resource by URI."""
-        return [
+        matching = [
             v
             for v in self._components.values()
             if isinstance(v, Resource)
             and str(v.uri) == uri
             and self._is_component_enabled(v)
         ]
+        if version:
+            matching = [r for r in matching if version.matches(r.version)]
+        if not matching:
+            return None
+        return max(matching, key=version_sort_key)  # type: ignore[type-var]
 
     async def list_resource_templates(self) -> Sequence[ResourceTemplate]:
         """Return all visible resource templates."""
@@ -497,13 +559,13 @@ class LocalProvider(Provider):
         ]
 
     async def get_resource_template(
-        self, uri: str, version: str | None = None
+        self, uri: str, version: VersionSpec | None = None
     ) -> ResourceTemplate | None:
         """Get a resource template that matches the given URI.
 
         Args:
             uri: The URI to match against templates.
-            version: If None, returns highest version. If specified, returns that version.
+            version: Optional version filter. If None, returns highest version.
         """
         # Find all templates that match the URI
         matching = [
@@ -515,23 +577,11 @@ class LocalProvider(Provider):
                 and self._is_component_enabled(component)
             )
         ]
+        if version:
+            matching = [t for t in matching if version.matches(t.version)]
         if not matching:
             return None
-        if version is None:
-            return max(matching, key=version_sort_key)  # type: ignore[type-var]
-        return next((t for t in matching if t.version == version), None)
-
-    async def get_resource_template_versions(
-        self, uri_template: str
-    ) -> Sequence[ResourceTemplate]:
-        """Get all versions of a resource template by uri_template."""
-        return [
-            v
-            for v in self._components.values()
-            if isinstance(v, ResourceTemplate)
-            and v.uri_template == uri_template
-            and self._is_component_enabled(v)
-        ]
+        return max(matching, key=version_sort_key)  # type: ignore[type-var]
 
     async def list_prompts(self) -> Sequence[Prompt]:
         """Return all visible prompts."""
@@ -541,29 +591,27 @@ class LocalProvider(Provider):
             if isinstance(v, Prompt) and self._is_component_enabled(v)
         ]
 
-    async def get_prompt(self, name: str, version: str | None = None) -> Prompt | None:
+    async def get_prompt(
+        self, name: str, version: VersionSpec | None = None
+    ) -> Prompt | None:
         """Get a prompt by name.
 
         Args:
             name: The prompt name.
-            version: If None, returns highest version. If specified, returns that version.
+            version: Optional version filter. If None, returns highest version.
         """
-        versions = list(await self.get_prompt_versions(name))
-        if not versions:
-            return None
-        if version is None:
-            return max(versions, key=version_sort_key)  # type: ignore[type-var]
-        return next((p for p in versions if p.version == version), None)
-
-    async def get_prompt_versions(self, name: str) -> Sequence[Prompt]:
-        """Get all versions of a prompt by name."""
-        return [
+        matching = [
             v
             for v in self._components.values()
             if isinstance(v, Prompt)
             and v.name == name
             and self._is_component_enabled(v)
         ]
+        if version:
+            matching = [p for p in matching if version.matches(p.version)]
+        if not matching:
+            return None
+        return max(matching, key=version_sort_key)  # type: ignore[type-var]
 
     # =========================================================================
     # Task registration

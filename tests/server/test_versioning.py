@@ -159,25 +159,39 @@ class TestComponentVersioning:
         assert isinstance(result.content[0], TextContent)
         assert result.content[0].text == "30"
 
-    async def test_unversioned_tool_loses_to_versioned(self):
-        """Unversioned tool should be superseded by versioned tool."""
+    async def test_mixing_versioned_and_unversioned_rejected(self):
+        """Cannot mix versioned and unversioned tools with the same name."""
+        import pytest
+
         mcp = FastMCP()
 
         @mcp.tool
         def my_tool() -> str:
             return "unversioned"
 
+        # Adding versioned tool when unversioned exists should fail
+        with pytest.raises(ValueError, match="versioned.*unversioned"):
+
+            @mcp.tool(version="1.0")
+            def my_tool() -> str:
+                return "v1.0"
+
+    async def test_mixing_unversioned_after_versioned_rejected(self):
+        """Cannot add unversioned tool when versioned exists."""
+        import pytest
+
+        mcp = FastMCP()
+
         @mcp.tool(version="1.0")
         def my_tool() -> str:
             return "v1.0"
 
-        tools = await mcp.get_tools()
-        assert len(tools) == 1
-        assert tools[0].version == "1.0"
+        # Adding unversioned tool when versioned exists should fail
+        with pytest.raises(ValueError, match="unversioned.*versioned"):
 
-        result = await mcp.call_tool("my_tool", {})
-        assert isinstance(result.content[0], TextContent)
-        assert result.content[0].text == "v1.0"
+            @mcp.tool
+            def my_tool() -> str:
+                return "unversioned"
 
     async def test_resource_with_version(self):
         """Resource version should work like tool version."""
@@ -455,12 +469,18 @@ class TestVersionFilter:
         assert len(tools) == 1
         assert tools[0].version == "3.0"
 
-        # All versions >= 2.0 should be available
-        versions = await mcp.get_tool_versions("add")
-        version_strs = [t.version for t in versions]
-        assert "2.0" in version_strs
-        assert "3.0" in version_strs
-        assert "1.0" not in version_strs
+        # Can request specific versions in range
+        tool_v2 = await mcp.get_tool("add", version="2.0")
+        assert tool_v2 is not None
+        assert tool_v2.version == "2.0"
+
+        # Cannot request version outside range
+        import pytest
+
+        from fastmcp.exceptions import NotFoundError
+
+        with pytest.raises(NotFoundError):
+            await mcp.get_tool("add", version="1.0")
 
     async def test_version_range(self):
         """VersionFilter(version_gte='2.0', version_lt='3.0') shows only v2.x."""
@@ -491,13 +511,21 @@ class TestVersionFilter:
         assert len(tools) == 1
         assert tools[0].version == "2.5"
 
-        # Versions in range
-        versions = await mcp.get_tool_versions("calc")
-        version_strs = [t.version for t in versions]
-        assert "2.0" in version_strs
-        assert "2.5" in version_strs
-        assert "1.0" not in version_strs
-        assert "3.0" not in version_strs
+        # Can request specific versions in range
+        tool_v2 = await mcp.get_tool("calc", version="2.0")
+        assert tool_v2 is not None
+        assert tool_v2.version == "2.0"
+
+        # Versions outside range are not accessible
+        import pytest
+
+        from fastmcp.exceptions import NotFoundError
+
+        with pytest.raises(NotFoundError):
+            await mcp.get_tool("calc", version="1.0")
+
+        with pytest.raises(NotFoundError):
+            await mcp.get_tool("calc", version="3.0")
 
     async def test_unversioned_always_passes(self):
         """Unversioned components pass through any filter."""
@@ -626,6 +654,310 @@ class TestVersionFilter:
 
         f3 = VersionFilter(version_gte="1.0")
         assert repr(f3) == "VersionFilter(version_gte='1.0')"
+
+
+class TestVersionMixingValidation:
+    """Tests for versioned/unversioned mixing prevention."""
+
+    async def test_resource_mixing_rejected(self):
+        """Cannot mix versioned and unversioned resources with the same URI."""
+        import pytest
+
+        mcp = FastMCP()
+
+        @mcp.resource("file://config", version="1.0")
+        def config_v1() -> str:
+            return "v1"
+
+        with pytest.raises(ValueError, match="unversioned.*versioned"):
+
+            @mcp.resource("file://config")
+            def config_unversioned() -> str:
+                return "unversioned"
+
+    async def test_prompt_mixing_rejected(self):
+        """Cannot mix versioned and unversioned prompts with the same name."""
+        import pytest
+
+        mcp = FastMCP()
+
+        @mcp.prompt
+        def greet(name: str) -> str:
+            return f"Hello, {name}!"
+
+        with pytest.raises(ValueError, match="versioned.*unversioned"):
+
+            @mcp.prompt(version="1.0")
+            def greet(name: str) -> str:
+                return f"Hi, {name}!"
+
+    async def test_multiple_versions_allowed(self):
+        """Multiple versioned components with same name are allowed."""
+        mcp = FastMCP()
+
+        @mcp.tool(version="1.0")
+        def calc() -> int:
+            return 1
+
+        @mcp.tool(version="2.0")
+        def calc() -> int:
+            return 2
+
+        @mcp.tool(version="3.0")
+        def calc() -> int:
+            return 3
+
+        # All versioned - this should work
+        tools = await mcp.get_tools()
+        assert len(tools) == 1
+        assert tools[0].version == "3.0"
+
+
+class TestMountedVersionFiltering:
+    """Tests for version filtering with mounted servers (FastMCPProvider).
+
+    Note: For mounted servers, list_* methods show what the child exposes (already
+    deduplicated to highest version). get_* methods support range filtering via
+    VersionSpec propagation to FastMCPProvider.
+    """
+
+    async def test_mounted_get_tool_with_range_filter(self):
+        """FastMCPProvider.get_tool applies range filtering from VersionSpec."""
+        from fastmcp.server.providers.fastmcp_provider import FastMCPProvider
+        from fastmcp.utilities.versions import VersionSpec
+
+        child = FastMCP("Child")
+
+        @child.tool(version="2.0")
+        def calc() -> int:
+            return 2
+
+        provider = FastMCPProvider(child)
+
+        # Without range spec, should return the tool
+        tool = await provider.get_tool("calc")
+        assert tool is not None
+        assert tool.version == "2.0"
+
+        # With range spec that excludes v2.0, should return None
+        tool = await provider.get_tool("calc", version=VersionSpec(lt="2.0"))
+        assert tool is None
+
+        # With range spec that includes v2.0, should return the tool
+        tool = await provider.get_tool("calc", version=VersionSpec(gte="2.0"))
+        assert tool is not None
+        assert tool.version == "2.0"
+
+    async def test_mounted_get_resource_with_range_filter(self):
+        """FastMCPProvider.get_resource applies range filtering from VersionSpec."""
+        from fastmcp.server.providers.fastmcp_provider import FastMCPProvider
+        from fastmcp.utilities.versions import VersionSpec
+
+        child = FastMCP("Child")
+
+        @child.resource("file://data/", version="2.0")
+        def data() -> str:
+            return "data"
+
+        provider = FastMCPProvider(child)
+
+        # Without range spec, should return the resource
+        resource = await provider.get_resource("file://data/")
+        assert resource is not None
+        assert resource.version == "2.0"
+
+        # With range spec that excludes v2.0, should return None
+        resource = await provider.get_resource(
+            "file://data/", version=VersionSpec(lt="2.0")
+        )
+        assert resource is None
+
+    async def test_mounted_get_prompt_with_range_filter(self):
+        """FastMCPProvider.get_prompt applies range filtering from VersionSpec."""
+        from fastmcp.server.providers.fastmcp_provider import FastMCPProvider
+        from fastmcp.utilities.versions import VersionSpec
+
+        child = FastMCP("Child")
+
+        @child.prompt(version="2.0")
+        def greet(name: str) -> str:
+            return f"Hello {name}"
+
+        provider = FastMCPProvider(child)
+
+        # Without range spec, should return the prompt
+        prompt = await provider.get_prompt("greet")
+        assert prompt is not None
+        assert prompt.version == "2.0"
+
+        # With range spec that excludes v2.0, should return None
+        prompt = await provider.get_prompt("greet", version=VersionSpec(lt="2.0"))
+        assert prompt is None
+
+    async def test_mounted_unversioned_passes_version_filter(self):
+        """Unversioned components in mounted servers pass through version filters."""
+        from fastmcp.server.transforms import VersionFilter
+
+        child = FastMCP("Child")
+
+        @child.tool
+        def unversioned_tool() -> str:
+            return "unversioned"
+
+        parent = FastMCP("Parent")
+        parent.mount(child, "child")
+        parent.add_transform(VersionFilter(version_lt="3.0"))
+
+        # Unversioned should pass through
+        tools = await parent.get_tools()
+        assert len(tools) == 1
+        assert tools[0].name == "child_unversioned_tool"
+        assert tools[0].version is None
+
+    async def test_version_filter_filters_out_high_mounted_version(self):
+        """VersionFilter hides mounted components outside the range."""
+        from fastmcp.server.transforms import VersionFilter
+
+        child = FastMCP("Child")
+
+        @child.tool(version="5.0")
+        def high_version_tool() -> int:
+            return 5
+
+        parent = FastMCP("Parent")
+        parent.mount(child, "child")
+        parent.add_transform(VersionFilter(version_lt="3.0"))
+
+        # v5.0 is outside the filter range, so it should be hidden
+        tools = await parent.get_tools()
+        assert len(tools) == 0
+
+        # get_tool should also return None (respects filter)
+        import pytest
+
+        from fastmcp.exceptions import NotFoundError
+
+        with pytest.raises(NotFoundError):
+            await parent.get_tool("child_high_version_tool")
+
+
+class TestMountedRangeFiltering:
+    """Tests for version range filtering with mounted servers."""
+
+    async def test_mounted_lower_version_selected_by_filter(self):
+        """When parent has filter <2.0 and child has v1.0+v3.0, should get v1.0."""
+        from fastmcp.server.transforms import VersionFilter
+
+        child = FastMCP("Child")
+
+        @child.tool(version="1.0")
+        def calc() -> int:
+            return 1
+
+        @child.tool(version="3.0")
+        def calc() -> int:
+            return 3
+
+        parent = FastMCP("Parent")
+        parent.mount(child, "child")
+        parent.add_transform(VersionFilter(version_lt="2.0"))
+
+        # Should return v1.0 (the highest version that matches <2.0)
+        tool = await parent.get_tool("child_calc")
+        assert tool is not None
+        assert tool.version == "1.0"
+
+    async def test_explicit_version_honored_within_filter_range(self):
+        """Explicit version="1.0" request should work within filter range."""
+        from fastmcp.server.transforms import VersionFilter
+
+        child = FastMCP("Child")
+
+        @child.tool(version="1.0")
+        def calc() -> int:
+            return 1
+
+        @child.tool(version="2.0")
+        def calc() -> int:
+            return 2
+
+        @child.tool(version="3.0")
+        def calc() -> int:
+            return 3
+
+        parent = FastMCP("Parent")
+        parent.mount(child, "child")
+        parent.add_transform(VersionFilter(version_gte="1.0", version_lt="3.0"))
+
+        # Request specific version within range
+        tool = await parent.get_tool("child_calc", version="1.0")
+        assert tool is not None
+        assert tool.version == "1.0"
+
+        # Request version outside range should fail
+        import pytest
+
+        from fastmcp.exceptions import NotFoundError
+
+        with pytest.raises(NotFoundError):
+            await parent.get_tool("child_calc", version="3.0")
+
+
+class TestUnversionedExemption:
+    """Tests confirming unversioned components bypass version filters."""
+
+    async def test_unversioned_bypasses_version_filter(self):
+        """Unversioned components pass through any VersionFilter - by design."""
+        from fastmcp.server.transforms import VersionFilter
+
+        mcp = FastMCP()
+
+        @mcp.tool
+        def unversioned_tool() -> str:
+            return "unversioned"
+
+        @mcp.tool(version="5.0")
+        def versioned_tool() -> str:
+            return "v5"
+
+        # Filter that would exclude v5.0
+        mcp.add_transform(VersionFilter(version_lt="3.0"))
+
+        tools = await mcp.get_tools()
+        names = [t.name for t in tools]
+
+        # Unversioned passes through (exempt from filtering)
+        assert "unversioned_tool" in names
+        # Versioned is filtered out
+        assert "versioned_tool" not in names
+
+    async def test_unversioned_returned_for_exact_version_request(self):
+        """Requesting exact version of unversioned tool returns the tool."""
+        mcp = FastMCP()
+
+        @mcp.tool
+        def my_tool() -> str:
+            return "unversioned"
+
+        # Even with explicit version request, unversioned tool is returned
+        # (it's the only version that exists, and unversioned matches any spec)
+        tool = await mcp.get_tool("my_tool", version="1.0")
+        assert tool is not None
+        assert tool.version is None
+
+    async def test_unversioned_matches_any_version_spec(self):
+        """VersionSpec.matches(None) returns True for any spec."""
+        from fastmcp.utilities.versions import VersionSpec
+
+        # Unversioned matches exact version specs
+        assert VersionSpec(eq="1.0").matches(None) is True
+
+        # Unversioned matches range specs
+        assert VersionSpec(gte="1.0", lt="3.0").matches(None) is True
+
+        # Unversioned matches open specs
+        assert VersionSpec(lt="5.0").matches(None) is True
+        assert VersionSpec(gte="1.0").matches(None) is True
 
 
 class TestVersionValidation:

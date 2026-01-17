@@ -14,6 +14,7 @@ Examples:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from functools import total_ordering
 from typing import TYPE_CHECKING
 
@@ -21,6 +22,89 @@ from packaging.version import InvalidVersion, Version
 
 if TYPE_CHECKING:
     from fastmcp.utilities.components import FastMCPComponent
+
+
+@dataclass
+class VersionSpec:
+    """Specification for filtering components by version.
+
+    Used by transforms and providers to filter components to a specific
+    version or version range. Unversioned components (version=None) always
+    match any spec.
+
+    Args:
+        gte: If set, only versions >= this value match.
+        lt: If set, only versions < this value match.
+        eq: If set, only this exact version matches (gte/lt ignored).
+    """
+
+    gte: str | None = None
+    lt: str | None = None
+    eq: str | None = None
+
+    def matches(self, version: str | None) -> bool:
+        """Check if a version matches this spec.
+
+        Args:
+            version: The version to check, or None for unversioned.
+
+        Returns:
+            True if the version matches the spec.
+        """
+        if version is None:
+            # Unversioned components always match
+            return True
+
+        if self.eq is not None:
+            return version == self.eq
+
+        key = parse_version_key(version)
+
+        if self.gte is not None:
+            gte_key = parse_version_key(self.gte)
+            if key < gte_key:
+                return False
+
+        if self.lt is not None:
+            lt_key = parse_version_key(self.lt)
+            if not key < lt_key:
+                return False
+
+        return True
+
+    def intersect(self, other: VersionSpec | None) -> VersionSpec:
+        """Return a spec that satisfies both this spec and other.
+
+        Used by transforms to combine caller constraints with filter constraints.
+        For example, if a VersionFilter has lt="3.0" and caller requests eq="1.0",
+        the intersection validates "1.0" is in range and returns the exact spec.
+
+        Args:
+            other: Another spec to intersect with, or None.
+
+        Returns:
+            A VersionSpec that matches only versions satisfying both specs.
+        """
+        if other is None:
+            return self
+
+        if self.eq is not None:
+            # This spec wants exact - validate against other's range
+            if other.matches(self.eq):
+                return self
+            return VersionSpec(eq="__impossible__")
+
+        if other.eq is not None:
+            # Other wants exact - validate against our range
+            if self.matches(other.eq):
+                return other
+            return VersionSpec(eq="__impossible__")
+
+        # Both are ranges - take tighter bounds
+        return VersionSpec(
+            gte=max_version(self.gte, other.gte),
+            lt=min_version(self.lt, other.lt),
+        )
 
 
 @total_ordering
@@ -162,3 +246,37 @@ def is_version_greater(a: str | None, b: str | None) -> bool:
         True if a > b, False otherwise.
     """
     return compare_versions(a, b) > 0
+
+
+def max_version(a: str | None, b: str | None) -> str | None:
+    """Return the greater of two versions.
+
+    Args:
+        a: First version string (or None).
+        b: Second version string (or None).
+
+    Returns:
+        The greater version, or None if both are None.
+    """
+    if a is None:
+        return b
+    if b is None:
+        return a
+    return a if compare_versions(a, b) >= 0 else b
+
+
+def min_version(a: str | None, b: str | None) -> str | None:
+    """Return the lesser of two versions.
+
+    Args:
+        a: First version string (or None).
+        b: Second version string (or None).
+
+    Returns:
+        The lesser version, or None if both are None.
+    """
+    if a is None:
+        return b
+    if b is None:
+        return a
+    return a if compare_versions(a, b) <= 0 else b
