@@ -1791,7 +1791,11 @@ class FastMCP(Generic[LifespanResultT]):
                 try:
                     template = await self.get_resource_template(uri, version=version)
                 except NotFoundError:
-                    raise NotFoundError(f"Unknown resource: {uri!r}") from None
+                    if version is None:
+                        raise NotFoundError(f"Unknown resource: {uri!r}") from None
+                    raise NotFoundError(
+                        f"Unknown resource: {uri!r} version {version!r}"
+                    ) from None
                 span.set_attributes(template.get_span_attributes())
                 params = template.matches(uri)
                 assert params is not None
