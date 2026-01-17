@@ -27,13 +27,13 @@ def process(data: str) -> str:
 
 
 @components.tool(version="2.0")
-def process(data: str, mode: str = "upper") -> str:
+def process(data: str, mode: str = "upper") -> str:  # noqa: F811
     """Process data (v2 - with mode selection)."""
     return data.lower() if mode == "lower" else data.upper()
 
 
 @components.tool(version="3.0")
-def process(data: str, mode: str = "upper", repeat: int = 1) -> str:
+def process(data: str, mode: str = "upper", repeat: int = 1) -> str:  # noqa: F811
     """Process data (v3 - with repeat)."""
     result = data.lower() if mode == "lower" else data.upper()
     return result * repeat

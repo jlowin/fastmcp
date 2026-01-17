@@ -24,13 +24,15 @@ def charge(amount: int, currency: str = "USD") -> dict:
 
 
 @mcp.tool(version="1.1")
-def charge(amount: int, currency: str = "USD", idempotency_key: str | None = None) -> dict:
+def charge(  # noqa: F811
+    amount: int, currency: str = "USD", idempotency_key: str | None = None
+) -> dict:
     """Charge a payment (v1.1 - added idempotency)."""
     return {"status": "charged", "amount": amount, "idempotency_key": idempotency_key}
 
 
 @mcp.tool(version="2.0")
-def charge(
+def charge(  # noqa: F811
     amount: int,
     currency: str = "USD",
     idempotency_key: str | None = None,

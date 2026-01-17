@@ -28,7 +28,7 @@ def calculate(x: int, y: int) -> int:
 
 
 @mcp.tool(version="2.0")
-def calculate(x: int, y: int, z: int = 0) -> int:
+def calculate(x: int, y: int, z: int = 0) -> int:  # noqa: F811
     """Add two or three numbers (v2.0)."""
     return x + y + z
 
@@ -57,7 +57,7 @@ def summarize(text: str) -> str:
 
 
 @mcp.prompt(version="2.0")
-def summarize(text: str, style: str = "concise") -> str:
+def summarize(text: str, style: str = "concise") -> str:  # noqa: F811
     return f"Summarize in a {style} style: {text}"
 
 
@@ -75,7 +75,10 @@ async def main():
         for tool in tools:
             meta = tool.meta.get("fastmcp", {}) if tool.meta else {}
             table.add_row(
-                "Tool", tool.name, meta.get("version"), ", ".join(meta.get("versions", []))
+                "Tool",
+                tool.name,
+                meta.get("version"),
+                ", ".join(meta.get("versions", [])),
             )
 
         print(table)
@@ -85,7 +88,9 @@ async def main():
 
         r_default = await client.call_tool("calculate", {"x": 5, "y": 3})
         r_v1 = await client.call_tool("calculate", {"x": 5, "y": 3}, version="1.0")
-        r_v2 = await client.call_tool("calculate", {"x": 5, "y": 3, "z": 2}, version="2.0")
+        r_v2 = await client.call_tool(
+            "calculate", {"x": 5, "y": 3, "z": 2}, version="2.0"
+        )
 
         print(f"  calculate(5, 3)          -> {r_default.data}  (default: highest)")
         print(f"  calculate(5, 3) v1.0     -> {r_v1.data}")
