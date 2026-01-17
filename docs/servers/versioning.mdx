@@ -233,9 +233,7 @@ For generic MCP clients that don't have built-in version support, pass the versi
 ```
 </CodeGroup>
 
-The `_meta` field is stripped from arguments before they reach your function, so your component implementation never sees it. This convention allows version selection to work across any MCP client without requiring protocol changes.
-
-For resources, the same mechanism works through the MCP request's `_meta` field (which is part of the protocol's request params, not arguments). The FastMCP client handles this automatically when you pass the `version` parameter.
+The `_meta` field is part of the MCP request params, not arguments, so your component implementation never sees it. This convention allows version selection to work across any MCP client without requiring protocol changes. The FastMCP client handles this automatically when you pass the `version` parameter.
 
 ## Version Comparison
 

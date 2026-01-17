@@ -233,13 +233,13 @@ def add(x: int, y: int, z: int = 0) -> int:
 
 **Version visibility in meta:**
 
-List operations expose all available versions in the component's `_meta` field:
+List operations expose all available versions in the component's `meta` field:
 
 ```python
 tools = await client.list_tools()
-# Each tool's _meta includes:
-# - _meta.fastmcp.version: the version of this component ("2.0")
-# - _meta.fastmcp.versions: all available versions ["2.0", "1.0"]
+# Each tool's meta includes:
+# - meta["fastmcp"]["version"]: the version of this component ("2.0")
+# - meta["fastmcp"]["versions"]: all available versions ["2.0", "1.0"]
 ```
 
 **Retrieving and calling specific versions:**
