@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Annotated, Any, ClassVar, TypedDict
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, TypedDict, cast
 
 from mcp.types import Icon
 from pydantic import BeforeValidator, Field
@@ -20,6 +20,17 @@ T = TypeVar("T", default=Any)
 class FastMCPMeta(TypedDict, total=False):
     tags: list[str]
     version: str
+
+
+def get_fastmcp_metadata(meta: dict[str, Any] | None) -> FastMCPMeta:
+    """Extract FastMCP metadata from a component's meta dict.
+
+    Handles both the current `fastmcp` namespace and the legacy `_fastmcp`
+    namespace for compatibility with older FastMCP servers.
+    """
+    if not meta:
+        return {}
+    return cast(FastMCPMeta, meta.get("fastmcp") or meta.get("_fastmcp") or {})
 
 
 def _convert_set_default_none(maybe_set: set[T] | Sequence[T] | None) -> set[T]:
@@ -126,13 +137,12 @@ class FastMCPComponent(FastMCPBaseModel):
         base_key = self.make_key(self.name)
         return f"{base_key}@{self.version or ''}"
 
-    def get_meta(self) -> dict[str, Any] | None:
-        """
-        Get the meta information about the component.
+    def get_meta(self) -> dict[str, Any]:
+        """Get the meta information about the component.
 
-        A `fastmcp` key will always be included in the meta, containing a `tags`
-        field with the tags of the component, and optionally a `version` field
-        if the component has a version.
+        Returns a dict that always includes a `fastmcp` key containing:
+        - `tags`: sorted list of component tags
+        - `version`: component version (only if set)
         """
         meta = self.meta or {}
 
@@ -145,7 +155,7 @@ class FastMCPComponent(FastMCPBaseModel):
             fastmcp_meta = upstream_meta | fastmcp_meta
         meta["fastmcp"] = fastmcp_meta
 
-        return meta or None
+        return meta
 
     def __eq__(self, other: object) -> bool:
         if type(self) is not type(other):
