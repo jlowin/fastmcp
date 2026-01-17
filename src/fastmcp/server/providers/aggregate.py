@@ -31,10 +31,9 @@ class AggregateProvider(Provider):
     """Presents multiple providers as a single provider.
 
     Components are aggregated from all providers. For get_* operations,
-    providers are queried in parallel and the first non-None result is returned.
+    providers are queried in parallel and the highest version is returned.
 
     Errors from individual providers are logged and skipped (graceful degradation).
-    This matches the behavior of FastMCP's original provider iteration.
     """
 
     def __init__(self, providers: Sequence[Provider]) -> None:
