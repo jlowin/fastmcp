@@ -151,7 +151,9 @@ class FastMCPComponent(FastMCPBaseModel):
             fastmcp_meta["version"] = self.version
 
         # overwrite any existing fastmcp meta with keys from the new one
-        if upstream_meta := meta.get("fastmcp"):
+        if (upstream_meta := meta.get("fastmcp")) is not None:
+            if not isinstance(upstream_meta, dict):
+                raise TypeError("meta['fastmcp'] must be a dict")
             fastmcp_meta = upstream_meta | fastmcp_meta
         meta["fastmcp"] = fastmcp_meta
 
