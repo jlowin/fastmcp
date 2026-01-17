@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 from pydantic import AnyHttpUrl, ValidationError
 
@@ -11,6 +13,9 @@ from fastmcp.server.auth.cimd import (
     CIMDFetchError,
     CIMDValidationError,
 )
+
+# Standard public IP used for DNS mocking in tests
+TEST_PUBLIC_IP = "93.184.216.34"
 
 
 class TestCIMDDocument:
@@ -141,14 +146,28 @@ class TestCIMDFetcher:
 
 
 class TestCIMDFetcherHTTP:
-    """Tests for CIMDFetcher HTTP fetching (using httpx mock)."""
+    """Tests for CIMDFetcher HTTP fetching (using httpx mock).
+
+    Note: With SSRF protection and DNS pinning, HTTP requests go to the resolved IP
+    instead of the hostname. These tests mock DNS resolution to return a public IP
+    and configure httpx_mock to expect the IP-based URL.
+    """
 
     @pytest.fixture
     def fetcher(self):
         """Create a CIMDFetcher for testing."""
         return CIMDFetcher(cache_ttl=60)
 
-    async def test_fetch_success(self, fetcher: CIMDFetcher, httpx_mock):
+    @pytest.fixture
+    def mock_dns(self):
+        """Mock DNS resolution to return test public IP."""
+        with patch(
+            "fastmcp.server.auth.cimd._resolve_hostname",
+            return_value=[TEST_PUBLIC_IP],
+        ):
+            yield
+
+    async def test_fetch_success(self, fetcher: CIMDFetcher, httpx_mock, mock_dns):
         """Test successful CIMD document fetch."""
         url = "https://example.com/client.json"
         doc_data = {
@@ -158,9 +177,8 @@ class TestCIMDFetcherHTTP:
             "token_endpoint_auth_method": "none",
         }
 
-        # Mock HTTP request
+        # With DNS pinning, request goes to IP. Match any URL.
         httpx_mock.add_response(
-            url=url,
             json=doc_data,
             headers={
                 "content-type": "application/json",
@@ -172,7 +190,9 @@ class TestCIMDFetcherHTTP:
         assert str(doc.client_id) == url
         assert doc.client_name == "Test App"
 
-    async def test_fetch_client_id_mismatch(self, fetcher: CIMDFetcher, httpx_mock):
+    async def test_fetch_client_id_mismatch(
+        self, fetcher: CIMDFetcher, httpx_mock, mock_dns
+    ):
         """Test that client_id mismatch is rejected."""
         url = "https://example.com/client.json"
         doc_data = {
@@ -180,7 +200,6 @@ class TestCIMDFetcherHTTP:
             "client_name": "Test App",
         }
         httpx_mock.add_response(
-            url="https://example.com/client.json",
             json=doc_data,
             headers={"content-length": "100"},
         )
@@ -189,20 +208,19 @@ class TestCIMDFetcherHTTP:
             await fetcher.fetch(url)
         assert "mismatch" in str(exc_info.value).lower()
 
-    async def test_fetch_http_error(self, fetcher: CIMDFetcher, httpx_mock):
+    async def test_fetch_http_error(self, fetcher: CIMDFetcher, httpx_mock, mock_dns):
         """Test handling of HTTP errors."""
         url = "https://example.com/client.json"
-        httpx_mock.add_response(url="https://example.com/client.json", status_code=404)
+        httpx_mock.add_response(status_code=404)
 
         with pytest.raises(CIMDFetchError) as exc_info:
             await fetcher.fetch(url)
         assert "404" in str(exc_info.value)
 
-    async def test_fetch_invalid_json(self, fetcher: CIMDFetcher, httpx_mock):
+    async def test_fetch_invalid_json(self, fetcher: CIMDFetcher, httpx_mock, mock_dns):
         """Test handling of invalid JSON response."""
         url = "https://example.com/client.json"
         httpx_mock.add_response(
-            url="https://example.com/client.json",
             content=b"not json",
             headers={"content-length": "10"},
         )
@@ -211,7 +229,9 @@ class TestCIMDFetcherHTTP:
             await fetcher.fetch(url)
         assert "JSON" in str(exc_info.value)
 
-    async def test_fetch_invalid_document(self, fetcher: CIMDFetcher, httpx_mock):
+    async def test_fetch_invalid_document(
+        self, fetcher: CIMDFetcher, httpx_mock, mock_dns
+    ):
         """Test handling of invalid CIMD document."""
         url = "https://example.com/client.json"
         doc_data = {
@@ -219,7 +239,6 @@ class TestCIMDFetcherHTTP:
             "token_endpoint_auth_method": "client_secret_basic",  # Not allowed
         }
         httpx_mock.add_response(
-            url="https://example.com/client.json",
             json=doc_data,
             headers={"content-length": "100"},
         )
@@ -347,24 +366,27 @@ class TestCIMDAssertionValidator:
             ]
         }
 
-        httpx_mock.add_response(
-            url="https://example.com/.well-known/jwks.json", json=jwks
-        )
+        # Mock DNS resolution for SSRF-safe fetch
+        with patch(
+            "fastmcp.server.auth.ssrf.resolve_hostname",
+            return_value=[TEST_PUBLIC_IP],
+        ):
+            httpx_mock.add_response(json=jwks)
 
-        # Create valid assertion (use short lifetime for security compliance)
-        assertion = key_pair.create_token(
-            subject=client_id,
-            issuer=client_id,
-            audience=token_endpoint,
-            additional_claims={"jti": "unique-jti-123"},
-            expires_in_seconds=60,  # 1 minute (max allowed is 300s)
-            kid="test-key-1",
-        )
+            # Create valid assertion (use short lifetime for security compliance)
+            assertion = key_pair.create_token(
+                subject=client_id,
+                issuer=client_id,
+                audience=token_endpoint,
+                additional_claims={"jti": "unique-jti-123"},
+                expires_in_seconds=60,  # 1 minute (max allowed is 300s)
+                kid="test-key-1",
+            )
 
-        # Should validate successfully
-        assert await validator.validate_assertion(
-            assertion, client_id, token_endpoint, cimd_doc_with_jwks_uri
-        )
+            # Should validate successfully
+            assert await validator.validate_assertion(
+                assertion, client_id, token_endpoint, cimd_doc_with_jwks_uri
+            )
 
     async def test_valid_assertion_with_inline_jwks(
         self, validator, key_pair, cimd_doc_with_inline_jwks
@@ -550,6 +572,15 @@ class TestCIMDClientManager:
 
         return CIMDClientManager(enable_cimd=False)
 
+    @pytest.fixture
+    def mock_dns(self):
+        """Mock DNS resolution to return test public IP."""
+        with patch(
+            "fastmcp.server.auth.cimd._resolve_hostname",
+            return_value=[TEST_PUBLIC_IP],
+        ):
+            yield
+
     def test_is_cimd_client_id_enabled(self, manager):
         """Test CIMD URL detection when enabled."""
         assert manager.is_cimd_client_id("https://example.com/client.json")
@@ -560,7 +591,7 @@ class TestCIMDClientManager:
         assert not disabled_manager.is_cimd_client_id("https://example.com/client.json")
         assert not disabled_manager.is_cimd_client_id("regular-client-id")
 
-    async def test_get_client_success(self, manager, httpx_mock):
+    async def test_get_client_success(self, manager, httpx_mock, mock_dns):
         """Test successful CIMD client creation."""
         url = "https://example.com/client.json"
         doc_data = {
@@ -570,7 +601,6 @@ class TestCIMDClientManager:
             "token_endpoint_auth_method": "none",
         }
         httpx_mock.add_response(
-            url="https://example.com/client.json",
             json=doc_data,
             headers={"content-length": "200"},
         )
@@ -587,10 +617,10 @@ class TestCIMDClientManager:
         client = await disabled_manager.get_client("https://example.com/client.json")
         assert client is None
 
-    async def test_get_client_fetch_failure(self, manager, httpx_mock):
+    async def test_get_client_fetch_failure(self, manager, httpx_mock, mock_dns):
         """Test that get_client returns None on fetch failure."""
         url = "https://example.com/client.json"
-        httpx_mock.add_response(url="https://example.com/client.json", status_code=404)
+        httpx_mock.add_response(status_code=404)
 
         client = await manager.get_client(url)
         assert client is None

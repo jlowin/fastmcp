@@ -24,22 +24,32 @@ from urllib.parse import urlparse
 import httpx
 from pydantic import AnyHttpUrl, BaseModel, Field, field_validator
 
+from fastmcp.server.auth.ssrf import format_ip_for_url
 from fastmcp.utilities.logging import get_logger
 
 logger = get_logger(__name__)
 
 
 def _is_ip_allowed(ip_str: str) -> bool:
-    """Check if an IP address is allowed (not private/internal/dangerous).
+    """Check if an IP address is allowed (must be globally routable unicast).
 
     This is the core SSRF protection - it validates actual resolved IP addresses,
     not hostnames. This prevents DNS rebinding and IP obfuscation attacks.
+
+    Uses ip.is_global which catches:
+    - Private (10.x, 172.16-31.x, 192.168.x)
+    - Loopback (127.x, ::1)
+    - Link-local (169.254.x, fe80::) - includes AWS metadata!
+    - Reserved, unspecified
+    - RFC6598 Carrier-Grade NAT (100.64.0.0/10) - can point to internal networks
+
+    Additionally blocks multicast addresses (not caught by is_global).
 
     Args:
         ip_str: IP address string to check
 
     Returns:
-        True if the IP is allowed (public internet), False if blocked
+        True if the IP is allowed (public unicast internet), False if blocked
     """
     try:
         ip = ipaddress.ip_address(ip_str)
@@ -47,21 +57,15 @@ def _is_ip_allowed(ip_str: str) -> bool:
         # If we can't parse it as an IP, block it
         return False
 
-    # Block all dangerous IP categories
-    if ip.is_private:
-        return False
-    if ip.is_loopback:
-        return False
-    if ip.is_reserved:
-        return False
-    if ip.is_link_local:  # 169.254.x.x (AWS metadata!), fe80::/10
-        return False
-    if ip.is_multicast:
-        return False
-    if ip.is_unspecified:  # 0.0.0.0, ::
+    # Must be globally routable
+    if not ip.is_global:
         return False
 
-    # IPv6-specific checks
+    # Block multicast (not caught by is_global for some ranges)
+    if ip.is_multicast:
+        return False
+
+    # IPv6-specific checks for embedded IPv4 addresses
     if isinstance(ip, ipaddress.IPv6Address):
         # Block IPv4-mapped IPv6 addresses (::ffff:127.0.0.1)
         if ip.ipv4_mapped:
@@ -73,8 +77,7 @@ def _is_ip_allowed(ip_str: str) -> bool:
         if ip.teredo:
             # teredo returns (server, client) tuple
             server, client = ip.teredo
-            if not _is_ip_allowed(str(server)) or not _is_ip_allowed(str(client)):
-                return False
+            return _is_ip_allowed(str(server)) and _is_ip_allowed(str(client))
 
     return True
 
@@ -326,11 +329,12 @@ class CIMDFetcher:
 
         Security measures:
         1. HTTPS only (no HTTP)
-        2. DNS resolution with IP validation (prevents DNS rebinding)
-        3. Blocks private/loopback/link-local/multicast/reserved IPs
-        4. Response size limit (5KB, enforced via streaming)
-        5. Redirects disabled (prevents redirect-based SSRF)
-        6. Overall timeout (prevents slow-stream DoS)
+        2. DNS resolution with IP validation
+        3. DNS pinning - connects to validated IP directly (prevents rebinding TOCTOU)
+        4. Blocks private/loopback/link-local/multicast/reserved/RFC6598 IPs
+        5. Response size limit (5KB, enforced via streaming)
+        6. Redirects disabled (prevents redirect-based SSRF)
+        7. Overall timeout (prevents slow-stream DoS)
 
         Args:
             client_id_url: The URL to fetch (also the expected client_id)
@@ -346,7 +350,7 @@ class CIMDFetcher:
         start_time = time.monotonic()
 
         # Validate URL and resolve DNS with IP validation
-        _hostname, _port, resolved_ips = await self._validate_url_and_resolve(
+        hostname, port, resolved_ips = await self._validate_url_and_resolve(
             client_id_url
         )
 
@@ -356,6 +360,20 @@ class CIMDFetcher:
         # Calculate remaining time budget
         elapsed = time.monotonic() - start_time
         remaining_timeout = max(1.0, self.FETCH_TIMEOUT - elapsed)
+
+        # DNS Pinning: Connect to validated IP directly to prevent rebinding TOCTOU
+        # This ensures httpx can't re-resolve DNS to a different (malicious) IP
+        pinned_ip = resolved_ips[0]
+        parsed = urlparse(client_id_url)
+        path = parsed.path + ("?" + parsed.query if parsed.query else "")
+        pinned_url = f"https://{format_ip_for_url(pinned_ip)}:{port}{path}"
+
+        logger.debug(
+            "DNS pinning: %s -> %s (connecting to %s)",
+            client_id_url,
+            pinned_url,
+            pinned_ip,
+        )
 
         # Fetch document with streaming to prevent memory exhaustion
         try:
@@ -368,8 +386,16 @@ class CIMDFetcher:
                         pool=min(self.timeout, remaining_timeout),
                     ),
                     follow_redirects=False,  # Disable redirects to prevent SSRF bypass
+                    verify=True,  # Verify TLS against original hostname via SNI
                 ) as client,
-                client.stream("GET", client_id_url) as response,
+                client.stream(
+                    "GET",
+                    pinned_url,
+                    headers={"Host": hostname},  # Set Host header for virtual hosting
+                    extensions={
+                        "sni_hostname": hostname
+                    },  # TLS SNI for cert validation
+                ) as response,
             ):
                 # Check if we've exceeded overall timeout
                 if time.monotonic() - start_time > self.FETCH_TIMEOUT:

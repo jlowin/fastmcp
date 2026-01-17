@@ -476,3 +476,247 @@ class TestSSRFPortHandling:
             # Should succeed without any port-related warnings
             doc = await fetcher.fetch("https://example.com/client.json")
             assert str(doc.client_id) == "https://example.com/client.json"
+
+
+class TestRFC6598CarrierGradeNAT:
+    """Tests for RFC6598 Carrier-Grade NAT (100.64.0.0/10) blocking."""
+
+    def test_rfc6598_cgnat_blocked(self):
+        """RFC6598 Carrier-Grade NAT addresses should be blocked."""
+        # These are in the 100.64.0.0/10 range used for carrier-grade NAT
+        # They can point to internal infrastructure and should be blocked
+        assert _is_ip_allowed("100.64.0.1") is False
+        assert _is_ip_allowed("100.64.255.255") is False
+        assert _is_ip_allowed("100.100.100.100") is False
+        assert _is_ip_allowed("100.127.255.255") is False
+
+    def test_public_ips_in_100_range_outside_cgnat_allowed(self):
+        """IPs in 100.x range outside CGNAT (100.64-127) should be allowed."""
+        # 100.0.0.0 - 100.63.255.255 are normal public IPs
+        assert _is_ip_allowed("100.0.0.1") is True
+        assert _is_ip_allowed("100.63.255.255") is True
+        # 100.128.0.0 - 100.255.255.255 are normal public IPs
+        assert _is_ip_allowed("100.128.0.1") is True
+
+    async def test_dns_resolving_to_rfc6598_rejected(self):
+        """Hostnames resolving to RFC6598 addresses should be rejected."""
+        fetcher = CIMDFetcher()
+
+        with patch(
+            "fastmcp.server.auth.cimd._resolve_hostname",
+            return_value=["100.64.0.1"],
+        ):
+            with pytest.raises(CIMDValidationError, match="blocked IP"):
+                await fetcher.fetch("https://cgnat.example.com/client.json")
+
+
+class TestDNSPinning:
+    """Tests for DNS pinning to prevent TOCTOU attacks."""
+
+    async def test_connects_to_pinned_ip(self):
+        """Verify that httpx connects to the pinned IP, not re-resolving DNS."""
+        fetcher = CIMDFetcher()
+
+        # Resolve to a public IP
+        resolved_ip = "93.184.216.34"
+
+        with (
+            patch(
+                "fastmcp.server.auth.cimd._resolve_hostname",
+                return_value=[resolved_ip],
+            ),
+            patch("httpx.AsyncClient") as mock_client_class,
+        ):
+            # Create valid CIMD document
+            doc_content = b"""{
+                "client_id": "https://example.com/client.json",
+                "grant_types": ["authorization_code"],
+                "token_endpoint_auth_method": "none"
+            }"""
+
+            mock_stream = MagicMock()
+            mock_stream.status_code = 200
+            mock_stream.headers = {"content-length": str(len(doc_content))}
+            mock_stream.__aenter__ = AsyncMock(return_value=mock_stream)
+            mock_stream.__aexit__ = AsyncMock(return_value=None)
+
+            async def aiter_bytes():
+                yield doc_content
+
+            mock_stream.aiter_bytes = aiter_bytes
+
+            mock_client = AsyncMock()
+            mock_client.stream = MagicMock(return_value=mock_stream)
+            mock_client.__aenter__.return_value = mock_client
+            mock_client_class.return_value = mock_client
+
+            await fetcher.fetch("https://example.com/client.json")
+
+            # Verify the URL passed to stream() contains the pinned IP
+            mock_client.stream.assert_called_once()
+            call_args = mock_client.stream.call_args
+            url_called = call_args[0][1]  # Second positional arg is the URL
+
+            # The URL should be using the pinned IP
+            assert resolved_ip in url_called, (
+                f"Expected pinned IP {resolved_ip} in URL, got {url_called}"
+            )
+
+    async def test_dns_pinning_sets_host_header(self):
+        """Verify Host header is set to original hostname when connecting to IP."""
+        fetcher = CIMDFetcher()
+
+        resolved_ip = "93.184.216.34"
+        original_host = "example.com"
+
+        with (
+            patch(
+                "fastmcp.server.auth.cimd._resolve_hostname",
+                return_value=[resolved_ip],
+            ),
+            patch("httpx.AsyncClient") as mock_client_class,
+        ):
+            doc_content = b"""{
+                "client_id": "https://example.com/client.json",
+                "grant_types": ["authorization_code"],
+                "token_endpoint_auth_method": "none"
+            }"""
+
+            mock_stream = MagicMock()
+            mock_stream.status_code = 200
+            mock_stream.headers = {"content-length": str(len(doc_content))}
+            mock_stream.__aenter__ = AsyncMock(return_value=mock_stream)
+            mock_stream.__aexit__ = AsyncMock(return_value=None)
+
+            async def aiter_bytes():
+                yield doc_content
+
+            mock_stream.aiter_bytes = aiter_bytes
+
+            mock_client = AsyncMock()
+            mock_client.stream = MagicMock(return_value=mock_stream)
+            mock_client.__aenter__.return_value = mock_client
+            mock_client_class.return_value = mock_client
+
+            await fetcher.fetch(f"https://{original_host}/client.json")
+
+            # Verify Host header is set to original hostname
+            call_kwargs = mock_client.stream.call_args[1]
+            headers = call_kwargs.get("headers", {})
+            assert headers.get("Host") == original_host
+
+    async def test_dns_pinning_sets_sni_hostname(self):
+        """Verify SNI hostname extension is set for TLS verification."""
+        fetcher = CIMDFetcher()
+
+        resolved_ip = "93.184.216.34"
+        original_host = "example.com"
+
+        with (
+            patch(
+                "fastmcp.server.auth.cimd._resolve_hostname",
+                return_value=[resolved_ip],
+            ),
+            patch("httpx.AsyncClient") as mock_client_class,
+        ):
+            doc_content = b"""{
+                "client_id": "https://example.com/client.json",
+                "grant_types": ["authorization_code"],
+                "token_endpoint_auth_method": "none"
+            }"""
+
+            mock_stream = MagicMock()
+            mock_stream.status_code = 200
+            mock_stream.headers = {"content-length": str(len(doc_content))}
+            mock_stream.__aenter__ = AsyncMock(return_value=mock_stream)
+            mock_stream.__aexit__ = AsyncMock(return_value=None)
+
+            async def aiter_bytes():
+                yield doc_content
+
+            mock_stream.aiter_bytes = aiter_bytes
+
+            mock_client = AsyncMock()
+            mock_client.stream = MagicMock(return_value=mock_stream)
+            mock_client.__aenter__.return_value = mock_client
+            mock_client_class.return_value = mock_client
+
+            await fetcher.fetch(f"https://{original_host}/client.json")
+
+            # Verify SNI hostname extension is set
+            call_kwargs = mock_client.stream.call_args[1]
+            extensions = call_kwargs.get("extensions", {})
+            assert extensions.get("sni_hostname") == original_host
+
+
+class TestIPv6URLFormatting:
+    """Tests for proper IPv6 address bracketing in URLs."""
+
+    def test_format_ip_for_url_ipv4(self):
+        """IPv4 addresses should not be bracketed."""
+        from fastmcp.server.auth.ssrf import format_ip_for_url
+
+        assert format_ip_for_url("8.8.8.8") == "8.8.8.8"
+        assert format_ip_for_url("192.168.1.1") == "192.168.1.1"
+
+    def test_format_ip_for_url_ipv6(self):
+        """IPv6 addresses should be bracketed for URL use."""
+        from fastmcp.server.auth.ssrf import format_ip_for_url
+
+        assert format_ip_for_url("2001:db8::1") == "[2001:db8::1]"
+        assert format_ip_for_url("::1") == "[::1]"
+        assert format_ip_for_url("fe80::1") == "[fe80::1]"
+
+    def test_format_ip_for_url_invalid(self):
+        """Invalid IP strings should be returned unchanged."""
+        from fastmcp.server.auth.ssrf import format_ip_for_url
+
+        assert format_ip_for_url("not-an-ip") == "not-an-ip"
+        assert format_ip_for_url("") == ""
+
+    async def test_ipv6_pinned_url_is_valid(self):
+        """Verify IPv6 addresses are properly bracketed in pinned URLs."""
+        fetcher = CIMDFetcher()
+
+        # Use a public IPv6 address (Google DNS)
+        resolved_ipv6 = "2001:4860:4860::8888"
+
+        with (
+            patch(
+                "fastmcp.server.auth.cimd._resolve_hostname",
+                return_value=[resolved_ipv6],
+            ),
+            patch("httpx.AsyncClient") as mock_client_class,
+        ):
+            doc_content = b"""{
+                "client_id": "https://example.com/client.json",
+                "grant_types": ["authorization_code"],
+                "token_endpoint_auth_method": "none"
+            }"""
+
+            mock_stream = MagicMock()
+            mock_stream.status_code = 200
+            mock_stream.headers = {"content-length": str(len(doc_content))}
+            mock_stream.__aenter__ = AsyncMock(return_value=mock_stream)
+            mock_stream.__aexit__ = AsyncMock(return_value=None)
+
+            async def aiter_bytes():
+                yield doc_content
+
+            mock_stream.aiter_bytes = aiter_bytes
+
+            mock_client = AsyncMock()
+            mock_client.stream = MagicMock(return_value=mock_stream)
+            mock_client.__aenter__.return_value = mock_client
+            mock_client_class.return_value = mock_client
+
+            await fetcher.fetch("https://example.com/client.json")
+
+            # Verify the URL contains bracketed IPv6 address
+            call_args = mock_client.stream.call_args
+            url_called = call_args[0][1]
+
+            # IPv6 should be bracketed: https://[2001:4860:4860::8888]:443/path
+            assert f"[{resolved_ipv6}]" in url_called, (
+                f"Expected bracketed IPv6 [{resolved_ipv6}] in URL, got {url_called}"
+            )

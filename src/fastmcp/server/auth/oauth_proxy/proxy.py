@@ -225,7 +225,7 @@ class OAuthProxyClient(OAuthClientInformationFull):
 
     allowed_redirect_uri_patterns: list[str] | None = Field(default=None)
     client_name: str | None = Field(default=None)
-    cimd_document: CIMDDocument | None = Field(default=None, exclude=True)
+    cimd_document: CIMDDocument | None = Field(default=None)
 
     def validate_redirect_uri(self, redirect_uri: AnyUrl | None) -> AnyUrl:
         """Validate redirect URI against allowed patterns.
@@ -1863,6 +1863,46 @@ class OAuthProxy(OAuthProvider):
                         methods=["GET", "POST"],
                     )
                 )
+            # Replace /token endpoint with one that supports private_key_jwt
+            elif (
+                isinstance(route, Route)
+                and route.path == "/token"
+                and route.methods is not None
+                and "POST" in route.methods
+            ):
+                # Import here to avoid circular dependency
+                from mcp.server.auth.routes import cors_middleware
+
+                from fastmcp.server.auth.auth import (
+                    PrivateKeyJWTClientAuthenticator,
+                    TokenHandler,
+                )
+
+                # Build token endpoint URL for audience validation
+                token_endpoint_url = f"{self.base_url}/token"
+
+                # Create authenticator with private_key_jwt support
+                authenticator = PrivateKeyJWTClientAuthenticator(
+                    provider=self,
+                    cimd_manager=self._cimd,
+                    token_endpoint_url=token_endpoint_url,
+                )
+
+                # Create token handler with our custom authenticator
+                token_handler = TokenHandler(
+                    provider=self,
+                    client_authenticator=authenticator,
+                )
+
+                custom_routes.append(
+                    Route(
+                        path="/token",
+                        endpoint=cors_middleware(
+                            token_handler.handle, ["POST", "OPTIONS"]
+                        ),
+                        methods=["POST", "OPTIONS"],
+                    )
+                )
             # Wrap metadata endpoint to add CIMD support field
             elif (
                 isinstance(route, Route)
@@ -1883,26 +1923,80 @@ class OAuthProxy(OAuthProvider):
                         from starlette.responses import JSONResponse
 
                         body_parts = []
+                        original_status = 200
+                        original_headers: dict[str, str] = {}
+
+                        # Headers we want to preserve from the original response
+                        preserve_headers = {
+                            "cache-control",
+                            "access-control-allow-origin",
+                            "access-control-allow-methods",
+                            "access-control-allow-headers",
+                            "access-control-max-age",
+                            "access-control-expose-headers",
+                            "vary",
+                        }
 
                         async def receive():
                             return {"type": "http.request", "body": b""}
 
                         async def send(message):
-                            if message["type"] == "http.response.body":
+                            nonlocal original_status, original_headers
+                            if message["type"] == "http.response.start":
+                                original_status = message.get("status", 200)
+                                headers = message.get("headers", [])
+                                for key, value in headers:
+                                    key_str = (
+                                        key.decode() if isinstance(key, bytes) else key
+                                    )
+                                    value_str = (
+                                        value.decode()
+                                        if isinstance(value, bytes)
+                                        else value
+                                    )
+                                    if key_str.lower() in preserve_headers:
+                                        original_headers[key_str] = value_str
+                            elif message["type"] == "http.response.body":
                                 body_parts.append(message.get("body", b""))
 
                         await endpoint(request.scope, receive, send)
 
                         # Combine body parts
                         body = b"".join(body_parts)
-                        metadata = json.loads(body)
+
+                        # For non-200 responses, pass through raw body without modification
+                        # This handles error pages, HTML responses from middleware, etc.
+                        if original_status != 200:
+                            from starlette.responses import Response
+
+                            return Response(
+                                content=body,
+                                status_code=original_status,
+                                headers=original_headers,
+                            )
+
+                        # Try to parse as JSON; if it fails, pass through raw body
+                        try:
+                            metadata = json.loads(body)
+                        except (json.JSONDecodeError, ValueError):
+                            from starlette.responses import Response
+
+                            return Response(
+                                content=body,
+                                status_code=original_status,
+                                headers=original_headers,
+                            )
 
                         # Add CIMD field
                         metadata["client_id_metadata_document_supported"] = (
                             self._cimd.enabled
                         )
 
-                        return JSONResponse(metadata)
+                        return JSONResponse(
+                            metadata,
+                            status_code=original_status,
+                            headers=original_headers,
+                        )
 
                     return metadata_with_cimd
 
