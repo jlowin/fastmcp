@@ -8,6 +8,7 @@ from mcp.types import TextContent
 from fastmcp import FastMCP
 from fastmcp.utilities.versions import (
     VersionKey,
+    VersionSpec,
     compare_versions,
     is_version_greater,
 )
@@ -377,7 +378,7 @@ class TestMountedServerVersioning:
         assert tool.version == "2.0"
 
         # Get specific version
-        tool_v1 = await parent.get_tool("child_calc", version="1.0")
+        tool_v1 = await parent.get_tool("child_calc", VersionSpec(eq="1.0"))
         assert tool_v1 is not None
         assert tool_v1.version == "1.0"
 
@@ -482,18 +483,13 @@ class TestVersionFilter:
         assert len(tools) == 1
         assert tools[0].version == "3.0"
 
-        # Can request specific versions in range
-        tool_v2 = await mcp.get_tool("add", version="2.0")
+        # Can request specific versions in range (use get_tool to apply transforms)
+        tool_v2 = await mcp.get_tool("add", VersionSpec(eq="2.0"))
         assert tool_v2 is not None
         assert tool_v2.version == "2.0"
 
-        # Cannot request version outside range
-        import pytest
-
-        from fastmcp.exceptions import NotFoundError
-
-        with pytest.raises(NotFoundError):
-            await mcp.get_tool("add", version="1.0")
+        # Cannot request version outside range - returns None
+        assert await mcp.get_tool("add", VersionSpec(eq="1.0")) is None
 
     async def test_version_range(self):
         """VersionFilter(version_gte='2.0', version_lt='3.0') shows only v2.x."""
@@ -524,21 +520,14 @@ class TestVersionFilter:
         assert len(tools) == 1
         assert tools[0].version == "2.5"
 
-        # Can request specific versions in range
-        tool_v2 = await mcp.get_tool("calc", version="2.0")
+        # Can request specific versions in range (use get_tool to apply transforms)
+        tool_v2 = await mcp.get_tool("calc", VersionSpec(eq="2.0"))
         assert tool_v2 is not None
         assert tool_v2.version == "2.0"
 
-        # Versions outside range are not accessible
-        import pytest
-
-        from fastmcp.exceptions import NotFoundError
-
-        with pytest.raises(NotFoundError):
-            await mcp.get_tool("calc", version="1.0")
-
-        with pytest.raises(NotFoundError):
-            await mcp.get_tool("calc", version="3.0")
+        # Versions outside range are not accessible - return None
+        assert await mcp.get_tool("calc", VersionSpec(eq="1.0")) is None
+        assert await mcp.get_tool("calc", VersionSpec(eq="3.0")) is None
 
     async def test_unversioned_always_passes(self):
         """Unversioned components pass through any filter."""
@@ -588,10 +577,8 @@ class TestVersionFilter:
         assert tools[0].version == "2025-01-01"
 
     async def test_get_tool_respects_filter(self):
-        """get_tool() raises NotFoundError if highest version is filtered out."""
-        import pytest
+        """get_tool() returns None if highest version is filtered out."""
 
-        from fastmcp.exceptions import NotFoundError
         from fastmcp.server.transforms import VersionFilter
 
         mcp = FastMCP()
@@ -602,9 +589,8 @@ class TestVersionFilter:
 
         mcp.add_transform(VersionFilter(version_lt="3.0"))
 
-        # Tool exists but is filtered out
-        with pytest.raises(NotFoundError):
-            await mcp.get_tool("only_v5")
+        # Tool exists but is filtered out - returns None (use get_tool to apply transforms)
+        assert await mcp.get_tool("only_v5") is None
 
     async def test_must_specify_at_least_one(self):
         """VersionFilter() with no args raises ValueError."""
@@ -845,13 +831,8 @@ class TestMountedVersionFiltering:
         tools = await parent.get_tools()
         assert len(tools) == 0
 
-        # get_tool should also return None (respects filter)
-        import pytest
-
-        from fastmcp.exceptions import NotFoundError
-
-        with pytest.raises(NotFoundError):
-            await parent.get_tool("child_high_version_tool")
+        # get_tool should also return None (respects filter, applies transforms)
+        assert await parent.get_tool("child_high_version_tool") is None
 
 
 class TestMountedRangeFiltering:
@@ -876,6 +857,7 @@ class TestMountedRangeFiltering:
         parent.add_transform(VersionFilter(version_lt="2.0"))
 
         # Should return v1.0 (the highest version that matches <2.0)
+        # Use get_tool to apply transforms
         tool = await parent.get_tool("child_calc")
         assert tool is not None
         assert tool.version == "1.0"
@@ -902,18 +884,14 @@ class TestMountedRangeFiltering:
         parent.mount(child, "child")
         parent.add_transform(VersionFilter(version_gte="1.0", version_lt="3.0"))
 
-        # Request specific version within range
-        tool = await parent.get_tool("child_calc", version="1.0")
+        # Request specific version within range (use get_tool to apply transforms)
+        tool = await parent.get_tool("child_calc", VersionSpec(eq="1.0"))
         assert tool is not None
         assert tool.version == "1.0"
 
-        # Request version outside range should fail
-        import pytest
-
-        from fastmcp.exceptions import NotFoundError
-
-        with pytest.raises(NotFoundError):
-            await parent.get_tool("child_calc", version="3.0")
+        # Request version outside range should return None
+        result = await parent.get_tool("child_calc", VersionSpec(eq="3.0"))
+        assert result is None
 
 
 class TestUnversionedExemption:
@@ -954,7 +932,7 @@ class TestUnversionedExemption:
 
         # Even with explicit version request, unversioned tool is returned
         # (it's the only version that exists, and unversioned matches any spec)
-        tool = await mcp.get_tool("my_tool", version="1.0")
+        tool = await mcp.get_tool("my_tool", VersionSpec(eq="1.0"))
         assert tool is not None
         assert tool.version is None
 
@@ -988,3 +966,270 @@ class TestVersionValidation:
             @mcp.tool(version="1.0@beta")
             def my_tool() -> str:
                 return "test"
+
+
+class TestVersionMetadata:
+    """Tests for version metadata exposure in list operations."""
+
+    async def test_tool_versions_in_meta(self):
+        """List tools should include versions list in meta."""
+        mcp = FastMCP()
+
+        @mcp.tool(version="1.0")
+        def add(x: int, y: int) -> int:  # noqa: F811
+            return x + y
+
+        @mcp.tool(version="2.0")
+        def add(x: int, y: int) -> int:  # noqa: F811
+            return x + y
+
+        tools = await mcp.get_tools()
+        assert len(tools) == 1
+
+        tool = tools[0]
+        meta = tool.get_meta()
+        assert meta["fastmcp"]["version"] == "2.0"
+        assert meta["fastmcp"]["versions"] == ["2.0", "1.0"]
+
+    async def test_resource_versions_in_meta(self):
+        """List resources should include versions list in meta."""
+        mcp = FastMCP()
+
+        @mcp.resource("data://config", version="1.0")
+        def config_v1() -> str:  # noqa: F811
+            return "v1"
+
+        @mcp.resource("data://config", version="2.0")
+        def config_v2() -> str:  # noqa: F811
+            return "v2"
+
+        resources = await mcp.get_resources()
+        assert len(resources) == 1
+
+        resource = resources[0]
+        meta = resource.get_meta()
+        assert meta["fastmcp"]["version"] == "2.0"
+        assert meta["fastmcp"]["versions"] == ["2.0", "1.0"]
+
+    async def test_prompt_versions_in_meta(self):
+        """List prompts should include versions list in meta."""
+        mcp = FastMCP()
+
+        @mcp.prompt(version="1.0")
+        def greet() -> str:  # noqa: F811
+            return "Hello v1"
+
+        @mcp.prompt(version="2.0")
+        def greet() -> str:  # noqa: F811
+            return "Hello v2"
+
+        prompts = await mcp.get_prompts()
+        assert len(prompts) == 1
+
+        prompt = prompts[0]
+        meta = prompt.get_meta()
+        assert meta["fastmcp"]["version"] == "2.0"
+        assert meta["fastmcp"]["versions"] == ["2.0", "1.0"]
+
+    async def test_unversioned_no_versions_list(self):
+        """Unversioned components should not have versions list in meta."""
+        mcp = FastMCP()
+
+        @mcp.tool
+        def simple() -> str:
+            return "simple"
+
+        tools = await mcp.get_tools()
+        assert len(tools) == 1
+
+        tool = tools[0]
+        meta = tool.get_meta()
+        assert "versions" not in meta.get("fastmcp", {})
+
+
+class TestVersionedCalls:
+    """Tests for calling specific component versions."""
+
+    async def test_call_tool_with_version(self):
+        """call_tool should use specified version."""
+        mcp = FastMCP()
+
+        @mcp.tool(version="1.0")
+        def calculate(x: int, y: int) -> int:  # noqa: F811
+            return x + y
+
+        @mcp.tool(version="2.0")
+        def calculate(x: int, y: int) -> int:  # noqa: F811
+            return x * y
+
+        # Default: highest version (2.0, multiplication)
+        result = await mcp.call_tool("calculate", {"x": 3, "y": 4})
+        assert result.structured_content is not None
+        assert result.structured_content["result"] == 12
+
+        # Explicit v1.0 (addition)
+        result = await mcp.call_tool(
+            "calculate", {"x": 3, "y": 4}, version=VersionSpec(eq="1.0")
+        )
+        assert result.structured_content is not None
+        assert result.structured_content["result"] == 7
+
+        # Explicit v2.0 (multiplication)
+        result = await mcp.call_tool(
+            "calculate", {"x": 3, "y": 4}, version=VersionSpec(eq="2.0")
+        )
+        assert result.structured_content is not None
+        assert result.structured_content["result"] == 12
+
+    async def test_read_resource_with_version(self):
+        """read_resource should use specified version."""
+        mcp = FastMCP()
+
+        @mcp.resource("data://config", version="1.0")
+        def config() -> str:  # noqa: F811
+            return "config v1"
+
+        @mcp.resource("data://config", version="2.0")
+        def config() -> str:  # noqa: F811
+            return "config v2"
+
+        # Default: highest version
+        result = await mcp.read_resource("data://config")
+        assert result.contents[0].content == "config v2"
+
+        # Explicit v1.0
+        result = await mcp.read_resource("data://config", version=VersionSpec(eq="1.0"))
+        assert result.contents[0].content == "config v1"
+
+    async def test_render_prompt_with_version(self):
+        """render_prompt should use specified version."""
+        mcp = FastMCP()
+
+        @mcp.prompt(version="1.0")
+        def greet() -> str:  # noqa: F811
+            return "Hello from v1"
+
+        @mcp.prompt(version="2.0")
+        def greet() -> str:  # noqa: F811
+            return "Hello from v2"
+
+        # Default: highest version
+        result = await mcp.render_prompt("greet")
+        content = result.messages[0].content
+        assert isinstance(content, TextContent) and content.text == "Hello from v2"
+
+        # Explicit v1.0
+        result = await mcp.render_prompt("greet", version=VersionSpec(eq="1.0"))
+        content = result.messages[0].content
+        assert isinstance(content, TextContent) and content.text == "Hello from v1"
+
+    async def test_call_tool_invalid_version_not_found(self):
+        """Calling with non-existent version should raise NotFoundError."""
+        import pytest
+
+        from fastmcp.exceptions import NotFoundError
+
+        mcp = FastMCP()
+
+        @mcp.tool(version="1.0")
+        def mytool() -> str:
+            return "v1"
+
+        with pytest.raises(NotFoundError):
+            await mcp.call_tool("mytool", {}, version=VersionSpec(eq="999.0"))
+
+
+class TestClientVersionSelection:
+    """Tests for client-side version selection via the version parameter.
+
+    Version selection flows through request-level _meta, not arguments.
+    """
+
+    import pytest
+
+    @pytest.mark.parametrize(
+        "version,expected",
+        [
+            (None, 10),  # Default: highest version (2.0) -> 5 * 2
+            ("1.0", 6),  # v1.0 -> 5 + 1
+            ("2.0", 10),  # v2.0 -> 5 * 2
+        ],
+    )
+    async def test_call_tool_version_selection(
+        self, version: str | None, expected: int
+    ):
+        """Client.call_tool routes to correct version via request meta."""
+        from fastmcp import Client
+
+        mcp = FastMCP()
+
+        @mcp.tool(version="1.0")
+        def calc(x: int) -> int:  # noqa: F811
+            return x + 1
+
+        @mcp.tool(version="2.0")
+        def calc(x: int) -> int:  # noqa: F811
+            return x * 2
+
+        async with Client(mcp) as client:
+            result = await client.call_tool("calc", {"x": 5}, version=version)
+            assert result.data == expected
+
+    @pytest.mark.parametrize(
+        "version,expected",
+        [
+            (None, "Hello world from v2"),  # Default: highest version
+            ("1.0", "Hello world from v1"),
+            ("2.0", "Hello world from v2"),
+        ],
+    )
+    async def test_get_prompt_version_selection(
+        self, version: str | None, expected: str
+    ):
+        """Client.get_prompt routes to correct version via request meta."""
+        from fastmcp import Client
+
+        mcp = FastMCP()
+
+        @mcp.prompt(version="1.0")
+        def greet(name: str) -> str:  # noqa: F811
+            return f"Hello {name} from v1"
+
+        @mcp.prompt(version="2.0")
+        def greet(name: str) -> str:  # noqa: F811
+            return f"Hello {name} from v2"
+
+        async with Client(mcp) as client:
+            result = await client.get_prompt(
+                "greet", {"name": "world"}, version=version
+            )
+            content = result.messages[0].content
+            assert isinstance(content, TextContent) and content.text == expected
+
+    @pytest.mark.parametrize(
+        "version,expected",
+        [
+            (None, "v2 data"),  # Default: highest version
+            ("1.0", "v1 data"),
+            ("2.0", "v2 data"),
+        ],
+    )
+    async def test_read_resource_version_selection(
+        self, version: str | None, expected: str
+    ):
+        """Client.read_resource routes to correct version via request meta."""
+        from fastmcp import Client
+
+        mcp = FastMCP()
+
+        @mcp.resource("data://info", version="1.0")
+        def info_v1() -> str:  # noqa: F811
+            return "v1 data"
+
+        @mcp.resource("data://info", version="2.0")
+        def info_v2() -> str:  # noqa: F811
+            return "v2 data"
+
+        async with Client(mcp) as client:
+            result = await client.read_resource("data://info", version=version)
+            assert result[0].text == expected  # type: ignore[union-attr]

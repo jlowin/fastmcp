@@ -14,11 +14,11 @@ Example:
             super().__init__()
             self.db = Database(db_url)
 
-        async def list_tools(self) -> list[Tool]:
+        async def _list_tools(self) -> list[Tool]:
             rows = await self.db.fetch("SELECT * FROM tools")
             return [self._make_tool(row) for row in rows]
 
-        async def get_tool(self, name: str) -> Tool | None:
+        async def _get_tool(self, name: str) -> Tool | None:
             row = await self.db.fetchone("SELECT * FROM tools WHERE name = ?", name)
             return self._make_tool(row) if row else None
 
@@ -65,12 +65,16 @@ class Provider:
     """
 
     def __init__(self) -> None:
-        # Visibility is the first (innermost) transform - closest to the base provider
         self._visibility = Visibility()
-        self._transforms: list[Transform] = [self._visibility]
+        self._transforms: list[Transform] = []
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}()"
+
+    @property
+    def transforms(self) -> list[Transform]:
+        """All transforms including visibility (applied last/outermost)."""
+        return [*self._transforms, self._visibility]
 
     def add_transform(self, transform: Transform) -> None:
         """Add a transform to this provider.
@@ -96,7 +100,7 @@ class Provider:
     # Internal transform chain building
     # -------------------------------------------------------------------------
 
-    async def _list_tools(self) -> Sequence[Tool]:
+    async def list_tools(self) -> Sequence[Tool]:
         """List tools with all transforms applied.
 
         Builds a middleware chain: base → transforms (in order).
@@ -107,15 +111,15 @@ class Provider:
         """
 
         async def base() -> Sequence[Tool]:
-            return await self.list_tools()
+            return await self._list_tools()
 
         chain = base
-        for transform in self._transforms:
+        for transform in self.transforms:
             chain = partial(transform.list_tools, call_next=chain)
 
         return await chain()
 
-    async def _get_tool(
+    async def get_tool(
         self, name: str, version: VersionSpec | None = None
     ) -> Tool | None:
         """Get tool by transformed name with all transforms applied.
@@ -129,27 +133,27 @@ class Provider:
         """
 
         async def base(n: str, version: VersionSpec | None = None) -> Tool | None:
-            return await self.get_tool(n, version)
+            return await self._get_tool(n, version)
 
         chain = base
-        for transform in self._transforms:
+        for transform in self.transforms:
             chain = partial(transform.get_tool, call_next=chain)
 
         return await chain(name, version=version)
 
-    async def _list_resources(self) -> Sequence[Resource]:
+    async def list_resources(self) -> Sequence[Resource]:
         """List resources with all transforms applied."""
 
         async def base() -> Sequence[Resource]:
-            return await self.list_resources()
+            return await self._list_resources()
 
         chain = base
-        for transform in self._transforms:
+        for transform in self.transforms:
             chain = partial(transform.list_resources, call_next=chain)
 
         return await chain()
 
-    async def _get_resource(
+    async def get_resource(
         self, uri: str, version: VersionSpec | None = None
     ) -> Resource | None:
         """Get resource by transformed URI with all transforms applied.
@@ -160,27 +164,27 @@ class Provider:
         """
 
         async def base(u: str, version: VersionSpec | None = None) -> Resource | None:
-            return await self.get_resource(u, version)
+            return await self._get_resource(u, version)
 
         chain = base
-        for transform in self._transforms:
+        for transform in self.transforms:
             chain = partial(transform.get_resource, call_next=chain)
 
         return await chain(uri, version=version)
 
-    async def _list_resource_templates(self) -> Sequence[ResourceTemplate]:
+    async def list_resource_templates(self) -> Sequence[ResourceTemplate]:
         """List resource templates with all transforms applied."""
 
         async def base() -> Sequence[ResourceTemplate]:
-            return await self.list_resource_templates()
+            return await self._list_resource_templates()
 
         chain = base
-        for transform in self._transforms:
+        for transform in self.transforms:
             chain = partial(transform.list_resource_templates, call_next=chain)
 
         return await chain()
 
-    async def _get_resource_template(
+    async def get_resource_template(
         self, uri: str, version: VersionSpec | None = None
     ) -> ResourceTemplate | None:
         """Get resource template by transformed URI with all transforms applied.
@@ -193,27 +197,27 @@ class Provider:
         async def base(
             u: str, version: VersionSpec | None = None
         ) -> ResourceTemplate | None:
-            return await self.get_resource_template(u, version)
+            return await self._get_resource_template(u, version)
 
         chain = base
-        for transform in self._transforms:
+        for transform in self.transforms:
             chain = partial(transform.get_resource_template, call_next=chain)
 
         return await chain(uri, version=version)
 
-    async def _list_prompts(self) -> Sequence[Prompt]:
+    async def list_prompts(self) -> Sequence[Prompt]:
         """List prompts with all transforms applied."""
 
         async def base() -> Sequence[Prompt]:
-            return await self.list_prompts()
+            return await self._list_prompts()
 
         chain = base
-        for transform in self._transforms:
+        for transform in self.transforms:
             chain = partial(transform.list_prompts, call_next=chain)
 
         return await chain()
 
-    async def _get_prompt(
+    async def get_prompt(
         self, name: str, version: VersionSpec | None = None
     ) -> Prompt | None:
         """Get prompt by transformed name with all transforms applied.
@@ -224,19 +228,19 @@ class Provider:
         """
 
         async def base(n: str, version: VersionSpec | None = None) -> Prompt | None:
-            return await self.get_prompt(n, version)
+            return await self._get_prompt(n, version)
 
         chain = base
-        for transform in self._transforms:
+        for transform in self.transforms:
             chain = partial(transform.get_prompt, call_next=chain)
 
         return await chain(name, version=version)
 
     # -------------------------------------------------------------------------
-    # Public list/get methods (override these to provide components)
+    # Private list/get methods (override these to provide components)
     # -------------------------------------------------------------------------
 
-    async def list_tools(self) -> Sequence[Tool]:
+    async def _list_tools(self) -> Sequence[Tool]:
         """Return all available tools.
 
         Override to provide tools dynamically. Returns ALL versions of all tools.
@@ -244,12 +248,12 @@ class Provider:
         """
         return []
 
-    async def get_tool(
+    async def _get_tool(
         self, name: str, version: VersionSpec | None = None
     ) -> Tool | None:
         """Get a specific tool by name.
 
-        Default implementation filters list_tools() and picks the highest version
+        Default implementation filters _list_tools() and picks the highest version
         that matches the spec.
 
         Args:
@@ -260,7 +264,7 @@ class Provider:
         Returns:
             The Tool if found, or None to continue searching other providers.
         """
-        tools = await self.list_tools()
+        tools = await self._list_tools()
         matching = [t for t in tools if t.name == name]
         if version:
             matching = [t for t in matching if version.matches(t.version)]
@@ -268,7 +272,7 @@ class Provider:
             return None
         return max(matching, key=version_sort_key)  # type: ignore[type-var]
 
-    async def list_resources(self) -> Sequence[Resource]:
+    async def _list_resources(self) -> Sequence[Resource]:
         """Return all available resources.
 
         Override to provide resources dynamically. Returns ALL versions of all resources.
@@ -276,12 +280,12 @@ class Provider:
         """
         return []
 
-    async def get_resource(
+    async def _get_resource(
         self, uri: str, version: VersionSpec | None = None
     ) -> Resource | None:
         """Get a specific resource by URI.
 
-        Default implementation filters list_resources() and returns highest
+        Default implementation filters _list_resources() and returns highest
         version matching the spec.
 
         Args:
@@ -291,7 +295,7 @@ class Provider:
         Returns:
             The Resource if found, or None to continue searching other providers.
         """
-        resources = await self.list_resources()
+        resources = await self._list_resources()
         matching = [r for r in resources if str(r.uri) == uri]
         if version:
             matching = [r for r in matching if version.matches(r.version)]
@@ -299,7 +303,7 @@ class Provider:
             return None
         return max(matching, key=version_sort_key)  # type: ignore[type-var]
 
-    async def list_resource_templates(self) -> Sequence[ResourceTemplate]:
+    async def _list_resource_templates(self) -> Sequence[ResourceTemplate]:
         """Return all available resource templates.
 
         Override to provide resource templates dynamically. Returns ALL versions.
@@ -307,7 +311,7 @@ class Provider:
         """
         return []
 
-    async def get_resource_template(
+    async def _get_resource_template(
         self, uri: str, version: VersionSpec | None = None
     ) -> ResourceTemplate | None:
         """Get a resource template that matches the given URI.
@@ -322,7 +326,7 @@ class Provider:
         Returns:
             The ResourceTemplate if a matching one is found, or None to continue searching.
         """
-        templates = await self.list_resource_templates()
+        templates = await self._list_resource_templates()
         matching = [t for t in templates if t.matches(uri) is not None]
         if version:
             matching = [t for t in matching if version.matches(t.version)]
@@ -330,7 +334,7 @@ class Provider:
             return None
         return max(matching, key=version_sort_key)  # type: ignore[type-var]
 
-    async def list_prompts(self) -> Sequence[Prompt]:
+    async def _list_prompts(self) -> Sequence[Prompt]:
         """Return all available prompts.
 
         Override to provide prompts dynamically. Returns ALL versions of all prompts.
@@ -338,12 +342,12 @@ class Provider:
         """
         return []
 
-    async def get_prompt(
+    async def _get_prompt(
         self, name: str, version: VersionSpec | None = None
     ) -> Prompt | None:
         """Get a specific prompt by name.
 
-        Default implementation filters list_prompts() and picks the highest version
+        Default implementation filters _list_prompts() and picks the highest version
         matching the spec.
 
         Args:
@@ -353,7 +357,7 @@ class Provider:
         Returns:
             The Prompt if found, or None to continue searching other providers.
         """
-        prompts = await self.list_prompts()
+        prompts = await self._list_prompts()
         matching = [p for p in prompts if p.name == name]
         if version:
             matching = [p for p in matching if version.matches(p.version)]
@@ -376,10 +380,10 @@ class Provider:
         """
         # Fetch all component types in parallel
         results = await gather(
-            self.list_tools(),
-            self.list_resources(),
-            self.list_resource_templates(),
-            self.list_prompts(),
+            self._list_tools(),
+            self._list_resources(),
+            self._list_resource_templates(),
+            self._list_prompts(),
         )
         tools = cast(Sequence[Tool], results[0])
         resources = cast(Sequence[Resource], results[1])
@@ -402,13 +406,13 @@ class Provider:
         async def prompts_base() -> Sequence[Prompt]:
             return prompts
 
-        # Apply transforms in order (first is innermost)
+        # Apply transforms in order (visibility last/outermost)
         tools_chain = tools_base
         resources_chain = resources_base
         templates_chain = templates_base
         prompts_chain = prompts_base
 
-        for transform in self._transforms:
+        for transform in self.transforms:
             tools_chain = partial(transform.list_tools, call_next=tools_chain)
             resources_chain = partial(
                 transform.list_resources, call_next=resources_chain
