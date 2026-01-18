@@ -2,7 +2,8 @@
 
 import asyncio
 import threading
-from unittest.mock import AsyncMock, patch
+from contextlib import asynccontextmanager
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -17,9 +18,23 @@ class TestSignalHandling:
         """Test that signal handlers are installed for run_stdio_async in main thread."""
         server = FastMCP()
 
+        # Create mock streams
+        mock_read_stream = AsyncMock()
+        mock_write_stream = AsyncMock()
+        
+        # Create a proper async context manager for stdio_server
+        @asynccontextmanager
+        async def mock_stdio():
+            yield (mock_read_stream, mock_write_stream)
+        
+        # Create a proper async context manager for lifespan
+        @asynccontextmanager
+        async def mock_lifespan():
+            yield
+
         # Mock the MCP server internals to prevent actual server execution
-        with patch.object(server, "_lifespan_manager"):
-            with patch("fastmcp.server.server.stdio_server"):
+        with patch.object(server, "_lifespan_manager", side_effect=lambda: mock_lifespan()):
+            with patch("fastmcp.server.server.stdio_server", side_effect=lambda: mock_stdio()):
                 with patch.object(server._mcp_server, "run", new_callable=AsyncMock):
                     # Mock signal.signal to track calls
                     with patch("signal.signal") as mock_signal:
@@ -96,9 +111,23 @@ class TestSignalHandling:
 
         def run_in_thread():
             async def async_test():
+                # Create mock streams
+                mock_read_stream = AsyncMock()
+                mock_write_stream = AsyncMock()
+                
+                # Create a proper async context manager for stdio_server
+                @asynccontextmanager
+                async def mock_stdio():
+                    yield (mock_read_stream, mock_write_stream)
+                
+                # Create a proper async context manager for lifespan
+                @asynccontextmanager
+                async def mock_lifespan():
+                    yield
+
                 # Mock the MCP server internals to prevent actual server execution
-                with patch.object(server, "_lifespan_manager"):
-                    with patch("fastmcp.server.server.stdio_server"):
+                with patch.object(server, "_lifespan_manager", side_effect=lambda: mock_lifespan()):
+                    with patch("fastmcp.server.server.stdio_server", side_effect=lambda: mock_stdio()):
                         with patch.object(
                             server._mcp_server, "run", new_callable=AsyncMock
                         ):
@@ -130,9 +159,23 @@ class TestSignalHandling:
         """Test that KeyboardInterrupt in run_stdio_async/main thread calls os._exit(0)."""
         server = FastMCP()
 
+        # Create mock streams
+        mock_read_stream = AsyncMock()
+        mock_write_stream = AsyncMock()
+        
+        # Create a proper async context manager for stdio_server
+        @asynccontextmanager
+        async def mock_stdio():
+            yield (mock_read_stream, mock_write_stream)
+        
+        # Create a proper async context manager for lifespan
+        @asynccontextmanager
+        async def mock_lifespan():
+            yield
+
         # Mock the MCP server internals to raise KeyboardInterrupt
-        with patch.object(server, "_lifespan_manager"):
-            with patch("fastmcp.server.server.stdio_server"):
+        with patch.object(server, "_lifespan_manager", side_effect=lambda: mock_lifespan()):
+            with patch("fastmcp.server.server.stdio_server", side_effect=lambda: mock_stdio()):
                 with patch.object(
                     server._mcp_server, "run", new_callable=AsyncMock
                 ) as mock_run:
@@ -156,9 +199,23 @@ class TestSignalHandling:
 
         def run_in_thread():
             async def async_test():
+                # Create mock streams
+                mock_read_stream = AsyncMock()
+                mock_write_stream = AsyncMock()
+                
+                # Create a proper async context manager for stdio_server
+                @asynccontextmanager
+                async def mock_stdio():
+                    yield (mock_read_stream, mock_write_stream)
+                
+                # Create a proper async context manager for lifespan
+                @asynccontextmanager
+                async def mock_lifespan():
+                    yield
+
                 # Mock the MCP server internals to raise KeyboardInterrupt
-                with patch.object(server, "_lifespan_manager"):
-                    with patch("fastmcp.server.server.stdio_server"):
+                with patch.object(server, "_lifespan_manager", side_effect=lambda: mock_lifespan()):
+                    with patch("fastmcp.server.server.stdio_server", side_effect=lambda: mock_stdio()):
                         with patch.object(
                             server._mcp_server, "run", new_callable=AsyncMock
                         ) as mock_run:
