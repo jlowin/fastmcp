@@ -728,21 +728,76 @@ class FastMCP(Provider, Generic[LifespanResultT]):
             show_banner: Whether to display the server banner. If None, uses the
                 FASTMCP_SHOW_SERVER_BANNER setting (default: True).
         """
+        # Resolve transport (default to stdio if not specified)
+        resolved_transport = transport if transport is not None else "stdio"
+
+        # For stdio transport in main thread, we need to install signal handlers early
+        # (before entering anyio.run) to ensure single Ctrl+C works. The handlers are
+        # re-installed in run_stdio_async() for proper scoping, but this early installation
+        # prevents the "two Ctrl+C" problem.
+        should_handle_signals = (
+            resolved_transport == "stdio"
+            and threading.current_thread() is threading.main_thread()
+        )
+
+        old_sigint = None
+        old_sigterm = None
+
+        if should_handle_signals:
+            # Track if we're already shutting down to prevent cascading interrupts
+            shutting_down = False
+
+            def handle_interrupt(signum: int, frame: Any) -> None:
+                """Handle SIGINT/SIGTERM during shutdown - ignore additional signals."""
+                nonlocal shutting_down
+                if not shutting_down:
+                    shutting_down = True
+                    # Raise KeyboardInterrupt for first signal
+                    raise KeyboardInterrupt()
+                # Ignore subsequent signals during cleanup
+                logger.debug("Ignoring additional interrupt signal during shutdown")
+
+            # Install custom signal handlers to prevent cascading interrupts
+            old_sigint = signal.signal(signal.SIGINT, handle_interrupt)
+            old_sigterm = signal.signal(signal.SIGTERM, handle_interrupt)
+
         try:
             anyio.run(
                 partial(
                     self.run_async,
-                    transport,
+                    resolved_transport,
                     show_banner=show_banner,
                     **transport_kwargs,
                 )
             )
         except KeyboardInterrupt:
-            # Suppress traceback for clean exit. The actual signal handling and
-            # os._exit(0) call happens in run_stdio_async() for stdio transport.
-            # This just prevents the traceback from being displayed if the
-            # KeyboardInterrupt propagates up through anyio.run().
-            pass
+            if should_handle_signals:
+                # Restore signal handlers before exiting
+                if old_sigint is not None:
+                    signal.signal(signal.SIGINT, old_sigint)
+                if old_sigterm is not None:
+                    signal.signal(signal.SIGTERM, old_sigterm)
+
+                # Suppress the traceback for clean exit on Ctrl-C
+                logger.info("Server stopped")
+
+                # Use os._exit(0) to immediately terminate without cleanup.
+                # This is necessary because stdio streams may be blocking indefinitely
+                # on stdin.read(). Normal cleanup (sys.exit/raise SystemExit) would
+                # wait for these blocking operations to complete.
+                #
+                # TODO: Once MCP SDK v2 supports graceful server shutdown, refactor this
+                # to use that API instead of os._exit(0). Graceful shutdown would allow
+                # proper cleanup of resources and connections before terminating.
+                os._exit(0)
+            else:
+                # For HTTP/SSE or non-main thread, propagate normally
+                raise
+        finally:
+            if should_handle_signals and old_sigint is not None and old_sigterm is not None:
+                # Restore original signal handlers (only reached if no exception)
+                signal.signal(signal.SIGINT, old_sigint)
+                signal.signal(signal.SIGTERM, old_sigterm)
 
     def _setup_handlers(self) -> None:
         """Set up core MCP protocol handlers.
@@ -2560,30 +2615,8 @@ class FastMCP(Provider, Generic[LifespanResultT]):
         if show_banner:
             log_server_banner(server=self)
 
-        # Only install custom signal handlers for stdio transport in main thread
-        # This prevents cascading interrupts during shutdown
-        should_handle_signals = threading.current_thread() is threading.main_thread()
-
-        old_sigint = None
-        old_sigterm = None
-
-        if should_handle_signals:
-            # Track if we're already shutting down to prevent cascading interrupts
-            shutting_down = False
-
-            def handle_interrupt(signum: int, frame: Any) -> None:
-                """Handle SIGINT/SIGTERM during shutdown - ignore additional signals."""
-                nonlocal shutting_down
-                if not shutting_down:
-                    shutting_down = True
-                    # Raise KeyboardInterrupt for first signal
-                    raise KeyboardInterrupt()
-                # Ignore subsequent signals during cleanup
-                logger.debug("Ignoring additional interrupt signal during shutdown")
-
-            # Install custom signal handlers to prevent cascading interrupts
-            old_sigint = signal.signal(signal.SIGINT, handle_interrupt)
-            old_sigterm = signal.signal(signal.SIGTERM, handle_interrupt)
+        # Note: Signal handlers are installed in run() for stdio transport to ensure
+        # single Ctrl+C works. They need to be installed before anyio.run() is called.
 
         token = set_transport("stdio")
         try:
@@ -2605,35 +2638,8 @@ class FastMCP(Provider, Generic[LifespanResultT]):
                             ),
                             stateless=stateless,
                         )
-        except KeyboardInterrupt:
-            if should_handle_signals:
-                # Restore signal handlers before exiting
-                if old_sigint is not None:
-                    signal.signal(signal.SIGINT, old_sigint)
-                if old_sigterm is not None:
-                    signal.signal(signal.SIGTERM, old_sigterm)
-
-                # Suppress the traceback for clean exit on Ctrl-C
-                logger.info("Server stopped")
-
-                # Use os._exit(0) to immediately terminate without cleanup.
-                # This is necessary because stdio streams may be blocking indefinitely
-                # on stdin.read(). Normal cleanup (sys.exit/raise SystemExit) would
-                # wait for these blocking operations to complete.
-                #
-                # TODO: Once MCP SDK v2 supports graceful server shutdown, refactor this
-                # to use that API instead of os._exit(0). Graceful shutdown would allow
-                # proper cleanup of resources and connections before terminating.
-                os._exit(0)
-            else:
-                # For non-main thread, propagate normally
-                raise
         finally:
             reset_transport(token)
-            if should_handle_signals and old_sigint is not None and old_sigterm is not None:
-                # Restore original signal handlers (only reached if no exception)
-                signal.signal(signal.SIGINT, old_sigint)
-                signal.signal(signal.SIGTERM, old_sigterm)
 
     async def run_http_async(
         self,
