@@ -1,11 +1,7 @@
 """Tests for signal handling in FastMCP server.run() method."""
 
-import asyncio
 import threading
-from contextlib import asynccontextmanager
-from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
+from unittest.mock import patch
 
 from fastmcp import FastMCP
 
@@ -17,8 +13,8 @@ class TestSignalHandling:
         """Test that signal handlers are installed for stdio in main thread via .run()."""
         server = FastMCP()
 
-        # Mock anyio.run to prevent actual server execution but track if it was called
-        with patch("fastmcp.server.server.anyio.run") as mock_anyio:
+        # Mock anyio.run to prevent actual server execution
+        with patch("fastmcp.server.server.anyio.run"):
             # Mock signal.signal to track calls
             with patch("signal.signal") as mock_signal:
                 mock_signal.return_value = lambda *args: None
