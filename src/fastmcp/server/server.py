@@ -794,7 +794,11 @@ class FastMCP(Provider, Generic[LifespanResultT]):
                 # For HTTP/SSE or non-main thread, propagate normally
                 raise
         finally:
-            if should_handle_signals and old_sigint is not None and old_sigterm is not None:
+            if (
+                should_handle_signals
+                and old_sigint is not None
+                and old_sigterm is not None
+            ):
                 # Restore original signal handlers (only reached if no exception)
                 signal.signal(signal.SIGINT, old_sigint)
                 signal.signal(signal.SIGTERM, old_sigterm)
