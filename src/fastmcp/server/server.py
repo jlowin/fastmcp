@@ -729,10 +729,10 @@ class FastMCP(Provider, Generic[LifespanResultT]):
                 FASTMCP_SHOW_SERVER_BANNER setting (default: True).
         """
         import fastmcp
-        
+
         # Resolve transport (default to stdio if not specified)
         resolved_transport = transport if transport is not None else "stdio"
-        
+
         # Resolve show_banner
         if show_banner is None:
             show_banner = fastmcp.settings.show_server_banner
@@ -742,13 +742,13 @@ class FastMCP(Provider, Generic[LifespanResultT]):
             # Extract stdio-specific kwargs
             log_level = transport_kwargs.pop("log_level", None)
             stateless = transport_kwargs.pop("stateless", False)
-            
+
             # Warn about unexpected kwargs for stdio
             if transport_kwargs:
                 logger.warning(
                     f"Unexpected kwargs for stdio transport: {list(transport_kwargs.keys())}"
                 )
-            
+
             self.run_stdio(
                 show_banner=show_banner,
                 log_level=log_level,
@@ -2569,7 +2569,7 @@ class FastMCP(Provider, Generic[LifespanResultT]):
         stateless: bool = False,
     ) -> None:
         """Run the server using stdio transport with signal handling.
-        
+
         This is the recommended way to run stdio servers as it provides
         proper signal handling for single Ctrl+C termination. It can be
         called from both sync and async contexts.
@@ -2652,10 +2652,10 @@ class FastMCP(Provider, Generic[LifespanResultT]):
         stateless: bool = False,
     ) -> None:
         """Run the server using stdio transport (async version).
-        
+
         This is the async implementation of stdio server. For most use cases,
         prefer using `run_stdio()` which provides proper signal handling.
-        
+
         This method should only be called directly if you're already managing
         your own event loop and signal handling.
 
