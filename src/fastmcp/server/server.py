@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import secrets
+import signal
+import threading
 import warnings
 import weakref
 from collections.abc import (
@@ -748,15 +751,42 @@ class FastMCP(Provider, Generic[LifespanResultT]):
             show_banner: Whether to display the server banner. If None, uses the
                 FASTMCP_SHOW_SERVER_BANNER setting (default: True).
         """
+        import fastmcp
 
-        anyio.run(
-            partial(
-                self.run_async,
-                transport,
+        # Resolve transport (default to stdio if not specified)
+        resolved_transport = transport if transport is not None else "stdio"
+
+        # Resolve show_banner
+        if show_banner is None:
+            show_banner = fastmcp.settings.show_server_banner
+
+        # For stdio transport, delegate to run_stdio() which provides signal handling
+        if resolved_transport == "stdio":
+            # Extract stdio-specific kwargs
+            log_level = transport_kwargs.pop("log_level", None)
+            stateless = transport_kwargs.pop("stateless", False)
+
+            # Warn about unexpected kwargs for stdio
+            if transport_kwargs:
+                logger.warning(
+                    f"Unexpected kwargs for stdio transport: {list(transport_kwargs.keys())}"
+                )
+
+            self.run_stdio(
                 show_banner=show_banner,
-                **transport_kwargs,
+                log_level=log_level,
+                stateless=stateless,
             )
-        )
+        else:
+            # For HTTP/SSE transports, use the existing async path
+            anyio.run(
+                partial(
+                    self.run_async,
+                    resolved_transport,
+                    show_banner=show_banner,
+                    **transport_kwargs,
+                )
+            )
 
     def _setup_handlers(self) -> None:
         """Set up core MCP protocol handlers.
@@ -2597,13 +2627,103 @@ class FastMCP(Provider, Generic[LifespanResultT]):
             auth=auth,
         )
 
+    def run_stdio(
+        self,
+        show_banner: bool = True,
+        log_level: str | None = None,
+        stateless: bool = False,
+    ) -> None:
+        """Run the server using stdio transport with signal handling.
+
+        This is the recommended way to run stdio servers as it provides
+        proper signal handling for single Ctrl+C termination.
+        Call from synchronous contexts. If you're already inside an event loop,
+        use `run_stdio_async()` (and manage signals yourself).
+
+        Args:
+            show_banner: Whether to display the server banner
+            log_level: Log level for the server
+            stateless: Whether to run in stateless mode (no session initialization)
+        """
+        # Only install signal handlers in main thread
+        should_handle_signals = threading.current_thread() is threading.main_thread()
+
+        old_sigint = None
+        old_sigterm = None
+
+        if should_handle_signals:
+            # Track if we're already shutting down to prevent cascading interrupts
+            shutting_down = False
+
+            def handle_interrupt(signum: int, frame: Any) -> None:
+                """Handle SIGINT/SIGTERM during shutdown - ignore additional signals."""
+                nonlocal shutting_down
+                if not shutting_down:
+                    shutting_down = True
+                    # Raise KeyboardInterrupt for first signal
+                    raise KeyboardInterrupt()
+                # Ignore subsequent signals during cleanup
+                logger.debug("Ignoring additional interrupt signal during shutdown")
+
+            # Install custom signal handlers to prevent cascading interrupts
+            old_sigint = signal.signal(signal.SIGINT, handle_interrupt)
+            old_sigterm = signal.signal(signal.SIGTERM, handle_interrupt)
+
+        try:
+            anyio.run(
+                partial(
+                    self.run_stdio_async,
+                    show_banner=show_banner,
+                    log_level=log_level,
+                    stateless=stateless,
+                )
+            )
+        except KeyboardInterrupt:
+            if should_handle_signals:
+                # Restore signal handlers before exiting
+                if old_sigint is not None:
+                    signal.signal(signal.SIGINT, old_sigint)
+                if old_sigterm is not None:
+                    signal.signal(signal.SIGTERM, old_sigterm)
+
+                # Suppress the traceback for clean exit on Ctrl-C
+                logger.info("Server stopped")
+
+                # Use os._exit(0) to immediately terminate without cleanup.
+                # This is necessary because stdio streams may be blocking indefinitely
+                # on stdin.read(). Normal cleanup (sys.exit/raise SystemExit) would
+                # wait for these blocking operations to complete.
+                #
+                # TODO: Once MCP SDK v2 supports graceful server shutdown, refactor this
+                # to use that API instead of os._exit(0). Graceful shutdown would allow
+                # proper cleanup of resources and connections before terminating.
+                os._exit(0)
+            else:
+                # For non-main thread, propagate normally
+                raise
+        finally:
+            if (
+                should_handle_signals
+                and old_sigint is not None
+                and old_sigterm is not None
+            ):
+                # Restore original signal handlers (only reached if no exception)
+                signal.signal(signal.SIGINT, old_sigint)
+                signal.signal(signal.SIGTERM, old_sigterm)
+
     async def run_stdio_async(
         self,
         show_banner: bool = True,
         log_level: str | None = None,
         stateless: bool = False,
     ) -> None:
-        """Run the server using stdio transport.
+        """Run the server using stdio transport (async version).
+
+        This is the async implementation of stdio server. For most use cases,
+        prefer using `run_stdio()` which provides proper signal handling.
+
+        This method should only be called directly if you're already managing
+        your own event loop and signal handling.
 
         Args:
             show_banner: Whether to display the server banner
@@ -2615,6 +2735,9 @@ class FastMCP(Provider, Generic[LifespanResultT]):
         # Display server banner
         if show_banner:
             log_server_banner(server=self)
+
+        # Note: Signal handlers are NOT installed here. Use run_stdio() for
+        # automatic signal handling, or manage signals yourself if calling this directly.
 
         token = set_transport("stdio")
         try:
