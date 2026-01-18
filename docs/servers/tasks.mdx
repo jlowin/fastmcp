@@ -259,3 +259,138 @@ async def my_task(
 ```
 
 With `CurrentDocket()`, you can schedule additional background tasks, chain work together, and coordinate complex workflows. See the [Docket documentation](https://chrisguidry.github.io/docket/) for the complete API, including retry policies, timeouts, and custom dependencies.
+
+## Elicitation and Sampling in Background Tasks
+
+<VersionBadge version="2.16.0" />
+
+Background tasks can request user input (elicitation) or LLM responses (sampling) using the `TaskContext` dependency. This implements the MCP `input_required` status flow per SEP-1686.
+
+<Warning>
+The regular `Context` dependency is **not available** in background tasks because workers may run in separate processes without an active MCP session. Use `TaskContext` instead.
+</Warning>
+
+### TaskContext Dependency
+
+Import `CurrentTaskContext()` to access elicitation and sampling from within background tasks:
+
+```python {1, 8-9, 11-14}
+from fastmcp import FastMCP
+from fastmcp.dependencies import CurrentTaskContext, TaskContext
+from dataclasses import dataclass
+
+mcp = FastMCP("MyServer")
+
+@dataclass
+class UserChoice:
+    option: str
+
+@mcp.tool(task=True)
+async def clarify_and_execute(
+    query: str,
+    task_ctx: TaskContext = CurrentTaskContext()
+) -> str:
+    """A long-running task that needs user clarification."""
+    
+    # Ask the user for clarification
+    result = await task_ctx.elicit(
+        message=f"Your query '{query}' is ambiguous. Please clarify:",
+        response_type=UserChoice,
+    )
+    
+    if result.action == "accept":
+        return f"Executing with option: {result.data.option}"
+    return "User declined to clarify"
+```
+
+When `elicit()` or `sample()` is called, `TaskContext` automatically:
+
+1. Updates task status to `input_required`
+2. Sends the request with `related-task` metadata  
+3. Waits for the response
+4. Restores task status to `working`
+
+Clients see the task status change and can display appropriate UI for user input.
+
+### Elicitation in Tasks
+
+The `TaskContext.elicit()` method mirrors `Context.elicit()` from foreground tools:
+
+```python
+from fastmcp import FastMCP
+from fastmcp.dependencies import CurrentTaskContext, TaskContext
+from fastmcp.server.elicitation import AcceptedElicitation, DeclinedElicitation
+from dataclasses import dataclass
+
+mcp = FastMCP("MyServer")
+
+@dataclass  
+class Confirmation:
+    proceed: bool
+
+@mcp.tool(task=True)
+async def destructive_operation(
+    target: str,
+    task_ctx: TaskContext = CurrentTaskContext()
+) -> str:
+    """Delete files after user confirmation."""
+    
+    result = await task_ctx.elicit(
+        message=f"Are you sure you want to delete {target}?",
+        response_type=Confirmation,
+    )
+    
+    match result:
+        case AcceptedElicitation(data=conf) if conf.proceed:
+            # ... perform deletion ...
+            return f"Deleted {target}"
+        case AcceptedElicitation():
+            return "Operation cancelled by user"
+        case DeclinedElicitation():
+            return "User declined to confirm"
+```
+
+### Sampling in Tasks
+
+Use `TaskContext.sample()` to request LLM completions from within background tasks:
+
+```python
+from fastmcp import FastMCP
+from fastmcp.dependencies import CurrentTaskContext, TaskContext
+
+mcp = FastMCP("MyServer")
+
+@mcp.tool(task=True)
+async def research_and_summarize(
+    topic: str,
+    task_ctx: TaskContext = CurrentTaskContext()
+) -> str:
+    """Research a topic and get an AI summary."""
+    
+    # ... gather research data ...
+    research_data = f"Found information about {topic}..."
+    
+    # Request LLM to summarize
+    result = await task_ctx.sample(
+        messages=[{
+            "role": "user", 
+            "content": f"Summarize this research:\n{research_data}"
+        }],
+        max_tokens=500,
+    )
+    
+    return result.content.text
+```
+
+<Note>
+`TaskContext.sample()` returns the raw `CreateMessageResult` from the client, not the enriched `SamplingResult` that `Context.sample()` provides. For simple text extraction, use `result.content.text`.
+</Note>
+
+### Limitations
+
+`TaskContext` is only available in **embedded worker mode** (the FastMCP default). Distributed workers running in separate processes cannot access the session and will raise an error.
+
+For distributed workers, consider:
+- Pre-collecting all needed information before starting the background task
+- Using a message queue pattern for async communication
+- Keeping interactive tasks in the embedded worker
