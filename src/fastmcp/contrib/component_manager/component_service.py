@@ -7,7 +7,8 @@ from fastmcp.exceptions import NotFoundError
 from fastmcp.prompts.prompt import Prompt
 from fastmcp.resources.resource import Resource
 from fastmcp.resources.template import ResourceTemplate
-from fastmcp.server.providers import FastMCPProvider, Provider
+from fastmcp.server.providers import FastMCPProvider
+from fastmcp.server.providers.base import Provider, _WrappedProvider
 from fastmcp.server.server import FastMCP
 from fastmcp.server.transforms import Namespace
 from fastmcp.tools.tool import Tool
@@ -16,40 +17,25 @@ from fastmcp.utilities.logging import get_logger
 logger = get_logger(__name__)
 
 
-def _reverse_through_transforms(
-    provider: Provider,
-    key: str,
-    component_type: str,
-) -> str | None:
-    """Reverse a key through provider's transforms.
-
-    Iterates through transforms in reverse order (outer to inner) and
-    reverses the key transformation.
-
-    Args:
-        provider: The provider with transforms.
-        key: The transformed key.
-        component_type: Either "tool", "prompt", or "resource".
+def _unwrap_provider(provider: Provider) -> tuple[Provider, Namespace | None]:
+    """Unwrap a provider to get the inner provider and namespace transform.
 
     Returns:
-        The original key if transformations can be reversed, None otherwise.
+        Tuple of (inner_provider, namespace_transform_or_none).
+        If the provider is not wrapped, returns (provider, None).
     """
-    current_key = key
-    # Iterate transforms in reverse (outer first)
-    for transform in reversed(provider._transforms):
-        if isinstance(transform, Namespace):
-            # Namespace transform - try to reverse
-            if component_type in ("tool", "prompt"):
-                original = transform._reverse_name(current_key)
-            else:
-                original = transform._reverse_uri(current_key)
-            if original is None:
-                return None
-            current_key = original
-        # Other transform types don't transform keys in ways we need to reverse
-        # for enable/disable operations (ToolTransform renames tools but
-        # the original name is what we need)
-    return current_key
+    namespace: Namespace | None = None
+
+    # Unwrap _WrappedProvider layers, looking for Namespace transform
+    while isinstance(provider, _WrappedProvider):
+        # Check if this wrapper has a Namespace transform
+        for transform in provider._transforms:
+            if isinstance(transform, Namespace):
+                namespace = transform
+                break
+        provider = provider._inner
+
+    return provider, namespace
 
 
 def _get_mounted_server_and_key(
@@ -60,7 +46,7 @@ def _get_mounted_server_and_key(
     """Get the mounted server and unprefixed key for a component.
 
     Args:
-        provider: The provider to check.
+        provider: The provider to check (may be wrapped).
         key: The transformed component key.
         component_type: Either "tool", "prompt", or "resource".
 
@@ -68,17 +54,25 @@ def _get_mounted_server_and_key(
         Tuple of (server, original_key) if the key matches this provider,
         or None if it doesn't.
     """
-    if isinstance(provider, FastMCPProvider):
-        # FastMCPProvider with layers - reverse through layers
-        if provider._transforms:
-            original = _reverse_through_transforms(provider, key, component_type)
-            if original is not None:
-                return provider.server, original
-        else:
-            # Direct FastMCPProvider - no transformation
-            return provider.server, key
+    inner, namespace = _unwrap_provider(provider)
 
-    return None
+    # Only handle FastMCPProvider (mounted servers)
+    if not isinstance(inner, FastMCPProvider):
+        return None
+
+    # Reverse the namespace transformation
+    if namespace is not None:
+        if component_type in ("tool", "prompt"):
+            original = namespace._reverse_name(key)
+        else:
+            original = namespace._reverse_uri(key)
+
+        if original is None:
+            return None
+        return inner.server, original
+    else:
+        # No namespace, key is unchanged
+        return inner.server, key
 
 
 class ComponentService:
@@ -114,7 +108,7 @@ class ComponentService:
             return tool
 
         # 2. Check mounted servers via FastMCPProvider
-        for provider in self._server._providers:
+        for provider in self._server.providers:
             result = _get_mounted_server_and_key(provider, name, "tool")
             if result is not None:
                 server, unprefixed = result
@@ -151,7 +145,7 @@ class ComponentService:
             return tool
 
         # 2. Check mounted servers via FastMCPProvider
-        for provider in self._server._providers:
+        for provider in self._server.providers:
             result = _get_mounted_server_and_key(provider, name, "tool")
             if result is not None:
                 server, unprefixed = result
@@ -199,7 +193,7 @@ class ComponentService:
             return template
 
         # 2. Check mounted servers via FastMCPProvider
-        for provider in self._server._providers:
+        for provider in self._server.providers:
             result = _get_mounted_server_and_key(provider, uri, "resource")
             if result is not None:
                 server, unprefixed = result
@@ -251,7 +245,7 @@ class ComponentService:
             return template
 
         # 2. Check mounted servers via FastMCPProvider
-        for provider in self._server._providers:
+        for provider in self._server.providers:
             result = _get_mounted_server_and_key(provider, uri, "resource")
             if result is not None:
                 server, unprefixed = result
@@ -289,7 +283,7 @@ class ComponentService:
             return prompt
 
         # 2. Check mounted servers via FastMCPProvider
-        for provider in self._server._providers:
+        for provider in self._server.providers:
             result = _get_mounted_server_and_key(provider, name, "prompt")
             if result is not None:
                 server, unprefixed = result
@@ -326,7 +320,7 @@ class ComponentService:
             return prompt
 
         # 2. Check mounted servers via FastMCPProvider
-        for provider in self._server._providers:
+        for provider in self._server.providers:
             result = _get_mounted_server_and_key(provider, name, "prompt")
             if result is not None:
                 server, unprefixed = result
