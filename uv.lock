@@ -747,6 +747,12 @@ dev = [
     { name = "ruff" },
     { name = "ty" },
 ]
+minimum-test = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-env" },
+    { name = "pytest-timeout" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -802,6 +808,12 @@ dev = [
     { name = "pytest-xdist", specifier = ">=3.6.1" },
     { name = "ruff", specifier = ">=0.12.8" },
     { name = "ty", specifier = ">=0.0.7" },
+]
+minimum-test = [
+    { name = "pytest", specifier = ">=8.3.3" },
+    { name = "pytest-asyncio", specifier = ">=1.2.0" },
+    { name = "pytest-env", specifier = ">=1.1.5" },
+    { name = "pytest-timeout", specifier = ">=2.4.0" },
 ]
 
 [[package]]
