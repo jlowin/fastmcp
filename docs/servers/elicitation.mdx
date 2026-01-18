@@ -27,6 +27,10 @@ Elicitation enables tools to pause execution and request specific information fr
 
 For example, a file management tool might ask "Which directory should I create?" or a data analysis tool might request "What date range should I analyze?"
 
+<Tip>
+**Background Tasks**: For elicitation in background tasks (`task=True`), use `TaskContext` instead of `Context`. See [Elicitation and Sampling in Background Tasks](/servers/tasks#elicitation-and-sampling-in-background-tasks).
+</Tip>
+
 ### Basic Usage
 
 Use the `ctx.elicit()` method within any tool function to request user input:
