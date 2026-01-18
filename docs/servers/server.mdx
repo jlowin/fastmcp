@@ -362,8 +362,8 @@ print(fastmcp.settings.strict_input_validation)  # Default: False
 
 Common global settings include:
 - **`log_level`**: Logging level ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"), set with `FASTMCP_LOG_LEVEL`
-- **`debug`**: Global debug mode that sets log level to DEBUG and enables Starlette debug tracebacks for HTTP/SSE transports, set with `FASTMCP_DEBUG`. Provides a convenient way to enable comprehensive debugging. For granular control, use `log_level` and `starlette_debug` separately
-- **`starlette_debug`**: Enable Starlette debug mode for HTTP/SSE transports only, set with `FASTMCP_STARLETTE_DEBUG`. When enabled, detailed error tracebacks are returned in HTTP responses. Only affects HTTP/SSE transports; has no effect on stdio transport
+- **`debug`**: Global debug mode that sets log level to DEBUG and enables Starlette debug tracebacks for HTTP/SSE transports, set with `FASTMCP_DEBUG`. Provides a convenient way to enable comprehensive debugging. For granular control, use `log_level` and `starlette_debug` separately. **WARNING**: Only enable in development - debug tracebacks expose detailed internal information
+- **`starlette_debug`**: Enable Starlette debug mode for HTTP/SSE transports only, set with `FASTMCP_STARLETTE_DEBUG`. When enabled, detailed error tracebacks are returned in HTTP responses. Only affects HTTP/SSE transports; has no effect on stdio transport. **WARNING**: Only enable in development - exposes detailed internal information in HTTP responses
 - **`mask_error_details`**: Whether to hide detailed error information from clients, set with `FASTMCP_MASK_ERROR_DETAILS`
 - **`strict_input_validation`**: Controls tool input validation mode (default: False for flexible coercion), set with `FASTMCP_STRICT_INPUT_VALIDATION`. See [Input Validation Modes](/servers/tools#input-validation-modes)
 - **`env_file`**: Path to the environment file to load settings from (default: ".env"), set with `FASTMCP_ENV_FILE`. Useful when your project uses a `.env` file with syntax incompatible with python-dotenv

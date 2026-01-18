@@ -290,27 +290,29 @@ class Settings(BaseSettings):
 
     @field_validator("debug")
     @classmethod
-    def _update_log_level_for_debug(cls, v: bool, info) -> bool:
+    def _update_log_level_for_debug(cls, v: bool) -> bool:
         """When debug is enabled, set log_level to DEBUG."""
-        if v:
-            # When debug is True, we need to ensure log_level is set to DEBUG
-            # This is checked in model_post_init
-            pass
         return v
 
-    def model_post_init(self, __context) -> None:
+    def model_post_init(self, __context: Any) -> None:
         """Post-initialization hook to handle debug mode."""
         if self.debug and self.log_level != "DEBUG":
             # When debug is enabled, force log_level to DEBUG
             self.log_level = "DEBUG"
             # Reconfigure logging if it's enabled
+            # Only reconfigure if fastmcp module is fully initialized
+            # to avoid AttributeError during import
             if self.log_enabled:
-                from fastmcp.utilities.logging import configure_logging
+                import fastmcp
 
-                configure_logging(
-                    level=self.log_level,
-                    enable_rich_tracebacks=self.enable_rich_tracebacks,
-                )
+                # Check if fastmcp.settings exists (module fully initialized)
+                if hasattr(fastmcp, "settings"):
+                    from fastmcp.utilities.logging import configure_logging
+
+                    configure_logging(
+                        level=self.log_level,
+                        enable_rich_tracebacks=self.enable_rich_tracebacks,
+                    )
 
     # error handling
     mask_error_details: Annotated[

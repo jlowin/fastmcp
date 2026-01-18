@@ -2,9 +2,6 @@
 
 import logging
 
-import pytest
-
-from fastmcp import settings as global_settings
 from fastmcp.settings import Settings
 from fastmcp.utilities.logging import get_logger
 
@@ -47,7 +44,7 @@ class TestDebugSettings:
     def test_debug_reconfigures_logging(self):
         """Test that enabling debug reconfigures logging."""
         # Create a settings instance with debug enabled
-        settings = Settings(debug=True, log_enabled=True)
+        _settings = Settings(debug=True, log_enabled=True)
 
         # Verify logging was reconfigured
         logger = get_logger("test")
