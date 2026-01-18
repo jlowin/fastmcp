@@ -2636,8 +2636,9 @@ class FastMCP(Provider, Generic[LifespanResultT]):
         """Run the server using stdio transport with signal handling.
 
         This is the recommended way to run stdio servers as it provides
-        proper signal handling for single Ctrl+C termination. It can be
-        called from both sync and async contexts.
+        proper signal handling for single Ctrl+C termination.
+        Call from synchronous contexts. If you're already inside an event loop,
+        use `run_stdio_async()` (and manage signals yourself).
 
         Args:
             show_banner: Whether to display the server banner
