@@ -32,7 +32,6 @@ from fastmcp.server.dependencies import (
 )
 from fastmcp.server.elicitation import AcceptedElicitation, DeclinedElicitation
 
-
 # =============================================================================
 # Tests for get_task_context() and TaskContextInfo
 # =============================================================================
@@ -125,8 +124,7 @@ async def test_concurrent_tasks_have_isolated_contexts():
     async with Client(mcp) as client:
         # Start 3 tasks concurrently
         tasks = [
-            await client.call_tool("capture_and_delay", {}, task=True)
-            for _ in range(3)
+            await client.call_tool("capture_and_delay", {}, task=True) for _ in range(3)
         ]
 
         # Get expected task IDs
@@ -315,9 +313,7 @@ async def test_task_context_sample_calls_client():
     sampling_called = {}
 
     @mcp.tool(task=True)
-    async def summarize(
-        text: str, task_ctx: TaskContext = CurrentTaskContext()
-    ) -> str:
+    async def summarize(text: str, task_ctx: TaskContext = CurrentTaskContext()) -> str:
         result = await task_ctx.sample(
             messages=[{"role": "user", "content": f"Summarize: {text}"}],
             max_tokens=100,

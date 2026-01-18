@@ -103,9 +103,11 @@ async def submit_to_docket(
 
     # Register session for TaskContext access in background workers (SEP-1686)
     # This enables elicitation/sampling from background tasks via weakref
-    from fastmcp.server.dependencies import register_task_session
+    # Skip for "internal" sessions (programmatic calls without MCP session)
+    if session_id != "internal":
+        from fastmcp.server.dependencies import register_task_session
 
-    register_task_session(session_id, ctx.session)
+        register_task_session(session_id, ctx.session)
 
     # Send notifications/tasks/created per SEP-1686 (mandatory)
     # Send BEFORE queuing to avoid race where task completes before notification

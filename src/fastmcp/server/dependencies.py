@@ -924,7 +924,7 @@ class TaskContext:
                 return "No name provided"
     """
 
-    __slots__ = ("_task_id", "_session_id")
+    __slots__ = ("_session_id", "_task_id")
 
     def __init__(self, task_id: str, session_id: str) -> None:
         self._task_id = task_id
@@ -1021,10 +1021,10 @@ class TaskContext:
                     return "No info provided"
         """
         import anyio
-
         import mcp.shared.exceptions
         import mcp.shared.message
         import mcp.types
+
         from fastmcp.server.elicitation import (
             CancelledElicitation,
             DeclinedElicitation,
@@ -1149,10 +1149,10 @@ class TaskContext:
                     return result.content.text
         """
         import anyio
-
         import mcp.shared.exceptions
         import mcp.shared.message
         import mcp.types
+
         from fastmcp.server.tasks.subscriptions import send_input_required_notification
 
         session = self._get_session()
