@@ -1083,8 +1083,15 @@ class FastMCP(Provider, Generic[LifespanResultT]):
                 )
 
             # Query through full transform chain (provider transforms + server transforms)
+            tools = await self.list_tools()
+
+            # Apply session-specific transforms if available
+            from fastmcp.server.context import apply_session_transforms
+
+            tools = await apply_session_transforms(tools)
+
             # Then apply enabled filtering at the server level
-            tools = [t for t in await self.list_tools() if is_enabled(t)]
+            tools = [t for t in tools if is_enabled(t)]
 
             # Get auth context (skip_auth=True for STDIO which has no auth concept)
             skip_auth, token = _get_auth_context()
@@ -1155,27 +1162,6 @@ class FastMCP(Provider, Generic[LifespanResultT]):
 
         return tool
 
-    async def get_tool(
-        self, name: str, version: VersionSpec | None = None
-    ) -> Tool | None:
-        """Get a tool by name, filtering disabled tools.
-
-        Overrides Provider.get_tool() to add enabled filtering after all
-        transforms (including session-level) have been applied. This ensures
-        session transforms can override provider-level disables.
-
-        Args:
-            name: The tool name.
-            version: Version filter (None returns highest version).
-
-        Returns:
-            The tool if found and enabled, None otherwise.
-        """
-        tool = await super().get_tool(name, version)
-        if tool is None or not is_enabled(tool):
-            return None
-        return tool
-
     async def get_resources(self, *, run_middleware: bool = False) -> list[Resource]:
         """Get all enabled resources from providers.
 
@@ -1200,8 +1186,16 @@ class FastMCP(Provider, Generic[LifespanResultT]):
                     call_next=lambda context: self.get_resources(run_middleware=False),
                 )
 
-            # Query through full transform chain, then apply enabled filtering
-            resources = [r for r in await self.list_resources() if is_enabled(r)]
+            # Query through full transform chain
+            resources = await self.list_resources()
+
+            # Apply session-specific transforms if available
+            from fastmcp.server.context import apply_session_transforms
+
+            resources = await apply_session_transforms(resources)
+
+            # Then apply enabled filtering
+            resources = [r for r in resources if is_enabled(r)]
 
             # Get auth context (skip_auth=True for STDIO which has no auth concept)
             skip_auth, token = _get_auth_context()
@@ -1271,26 +1265,6 @@ class FastMCP(Provider, Generic[LifespanResultT]):
 
         return resource
 
-    async def get_resource(
-        self, uri: str, version: VersionSpec | None = None
-    ) -> Resource | None:
-        """Get a resource by URI, filtering disabled resources.
-
-        Overrides Provider.get_resource() to add enabled filtering after all
-        transforms (including session-level) have been applied.
-
-        Args:
-            uri: The resource URI.
-            version: Version filter (None returns highest version).
-
-        Returns:
-            The resource if found and enabled, None otherwise.
-        """
-        resource = await super().get_resource(uri, version)
-        if resource is None or not is_enabled(resource):
-            return None
-        return resource
-
     async def get_resource_templates(
         self, *, run_middleware: bool = False
     ) -> list[ResourceTemplate]:
@@ -1319,10 +1293,16 @@ class FastMCP(Provider, Generic[LifespanResultT]):
                     ),
                 )
 
-            # Query through full transform chain, then apply enabled filtering
-            templates = [
-                t for t in await self.list_resource_templates() if is_enabled(t)
-            ]
+            # Query through full transform chain
+            templates = await self.list_resource_templates()
+
+            # Apply session-specific transforms if available
+            from fastmcp.server.context import apply_session_transforms
+
+            templates = await apply_session_transforms(templates)
+
+            # Then apply enabled filtering
+            templates = [t for t in templates if is_enabled(t)]
 
             # Get auth context (skip_auth=True for STDIO which has no auth concept)
             skip_auth, token = _get_auth_context()
@@ -1392,26 +1372,6 @@ class FastMCP(Provider, Generic[LifespanResultT]):
 
         return template
 
-    async def get_resource_template(
-        self, uri: str, version: VersionSpec | None = None
-    ) -> ResourceTemplate | None:
-        """Get a resource template by URI, filtering disabled templates.
-
-        Overrides Provider.get_resource_template() to add enabled filtering after
-        all transforms (including session-level) have been applied.
-
-        Args:
-            uri: The template URI.
-            version: Version filter (None returns highest version).
-
-        Returns:
-            The template if found and enabled, None otherwise.
-        """
-        template = await super().get_resource_template(uri, version)
-        if template is None or not is_enabled(template):
-            return None
-        return template
-
     async def get_prompts(self, *, run_middleware: bool = False) -> list[Prompt]:
         """Get all enabled prompts from providers.
 
@@ -1436,8 +1396,16 @@ class FastMCP(Provider, Generic[LifespanResultT]):
                     call_next=lambda context: self.get_prompts(run_middleware=False),
                 )
 
-            # Query through full transform chain, then apply enabled filtering
-            prompts = [p for p in await self.list_prompts() if is_enabled(p)]
+            # Query through full transform chain
+            prompts = await self.list_prompts()
+
+            # Apply session-specific transforms if available
+            from fastmcp.server.context import apply_session_transforms
+
+            prompts = await apply_session_transforms(prompts)
+
+            # Then apply enabled filtering
+            prompts = [p for p in prompts if is_enabled(p)]
 
             # Get auth context (skip_auth=True for STDIO which has no auth concept)
             skip_auth, token = _get_auth_context()
@@ -1505,26 +1473,6 @@ class FastMCP(Provider, Generic[LifespanResultT]):
             except AuthorizationError:
                 return None
 
-        return prompt
-
-    async def get_prompt(
-        self, name: str, version: VersionSpec | None = None
-    ) -> Prompt | None:
-        """Get a prompt by name, filtering disabled prompts.
-
-        Overrides Provider.get_prompt() to add enabled filtering after all
-        transforms (including session-level) have been applied.
-
-        Args:
-            name: The prompt name.
-            version: Version filter (None returns highest version).
-
-        Returns:
-            The prompt if found and enabled, None otherwise.
-        """
-        prompt = await super().get_prompt(name, version)
-        if prompt is None or not is_enabled(prompt):
-            return None
         return prompt
 
     @overload
