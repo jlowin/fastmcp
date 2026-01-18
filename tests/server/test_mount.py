@@ -10,8 +10,8 @@ from fastmcp.client import Client
 from fastmcp.client.transports import FastMCPTransport, SSETransport
 from fastmcp.exceptions import NotFoundError
 from fastmcp.server.providers import FastMCPProvider
-from fastmcp.server.providers.base import _WrappedProvider
 from fastmcp.server.providers.proxy import FastMCPProxy
+from fastmcp.server.providers.wrapped_provider import _WrappedProvider
 from fastmcp.server.transforms import Namespace
 from fastmcp.tools.tool import Tool
 from fastmcp.tools.tool_transform import TransformedTool
