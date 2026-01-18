@@ -13,6 +13,7 @@ import weakref
 from collections.abc import AsyncGenerator, Callable
 from contextlib import AsyncExitStack, asynccontextmanager
 from contextvars import ContextVar
+from dataclasses import dataclass
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any, Protocol, cast, get_type_hints, runtime_checkable
 
@@ -35,6 +36,7 @@ from fastmcp.utilities.types import find_kwarg_by_type, is_class_member_of_type
 if TYPE_CHECKING:
     from docket import Docket
     from docket.worker import Worker
+    from mcp.server.session import ServerSession
 
     from fastmcp.server.context import Context
     from fastmcp.server.server import FastMCP
@@ -45,19 +47,114 @@ __all__ = [
     "CurrentContext",
     "CurrentDocket",
     "CurrentFastMCP",
+    "CurrentTaskContext",
     "CurrentWorker",
     "Progress",
+    "TaskContext",
+    "TaskContextInfo",
     "get_access_token",
     "get_context",
     "get_http_headers",
     "get_http_request",
     "get_server",
+    "get_task_context",
+    "get_task_session",
     "is_docket_available",
+    "register_task_session",
     "require_docket",
     "resolve_dependencies",
     "transform_context_annotations",
     "without_injected_parameters",
 ]
+
+
+# --- TaskContextInfo and get_task_context ---
+
+
+@dataclass(frozen=True, slots=True)
+class TaskContextInfo:
+    """Information about the current background task context.
+
+    Returned by ``get_task_context()`` when running inside a Docket worker.
+    Contains identifiers needed to communicate with the MCP session.
+    """
+
+    task_id: str
+    """The MCP task ID (server-generated UUID)."""
+
+    session_id: str
+    """The session ID that submitted this task."""
+
+
+def get_task_context() -> TaskContextInfo | None:
+    """Get the current task context if running inside a background task worker.
+
+    This function extracts task information from the Docket execution context.
+    Returns None if not running in a task context (e.g., foreground execution).
+
+    Returns:
+        TaskContextInfo with task_id and session_id, or None if not in a task.
+    """
+    if not is_docket_available():
+        return None
+
+    from docket.dependencies import Dependency as DocketDependency
+
+    try:
+        execution = DocketDependency.execution.get()
+        # Parse the task key: {session_id}:{task_id}:{task_type}:{component}
+        from fastmcp.server.tasks.keys import parse_task_key
+
+        key_parts = parse_task_key(execution.key)
+        return TaskContextInfo(
+            task_id=key_parts["client_task_id"],
+            session_id=key_parts["session_id"],
+        )
+    except LookupError:
+        # Not in worker context
+        return None
+    except (ValueError, KeyError):
+        # Invalid task key format
+        return None
+
+
+# --- Session registry for TaskContext ---
+
+
+_task_sessions: dict[str, weakref.ref[ServerSession]] = {}
+
+
+def register_task_session(session_id: str, session: ServerSession) -> None:
+    """Register a session for TaskContext access in background tasks.
+
+    Called automatically when a task is submitted to Docket. The session is
+    stored as a weakref so it doesn't prevent garbage collection when the
+    client disconnects.
+
+    Args:
+        session_id: The session identifier
+        session: The ServerSession instance
+    """
+    _task_sessions[session_id] = weakref.ref(session)
+
+
+def get_task_session(session_id: str) -> ServerSession | None:
+    """Get a registered session by ID if still alive.
+
+    Args:
+        session_id: The session identifier
+
+    Returns:
+        The ServerSession if found and alive, None otherwise
+    """
+    ref = _task_sessions.get(session_id)
+    if ref is None:
+        return None
+    session = ref()
+    if session is None:
+        # Session was garbage collected, clean up entry
+        _task_sessions.pop(session_id, None)
+    return session
 
 
 # --- ContextVars ---
@@ -782,6 +879,408 @@ def CurrentFastMCP() -> FastMCP:
     from fastmcp.server.server import FastMCP
 
     return cast(FastMCP, _CurrentFastMCP())
+
+
+# --- TaskContext for background task elicitation/sampling ---
+
+
+class TaskContext:
+    """Context for background tasks with elicitation and sampling support.
+
+    TaskContext provides access to elicitation and sampling from within
+    background tasks (tools/resources/prompts with ``task=True``). Unlike the
+    regular Context, TaskContext IS available in Docket workers.
+
+    When ``elicit()`` or ``sample()`` is called, TaskContext automatically:
+
+    1. Updates task status to ``input_required``
+    2. Includes ``related-task`` metadata in the request
+    3. Waits for the response
+    4. Restores task status to ``working``
+
+    This implements SEP-1686 ``input_required`` semantics.
+
+    Note:
+        TaskContext is only available in embedded worker mode (the FastMCP
+        default). Distributed workers running in separate processes cannot
+        access the session and will raise an error.
+
+    Example:
+        .. code-block:: python
+
+            from fastmcp import FastMCP
+            from fastmcp.dependencies import CurrentTaskContext, TaskContext
+
+            mcp = FastMCP("my-server")
+
+            @mcp.tool(task=True)
+            async def ask_user(task_ctx: TaskContext = CurrentTaskContext()) -> str:
+                result = await task_ctx.elicit(
+                    message="What is your name?",
+                    response_type=str,
+                )
+                if result.action == "accept":
+                    return f"Hello, {result.data}!"
+                return "No name provided"
+    """
+
+    __slots__ = ("_task_id", "_session_id")
+
+    def __init__(self, task_id: str, session_id: str) -> None:
+        self._task_id = task_id
+        self._session_id = session_id
+
+    @property
+    def task_id(self) -> str:
+        """The MCP task ID (server-generated UUID)."""
+        return self._task_id
+
+    @property
+    def session_id(self) -> str:
+        """The session ID for this task."""
+        return self._session_id
+
+    def _get_session(self) -> ServerSession:
+        """Get the associated ServerSession.
+
+        Raises:
+            RuntimeError: If session is no longer available
+        """
+        session = get_task_session(self._session_id)
+        if session is None:
+            raise RuntimeError(
+                "Session is no longer available. This can happen if the client "
+                "disconnected or if running in distributed worker mode (which "
+                "doesn't support TaskContext). For distributed workers, consider "
+                "using a message queue pattern."
+            )
+        return session
+
+    def _get_docket(self) -> Docket:
+        """Get the current Docket instance.
+
+        Raises:
+            RuntimeError: If no Docket instance is available
+        """
+        docket = _current_docket.get()
+        if docket is None:
+            raise RuntimeError(
+                "No Docket instance available. This should not happen in a "
+                "background task context."
+            )
+        return docket
+
+    async def elicit(
+        self,
+        message: str,
+        response_type: type | None = None,
+    ) -> Any:
+        """Request user input, updating task status to input_required.
+
+        This method implements the SEP-1686 ``input_required`` flow:
+
+        1. Updates task status to ``input_required``
+        2. Sends elicitation request with ``related-task`` metadata
+        3. Waits for user response
+        4. Updates task status back to ``working``
+        5. Returns the parsed result
+
+        Args:
+            message: The message to display to the user
+            response_type: The expected response type. Can be:
+
+                - A dataclass or Pydantic model for structured input
+                - A primitive type (str, int, bool, float) for simple input
+                - None for freeform text input
+
+        Returns:
+            - ``AcceptedElicitation[T]`` if user accepted (data contains response)
+            - ``DeclinedElicitation`` if user declined
+            - ``CancelledElicitation`` if user cancelled
+
+        Raises:
+            RuntimeError: If session is no longer available
+            McpError: If client doesn't support elicitation
+
+        Example:
+            .. code-block:: python
+
+                @dataclass
+                class UserInfo:
+                    name: str
+                    age: int
+
+                @mcp.tool(task=True)
+                async def get_info(task_ctx: TaskContext = CurrentTaskContext()):
+                    result = await task_ctx.elicit(
+                        message="Please provide your information",
+                        response_type=UserInfo,
+                    )
+                    if result.action == "accept":
+                        return f"{result.data.name} is {result.data.age} years old"
+                    return "No info provided"
+        """
+        import anyio
+
+        import mcp.shared.exceptions
+        import mcp.shared.message
+        import mcp.types
+        from fastmcp.server.elicitation import (
+            CancelledElicitation,
+            DeclinedElicitation,
+            handle_elicit_accept,
+            parse_elicit_response_type,
+        )
+        from fastmcp.server.tasks.subscriptions import send_input_required_notification
+
+        session = self._get_session()
+        docket = self._get_docket()
+        config = parse_elicit_response_type(response_type)
+
+        try:
+            # Update status to input_required
+            await send_input_required_notification(
+                session=session,
+                task_id=self._task_id,
+                session_id=self._session_id,
+                docket=docket,
+                status="input_required",
+            )
+
+            # Build the elicitation request with related-task metadata
+            request = session._build_elicit_form_request(  # pyright: ignore[reportPrivateUsage]
+                message=message,
+                requestedSchema=config.schema,
+                related_task_id=self._task_id,
+            )
+
+            # Send the request and wait for response
+            response_stream, response_stream_reader = anyio.create_memory_object_stream[
+                mcp.types.JSONRPCResponse | mcp.types.JSONRPCError
+            ](1)
+            request_id = request.id
+            session._response_streams[request_id] = response_stream  # pyright: ignore[reportPrivateUsage]
+
+            try:
+                await session._write_stream.send(  # pyright: ignore[reportPrivateUsage]
+                    mcp.shared.message.SessionMessage(
+                        message=mcp.types.JSONRPCMessage(request)
+                    )
+                )
+
+                response_or_error = await response_stream_reader.receive()
+
+                if isinstance(response_or_error, mcp.types.JSONRPCError):
+                    raise mcp.shared.exceptions.McpError(response_or_error.error)
+                else:
+                    result = mcp.types.ElicitResult.model_validate(
+                        response_or_error.result
+                    )
+            finally:
+                session._response_streams.pop(request_id, None)  # pyright: ignore[reportPrivateUsage]
+                await response_stream.aclose()
+                await response_stream_reader.aclose()
+
+            # Parse and return result
+            if result.action == "accept":
+                return handle_elicit_accept(config, result.content)
+            elif result.action == "decline":
+                return DeclinedElicitation()
+            elif result.action == "cancel":
+                return CancelledElicitation()
+            else:
+                raise ValueError(f"Unexpected elicitation action: {result.action}")
+
+        finally:
+            # Always restore status to working
+            await send_input_required_notification(
+                session=session,
+                task_id=self._task_id,
+                session_id=self._session_id,
+                docket=docket,
+                status="working",
+            )
+
+    async def sample(
+        self,
+        messages: list[Any],
+        *,
+        max_tokens: int = 512,
+        system_prompt: str | None = None,
+        temperature: float | None = None,
+        model_preferences: Any | None = None,
+    ) -> Any:
+        """Request model sampling, updating task status to input_required.
+
+        This method implements the SEP-1686 ``input_required`` flow for sampling:
+
+        1. Updates task status to ``input_required``
+        2. Sends sampling request with ``related-task`` metadata
+        3. Waits for LLM response
+        4. Updates task status back to ``working``
+        5. Returns the result
+
+        Args:
+            messages: The conversation messages for sampling
+            max_tokens: Maximum tokens in the response (default: 512)
+            system_prompt: Optional system prompt
+            temperature: Sampling temperature
+            model_preferences: Optional model selection preferences
+
+        Returns:
+            CreateMessageResult from the client
+
+        Raises:
+            RuntimeError: If session is no longer available
+            McpError: If client doesn't support sampling
+
+        Example:
+            .. code-block:: python
+
+                @mcp.tool(task=True)
+                async def summarize(
+                    text: str,
+                    task_ctx: TaskContext = CurrentTaskContext(),
+                ) -> str:
+                    result = await task_ctx.sample(
+                        messages=[{"role": "user", "content": f"Summarize: {text}"}],
+                        max_tokens=200,
+                    )
+                    return result.content.text
+        """
+        import anyio
+
+        import mcp.shared.exceptions
+        import mcp.shared.message
+        import mcp.types
+        from fastmcp.server.tasks.subscriptions import send_input_required_notification
+
+        session = self._get_session()
+        docket = self._get_docket()
+
+        # Convert simple message dicts to SamplingMessage if needed
+        sampling_messages = []
+        for msg in messages:
+            if isinstance(msg, dict):
+                from mcp.types import SamplingMessage, TextContent
+
+                role = msg.get("role", "user")
+                content = msg.get("content", "")
+                if isinstance(content, str):
+                    content = TextContent(type="text", text=content)
+                sampling_messages.append(SamplingMessage(role=role, content=content))
+            else:
+                sampling_messages.append(msg)
+
+        try:
+            # Update status to input_required
+            await send_input_required_notification(
+                session=session,
+                task_id=self._task_id,
+                session_id=self._session_id,
+                docket=docket,
+                status="input_required",
+            )
+
+            # Build the sampling request with related-task metadata
+            request = session._build_create_message_request(  # pyright: ignore[reportPrivateUsage]
+                messages=sampling_messages,
+                max_tokens=max_tokens,
+                system_prompt=system_prompt,
+                temperature=temperature,
+                model_preferences=model_preferences,
+                related_task_id=self._task_id,
+            )
+
+            # Send the request and wait for response
+            response_stream, response_stream_reader = anyio.create_memory_object_stream[
+                mcp.types.JSONRPCResponse | mcp.types.JSONRPCError
+            ](1)
+            request_id = request.id
+            session._response_streams[request_id] = response_stream  # pyright: ignore[reportPrivateUsage]
+
+            try:
+                await session._write_stream.send(  # pyright: ignore[reportPrivateUsage]
+                    mcp.shared.message.SessionMessage(
+                        message=mcp.types.JSONRPCMessage(request)
+                    )
+                )
+
+                response_or_error = await response_stream_reader.receive()
+
+                if isinstance(response_or_error, mcp.types.JSONRPCError):
+                    raise mcp.shared.exceptions.McpError(response_or_error.error)
+                else:
+                    return mcp.types.CreateMessageResult.model_validate(
+                        response_or_error.result
+                    )
+            finally:
+                session._response_streams.pop(request_id, None)  # pyright: ignore[reportPrivateUsage]
+                await response_stream.aclose()
+                await response_stream_reader.aclose()
+
+        finally:
+            # Always restore status to working
+            await send_input_required_notification(
+                session=session,
+                task_id=self._task_id,
+                session_id=self._session_id,
+                docket=docket,
+                status="working",
+            )
+
+
+class _CurrentTaskContext(Dependency):  # type: ignore[misc]
+    """Async context manager for TaskContext dependency."""
+
+    async def __aenter__(self) -> TaskContext:
+        task_info = get_task_context()
+        if task_info is None:
+            raise RuntimeError(
+                "CurrentTaskContext() can only be used in background tasks. "
+                "Add task=True to your component decorator, or use CurrentContext() "
+                "for foreground operations."
+            )
+        return TaskContext(
+            task_id=task_info.task_id,
+            session_id=task_info.session_id,
+        )
+
+    async def __aexit__(self, *args: object) -> None:
+        pass
+
+
+def CurrentTaskContext() -> TaskContext:
+    """Get the current TaskContext for background task operations.
+
+    This dependency is ONLY available in background tasks (``task=True``).
+    It provides access to elicitation and sampling with proper
+    ``input_required`` status handling per SEP-1686.
+
+    Unlike ``CurrentContext()``, which is NOT available in background tasks,
+    ``CurrentTaskContext()`` IS available and provides a subset of Context
+    functionality that works in the worker environment.
+
+    Returns:
+        A dependency that resolves to the active TaskContext
+
+    Raises:
+        RuntimeError: If not in a background task context (during resolution)
+
+    Example:
+        .. code-block:: python
+
+            from fastmcp.dependencies import CurrentTaskContext, TaskContext
+
+            @mcp.tool(task=True)
+            async def my_task(task_ctx: TaskContext = CurrentTaskContext()) -> str:
+                result = await task_ctx.elicit("Name?", response_type=str)
+                if result.action == "accept":
+                    return f"Hello, {result.data}!"
+                return "No name"
+    """
+    require_docket("CurrentTaskContext()")
+    return cast(TaskContext, _CurrentTaskContext())
 
 
 # --- Progress dependency ---
