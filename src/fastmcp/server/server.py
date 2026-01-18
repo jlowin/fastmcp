@@ -728,14 +728,21 @@ class FastMCP(Provider, Generic[LifespanResultT]):
             show_banner: Whether to display the server banner. If None, uses the
                 FASTMCP_SHOW_SERVER_BANNER setting (default: True).
         """
-        anyio.run(
-            partial(
-                self.run_async,
-                transport,
-                show_banner=show_banner,
-                **transport_kwargs,
+        try:
+            anyio.run(
+                partial(
+                    self.run_async,
+                    transport,
+                    show_banner=show_banner,
+                    **transport_kwargs,
+                )
             )
-        )
+        except KeyboardInterrupt:
+            # Suppress traceback for clean exit. The actual signal handling and
+            # os._exit(0) call happens in run_stdio_async() for stdio transport.
+            # This just prevents the traceback from being displayed if the
+            # KeyboardInterrupt propagates up through anyio.run().
+            pass
 
     def _setup_handlers(self) -> None:
         """Set up core MCP protocol handlers.
