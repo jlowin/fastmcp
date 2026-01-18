@@ -142,6 +142,7 @@ def create_sse_app(
     sse_path: str,
     auth: AuthProvider | None = None,
     debug: bool = False,
+    starlette_debug: bool = False,
     routes: list[BaseRoute] | None = None,
     middleware: list[Middleware] | None = None,
 ) -> StarletteWithLifespan:
@@ -152,7 +153,8 @@ def create_sse_app(
         message_path: Path for SSE messages
         sse_path: Path for SSE connections
         auth: Optional authentication provider (AuthProvider)
-        debug: Whether to enable debug mode
+        debug: Whether to enable global debug mode (sets log level and Starlette debug)
+        starlette_debug: Whether to enable Starlette debug mode only
         routes: Optional list of custom routes
         middleware: Optional list of middleware
     Returns:
@@ -252,7 +254,7 @@ def create_sse_app(
     app = create_base_app(
         routes=server_routes,
         middleware=server_middleware,
-        debug=debug,
+        debug=debug or starlette_debug,
         lifespan=lifespan,
     )
     # Store the FastMCP server instance on the Starlette app state
@@ -272,6 +274,7 @@ def create_streamable_http_app(
     json_response: bool = False,
     stateless_http: bool = False,
     debug: bool = False,
+    starlette_debug: bool = False,
     routes: list[BaseRoute] | None = None,
     middleware: list[Middleware] | None = None,
 ) -> StarletteWithLifespan:
@@ -287,7 +290,8 @@ def create_streamable_http_app(
         auth: Optional authentication provider (AuthProvider)
         json_response: Whether to use JSON response format
         stateless_http: Whether to use stateless mode (new transport per request)
-        debug: Whether to enable debug mode
+        debug: Whether to enable global debug mode (sets log level and Starlette debug)
+        starlette_debug: Whether to enable Starlette debug mode only
         routes: Optional list of custom routes
         middleware: Optional list of middleware
 
@@ -365,7 +369,7 @@ def create_streamable_http_app(
     app = create_base_app(
         routes=server_routes,
         middleware=server_middleware,
-        debug=debug,
+        debug=debug or starlette_debug,
         lifespan=lifespan,
     )
     # Store the FastMCP server instance on the Starlette app state

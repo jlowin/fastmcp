@@ -260,7 +260,57 @@ class Settings(BaseSettings):
     sse_path: str = "/sse"
     message_path: str = "/messages/"
     streamable_http_path: str = "/mcp"
-    debug: bool = False
+
+    debug: Annotated[
+        bool,
+        Field(
+            description=inspect.cleandoc(
+                """
+                Global debug mode. When enabled, sets log level to DEBUG and enables
+                Starlette debug tracebacks for HTTP/SSE transports. This provides a
+                convenient way to enable comprehensive debugging. For granular control,
+                use log_level and starlette_debug separately.
+                """
+            )
+        ),
+    ] = False
+
+    starlette_debug: Annotated[
+        bool,
+        Field(
+            description=inspect.cleandoc(
+                """
+                Enable Starlette debug mode for HTTP/SSE transports. When enabled,
+                detailed error tracebacks will be returned in HTTP responses. Only
+                affects HTTP/SSE transports; has no effect on stdio transport.
+                """
+            )
+        ),
+    ] = False
+
+    @field_validator("debug")
+    @classmethod
+    def _update_log_level_for_debug(cls, v: bool, info) -> bool:
+        """When debug is enabled, set log_level to DEBUG."""
+        if v:
+            # When debug is True, we need to ensure log_level is set to DEBUG
+            # This is checked in model_post_init
+            pass
+        return v
+
+    def model_post_init(self, __context) -> None:
+        """Post-initialization hook to handle debug mode."""
+        if self.debug and self.log_level != "DEBUG":
+            # When debug is enabled, force log_level to DEBUG
+            self.log_level = "DEBUG"
+            # Reconfigure logging if it's enabled
+            if self.log_enabled:
+                from fastmcp.utilities.logging import configure_logging
+
+                configure_logging(
+                    level=self.log_level,
+                    enable_rich_tracebacks=self.enable_rich_tracebacks,
+                )
 
     # error handling
     mask_error_details: Annotated[

@@ -2769,6 +2769,7 @@ class FastMCP(Provider, Generic[LifespanResultT]):
                     else self._deprecated_settings.stateless_http
                 ),
                 debug=self._deprecated_settings.debug,
+                starlette_debug=self._deprecated_settings.starlette_debug,
                 middleware=middleware,
             )
         elif transport == "sse":
@@ -2778,6 +2779,7 @@ class FastMCP(Provider, Generic[LifespanResultT]):
                 sse_path=path or self._deprecated_settings.sse_path,
                 auth=self.auth,
                 debug=self._deprecated_settings.debug,
+                starlette_debug=self._deprecated_settings.starlette_debug,
                 middleware=middleware,
             )
 
