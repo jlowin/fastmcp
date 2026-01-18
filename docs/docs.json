@@ -568,6 +568,7 @@
                       "python-sdk/fastmcp-utilities-openapi-schemas"
                     ]
                   },
+                  "python-sdk/fastmcp-utilities-pagination",
                   "python-sdk/fastmcp-utilities-tests",
                   "python-sdk/fastmcp-utilities-types",
                   "python-sdk/fastmcp-utilities-ui",

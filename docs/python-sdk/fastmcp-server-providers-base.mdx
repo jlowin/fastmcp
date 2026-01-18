@@ -22,11 +22,11 @@ Example:
             super().__init__()
             self.db = Database(db_url)
 
-        async def list_tools(self) -> list[Tool]:
+        async def _list_tools(self) -> list[Tool]:
             rows = await self.db.fetch("SELECT * FROM tools")
             return [self._make_tool(row) for row in rows]
 
-        async def get_tool(self, name: str) -> Tool | None:
+        async def _get_tool(self, name: str) -> Tool | None:
             row = await self.db.fetchone("SELECT * FROM tools WHERE name = ?", name)
             return self._make_tool(row) if row else None
 
@@ -48,7 +48,16 @@ supports.
 
 **Methods:**
 
-#### `add_transform` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/providers/base.py#L75" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+#### `transforms` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/providers/base.py#L75" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+transforms(self) -> list[Transform]
+```
+
+All transforms including visibility (applied last/outermost).
+
+
+#### `add_transform` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/providers/base.py#L79" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 ```python
 add_transform(self, transform: Transform) -> None
@@ -63,132 +72,104 @@ through the provider. They're applied in order - first added is innermost.
 - `transform`: The transform to add.
 
 
-#### `list_tools` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/providers/base.py#L239" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+#### `list_tools` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/providers/base.py#L103" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 ```python
 list_tools(self) -> Sequence[Tool]
 ```
 
-Return all available tools.
+List tools with all transforms applied.
 
-Override to provide tools dynamically. Returns ALL versions of all tools.
-The server handles deduplication to show one tool per name.
+Builds a middleware chain: base → transforms (in order).
+Each transform wraps the previous via call_next.
+
+**Returns:**
+- Transformed sequence of tools.
 
 
-#### `get_tool` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/providers/base.py#L247" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+#### `get_tool` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/providers/base.py#L122" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 ```python
 get_tool(self, name: str, version: VersionSpec | None = None) -> Tool | None
 ```
 
-Get a specific tool by name.
-
-Default implementation filters list_tools() and picks the highest version
-that matches the spec.
+Get tool by transformed name with all transforms applied.
 
 **Args:**
-- `name`: The tool name.
+- `name`: The transformed tool name to look up.
 - `version`: Optional version filter. If None, returns highest version.
-     If specified, returns highest version matching the spec.
 
 **Returns:**
-- The Tool if found, or None to continue searching other providers.
+- The tool if found and enabled, None otherwise.
 
 
-#### `list_resources` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/providers/base.py#L271" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+#### `list_resources` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/providers/base.py#L144" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 ```python
 list_resources(self) -> Sequence[Resource]
 ```
 
-Return all available resources.
-
-Override to provide resources dynamically. Returns ALL versions of all resources.
-The server handles deduplication to show one resource per URI.
+List resources with all transforms applied.
 
 
-#### `get_resource` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/providers/base.py#L279" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+#### `get_resource` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/providers/base.py#L156" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 ```python
 get_resource(self, uri: str, version: VersionSpec | None = None) -> Resource | None
 ```
 
-Get a specific resource by URI.
-
-Default implementation filters list_resources() and returns highest
-version matching the spec.
+Get resource by transformed URI with all transforms applied.
 
 **Args:**
-- `uri`: The resource URI.
+- `uri`: The transformed resource URI to look up.
 - `version`: Optional version filter. If None, returns highest version.
 
-**Returns:**
-- The Resource if found, or None to continue searching other providers.
 
-
-#### `list_resource_templates` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/providers/base.py#L302" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+#### `list_resource_templates` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/providers/base.py#L175" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 ```python
 list_resource_templates(self) -> Sequence[ResourceTemplate]
 ```
 
-Return all available resource templates.
-
-Override to provide resource templates dynamically. Returns ALL versions.
-The server handles deduplication.
+List resource templates with all transforms applied.
 
 
-#### `get_resource_template` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/providers/base.py#L310" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+#### `get_resource_template` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/providers/base.py#L187" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 ```python
 get_resource_template(self, uri: str, version: VersionSpec | None = None) -> ResourceTemplate | None
 ```
 
-Get a resource template that matches the given URI.
-
-Default implementation lists all templates, finds those whose pattern
-matches the URI, and returns the highest version matching the spec.
+Get resource template by transformed URI with all transforms applied.
 
 **Args:**
-- `uri`: The URI to match against templates.
+- `uri`: The transformed template URI to look up.
 - `version`: Optional version filter. If None, returns highest version.
 
-**Returns:**
-- The ResourceTemplate if a matching one is found, or None to continue searching.
 
-
-#### `list_prompts` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/providers/base.py#L333" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+#### `list_prompts` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/providers/base.py#L208" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 ```python
 list_prompts(self) -> Sequence[Prompt]
 ```
 
-Return all available prompts.
-
-Override to provide prompts dynamically. Returns ALL versions of all prompts.
-The server handles deduplication to show one prompt per name.
+List prompts with all transforms applied.
 
 
-#### `get_prompt` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/providers/base.py#L341" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+#### `get_prompt` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/providers/base.py#L220" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 ```python
 get_prompt(self, name: str, version: VersionSpec | None = None) -> Prompt | None
 ```
 
-Get a specific prompt by name.
-
-Default implementation filters list_prompts() and picks the highest version
-matching the spec.
+Get prompt by transformed name with all transforms applied.
 
 **Args:**
-- `name`: The prompt name.
+- `name`: The transformed prompt name to look up.
 - `version`: Optional version filter. If None, returns highest version.
 
-**Returns:**
-- The Prompt if found, or None to continue searching other providers.
 
-
-#### `get_tasks` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/providers/base.py#L368" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+#### `get_tasks` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/providers/base.py#L372" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 ```python
 get_tasks(self) -> Sequence[FastMCPComponent]
@@ -203,7 +184,7 @@ for components with task_config.mode != 'forbidden'.
 Used by the server during startup to register functions with Docket.
 
 
-#### `lifespan` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/providers/base.py#L442" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+#### `lifespan` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/providers/base.py#L446" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 ```python
 lifespan(self) -> AsyncIterator[None]
@@ -219,7 +200,7 @@ The lifespan scope matches the server's lifespan - code before yield
 runs at startup, code after yield runs at shutdown.
 
 
-#### `enable` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/providers/base.py#L471" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+#### `enable` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/providers/base.py#L475" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 ```python
 enable(self) -> None
@@ -233,7 +214,7 @@ Enable components by removing from blocklist, or set allowlist with only=True.
 - `only`: If True, switches to allowlist mode - ONLY show these keys/tags.
 
 
-#### `disable` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/providers/base.py#L487" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+#### `disable` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/providers/base.py#L491" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 ```python
 disable(self) -> None
