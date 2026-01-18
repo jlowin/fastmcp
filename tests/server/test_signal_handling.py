@@ -1,4 +1,4 @@
-"""Tests for signal handling in FastMCP server.run() method."""
+"""Tests for signal handling in FastMCP server signal handling methods."""
 
 import threading
 from unittest.mock import patch
@@ -8,6 +8,26 @@ from fastmcp import FastMCP
 
 class TestSignalHandling:
     """Test signal handling behavior in different contexts."""
+
+    def test_run_stdio_main_thread_installs_signal_handlers(self):
+        """Test that run_stdio() installs signal handlers in main thread."""
+        server = FastMCP()
+
+        # Mock anyio.run to prevent actual server execution
+        with patch("fastmcp.server.server.anyio.run"):
+            # Mock signal.signal to track calls
+            with patch("signal.signal") as mock_signal:
+                mock_signal.return_value = lambda *args: None
+
+                # Call should work without exceptions
+                try:
+                    server.run_stdio(show_banner=False)
+                except SystemExit:
+                    pass  # os._exit() will be caught
+
+                # Verify signal handlers were installed (2 calls: SIGINT and SIGTERM)
+                # Plus 2 more to restore them in finally block
+                assert mock_signal.call_count >= 2
 
     def test_stdio_main_thread_installs_signal_handlers(self):
         """Test that signal handlers are installed for stdio in main thread via .run()."""
@@ -172,16 +192,12 @@ class TestSignalHandling:
         """Test that default transport (None) is treated as stdio and gets signal handlers."""
         server = FastMCP()
 
-        # Mock anyio.run to prevent actual server execution
-        with patch("fastmcp.server.server.anyio.run"):
-            # Mock signal.signal to track calls
-            with patch("signal.signal") as mock_signal:
-                mock_signal.return_value = lambda *args: None
+        # Mock run_stdio to prevent actual server execution
+        with patch.object(server, "run_stdio") as mock_run_stdio:
+            try:
+                server.run()  # No transport specified - should default to stdio
+            except Exception:
+                pass
 
-                try:
-                    server.run()  # No transport specified - should default to stdio
-                except Exception:
-                    pass
-
-                # Verify signal handlers were installed (since default is stdio)
-                assert mock_signal.call_count >= 2
+            # Verify run_stdio was called (since default is stdio)
+            mock_run_stdio.assert_called_once()
