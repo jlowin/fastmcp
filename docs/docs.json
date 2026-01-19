@@ -98,15 +98,9 @@
                 "group": "Servers",
                 "pages": [
                   "servers/server",
-                  {
-                    "group": "Components",
-                    "icon": "cube",
-                    "pages": [
-                      "servers/tools",
-                      "servers/resources",
-                      "servers/prompts"
-                    ]
-                  },
+                  "servers/tools",
+                  "servers/resources",
+                  "servers/prompts",
                   "servers/context",
                   {
                     "group": "Providers",
