@@ -1404,9 +1404,8 @@ class TestToolNameOverrides:
     async def test_tool_names_override_via_transforms(self):
         """Test that tool_names renames tools via ToolTransform layer.
 
-        Tool renames are applied via ToolTransform and bypass namespace prefixing.
-        Both server introspection and client-facing API show the transformed names
-        consistently.
+        Tool renames are applied first, then namespace prefixing.
+        So original_tool → custom_name → prefix_custom_name.
         """
         sub = FastMCP("Sub")
 
@@ -1415,19 +1414,20 @@ class TestToolNameOverrides:
             return "test"
 
         main = FastMCP("Main")
-        # tool_names maps original name → final name (bypasses namespace)
+        # tool_names renames first, then namespace is applied
         main.mount(
             sub,
             namespace="prefix",
             tool_names={"original_tool": "custom_name"},
         )
 
-        # Server introspection shows transformed names
+        # Server introspection shows renamed + namespaced names
         tools = await main.get_tools()
         tool_names = [t.name for t in tools]
-        assert "custom_name" in tool_names
+        assert "prefix_custom_name" in tool_names
         assert "original_tool" not in tool_names
         assert "prefix_original_tool" not in tool_names
+        assert "custom_name" not in tool_names
 
     async def test_tool_names_override_applied_in_list_tools(self):
         """Test that tool_names override is reflected in list_tools()."""
@@ -1446,7 +1446,7 @@ class TestToolNameOverrides:
 
         tools = await main.get_tools()
         tool_names = [t.name for t in tools]
-        assert "custom_name" in tool_names
+        assert "prefix_custom_name" in tool_names
         assert "prefix_original_tool" not in tool_names
 
     async def test_tool_call_with_overridden_name(self):
@@ -1464,7 +1464,8 @@ class TestToolNameOverrides:
             tool_names={"original_tool": "renamed"},
         )
 
-        result = await main.call_tool("renamed", {})
+        # Tool is renamed then namespaced: original_tool → renamed → prefix_renamed
+        result = await main.call_tool("prefix_renamed", {})
         assert result.structured_content == {"result": "success"}
 
     def test_duplicate_tool_rename_targets_raises_error(self):

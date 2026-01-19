@@ -2737,18 +2737,18 @@ class FastMCP(AggregateProvider, Generic[LifespanResultT]):
 
         # Create provider and add it with namespace
         provider: Provider = FastMCPProvider(server)
-        # Use add_provider with namespace (applies namespace in AggregateProvider)
-        self.add_provider(provider, namespace=namespace or "")
 
-        # Tool renames are applied at server level (after aggregation + namespacing)
+        # Apply tool renames first (scoped to this provider), then namespace
+        # So foo → bar with namespace="baz" becomes baz_bar
         if tool_names:
             transforms = {
-                (
-                    f"{namespace}_{old_name}" if namespace else old_name
-                ): ToolTransformConfig(name=new_name)
+                old_name: ToolTransformConfig(name=new_name)
                 for old_name, new_name in tool_names.items()
             }
-            self.add_transform(ToolTransform(transforms))
+            provider = provider.wrap_transform(ToolTransform(transforms))
+
+        # Use add_provider with namespace (applies namespace in AggregateProvider)
+        self.add_provider(provider, namespace=namespace or "")
 
     async def import_server(
         self,
