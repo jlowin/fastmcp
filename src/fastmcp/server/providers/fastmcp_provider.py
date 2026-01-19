@@ -114,11 +114,14 @@ class FastMCPProviderTool(Tool):
         backgrounding appropriately. fn_key is already set by the parent
         server before calling this method.
         """
+        # Pass exact version so child executes the correct version
+        version = VersionSpec(eq=self.version) if self.version else None
+
         with delegate_span(
             self._original_name or "", "FastMCPProvider", self._original_name or ""
         ):
             return await self._server.call_tool(
-                self._original_name, arguments, task_meta=task_meta
+                self._original_name, arguments, version=version, task_meta=task_meta
             )
 
     async def run(self, arguments: dict[str, Any]) -> ToolResult:
@@ -127,7 +130,12 @@ class FastMCPProviderTool(Tool):
         This is called when the tool is used within a TransformedTool
         forwarding function or other contexts where task_meta is not available.
         """
-        result = await self._server.call_tool(self._original_name, arguments)
+        # Pass exact version so child executes the correct version
+        version = VersionSpec(eq=self.version) if self.version else None
+
+        result = await self._server.call_tool(
+            self._original_name, arguments, version=version
+        )
         # Result from call_tool should always be ToolResult when no task_meta
         if isinstance(result, mcp.types.CreateTaskResult):
             raise RuntimeError(
@@ -489,7 +497,7 @@ class FastMCPProvider(Provider):
         Wraps each tool as a FastMCPProviderTool that delegates execution to
         the nested server's middleware.
         """
-        raw_tools = await self.server.get_tools(run_middleware=True)
+        raw_tools = await self.server.list_tools()
         return [FastMCPProviderTool.wrap(self.server, t) for t in raw_tools]
 
     async def _get_tool(
@@ -517,7 +525,7 @@ class FastMCPProvider(Provider):
         Wraps each resource as a FastMCPProviderResource that delegates reading
         to the nested server's middleware.
         """
-        raw_resources = await self.server.get_resources(run_middleware=True)
+        raw_resources = await self.server.list_resources()
         return [FastMCPProviderResource.wrap(self.server, r) for r in raw_resources]
 
     async def _get_resource(
@@ -545,7 +553,7 @@ class FastMCPProvider(Provider):
         Returns FastMCPProviderResourceTemplate instances that create
         FastMCPProviderResources when materialized.
         """
-        raw_templates = await self.server.get_resource_templates(run_middleware=True)
+        raw_templates = await self.server.list_resource_templates()
         return [
             FastMCPProviderResourceTemplate.wrap(self.server, t) for t in raw_templates
         ]
@@ -575,7 +583,7 @@ class FastMCPProvider(Provider):
         Returns FastMCPProviderPrompt instances that delegate rendering to the
         wrapped server's middleware.
         """
-        raw_prompts = await self.server.get_prompts(run_middleware=True)
+        raw_prompts = await self.server.list_prompts()
         return [FastMCPProviderPrompt.wrap(self.server, p) for p in raw_prompts]
 
     async def _get_prompt(
