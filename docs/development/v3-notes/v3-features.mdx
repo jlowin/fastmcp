@@ -650,6 +650,32 @@ Documentation: [Telemetry](/servers/telemetry)
 
 ---
 
+## Pagination
+
+v3.0 adds pagination support for list operations when servers expose many components ([#2903](https://github.com/jlowin/fastmcp/pull/2903)).
+
+```python
+from fastmcp import FastMCP
+
+# Enable pagination with 50 items per page
+server = FastMCP("ComponentRegistry", list_page_size=50)
+```
+
+When `list_page_size` is set, `tools/list`, `resources/list`, `resources/templates/list`, and `prompts/list` paginate responses with `nextCursor` for subsequent pages.
+
+**Client behavior**: The FastMCP Client fetches all pages automatically—`list_tools()` and similar methods return the complete list. For manual pagination (memory constraints, progress reporting), use `_mcp` variants:
+
+```python
+async with Client(server) as client:
+    result = await client.list_tools_mcp()
+    while result.nextCursor:
+        result = await client.list_tools_mcp(cursor=result.nextCursor)
+```
+
+Documentation: [Pagination](/servers/pagination)
+
+---
+
 ## Composable Lifespans
 
 Lifespans can be combined with the `|` operator for modular setup/teardown ([#2828](https://github.com/jlowin/fastmcp/pull/2828)):
