@@ -7,15 +7,13 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-import pytest
 from mcp.types import (
     AudioContent,
-    BlobResourceContents,
     EmbeddedResource,
     ImageContent,
     TextContent,
 )
-from pydantic import AnyUrl, BaseModel
+from pydantic import BaseModel
 from typing_extensions import TypedDict
 
 from fastmcp import FastMCP
@@ -48,83 +46,6 @@ class PersonModel(BaseModel):
 class PersonDataclass:
     name: str
     age: int
-
-
-@pytest.fixture
-def tool_server():
-    mcp = FastMCP()
-
-    @mcp.tool
-    def add(x: int, y: int) -> int:
-        return x + y
-
-    @mcp.tool
-    def list_tool() -> list[str | int]:
-        return ["x", 2]
-
-    @mcp.tool
-    def error_tool() -> None:
-        raise ValueError("Test error")
-
-    @mcp.tool
-    def image_tool(path: str) -> Image:
-        return Image(path)
-
-    @mcp.tool
-    def audio_tool(path: str) -> Audio:
-        return Audio(path)
-
-    @mcp.tool
-    def file_tool(path: str) -> File:
-        return File(path)
-
-    @mcp.tool
-    def mixed_content_tool() -> list[TextContent | ImageContent | EmbeddedResource]:
-        return [
-            TextContent(type="text", text="Hello"),
-            ImageContent(type="image", data="abc", mimeType="application/octet-stream"),
-            EmbeddedResource(
-                type="resource",
-                resource=BlobResourceContents(
-                    blob=base64.b64encode(b"abc").decode(),
-                    mimeType="application/octet-stream",
-                    uri=AnyUrl("file:///test.bin"),
-                ),
-            ),
-        ]
-
-    @mcp.tool(output_schema=None)
-    def mixed_list_fn(image_path: str) -> list:
-        return [
-            "text message",
-            Image(image_path),
-            {"key": "value"},
-            TextContent(type="text", text="direct content"),
-        ]
-
-    @mcp.tool(output_schema=None)
-    def mixed_audio_list_fn(audio_path: str) -> list:
-        return [
-            "text message",
-            Audio(audio_path),
-            {"key": "value"},
-            TextContent(type="text", text="direct content"),
-        ]
-
-    @mcp.tool(output_schema=None)
-    def mixed_file_list_fn(file_path: str) -> list:
-        return [
-            "text message",
-            File(file_path),
-            {"key": "value"},
-            TextContent(type="text", text="direct content"),
-        ]
-
-    @mcp.tool
-    def file_text_tool() -> File:
-        return File(data=b"hello world", format="plain")
-
-    return mcp
 
 
 class TestToolReturnTypes:
