@@ -95,7 +95,7 @@
                 ]
               },
               {
-                "group": "Servers",
+                "group": "Build",
                 "pages": [
                   "servers/server",
                   {
@@ -127,7 +127,12 @@
                       "servers/providers/transforms",
                       "servers/enabled"
                     ]
-                  },
+                  }
+                ]
+              },
+              {
+                "group": "Run",
+                "pages": [
                   {
                     "group": "Features",
                     "icon": "play",
@@ -147,22 +152,21 @@
                     ]
                   },
                   {
-                    "group": "Authentication",
-                    "icon": "key",
+                    "group": "Deployment",
+                    "icon": "rocket",
                     "pages": [
-                      "servers/auth/authentication",
-                      "servers/auth/token-verification",
-                      "servers/auth/remote-oauth",
-                      "servers/auth/oauth-proxy",
-                      "servers/auth/oidc-proxy",
-                      "servers/auth/full-oauth-server"
+                      "deployment/running-server",
+                      "deployment/http",
+                      "deployment/fastmcp-cloud",
+                      "deployment/server-configuration",
+                      "patterns/cli",
+                      "patterns/testing"
                     ]
-                  },
-                  "servers/authorization"
+                  }
                 ]
               },
               {
-                "group": "Clients",
+                "group": "Connect",
                 "pages": [
                   "clients/client",
                   "clients/transports",
@@ -196,6 +200,24 @@
                       "clients/auth/bearer"
                     ]
                   }
+                ]
+              },
+              {
+                "group": "Secure",
+                "pages": [
+                  {
+                    "group": "Server Authentication",
+                    "icon": "key",
+                    "pages": [
+                      "servers/auth/authentication",
+                      "servers/auth/token-verification",
+                      "servers/auth/remote-oauth",
+                      "servers/auth/oauth-proxy",
+                      "servers/auth/oidc-proxy",
+                      "servers/auth/full-oauth-server"
+                    ]
+                  },
+                  "servers/authorization"
                 ]
               },
               {
@@ -253,17 +275,6 @@
                       "integrations/openai"
                     ]
                   }
-                ]
-              },
-              {
-                "group": "Deployment",
-                "pages": [
-                  "deployment/running-server",
-                  "deployment/http",
-                  "deployment/fastmcp-cloud",
-                  "deployment/server-configuration",
-                  "patterns/cli",
-                  "patterns/testing"
                 ]
               },
               {
