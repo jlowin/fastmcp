@@ -252,7 +252,8 @@ class TestDeprecatedServerInitKwargs:
             server = FastMCP("TestServer")
 
             # Verify settings are inherited from global settings
-            assert server._deprecated_settings.log_level == "WARNING"
+            # Note: When debug=True, log_level is forced to DEBUG (new behavior)
+            assert server._deprecated_settings.log_level == "DEBUG"
             assert server._deprecated_settings.debug is True
             assert server._deprecated_settings.host == "0.0.0.0"
             assert server._deprecated_settings.port == 3000
