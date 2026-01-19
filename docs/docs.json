@@ -98,10 +98,16 @@
                 "group": "Servers",
                 "pages": [
                   "servers/server",
-                  "servers/tools",
-                  "servers/resources",
-                  "servers/prompts",
-                  "servers/context",
+                  {
+                    "group": "Core",
+                    "icon": "cube",
+                    "pages": [
+                      "servers/tools",
+                      "servers/resources",
+                      "servers/prompts",
+                      "servers/context"
+                    ]
+                  },
                   {
                     "group": "Providers",
                     "icon": "puzzle-piece",
