@@ -261,20 +261,15 @@
                   "deployment/running-server",
                   "deployment/http",
                   "deployment/fastmcp-cloud",
-                  "deployment/server-configuration"
-                ]
-              },
-              {
-                "group": "Patterns",
-                "pages": [
+                  "deployment/server-configuration",
                   "patterns/cli",
-                  "patterns/contrib",
                   "patterns/testing"
                 ]
               },
               {
                 "group": "Development",
                 "pages": [
+                  "patterns/contrib",
                   "development/contributing",
                   "development/tests",
                   "development/releases",
