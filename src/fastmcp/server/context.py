@@ -732,7 +732,7 @@ class Context:
             model_preferences=model_preferences,
             tools=tools,
             tool_choice=tool_choice,
-            execute_tools=execute_tools,
+            auto_execute_tools=execute_tools,
             mask_error_details=mask_error_details,
         )
 

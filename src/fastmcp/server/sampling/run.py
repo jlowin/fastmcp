@@ -410,7 +410,7 @@ async def sample_step_impl(
     model_preferences: ModelPreferences | str | list[str] | None = None,
     tools: Sequence[SamplingTool | Callable[..., Any]] | None = None,
     tool_choice: ToolChoiceOption | str | None = None,
-    execute_tools: bool = True,
+    auto_execute_tools: bool = True,
     mask_error_details: bool | None = None,
 ) -> SampleStep:
     """Implementation of Context.sample_step().
@@ -486,7 +486,7 @@ async def sample_step_impl(
         return SampleStep(response=response, history=current_messages)
 
     # If not executing tools, return with assistant message but no tool results
-    if not execute_tools:
+    if not auto_execute_tools:
         return SampleStep(response=response, history=current_messages)
 
     # Execute tools and add results to history
@@ -497,7 +497,7 @@ async def sample_step_impl(
             if mask_error_details is not None
             else settings.mask_error_details
         )
-        tool_results: list[SamplingMessageContentBlock] = await execute_tools(  # type: ignore[assignment]
+        tool_results: list[ToolResultContent] = await execute_tools(
             step_tool_calls, tool_map, mask_error_details=effective_mask
         )
 
@@ -505,7 +505,7 @@ async def sample_step_impl(
             current_messages.append(
                 SamplingMessage(
                     role="user",
-                    content=tool_results,
+                    content=cast(list[SamplingMessageContentBlock], tool_results),
                 )
             )
 
