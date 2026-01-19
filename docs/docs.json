@@ -271,6 +271,14 @@
                 ]
               },
               {
+                "group": "Patterns",
+                "pages": [
+                  "patterns/cli",
+                  "patterns/contrib",
+                  "patterns/testing"
+                ]
+              },
+              {
                 "group": "Development",
                 "pages": [
                   "development/contributing",
