@@ -274,10 +274,11 @@ class Client(
         # Convert timeout to timedelta if needed
         timeout = normalize_timeout_to_timedelta(timeout)
 
-        # handle init handshake timeout
+        # handle init handshake timeout (0 means disabled)
         if init_timeout is None:
             init_timeout = fastmcp.settings.client_init_timeout
-        self._init_timeout = normalize_timeout_to_seconds(init_timeout)
+        init_timeout_seconds = normalize_timeout_to_seconds(init_timeout)
+        self._init_timeout = None if init_timeout_seconds == 0 else init_timeout_seconds
 
         self.auto_initialize = auto_initialize
 
