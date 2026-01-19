@@ -17,7 +17,7 @@ from fastmcp.server.providers.skills import SkillsDirectoryProvider
 async def main():
     # Create a skills provider pointing at our sample skills
     skills_dir = Path(__file__).parent / "sample_skills"
-    provider = SkillsDirectoryProvider(root=skills_dir)
+    provider = SkillsDirectoryProvider(roots=skills_dir)
 
     # Connect to a FastMCP server with this provider
     from fastmcp import FastMCP

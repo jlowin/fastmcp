@@ -195,11 +195,13 @@ The `supporting_files` parameter controls how supporting files (everything excep
 With `supporting_files="template"`, supporting files are accessed through a `ResourceTemplate` rather than being listed as individual resources. Clients see only the main file and manifest in `list_resources()`, then discover supporting files by reading the manifest.
 
 ```python
+from pathlib import Path
+
 from fastmcp.server.providers.skills import SkillsDirectoryProvider
 
 # Default behavior - supporting files hidden from list_resources()
 provider = SkillsDirectoryProvider(
-    roots="~/.claude/skills",
+    roots=Path.home() / ".claude" / "skills",
     supporting_files="template",  # This is the default
 )
 ```
@@ -211,11 +213,13 @@ This keeps the resource list compact when skills contain many files. Clients tha
 With `supporting_files="resources"`, every file in every skill appears as an individual resource in `list_resources()`. Clients get full enumeration upfront without needing to read manifests.
 
 ```python
+from pathlib import Path
+
 from fastmcp.server.providers.skills import SkillsDirectoryProvider
 
 # All files visible as individual resources
 provider = SkillsDirectoryProvider(
-    roots="~/.claude/skills",
+    roots=Path.home() / ".claude" / "skills",
     supporting_files="resources",
 )
 ```
@@ -227,10 +231,12 @@ Use this mode when clients need to discover all available files without addition
 Enable reload mode to re-scan the skills directory on every request. Changes to skills take effect immediately without restarting the server.
 
 ```python
+from pathlib import Path
+
 from fastmcp.server.providers.skills import SkillsDirectoryProvider
 
 provider = SkillsDirectoryProvider(
-    roots="~/.claude/skills",
+    roots=Path.home() / ".claude" / "skills",
     reload=True,
 )
 ```

@@ -49,7 +49,7 @@ When a client lists resources, they see skill names and descriptions (from front
 By default, supporting files are exposed via ResourceTemplate (hidden from `list_resources()`). Set `supporting_files="resources"` to make them visible:
 
 ```python
-SkillsDirectoryProvider(root=skills_dir, supporting_files="resources")
+SkillsDirectoryProvider(roots=skills_dir, supporting_files="resources")
 ```
 
 ### The Manifest
@@ -88,7 +88,7 @@ mcp.run()
 from fastmcp.server.providers.skills import SkillsDirectoryProvider
 
 mcp = FastMCP("Skills")
-mcp.add_provider(SkillsDirectoryProvider(root=Path.home() / ".claude/skills"))
+mcp.add_provider(SkillsDirectoryProvider(roots=Path.home() / ".claude" / "skills"))
 mcp.run()
 ```
 
