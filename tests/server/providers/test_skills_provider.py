@@ -546,13 +546,12 @@ class TestSkillsProviderAlias:
 
 
 class TestClaudeSkillsProvider:
-    def test_default_root_is_claude_skills_dir(self, monkeypatch):
-        # Mock Path.home() to return a temp path
-        fake_home = Path("/fake/home")
-        monkeypatch.setattr(Path, "home", lambda: fake_home)
+    def test_default_root_is_claude_skills_dir(self, tmp_path: Path, monkeypatch):
+        # Mock Path.home() to return a temp path (use tmp_path for cross-platform compatibility)
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
         provider = ClaudeSkillsProvider()
-        assert provider._roots == [fake_home / ".claude" / "skills"]
+        assert provider._roots == [tmp_path / ".claude" / "skills"]
 
     def test_main_file_name_is_skill_md(self):
         provider = ClaudeSkillsProvider()

@@ -23,6 +23,9 @@ from fastmcp.utilities.versions import VersionSpec
 
 logger = get_logger(__name__)
 
+# Ensure .md is recognized as text/markdown on all platforms (Windows may not have this)
+mimetypes.add_type("text/markdown", ".md")
+
 
 # -----------------------------------------------------------------------------
 # Skill-specific Resource and ResourceTemplate subclasses

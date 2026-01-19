@@ -19,74 +19,66 @@ from fastmcp.server.providers.skills import (
 class TestVendorProviders:
     """Tests for vendor-specific skills providers."""
 
-    def test_cursor_skills_provider_path(self, monkeypatch):
+    def test_cursor_skills_provider_path(self, tmp_path: Path, monkeypatch):
         """Test CursorSkillsProvider uses correct path."""
-        fake_home = Path("/fake/home")
-        monkeypatch.setattr(Path, "home", lambda: fake_home)
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
         provider = CursorSkillsProvider()
-        assert provider._roots == [fake_home / ".cursor" / "skills"]
+        assert provider._roots == [tmp_path / ".cursor" / "skills"]
 
-    def test_vscode_skills_provider_path(self, monkeypatch):
+    def test_vscode_skills_provider_path(self, tmp_path: Path, monkeypatch):
         """Test VSCodeSkillsProvider uses correct path."""
-        fake_home = Path("/fake/home")
-        monkeypatch.setattr(Path, "home", lambda: fake_home)
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
         provider = VSCodeSkillsProvider()
-        assert provider._roots == [fake_home / ".copilot" / "skills"]
+        assert provider._roots == [tmp_path / ".copilot" / "skills"]
 
-    def test_codex_skills_provider_paths(self, monkeypatch):
+    def test_codex_skills_provider_paths(self, tmp_path: Path, monkeypatch):
         """Test CodexSkillsProvider uses both system and user paths."""
-        fake_home = Path("/fake/home")
-        monkeypatch.setattr(Path, "home", lambda: fake_home)
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
         provider = CodexSkillsProvider()
         # Path.resolve() may add /private on macOS, so compare resolved paths
         expected_roots = [
             Path("/etc/codex/skills").resolve(),
-            (fake_home / ".codex" / "skills").resolve(),
+            (tmp_path / ".codex" / "skills").resolve(),
         ]
         assert provider._roots == expected_roots
 
-    def test_gemini_skills_provider_path(self, monkeypatch):
+    def test_gemini_skills_provider_path(self, tmp_path: Path, monkeypatch):
         """Test GeminiSkillsProvider uses correct path."""
-        fake_home = Path("/fake/home")
-        monkeypatch.setattr(Path, "home", lambda: fake_home)
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
         provider = GeminiSkillsProvider()
-        assert provider._roots == [fake_home / ".gemini" / "skills"]
+        assert provider._roots == [tmp_path / ".gemini" / "skills"]
 
-    def test_goose_skills_provider_path(self, monkeypatch):
+    def test_goose_skills_provider_path(self, tmp_path: Path, monkeypatch):
         """Test GooseSkillsProvider uses correct path."""
-        fake_home = Path("/fake/home")
-        monkeypatch.setattr(Path, "home", lambda: fake_home)
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
         provider = GooseSkillsProvider()
-        assert provider._roots == [fake_home / ".config" / "agents" / "skills"]
+        assert provider._roots == [tmp_path / ".config" / "agents" / "skills"]
 
-    def test_copilot_skills_provider_path(self, monkeypatch):
+    def test_copilot_skills_provider_path(self, tmp_path: Path, monkeypatch):
         """Test CopilotSkillsProvider uses correct path."""
-        fake_home = Path("/fake/home")
-        monkeypatch.setattr(Path, "home", lambda: fake_home)
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
         provider = CopilotSkillsProvider()
-        assert provider._roots == [fake_home / ".copilot" / "skills"]
+        assert provider._roots == [tmp_path / ".copilot" / "skills"]
 
-    def test_opencode_skills_provider_path(self, monkeypatch):
+    def test_opencode_skills_provider_path(self, tmp_path: Path, monkeypatch):
         """Test OpenCodeSkillsProvider uses correct path."""
-        fake_home = Path("/fake/home")
-        monkeypatch.setattr(Path, "home", lambda: fake_home)
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
         provider = OpenCodeSkillsProvider()
-        assert provider._roots == [fake_home / ".config" / "opencode" / "skills"]
+        assert provider._roots == [tmp_path / ".config" / "opencode" / "skills"]
 
-    def test_claude_skills_provider_path(self, monkeypatch):
+    def test_claude_skills_provider_path(self, tmp_path: Path, monkeypatch):
         """Test ClaudeSkillsProvider uses correct path."""
-        fake_home = Path("/fake/home")
-        monkeypatch.setattr(Path, "home", lambda: fake_home)
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
         provider = ClaudeSkillsProvider()
-        assert provider._roots == [fake_home / ".claude" / "skills"]
+        assert provider._roots == [tmp_path / ".claude" / "skills"]
 
     def test_all_providers_instantiable(self):
         """Test that all vendor providers can be instantiated."""
@@ -184,10 +176,13 @@ description: User skill
         assert "system-skill/SKILL.md" in resource_names
         assert "user-skill/SKILL.md" in resource_names
 
-    async def test_nonexistent_paths_handled_gracefully(self, monkeypatch):
+    async def test_nonexistent_paths_handled_gracefully(
+        self, tmp_path: Path, monkeypatch
+    ):
         """Test that non-existent paths don't cause errors."""
-        fake_home = Path("/nonexistent/home")
-        monkeypatch.setattr(Path, "home", lambda: fake_home)
+        # Use a path that definitely doesn't exist
+        nonexistent_home = tmp_path / "nonexistent" / "home"
+        monkeypatch.setattr(Path, "home", lambda: nonexistent_home)
 
         # All providers should handle non-existent paths gracefully
         providers = [
