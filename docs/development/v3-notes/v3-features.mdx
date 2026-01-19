@@ -108,6 +108,8 @@ Transforms modify components (tools, resources, prompts) as they flow from provi
 - `ToolTransform` - modifies tool schemas (rename, description, tags, argument transforms)
 - `Enabled` - sets enabled state on components by key or tag (backs `enable()`/`disable()` API)
 - `VersionFilter` - filters components by version range (`version_gte`, `version_lt`)
+- `ResourcesAsTools` - exposes resources as tools for tool-only clients
+- `PromptsAsTools` - exposes prompts as tools for tool-only clients
 
 ```python
 from fastmcp.server.transforms import Namespace, ToolTransform
@@ -148,6 +150,54 @@ Transforms apply at two levels:
 - **Server-level**: `server.add_transform()` - affects all components from all providers
 
 Documentation: `docs/servers/providers/transforms.mdx`, `docs/servers/enabled.mdx`
+
+### ResourcesAsTools and PromptsAsTools
+
+These transforms expose resources and prompts as tools for clients that only support the tools protocol. Each transform generates two tools that provide listing and access functionality.
+
+**ResourcesAsTools** generates `list_resources` and `read_resource` tools:
+
+```python
+from fastmcp import FastMCP
+from fastmcp.server.transforms import ResourcesAsTools
+
+mcp = FastMCP("Server")
+
+@mcp.resource("data://config")
+def get_config() -> dict:
+    return {"setting": "value"}
+
+mcp.add_transform(ResourcesAsTools(mcp))
+# Now has list_resources and read_resource tools
+```
+
+The `list_resources` tool returns JSON with resource metadata. The `read_resource` tool accepts a URI and returns the resource content, preserving both text and binary data through base64 encoding.
+
+**PromptsAsTools** generates `list_prompts` and `get_prompt` tools:
+
+```python
+from fastmcp import FastMCP
+from fastmcp.server.transforms import PromptsAsTools
+
+mcp = FastMCP("Server")
+
+@mcp.prompt
+def analyze_code(code: str, language: str = "python") -> str:
+    return f"Analyze this {language} code:\n{code}"
+
+mcp.add_transform(PromptsAsTools(mcp))
+# Now has list_prompts and get_prompt tools
+```
+
+The `list_prompts` tool returns JSON with prompt metadata including argument information. The `get_prompt` tool accepts a prompt name and optional arguments dict, returning the rendered prompt as a messages array. Non-text content (like embedded resources) is preserved as structured JSON.
+
+Both transforms:
+- Capture a provider reference at construction for deferred querying
+- Route through `FastMCP.read_resource()` / `FastMCP.render_prompt()` when the provider is FastMCP, ensuring middleware chains execute
+- Fall back to direct provider methods for plain providers
+- Return JSON for easy parsing by tool-only clients
+
+Documentation: `docs/servers/providers/resources-as-tools.mdx`, `docs/servers/providers/prompts-as-tools.mdx`
 
 ---
 
@@ -212,6 +262,45 @@ Works at both server and provider level. Supports:
 - **Tag-based filtering**: Enable/disable groups of components by tag
 - **Override semantics**: Later transforms override earlier marks (enable after disable = enabled)
 - **Transform ordering**: Enabled transforms are injected at the point you call them, so component state is known
+
+### Per-Session Visibility
+
+Server-level visibility changes affect all connected clients. For per-session control, use `Context` methods that apply rules only to the current session ([#2917](https://github.com/jlowin/fastmcp/pull/2917)):
+
+```python
+from fastmcp import FastMCP
+from fastmcp.server.context import Context
+
+mcp = FastMCP("Server")
+
+@mcp.tool(tags={"premium"})
+def premium_analysis(data: str) -> str:
+    return f"Premium analysis of: {data}"
+
+@mcp.tool
+async def unlock_premium(ctx: Context) -> str:
+    """Unlock premium features for this session only."""
+    await ctx.enable_components(tags={"premium"})
+    return "Premium features unlocked"
+
+@mcp.tool
+async def reset_features(ctx: Context) -> str:
+    """Reset to default feature set."""
+    await ctx.reset_components()
+    return "Features reset to defaults"
+
+# Globally disabled - sessions unlock individually
+mcp.disable(tags={"premium"})
+```
+
+Session visibility methods:
+- `await ctx.enable_components(...)`: Enable components for this session
+- `await ctx.disable_components(...)`: Disable components for this session
+- `await ctx.reset_components()`: Clear session rules, return to global defaults
+
+Session rules override global transforms. FastMCP automatically sends `ToolListChangedNotification` (and resource/prompt equivalents) to affected sessions when visibility changes.
+
+Documentation: `docs/servers/enabled.mdx`
 
 ---
 
@@ -583,6 +672,49 @@ Documentation: [FileSystemProvider](/servers/providers/filesystem)
 
 ---
 
+## SkillsProvider
+
+v3.0 introduces `SkillsProvider` for exposing agent skills as MCP resources ([#2944](https://github.com/jlowin/fastmcp/pull/2944)). Skills are directories containing instructions and supporting files that teach AI assistants how to perform tasks—used by Claude Code, Cursor, VS Code Copilot, and other AI coding tools.
+
+**Usage**:
+
+```python
+from pathlib import Path
+from fastmcp import FastMCP
+from fastmcp.server.providers.skills import SkillsDirectoryProvider
+
+mcp = FastMCP("Skills Server")
+mcp.add_provider(SkillsDirectoryProvider(roots=Path.home() / ".claude" / "skills"))
+```
+
+Each subdirectory with a `SKILL.md` file becomes a discoverable skill. Clients see:
+- `skill://{name}/SKILL.md` - Main instruction file
+- `skill://{name}/_manifest` - JSON listing of all files with sizes and hashes
+- `skill://{name}/{path}` - Supporting files (via template or resources)
+
+**Two-layer architecture**:
+- `SkillProvider` - Handles a single skill folder
+- `SkillsDirectoryProvider` - Scans directories, creates a `SkillProvider` per valid skill
+
+**Vendor providers** with locked default paths:
+
+| Provider | Directory |
+|----------|-----------|
+| `ClaudeSkillsProvider` | `~/.claude/skills/` |
+| `CursorSkillsProvider` | `~/.cursor/skills/` |
+| `VSCodeSkillsProvider` | `~/.copilot/skills/` |
+| `CodexSkillsProvider` | `/etc/codex/skills/`, `~/.codex/skills/` |
+| `GeminiSkillsProvider` | `~/.gemini/skills/` |
+| `GooseSkillsProvider` | `~/.config/agents/skills/` |
+| `CopilotSkillsProvider` | `~/.copilot/skills/` |
+| `OpenCodeSkillsProvider` | `~/.config/opencode/skills/` |
+
+**Progressive disclosure**: By default, supporting files are hidden from `list_resources()` and accessed via template. Set `supporting_files="resources"` for full enumeration.
+
+Documentation: [Skills Provider](/servers/providers/skills)
+
+---
+
 ## OpenTelemetry Tracing
 
 v3.0 adds OpenTelemetry instrumentation for observability into server and client operations ([#2869](https://github.com/jlowin/fastmcp/pull/2869)).
@@ -608,6 +740,32 @@ trace.set_tracer_provider(provider)
 Components provide their own span attributes through a `get_span_attributes()` method that subclasses override—this lets LocalProvider, FastMCPProvider, and ProxyProvider each include relevant context (original names, backend URIs, etc.).
 
 Documentation: [Telemetry](/servers/telemetry)
+
+---
+
+## Pagination
+
+v3.0 adds pagination support for list operations when servers expose many components ([#2903](https://github.com/jlowin/fastmcp/pull/2903)).
+
+```python
+from fastmcp import FastMCP
+
+# Enable pagination with 50 items per page
+server = FastMCP("ComponentRegistry", list_page_size=50)
+```
+
+When `list_page_size` is set, `tools/list`, `resources/list`, `resources/templates/list`, and `prompts/list` paginate responses with `nextCursor` for subsequent pages.
+
+**Client behavior**: The FastMCP Client fetches all pages automatically—`list_tools()` and similar methods return the complete list. For manual pagination (memory constraints, progress reporting), use `_mcp` variants:
+
+```python
+async with Client(server) as client:
+    result = await client.list_tools_mcp()
+    while result.nextCursor:
+        result = await client.list_tools_mcp(cursor=result.nextCursor)
+```
+
+Documentation: [Pagination](/servers/pagination)
 
 ---
 
