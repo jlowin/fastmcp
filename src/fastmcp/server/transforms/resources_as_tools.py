@@ -136,13 +136,19 @@ class ResourcesAsTools(Transform):
             Returns the resource content as a string. Binary content is
             base64-encoded.
             """
-            # Try static resource first
+            from fastmcp import FastMCP
+
+            # Use FastMCP.read_resource() if available - runs middleware chain
+            if isinstance(provider, FastMCP):
+                result = await provider.read_resource(uri)
+                return _format_result(result)
+
+            # Fallback for plain providers - no middleware
             resource = await provider.get_resource(uri)
             if resource is not None:
                 result = await resource._read()
                 return _format_result(result)
 
-            # Try template match
             template = await provider.get_resource_template(uri)
             if template is not None:
                 params = template.matches(uri)

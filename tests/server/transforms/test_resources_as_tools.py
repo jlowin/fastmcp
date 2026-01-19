@@ -168,7 +168,7 @@ class TestReadResourceTool:
         mcp.add_transform(ResourcesAsTools(mcp))
 
         async with Client(mcp) as client:
-            with pytest.raises(ToolError, match="Resource not found"):
+            with pytest.raises(ToolError, match="Unknown resource"):
                 await client.call_tool("read_resource", {"uri": "unknown://resource"})
 
     async def test_reads_binary_as_base64(self):
