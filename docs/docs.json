@@ -109,6 +109,7 @@
                 "pages": [
                   "servers/providers/overview",
                   "servers/providers/transforms",
+                  "servers/providers/resource-as-tools",
                   "servers/providers/local",
                   "servers/providers/filesystem",
                   "servers/providers/mounting",
