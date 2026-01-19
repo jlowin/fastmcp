@@ -807,3 +807,182 @@ class TestOIDCScopeHandling:
         assert "profile" in result
         assert "api://my-api/openid" not in result
         assert "api://my-api/profile" not in result
+
+
+class TestAzureMSALIntegration:
+    """Tests for MSAL integration (get_msal_app, MSALApp, EntraOBOToken)."""
+
+    def test_get_msal_app_returns_configured_client(self):
+        """Test that get_msal_app returns a properly configured MSAL client."""
+        from unittest.mock import MagicMock, patch
+
+        from msal import ConfidentialClientApplication
+
+        provider = AzureProvider(
+            client_id="test-client-id",
+            client_secret="test-client-secret",
+            tenant_id="test-tenant-id",
+            base_url="https://myserver.com",
+            required_scopes=["read"],
+            jwt_signing_key="test-secret",
+        )
+
+        # Mock the ConfidentialClientApplication to avoid network calls
+        mock_app = MagicMock(spec=ConfidentialClientApplication)
+        mock_app.client_id = "test-client-id"
+        mock_authority = MagicMock()
+        mock_authority.tenant = "test-tenant-id"
+        mock_app.authority = mock_authority
+
+        with patch(
+            "msal.ConfidentialClientApplication", return_value=mock_app
+        ) as mock_class:
+            msal_app = provider.get_msal_app()
+
+            # Verify MSAL was called with correct params
+            mock_class.assert_called_once()
+            call_kwargs = mock_class.call_args
+            assert call_kwargs[1]["client_id"] == "test-client-id"
+            assert call_kwargs[1]["client_credential"] == "test-client-secret"
+            assert (
+                call_kwargs[1]["authority"]
+                == "https://login.microsoftonline.com/test-tenant-id"
+            )
+
+            # Verify return value
+            assert msal_app is mock_app
+            assert msal_app.client_id == "test-client-id"
+            assert msal_app.authority.tenant == "test-tenant-id"
+
+    def test_get_msal_app_with_custom_authority(self):
+        """Test that get_msal_app uses custom base_authority."""
+        from unittest.mock import MagicMock, patch
+
+        from msal import ConfidentialClientApplication
+
+        provider = AzureProvider(
+            client_id="test-client-id",
+            client_secret="test-client-secret",
+            tenant_id="gov-tenant-id",
+            base_url="https://myserver.com",
+            required_scopes=["read"],
+            base_authority="login.microsoftonline.us",
+            jwt_signing_key="test-secret",
+        )
+
+        # Mock the ConfidentialClientApplication to avoid network calls
+        mock_app = MagicMock(spec=ConfidentialClientApplication)
+        mock_authority = MagicMock()
+        mock_authority.token_endpoint = (
+            "https://login.microsoftonline.us/gov-tenant-id/oauth2/v2.0/token"
+        )
+        mock_app.authority = mock_authority
+
+        with patch(
+            "msal.ConfidentialClientApplication", return_value=mock_app
+        ) as mock_class:
+            msal_app = provider.get_msal_app()
+
+            # Verify MSAL was called with correct authority
+            call_kwargs = mock_class.call_args
+            assert (
+                call_kwargs[1]["authority"]
+                == "https://login.microsoftonline.us/gov-tenant-id"
+            )
+
+            # Verify return value has gov cloud authority
+            assert "login.microsoftonline.us" in str(msal_app.authority.token_endpoint)
+
+    def test_tenant_and_authority_stored_as_attributes(self):
+        """Test that tenant_id and base_authority are stored for MSAL access."""
+        provider = AzureProvider(
+            client_id="test-client-id",
+            client_secret="test-client-secret",
+            tenant_id="my-tenant",
+            base_url="https://myserver.com",
+            required_scopes=["read"],
+            base_authority="login.microsoftonline.us",
+            jwt_signing_key="test-secret",
+        )
+
+        assert provider._tenant_id == "my-tenant"
+        assert provider._base_authority == "login.microsoftonline.us"
+
+    def test_msal_app_dependency_is_importable(self):
+        """Test that MSALApp dependency can be imported."""
+        from fastmcp.server.auth.providers.azure import MSALApp
+
+        assert MSALApp is not None
+
+    def test_entra_obo_token_is_importable(self):
+        """Test that EntraOBOToken can be imported."""
+        from fastmcp.server.auth.providers.azure import EntraOBOToken
+
+        assert EntraOBOToken is not None
+
+    def test_entra_obo_token_creates_dependency(self):
+        """Test that EntraOBOToken creates a dependency with scopes."""
+        from fastmcp.server.auth.providers.azure import EntraOBOToken, _EntraOBOToken
+
+        dep = EntraOBOToken(["https://graph.microsoft.com/User.Read"])
+        assert isinstance(dep, _EntraOBOToken)
+        assert dep.scopes == ["https://graph.microsoft.com/User.Read"]
+
+    def test_msal_app_dependency_is_dependency_instance(self):
+        """Test that MSALApp is a Dependency instance."""
+        # Import the Dependency class the same way the code does
+        try:
+            from docket.dependencies import Dependency
+        except ImportError:
+            from fastmcp._vendor.docket_di import Dependency
+
+        from fastmcp.server.auth.providers.azure import _MSALApp
+
+        dep = _MSALApp()
+        assert isinstance(dep, Dependency)
+
+    def test_entra_obo_token_is_dependency_instance(self):
+        """Test that EntraOBOToken is a Dependency instance."""
+        # Import the Dependency class the same way the code does
+        try:
+            from docket.dependencies import Dependency
+        except ImportError:
+            from fastmcp._vendor.docket_di import Dependency
+
+        from fastmcp.server.auth.providers.azure import _EntraOBOToken
+
+        dep = _EntraOBOToken(["scope"])
+        assert isinstance(dep, Dependency)
+
+    def test_multiple_msal_app_calls_create_new_instances(self):
+        """Test that get_msal_app creates new instances each time (no shared state)."""
+        from unittest.mock import MagicMock, patch
+
+        from msal import ConfidentialClientApplication
+
+        provider = AzureProvider(
+            client_id="test-client-id",
+            client_secret="test-client-secret",
+            tenant_id="test-tenant-id",
+            base_url="https://myserver.com",
+            required_scopes=["read"],
+            jwt_signing_key="test-secret",
+        )
+
+        # Create two different mock apps
+        mock_app1 = MagicMock(spec=ConfidentialClientApplication)
+        mock_app2 = MagicMock(spec=ConfidentialClientApplication)
+
+        with patch(
+            "msal.ConfidentialClientApplication", side_effect=[mock_app1, mock_app2]
+        ) as mock_class:
+            app1 = provider.get_msal_app()
+            app2 = provider.get_msal_app()
+
+            # Verify MSAL was called twice (once per get_msal_app call)
+            assert mock_class.call_count == 2
+
+            # Each call should create a new instance
+            assert app1 is mock_app1
+            assert app2 is mock_app2
+            assert app1 is not app2

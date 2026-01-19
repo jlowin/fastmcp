@@ -50,6 +50,7 @@ __all__ = [
     "CurrentRequest",
     "CurrentWorker",
     "Progress",
+    "TokenClaim",
     "get_access_token",
     "get_context",
     "get_http_headers",
@@ -1027,3 +1028,107 @@ class Progress(Dependency):  # type: ignore[misc]
 
     async def __aexit__(self, *args: object) -> None:
         pass
+
+
+# --- Authentication dependencies ---
+
+
+class _CurrentAccessToken(Dependency):  # type: ignore[misc]
+    """Dependency that provides the current access token.
+
+    Raises AuthenticationError if no token is available.
+    """
+
+    async def __aenter__(self) -> AccessToken:
+        token = get_access_token()
+        if token is None:
+            raise RuntimeError(
+                "No access token available. Ensure the request is authenticated."
+            )
+        return token
+
+    async def __aexit__(self, *args: object) -> None:
+        pass
+
+
+# Pre-instantiated singleton - no () needed when using as default
+CurrentAccessToken: AccessToken = cast(AccessToken, _CurrentAccessToken())
+"""Get the current access token as a dependency.
+
+This dependency provides access to the full AccessToken object for the
+current authenticated request. It raises an error if no token is available.
+
+Returns:
+    A dependency that resolves to the AccessToken for the current request
+
+Raises:
+    RuntimeError: If no access token is available (during resolution)
+
+Example:
+    ```python
+    from fastmcp.server.dependencies import CurrentAccessToken
+    from fastmcp.server.auth import AccessToken
+
+    @mcp.tool()
+    async def my_tool(token: AccessToken = CurrentAccessToken):
+        user_id = token.claims.get("oid")  # Azure user ID
+        upstream_token = token.token  # For OBO or downstream calls
+        return f"User: {user_id}"
+    ```
+"""
+
+
+class _TokenClaim(Dependency):  # type: ignore[misc]
+    """Dependency that extracts a specific claim from the access token."""
+
+    def __init__(self, claim_name: str):
+        self.claim_name = claim_name
+
+    async def __aenter__(self) -> str:
+        token = get_access_token()
+        if token is None:
+            raise RuntimeError(
+                f"No access token available. Cannot extract claim '{self.claim_name}'."
+            )
+        value = token.claims.get(self.claim_name)
+        if value is None:
+            raise RuntimeError(
+                f"Claim '{self.claim_name}' not found in access token. "
+                f"Available claims: {list(token.claims.keys())}"
+            )
+        return str(value)
+
+    async def __aexit__(self, *args: object) -> None:
+        pass
+
+
+def TokenClaim(name: str) -> str:
+    """Get a specific claim from the access token.
+
+    This dependency extracts a single claim value from the current access token.
+    It's useful for getting user identifiers, roles, or other token claims
+    without needing the full token object.
+
+    Args:
+        name: The name of the claim to extract (e.g., "oid", "sub", "email")
+
+    Returns:
+        A dependency that resolves to the claim value as a string
+
+    Raises:
+        RuntimeError: If no access token is available or claim is missing
+
+    Example:
+        ```python
+        from fastmcp.server.dependencies import TokenClaim
+
+        @mcp.tool()
+        async def add_expense(
+            user_id: str = TokenClaim("oid"),  # Azure object ID
+            amount: float,
+        ):
+            # user_id is automatically injected from the token
+            await db.insert({"user_id": user_id, "amount": amount})
+        ```
+    """
+    return cast(str, _TokenClaim(name))

@@ -6,7 +6,7 @@ using the OAuth Proxy pattern for non-DCR OAuth flows.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from key_value.aio.protocols import AsyncKeyValue
 
@@ -18,6 +18,11 @@ from fastmcp.utilities.logging import get_logger
 if TYPE_CHECKING:
     from mcp.server.auth.provider import AuthorizationParams
     from mcp.shared.auth import OAuthClientInformationFull
+
+    try:
+        from msal import ConfidentialClientApplication
+    except ImportError:
+        ConfidentialClientApplication = Any  # type: ignore[assignment, misc]
 
 logger = get_logger(__name__)
 
@@ -155,6 +160,10 @@ class AzureProvider(OAuthProxy):
             if additional_authorize_scopes
             else []
         )
+
+        # Store Azure-specific config for get_msal_app()
+        self._tenant_id = tenant_id
+        self._base_authority = base_authority
 
         # Apply defaults
         self.identifier_uri = identifier_uri or f"api://{client_id}"
@@ -356,3 +365,233 @@ class AzureProvider(OAuthProxy):
 
         logger.debug("Scopes for Azure token endpoint: %s", deduplicated_scopes)
         return deduplicated_scopes
+
+    def get_msal_app(self) -> ConfidentialClientApplication:
+        """Get a pre-configured MSAL ConfidentialClientApplication for OBO token exchanges.
+
+        This method creates an MSAL client using the same credentials configured for
+        the AzureProvider, avoiding the need to duplicate configuration. The MSAL
+        app can be used for On-Behalf-Of (OBO) token exchanges to call downstream
+        APIs like Microsoft Graph.
+
+        Returns:
+            A configured ConfidentialClientApplication ready for OBO exchanges
+
+        Raises:
+            ImportError: If the `msal` package is not installed (requires fastmcp[azure])
+
+        Example:
+            ```python
+            from fastmcp.server.dependencies import get_access_token
+
+            @mcp.tool()
+            async def call_graph():
+                access_token = get_access_token()
+                msal_app = mcp.auth.get_msal_app()
+
+                result = msal_app.acquire_token_on_behalf_of(
+                    user_assertion=access_token.token,
+                    scopes=["https://graph.microsoft.com/User.Read"]
+                )
+
+                if "error" in result:
+                    raise RuntimeError(result.get("error_description"))
+
+                graph_token = result["access_token"]
+                # Use graph_token to call Microsoft Graph APIs
+            ```
+
+        Note:
+            For OBO to work, ensure the scopes you need are included in
+            `additional_authorize_scopes` when configuring the AzureProvider,
+            and that admin consent has been granted for those scopes.
+        """
+        try:
+            from msal import ConfidentialClientApplication, TokenCache
+        except ImportError as e:
+            raise ImportError(
+                "MSAL is required for get_msal_app(). "
+                "Install with: pip install 'fastmcp[azure]'"
+            ) from e
+
+        authority = f"https://{self._base_authority}/{self._tenant_id}"
+
+        return ConfidentialClientApplication(
+            client_id=self._upstream_client_id,
+            client_credential=self._upstream_client_secret.get_secret_value(),
+            authority=authority,
+            token_cache=TokenCache(),
+        )
+
+
+# --- Dependency injection support ---
+# These require fastmcp[azure] extra for MSAL
+
+# Check if DI engine is available
+try:
+    from docket.dependencies import Dependency
+except ImportError:
+    from fastmcp._vendor.docket_di import Dependency
+
+
+def _require_msal(feature: str) -> None:
+    """Raise ImportError with install instructions if MSAL is not available."""
+    try:
+        import msal  # noqa: F401
+    except ImportError as e:
+        raise ImportError(
+            f"{feature} requires the `azure` extra. "
+            "Install with: pip install 'fastmcp[azure]'"
+        ) from e
+
+
+class _MSALApp(Dependency):  # type: ignore[misc]
+    """Dependency that provides a pre-configured MSAL ConfidentialClientApplication.
+
+    Raises ImportError if fastmcp[azure] is not installed or if the auth provider
+    is not an AzureProvider.
+    """
+
+    async def __aenter__(self) -> ConfidentialClientApplication:
+        _require_msal("MSALApp")
+
+        from fastmcp.server.dependencies import get_server
+
+        server = get_server()
+        if not isinstance(server.auth, AzureProvider):
+            raise RuntimeError(
+                "MSALApp requires an AzureProvider as the auth provider. "
+                f"Current provider: {type(server.auth).__name__}"
+            )
+
+        return server.auth.get_msal_app()
+
+    async def __aexit__(self, *args: object) -> None:
+        pass
+
+
+# Pre-instantiated singleton - no () needed when using as default
+MSALApp: ConfidentialClientApplication = cast(
+    "ConfidentialClientApplication", _MSALApp()
+)
+"""Get a pre-configured MSAL ConfidentialClientApplication as a dependency.
+
+This dependency provides an MSAL client configured with the same credentials
+as the AzureProvider. Use it for custom OBO scenarios or other MSAL operations.
+
+Returns:
+    A dependency that resolves to a ConfidentialClientApplication
+
+Raises:
+    ImportError: If fastmcp[azure] is not installed
+    RuntimeError: If the auth provider is not an AzureProvider
+
+Example:
+    ```python
+    from fastmcp.server.auth.providers.azure import MSALApp
+    from fastmcp.server.dependencies import get_access_token
+    from msal import ConfidentialClientApplication
+
+    @mcp.tool()
+    async def custom_obo(msal: ConfidentialClientApplication = MSALApp):
+        token = get_access_token()
+        result = msal.acquire_token_on_behalf_of(
+            user_assertion=token.token,
+            scopes=["https://graph.microsoft.com/.default"]
+        )
+        return result["access_token"]
+    ```
+"""
+
+
+class _EntraOBOToken(Dependency):  # type: ignore[misc]
+    """Dependency that performs OBO token exchange for Microsoft Entra.
+
+    This dependency handles the complete On-Behalf-Of flow, exchanging the
+    user's access token for a token that can call downstream APIs.
+    """
+
+    def __init__(self, scopes: list[str]):
+        self.scopes = scopes
+
+    async def __aenter__(self) -> str:
+        _require_msal("EntraOBOToken")
+
+        from fastmcp.server.dependencies import get_access_token, get_server
+
+        # Get the current access token
+        access_token = get_access_token()
+        if access_token is None:
+            raise RuntimeError(
+                "No access token available. Cannot perform OBO exchange."
+            )
+
+        # Get the MSAL app from the server's auth provider
+        server = get_server()
+        if not isinstance(server.auth, AzureProvider):
+            raise RuntimeError(
+                "EntraOBOToken requires an AzureProvider as the auth provider. "
+                f"Current provider: {type(server.auth).__name__}"
+            )
+
+        msal_app = server.auth.get_msal_app()
+
+        # Perform the OBO exchange
+        result = msal_app.acquire_token_on_behalf_of(
+            user_assertion=access_token.token,
+            scopes=self.scopes,
+        )
+
+        if "error" in result:
+            error_desc = result.get("error_description", result.get("error"))
+            raise RuntimeError(f"OBO token exchange failed: {error_desc}")
+
+        return result["access_token"]
+
+    async def __aexit__(self, *args: object) -> None:
+        pass
+
+
+def EntraOBOToken(scopes: list[str]) -> str:
+    """Exchange the user's Entra token for a downstream API token via OBO.
+
+    This dependency performs a Microsoft Entra On-Behalf-Of (OBO) token exchange,
+    allowing your MCP server to call downstream APIs (like Microsoft Graph) on
+    behalf of the authenticated user.
+
+    Args:
+        scopes: The scopes to request for the downstream API. For Microsoft Graph,
+            use scopes like ["https://graph.microsoft.com/Mail.Read"] or
+            ["https://graph.microsoft.com/.default"].
+
+    Returns:
+        A dependency that resolves to the downstream API access token string
+
+    Raises:
+        ImportError: If fastmcp[azure] is not installed
+        RuntimeError: If no access token is available, provider is not Azure,
+            or OBO exchange fails
+
+    Example:
+        ```python
+        from fastmcp.server.auth.providers.azure import EntraOBOToken
+        import httpx
+
+        @mcp.tool()
+        async def get_my_emails(
+            graph_token: str = EntraOBOToken(["https://graph.microsoft.com/Mail.Read"])
+        ):
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(
+                    "https://graph.microsoft.com/v1.0/me/messages",
+                    headers={"Authorization": f"Bearer {graph_token}"}
+                )
+                return resp.json()
+        ```
+
+    Note:
+        For OBO to work, ensure the scopes are included in the AzureProvider's
+        `additional_authorize_scopes` parameter, and that admin consent has been
+        granted for those scopes in your Entra app registration.
+    """
+    return cast(str, _EntraOBOToken(scopes))
