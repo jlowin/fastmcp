@@ -148,14 +148,14 @@
                   "servers/providers/local",
                   "servers/providers/filesystem",
                   "servers/providers/proxy",
-                  "servers/providers/custom"
+                  "servers/providers/custom",
+                  "servers/providers/mounting"
                 ]
               },
               {
                 "group": "Transforms",
                 "pages": [
                   "servers/providers/transforms",
-                  "servers/providers/mounting",
                   "servers/enabled"
                 ]
               },
