@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import socket
 import sys
 from collections.abc import Callable, Generator
@@ -33,6 +34,24 @@ def import_rich_rule():
     import rich.rule  # noqa: F401
 
     yield
+
+
+@pytest.fixture(autouse=True)
+def enable_fastmcp_logger_propagation(caplog):
+    """Enable propagation on FastMCP root logger so caplog captures FastMCP log messages.
+
+    FastMCP loggers have propagate=False by default, which prevents messages from
+    reaching pytest's caplog handler (attached to root logger). This fixture
+    temporarily enables propagation on the FastMCP root logger so FastMCP logs
+    are captured in tests.
+    """
+    root_logger = logging.getLogger("fastmcp")
+    original_propagate = root_logger.propagate
+    root_logger.propagate = True
+
+    yield
+
+    root_logger.propagate = original_propagate
 
 
 @pytest.fixture(autouse=True)

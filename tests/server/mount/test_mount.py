@@ -10,7 +10,6 @@ from fastmcp.client import Client
 from fastmcp.client.transports import SSETransport
 from fastmcp.tools.tool import Tool
 from fastmcp.tools.tool_transform import TransformedTool
-from fastmcp.utilities.tests import caplog_for_fastmcp
 
 
 class TestBasicMount:
@@ -279,26 +278,25 @@ class TestMultipleServerMount:
         main_app.mount(unreachable_proxy, "unreachable")
 
         # All object types should work from working server despite unreachable proxy
-        with caplog_for_fastmcp(caplog):
-            async with Client(main_app, name="main_app_client") as client:
-                # Test tools
-                tools = await client.list_tools()
-                tool_names = [tool.name for tool in tools]
-                assert "working_working_tool" in tool_names
+        async with Client(main_app, name="main_app_client") as client:
+            # Test tools
+            tools = await client.list_tools()
+            tool_names = [tool.name for tool in tools]
+            assert "working_working_tool" in tool_names
 
-                # Test calling a tool
-                result = await client.call_tool("working_working_tool", {})
-                assert result.data == "Working tool"
+            # Test calling a tool
+            result = await client.call_tool("working_working_tool", {})
+            assert result.data == "Working tool"
 
-                # Test resources
-                resources = await client.list_resources()
-                resource_uris = [str(resource.uri) for resource in resources]
-                assert "working://working/data" in resource_uris
+            # Test resources
+            resources = await client.list_resources()
+            resource_uris = [str(resource.uri) for resource in resources]
+            assert "working://working/data" in resource_uris
 
-                # Test prompts
-                prompts = await client.list_prompts()
-                prompt_names = [prompt.name for prompt in prompts]
-                assert "working_working_prompt" in prompt_names
+            # Test prompts
+            prompts = await client.list_prompts()
+            prompt_names = [prompt.name for prompt in prompts]
+            assert "working_working_prompt" in prompt_names
 
         # Verify that errors were logged for the unreachable provider (at DEBUG level)
         debug_messages = [
