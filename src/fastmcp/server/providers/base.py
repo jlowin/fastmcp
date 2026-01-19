@@ -543,7 +543,7 @@ class Provider:
         *,
         names: set[str] | None = None,
         keys: set[str] | None = None,
-        version: str | None = None,
+        version: VersionSpec | None = None,
         tags: set[str] | None = None,
         components: list[Literal["tool", "resource", "template", "prompt"]]
         | None = None,
@@ -561,7 +561,8 @@ class Provider:
         Args:
             names: Component names or URIs to enable.
             keys: Component keys to enable (e.g., {"tool:my_tool@v1"}).
-            version: Component version to enable.
+            version: Component version spec to enable (e.g., VersionSpec(eq="v1") or
+                VersionSpec(gte="v2")). Unversioned components will not match.
             tags: Enable components with these tags.
             components: Component types to include (e.g., ["tool", "prompt"]).
             only: If True, ONLY enable matching components (allowlist mode).
@@ -591,7 +592,7 @@ class Provider:
         *,
         names: set[str] | None = None,
         keys: set[str] | None = None,
-        version: str | None = None,
+        version: VersionSpec | None = None,
         tags: set[str] | None = None,
         components: list[Literal["tool", "resource", "template", "prompt"]]
         | None = None,
@@ -605,7 +606,8 @@ class Provider:
         Args:
             names: Component names or URIs to disable.
             keys: Component keys to disable (e.g., {"tool:my_tool@v1"}).
-            version: Component version to disable.
+            version: Component version spec to disable (e.g., VersionSpec(eq="v1") or
+                VersionSpec(gte="v2")). Unversioned components will not match.
             tags: Disable components with these tags.
             components: Component types to include (e.g., ["tool", "prompt"]).
 
