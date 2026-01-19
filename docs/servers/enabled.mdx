@@ -285,9 +285,9 @@ def check_permissions(ctx: Context) -> str:
         return "Admin tools disabled"
 ```
 
-<Warning>
-Dynamic enabled state changes affect all connected clients. For per-user filtering, consider using separate server instances or implementing authorization in the tools themselves.
-</Warning>
+<Note>
+Server-level visibility changes affect all connected clients. For per-session filtering where different clients see different components, see [Session Visibility](/servers/context#session-visibility).
+</Note>
 
 ## Client Notifications
 
