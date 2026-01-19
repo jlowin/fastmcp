@@ -46,7 +46,7 @@ class TransportMixin:
         """Run the FastMCP server asynchronously.
 
         Args:
-            transport: Transport protocol to use ("stdio", "sse", or "streamable-http")
+            transport: Transport protocol to use ("stdio", "http", "sse", or "streamable-http")
             show_banner: Whether to display the server banner. If None, uses the
                 FASTMCP_SHOW_SERVER_BANNER setting (default: True).
         """
@@ -214,7 +214,7 @@ class TransportMixin:
         """Run the server using HTTP transport.
 
         Args:
-            transport: Transport protocol to use - either "streamable-http" (default) or "sse"
+            transport: Transport protocol to use - "http" (default), "streamable-http", or "sse"
             host: Host address to bind to (defaults to settings.host)
             port: Port to bind to (defaults to settings.port)
             log_level: Log level for the server (defaults to settings.log_level)
@@ -338,3 +338,5 @@ class TransportMixin:
                 debug=self._deprecated_settings.debug,
                 middleware=middleware,
             )
+        else:
+            raise ValueError(f"Unknown transport: {transport}")
