@@ -154,21 +154,22 @@ class PromptsAsTools(Transform):
 def _format_prompt_result(result: Any) -> str:
     """Format PromptResult for tool output.
 
-    Returns JSON with the messages array.
+    Returns JSON with the messages array. Preserves embedded resources
+    as structured JSON objects.
     """
-    return json.dumps(
-        {
-            "messages": [
-                {
-                    "role": msg.role,
-                    "content": (
-                        msg.content.text
-                        if isinstance(msg.content, TextContent)
-                        else str(msg.content)
-                    ),
-                }
-                for msg in result.messages
-            ]
-        },
-        indent=2,
-    )
+    messages = []
+    for msg in result.messages:
+        if isinstance(msg.content, TextContent):
+            content = msg.content.text
+        else:
+            # Preserve structured content (e.g., EmbeddedResource) as dict
+            content = msg.content.model_dump(mode="json", exclude_none=True)
+
+        messages.append(
+            {
+                "role": msg.role,
+                "content": content,
+            }
+        )
+
+    return json.dumps({"messages": messages}, indent=2)
