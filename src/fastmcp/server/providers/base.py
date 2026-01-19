@@ -136,23 +136,18 @@ class Provider:
     async def list_tools(self) -> Sequence[Tool]:
         """List tools with all transforms applied.
 
-        Builds a middleware chain: base → transforms (in order).
-        Each transform wraps the previous via call_next.
+        Applies transforms sequentially: base → transforms (in order).
+        Each transform receives the result from the previous transform.
         Components may be marked as disabled but are NOT filtered here -
         filtering happens at the server level to allow session transforms to override.
 
         Returns:
             Transformed sequence of tools (including disabled ones).
         """
-
-        async def base() -> Sequence[Tool]:
-            return await self._list_tools()
-
-        chain = base
+        tools = await self._list_tools()
         for transform in self.transforms:
-            chain = partial(transform.list_tools, call_next=chain)
-
-        return await chain()
+            tools = await transform.list_tools(tools)
+        return tools
 
     async def get_tool(
         self, name: str, version: VersionSpec | None = None
@@ -185,15 +180,10 @@ class Provider:
 
         Components may be marked as disabled but are NOT filtered here.
         """
-
-        async def base() -> Sequence[Resource]:
-            return await self._list_resources()
-
-        chain = base
+        resources = await self._list_resources()
         for transform in self.transforms:
-            chain = partial(transform.list_resources, call_next=chain)
-
-        return await chain()
+            resources = await transform.list_resources(resources)
+        return resources
 
     async def get_resource(
         self, uri: str, version: VersionSpec | None = None
@@ -225,15 +215,10 @@ class Provider:
 
         Components may be marked as disabled but are NOT filtered here.
         """
-
-        async def base() -> Sequence[ResourceTemplate]:
-            return await self._list_resource_templates()
-
-        chain = base
+        templates = await self._list_resource_templates()
         for transform in self.transforms:
-            chain = partial(transform.list_resource_templates, call_next=chain)
-
-        return await chain()
+            templates = await transform.list_resource_templates(templates)
+        return templates
 
     async def get_resource_template(
         self, uri: str, version: VersionSpec | None = None
@@ -267,15 +252,10 @@ class Provider:
 
         Components may be marked as disabled but are NOT filtered here.
         """
-
-        async def base() -> Sequence[Prompt]:
-            return await self._list_prompts()
-
-        chain = base
+        prompts = await self._list_prompts()
         for transform in self.transforms:
-            chain = partial(transform.list_prompts, call_next=chain)
-
-        return await chain()
+            prompts = await transform.list_prompts(prompts)
+        return prompts
 
     async def get_prompt(
         self, name: str, version: VersionSpec | None = None
