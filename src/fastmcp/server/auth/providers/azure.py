@@ -536,10 +536,17 @@ class _EntraOBOToken(Dependency):  # type: ignore[misc]
 
         msal_app = server.auth.get_msal_app()
 
-        # Perform the OBO exchange
-        result = msal_app.acquire_token_on_behalf_of(
-            user_assertion=access_token.token,
-            scopes=self.scopes,
+        # Perform the OBO exchange in a thread pool to avoid blocking the event loop
+        # (MSAL uses synchronous requests under the hood)
+        import asyncio
+
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(
+            None,
+            lambda: msal_app.acquire_token_on_behalf_of(
+                user_assertion=access_token.token,
+                scopes=self.scopes,
+            ),
         )
 
         if "error" in result:
