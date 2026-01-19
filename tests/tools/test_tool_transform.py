@@ -1,16 +1,17 @@
 """Core tool transform functionality."""
 
-from dataclasses import dataclass
+import re
 from typing import Annotated, Any
 
 import pytest
 from mcp.types import TextContent
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 from fastmcp import FastMCP
 from fastmcp.client.client import Client
 from fastmcp.tools import Tool, forward, forward_raw
 from fastmcp.tools.function_tool import FunctionTool
+from fastmcp.tools.tool import ToolResult
 from fastmcp.tools.tool_transform import (
     ArgTransform,
     TransformedTool,
@@ -98,7 +99,9 @@ async def test_dropped_args_error_if_provided(add_tool):
     new_tool = Tool.from_tool(
         add_tool, transform_args={"old_y": ArgTransform(hide=True)}
     )
-    with pytest.raises(ValueError, match="Unknown argument"):
+    with pytest.raises(
+        TypeError, match="Got unexpected keyword argument\\(s\\): old_y"
+    ):
         await new_tool.run(arguments={"old_x": 1, "old_y": 2})
 
 
@@ -112,16 +115,17 @@ async def test_hidden_arg_with_constant_default(add_tool):
 
 
 async def test_hidden_arg_without_default_uses_parent_default(add_tool):
-    def func_without_default(x: int, y: int) -> int:
-        return x + y
-
-    tool_without_default = Tool.from_function(func_without_default)
+    """Test that hidden argument without default uses parent's default."""
     new_tool = Tool.from_tool(
-        tool_without_default, transform_args={"y": ArgTransform(hide=True)}
+        add_tool, transform_args={"old_y": ArgTransform(hide=True)}
     )
-    # y has no default, so it should raise an error
-    with pytest.raises(ValueError, match="Missing required argument"):
-        await new_tool.run(arguments={"x": 1})
+    # Only old_x should be exposed
+    assert sorted(new_tool.parameters["properties"]) == ["old_x"]
+    # Should pass old_x=3 and let parent use its default old_y=10
+    result = await new_tool.run(arguments={"old_x": 3})
+    assert isinstance(result.content[0], TextContent)
+    assert result.content[0].text == "13"
+    assert result.structured_content == {"result": 13}
 
 
 async def test_mixed_hidden_args_with_custom_function(add_tool):
@@ -145,47 +149,70 @@ async def test_mixed_hidden_args_with_custom_function(add_tool):
 
 
 async def test_hide_required_param_without_default_raises_error():
-    def func(x: int, y: int) -> int:
-        return x + y
+    """Test that hiding a required parameter without providing default raises error."""
 
-    tool = Tool.from_function(func)
+    @Tool.from_function
+    def tool_with_required_param(required_param: int, optional_param: int = 10) -> int:
+        return required_param + optional_param
 
+    # This should raise an error because required_param has no default and we're not providing one
     with pytest.raises(
         ValueError,
-        match="Cannot hide required parameter 'y' that has no default value",
+        match=r"Hidden parameter 'required_param' has no default value in parent tool",
     ):
-        Tool.from_tool(tool, transform_args={"y": ArgTransform(hide=True)})
+        Tool.from_tool(
+            tool_with_required_param,
+            transform_args={"required_param": ArgTransform(hide=True)},
+        )
 
 
 async def test_hide_required_param_with_user_default_works():
-    def func(x: int, y: int = 20) -> int:
-        return x + y
+    """Test that hiding a required parameter works when user provides a default."""
 
-    tool = Tool.from_function(func)
-    new_tool = Tool.from_tool(tool, transform_args={"y": ArgTransform(hide=True)})
+    @Tool.from_function
+    def tool_with_required_param(required_param: int, optional_param: int = 10) -> int:
+        return required_param + optional_param
 
-    result = await new_tool.run(arguments={"x": 5})
+    # This should work because we're providing a default for the hidden required param
+    new_tool = Tool.from_tool(
+        tool_with_required_param,
+        transform_args={"required_param": ArgTransform(hide=True, default=5)},
+    )
+
+    # Only optional_param should be exposed
+    assert sorted(new_tool.parameters["properties"]) == ["optional_param"]
+    # Should pass required_param=5 and optional_param=20 to parent
+    result = await new_tool.run(arguments={"optional_param": 20})
     assert result.structured_content == {"result": 25}
 
 
 async def test_hidden_param_prunes_defs():
-    """Test that hidden parameters are pruned from $defs in schema."""
+    class VisibleType(BaseModel):
+        x: int
 
-    @dataclass
-    class Nested:
-        value: int
+    class HiddenType(BaseModel):
+        y: int
 
-    def func(x: int, nested: Nested) -> int:
-        return x + nested.value
+    @Tool.from_function
+    def tool_with_refs(a: VisibleType, b: HiddenType | None = None) -> int:
+        return a.x + (b.y if b else 0)
 
-    tool = Tool.from_function(func)
-    new_tool = Tool.from_tool(tool, transform_args={"nested": ArgTransform(hide=True)})
+    # Hide parameter 'b'
+    new_tool = Tool.from_tool(
+        tool_with_refs, transform_args={"b": ArgTransform(hide=True)}
+    )
 
-    # nested should be hidden, so its $defs should be pruned
     schema = new_tool.parameters
-    assert "nested" not in schema["properties"]
-    # $defs for Nested should be pruned since nested is hidden
-    assert "$defs" not in schema or "Nested" not in schema.get("$defs", {})
+    # Only 'a' should be visible
+    assert list(schema["properties"].keys()) == ["a"]
+    # Schema should be fully dereferenced (no $defs)
+    assert "$defs" not in schema
+    # VisibleType should be inlined in the property
+    assert schema["properties"]["a"] == {
+        "properties": {"x": {"type": "integer"}},
+        "required": ["x"],
+        "type": "object",
+    }
 
 
 async def test_forward_with_argument_mapping(add_tool):
@@ -206,20 +233,22 @@ async def test_forward_with_argument_mapping(add_tool):
 
 
 async def test_forward_with_incorrect_args_raises_error(add_tool):
-    async def custom_fn(new_x: int, **kwargs) -> str:
-        # Try to forward with wrong arg name
-        result = await forward(old_x=new_x, **kwargs)  # Wrong: should be new_x
-        assert isinstance(result.content[0], TextContent)
-        return result.content[0].text
+    async def custom_fn(new_x: int, new_y: int = 5) -> ToolResult:
+        # the forward should use the new args, not the old ones
+        return await forward(old_x=new_x, old_y=new_y)
 
     new_tool = Tool.from_tool(
         add_tool,
         transform_fn=custom_fn,
-        transform_args={"old_x": ArgTransform(name="new_x")},
+        transform_args={
+            "old_x": ArgTransform(name="new_x"),
+            "old_y": ArgTransform(name="new_y"),
+        },
     )
-
-    with pytest.raises(ValueError, match="Unknown argument"):
-        await new_tool.run(arguments={"new_x": 3})
+    with pytest.raises(
+        TypeError, match=re.escape("Got unexpected keyword argument(s): old_x, old_y")
+    ):
+        await new_tool.run(arguments={"new_x": 2, "new_y": 3})
 
 
 async def test_forward_raw_without_argument_mapping(add_tool):
@@ -266,22 +295,23 @@ async def test_fn_with_kwargs_passes_through_original_args(add_tool):
 
 
 async def test_fn_with_kwargs_receives_transformed_arg_names(add_tool):
-    async def custom_fn(new_x: int, **kwargs) -> str:
-        # Should receive transformed arg name
-        assert "new_x" in kwargs or "new_x" == new_x
+    """Test that **kwargs receives arguments with their transformed names from transform_args."""
+
+    async def custom_fn(new_x: int, **kwargs) -> ToolResult:
+        # kwargs should contain 'old_y': 3 (transformed name), not 'old_y': 3 (original name)
+        assert kwargs == {"old_y": 3}
         result = await forward(new_x=new_x, **kwargs)
-        assert isinstance(result.content[0], TextContent)
-        return result.content[0].text
+        return result
 
     new_tool = Tool.from_tool(
         add_tool,
         transform_fn=custom_fn,
         transform_args={"old_x": ArgTransform(name="new_x")},
     )
-
-    result = await new_tool.run(arguments={"new_x": 5, "old_y": 3})
+    result = await new_tool.run(arguments={"new_x": 2, "old_y": 3})
     assert isinstance(result.content[0], TextContent)
-    assert result.content[0].text == "8"
+    assert result.content[0].text == "5"
+    assert result.structured_content == {"result": 5}
 
 
 async def test_fn_with_kwargs_handles_partial_explicit_args(add_tool):
@@ -354,70 +384,113 @@ async def test_forward_raw_outside_context_raises_error():
 
 
 def test_transform_args_with_parent_defaults():
-    def parent(x: int, y: int = 10) -> int:
-        return x + y
+    """Test that transform_args with parent defaults works."""
 
-    tool = Tool.from_function(parent)
-    new_tool = Tool.from_tool(tool, transform_args={"x": ArgTransform(name="new_x")})
+    class CoolModel(BaseModel):
+        x: int = 10
 
-    # new_tool should have old_y with default, and new_x as required
-    assert "new_x" in new_tool.parameters["properties"]
-    assert "old_y" in new_tool.parameters["properties"]
-    assert "new_x" in new_tool.parameters["required"]
-    assert "old_y" not in new_tool.parameters["required"]
+    def parent_tool(cool_model: CoolModel) -> int:
+        return cool_model.x
+
+    tool = Tool.from_function(parent_tool)
+
+    new_tool = Tool.from_tool(tool)
+
+    # Both tools should have the same dereferenced schema
+    assert new_tool.parameters == tool.parameters
+    # Schema should be fully dereferenced (no $defs)
+    assert "$defs" not in new_tool.parameters
 
 
 def test_transform_args_validation_unknown_arg(add_tool):
-    with pytest.raises(ValueError, match="Unknown argument"):
-        Tool.from_tool(add_tool, transform_args={"unknown": ArgTransform()})
+    """Test that transform_args with unknown arguments raises ValueError."""
+    with pytest.raises(
+        ValueError, match="Unknown arguments in transform_args: unknown_param"
+    ) as exc_info:
+        Tool.from_tool(
+            add_tool, transform_args={"unknown_param": ArgTransform(name="new_name")}
+        )
+
+    assert "`add`" in str(exc_info.value)
 
 
 def test_transform_args_creates_duplicate_names(add_tool):
-    with pytest.raises(ValueError, match="Duplicate argument name"):
+    """Test that transform_args creating duplicate parameter names raises ValueError."""
+    with pytest.raises(
+        ValueError,
+        match="Multiple arguments would be mapped to the same names: same_name",
+    ):
         Tool.from_tool(
             add_tool,
             transform_args={
-                "old_x": ArgTransform(name="new_name"),
-                "old_y": ArgTransform(name="new_name"),
+                "old_x": ArgTransform(name="same_name"),
+                "old_y": ArgTransform(name="same_name"),
             },
         )
 
 
-async def test_function_without_kwargs_missing_params(add_tool):
-    def custom_fn(x: int) -> str:
-        return f"Result: {x}"
+def test_function_without_kwargs_missing_params(add_tool):
+    """Test that function missing required transformed parameters raises ValueError."""
 
-    new_tool = Tool.from_tool(add_tool, transform_fn=custom_fn)
+    def invalid_fn(new_x: int, non_existent: str) -> str:
+        return f"{new_x}_{non_existent}"
 
-    # custom_fn doesn't have **kwargs, so it can't receive old_y
-    # Should raise error when old_y is required but not provided
-    with pytest.raises(ValueError, match="Missing required argument"):
-        await new_tool.run(arguments={"old_x": 1})
-
-
-async def test_function_without_kwargs_can_have_extra_params(add_tool):
-    def custom_fn(old_x: int, old_y: int, extra: int = 5) -> str:
-        return f"Result: {old_x + old_y + extra}"
-
-    new_tool = Tool.from_tool(add_tool, transform_fn=custom_fn)
-
-    result = await new_tool.run(arguments={"old_x": 1, "old_y": 2})
-    assert isinstance(result.content[0], TextContent)
-    assert result.content[0].text == "Result: 8"  # 1 + 2 + 5
+    with pytest.raises(
+        ValueError,
+        match="Function missing parameters required after transformation: new_y",
+    ):
+        Tool.from_tool(
+            add_tool,
+            transform_fn=invalid_fn,
+            transform_args={
+                "old_x": ArgTransform(name="new_x"),
+                "old_y": ArgTransform(name="new_y"),
+            },
+        )
 
 
-async def test_function_with_kwargs_can_add_params(add_tool):
-    async def custom_fn(old_x: int, old_y: int, multiplier: int = 2, **kwargs) -> str:
+def test_function_without_kwargs_can_have_extra_params(add_tool):
+    """Test that function can have extra parameters not in parent tool."""
+
+    def valid_fn(new_x: int, new_y: int, extra_param: str = "default") -> str:
+        return f"{new_x}_{new_y}_{extra_param}"
+
+    # Should work - extra_param is fine as long as it has a default
+    new_tool = Tool.from_tool(
+        add_tool,
+        transform_fn=valid_fn,
+        transform_args={
+            "old_x": ArgTransform(name="new_x"),
+            "old_y": ArgTransform(name="new_y"),
+        },
+    )
+
+    # The final schema should include all function parameters
+    assert "new_x" in new_tool.parameters["properties"]
+    assert "new_y" in new_tool.parameters["properties"]
+    assert "extra_param" in new_tool.parameters["properties"]
+
+
+def test_function_with_kwargs_can_add_params(add_tool):
+    """Test that function with **kwargs can add new parameters."""
+
+    async def valid_fn(extra_param: str, **kwargs) -> str:
         result = await forward(**kwargs)
-        assert isinstance(result.content[0], TextContent)
-        base_result = int(result.content[0].text)
-        return str(base_result * multiplier)
+        return f"{extra_param}: {result}"
 
-    new_tool = Tool.from_tool(add_tool, transform_fn=custom_fn)
+    # This should work fine - kwargs allows access to all transformed params
+    tool = Tool.from_tool(
+        add_tool,
+        transform_fn=valid_fn,
+        transform_args={
+            "old_x": ArgTransform(name="new_x"),
+            "old_y": ArgTransform(name="new_y"),
+        },
+    )
 
-    result = await new_tool.run(arguments={"old_x": 3, "old_y": 4, "multiplier": 3})
-    assert isinstance(result.content[0], TextContent)
-    assert result.content[0].text == "21"  # (3 + 4) * 3
+    # extra_param is added, new_x and new_y are available
+    assert "extra_param" in tool.parameters["properties"]
+    assert "new_x" in tool.parameters["properties"]
 
 
 class TestProxy:

@@ -309,7 +309,6 @@ class TestTransformToolOutputSchema:
         assert result.structured_content == {"direct_value": 6, "doubled": 12}
 
 
-@pytest.fixture
 class TestInputSchema:
     """Test schema definition handling and reference finding."""
 

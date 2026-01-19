@@ -11,7 +11,7 @@ from typing_extensions import TypedDict
 from fastmcp import FastMCP
 from fastmcp.client.client import Client
 from fastmcp.exceptions import ToolError
-from fastmcp.tools import Tool, forward
+from fastmcp.tools import Tool, forward, forward_raw
 from fastmcp.tools.function_tool import FunctionTool
 from fastmcp.tools.tool_transform import (
     ArgTransform,
@@ -126,30 +126,50 @@ def test_arg_transform_precedence_over_function_without_kwargs():
 
 
 async def test_arg_transform_precedence_over_function_with_kwargs():
-    async def base(x: int, **kwargs) -> str:
-        result = await forward(**kwargs)
-        assert isinstance(result.content[0], TextContent)
-        return f"String input '{result.content[0].text}'"
+    """Test that ArgTransform attributes take precedence over function signature (with **kwargs)."""
 
-    tool = Tool.from_function(base)
-    new_tool = Tool.from_tool(
-        tool, transform_args={"x": ArgTransform(type=str, description="String input")}
+    @Tool.from_function
+    def base(x: int, y: str = "base_default") -> str:
+        return f"{x}: {y}"
+
+    # Function signature has different types/defaults than ArgTransform
+    async def custom_fn(x: str = "function_default", **kwargs) -> str:
+        result = await forward(x=x, **kwargs)
+        assert isinstance(result.content[0], TextContent)
+        return f"custom: {result.content[0].text}"
+
+    tool = Tool.from_tool(
+        base,
+        transform_fn=custom_fn,
+        transform_args={
+            "x": ArgTransform(type=int, default=42),  # Different type and default
+            "y": ArgTransform(description="ArgTransform description"),
+        },
     )
 
-    prop = get_property(new_tool, "x")
-    assert prop["type"] == "string"
-    assert prop["description"] == "String input"
+    # ArgTransform should take precedence
+    x_prop = get_property(tool, "x")
+    y_prop = get_property(tool, "y")
 
-    # Test it works with string input
-    result = await tool.run(arguments={"x": "5", "y": 3})
+    assert x_prop["type"] == "integer"  # ArgTransform type wins over function's str
+    assert x_prop["default"] == 42  # ArgTransform default wins over function's default
+    assert (
+        y_prop["description"] == "ArgTransform description"
+    )  # ArgTransform description
+
+    # x should not be required due to ArgTransform default
+    assert "x" not in tool.parameters["required"]
+
+    # Test it works at runtime
+    result = await tool.run(arguments={"y": "test"})
+    # Should use ArgTransform default of 42
     assert isinstance(result.content[0], TextContent)
-    assert "String input '5'" in result.content[0].text
-    assert "result: 8" in result.content[0].text
+    assert "42: test" in result.content[0].text
 
 
 def test_arg_transform_combined_attributes(add_tool):
     new_tool = Tool.from_tool(
-        add_tool,  # type: ignore[arg-type]
+        add_tool,
         transform_args={
             "old_x": ArgTransform(
                 name="new_x",
@@ -166,15 +186,27 @@ def test_arg_transform_combined_attributes(add_tool):
 
 
 async def test_arg_transform_type_precedence_runtime():
-    async def custom_fn(x: str, **kwargs) -> str:
-        result = await forward(x=x, **kwargs)
-        assert isinstance(result.content[0], TextContent)
-        return f"String input '{result.content[0].text}'"
+    """Test that ArgTransform type changes work correctly at runtime."""
 
-    tool = Tool.from_function(custom_fn)
-    Tool.from_tool(
-        tool, transform_args={"x": ArgTransform(type=str, description="String input")}
+    @Tool.from_function
+    def base(x: int, y: int = 10) -> int:
+        return x + y
+
+    # Transform x to string type but keep same logic
+    async def custom_fn(x: str, y: int = 10) -> str:
+        # Convert string back to int for the original function
+        result = await forward_raw(x=int(x), y=y)
+        # Extract the text from the result
+        assert isinstance(result.content[0], TextContent)
+        result_text = result.content[0].text
+        return f"String input '{x}' converted to result: {result_text}"
+
+    tool = Tool.from_tool(
+        base, transform_fn=custom_fn, transform_args={"x": ArgTransform(type=str)}
     )
+
+    # Verify schema shows string type
+    assert get_property(tool, "x")["type"] == "string"
 
     # Test it works with string input
     result = await tool.run(arguments={"x": "5", "y": 3})
@@ -204,6 +236,8 @@ async def test_arg_transform_default_factory():
     result2 = await new_tool.run(arguments={"x": 2})
 
     # Each call should get a different timestamp
+    assert isinstance(result1.content[0], TextContent)
+    assert isinstance(result2.content[0], TextContent)
     assert result1.content[0].text != result2.content[0].text
     assert "1_" in result1.content[0].text
     assert "2_" in result2.content[0].text
@@ -234,6 +268,9 @@ async def test_arg_transform_default_factory_called_each_time():
     result3 = await new_tool.run(arguments={"x": 3})
 
     # Each call should increment the counter
+    assert isinstance(result1.content[0], TextContent)
+    assert isinstance(result2.content[0], TextContent)
+    assert isinstance(result3.content[0], TextContent)
     assert "1_1" in result1.content[0].text
     assert "2_2" in result2.content[0].text
     assert "3_3" in result3.content[0].text
@@ -259,6 +296,7 @@ async def test_arg_transform_hidden_with_default_factory():
 
     result = await new_tool.run(arguments={"x": 1})
     # Should have a UUID in the result
+    assert isinstance(result.content[0], TextContent)
     assert "1_" in result.content[0].text
     assert len(result.content[0].text.split("_")[1]) > 10
 
@@ -282,7 +320,8 @@ async def test_arg_transform_default_factory_requires_hide():
 async def test_arg_transform_required_true(add_tool):
     """Test ArgTransform with required=True."""
     new_tool = Tool.from_tool(
-        add_tool, transform_args={"old_y": ArgTransform(required=True)}  # type: ignore[arg-type]
+        add_tool,
+        transform_args={"old_y": ArgTransform(required=True)},
     )
 
     # old_y should now be required (even though it had a default)
@@ -306,7 +345,7 @@ async def test_arg_transform_required_false():
 async def test_arg_transform_required_with_rename(add_tool):
     """Test ArgTransform with required and rename."""
     new_tool = Tool.from_tool(
-        add_tool,  # type: ignore[arg-type]
+        add_tool,
         transform_args={"old_y": ArgTransform(name="new_y", required=True)},
     )
 
@@ -318,19 +357,17 @@ async def test_arg_transform_required_with_rename(add_tool):
 async def test_arg_transform_required_true_with_default_raises_error():
     """Test that required=True with default raises an error."""
     with pytest.raises(
-        ValueError,
-        match="Cannot specify both 'required=True' and 'default'",
+        ValueError, match="Cannot specify 'required=True' with 'default'"
     ):
-        ArgTransform(required=True, default=10)
+        ArgTransform(required=True, default=42)
 
 
 async def test_arg_transform_required_true_with_factory_raises_error():
     """Test that required=True with default_factory raises an error."""
     with pytest.raises(
-        ValueError,
-        match="Cannot specify both 'required=True' and 'default_factory'",
+        ValueError, match="default_factory can only be used with hide=True"
     ):
-        ArgTransform(required=True, default_factory=lambda: 10)
+        ArgTransform(required=True, default_factory=lambda: 42)
 
 
 async def test_arg_transform_required_no_change():

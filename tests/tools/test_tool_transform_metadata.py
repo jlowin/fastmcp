@@ -25,6 +25,7 @@ def add_tool() -> FunctionTool:
     return Tool.from_function(add)
 
 
+@pytest.fixture
 def sample_tool():
     """Sample tool for testing transformations."""
 
