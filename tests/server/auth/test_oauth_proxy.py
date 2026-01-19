@@ -670,7 +670,9 @@ class TestOAuthProxyTokenEndpointAuth:
         )
 
         # Mock the upstream OAuth provider response
-        with patch("fastmcp.server.auth.oauth_proxy.AsyncOAuth2Client") as MockClient:
+        with patch(
+            "fastmcp.server.auth.oauth_proxy.proxy.AsyncOAuth2Client"
+        ) as MockClient:
             mock_client = AsyncMock()
 
             # Mock initial token exchange (authorization code flow)
@@ -852,7 +854,9 @@ class TestOAuthProxyE2E:
             "scope": "read write",
         }
 
-        with patch("fastmcp.server.auth.oauth_proxy.AsyncOAuth2Client") as MockClient:
+        with patch(
+            "fastmcp.server.auth.oauth_proxy.proxy.AsyncOAuth2Client"
+        ) as MockClient:
             mock_client = AsyncMock()
 
             # Mock initial token exchange to get FastMCP tokens
