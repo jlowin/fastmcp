@@ -23,6 +23,7 @@ ENV_FILE = os.getenv("FASTMCP_ENV_FILE", ".env")
 LOG_LEVEL = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
 DuplicateBehavior = Literal["warn", "error", "replace", "ignore"]
+Transport = Literal["stdio", "http", "sse", "streamable-http"]
 
 TEN_MB_IN_BYTES = 1024 * 1024 * 10
 
@@ -253,6 +254,14 @@ class Settings(BaseSettings):
             description="The timeout for the client's initialization handshake, in seconds. Set to None or 0 to disable.",
         ),
     ] = None
+
+    transport: Annotated[
+        Transport,
+        Field(
+            default="stdio",
+            description="The transport protocol to use for the server. Defaults to 'stdio'.",
+        ),
+    ] = "stdio"
 
     # HTTP settings
     host: str = "127.0.0.1"
