@@ -245,7 +245,7 @@ class TestMultipleServerMount:
     )
     async def test_mount_with_unreachable_proxy_servers(self, caplog):
         """Test graceful handling when multiple mounted servers fail to connect."""
-        caplog.set_level(logging.DEBUG)
+        caplog.set_level(logging.DEBUG, logger="fastmcp")
 
         main_app = FastMCP("MainApp")
         working_app = FastMCP("WorkingApp")
