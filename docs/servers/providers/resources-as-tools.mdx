@@ -1,6 +1,6 @@
 ---
-title: Resource as Tools
-sidebarTitle: Resource as Tools
+title: Resources as Tools
+sidebarTitle: Resources as Tools
 description: Expose resources to tool-only clients
 icon: toolbox
 ---
@@ -9,9 +9,9 @@ import { VersionBadge } from '/snippets/version-badge.mdx'
 
 <VersionBadge version="3.0.0" />
 
-Some MCP clients only support tools. They cannot list or read resources directly because they lack resource protocol support. The `ResourceAsTools` transform bridges this gap by generating tools that provide access to your server's resources.
+Some MCP clients only support tools. They cannot list or read resources directly because they lack resource protocol support. The `ResourcesAsTools` transform bridges this gap by generating tools that provide access to your server's resources.
 
-When you add `ResourceAsTools` to a server, it creates two tools that clients can call instead of using the resource protocol:
+When you add `ResourcesAsTools` to a server, it creates two tools that clients can call instead of using the resource protocol:
 
 - **`list_resources`** returns JSON describing all available resources and templates
 - **`read_resource`** reads a specific resource by URI
@@ -20,11 +20,11 @@ This means any client that can call tools can now access resources, even if the 
 
 ## Basic Usage
 
-Pass your server to `ResourceAsTools` when adding the transform. The transform queries that server for resources whenever the generated tools are called.
+Pass your server to `ResourcesAsTools` when adding the transform. The transform queries that server for resources whenever the generated tools are called.
 
 ```python
 from fastmcp import FastMCP
-from fastmcp.server.transforms import ResourceAsTools
+from fastmcp.server.transforms import ResourcesAsTools
 
 mcp = FastMCP("My Server")
 
@@ -39,7 +39,7 @@ def user_profile(user_id: str) -> str:
     return f'{{"user_id": "{user_id}", "name": "User {user_id}"}}'
 
 # Add the transform - creates list_resources and read_resource tools
-mcp.add_transform(ResourceAsTools(mcp))
+mcp.add_transform(ResourcesAsTools(mcp))
 ```
 
 Clients now see three tools: whatever tools you defined directly, plus `list_resources` and `read_resource`.

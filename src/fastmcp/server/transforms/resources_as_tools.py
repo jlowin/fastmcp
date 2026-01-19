@@ -6,10 +6,10 @@ clients that only support tools to access resource functionality.
 Example:
     ```python
     from fastmcp import FastMCP
-    from fastmcp.server.transforms import ResourceAsTools
+    from fastmcp.server.transforms import ResourcesAsTools
 
     mcp = FastMCP("Server")
-    mcp.add_transform(ResourceAsTools(mcp))
+    mcp.add_transform(ResourcesAsTools(mcp))
     # Now has list_resources and read_resource tools
     ```
 """
@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from fastmcp.server.providers.base import Provider
 
 
-class ResourceAsTools(Transform):
+class ResourcesAsTools(Transform):
     """Transform that adds tools for listing and reading resources.
 
     Generates two tools:
@@ -43,7 +43,7 @@ class ResourceAsTools(Transform):
     Example:
         ```python
         mcp = FastMCP("Server")
-        mcp.add_transform(ResourceAsTools(mcp))
+        mcp.add_transform(ResourcesAsTools(mcp))
         # Now has list_resources and read_resource tools
         ```
     """
@@ -58,7 +58,7 @@ class ResourceAsTools(Transform):
         self._provider = provider
 
     def __repr__(self) -> str:
-        return f"ResourceAsTools({self._provider!r})"
+        return f"ResourcesAsTools({self._provider!r})"
 
     async def list_tools(self, tools: Sequence[Tool]) -> Sequence[Tool]:
         """Add resource tools to the tool list."""

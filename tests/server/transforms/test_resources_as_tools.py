@@ -1,4 +1,4 @@
-"""Tests for ResourceAsTools transform."""
+"""Tests for ResourcesAsTools transform."""
 
 import base64
 import json
@@ -7,16 +7,16 @@ import pytest
 
 from fastmcp import FastMCP
 from fastmcp.client import Client
-from fastmcp.server.transforms import ResourceAsTools
+from fastmcp.server.transforms import ResourcesAsTools
 
 
-class TestResourceAsToolsBasic:
-    """Test basic ResourceAsTools functionality."""
+class TestResourcesAsToolsBasic:
+    """Test basic ResourcesAsTools functionality."""
 
     async def test_adds_list_resources_tool(self):
         """Transform adds list_resources tool."""
         mcp = FastMCP("Test")
-        mcp.add_transform(ResourceAsTools(mcp))
+        mcp.add_transform(ResourcesAsTools(mcp))
 
         async with Client(mcp) as client:
             tools = await client.list_tools()
@@ -26,7 +26,7 @@ class TestResourceAsToolsBasic:
     async def test_adds_read_resource_tool(self):
         """Transform adds read_resource tool."""
         mcp = FastMCP("Test")
-        mcp.add_transform(ResourceAsTools(mcp))
+        mcp.add_transform(ResourcesAsTools(mcp))
 
         async with Client(mcp) as client:
             tools = await client.list_tools()
@@ -41,7 +41,7 @@ class TestResourceAsToolsBasic:
         def my_tool() -> str:
             return "result"
 
-        mcp.add_transform(ResourceAsTools(mcp))
+        mcp.add_transform(ResourcesAsTools(mcp))
 
         async with Client(mcp) as client:
             tools = await client.list_tools()
@@ -62,7 +62,7 @@ class TestListResourcesTool:
         def app_config() -> str:
             return "config data"
 
-        mcp.add_transform(ResourceAsTools(mcp))
+        mcp.add_transform(ResourcesAsTools(mcp))
 
         async with Client(mcp) as client:
             result = await client.call_tool("list_resources", {})
@@ -80,7 +80,7 @@ class TestListResourcesTool:
         def read_file(path: str) -> str:
             return f"content of {path}"
 
-        mcp.add_transform(ResourceAsTools(mcp))
+        mcp.add_transform(ResourcesAsTools(mcp))
 
         async with Client(mcp) as client:
             result = await client.call_tool("list_resources", {})
@@ -102,7 +102,7 @@ class TestListResourcesTool:
         def read_file(path: str) -> str:
             return f"content of {path}"
 
-        mcp.add_transform(ResourceAsTools(mcp))
+        mcp.add_transform(ResourcesAsTools(mcp))
 
         async with Client(mcp) as client:
             result = await client.call_tool("list_resources", {})
@@ -120,7 +120,7 @@ class TestListResourcesTool:
     async def test_empty_when_no_resources(self):
         """list_resources returns empty list when no resources exist."""
         mcp = FastMCP("Test")
-        mcp.add_transform(ResourceAsTools(mcp))
+        mcp.add_transform(ResourcesAsTools(mcp))
 
         async with Client(mcp) as client:
             result = await client.call_tool("list_resources", {})
@@ -138,7 +138,7 @@ class TestReadResourceTool:
         def app_config() -> str:
             return "my config data"
 
-        mcp.add_transform(ResourceAsTools(mcp))
+        mcp.add_transform(ResourcesAsTools(mcp))
 
         async with Client(mcp) as client:
             result = await client.call_tool("read_resource", {"uri": "config://app"})
@@ -152,7 +152,7 @@ class TestReadResourceTool:
         def user_profile(user_id: str) -> str:
             return f"Profile for user {user_id}"
 
-        mcp.add_transform(ResourceAsTools(mcp))
+        mcp.add_transform(ResourcesAsTools(mcp))
 
         async with Client(mcp) as client:
             result = await client.call_tool(
@@ -165,7 +165,7 @@ class TestReadResourceTool:
         from fastmcp.exceptions import ToolError
 
         mcp = FastMCP("Test")
-        mcp.add_transform(ResourceAsTools(mcp))
+        mcp.add_transform(ResourcesAsTools(mcp))
 
         async with Client(mcp) as client:
             with pytest.raises(ToolError, match="Resource not found"):
@@ -179,7 +179,7 @@ class TestReadResourceTool:
         def binary_data() -> bytes:
             return b"\x00\x01\x02\x03"
 
-        mcp.add_transform(ResourceAsTools(mcp))
+        mcp.add_transform(ResourcesAsTools(mcp))
 
         async with Client(mcp) as client:
             result = await client.call_tool("read_resource", {"uri": "data://binary"})
@@ -188,11 +188,11 @@ class TestReadResourceTool:
             assert decoded == b"\x00\x01\x02\x03"
 
 
-class TestResourceAsToolsWithNamespace:
-    """Test ResourceAsTools combined with other transforms."""
+class TestResourcesAsToolsWithNamespace:
+    """Test ResourcesAsTools combined with other transforms."""
 
     async def test_works_with_namespace_on_provider(self):
-        """ResourceAsTools works when provider has Namespace transform."""
+        """ResourcesAsTools works when provider has Namespace transform."""
         from fastmcp.server.providers import FastMCPProvider
         from fastmcp.server.transforms import Namespace
 
@@ -206,7 +206,7 @@ class TestResourceAsToolsWithNamespace:
         provider = FastMCPProvider(sub)
         provider.add_transform(Namespace("sub"))
         main.add_provider(provider)
-        main.add_transform(ResourceAsTools(main))
+        main.add_transform(ResourcesAsTools(main))
 
         async with Client(main) as client:
             result = await client.call_tool("list_resources", {})
@@ -217,11 +217,11 @@ class TestResourceAsToolsWithNamespace:
             assert resources[0]["uri"] == "config://sub/app"
 
 
-class TestResourceAsToolsRepr:
-    """Test ResourceAsTools repr."""
+class TestResourcesAsToolsRepr:
+    """Test ResourcesAsTools repr."""
 
     def test_repr(self):
         """Transform has useful repr."""
         mcp = FastMCP("Test")
-        transform = ResourceAsTools(mcp)
-        assert "ResourceAsTools" in repr(transform)
+        transform = ResourcesAsTools(mcp)
+        assert "ResourcesAsTools" in repr(transform)
