@@ -201,11 +201,14 @@ class FastMCPProviderResource(Resource):
         backgrounding appropriately. fn_key is already set by the parent
         server before calling this method.
         """
+        # Pass exact version so child reads the correct version
+        version = VersionSpec(eq=self.version) if self.version else None
+
         with delegate_span(
             self._original_uri or "", "FastMCPProvider", self._original_uri or ""
         ):
             return await self._server.read_resource(
-                self._original_uri, task_meta=task_meta
+                self._original_uri, version=version, task_meta=task_meta
             )
 
     def get_span_attributes(self) -> dict[str, Any]:
@@ -274,11 +277,14 @@ class FastMCPProviderPrompt(Prompt):
         backgrounding appropriately. fn_key is already set by the parent
         server before calling this method.
         """
+        # Pass exact version so child renders the correct version
+        version = VersionSpec(eq=self.version) if self.version else None
+
         with delegate_span(
             self._original_name or "", "FastMCPProvider", self._original_name or ""
         ):
             return await self._server.render_prompt(
-                self._original_name, arguments, task_meta=task_meta
+                self._original_name, arguments, version=version, task_meta=task_meta
             )
 
     async def render(self, arguments: dict[str, Any] | None = None) -> PromptResult:
@@ -287,7 +293,12 @@ class FastMCPProviderPrompt(Prompt):
         This is called when the prompt is used within a transformed context
         or other contexts where task_meta is not available.
         """
-        result = await self._server.render_prompt(self._original_name, arguments)
+        # Pass exact version so child renders the correct version
+        version = VersionSpec(eq=self.version) if self.version else None
+
+        result = await self._server.render_prompt(
+            self._original_name, arguments, version=version
+        )
         # Result from render_prompt should always be PromptResult when no task_meta
         if isinstance(result, mcp.types.CreateTaskResult):
             raise RuntimeError(
@@ -382,10 +393,15 @@ class FastMCPProviderResourceTemplate(ResourceTemplate):
         # Expand the original template with params to get internal URI
         original_uri = _expand_uri_template(self._original_uri_template or "", params)
 
+        # Pass exact version so child reads the correct version
+        version = VersionSpec(eq=self.version) if self.version else None
+
         with delegate_span(
             original_uri, "FastMCPProvider", self._original_uri_template or ""
         ):
-            return await self._server.read_resource(original_uri, task_meta=task_meta)
+            return await self._server.read_resource(
+                original_uri, version=version, task_meta=task_meta
+            )
 
     async def read(self, arguments: dict[str, Any]) -> str | bytes | ResourceResult:
         """Read the resource content for background task execution.
@@ -398,8 +414,11 @@ class FastMCPProviderResourceTemplate(ResourceTemplate):
             self._original_uri_template or "", arguments
         )
 
+        # Pass exact version so child reads the correct version
+        version = VersionSpec(eq=self.version) if self.version else None
+
         # Read from the wrapped server
-        result = await self._server.read_resource(original_uri)
+        result = await self._server.read_resource(original_uri, version=version)
         if isinstance(result, mcp.types.CreateTaskResult):
             raise RuntimeError("Unexpected CreateTaskResult during Docket execution")
 
