@@ -1244,6 +1244,9 @@ class Context:
             components: Component types to match (e.g., {"tool", "prompt"}).
             match_all: If True, matches all components regardless of other criteria.
         """
+        # Normalize empty sets to None (empty = match all)
+        components = components if components else None
+
         # Load current rules
         rules = await self._get_visibility_rules()
 
@@ -1294,6 +1297,9 @@ class Context:
             components: Component types to match (e.g., {"tool", "prompt"}).
             match_all: If True, matches all components regardless of other criteria.
         """
+        # Normalize empty sets to None (empty = match all)
+        components = components if components else None
+
         # Load current rules
         rules = await self._get_visibility_rules()
 
