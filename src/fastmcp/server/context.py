@@ -1170,9 +1170,10 @@ class Context:
         await self.set_state("_visibility_rules", rules)
 
         # Send notifications based on components hint
+        # Note: MCP has no separate template notification - templates use ResourceListChangedNotification
         if components is None or "tool" in components:
             await self.send_notification(mcp.types.ToolListChangedNotification())
-        if components is None or "resource" in components:
+        if components is None or "resource" in components or "template" in components:
             await self.send_notification(mcp.types.ResourceListChangedNotification())
         if components is None or "prompt" in components:
             await self.send_notification(mcp.types.PromptListChangedNotification())
