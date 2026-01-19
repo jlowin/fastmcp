@@ -556,6 +556,39 @@ class TestMountedServerVersioning:
         content = result.messages[0].content
         assert isinstance(content, TextContent) and "Greetings, World!" in content.text
 
+    async def test_deeply_nested_version_forwarding(self):
+        """Verify version is correctly forwarded through multiple mount levels."""
+        level3 = FastMCP("Level3")
+
+        @level3.tool(version="1.0")
+        def calc(x: int) -> int:
+            return x * 10  # v1.0 multiplies by 10
+
+        @level3.tool(version="2.0")
+        def calc(x: int) -> int:
+            return x * 100  # v2.0 multiplies by 100
+
+        level2 = FastMCP("Level2")
+        level2.mount(level3, "l3")
+
+        level1 = FastMCP("Level1")
+        level1.mount(level2, "l2")
+
+        # All versions should be visible through two levels of mounting
+        tools = await level1.list_tools()
+        calc_tools = [t for t in tools if "calc" in t.name]
+        assert len(calc_tools) == 2
+        versions = {t.version for t in calc_tools}
+        assert versions == {"1.0", "2.0"}
+
+        # Get v1.0 wrapper through two levels of mounting
+        v1_tool = next(t for t in tools if "calc" in t.name and t.version == "1.0")
+
+        # Should execute v1.0 logic, not v2.0
+        result = await v1_tool.run({"x": 5})
+        assert isinstance(result.content[0], TextContent)
+        assert result.content[0].text == "50"  # 5 * 10, not 5 * 100
+
 
 class TestVersionFilter:
     """Tests for VersionFilter transform."""
