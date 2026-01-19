@@ -129,7 +129,7 @@
                     ]
                   },
                   {
-                    "group": "Runtime",
+                    "group": "Features",
                     "icon": "play",
                     "pages": [
                       "servers/middleware",
@@ -202,16 +202,8 @@
                 "group": "Integrations",
                 "pages": [
                   {
-                    "group": "Web Frameworks",
-                    "icon": "code",
-                    "pages": [
-                      "integrations/fastapi",
-                      "integrations/openapi"
-                    ]
-                  },
-                  {
                     "collapsed": true,
-                    "group": "Auth Providers",
+                    "group": "Auth",
                     "icon": "key",
                     "pages": [
                       "integrations/auth0",
@@ -225,15 +217,17 @@
                       "integrations/oci",
                       "integrations/scalekit",
                       "integrations/supabase",
-                      "integrations/workos"
+                      "integrations/workos",
+                      "integrations/eunomia-authorization",
+                      "integrations/permit"
                     ]
                   },
                   {
-                    "group": "Authorization",
-                    "icon": "shield-check",
+                    "group": "Web Frameworks",
+                    "icon": "code",
                     "pages": [
-                      "integrations/eunomia-authorization",
-                      "integrations/permit"
+                      "integrations/fastapi",
+                      "integrations/openapi"
                     ]
                   },
                   {
