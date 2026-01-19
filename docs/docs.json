@@ -167,8 +167,8 @@
                   "clients/client",
                   "clients/transports",
                   {
-                    "group": "Operations",
-                    "icon": "arrow-right-arrow-left",
+                    "group": "Core",
+                    "icon": "cube",
                     "pages": [
                       "clients/tools",
                       "clients/resources",
