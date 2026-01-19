@@ -107,7 +107,11 @@ class SkillFileTemplate(ResourceTemplate):
         Provided for compatibility with the ResourceTemplate interface.
         """
         file_path = params.get("path", "")
-        full_path = self.skill_info.path / file_path
+        full_path = (self.skill_info.path / file_path).resolve()
+
+        # Security: ensure path doesn't escape skill directory
+        if not full_path.is_relative_to(self.skill_info.path):
+            raise ValueError(f"Path {file_path} escapes skill directory")
 
         mime_type, _ = mimetypes.guess_type(str(full_path))
 
