@@ -1107,8 +1107,10 @@ class TestAuthDependencies:
         with pytest.raises(RuntimeError, match="No access token available"):
             await dep.__aenter__()
 
-    def test_current_access_token_excluded_from_tool_schema(self, mcp: FastMCP):
+    async def test_current_access_token_excluded_from_tool_schema(self, mcp: FastMCP):
         """Test that CurrentAccessToken dependency is excluded from tool schema."""
+        import mcp.types as mcp_types
+
         from fastmcp.server.auth import AccessToken
         from fastmcp.server.dependencies import CurrentAccessToken
 
@@ -1119,21 +1121,16 @@ class TestAuthDependencies:
         ) -> str:
             return name
 
-        # Use synchronous call to get tools
-        import asyncio
-
-        import mcp.types as mcp_types
-
-        result = asyncio.get_event_loop().run_until_complete(
-            mcp._list_tools_mcp(mcp_types.ListToolsRequest())
-        )
+        result = await mcp._list_tools_mcp(mcp_types.ListToolsRequest())
         tool = next(t for t in result.tools if t.name == "tool_with_token")
 
         assert "name" in tool.inputSchema["properties"]
         assert "token" not in tool.inputSchema["properties"]
 
-    def test_token_claim_excluded_from_tool_schema(self, mcp: FastMCP):
+    async def test_token_claim_excluded_from_tool_schema(self, mcp: FastMCP):
         """Test that TokenClaim dependency is excluded from tool schema."""
+        import mcp.types as mcp_types
+
         from fastmcp.server.dependencies import TokenClaim
 
         @mcp.tool()
@@ -1143,14 +1140,7 @@ class TestAuthDependencies:
         ) -> str:
             return name
 
-        # Use synchronous call to get tools
-        import asyncio
-
-        import mcp.types as mcp_types
-
-        result = asyncio.get_event_loop().run_until_complete(
-            mcp._list_tools_mcp(mcp_types.ListToolsRequest())
-        )
+        result = await mcp._list_tools_mcp(mcp_types.ListToolsRequest())
         tool = next(t for t in result.tools if t.name == "tool_with_claim")
 
         assert "name" in tool.inputSchema["properties"]
