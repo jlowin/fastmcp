@@ -13,8 +13,8 @@ from fastmcp.server.providers.skills import (
     SkillProvider,
     SkillsDirectoryProvider,
     SkillsProvider,
-    parse_frontmatter,
 )
+from fastmcp.server.providers.skills._common import parse_frontmatter
 
 
 class TestParseFrontmatter:
@@ -239,7 +239,7 @@ Additional documentation.
         return skills_root
 
     async def test_list_resources_discovers_skills(self, skills_dir: Path):
-        provider = SkillsDirectoryProvider(root=skills_dir)
+        provider = SkillsDirectoryProvider(roots=skills_dir)
         resources = await provider.list_resources()
 
         # Should have 2 resources per skill (main file + manifest)
@@ -253,7 +253,7 @@ Additional documentation.
         assert "complex-skill/_manifest" in resource_names
 
     async def test_list_resources_includes_descriptions(self, skills_dir: Path):
-        provider = SkillsDirectoryProvider(root=skills_dir)
+        provider = SkillsDirectoryProvider(roots=skills_dir)
         resources = await provider.list_resources()
 
         # Find the simple-skill main resource
@@ -262,7 +262,7 @@ Additional documentation.
 
     async def test_read_main_skill_file(self, skills_dir: Path):
         mcp = FastMCP("Test")
-        mcp.add_provider(SkillsDirectoryProvider(root=skills_dir))
+        mcp.add_provider(SkillsDirectoryProvider(roots=skills_dir))
 
         async with Client(mcp) as client:
             result = await client.read_resource(AnyUrl("skill://simple-skill/SKILL.md"))
@@ -272,7 +272,7 @@ Additional documentation.
 
     async def test_read_manifest(self, skills_dir: Path):
         mcp = FastMCP("Test")
-        mcp.add_provider(SkillsDirectoryProvider(root=skills_dir))
+        mcp.add_provider(SkillsDirectoryProvider(roots=skills_dir))
 
         async with Client(mcp) as client:
             result = await client.read_resource(
@@ -297,7 +297,7 @@ Additional documentation.
                 assert file_info["size"] > 0
 
     async def test_list_resource_templates(self, skills_dir: Path):
-        provider = SkillsDirectoryProvider(root=skills_dir)
+        provider = SkillsDirectoryProvider(roots=skills_dir)
         templates = await provider.list_resource_templates()
 
         # One template per skill
@@ -309,7 +309,7 @@ Additional documentation.
 
     async def test_read_supporting_file_via_template(self, skills_dir: Path):
         mcp = FastMCP("Test")
-        mcp.add_provider(SkillsDirectoryProvider(root=skills_dir))
+        mcp.add_provider(SkillsDirectoryProvider(roots=skills_dir))
 
         async with Client(mcp) as client:
             result = await client.read_resource(
@@ -321,7 +321,7 @@ Additional documentation.
 
     async def test_read_nested_file_via_template(self, skills_dir: Path):
         mcp = FastMCP("Test")
-        mcp.add_provider(SkillsDirectoryProvider(root=skills_dir))
+        mcp.add_provider(SkillsDirectoryProvider(roots=skills_dir))
 
         async with Client(mcp) as client:
             result = await client.read_resource(
@@ -335,7 +335,7 @@ Additional documentation.
         empty_dir = tmp_path / "empty"
         empty_dir.mkdir()
 
-        provider = SkillsDirectoryProvider(root=empty_dir)
+        provider = SkillsDirectoryProvider(roots=empty_dir)
         resources = await provider.list_resources()
         assert resources == []
 
@@ -344,13 +344,13 @@ Additional documentation.
 
     async def test_nonexistent_skills_directory(self, tmp_path: Path):
         nonexistent = tmp_path / "does-not-exist"
-        provider = SkillsDirectoryProvider(root=nonexistent)
+        provider = SkillsDirectoryProvider(roots=nonexistent)
 
         resources = await provider.list_resources()
         assert resources == []
 
     async def test_reload_mode(self, skills_dir: Path):
-        provider = SkillsDirectoryProvider(root=skills_dir, reload=True)
+        provider = SkillsDirectoryProvider(roots=skills_dir, reload=True)
 
         # Initial load
         resources = await provider.list_resources()
@@ -381,7 +381,7 @@ description: A new skill
         skill.mkdir()
         (skill / "SKILL.md").write_text("# My Skill Title\n\nSome content.")
 
-        provider = SkillsDirectoryProvider(root=skills_dir)
+        provider = SkillsDirectoryProvider(roots=skills_dir)
         resources = await provider.list_resources()
 
         main_resource = next(
@@ -392,7 +392,7 @@ description: A new skill
     async def test_supporting_files_as_resources(self, skills_dir: Path):
         """Test that supporting_files='resources' shows all files."""
         provider = SkillsDirectoryProvider(
-            root=skills_dir, supporting_files="resources"
+            roots=skills_dir, supporting_files="resources"
         )
         resources = await provider.list_resources()
 
@@ -408,10 +408,134 @@ description: A new skill
     async def test_supporting_files_as_resources_no_templates(self, skills_dir: Path):
         """In resources mode, no templates should be exposed."""
         provider = SkillsDirectoryProvider(
-            root=skills_dir, supporting_files="resources"
+            roots=skills_dir, supporting_files="resources"
         )
         templates = await provider.list_resource_templates()
         assert templates == []
+
+
+class TestMultiDirectoryProvider:
+    """Tests for multi-directory support in SkillsDirectoryProvider."""
+
+    @pytest.fixture
+    def multi_skills_dirs(self, tmp_path: Path) -> tuple[Path, Path]:
+        """Create two separate skills directories."""
+        root1 = tmp_path / "skills1"
+        root1.mkdir()
+        skill1 = root1 / "skill-a"
+        skill1.mkdir()
+        (skill1 / "SKILL.md").write_text(
+            """---
+description: Skill A from root 1
+---
+# Skill A
+"""
+        )
+
+        root2 = tmp_path / "skills2"
+        root2.mkdir()
+        skill2 = root2 / "skill-b"
+        skill2.mkdir()
+        (skill2 / "SKILL.md").write_text(
+            """---
+description: Skill B from root 2
+---
+# Skill B
+"""
+        )
+
+        return root1, root2
+
+    async def test_multiple_roots_discover_all_skills(self, multi_skills_dirs):
+        """Test that skills from multiple roots are all discovered."""
+        root1, root2 = multi_skills_dirs
+        provider = SkillsDirectoryProvider(roots=[root1, root2])
+
+        resources = await provider.list_resources()
+        # 2 skills * 2 resources each = 4 total
+        assert len(resources) == 4
+
+        resource_names = {r.name for r in resources}
+        assert "skill-a/SKILL.md" in resource_names
+        assert "skill-a/_manifest" in resource_names
+        assert "skill-b/SKILL.md" in resource_names
+        assert "skill-b/_manifest" in resource_names
+
+    async def test_duplicate_skill_names_first_wins(self, tmp_path: Path):
+        """Test that if a skill appears in multiple roots, first one wins."""
+        root1 = tmp_path / "root1"
+        root1.mkdir()
+        skill1 = root1 / "duplicate-skill"
+        skill1.mkdir()
+        (skill1 / "SKILL.md").write_text(
+            """---
+description: First occurrence
+---
+# First
+"""
+        )
+
+        root2 = tmp_path / "root2"
+        root2.mkdir()
+        skill2 = root2 / "duplicate-skill"
+        skill2.mkdir()
+        (skill2 / "SKILL.md").write_text(
+            """---
+description: Second occurrence
+---
+# Second
+"""
+        )
+
+        provider = SkillsDirectoryProvider(roots=[root1, root2])
+        resources = await provider.list_resources()
+
+        # Should only have one skill (first one)
+        assert len(resources) == 2  # SKILL.md + _manifest
+
+        # Should be the first one
+        main_resource = next(
+            r for r in resources if r.name == "duplicate-skill/SKILL.md"
+        )
+        assert main_resource.description == "First occurrence"
+
+    async def test_single_path_as_list(self, multi_skills_dirs):
+        """Test that single path can be passed as a list."""
+        root1, _ = multi_skills_dirs
+        provider = SkillsDirectoryProvider(roots=[root1])
+
+        resources = await provider.list_resources()
+        assert len(resources) == 2  # skill-a has 2 resources
+
+    async def test_single_path_as_string(self, multi_skills_dirs):
+        """Test that single path can be passed as string."""
+        root1, _ = multi_skills_dirs
+        provider = SkillsDirectoryProvider(roots=str(root1))
+
+        resources = await provider.list_resources()
+        assert len(resources) == 2
+
+    async def test_nonexistent_roots_handled_gracefully(self, tmp_path: Path):
+        """Test that non-existent roots don't cause errors."""
+        existent = tmp_path / "exists"
+        existent.mkdir()
+        skill = existent / "test-skill"
+        skill.mkdir()
+        (skill / "SKILL.md").write_text("# Test\n\nContent")
+
+        nonexistent = tmp_path / "does-not-exist"
+
+        provider = SkillsDirectoryProvider(roots=[existent, nonexistent])
+        resources = await provider.list_resources()
+
+        # Should still find skills from existing root
+        assert len(resources) == 2
+
+    async def test_empty_roots_list(self, tmp_path: Path):
+        """Test that empty roots list results in no skills."""
+        provider = SkillsDirectoryProvider(roots=[])
+        resources = await provider.list_resources()
+        assert resources == []
 
 
 class TestSkillsProviderAlias:
@@ -428,21 +552,14 @@ class TestClaudeSkillsProvider:
         monkeypatch.setattr(Path, "home", lambda: fake_home)
 
         provider = ClaudeSkillsProvider()
-        assert provider._root == fake_home / ".claude" / "skills"
+        assert provider._roots == [fake_home / ".claude" / "skills"]
 
-    def test_custom_root_overrides_default(self, tmp_path: Path):
-        custom_root = tmp_path / "custom-skills"
-        custom_root.mkdir()
-
-        provider = ClaudeSkillsProvider(root=custom_root)
-        assert provider._root == custom_root
-
-    def test_main_file_name_is_skill_md(self, tmp_path: Path):
-        provider = ClaudeSkillsProvider(root=tmp_path)
+    def test_main_file_name_is_skill_md(self):
+        provider = ClaudeSkillsProvider()
         assert provider._main_file_name == "SKILL.md"
 
-    def test_supporting_files_parameter(self, tmp_path: Path):
-        provider = ClaudeSkillsProvider(root=tmp_path, supporting_files="resources")
+    def test_supporting_files_parameter(self):
+        provider = ClaudeSkillsProvider(supporting_files="resources")
         assert provider._supporting_files == "resources"
 
 
@@ -459,7 +576,7 @@ class TestPathTraversalPrevention:
         secret_file.write_text("SECRET DATA")
 
         mcp = FastMCP("Test")
-        mcp.add_provider(SkillsDirectoryProvider(root=skills_dir))
+        mcp.add_provider(SkillsDirectoryProvider(roots=skills_dir))
 
         async with Client(mcp) as client:
             # Path traversal attempts should fail (either normalized away or blocked)

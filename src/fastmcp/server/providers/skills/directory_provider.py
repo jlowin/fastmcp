@@ -17,13 +17,16 @@ logger = get_logger(__name__)
 
 
 class SkillsDirectoryProvider(AggregateProvider):
-    """Provider that scans a directory and creates a SkillProvider per skill folder.
+    """Provider that scans directories and creates a SkillProvider per skill folder.
 
     This extends AggregateProvider to combine multiple SkillProviders into one.
     Each subdirectory containing a main file (default: SKILL.md) becomes a skill.
+    Can scan multiple root directories - if a skill name appears in multiple roots,
+    the first one found wins.
 
     Args:
-        root: Root directory containing skill folders.
+        roots: Root directory(ies) containing skill folders. Can be a single path
+            or a sequence of paths.
         reload: If True, re-discover skills on each request. Defaults to False.
         main_file_name: Name of the main skill file. Defaults to "SKILL.md".
         supporting_files: How supporting files are exposed in child SkillProviders:
@@ -37,22 +40,31 @@ class SkillsDirectoryProvider(AggregateProvider):
         from fastmcp.server.providers.skills import SkillsDirectoryProvider
 
         mcp = FastMCP("Skills")
+        # Single directory
         mcp.add_provider(SkillsDirectoryProvider(
-            root=Path.home() / ".claude" / "skills",
+            roots=Path.home() / ".claude" / "skills",
             reload=True,  # Re-scan on each request
+        ))
+        # Multiple directories
+        mcp.add_provider(SkillsDirectoryProvider(
+            roots=[Path("/etc/skills"), Path.home() / ".local" / "skills"],
         ))
         ```
     """
 
     def __init__(
         self,
-        root: str | Path,
+        roots: str | Path | Sequence[str | Path],
         reload: bool = False,
         main_file_name: str = "SKILL.md",
         supporting_files: Literal["template", "resources"] = "template",
     ) -> None:
         super().__init__()
-        self._root = Path(root).resolve()
+        # Normalize to sequence: single path becomes list
+        if isinstance(roots, (str, Path)):
+            roots = [roots]
+
+        self._roots = [Path(r).resolve() for r in roots]
         self._reload = reload
         self._main_file_name = main_file_name
         self._supporting_files = supporting_files
@@ -62,37 +74,49 @@ class SkillsDirectoryProvider(AggregateProvider):
         self._discover_skills()
 
     def _discover_skills(self) -> None:
-        """Scan root directory and create SkillProvider per valid skill folder."""
+        """Scan root directories and create SkillProvider per valid skill folder."""
         # Clear existing providers if reloading
         self.providers.clear()
 
-        if not self._root.exists():
-            logger.debug(f"Skills root does not exist: {self._root}")
-            self._discovered = True
-            return
+        seen_skill_names: set[str] = set()
 
-        for skill_dir in self._root.iterdir():
-            if not skill_dir.is_dir():
+        for root in self._roots:
+            if not root.exists():
+                logger.debug(f"Skills root does not exist: {root}")
                 continue
 
-            main_file = skill_dir / self._main_file_name
-            if not main_file.exists():
-                continue
+            for skill_dir in root.iterdir():
+                if not skill_dir.is_dir():
+                    continue
 
-            try:
-                provider = SkillProvider(
-                    skill_path=skill_dir,
-                    main_file_name=self._main_file_name,
-                    supporting_files=self._supporting_files,
-                )
-                self.providers.append(provider)
-            except FileNotFoundError:
-                logger.exception(f"Failed to load skill: {skill_dir.name}")
+                main_file = skill_dir / self._main_file_name
+                if not main_file.exists():
+                    continue
+
+                skill_name = skill_dir.name
+                # Skip if we've already seen this skill name (first wins)
+                if skill_name in seen_skill_names:
+                    logger.debug(
+                        f"Skipping duplicate skill '{skill_name}' from {root} "
+                        f"(already found in earlier root)"
+                    )
+                    continue
+
+                try:
+                    provider = SkillProvider(
+                        skill_path=skill_dir,
+                        main_file_name=self._main_file_name,
+                        supporting_files=self._supporting_files,
+                    )
+                    self.providers.append(provider)
+                    seen_skill_names.add(skill_name)
+                except FileNotFoundError:
+                    logger.exception(f"Failed to load skill: {skill_dir.name}")
 
         self._discovered = True
         logger.debug(
             f"SkillsDirectoryProvider loaded {len(self.providers)} skills "
-            f"from {self._root}"
+            f"from {len(self._roots)} root(s)"
         )
 
     async def _ensure_discovered(self) -> None:
@@ -122,7 +146,8 @@ class SkillsDirectoryProvider(AggregateProvider):
         return await super()._get_resource_template(uri, version)
 
     def __repr__(self) -> str:
+        roots_repr = self._roots[0] if len(self._roots) == 1 else self._roots
         return (
-            f"SkillsDirectoryProvider(root={self._root!r}, "
+            f"SkillsDirectoryProvider(roots={roots_repr!r}, "
             f"reload={self._reload}, skills={len(self.providers)})"
         )

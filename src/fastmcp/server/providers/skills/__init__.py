@@ -4,7 +4,8 @@ This module provides a two-layer architecture for skill discovery:
 
 - **SkillProvider**: Handles a single skill folder, exposing its files as resources.
 - **SkillsDirectoryProvider**: Scans a directory, creates a SkillProvider per folder.
-- **ClaudeSkillsProvider**: Convenience subclass for Claude Code skills.
+- **Vendor providers**: Platform-specific providers for Claude, Cursor, VS Code, Codex,
+  Gemini, Goose, Copilot, and OpenCode.
 
 Example:
     ```python
@@ -24,23 +25,18 @@ Example:
 
 from __future__ import annotations
 
-# Import shared utilities first
-from fastmcp.server.providers.skills._common import (
-    SkillFileInfo,
-    SkillInfo,
-    compute_file_hash,
-    parse_frontmatter,
-    scan_skill_files,
-)
-
 # Import providers
 from fastmcp.server.providers.skills.claude_provider import ClaudeSkillsProvider
 from fastmcp.server.providers.skills.directory_provider import SkillsDirectoryProvider
-from fastmcp.server.providers.skills.skill_provider import (
-    SkillFileResource,
-    SkillFileTemplate,
-    SkillProvider,
-    SkillResource,
+from fastmcp.server.providers.skills.skill_provider import SkillProvider
+from fastmcp.server.providers.skills.vendor_providers import (
+    CodexSkillsProvider,
+    CopilotSkillsProvider,
+    CursorSkillsProvider,
+    GeminiSkillsProvider,
+    GooseSkillsProvider,
+    OpenCodeSkillsProvider,
+    VSCodeSkillsProvider,
 )
 
 
@@ -50,15 +46,14 @@ SkillsProvider = SkillsDirectoryProvider
 
 __all__ = [
     "ClaudeSkillsProvider",
-    "SkillFileInfo",
-    "SkillFileResource",
-    "SkillFileTemplate",
-    "SkillInfo",
+    "CodexSkillsProvider",
+    "CopilotSkillsProvider",
+    "CursorSkillsProvider",
+    "GeminiSkillsProvider",
+    "GooseSkillsProvider",
+    "OpenCodeSkillsProvider",
     "SkillProvider",
-    "SkillResource",
     "SkillsDirectoryProvider",
     "SkillsProvider",  # Backwards compatibility alias
-    "compute_file_hash",
-    "parse_frontmatter",
-    "scan_skill_files",
+    "VSCodeSkillsProvider",
 ]

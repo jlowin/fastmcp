@@ -14,7 +14,6 @@ class ClaudeSkillsProvider(SkillsDirectoryProvider):
     A convenience subclass that sets the default root to Claude's skills location.
 
     Args:
-        root: Override the default root directory. If None, uses ~/.claude/skills/
         reload: If True, re-scan on every request. Defaults to False.
         supporting_files: How supporting files are exposed:
             - "template": Accessed via ResourceTemplate, hidden from list_resources().
@@ -32,15 +31,13 @@ class ClaudeSkillsProvider(SkillsDirectoryProvider):
 
     def __init__(
         self,
-        root: str | Path | None = None,
         reload: bool = False,
         supporting_files: Literal["template", "resources"] = "template",
     ) -> None:
-        if root is None:
-            root = Path.home() / ".claude" / "skills"
+        root = Path.home() / ".claude" / "skills"
 
         super().__init__(
-            root=root,
+            roots=[root],
             reload=reload,
             main_file_name="SKILL.md",
             supporting_files=supporting_files,

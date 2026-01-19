@@ -112,6 +112,7 @@
                   "servers/providers/resources-as-tools",
                   "servers/providers/local",
                   "servers/providers/filesystem",
+                  "servers/providers/skills",
                   "servers/providers/mounting",
                   "servers/providers/proxy",
                   "servers/providers/custom"
