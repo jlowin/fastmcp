@@ -12,7 +12,7 @@ from pydantic import RootModel
 if TYPE_CHECKING:
     import datetime
 
-    from fastmcp.client.client import CallToolResult
+    from fastmcp.client.client import CallToolResult, Client
 from fastmcp.client.progress import ProgressHandler
 from fastmcp.client.tasks import ToolTask
 from fastmcp.client.telemetry import client_span
@@ -35,7 +35,7 @@ class ClientToolsMixin:
     # --- Tools ---
 
     async def list_tools_mcp(
-        self, *, cursor: str | None = None
+        self: Client, *, cursor: str | None = None
     ) -> mcp.types.ListToolsResult:
         """Send a tools/list request and return the complete MCP protocol result.
 
@@ -57,7 +57,7 @@ class ClientToolsMixin:
         )
         return result
 
-    async def list_tools(self) -> list[mcp.types.Tool]:
+    async def list_tools(self: Client) -> list[mcp.types.Tool]:
         """Retrieve all tools available on the server.
 
         This method automatically fetches all pages if the server paginates results,
@@ -86,7 +86,7 @@ class ClientToolsMixin:
     # --- Call Tool ---
 
     async def call_tool_mcp(
-        self,
+        self: Client,
         name: str,
         arguments: dict[str, Any],
         progress_handler: ProgressHandler | None = None,
@@ -139,7 +139,10 @@ class ClientToolsMixin:
             return result
 
     async def _parse_call_tool_result(
-        self, name: str, result: mcp.types.CallToolResult, raise_on_error: bool = False
+        self: Client,
+        name: str,
+        result: mcp.types.CallToolResult,
+        raise_on_error: bool = False,
     ) -> CallToolResult:
         """Parse an mcp.types.CallToolResult into our CallToolResult dataclass.
 
@@ -163,7 +166,7 @@ class ClientToolsMixin:
 
     @overload
     async def call_tool(
-        self,
+        self: Client,
         name: str,
         arguments: dict[str, Any] | None = None,
         *,
@@ -177,7 +180,7 @@ class ClientToolsMixin:
 
     @overload
     async def call_tool(
-        self,
+        self: Client,
         name: str,
         arguments: dict[str, Any] | None = None,
         *,
@@ -192,7 +195,7 @@ class ClientToolsMixin:
     ) -> ToolTask: ...
 
     async def call_tool(
-        self,
+        self: Client,
         name: str,
         arguments: dict[str, Any] | None = None,
         *,
@@ -263,7 +266,7 @@ class ClientToolsMixin:
         )
 
     async def _call_tool_as_task(
-        self,
+        self: Client,
         name: str,
         arguments: dict[str, Any] | None = None,
         task_id: str | None = None,
@@ -287,13 +290,16 @@ class ClientToolsMixin:
             ToolTask: Future-like object for accessing task status and results
         """
         # Per SEP-1686 final spec: client sends only ttl, server generates taskId
+        # Inject trace context into meta for propagation to server
+        propagated_meta = inject_trace_context(meta)
+
         # Build request with task metadata
         request = mcp.types.CallToolRequest(
             params=mcp.types.CallToolRequestParams(
                 name=name,
                 arguments=arguments or {},
                 task=mcp.types.TaskMetadata(ttl=ttl),
-                _meta=meta,  # type: ignore[unknown-argument]  # pydantic alias
+                _meta=propagated_meta,  # type: ignore[unknown-argument]  # pydantic alias
             )
         )
 

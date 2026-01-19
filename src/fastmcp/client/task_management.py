@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import mcp.types
 from mcp import McpError
+
+if TYPE_CHECKING:
+    from fastmcp.client.client import Client
 from mcp.types import (
     CancelTaskRequest,
     CancelTaskRequestParams,
@@ -27,7 +30,7 @@ logger = get_logger(__name__)
 class ClientTaskManagementMixin:
     """Mixin providing task management methods for Client."""
 
-    async def get_task_status(self, task_id: str) -> GetTaskResult:
+    async def get_task_status(self: Client, task_id: str) -> GetTaskResult:
         """Query the status of a background task.
 
         Sends a 'tasks/get' MCP protocol request over the existing transport.
@@ -50,7 +53,7 @@ class ClientTaskManagementMixin:
             )
         )
 
-    async def get_task_result(self, task_id: str) -> Any:
+    async def get_task_result(self: Client, task_id: str) -> Any:
         """Retrieve the raw result of a completed background task.
 
         Sends a 'tasks/result' MCP protocol request over the existing transport.
@@ -80,7 +83,7 @@ class ClientTaskManagementMixin:
         return result.model_dump(exclude_none=True, by_alias=True)
 
     async def list_tasks(
-        self,
+        self: Client,
         cursor: str | None = None,
         limit: int = 50,
     ) -> dict[str, Any]:
@@ -129,7 +132,7 @@ class ClientTaskManagementMixin:
 
         return {"tasks": tasks, "nextCursor": None}
 
-    async def cancel_task(self, task_id: str) -> mcp.types.CancelTaskResult:
+    async def cancel_task(self: Client, task_id: str) -> mcp.types.CancelTaskResult:
         """Cancel a task, transitioning it to cancelled state.
 
         Sends a 'tasks/cancel' MCP protocol request. Task will halt execution

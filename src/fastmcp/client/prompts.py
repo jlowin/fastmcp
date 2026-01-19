@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import uuid
 import weakref
-from typing import Any, Literal, overload
+from typing import TYPE_CHECKING, Any, Literal, overload
 
 import mcp.types
 import pydantic_core
 from pydantic import RootModel
+
+if TYPE_CHECKING:
+    from fastmcp.client.client import Client
 
 from fastmcp.client.tasks import PromptTask
 from fastmcp.client.telemetry import client_span
@@ -29,7 +32,7 @@ class ClientPromptsMixin:
     # --- Prompts ---
 
     async def list_prompts_mcp(
-        self, *, cursor: str | None = None
+        self: Client, *, cursor: str | None = None
     ) -> mcp.types.ListPromptsResult:
         """Send a prompts/list request and return the complete MCP protocol result.
 
@@ -51,7 +54,7 @@ class ClientPromptsMixin:
         )
         return result
 
-    async def list_prompts(self) -> list[mcp.types.Prompt]:
+    async def list_prompts(self: Client) -> list[mcp.types.Prompt]:
         """Retrieve all prompts available on the server.
 
         This method automatically fetches all pages if the server paginates results,
@@ -79,7 +82,7 @@ class ClientPromptsMixin:
 
     # --- Prompt ---
     async def get_prompt_mcp(
-        self,
+        self: Client,
         name: str,
         arguments: dict[str, Any] | None = None,
         meta: dict[str, Any] | None = None,
@@ -148,7 +151,7 @@ class ClientPromptsMixin:
 
     @overload
     async def get_prompt(
-        self,
+        self: Client,
         name: str,
         arguments: dict[str, Any] | None = None,
         *,
@@ -159,7 +162,7 @@ class ClientPromptsMixin:
 
     @overload
     async def get_prompt(
-        self,
+        self: Client,
         name: str,
         arguments: dict[str, Any] | None = None,
         *,
@@ -171,7 +174,7 @@ class ClientPromptsMixin:
     ) -> PromptTask: ...
 
     async def get_prompt(
-        self,
+        self: Client,
         name: str,
         arguments: dict[str, Any] | None = None,
         *,
@@ -219,7 +222,7 @@ class ClientPromptsMixin:
         return result
 
     async def _get_prompt_as_task(
-        self,
+        self: Client,
         name: str,
         arguments: dict[str, Any] | None = None,
         task_id: str | None = None,
@@ -241,6 +244,9 @@ class ClientPromptsMixin:
             PromptTask: Future-like object for accessing task status and results
         """
         # Per SEP-1686 final spec: client sends only ttl, server generates taskId
+        # Inject trace context into meta for propagation to server
+        propagated_meta = inject_trace_context(meta)
+
         # Serialize arguments for MCP protocol
         serialized_arguments: dict[str, str] | None = None
         if arguments:
@@ -258,7 +264,7 @@ class ClientPromptsMixin:
                 name=name,
                 arguments=serialized_arguments,
                 task=mcp.types.TaskMetadata(ttl=ttl),
-                _meta=meta,  # type: ignore[unknown-argument]  # pydantic alias
+                _meta=propagated_meta,  # type: ignore[unknown-argument]  # pydantic alias
             )
         )
 

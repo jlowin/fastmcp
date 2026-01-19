@@ -31,15 +31,17 @@ def normalize_timeout_to_seconds(
     """Normalize a timeout value to seconds (float).
 
     Args:
-        value: Timeout value as int/float (seconds), timedelta, or None
+        value: Timeout value as int/float (seconds), timedelta, or None.
+            Zero values are treated as "disabled" and return None.
 
     Returns:
-        float seconds if value provided, None otherwise
+        float seconds if value provided and non-zero, None otherwise
     """
     if value is None:
         return None
     if isinstance(value, datetime.timedelta):
-        return value.total_seconds()
+        seconds = value.total_seconds()
+        return None if seconds == 0 else seconds
     if isinstance(value, int | float):
-        return float(value)
+        return None if value == 0 else float(value)
     raise TypeError(f"Invalid timeout type: {type(value)}")

@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import uuid
 import weakref
-from typing import Any, Literal, overload
+from typing import TYPE_CHECKING, Any, Literal, overload
 
 import mcp.types
 from pydantic import AnyUrl, RootModel
+
+if TYPE_CHECKING:
+    from fastmcp.client.client import Client
 
 from fastmcp.client.tasks import ResourceTask
 from fastmcp.client.telemetry import client_span
@@ -28,7 +31,7 @@ class ClientResourcesMixin:
     # --- Resources ---
 
     async def list_resources_mcp(
-        self, *, cursor: str | None = None
+        self: Client, *, cursor: str | None = None
     ) -> mcp.types.ListResourcesResult:
         """Send a resources/list request and return the complete MCP protocol result.
 
@@ -50,7 +53,7 @@ class ClientResourcesMixin:
         )
         return result
 
-    async def list_resources(self) -> list[mcp.types.Resource]:
+    async def list_resources(self: Client) -> list[mcp.types.Resource]:
         """Retrieve all resources available on the server.
 
         This method automatically fetches all pages if the server paginates results,
@@ -77,7 +80,7 @@ class ClientResourcesMixin:
         return all_resources
 
     async def list_resource_templates_mcp(
-        self, *, cursor: str | None = None
+        self: Client, *, cursor: str | None = None
     ) -> mcp.types.ListResourceTemplatesResult:
         """Send a resources/listResourceTemplates request and return the complete MCP protocol result.
 
@@ -99,7 +102,7 @@ class ClientResourcesMixin:
         )
         return result
 
-    async def list_resource_templates(self) -> list[mcp.types.ResourceTemplate]:
+    async def list_resource_templates(self: Client) -> list[mcp.types.ResourceTemplate]:
         """Retrieve all resource templates available on the server.
 
         This method automatically fetches all pages if the server paginates results,
@@ -127,7 +130,7 @@ class ClientResourcesMixin:
         return all_templates
 
     async def read_resource_mcp(
-        self, uri: AnyUrl | str, meta: dict[str, Any] | None = None
+        self: Client, uri: AnyUrl | str, meta: dict[str, Any] | None = None
     ) -> mcp.types.ReadResourceResult:
         """Send a resources/read request and return the complete MCP protocol result.
 
@@ -183,7 +186,7 @@ class ClientResourcesMixin:
 
     @overload
     async def read_resource(
-        self,
+        self: Client,
         uri: AnyUrl | str,
         *,
         version: str | None = None,
@@ -193,7 +196,7 @@ class ClientResourcesMixin:
 
     @overload
     async def read_resource(
-        self,
+        self: Client,
         uri: AnyUrl | str,
         *,
         version: str | None = None,
@@ -204,7 +207,7 @@ class ClientResourcesMixin:
     ) -> ResourceTask: ...
 
     async def read_resource(
-        self,
+        self: Client,
         uri: AnyUrl | str,
         *,
         version: str | None = None,
@@ -258,7 +261,7 @@ class ClientResourcesMixin:
         return result.contents
 
     async def _read_resource_as_task(
-        self,
+        self: Client,
         uri: AnyUrl | str,
         task_id: str | None = None,
         ttl: int = 60000,
@@ -278,6 +281,9 @@ class ClientResourcesMixin:
             ResourceTask: Future-like object for accessing task status and results
         """
         # Per SEP-1686 final spec: client sends only ttl, server generates taskId
+        # Inject trace context into meta for propagation to server
+        propagated_meta = inject_trace_context(meta)
+
         if isinstance(uri, str):
             uri = AnyUrl(uri)
 
@@ -285,7 +291,7 @@ class ClientResourcesMixin:
             params=mcp.types.ReadResourceRequestParams(
                 uri=uri,
                 task=mcp.types.TaskMetadata(ttl=ttl),
-                _meta=meta,  # type: ignore[unknown-argument]  # pydantic alias
+                _meta=propagated_meta,  # type: ignore[unknown-argument]  # pydantic alias
             )
         )
 
