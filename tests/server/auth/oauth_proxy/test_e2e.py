@@ -13,7 +13,7 @@ from fastmcp import FastMCP
 from fastmcp.server.auth.auth import RefreshToken
 from fastmcp.server.auth.oauth_proxy import OAuthProxy
 from fastmcp.server.auth.oauth_proxy.models import ClientCode
-from tests.server.auth.conftest import MockTokenVerifier
+from tests.server.auth.oauth_proxy.conftest import MockTokenVerifier
 
 
 class TestOAuthProxyE2E:
