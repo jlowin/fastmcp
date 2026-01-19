@@ -95,7 +95,7 @@
                 ]
               },
               {
-                "group": "Build",
+                "group": "Servers",
                 "pages": [
                   "servers/server",
                   {
@@ -109,33 +109,8 @@
                     ]
                   },
                   {
-                    "group": "Providers",
-                    "icon": "puzzle-piece",
-                    "pages": [
-                      "servers/providers/overview",
-                      "servers/providers/local",
-                      "servers/providers/filesystem",
-                      "servers/providers/proxy",
-                      "servers/providers/custom"
-                    ]
-                  },
-                  {
-                    "group": "Composition",
-                    "icon": "layer-group",
-                    "pages": [
-                      "servers/providers/mounting",
-                      "servers/providers/transforms",
-                      "servers/enabled"
-                    ]
-                  }
-                ]
-              },
-              {
-                "group": "Run",
-                "pages": [
-                  {
                     "group": "Features",
-                    "icon": "play",
+                    "icon": "stars",
                     "pages": [
                       "servers/middleware",
                       "servers/lifespan",
@@ -152,21 +127,40 @@
                     ]
                   },
                   {
-                    "group": "Deployment",
-                    "icon": "rocket",
+                    "group": "Authentication",
+                    "icon": "key",
                     "pages": [
-                      "deployment/running-server",
-                      "deployment/http",
-                      "deployment/fastmcp-cloud",
-                      "deployment/server-configuration",
-                      "patterns/cli",
-                      "patterns/testing"
+                      "servers/auth/authentication",
+                      "servers/auth/token-verification",
+                      "servers/auth/remote-oauth",
+                      "servers/auth/oauth-proxy",
+                      "servers/auth/oidc-proxy",
+                      "servers/auth/full-oauth-server"
                     ]
-                  }
+                  },
+                  "servers/authorization"
                 ]
               },
               {
-                "group": "Connect",
+                "group": "Providers",
+                "pages": [
+                  "servers/providers/overview",
+                  "servers/providers/local",
+                  "servers/providers/filesystem",
+                  "servers/providers/proxy",
+                  "servers/providers/custom"
+                ]
+              },
+              {
+                "group": "Transforms",
+                "pages": [
+                  "servers/providers/transforms",
+                  "servers/providers/mounting",
+                  "servers/enabled"
+                ]
+              },
+              {
+                "group": "Clients",
                 "pages": [
                   "clients/client",
                   "clients/transports",
@@ -203,21 +197,14 @@
                 ]
               },
               {
-                "group": "Secure",
+                "group": "Deployment",
                 "pages": [
-                  {
-                    "group": "Server Authentication",
-                    "icon": "key",
-                    "pages": [
-                      "servers/auth/authentication",
-                      "servers/auth/token-verification",
-                      "servers/auth/remote-oauth",
-                      "servers/auth/oauth-proxy",
-                      "servers/auth/oidc-proxy",
-                      "servers/auth/full-oauth-server"
-                    ]
-                  },
-                  "servers/authorization"
+                  "deployment/running-server",
+                  "deployment/http",
+                  "deployment/fastmcp-cloud",
+                  "deployment/server-configuration",
+                  "patterns/cli",
+                  "patterns/testing"
                 ]
               },
               {
