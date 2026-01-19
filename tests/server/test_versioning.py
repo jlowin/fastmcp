@@ -471,6 +471,91 @@ class TestMountedServerVersioning:
         assert isinstance(result.content[0], TextContent)
         assert result.content[0].text == "110"
 
+    async def test_mounted_tool_wrapper_executes_correct_version(self):
+        """Calling a specific versioned tool wrapper should execute that version."""
+        child = FastMCP("Child")
+
+        @child.tool(version="1.0")
+        def calc(x: int) -> int:
+            return x * 10  # v1.0 multiplies by 10
+
+        @child.tool(version="2.0")
+        def calc(x: int) -> int:
+            return x * 100  # v2.0 multiplies by 100
+
+        parent = FastMCP("Parent")
+        parent.mount(child, "child")
+
+        # Get the v1.0 wrapper specifically
+        tools = await parent.list_tools()
+        v1_tool = next(
+            t for t in tools if t.name == "child_calc" and t.version == "1.0"
+        )
+
+        # Calling the v1.0 wrapper should execute v1.0's logic
+        result = await v1_tool.run({"x": 5})
+        assert result.content[0].text == "50"  # 5 * 10, not 5 * 100
+
+    async def test_mounted_resource_wrapper_reads_correct_version(self):
+        """Reading a specific versioned resource should read that version."""
+        from fastmcp.utilities.versions import VersionSpec
+
+        child = FastMCP("Child")
+
+        @child.resource("data:///config", version="1.0")
+        def config_v1() -> str:
+            return "config-v1-content"
+
+        @child.resource("data:///config", version="2.0")
+        def config_v2() -> str:
+            return "config-v2-content"
+
+        parent = FastMCP("Parent")
+        parent.mount(child, "child")
+
+        # Reading with version=1.0 should read v1.0's content
+        result = await parent.read_resource(
+            "data://child//config", version=VersionSpec(eq="1.0")
+        )
+        assert result.contents[0].content == "config-v1-content"
+
+        # Reading with version=2.0 should read v2.0's content
+        result = await parent.read_resource(
+            "data://child//config", version=VersionSpec(eq="2.0")
+        )
+        assert result.contents[0].content == "config-v2-content"
+
+    async def test_mounted_prompt_wrapper_renders_correct_version(self):
+        """Rendering a specific versioned prompt should render that version."""
+        from fastmcp.utilities.versions import VersionSpec
+
+        child = FastMCP("Child")
+
+        @child.prompt(version="1.0")
+        def greeting(name: str) -> str:
+            return f"Hello, {name}!"  # v1.0 says Hello
+
+        @child.prompt(version="2.0")
+        def greeting(name: str) -> str:
+            return f"Greetings, {name}!"  # v2.0 says Greetings
+
+        parent = FastMCP("Parent")
+        parent.mount(child, "child")
+
+        # Rendering with version=1.0 should render v1.0's content
+        result = await parent.render_prompt(
+            "child_greeting", {"name": "World"}, version=VersionSpec(eq="1.0")
+        )
+        content = result.messages[0].content
+        assert isinstance(content, TextContent) and "Hello, World!" in content.text
+
+        # Rendering with version=2.0 should render v2.0's content
+        result = await parent.render_prompt(
+            "child_greeting", {"name": "World"}, version=VersionSpec(eq="2.0")
+        )
+        content = result.messages[0].content
+        assert isinstance(content, TextContent) and "Greetings, World!" in content.text
+
 
 class TestVersionFilter:
     """Tests for VersionFilter transform."""
