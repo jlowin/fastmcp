@@ -5,12 +5,27 @@ Demonstrates how session-specific visibility works from the client perspective.
 """
 
 import asyncio
+import sys
+from pathlib import Path
 
 from rich import print
 from rich.panel import Panel
 
 from fastmcp import Client
-from server import server
+
+
+def load_server():
+    """Load the example server."""
+    examples_dir = Path(__file__).parent
+    if str(examples_dir) not in sys.path:
+        sys.path.insert(0, str(examples_dir))
+
+    import server as server_module
+
+    return server_module.server
+
+
+server = load_server()
 
 
 def show_tools(tools: list, title: str) -> None:
