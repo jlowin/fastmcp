@@ -1,78 +1,54 @@
 ---
 title: Prompts
-sidebarTitle: Prompts
-description: Create reusable, parameterized prompt templates for MCP clients.
-icon: message-lines
+description: Create reusable, parameterized message templates for LLMs.
 ---
 
 import { VersionBadge } from "/snippets/version-badge.mdx"
 
-Prompts are reusable message templates that help LLMs generate structured, purposeful responses. FastMCP simplifies defining these templates, primarily using the `@mcp.prompt` decorator.
+Prompts give LLMs structured, reusable starting points for conversations. Unlike tools (which perform actions) or resources (which provide data), prompts shape how LLMs approach tasks by providing pre-defined message templates.
 
-## What Are Prompts?
+When a client requests a prompt, FastMCP validates the parameters against your function signature, executes the function, and returns the generated messages. This lets you define consistent conversation starters that work across different clients and contexts.
 
-Prompts provide parameterized message templates for LLMs. When a client requests a prompt:
+## Overview
 
-1.  FastMCP finds the corresponding prompt definition.
-2.  If it has parameters, they are validated against your function signature.
-3.  Your function executes with the validated inputs.
-4.  The generated message(s) are returned to the LLM to guide its response.
-
-This allows you to define consistent, reusable templates that LLMs can use across different clients and contexts.
-
-## Prompts
-
-### The `@prompt` Decorator
-
-The most common way to define a prompt is by decorating a Python function. The decorator uses the function name as the prompt's identifier.
+Decorate any Python function with `@mcp.prompt` to expose it as a prompt. FastMCP extracts the name from your function, the description from your docstring, and builds the argument schema from your type annotations.
 
 ```python
 from fastmcp import FastMCP
-from fastmcp.prompts import Message
 
 mcp = FastMCP(name="PromptServer")
 
-# Basic prompt returning a string (converted to user message automatically)
 @mcp.prompt
 def ask_about_topic(topic: str) -> str:
     """Generates a user message asking for an explanation of a topic."""
     return f"Can you please explain the concept of '{topic}'?"
-
-# Prompt returning multiple messages
-@mcp.prompt
-def generate_code_request(language: str, task_description: str) -> list[Message]:
-    """Generates a conversation for code generation."""
-    return [
-        Message(f"Write a {language} function that performs the following task: {task_description}"),
-        Message("I'll help you write that function.", role="assistant"),
-    ]
 ```
 
-**Key Concepts:**
+The way you write your Python function determines how the prompt appears to LLMs.
 
-*   **Name:** By default, the prompt name is taken from the function name.
-*   **Parameters:** The function parameters define the inputs needed to generate the prompt.
-*   **Inferred Metadata:** By default:
-    *   Prompt Name: Taken from the function name (`ask_about_topic`).
-    *   Prompt Description: Taken from the function's docstring.
 <Tip>
-Functions with `*args` or `**kwargs` are not supported as prompts. This restriction exists because FastMCP needs to generate a complete parameter schema for the MCP protocol, which isn't possible with variable argument lists.
+Functions with `*args` or `**kwargs` are not supported as prompts. FastMCP needs to generate a complete argument schema for MCP, which requires knowing all arguments at registration time.
 </Tip>
 
-#### Decorator Arguments
+### Decorator Arguments
 
-While FastMCP infers the name and description from your function, you can override these and add additional metadata using arguments to the `@mcp.prompt` decorator:
+Override inferred values or add metadata with decorator arguments:
 
 ```python
+from pydantic import Field
+from fastmcp import FastMCP
+
+mcp = FastMCP(name="PromptServer")
+
 @mcp.prompt(
-    name="analyze_data_request",          # Custom prompt name
-    description="Creates a request to analyze data with specific parameters",  # Custom description
-    tags={"analysis", "data"},            # Optional categorization tags
-    meta={"version": "1.1", "author": "data-team"}  # Custom metadata
+    name="analyze_data_request",
+    description="Creates a request to analyze data with specific parameters.",
+    tags={"analysis", "data"},
+    meta={"version": "1.1", "author": "data-team"},
 )
 def data_analysis_prompt(
     data_uri: str = Field(description="The URI of the resource containing the data."),
-    analysis_type: str = Field(default="summary", description="Type of analysis.")
+    analysis_type: str = Field(default="summary", description="Type of analysis."),
 ) -> str:
     """This docstring is ignored when description is provided."""
     return f"Please perform a '{analysis_type}' analysis on the data found at {data_uri}."
@@ -80,69 +56,171 @@ def data_analysis_prompt(
 
 <Card icon="code" title="@prompt Decorator Arguments">
 <ParamField body="name" type="str | None">
-  Sets the explicit prompt name exposed via MCP. If not provided, uses the function name
+  Prompt name exposed via MCP. Defaults to the function name.
 </ParamField>
 
 <ParamField body="title" type="str | None">
-  A human-readable title for the prompt
+  A human-readable title for the prompt.
 </ParamField>
 
 <ParamField body="description" type="str | None">
-  Provides the description exposed via MCP. If set, the function's docstring is ignored for this purpose
+  Description exposed via MCP. Defaults to the function's docstring.
 </ParamField>
 
 <ParamField body="tags" type="set[str] | None">
-  A set of strings used to categorize the prompt. These can be used by the server and, in some cases, by clients to filter or group available prompts.
-</ParamField>
-
-<ParamField body="enabled" type="bool" default="True">
-  <Warning>Deprecated in v3.0.0. Use `mcp.enable()` / `mcp.disable()` at the server level instead.</Warning>
-  A boolean to enable or disable the prompt. See [Component Visibility](#component-visibility) for the recommended approach.
+  Categorization tags for filtering and organization.
 </ParamField>
 
 <ParamField body="icons" type="list[Icon] | None">
   <VersionBadge version="2.13.0" />
-
-  Optional list of icon representations for this prompt. See [Icons](/servers/icons) for detailed examples
+  Icon representations for this prompt. See [Icons](/servers/icons).
 </ParamField>
 
 <ParamField body="meta" type="dict[str, Any] | None">
   <VersionBadge version="2.11.0" />
-
-  Optional meta information about the prompt. This data is passed through to the MCP client as the `meta` field of the client-side prompt object and can be used for custom metadata, versioning, or other application-specific purposes.
+  Custom metadata passed through to clients.
 </ParamField>
 
 <ParamField body="version" type="str | int | None">
   <VersionBadge version="3.0.0" />
-
-  Optional version identifier for this prompt. See [Versioning](/servers/versioning) for details.
+  Version identifier. See [Versioning](/servers/versioning).
 </ParamField>
 </Card>
 
-#### Using with Methods
+### Async Prompts
 
-For decorating instance or class methods, use the standalone `@prompt` decorator and register the bound method. See [Tools: Using with Methods](/servers/tools#using-with-methods) for the pattern.
+FastMCP supports both `async def` and regular `def` functions as prompts. Synchronous prompts run in a threadpool automatically, so they don't block the event loop.
 
-### Argument Types
+```python
+import aiohttp
+from fastmcp import FastMCP
+
+mcp = FastMCP(name="PromptServer")
+
+@mcp.prompt
+async def data_based_prompt(data_id: str) -> str:
+    """Generates a prompt based on data that needs to be fetched."""
+    async with aiohttp.ClientSession() as session:
+        async with session.get(f"https://api.example.com/data/{data_id}") as response:
+            data = await response.json()
+            return f"Analyze this data: {data['content']}"
+```
+
+For I/O-bound operations like network requests or database queries, async prompts are more efficient than threadpool dispatch.
+
+### Context Access
+
+<VersionBadge version="2.2.5" />
+
+Prompts can access MCP features through the `Context` object: logging, resource reading, and request metadata. Add a parameter with the `Context` type hint:
+
+```python
+from fastmcp import FastMCP, Context
+
+mcp = FastMCP(name="PromptServer")
+
+@mcp.prompt
+async def generate_report_request(report_type: str, ctx: Context) -> str:
+    """Generates a request for a report."""
+    await ctx.info(f"Generating {report_type} report prompt")
+    return f"Please create a {report_type} report. Request ID: {ctx.request_id}"
+```
+
+See [Context](/servers/context) for complete documentation on context capabilities and custom dependencies.
+
+### Instance Methods
+
+The `@mcp.prompt` decorator registers prompts immediately, which doesn't work with instance methods (you'd see `self` as a required argument). Use the standalone `@prompt` decorator to attach metadata, then register the bound method:
+
+```python
+from fastmcp import FastMCP
+from fastmcp.prompts import prompt
+
+class GreetingService:
+    def __init__(self, greeting: str):
+        self.greeting = greeting
+
+    @prompt()
+    def greet(self, name: str) -> str:
+        """Generate a personalized greeting."""
+        return f"{self.greeting}, {name}!"
+
+service = GreetingService(greeting="Hello")
+mcp = FastMCP()
+mcp.add_prompt(service.greet)  # Schema shows only 'name', not 'self'
+```
+
+## Arguments
+
+FastMCP converts Python function signatures into MCP prompt argument schemas. Type annotations determine argument types, defaults determine whether arguments are required, and Pydantic's `Field` adds descriptions.
+
+### Required vs Optional
+
+Arguments without default values are required. Arguments with default values are optional:
+
+```python
+from fastmcp import FastMCP
+
+mcp = FastMCP()
+
+@mcp.prompt
+def data_analysis_prompt(
+    data_uri: str,                   # Required
+    analysis_type: str = "summary",  # Optional
+    include_charts: bool = False,    # Optional
+) -> str:
+    """Creates a request to analyze data with specific parameters."""
+    prompt = f"Please perform a '{analysis_type}' analysis on the data found at {data_uri}."
+    if include_charts:
+        prompt += " Include relevant charts and visualizations."
+    return prompt
+```
+
+The client must provide `data_uri`. If `analysis_type` or `include_charts` are omitted, their default values are used.
+
+### Argument Descriptions
+
+Use Pydantic's `Field` to add descriptions that help LLMs understand what each argument expects:
+
+```python
+from pydantic import Field
+from fastmcp import FastMCP
+
+mcp = FastMCP()
+
+@mcp.prompt
+def code_review(
+    code: str = Field(description="The source code to review"),
+    language: str = Field(default="python", description="Programming language of the code"),
+    focus: str = Field(default="general", description="Review focus: security, performance, or general"),
+) -> str:
+    """Generate a code review prompt."""
+    return f"Review this {language} code with a focus on {focus}:\n\n```{language}\n{code}\n```"
+```
+
+| Field Option | Purpose |
+| :----------- | :------ |
+| `description` | Human-readable explanation shown to LLMs |
+| `default` | Default value if argument is omitted |
+
+### Complex Types
 
 <VersionBadge version="2.9.0" />
 
-The MCP specification requires that all prompt arguments be passed as strings, but FastMCP allows you to use typed annotations for better developer experience. When you use complex types like `list[int]` or `dict[str, str]`, FastMCP:
-
-1. **Automatically converts** string arguments from MCP clients to the expected types
-2. **Generates helpful descriptions** showing the exact JSON string format needed
-3. **Preserves direct usage** - you can still call prompts with properly typed arguments
-
-Since the MCP specification only allows string arguments, clients need to know what string format to use for complex types. FastMCP solves this by automatically enhancing the argument descriptions with JSON schema information, making it clear to both humans and LLMs how to format their arguments.
+The MCP specification requires all prompt arguments to be passed as strings, but FastMCP lets you use typed annotations for better developer experience. When you use complex types like `list[int]` or `dict[str, str]`, FastMCP automatically converts string arguments from MCP clients to the expected types and generates descriptions showing the required JSON format.
 
 <CodeGroup>
 
 ```python Python Code
+from fastmcp import FastMCP
+
+mcp = FastMCP()
+
 @mcp.prompt
 def analyze_data(
     numbers: list[int],
-    metadata: dict[str, str], 
-    threshold: float
+    metadata: dict[str, str],
+    threshold: float,
 ) -> str:
     """Analyze numerical data."""
     avg = sum(numbers) / len(numbers)
@@ -160,7 +238,7 @@ def analyze_data(
       "required": true
     },
     {
-      "name": "metadata", 
+      "name": "metadata",
       "description": "Provide as a JSON string matching the following schema: {\"additionalProperties\":{\"type\":\"string\"},\"type\":\"object\"}",
       "required": true
     },
@@ -175,7 +253,8 @@ def analyze_data(
 
 </CodeGroup>
 
-**MCP clients will call this prompt with string arguments:**
+MCP clients call this prompt with string arguments:
+
 ```json
 {
   "numbers": "[1, 2, 3, 4, 5]",
@@ -184,48 +263,64 @@ def analyze_data(
 }
 ```
 
-**But you can still call it directly with proper types:**
+Direct calls with properly typed arguments also work:
+
 ```python
-# This also works for direct calls
 result = await prompt.render({
     "numbers": [1, 2, 3, 4, 5],
-    "metadata": {"source": "api", "version": "1.0"}, 
-    "threshold": 2.5
+    "metadata": {"source": "api", "version": "1.0"},
+    "threshold": 2.5,
 })
 ```
 
 <Warning>
-Keep your type annotations simple when using this feature. Complex nested types or custom classes may not convert reliably from JSON strings. The automatically generated schema descriptions are the only guidance users receive about the expected format.
+Keep type annotations simple. Complex nested types or custom classes may not convert reliably from JSON strings. The auto-generated schema descriptions are the only guidance users receive about the expected format.
 
 Good choices: `list[int]`, `dict[str, str]`, `float`, `bool`
+
 Avoid: Complex Pydantic models, deeply nested structures, custom classes
 </Warning>
 
-### Return Values
+### Type Reference
 
-Prompt functions must return one of these types:
+| Type Annotation | MCP Format | Description |
+| :-------------- | :--------- | :---------- |
+| `str` | String | Direct string value |
+| `int`, `float` | JSON number string | `"42"`, `"3.14"` |
+| `bool` | JSON boolean string | `"true"`, `"false"` |
+| `list[T]` | JSON array string | `"[1, 2, 3]"` |
+| `dict[K, V]` | JSON object string | `"{\"key\": \"value\"}"` |
 
--   **`str`**: Sent as a single user message.
--   **`list[Message | str]`**: A sequence of messages (a conversation). Strings are auto-converted to user Messages.
--   **`PromptResult`**: Full control over messages, description, and metadata. See [PromptResult](#promptresult) below.
+## Results
+
+FastMCP prompts can return simple strings, lists of messages, or full `PromptResult` objects with metadata. The return type determines how your response is formatted for the MCP client.
+
+| Return Type | Description |
+| :---------- | :---------- |
+| `str` | Single user message |
+| `list[Message \| str]` | Conversation sequence (strings auto-convert to user messages) |
+| `PromptResult` | Full control over messages, description, and metadata |
+
+### String Returns
+
+The simplest prompts return a string, which becomes a single user message:
 
 ```python
-from fastmcp.prompts import Message
+from fastmcp import FastMCP
+
+mcp = FastMCP()
 
 @mcp.prompt
-def roleplay_scenario(character: str, situation: str) -> list[Message]:
-    """Sets up a roleplaying scenario with initial messages."""
-    return [
-        Message(f"Let's roleplay. You are {character}. The situation is: {situation}"),
-        Message("Okay, I understand. I am ready. What happens next?", role="assistant")
-    ]
+def ask_about_topic(topic: str) -> str:
+    """Ask for an explanation of a topic."""
+    return f"Can you please explain the concept of '{topic}'?"
 ```
 
-#### Message
+### Message
 
 <VersionBadge version="3.0.0" />
 
-`Message` provides a user-friendly wrapper for prompt messages with automatic serialization.
+`Message` provides a user-friendly wrapper for prompt messages with automatic serialization. Strings pass through directly, while other types (dict, list, BaseModel) are JSON-serialized.
 
 ```python
 from fastmcp.prompts import Message
@@ -241,22 +336,41 @@ Message({"key": "value"})
 Message(["item1", "item2"])
 ```
 
-`Message` accepts two fields:
+| Field | Type | Default | Description |
+| :---- | :--- | :------ | :---------- |
+| `content` | `Any` | required | The message content. Strings pass through directly. Other types (dict, list, BaseModel) are JSON-serialized. |
+| `role` | `"user" \| "assistant"` | `"user"` | The message role. |
 
-**`content`** - The message content. Strings pass through directly. Other types (dict, list, BaseModel) are automatically JSON-serialized to text.
+### Message Lists
 
-**`role`** - The message role, either `"user"` (default) or `"assistant"`.
+Return a list of messages to create a conversation with multiple turns:
 
-<Card title="Message">
-<ParamField body="content" type="Any" required>
-  The content data. Strings pass through directly. Other types (dict, list, BaseModel) are automatically JSON-serialized.
-</ParamField>
-<ParamField body="role" type="Literal['user', 'assistant']" default="user">
-  The message role.
-</ParamField>
-</Card>
+```python
+from fastmcp import FastMCP
+from fastmcp.prompts import Message
 
-#### PromptResult
+mcp = FastMCP()
+
+@mcp.prompt
+def roleplay_scenario(character: str, situation: str) -> list[Message]:
+    """Sets up a roleplaying scenario with initial messages."""
+    return [
+        Message(f"Let's roleplay. You are {character}. The situation is: {situation}"),
+        Message("Okay, I understand. I am ready. What happens next?", role="assistant"),
+    ]
+
+@mcp.prompt
+def code_generation(language: str, task: str) -> list[Message]:
+    """Generate a code request conversation."""
+    return [
+        Message(f"Write a {language} function that performs: {task}"),
+        Message("I'll help you write that function.", role="assistant"),
+    ]
+```
+
+Strings in the list are automatically converted to user messages, so you can mix strings and `Message` objects.
+
+### PromptResult
 
 <VersionBadge version="3.0.0" />
 
@@ -266,7 +380,7 @@ Message(["item1", "item2"])
 from fastmcp import FastMCP
 from fastmcp.prompts import PromptResult, Message
 
-mcp = FastMCP(name="PromptServer")
+mcp = FastMCP()
 
 @mcp.prompt
 def code_review(code: str) -> PromptResult:
@@ -277,59 +391,41 @@ def code_review(code: str) -> PromptResult:
             Message("I'll analyze this code for issues.", role="assistant"),
         ],
         description="Code review prompt",
-        meta={"review_type": "security", "priority": "high"}
+        meta={"review_type": "security", "priority": "high"},
     )
 ```
 
-For simple cases, you can pass a string directly to `PromptResult`:
+For simple cases, pass a string directly:
 
 ```python
 return PromptResult("Please help me with this task")  # auto-converts to single Message
 ```
 
-<Card title="PromptResult">
-<ParamField body="messages" type="str | list[Message]" required>
-  Messages to return. Strings are wrapped as a single user Message.
-</ParamField>
-<ParamField body="description" type="str | None">
-  Optional description of the prompt result. If not provided, defaults to the prompt's docstring.
-</ParamField>
-<ParamField body="meta" type="dict[str, Any] | None">
-  Result-level metadata, included in the MCP response's `_meta` field. Use this for runtime metadata like categorization, priority, or other client-specific data.
-</ParamField>
-</Card>
+| Field | Type | Description |
+| :---- | :--- | :---------- |
+| `messages` | `str \| list[Message]` | Messages to return. Strings are wrapped as a single user Message. |
+| `description` | `str \| None` | Optional description of the prompt result. Defaults to the prompt's docstring. |
+| `meta` | `dict[str, Any] \| None` | Result-level metadata, included in the MCP response's `_meta` field. |
 
 <Note>
-The `meta` field in `PromptResult` is for runtime metadata specific to this render response. This is separate from the `meta` parameter in `@mcp.prompt(meta={...})`, which provides static metadata about the prompt definition itself (returned when listing prompts).
+The `meta` field in `PromptResult` is runtime metadata specific to this render response. The `meta` parameter in `@mcp.prompt(meta={...})` provides static metadata about the prompt definition itself (returned when listing prompts).
 </Note>
 
-You can still return plain `str` or `list[Message | str]` from your prompt functions—`PromptResult` is opt-in for when you need to include metadata.
+### When to Use Each
 
-### Required vs. Optional Parameters
+| Approach | Use When |
+| :------- | :------- |
+| `str` | Simple single-message prompts |
+| `list[Message]` | Multi-turn conversations or assistant pre-responses |
+| `PromptResult` | You need to include runtime metadata or a custom description |
 
-Parameters in your function signature are considered **required** unless they have a default value.
+You can always return plain `str` or `list[Message]` from your prompt functions. `PromptResult` is opt-in for when you need metadata or explicit control.
 
-```python
-@mcp.prompt
-def data_analysis_prompt(
-    data_uri: str,                        # Required - no default value
-    analysis_type: str = "summary",       # Optional - has default value
-    include_charts: bool = False          # Optional - has default value
-) -> str:
-    """Creates a request to analyze data with specific parameters."""
-    prompt = f"Please perform a '{analysis_type}' analysis on the data found at {data_uri}."
-    if include_charts:
-        prompt += " Include relevant charts and visualizations."
-    return prompt
-```
-
-In this example, the client *must* provide `data_uri`. If `analysis_type` or `include_charts` are omitted, their default values will be used.
-
-### Component Visibility
+## Visibility Control
 
 <VersionBadge version="3.0.0" />
 
-You can control which prompts are enabled for clients using server-level enabled control. Disabled prompts don't appear in `list_prompts` and can't be called.
+Control which prompts are visible to clients using server-level visibility. Disabled prompts don't appear in `list_prompts` and can't be called.
 
 ```python
 from fastmcp import FastMCP
@@ -345,65 +441,22 @@ def internal_prompt() -> str:
     return "Internal system prompt"
 
 # Disable specific prompts by key
-mcp.disable(keys={"prompt:internal_prompt"})
+mcp.disable(keys=["prompt:internal_prompt"])
 
 # Disable prompts by tag
 mcp.disable(tags={"internal"})
 
-# Or use allowlist mode - only enable prompts with specific tags
+# Or use allowlist mode - only show prompts with specific tags
 mcp.enable(tags={"public"}, only=True)
 ```
 
-See [Enabled](/servers/enabled) for the complete enabled control API including key formats, tag-based filtering, and provider-level control.
+See [Visibility](/servers/visibility) for the complete visibility control API.
 
-### Async Prompts
-
-FastMCP supports both standard (`def`) and asynchronous (`async def`) functions as prompts. Synchronous functions automatically run in a threadpool to avoid blocking the event loop.
-
-```python
-# Synchronous prompt (runs in threadpool)
-@mcp.prompt
-def simple_question(question: str) -> str:
-    """Generates a simple question to ask the LLM."""
-    return f"Question: {question}"
-
-# Asynchronous prompt
-@mcp.prompt
-async def data_based_prompt(data_id: str) -> str:
-    """Generates a prompt based on data that needs to be fetched."""
-    # In a real scenario, you might fetch data from a database or API
-    async with aiohttp.ClientSession() as session:
-        async with session.get(f"https://api.example.com/data/{data_id}") as response:
-            data = await response.json()
-            return f"Analyze this data: {data['content']}"
-```
-
-Use `async def` when your prompt function performs I/O operations like network requests or database queries, since async is more efficient than threadpool dispatch.
-
-### Accessing MCP Context
-
-<VersionBadge version="2.2.5" />
-
-Prompts can access additional MCP information and features through the `Context` object. To access it, add a parameter to your prompt function with a type annotation of `Context`:
-
-```python {6}
-from fastmcp import FastMCP, Context
-
-mcp = FastMCP(name="PromptServer")
-
-@mcp.prompt
-async def generate_report_request(report_type: str, ctx: Context) -> str:
-    """Generates a request for a report."""
-    return f"Please create a {report_type} report. Request ID: {ctx.request_id}"
-```
-
-For full documentation on the Context object and all its capabilities, see the [Context documentation](/servers/context).
-
-### Notifications
+## Notifications
 
 <VersionBadge version="2.9.1" />
 
-FastMCP automatically sends `notifications/prompts/list_changed` notifications to connected clients when prompts are added, enabled, or disabled. This allows clients to stay up-to-date with the current prompt set without manually polling for changes.
+FastMCP automatically sends `notifications/prompts/list_changed` notifications to connected clients when prompts are added, enabled, or disabled. This allows clients to stay up-to-date with the current prompt set without polling.
 
 ```python
 @mcp.prompt
@@ -412,21 +465,17 @@ def example_prompt() -> str:
 
 # These operations trigger notifications:
 mcp.add_prompt(example_prompt)               # Sends prompts/list_changed notification
-mcp.disable(keys={"prompt:example_prompt"})  # Sends prompts/list_changed notification
-mcp.enable(keys={"prompt:example_prompt"})   # Sends prompts/list_changed notification
+mcp.disable(keys=["prompt:example_prompt"])  # Sends prompts/list_changed notification
+mcp.enable(keys=["prompt:example_prompt"])   # Sends prompts/list_changed notification
 ```
 
 Notifications are only sent when these operations occur within an active MCP request context (e.g., when called from within a tool or other MCP operation). Operations performed during server initialization do not trigger notifications.
 
-Clients can handle these notifications using a [message handler](/clients/messages) to automatically refresh their prompt lists or update their interfaces.
-
-## Server Behavior
-
-### Duplicate Prompts
+## Duplicate Handling
 
 <VersionBadge version="2.1.0" />
 
-You can configure how the FastMCP server handles attempts to register multiple prompts with the same name. Use the `on_duplicate_prompts` setting during `FastMCP` initialization.
+Configure how the server handles attempts to register multiple prompts with the same name using the `on_duplicate_prompts` setting:
 
 ```python
 from fastmcp import FastMCP
@@ -435,25 +484,33 @@ mcp = FastMCP(
     name="PromptServer",
     on_duplicate_prompts="error"  # Raise an error if a prompt name is duplicated
 )
-
-@mcp.prompt
-def greeting(): return "Hello, how can I help you today?"
-
-# This registration attempt will raise a ValueError because
-# "greeting" is already registered and the behavior is "error".
-# @mcp.prompt
-# def greeting(): return "Hi there! What can I do for you?"
 ```
 
-The duplicate behavior options are:
-
--   `"warn"` (default): Logs a warning, and the new prompt replaces the old one.
--   `"error"`: Raises a `ValueError`, preventing the duplicate registration.
--   `"replace"`: Silently replaces the existing prompt with the new one.
--   `"ignore"`: Keeps the original prompt and ignores the new registration attempt.
+| Behavior | Description |
+| :------- | :---------- |
+| `"warn"` (default) | Logs a warning, new prompt replaces old |
+| `"error"` | Raises `ValueError`, prevents duplicate registration |
+| `"replace"` | Silently replaces existing prompt |
+| `"ignore"` | Keeps original prompt, ignores new registration |
 
 ## Versioning
 
 <VersionBadge version="3.0.0" />
 
-Prompts support versioning, allowing you to maintain multiple implementations under the same name while clients automatically receive the highest version. See [Versioning](/servers/versioning) for complete documentation on version comparison, retrieval, and migration patterns.
+Prompts support versioning, allowing you to maintain multiple implementations under the same name while clients automatically receive the highest version. See [Versioning](/servers/versioning) for complete documentation.
+
+## Removing Prompts
+
+Remove prompts dynamically with `remove_prompt()`:
+
+```python
+from fastmcp import FastMCP
+
+mcp = FastMCP()
+
+@mcp.prompt
+def temporary_prompt() -> str:
+    return "I won't be here long"
+
+mcp.remove_prompt("temporary_prompt")
+```
