@@ -20,17 +20,21 @@ from fastmcp.server.dependencies import (
     CurrentContext,
     CurrentDocket,
     CurrentFastMCP,
+    CurrentTaskContext,
     CurrentWorker,
     Progress,
     ProgressLike,
+    TaskContext,
 )
 
 __all__ = [
     "CurrentContext",
     "CurrentDocket",
     "CurrentFastMCP",
+    "CurrentTaskContext",
     "CurrentWorker",
     "Depends",
     "Progress",
     "ProgressLike",
+    "TaskContext",
 ]

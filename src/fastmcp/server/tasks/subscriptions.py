@@ -210,3 +210,54 @@ async def _send_progress_notification(
 
     with suppress(Exception):
         await session.send_notification(notification)  # type: ignore[arg-type]
+
+
+async def send_input_required_notification(
+    session: ServerSession,
+    task_id: str,
+    session_id: str,
+    docket: Docket,
+    status: str,
+) -> None:
+    """Send task status notification for input_required transitions (SEP-1686).
+
+    Called by TaskContext.elicit() and TaskContext.sample() to update task
+    status when waiting for user input.
+
+    Args:
+        session: MCP ServerSession for sending notifications
+        task_id: Client-visible task ID
+        session_id: The session ID that owns this task
+        docket: Docket instance for Redis access
+        status: The new status ("input_required" or "working")
+    """
+    # Get created_at from Redis
+    created_at_key = docket.key(f"fastmcp:task:{session_id}:{task_id}:created_at")
+    poll_interval_key = docket.key(f"fastmcp:task:{session_id}:{task_id}:poll_interval")
+
+    async with docket.redis() as redis:
+        created_at_bytes = await redis.get(created_at_key)
+        poll_interval_bytes = await redis.get(poll_interval_key)
+
+    created_at = (
+        created_at_bytes.decode("utf-8")
+        if created_at_bytes
+        else datetime.now(timezone.utc).isoformat()
+    )
+    poll_interval_ms = int(poll_interval_bytes) if poll_interval_bytes else 5000
+
+    params_dict = {
+        "taskId": task_id,
+        "status": status,
+        "createdAt": created_at,
+        "lastUpdatedAt": datetime.now(timezone.utc).isoformat(),
+        "ttl": 60000,
+        "pollInterval": poll_interval_ms,
+    }
+
+    notification = TaskStatusNotification(
+        params=TaskStatusNotificationParams.model_validate(params_dict),
+    )
+
+    with suppress(Exception):
+        await session.send_notification(notification)  # type: ignore[arg-type]

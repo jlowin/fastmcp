@@ -14,6 +14,10 @@ LLM sampling allows your MCP tools to request text generation from an LLM during
 
 By default, sampling requests are routed to the client's LLM. You can also configure a fallback handler to use a specific provider (like OpenAI) when the client doesn't support sampling, or to always use your own LLM regardless of client capabilities.
 
+<Tip>
+**Background Tasks**: For sampling in background tasks (`task=True`), use `TaskContext` instead of `Context`. See [Elicitation and Sampling in Background Tasks](/servers/tasks#elicitation-and-sampling-in-background-tasks).
+</Tip>
+
 ## Method Reference
 
 <Card icon="code" title="ctx.sample()">
