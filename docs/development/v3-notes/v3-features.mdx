@@ -23,7 +23,7 @@ class Provider:
 
 Providers support:
 - **Lifecycle management**: `async def lifespan()` for setup/teardown
-- **Enabled control**: `enable()` / `disable()` with name, version, tags, components, and allowlist mode
+- **Visibility control**: `enable()` / `disable()` with name, version, tags, components, and allowlist mode
 - **Transform stacking**: `provider.add_transform(Namespace(...))`, `provider.add_transform(ToolTransform(...))`
 
 ### LocalProvider
@@ -232,7 +232,7 @@ Documentation: `docs/servers/context.mdx`
 
 ---
 
-## Enabled System
+## Visibility System
 
 Components can be enabled/disabled using the visibility system. Each `enable()` or `disable()` call adds a stateless Visibility transform that marks components via internal metadata. Later transforms override earlier ones.
 
@@ -261,7 +261,7 @@ Works at both server and provider level. Supports:
 - **Allowlist mode** (`only=True`): Only explicitly enabled components visible
 - **Tag-based filtering**: Enable/disable groups of components by tag
 - **Override semantics**: Later transforms override earlier marks (enable after disable = enabled)
-- **Transform ordering**: Enabled transforms are injected at the point you call them, so component state is known
+- **Transform ordering**: Visibility transforms are injected at the point you call them, so component state is known
 
 ### Per-Session Visibility
 
