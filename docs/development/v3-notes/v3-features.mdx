@@ -296,7 +296,7 @@ mcp.disable(tags={"premium"})
 Session visibility methods:
 - `await ctx.enable_components(...)`: Enable components for this session
 - `await ctx.disable_components(...)`: Disable components for this session
-- `await ctx.reset_components()`: Clear session rules, return to global defaults
+- `await ctx.reset_visibility()`: Clear session rules, return to global defaults
 
 Session rules override global transforms. FastMCP automatically sends `ToolListChangedNotification` (and resource/prompt equivalents) to affected sessions when visibility changes.
 
