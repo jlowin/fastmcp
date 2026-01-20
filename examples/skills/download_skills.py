@@ -14,14 +14,16 @@ import asyncio
 import tempfile
 from pathlib import Path
 
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+from rich.tree import Tree
+
 from fastmcp import Client, FastMCP
 from fastmcp.server.providers.skills import SkillsDirectoryProvider
-from fastmcp.utilities.skills import (
-    download_skill,
-    get_skill_manifest,
-    list_skills,
-    sync_skills,
-)
+from fastmcp.utilities.skills import list_skills, sync_skills
+
+console = Console()
 
 
 async def main():
@@ -32,35 +34,48 @@ async def main():
     mcp.add_provider(SkillsDirectoryProvider(roots=skills_dir))
 
     async with Client(mcp) as client:
-        # 1. Discover available skills
-        print("=== Available Skills ===")
+        # 1. Discover what skills are available on the server
+        console.print()
+        console.print(
+            Panel.fit(
+                "[bold]Discovering skills on MCP server...[/bold]",
+                border_style="blue",
+            )
+        )
+
         skills = await list_skills(client)
-        for skill in skills:
-            print(f"  {skill.name}: {skill.description}")
 
-        # 2. Inspect a skill's manifest
-        print("\n=== Manifest for pdf-processing ===")
-        manifest = await get_skill_manifest(client, "pdf-processing")
-        for file in manifest.files:
-            print(f"  {file.path} ({file.size} bytes)")
+        table = Table(title="Skills Available on Server", show_header=True)
+        table.add_column("Skill", style="cyan")
+        table.add_column("Description")
+        for skill in sorted(skills, key=lambda s: s.name):
+            table.add_row(skill.name, skill.description)
+        console.print(table)
 
-        # 3. Download a single skill
+        # 2. Download all skills to a local directory
+        console.print()
+        console.print(
+            Panel.fit(
+                "[bold]Downloading all skills to local directory...[/bold]",
+                border_style="green",
+            )
+        )
+
         with tempfile.TemporaryDirectory() as tmp:
-            print("\n=== Downloading pdf-processing ===")
-            skill_path = await download_skill(client, "pdf-processing", tmp)
-            print(f"  Downloaded to: {skill_path}")
-            print("  Files:")
-            for f in skill_path.rglob("*"):
-                if f.is_file():
-                    print(f"    {f.relative_to(skill_path)}")
-
-        # 4. Sync all skills at once
-        with tempfile.TemporaryDirectory() as tmp:
-            print("\n=== Syncing all skills ===")
             paths = await sync_skills(client, tmp)
-            print(f"  Downloaded {len(paths)} skills:")
-            for path in paths:
-                print(f"    {path.name}/")
+
+            tree = Tree(f"[bold]{tmp}[/bold]")
+            for skill_path in sorted(paths, key=lambda p: p.name):
+                skill_branch = tree.add(f"[cyan]{skill_path.name}/[/cyan]")
+                for f in sorted(skill_path.rglob("*")):
+                    if f.is_file():
+                        rel = f.relative_to(skill_path)
+                        skill_branch.add(str(rel))
+
+            console.print(tree)
+            console.print(
+                f"\n[green]✓[/green] Downloaded {len(paths)} skills to local directory"
+            )
 
 
 if __name__ == "__main__":
