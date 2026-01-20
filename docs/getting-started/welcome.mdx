@@ -39,17 +39,22 @@ if __name__ == "__main__":
 **This documentation is for FastMCP 3.0**, which is currently in beta. For the 2.x release, see the [FastMCP 2.0 documentation](/v2/getting-started/welcome).
 </Tip>
 
-## Production-Ready MCP
+## Move Fast and Make Things
 
-FastMCP has pioneered MCP development since FastMCP 1.0 was incorporated into the [official MCP SDK](https://github.com/modelcontextprotocol/python-sdk) in 2024. Today, 70% of MCP servers across all languages run on some version of FastMCP. 
+FastMCP has pioneered MCP development since FastMCP 1.0 was incorporated into the official MCP SDK in 2024. Today, 70% of MCP servers across all languages run on some version of FastMCP, because **FastMCP automatically gives you the best practices for working with the Model Context Protocol.**
 
-**FastMCP 3.0 was built from the ground up for production MCP applications.** When you need to compose multiple servers, proxy remote APIs, add enterprise auth, or deploy multi-tenant systems, FastMCP provides the right abstractions:
+FastMCP 3.0 is built for the next generation of MCP applications:
 
-- **[Components](/servers/tools)** define the logic—tools, resources, and prompts that wrap your Python functions and data.
-- **[Providers](/servers/providers/overview)** source the components—from decorated functions, filesystem discovery, remote servers, OpenAPI specs, or your own custom sources.
-- **[Transforms](/servers/transforms/transforms)** shape the components—namespace for composition, filter by version or user permissions, convert resources to tools for compatibility.
+- **Source** from anywhere.
+- **Compose** and transform freely.
+- **Personalize** per-user.
+- **Control** access.
+- **Track** state across sessions.
+- **Run** long operations.
+- **Version** your APIs.
+- **Observe** everything.
 
-Compose these into **[Servers](/servers/server)** to expose your logic to clients, and use **[Middleware](/servers/middleware)** for cross-cutting concerns like authentication, logging, and rate limiting.
+The architecture that enables this—[components](/servers/tools), [providers](/servers/providers/overview), and [transforms](/servers/transforms/transforms)—is covered throughout the docs.
 
 Ready to build? Start with our [installation guide](/getting-started/installation) or jump straight to the [quickstart](/getting-started/quickstart).
 
