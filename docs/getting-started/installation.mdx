@@ -70,10 +70,15 @@ pip install "cyclopts>=5.0.0a1"
 
 Alternatively, wait for the stable v5 release. See [this issue](https://github.com/BrianPugh/cyclopts/issues/672) for details.
 </Info>
-## Upgrading from the Official MCP SDK
+## Upgrading
+
+### From FastMCP 2.x
+
+See the [Upgrade Guide](/development/upgrade-guide) for a complete list of breaking changes and migration steps.
+
+### From the Official MCP SDK
 
 Upgrading from the official MCP SDK's FastMCP 1.0 to FastMCP 3.0 is generally straightforward. The core server API is highly compatible, and in many cases, changing your import statement from `from mcp.server.fastmcp import FastMCP` to `from fastmcp import FastMCP` will be sufficient.
-
 
 ```python {5}
 # Before
