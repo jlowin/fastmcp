@@ -102,7 +102,10 @@ async def get_skill_manifest(client: Client, skill_name: str) -> SkillManifest:
 
     content = result[0]
     if hasattr(content, "text"):
-        manifest_data = json.loads(content.text)
+        try:
+            manifest_data = json.loads(content.text)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid manifest JSON for skill: {skill_name}") from e
     else:
         raise ValueError(f"Unexpected manifest format for skill: {skill_name}")
 
@@ -172,6 +175,13 @@ async def download_skill(
 
     # Download each file
     for file_info in manifest.files:
+        # Security: reject absolute paths and paths that escape skill_dir
+        if Path(file_info.path).is_absolute():
+            continue
+        file_path = (skill_dir / file_info.path).resolve()
+        if not file_path.is_relative_to(skill_dir):
+            continue
+
         file_uri = f"skill://{skill_name}/{file_info.path}"
         result = await client.read_resource(file_uri)
 
@@ -179,7 +189,6 @@ async def download_skill(
             continue
 
         content = result[0]
-        file_path = skill_dir / file_info.path
 
         # Create parent directories if needed
         file_path.parent.mkdir(parents=True, exist_ok=True)

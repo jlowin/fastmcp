@@ -3,11 +3,11 @@
 This example shows how to use the skills client utilities to discover
 and download skills from any MCP server that exposes them via SkillsProvider.
 
-Run the skills server first:
-    uv run python examples/skills/server.py
-
-Then run this script:
+Run this script:
     uv run python examples/skills/download_skills.py
+
+This example creates an in-memory server with sample skills. In practice,
+you would connect to a remote server URL instead.
 """
 
 import asyncio
