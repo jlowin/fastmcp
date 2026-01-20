@@ -109,13 +109,16 @@ async def get_skill_manifest(client: Client, skill_name: str) -> SkillManifest:
     else:
         raise ValueError(f"Unexpected manifest format for skill: {skill_name}")
 
-    return SkillManifest(
-        name=manifest_data["skill"],
-        files=[
-            SkillFile(path=f["path"], size=f["size"], hash=f["hash"])
-            for f in manifest_data["files"]
-        ],
-    )
+    try:
+        return SkillManifest(
+            name=manifest_data["skill"],
+            files=[
+                SkillFile(path=f["path"], size=f["size"], hash=f["hash"])
+                for f in manifest_data["files"]
+            ],
+        )
+    except (KeyError, TypeError) as e:
+        raise ValueError(f"Invalid manifest format for skill: {skill_name}") from e
 
 
 async def download_skill(
@@ -133,8 +136,8 @@ async def download_skill(
         client: Connected FastMCP client
         skill_name: Name of the skill to download
         target_dir: Directory where skill folder will be created
-        overwrite: If True, overwrite existing files. If False (default),
-            skip files that already exist.
+        overwrite: If True, overwrite existing skill directory. If False
+            (default), raise FileExistsError if directory exists.
 
     Returns:
         Path to the downloaded skill directory
