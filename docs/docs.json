@@ -170,13 +170,12 @@
                   "clients/client",
                   "clients/transports",
                   {
-                    "group": "Core",
-                    "icon": "cube",
+                    "group": "Core Operations",
+                    "icon": "toolbox",
                     "pages": [
                       "clients/tools",
                       "clients/resources",
-                      "clients/prompts",
-                      "clients/messages"
+                      "clients/prompts"
                     ]
                   },
                   {
