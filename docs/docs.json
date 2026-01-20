@@ -159,7 +159,7 @@
                   "servers/providers/transforms",
                   "servers/providers/namespace",
                   "servers/providers/tool-transformation",
-                  "servers/enabled",
+                  "servers/visibility",
                   "servers/providers/resources-as-tools",
                   "servers/providers/prompts-as-tools"
                 ]
