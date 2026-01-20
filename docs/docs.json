@@ -99,8 +99,8 @@
                 "pages": [
                   "servers/server",
                   {
-                    "group": "Core",
-                    "icon": "cube",
+                    "group": "Core Components",
+                    "icon": "toolbox",
                     "pages": [
                       "servers/tools",
                       "servers/resources",
@@ -112,18 +112,18 @@
                     "group": "Features",
                     "icon": "stars",
                     "pages": [
-                      "servers/middleware",
-                      "servers/lifespan",
-                      "servers/sampling",
-                      "servers/elicitation",
                       "servers/tasks",
-                      "servers/progress",
+                      "servers/elicitation",
+                      "servers/icons",
+                      "servers/lifespan",
                       "servers/logging",
-                      "servers/telemetry",
-                      "servers/storage-backends",
+                      "servers/middleware",
                       "servers/pagination",
-                      "servers/versioning",
-                      "servers/icons"
+                      "servers/progress",
+                      "servers/sampling",
+                      "servers/storage-backends",
+                      "servers/telemetry",
+                      "servers/versioning"
                     ]
                   },
                   {
@@ -142,21 +142,26 @@
                 ]
               },
               {
-                "group": "Providers",
+                "group": "MCP Providers",
                 "pages": [
                   "servers/providers/overview",
                   "servers/providers/local",
                   "servers/providers/filesystem",
                   "servers/providers/proxy",
+                  "servers/providers/skills",
                   "servers/providers/custom",
                   "servers/providers/mounting"
                 ]
               },
               {
-                "group": "Transforms",
+                "group": "MCP Transforms",
                 "pages": [
                   "servers/providers/transforms",
-                  "servers/enabled"
+                  "servers/providers/namespace",
+                  "servers/providers/tool-transformation",
+                  "servers/enabled",
+                  "servers/providers/resources-as-tools",
+                  "servers/providers/prompts-as-tools"
                 ]
               },
               {
@@ -178,6 +183,7 @@
                     "group": "Handlers",
                     "icon": "hand",
                     "pages": [
+                      "clients/notifications",
                       "clients/sampling",
                       "clients/elicitation",
                       "clients/tasks",
@@ -267,12 +273,12 @@
               {
                 "group": "Development",
                 "pages": [
-                  "patterns/contrib",
                   "development/contributing",
                   "development/tests",
                   "development/releases",
                   "development/upgrade-guide",
-                  "changelog"
+                  "changelog",
+                  "patterns/contrib"
                 ]
               }
             ]
