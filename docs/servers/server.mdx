@@ -52,7 +52,7 @@ The `FastMCP` constructor accepts several configuration options. The most common
 <ParamField body="icons" type="list[Icon] | None">
   <VersionBadge version="2.13.0" />
 
-  List of icon representations for your server. Icons help users visually identify your server in client applications. See [Icons](/build/design/icons) for detailed examples
+  List of icon representations for your server. Icons help users visually identify your server in client applications. See [Icons](/servers/icons) for detailed examples
 </ParamField>
 
 <ParamField body="auth" type="OAuthProvider | TokenVerifier | None">
@@ -91,7 +91,7 @@ The `FastMCP` constructor accepts several configuration options. The most common
 
 <ParamField body="strict_input_validation" type="bool" default="False">
   <VersionBadge version="2.13.0" />
-  Controls how tool input parameters are validated. When `False` (default), FastMCP uses Pydantic's flexible validation that coerces compatible inputs (e.g., `"10"` to `10` for int parameters). When `True`, uses the MCP SDK's JSON Schema validation to validate inputs against the exact schema before passing them to your function, rejecting any type mismatches. The default mode improves compatibility with LLM clients while maintaining type safety. See [Input Validation Modes](/build/components/tool-inputs#validation-modes) for details
+  Controls how tool input parameters are validated. When `False` (default), FastMCP uses Pydantic's flexible validation that coerces compatible inputs (e.g., `"10"` to `10` for int parameters). When `True`, uses the MCP SDK's JSON Schema validation to validate inputs against the exact schema before passing them to your function, rejecting any type mismatches. The default mode improves compatibility with LLM clients while maintaining type safety. See [Input Validation Modes](/servers/tools#input-validation-modes) for details
 </ParamField>
 
 <ParamField body="list_page_size" type="int | None" default="None">
@@ -116,7 +116,7 @@ def multiply(a: float, b: float) -> float:
     return a * b
 ```
 
-See [Tools](/build/components/tools-overview) for detailed documentation.
+See [Tools](/servers/tools) for detailed documentation.
 
 ### Resources
 
@@ -129,7 +129,7 @@ def get_config() -> dict:
     return {"theme": "dark", "version": "1.0"}
 ```
 
-See [Resources](/build/components/resources-overview) for detailed documentation.
+See [Resources](/servers/resources) for detailed documentation.
 
 ### Resource Templates
 
@@ -142,7 +142,7 @@ def get_user_profile(user_id: int) -> dict:
     return {"id": user_id, "name": f"User {user_id}", "status": "active"}
 ```
 
-See [Resource Templates](/build/components/resource-templates) for detailed documentation.
+See [Resource Templates](/servers/resources#resource-templates) for detailed documentation.
 
 ### Prompts
 
@@ -156,7 +156,7 @@ def analyze_data(data_points: list[float]) -> str:
     return f"Please analyze these data points: {formatted_data}"
 ```
 
-See [Prompts](/build/components/prompts-overview) for detailed documentation.
+See [Prompts](/servers/prompts) for detailed documentation.
 
 ## Tag-Based Filtering
 

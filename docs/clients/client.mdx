@@ -87,7 +87,7 @@ from fastmcp import Client
 client = Client("https://api.example.com/mcp")
 ```
 
-See [Transports](/connect/transports) for detailed configuration options including authentication headers, session persistence, and multi-server configurations.
+See [Transports](/clients/transports) for detailed configuration options including authentication headers, session persistence, and multi-server configurations.
 
 ## Configuration-Based Clients
 
@@ -173,7 +173,7 @@ async with client:
     print(result.data)  # 15
 ```
 
-See [Tools](/connect/tools) for detailed documentation including version selection, error handling, and structured output.
+See [Tools](/clients/tools) for detailed documentation including version selection, error handling, and structured output.
 
 **Resources** are data sources that the client can read, either static or templated. Access them with `read_resource()` using URIs.
 
@@ -184,7 +184,7 @@ async with client:
     print(content[0].text)
 ```
 
-See [Resources](/connect/resources) for detailed documentation including templates and binary content.
+See [Resources](/clients/resources) for detailed documentation including templates and binary content.
 
 **Prompts** are reusable message templates that can accept arguments. Retrieve rendered prompts with `get_prompt()`.
 
@@ -195,7 +195,7 @@ async with client:
     print(messages.messages)
 ```
 
-See [Prompts](/connect/prompts) for detailed documentation including argument serialization.
+See [Prompts](/clients/prompts) for detailed documentation including argument serialization.
 
 ## Callback Handlers
 
@@ -226,11 +226,11 @@ client = Client(
 
 Each handler type has its own documentation:
 
-- **[Sampling](/connect/sampling)** - Respond to server LLM requests
-- **[Elicitation](/connect/elicitation)** - Handle server requests for user input
-- **[Progress](/connect/progress)** - Monitor long-running operations
-- **[Logging](/connect/logging)** - Handle server log messages
-- **[Roots](/connect/roots)** - Provide local context to servers
+- **[Sampling](/clients/sampling)** - Respond to server LLM requests
+- **[Elicitation](/clients/elicitation)** - Handle server requests for user input
+- **[Progress](/clients/progress)** - Monitor long-running operations
+- **[Logging](/clients/logging)** - Handle server log messages
+- **[Roots](/clients/roots)** - Provide local context to servers
 
 <Tip>
 The FastMCP Client is designed as a foundational tool. Use it directly for deterministic operations, or build higher-level agentic systems on top of its reliable, type-safe interface.
