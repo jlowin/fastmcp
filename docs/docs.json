@@ -823,6 +823,14 @@
   },
   "redirects": [
     {
+      "destination": "/v2/clients/messages",
+      "source": "/clients/messages"
+    },
+    {
+      "destination": "/v2/patterns/decorating-methods",
+      "source": "/patterns/decorating-methods"
+    },
+    {
       "destination": "/servers/providers/proxy",
       "source": "/patterns/proxy"
     },
