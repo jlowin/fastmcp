@@ -230,6 +230,7 @@
                   "integrations/discord",
                   "integrations/github",
                   "integrations/google",
+                  "integrations/keycloak",
                   "integrations/oci",
                   "integrations/scalekit",
                   "integrations/supabase",
