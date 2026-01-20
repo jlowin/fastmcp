@@ -97,7 +97,7 @@ value = await ctx.get_state("key")
 
 #### Metadata Namespace Renamed
 
-The FastMCP metadata namespace changed from `_fastmcp` to `fastmcp`. This only affects code that reads component metadata from FastMCP servers:
+The FastMCP metadata namespace changed from `_fastmcp` to `fastmcp`, and metadata is now always included. The `include_fastmcp_meta` parameter has been removed from `FastMCP()` and `to_mcp_tool()`—remove any usage of this parameter.
 
 ```python
 # Before
