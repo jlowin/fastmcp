@@ -915,6 +915,10 @@ class ToolTransformConfig(FastMCPBaseModel):
         default=None,
         description="The new meta information for the tool.",
     )
+    enabled: bool = Field(
+        default=True,
+        description="Whether the tool is enabled.",
+    )
 
     arguments: dict[str, ArgTransformConfig] = Field(
         default_factory=dict,
@@ -925,7 +929,7 @@ class ToolTransformConfig(FastMCPBaseModel):
         """Create a TransformedTool from a provided tool and this transformation configuration."""
 
         tool_changes: dict[str, Any] = self.model_dump(
-            exclude_unset=True, exclude={"arguments"}
+            exclude_unset=True, exclude={"arguments", "enabled"}
         )
 
         return TransformedTool.from_tool(
