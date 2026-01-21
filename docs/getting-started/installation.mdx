@@ -12,13 +12,13 @@ FastMCP 3.0 is currently in beta. Install by specifying the version explicitly.
 </Note>
 
 ```bash
-pip install fastmcp==3.0.0b1
+uv add "fastmcp>=3.0.0b1" --prerelease=explicit
 ```
 
-If you plan to use FastMCP in a uv-managed project, you can add it as a dependency with:
+Or with pip:
 
 ```bash
-uv add fastmcp --prerelease=allow
+pip install "fastmcp>=3.0.0b1" --pre
 ```
 
 ### Optional Dependencies
@@ -26,7 +26,7 @@ uv add fastmcp --prerelease=allow
 FastMCP provides optional extras for specific features. For example, to install the background tasks extra:
 
 ```bash
-pip install "fastmcp[tasks]==3.0.0b1"
+uv add "fastmcp[tasks]>=3.0.0b1" --prerelease=explicit
 ```
 
 See [Background Tasks](/servers/tasks) for details on the task system.
