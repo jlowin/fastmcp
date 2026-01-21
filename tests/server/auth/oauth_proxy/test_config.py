@@ -131,6 +131,65 @@ class TestResourceURLValidation:
         redirect_url = await proxy_with_resource_url.authorize(client, params)
         assert "/consent" in redirect_url
 
+    async def test_authorize_accepts_resource_with_query_params(
+        self, proxy_with_resource_url
+    ):
+        """Test that authorization accepts resource URLs with query parameters.
+
+        Per RFC 8707, clients may include query parameters in resource URLs.
+        ChatGPT sends resource URLs like ?kb_name=X, which should match the
+        server's resource URL that doesn't include query params.
+        """
+        client = OAuthClientInformationFull(
+            client_id="test-client",
+            client_secret="test-secret",
+            redirect_uris=[AnyUrl("http://localhost:12345/callback")],
+        )
+
+        await proxy_with_resource_url.register_client(client)
+
+        # Client requests resource with query params (like ChatGPT does)
+        params = AuthorizationParams(
+            redirect_uri=AnyUrl("http://localhost:12345/callback"),
+            redirect_uri_provided_explicitly=True,
+            state="client-state",
+            code_challenge="challenge",
+            scopes=["read"],
+            resource="https://proxy.example.com/api/v2/mcp?kb_name=test",
+        )
+
+        # Should succeed - base URL matches, query params are normalized away
+        redirect_url = await proxy_with_resource_url.authorize(client, params)
+        assert "/consent" in redirect_url
+
+    async def test_authorize_rejects_different_path_with_query_params(
+        self, proxy_with_resource_url
+    ):
+        """Test that query param normalization doesn't bypass path validation."""
+        client = OAuthClientInformationFull(
+            client_id="test-client",
+            client_secret="test-secret",
+            redirect_uris=[AnyUrl("http://localhost:12345/callback")],
+        )
+
+        await proxy_with_resource_url.register_client(client)
+
+        # Client requests wrong path but with query params
+        params = AuthorizationParams(
+            redirect_uri=AnyUrl("http://localhost:12345/callback"),
+            redirect_uri_provided_explicitly=True,
+            state="client-state",
+            code_challenge="challenge",
+            scopes=["read"],
+            resource="https://proxy.example.com/wrong/path?kb_name=test",
+        )
+
+        # Should fail - path doesn't match even after normalizing query params
+        with pytest.raises(AuthorizeError) as exc_info:
+            await proxy_with_resource_url.authorize(client, params)
+
+        assert exc_info.value.error == "invalid_target"
+
     def test_set_mcp_path_creates_jwt_issuer_with_correct_audience(self, jwt_verifier):
         """Test that set_mcp_path creates JWTIssuer with correct audience."""
         proxy = OAuthProxy(
