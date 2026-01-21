@@ -118,3 +118,33 @@ async def test_server_level_transforms_apply_to_mounted_servers():
 
     assert "renamed_sub_tool" in tool_names
     assert "sub_tool" not in tool_names
+
+
+async def test_tool_transform_config_has_enabled_field():
+    """Test that ToolTransformConfig has enabled field for consistency with other Meta classes."""
+    config = ToolTransformConfig(name="test_tool")
+    # enabled should default to True
+    assert config.enabled is True
+
+    # Can be set to False
+    config_disabled = ToolTransformConfig(name="test_tool", enabled=False)
+    assert config_disabled.enabled is False
+
+
+async def test_tool_transform_config_enabled_field_not_passed_to_from_tool():
+    """Test that enabled field is excluded when calling TransformedTool.from_tool()."""
+    from fastmcp.tools import Tool
+
+    @Tool.from_function
+    def original_tool(x: int) -> int:
+        return x * 2
+
+    # Create config with enabled field
+    config = ToolTransformConfig(name="transformed_tool", enabled=False)
+
+    # Apply should work without errors - enabled field should be excluded
+    transformed = config.apply(original_tool)
+
+    # Verify the transformation worked
+    assert transformed.name == "transformed_tool"
+    assert isinstance(transformed.parent_tool, Tool)
