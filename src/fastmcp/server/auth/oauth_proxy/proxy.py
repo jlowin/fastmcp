@@ -92,7 +92,9 @@ def _normalize_resource_url(url: str) -> str:
         Normalized URL with scheme, host, and path only (no query/fragment)
     """
     parsed = urlparse(str(url))
-    return urlunparse((parsed.scheme, parsed.netloc, parsed.path.rstrip("/"), "", "", ""))
+    return urlunparse(
+        (parsed.scheme, parsed.netloc, parsed.path.rstrip("/"), "", "", "")
+    )
 
 
 class OAuthProxy(OAuthProvider, ConsentMixin):
