@@ -55,7 +55,7 @@ The framework is built on three abstractions that map to the decisions you actua
 
 - **[Components](/servers/tools)** are what you expose: tools, resources, and prompts. Wrap a Python function, and FastMCP handles the schema, validation, and docs.
 - **[Providers](/servers/providers/overview)** are where components come from: decorated functions, files on disk, OpenAPI specs, remote servers—your logic can live anywhere.
-- **[Transforms](/servers/transforms/overview)** shape what clients see: namespacing, filtering, authorization, versioning. The same server can present differently to different users.
+- **[Transforms](/servers/transforms/transforms)** shape what clients see: namespacing, filtering, authorization, versioning. The same server can present differently to different users.
 
 These compose cleanly, so complex patterns don't require complex code. And because FastMCP is opinionated about the details, like serialization, error handling, and protocol compliance, **best practices are the path of least resistance**. You focus on your logic; the MCP part just works.
 
