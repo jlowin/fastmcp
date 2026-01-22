@@ -756,7 +756,7 @@ requires-dist = [
     { name = "platformdirs", specifier = ">=4.0.0" },
     { name = "py-key-value-aio", extras = ["disk", "keyring", "memory"], specifier = ">=0.3.0,<0.4.0" },
     { name = "pydantic", extras = ["email"], specifier = ">=2.11.7" },
-    { name = "pydocket", git = "https://github.com/chrisguidry/docket.git" },
+    { name = "pydocket", git = "https://github.com/chrisguidry/docket.git?rev=fix-redis-connection-guards" },
     { name = "pyperclip", specifier = ">=1.9.0" },
     { name = "python-dotenv", specifier = ">=1.1.0" },
     { name = "rich", specifier = ">=13.9.4" },
@@ -1732,8 +1732,8 @@ wheels = [
 
 [[package]]
 name = "pydocket"
-version = "0.17.1"
-source = { git = "https://github.com/chrisguidry/docket.git#c3167d568a1039135c2993cbd7796734ccefee67" }
+version = "0.17.2.dev1+g74b25f8af"
+source = { git = "https://github.com/chrisguidry/docket.git?rev=fix-redis-connection-guards#74b25f8afe8ca497fefc506008f2443f12559c60" }
 dependencies = [
     { name = "cloudpickle" },
     { name = "exceptiongroup", marker = "python_full_version < '3.11'" },
