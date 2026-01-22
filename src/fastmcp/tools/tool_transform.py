@@ -963,9 +963,10 @@ class ToolTransformConfig(FastMCPBaseModel):
             transform_args={k: v.to_arg_transform() for k, v in self.arguments.items()},
         )
 
-        # Set visibility metadata if disabled
-        if not self.enabled:
-            _set_visibility_metadata(transformed, enabled=False)
+        # Set visibility metadata if enabled was explicitly provided.
+        # This allows enabled=True to override an earlier disable (later transforms win).
+        if "enabled" in self.model_fields_set:
+            _set_visibility_metadata(transformed, enabled=self.enabled)
 
         return transformed
 

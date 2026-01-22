@@ -199,15 +199,18 @@ def test_tool_transform_config_enabled_false_sets_visibility_metadata(sample_too
     assert transformed.meta["fastmcp"]["_internal"]["visibility"] is False
 
 
-def test_tool_transform_config_enabled_true_explicit(sample_tool):
-    """Test that enabled=True explicitly doesn't set visibility metadata."""
+def test_tool_transform_config_enabled_true_explicit_sets_visibility(sample_tool):
+    """Test that enabled=True explicitly sets visibility metadata to allow overriding earlier disables."""
+    from fastmcp.server.transforms.visibility import is_enabled
+
     config = ToolTransformConfig(name="explicit_enabled", enabled=True)
     transformed = config.apply(sample_tool)
 
-    # No visibility metadata should be set when enabled=True
-    meta = transformed.meta or {}
-    internal = meta.get("fastmcp", {}).get("_internal", {})
-    assert "visibility" not in internal
+    # Visibility metadata should be set to True when enabled=True is explicit
+    # This allows later transforms to override earlier disables
+    assert is_enabled(transformed) is True
+    assert transformed.meta is not None
+    assert transformed.meta["fastmcp"]["_internal"]["visibility"] is True
 
 
 def test_tool_transform_config_enabled_false_preserves_existing_meta(sample_tool):

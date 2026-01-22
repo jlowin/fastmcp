@@ -182,3 +182,28 @@ async def test_tool_transform_config_enabled_true_keeps_tool_visible():
     tool_names = [t.name for t in tools]
 
     assert "my_tool" in tool_names
+
+
+async def test_tool_transform_config_enabled_true_overrides_earlier_disable():
+    """Test that ToolTransformConfig with enabled=True can re-enable a previously disabled tool."""
+    mcp = FastMCP("Test Server")
+
+    @mcp.tool()
+    def my_tool() -> str:
+        return "result"
+
+    # Disable the tool first
+    mcp.disable(names={"my_tool"})
+
+    # Verify tool is initially hidden
+    tools = await mcp.list_tools()
+    assert "my_tool" not in [t.name for t in tools]
+
+    # Re-enable via transformation (later transforms win)
+    mcp.add_transform(ToolTransform({"my_tool": ToolTransformConfig(enabled=True)}))
+
+    tools = await mcp.list_tools()
+    tool_names = [t.name for t in tools]
+
+    # Tool should now be visible
+    assert "my_tool" in tool_names
