@@ -239,22 +239,25 @@ def was_already_auto_closed(comments: list[Comment]) -> bool:
     return False
 
 
-def should_close_as_duplicate(
+def is_past_cooldown(duplicate_comment: Comment) -> bool:
+    """Check if the 3-day cooldown period has passed."""
+    comment_date = datetime.fromisoformat(
+        duplicate_comment.created_at.replace("Z", "+00:00")
+    )
+    three_days_ago = datetime.now(timezone.utc) - timedelta(days=3)
+    return comment_date <= three_days_ago
+
+
+def has_human_activity(
     issue: Issue,
     duplicate_comment: Comment,
     all_comments: list[Comment],
     reactions: list[Reaction],
 ) -> bool:
-    """Determine if an issue should be closed as duplicate."""
-
-    # Check if comment is old enough (3 days)
+    """Check if there's human activity that should prevent auto-closure."""
     comment_date = datetime.fromisoformat(
         duplicate_comment.created_at.replace("Z", "+00:00")
     )
-    three_days_ago = datetime.now(timezone.utc) - timedelta(days=3)
-
-    if comment_date > three_days_ago:
-        return False
 
     # Check for preventing reactions (thumbs down)
     for reaction in reactions:
@@ -262,22 +265,21 @@ def should_close_as_duplicate(
             print(
                 f"Issue #{issue.number}: Has preventing reaction from {reaction.user_login}"
             )
-            return False
+            return True
 
-    # Check for any human activity after the duplicate comment
+    # Check for any human comment after the duplicate marking
     for comment in all_comments:
         comment_date_check = datetime.fromisoformat(
             comment.created_at.replace("Z", "+00:00")
         )
         if comment_date_check > comment_date:
-            # Any non-bot comment after duplicate marking prevents closure
             if comment.user_type != "Bot":
                 print(
                     f"Issue #{issue.number}: {comment.user_login} commented after duplicate marking"
                 )
-                return False
+                return True
 
-    return True
+    return False
 
 
 def main():
@@ -329,29 +331,35 @@ def main():
 
         print(f"[DEBUG] Issue #{issue.number} has duplicate comment")
 
+        # Still in cooldown period - skip for now, check again later
+        if not is_past_cooldown(duplicate_comment):
+            print(f"[DEBUG] Issue #{issue.number} still in 3-day cooldown period")
+            continue
+
         # Get reactions on the duplicate comment
         reactions = client.get_comment_reactions(issue.number, duplicate_comment.id)
 
-        # Check if we should close
-        if should_close_as_duplicate(issue, duplicate_comment, comments, reactions):
-            close_message = (
-                "Closing this issue as a duplicate based on the automated analysis above.\n\n"
-                "The duplicate issues identified contain existing discussions and potential solutions. "
-                "Please add your 👍 to those issues if they match your use case.\n\n"
-                "If this was closed in error, please leave a comment explaining why this is not "
-                "a duplicate and we'll reopen it."
-            )
-
-            if client.close_issue(issue.number, close_message):
-                print(f"[SUCCESS] Closed issue #{issue.number} as duplicate")
-                closed_count += 1
-            else:
-                print(f"[ERROR] Failed to close issue #{issue.number}")
-        else:
-            # Human activity prevented closure - remove the label
+        # Check for human activity that prevents closure
+        if has_human_activity(issue, duplicate_comment, comments, reactions):
             print(f"[DEBUG] Issue #{issue.number} has human activity, removing label")
             client.remove_label(issue.number, "potential-duplicate")
             cleared_count += 1
+            continue
+
+        # No human activity after cooldown - close as duplicate
+        close_message = (
+            "Closing this issue as a duplicate based on the automated analysis above.\n\n"
+            "The duplicate issues identified contain existing discussions and potential solutions. "
+            "Please add your 👍 to those issues if they match your use case.\n\n"
+            "If this was closed in error, please leave a comment explaining why this is not "
+            "a duplicate and we'll reopen it."
+        )
+
+        if client.close_issue(issue.number, close_message):
+            print(f"[SUCCESS] Closed issue #{issue.number} as duplicate")
+            closed_count += 1
+        else:
+            print(f"[ERROR] Failed to close issue #{issue.number}")
 
     print(
         f"[DEBUG] Processing complete. Closed {closed_count} duplicates, "
