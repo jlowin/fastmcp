@@ -892,6 +892,31 @@ class TransformedTool(Tool):
         )
 
 
+# Visibility metadata keys (matching fastmcp.server.transforms.visibility)
+_FASTMCP_KEY = "fastmcp"
+_INTERNAL_KEY = "_internal"
+
+
+def _set_visibility_metadata(tool: Tool, *, enabled: bool) -> None:
+    """Set visibility state in tool metadata.
+
+    This uses the same metadata format as the Visibility transform,
+    so tools marked here will be filtered by the standard visibility system.
+
+    Args:
+        tool: Tool to mark.
+        enabled: Whether the tool should be visible to clients.
+    """
+    if tool.meta is None:
+        tool.meta = {_FASTMCP_KEY: {_INTERNAL_KEY: {"visibility": enabled}}}
+    else:
+        old_fastmcp = tool.meta.get(_FASTMCP_KEY, {})
+        old_internal = old_fastmcp.get(_INTERNAL_KEY, {})
+        new_internal = {**old_internal, "visibility": enabled}
+        new_fastmcp = {**old_fastmcp, _INTERNAL_KEY: new_internal}
+        tool.meta = {**tool.meta, _FASTMCP_KEY: new_fastmcp}
+
+
 class ToolTransformConfig(FastMCPBaseModel):
     """Provides a way to transform a tool."""
 
@@ -915,6 +940,10 @@ class ToolTransformConfig(FastMCPBaseModel):
         default=None,
         description="The new meta information for the tool.",
     )
+    enabled: bool = Field(
+        default=True,
+        description="Whether the tool is enabled. If False, the tool will be hidden from clients.",
+    )
 
     arguments: dict[str, ArgTransformConfig] = Field(
         default_factory=dict,
@@ -925,14 +954,20 @@ class ToolTransformConfig(FastMCPBaseModel):
         """Create a TransformedTool from a provided tool and this transformation configuration."""
 
         tool_changes: dict[str, Any] = self.model_dump(
-            exclude_unset=True, exclude={"arguments"}
+            exclude_unset=True, exclude={"arguments", "enabled"}
         )
 
-        return TransformedTool.from_tool(
+        transformed = TransformedTool.from_tool(
             tool=tool,
             **tool_changes,
             transform_args={k: v.to_arg_transform() for k, v in self.arguments.items()},
         )
+
+        # Set visibility metadata if disabled
+        if not self.enabled:
+            _set_visibility_metadata(transformed, enabled=False)
+
+        return transformed
 
 
 def apply_transformations_to_tools(
