@@ -892,11 +892,6 @@ class TransformedTool(Tool):
         )
 
 
-# Visibility metadata keys (matching fastmcp.server.transforms.visibility)
-_FASTMCP_KEY = "fastmcp"
-_INTERNAL_KEY = "_internal"
-
-
 def _set_visibility_metadata(tool: Tool, *, enabled: bool) -> None:
     """Set visibility state in tool metadata.
 
@@ -907,6 +902,9 @@ def _set_visibility_metadata(tool: Tool, *, enabled: bool) -> None:
         tool: Tool to mark.
         enabled: Whether the tool should be visible to clients.
     """
+    # Import here to avoid circular imports
+    from fastmcp.server.transforms.visibility import _FASTMCP_KEY, _INTERNAL_KEY
+
     if tool.meta is None:
         tool.meta = {_FASTMCP_KEY: {_INTERNAL_KEY: {"visibility": enabled}}}
     else:
