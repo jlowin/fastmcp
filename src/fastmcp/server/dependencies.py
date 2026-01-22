@@ -1124,52 +1124,7 @@ class Progress(Dependency):  # type: ignore[misc]
         pass
 
 
-# --- Authentication dependencies ---
-
-
-class _CurrentAccessToken(Dependency):  # type: ignore[misc]
-    """Dependency that provides the current access token.
-
-    Raises AuthenticationError if no token is available.
-    """
-
-    async def __aenter__(self) -> AccessToken:
-        token = get_access_token()
-        if token is None:
-            raise RuntimeError(
-                "No access token available. Ensure the request is authenticated."
-            )
-        return token
-
-    async def __aexit__(self, *args: object) -> None:
-        pass
-
-
-# Pre-instantiated singleton - no () needed when using as default
-CurrentAccessToken: AccessToken = cast(AccessToken, _CurrentAccessToken())
-"""Get the current access token as a dependency.
-
-This dependency provides access to the full AccessToken object for the
-current authenticated request. It raises an error if no token is available.
-
-Returns:
-    A dependency that resolves to the AccessToken for the current request
-
-Raises:
-    RuntimeError: If no access token is available (during resolution)
-
-Example:
-    ```python
-    from fastmcp.server.dependencies import CurrentAccessToken
-    from fastmcp.server.auth import AccessToken
-
-    @mcp.tool()
-    async def my_tool(token: AccessToken = CurrentAccessToken):
-        user_id = token.claims.get("oid")  # Azure user ID
-        upstream_token = token.token  # For OBO or downstream calls
-        return f"User: {user_id}"
-    ```
-"""
+# --- Token Claim dependency ---
 
 
 class _TokenClaim(Dependency):  # type: ignore[misc]

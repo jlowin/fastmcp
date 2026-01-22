@@ -1096,7 +1096,7 @@ class TestAuthDependencies:
         from fastmcp.server.dependencies import _CurrentAccessToken
 
         dep = _CurrentAccessToken()
-        with pytest.raises(RuntimeError, match="No access token available"):
+        with pytest.raises(RuntimeError, match="No access token found"):
             await dep.__aenter__()
 
     async def test_token_claim_raises_without_token(self):
@@ -1117,7 +1117,7 @@ class TestAuthDependencies:
         @mcp.tool()
         async def tool_with_token(
             name: str,
-            token: AccessToken = CurrentAccessToken,
+            token: AccessToken = CurrentAccessToken(),
         ) -> str:
             return name
 

@@ -666,38 +666,36 @@ class _MSALApp(Dependency):  # type: ignore[misc]
         pass
 
 
-# Pre-instantiated singleton - no () needed when using as default
-MSALApp: ConfidentialClientApplication = cast(
-    "ConfidentialClientApplication", _MSALApp()
-)
-"""Get a pre-configured MSAL ConfidentialClientApplication as a dependency.
+def MSALApp() -> ConfidentialClientApplication:
+    """Get a pre-configured MSAL ConfidentialClientApplication as a dependency.
 
-This dependency provides an MSAL client configured with the same credentials
-as the AzureProvider. Use it for custom OBO scenarios or other MSAL operations.
+    This dependency provides an MSAL client configured with the same credentials
+    as the AzureProvider. Use it for custom OBO scenarios or other MSAL operations.
 
-Returns:
-    A dependency that resolves to a ConfidentialClientApplication
+    Returns:
+        A dependency that resolves to a ConfidentialClientApplication
 
-Raises:
-    ImportError: If fastmcp[azure] is not installed
-    RuntimeError: If the auth provider is not an AzureProvider
+    Raises:
+        ImportError: If fastmcp[azure] is not installed
+        RuntimeError: If the auth provider is not an AzureProvider
 
-Example:
-    ```python
-    from fastmcp.server.auth.providers.azure import MSALApp
-    from fastmcp.server.dependencies import get_access_token
-    from msal import ConfidentialClientApplication
+    Example:
+        ```python
+        from fastmcp.server.auth.providers.azure import MSALApp
+        from fastmcp.server.dependencies import get_access_token
+        from msal import ConfidentialClientApplication
 
-    @mcp.tool()
-    async def custom_obo(msal: ConfidentialClientApplication = MSALApp):
-        token = get_access_token()
-        result = msal.acquire_token_on_behalf_of(
-            user_assertion=token.token,
-            scopes=["https://graph.microsoft.com/.default"]
-        )
-        return result["access_token"]
-    ```
-"""
+        @mcp.tool()
+        async def custom_obo(msal: ConfidentialClientApplication = MSALApp()):
+            token = get_access_token()
+            result = msal.acquire_token_on_behalf_of(
+                user_assertion=token.token,
+                scopes=["https://graph.microsoft.com/.default"]
+            )
+            return result["access_token"]
+        ```
+    """
+    return cast(ConfidentialClientApplication, _MSALApp())
 
 
 class _EntraOBOToken(Dependency):  # type: ignore[misc]

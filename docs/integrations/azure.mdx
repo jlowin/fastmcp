@@ -475,8 +475,8 @@ mcp = FastMCP(name="Custom OBO Server", auth=auth_provider)
 
 @mcp.tool
 async def custom_graph_call(
-    token: AccessToken = CurrentAccessToken,
-    msal: ConfidentialClientApplication = MSALApp,
+    token: AccessToken = CurrentAccessToken(),
+    msal: ConfidentialClientApplication = MSALApp(),
 ) -> dict:
     """Perform a custom OBO exchange with error handling."""
     result = msal.acquire_token_on_behalf_of(
