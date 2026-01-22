@@ -18,7 +18,7 @@ Dependency parameters are automatically excluded from the MCP schema—clients n
 
 ## How Dependency Injection Works
 
-Dependency injection in FastMCP follows a simple pattern: declare a parameter with a dependency as its default value, and FastMCP injects the resolved value at runtime.
+Dependency injection in FastMCP follows a simple pattern: declare a parameter with a recognized type annotation or a dependency default value, and FastMCP injects the resolved value at runtime.
 
 ```python
 from fastmcp import FastMCP
