@@ -313,6 +313,15 @@ class FunctionPrompt(Prompt):
             logger.exception(f"Error rendering prompt {self.name}")
             raise PromptError(f"Error rendering prompt {self.name}.") from e
 
+    @property
+    def docket_callable(self) -> Callable[..., Any]:
+        """Return the callable that would be registered with Docket.
+
+        FunctionPrompt returns self.fn (the underlying function with user's
+        Depends parameters for Docket to resolve).
+        """
+        return self.fn
+
     def register_with_docket(self, docket: Docket) -> None:
         """Register this prompt with docket for background execution.
 
@@ -321,7 +330,7 @@ class FunctionPrompt(Prompt):
         """
         if not self.task_config.supports_tasks():
             return
-        docket.register(self.fn, names=[self.key])
+        docket.register(self.docket_callable, names=[self.key])
 
     async def add_to_docket(
         self,

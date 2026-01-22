@@ -230,7 +230,7 @@ class ResourceTemplate(FastMCPComponent):
             component=self, task_type="template", arguments=params, task_meta=task_meta
         )
         if task_result:
-            return task_result
+            return task_result  # type: ignore[return-value]
 
         # Synchronous execution - create resource and read directly
         # Call resource.read() not resource._read() to avoid task routing on ephemeral resource
@@ -287,11 +287,19 @@ class ResourceTemplate(FastMCPComponent):
         base_key = self.make_key(self.uri_template)
         return f"{base_key}@{self.version or ''}"
 
+    @property
+    def docket_callable(self) -> Callable[..., Any]:
+        """Return the callable that would be registered with Docket.
+
+        For base ResourceTemplate, this is self.read. FunctionResourceTemplate overrides to return self.fn.
+        """
+        return self.read
+
     def register_with_docket(self, docket: Docket) -> None:
         """Register this template with docket for background execution."""
         if not self.task_config.supports_tasks():
             return
-        docket.register(self.read, names=[self.key])
+        docket.register(self.docket_callable, names=[self.key])
 
     async def add_to_docket(  # type: ignore[override]
         self,
@@ -363,7 +371,7 @@ class FunctionResourceTemplate(ResourceTemplate):
             component=self, task_type="template", arguments=params, task_meta=task_meta
         )
         if task_result:
-            return task_result
+            return task_result  # type: ignore[return-value]
 
         # Synchronous execution - call read() directly, skip resource creation
         result = await self.read(arguments=params)
@@ -419,6 +427,15 @@ class FunctionResourceTemplate(ResourceTemplate):
 
         return result
 
+    @property
+    def docket_callable(self) -> Callable[..., Any]:
+        """Return the callable that would be registered with Docket.
+
+        FunctionResourceTemplate returns self.fn (the underlying function with user's
+        Depends parameters for Docket to resolve).
+        """
+        return self.fn
+
     def register_with_docket(self, docket: Docket) -> None:
         """Register this template with docket for background execution.
 
@@ -427,7 +444,7 @@ class FunctionResourceTemplate(ResourceTemplate):
         """
         if not self.task_config.supports_tasks():
             return
-        docket.register(self.fn, names=[self.key])
+        docket.register(self.docket_callable, names=[self.key])
 
     async def add_to_docket(
         self,

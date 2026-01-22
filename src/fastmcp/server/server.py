@@ -1371,7 +1371,6 @@ class FastMCP(
         exclude_args: list[str] | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
-        timeout: float | None = None,
         auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
     ) -> FunctionTool: ...
 
@@ -1391,7 +1390,6 @@ class FastMCP(
         exclude_args: list[str] | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
-        timeout: float | None = None,
         auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
     ) -> Callable[[AnyFunction], FunctionTool]: ...
 
@@ -1410,7 +1408,6 @@ class FastMCP(
         exclude_args: list[str] | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
-        timeout: float | None = None,
         auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
     ) -> (
         Callable[[AnyFunction], FunctionTool]
@@ -1479,7 +1476,6 @@ class FastMCP(
             exclude_args=exclude_args,
             meta=meta,
             task=task if task is not None else self._support_tasks_by_default,
-            timeout=timeout,
             serializer=self._tool_serializer,
             auth=auth,
         )

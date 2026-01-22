@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, TypedDict, cast
 
 from mcp.types import Icon
@@ -203,6 +203,18 @@ class FastMCPComponent(FastMCPBaseModel):
     def copy(self) -> Self:  # type: ignore[override]
         """Create a copy of the component."""
         return self.model_copy()
+
+    @property
+    def docket_callable(self) -> Callable[..., Any] | None:
+        """Return the callable that would be registered with Docket.
+
+        Subclasses override to return their specific callable:
+        - Tool: self.run (or self.fn for FunctionTool)
+        - Resource: self.read (or self.fn for FunctionResource)
+        - Prompt: self.render (or self.fn for FunctionPrompt)
+        - ResourceTemplate: self.read (or self.fn for FunctionResourceTemplate)
+        """
+        return None  # Base implementation; subclasses override
 
     def register_with_docket(self, docket: Docket) -> None:
         """Register this component with docket for background execution.

@@ -64,7 +64,6 @@ class ToolDecoratorMixin:
                     task=resolved_task,
                     exclude_args=meta.exclude_args,
                     serializer=meta.serializer,
-                    timeout=meta.timeout,
                     auth=meta.auth,
                 )
             else:
@@ -114,7 +113,6 @@ class ToolDecoratorMixin:
         enabled: bool = True,
         task: bool | TaskConfig | None = None,
         serializer: ToolResultSerializerType | None = None,  # Deprecated
-        timeout: float | None = None,
         auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
     ) -> Callable[[AnyFunction], FunctionTool]: ...
 
@@ -139,7 +137,6 @@ class ToolDecoratorMixin:
         enabled: bool = True,
         task: bool | TaskConfig | None = None,
         serializer: ToolResultSerializerType | None = None,  # Deprecated
-        timeout: float | None = None,
         auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
     ) -> (
         Callable[[AnyFunction], FunctionTool]
@@ -243,7 +240,6 @@ class ToolDecoratorMixin:
                     meta=meta,
                     serializer=serializer,
                     task=resolved_task,
-                    timeout=timeout,
                     auth=auth,
                 )
                 self._add_component(tool_obj)
@@ -266,7 +262,6 @@ class ToolDecoratorMixin:
                     task=task,
                     exclude_args=exclude_args,
                     serializer=serializer,
-                    timeout=timeout,
                     auth=auth,
                     enabled=enabled,
                 )
@@ -310,6 +305,5 @@ class ToolDecoratorMixin:
             enabled=enabled,
             task=task,
             serializer=serializer,
-            timeout=timeout,
             auth=auth,
         )

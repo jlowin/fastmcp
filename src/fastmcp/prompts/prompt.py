@@ -357,17 +357,25 @@ class Prompt(FastMCPComponent):
             task_meta=task_meta,
         )
         if task_result:
-            return task_result
+            return task_result  # type: ignore[return-value]
 
         # Synchronous execution
         result = await self.render(arguments)
         return self.convert_result(result)
 
+    @property
+    def docket_callable(self) -> Callable[..., Any]:
+        """Return the callable that would be registered with Docket.
+
+        For base Prompt, this is self.render. FunctionPrompt overrides to return self.fn.
+        """
+        return self.render
+
     def register_with_docket(self, docket: Docket) -> None:
         """Register this prompt with docket for background execution."""
         if not self.task_config.supports_tasks():
             return
-        docket.register(self.render, names=[self.key])
+        docket.register(self.docket_callable, names=[self.key])
 
     async def add_to_docket(  # type: ignore[override]
         self,

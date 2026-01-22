@@ -11,14 +11,15 @@ import mcp.types
 from mcp.shared.exceptions import McpError
 from mcp.types import METHOD_NOT_FOUND, ErrorData
 
+from fastmcp.server.dependencies import requires_docket_execution
 from fastmcp.server.tasks.config import TaskMeta
-from fastmcp.server.tasks.handlers import submit_to_docket
+from fastmcp.server.tasks.handlers import run_in_docket_sync, submit_to_docket
 
 if TYPE_CHECKING:
-    from fastmcp.prompts.prompt import Prompt
-    from fastmcp.resources.resource import Resource
+    from fastmcp.prompts.prompt import Prompt, PromptResult
+    from fastmcp.resources.resource import Resource, ResourceResult
     from fastmcp.resources.template import ResourceTemplate
-    from fastmcp.tools.tool import Tool
+    from fastmcp.tools.tool import Tool, ToolResult
 
 TaskType = Literal["tool", "resource", "template", "prompt"]
 
@@ -28,8 +29,12 @@ async def check_background_task(
     task_type: TaskType,
     arguments: dict[str, Any] | None = None,
     task_meta: TaskMeta | None = None,
-) -> mcp.types.CreateTaskResult | None:
+) -> mcp.types.CreateTaskResult | ToolResult | ResourceResult | PromptResult | None:
     """Check task mode and submit to background if requested.
+
+    Also handles auto-routing for components with Docket dependencies:
+    if a component uses Timeout, Retry, etc. and wasn't explicitly requested
+    as a background task, we run it through Docket with sync-wait semantics.
 
     Args:
         component: The MCP component
@@ -38,7 +43,9 @@ async def check_background_task(
         task_meta: Task execution metadata. If provided, execute as background task.
 
     Returns:
-        CreateTaskResult if submitted to docket, None for sync execution
+        CreateTaskResult if submitted to docket as background task,
+        ToolResult/ResourceResult/PromptResult if auto-routed through Docket sync,
+        None for regular sync execution
 
     Raises:
         McpError: If mode="required" but no task metadata, or mode="forbidden"
@@ -67,7 +74,12 @@ async def check_background_task(
             )
         )
 
-    # No task metadata - synchronous execution
+    # Auto-route through Docket if component has Docket dependencies
+    # This ensures Timeout, Retry, etc. work even for foreground calls
+    if not task_meta and requires_docket_execution(component):
+        return await run_in_docket_sync(task_type, component, arguments)
+
+    # No task metadata - regular synchronous execution
     if not task_meta:
         return None
 

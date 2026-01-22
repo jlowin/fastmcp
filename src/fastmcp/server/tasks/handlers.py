@@ -8,21 +8,23 @@ from __future__ import annotations
 import uuid
 from contextlib import suppress
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal
 
 import mcp.types
+from docket.execution import ExecutionState
 from mcp.shared.exceptions import McpError
 from mcp.types import INTERNAL_ERROR, ErrorData
 
+from fastmcp.prompts.prompt import Prompt, PromptResult
+from fastmcp.resources.resource import Resource, ResourceResult
+from fastmcp.resources.template import ResourceTemplate
 from fastmcp.server.dependencies import _current_docket, get_context
 from fastmcp.server.tasks.config import TaskMeta
 from fastmcp.server.tasks.keys import build_task_key
+from fastmcp.tools.tool import Tool, ToolResult
+from fastmcp.utilities.logging import get_logger
 
-if TYPE_CHECKING:
-    from fastmcp.prompts.prompt import Prompt
-    from fastmcp.resources.resource import Resource
-    from fastmcp.resources.template import ResourceTemplate
-    from fastmcp.tools.tool import Tool
+logger = get_logger(__name__)
 
 # Redis mapping TTL buffer: Add 15 minutes to Docket's execution_ttl
 TASK_MAPPING_TTL_BUFFER_SECONDS = 15 * 60
@@ -155,3 +157,86 @@ async def submit_to_docket(
             pollInterval=poll_interval_ms,
         )
     )
+
+
+async def run_in_docket_sync(
+    task_type: Literal["tool", "resource", "template", "prompt"],
+    component: Tool | Resource | ResourceTemplate | Prompt,
+    arguments: dict[str, Any] | None = None,
+) -> ToolResult | ResourceResult | PromptResult:
+    """Submit to Docket and wait for result (foreground semantics).
+
+    This is used when a component has Docket-specific dependencies (Timeout,
+    Retry, etc.) but the caller didn't request background execution. We run
+    through Docket to honor the dependencies, but wait for the result.
+
+    Args:
+        task_type: Component type ("tool", "resource", "template", "prompt")
+        component: The component instance
+        arguments: Arguments for tool/prompt/template execution
+
+    Returns:
+        The component's result (ToolResult, ResourceResult, or PromptResult)
+
+    Raises:
+        McpError: If Docket is not available or execution fails
+    """
+    docket = _current_docket.get()
+    if docket is None:
+        raise McpError(
+            ErrorData(
+                code=INTERNAL_ERROR,
+                message="Docket dependencies require a running FastMCP server with Docket enabled",
+            )
+        )
+
+    # Generate a unique task key for this sync execution
+    task_key = f"fastmcp:sync:{uuid.uuid4()}"
+    fn_key = component.key
+
+    # Queue the function to Docket
+    # Component types have different add_to_docket signatures
+    if isinstance(component, Resource):
+        execution = await component.add_to_docket(
+            docket, fn_key=fn_key, task_key=task_key
+        )
+    elif isinstance(component, (Tool, ResourceTemplate)):
+        args = arguments if arguments is not None else {}
+        execution = await component.add_to_docket(
+            docket, args, fn_key=fn_key, task_key=task_key
+        )
+    else:  # Prompt
+        execution = await component.add_to_docket(
+            docket, arguments, fn_key=fn_key, task_key=task_key
+        )
+
+    # Wait for execution to complete
+    terminal_states: set[ExecutionState] = {
+        ExecutionState.COMPLETED,
+        ExecutionState.FAILED,
+        ExecutionState.CANCELLED,
+    }
+
+    async for event in execution.subscribe():
+        if hasattr(event, "state") and event.state in terminal_states:
+            break
+
+    # Get the result - execution is complete so this returns immediately.
+    # If the task failed, get_result re-raises the stored exception (which could
+    # be any exception type from the user's function), so we catch broadly.
+    try:
+        raw_result = await execution.get_result()
+    except McpError:
+        raise  # Don't wrap MCP errors
+    except Exception as e:
+        logger.error(f"Docket execution failed for {component.key}: {e}")
+        raise McpError(
+            ErrorData(
+                code=INTERNAL_ERROR,
+                message=f"Docket execution failed: {e}",
+            )
+        ) from e
+
+    # Convert raw result to appropriate MCP type
+    # The convert_result method handles the transformation
+    return component.convert_result(raw_result)

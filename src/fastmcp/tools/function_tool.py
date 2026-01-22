@@ -16,10 +16,8 @@ from typing import (
     runtime_checkable,
 )
 
-import anyio
 import mcp.types
-from mcp.shared.exceptions import McpError
-from mcp.types import ErrorData, Icon, ToolAnnotations, ToolExecution
+from mcp.types import Icon, ToolAnnotations, ToolExecution
 
 import fastmcp
 from fastmcp.decorators import resolve_task_config
@@ -75,7 +73,6 @@ class ToolMeta:
     task: bool | TaskConfig | None = None
     exclude_args: list[str] | None = None
     serializer: Any | None = None
-    timeout: float | None = None
     auth: AuthCheckCallable | list[AuthCheckCallable] | None = None
     enabled: bool = True
 
@@ -120,7 +117,6 @@ class FunctionTool(Tool):
         serializer: ToolResultSerializerType | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
-        timeout: float | None = None,
         auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
     ) -> FunctionTool:
         """Create a FunctionTool from a function.
@@ -147,7 +143,6 @@ class FunctionTool(Tool):
                     meta,
                     task,
                     serializer,
-                    timeout,
                     auth,
                 ]
             )
@@ -176,7 +171,6 @@ class FunctionTool(Tool):
                 task=task,
                 exclude_args=exclude_args,
                 serializer=serializer,
-                timeout=timeout,
                 auth=auth,
             )
 
@@ -240,7 +234,6 @@ class FunctionTool(Tool):
             serializer=metadata.serializer,
             meta=metadata.meta,
             task_config=task_config,
-            timeout=metadata.timeout,
             auth=metadata.auth,
         )
 
@@ -249,45 +242,25 @@ class FunctionTool(Tool):
         wrapper_fn = without_injected_parameters(self.fn)
         type_adapter = get_cached_typeadapter(wrapper_fn)
 
-        # Apply timeout if configured
-        if self.timeout is not None:
-            try:
-                with anyio.fail_after(self.timeout):
-                    # Thread pool execution for sync functions, direct await for async
-                    if inspect.iscoroutinefunction(wrapper_fn):
-                        result = await type_adapter.validate_python(arguments)
-                    else:
-                        # Sync function: run in threadpool to avoid blocking
-                        result = await call_sync_fn_in_threadpool(
-                            type_adapter.validate_python, arguments
-                        )
-                        # Handle sync wrappers that return awaitables
-                        if inspect.isawaitable(result):
-                            result = await result
-            except TimeoutError:
-                logger.warning(
-                    f"Tool '{self.name}' timed out after {self.timeout}s. "
-                    f"Consider using task=True for long-running operations. "
-                    f"See https://gofastmcp.com/servers/tasks"
-                )
-                raise McpError(
-                    ErrorData(
-                        code=-32000,
-                        message=f"Tool '{self.name}' execution timed out after {self.timeout}s",
-                    )
-                ) from None
+        if inspect.iscoroutinefunction(wrapper_fn):
+            result = await type_adapter.validate_python(arguments)
         else:
-            # No timeout: use existing execution path
-            if inspect.iscoroutinefunction(wrapper_fn):
-                result = await type_adapter.validate_python(arguments)
-            else:
-                result = await call_sync_fn_in_threadpool(
-                    type_adapter.validate_python, arguments
-                )
-                if inspect.isawaitable(result):
-                    result = await result
+            result = await call_sync_fn_in_threadpool(
+                type_adapter.validate_python, arguments
+            )
+            if inspect.isawaitable(result):
+                result = await result
 
         return self.convert_result(result)
+
+    @property
+    def docket_callable(self) -> Callable[..., Any]:
+        """Return the callable that would be registered with Docket.
+
+        FunctionTool returns self.fn (the underlying function with user's
+        Depends parameters for Docket to resolve).
+        """
+        return self.fn
 
     def register_with_docket(self, docket: Docket) -> None:
         """Register this tool with docket for background execution.
@@ -297,7 +270,7 @@ class FunctionTool(Tool):
         """
         if not self.task_config.supports_tasks():
             return
-        docket.register(self.fn, names=[self.key])
+        docket.register(self.docket_callable, names=[self.key])
 
     async def add_to_docket(
         self,
@@ -342,7 +315,6 @@ def tool(
     task: bool | TaskConfig | None = None,
     exclude_args: list[str] | None = None,
     serializer: Any | None = None,
-    timeout: float | None = None,
     auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
 ) -> Callable[[F], F]: ...
 @overload
@@ -361,7 +333,6 @@ def tool(
     task: bool | TaskConfig | None = None,
     exclude_args: list[str] | None = None,
     serializer: Any | None = None,
-    timeout: float | None = None,
     auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
 ) -> Callable[[F], F]: ...
 
@@ -381,7 +352,6 @@ def tool(
     task: bool | TaskConfig | None = None,
     exclude_args: list[str] | None = None,
     serializer: Any | None = None,
-    timeout: float | None = None,
     auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
 ) -> Any:
     """Standalone decorator to mark a function as an MCP tool.
@@ -413,7 +383,6 @@ def tool(
             task=resolve_task_config(task),
             exclude_args=exclude_args,
             serializer=serializer,
-            timeout=timeout,
             auth=auth,
         )
         return FunctionTool.from_function(fn, metadata=tool_meta)
@@ -432,7 +401,6 @@ def tool(
             task=task,
             exclude_args=exclude_args,
             serializer=serializer,
-            timeout=timeout,
             auth=auth,
         )
         target = fn.__func__ if hasattr(fn, "__func__") else fn

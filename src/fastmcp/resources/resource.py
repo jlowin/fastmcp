@@ -349,7 +349,7 @@ class Resource(FastMCPComponent):
             component=self, task_type="resource", arguments=None, task_meta=task_meta
         )
         if task_result:
-            return task_result
+            return task_result  # type: ignore[return-value]
 
         # Synchronous execution - convert result to ResourceResult
         result = await self.read()
@@ -383,11 +383,19 @@ class Resource(FastMCPComponent):
         base_key = self.make_key(str(self.uri))
         return f"{base_key}@{self.version or ''}"
 
+    @property
+    def docket_callable(self) -> Callable[..., Any]:
+        """Return the callable that would be registered with Docket.
+
+        For base Resource, this is self.read. FunctionResource overrides to return self.fn.
+        """
+        return self.read
+
     def register_with_docket(self, docket: Docket) -> None:
         """Register this resource with docket for background execution."""
         if not self.task_config.supports_tasks():
             return
-        docket.register(self.read, names=[self.key])
+        docket.register(self.docket_callable, names=[self.key])
 
     async def add_to_docket(  # type: ignore[override]
         self,

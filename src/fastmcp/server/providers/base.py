@@ -416,14 +416,18 @@ class Provider:
     # -------------------------------------------------------------------------
 
     async def get_tasks(self) -> Sequence[FastMCPComponent]:
-        """Return components that should be registered as background tasks.
+        """Return components that should be registered with Docket.
 
         Override to customize which components are task-eligible.
         Default calls list_* methods, applies provider transforms, and filters
-        for components with task_config.mode != 'forbidden'.
+        for components that either:
+        - Have task_config.mode != 'forbidden' (explicit task support), OR
+        - Have Docket-specific dependencies (Timeout, Retry, etc.)
 
         Used by the server during startup to register functions with Docket.
         """
+        from fastmcp.server.dependencies import requires_docket_execution
+
         # Fetch all component types in parallel
         results = await gather(
             self._list_tools(),
@@ -452,7 +456,7 @@ class Provider:
                 *templates,
                 *prompts,
             ]
-            if c.task_config.supports_tasks()
+            if c.task_config.supports_tasks() or requires_docket_execution(c)
         ]
 
     # -------------------------------------------------------------------------

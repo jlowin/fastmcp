@@ -810,20 +810,53 @@ Documentation: [Lifespan](/servers/lifespan)
 
 ---
 
-## Tool Timeout
+The features above were released in **v3.0.0b1**.
 
-Tools can limit foreground execution time with a `timeout` parameter ([#2872](https://github.com/jlowin/fastmcp/pull/2872)):
+---
+
+## v3.0 Beta 2 Features
+
+---
+
+## Auto-Docket Execution
+
+Components with Docket dependencies (like `Timeout`, `Retry`, `ExponentialRetry`) automatically route through Docket, ensuring consistent behavior for both foreground and background execution.
 
 ```python
-@mcp.tool(timeout=30.0)
-async def fetch_data(url: str) -> dict:
-    """Fetch with 30-second timeout."""
+from datetime import timedelta
+from docket import Timeout, ExponentialRetry
+from fastmcp import FastMCP
+
+mcp = FastMCP("Server")
+
+@mcp.tool
+async def fetch_data(
+    url: str,
+    timeout: Timeout = Timeout(timedelta(seconds=30)),
+    retry: ExponentialRetry = ExponentialRetry(max_attempts=3),
+) -> dict:
+    """Fetch with timeout and automatic retry."""
     ...
 ```
 
-When exceeded, clients receive MCP error code `-32000`. Both sync and async tools are supported—sync functions run in thread pools so the timeout applies regardless of execution model.
+When FastMCP detects these Docket dependencies in a component's function signature, it:
 
-Note: This timeout applies to foreground execution only. Background tasks (`task=True`) execute in Docket workers where this timeout isn't enforced.
+1. **Registers the component with Docket at startup** - even if `task=True` wasn't specified
+2. **Routes foreground calls through Docket** - ensuring timeouts/retries work correctly
+3. **Uses the same code path for background tasks** - unified execution model
+
+This replaces the previous `timeout` parameter on `@mcp.tool()`. The Docket approach has several advantages:
+
+- **Unified behavior**: Timeouts and retries work identically for foreground and background execution
+- **Battle-tested implementation**: Docket's timeout/retry logic handles edge cases properly
+- **Composable**: Multiple dependencies can be combined (timeout + retry + concurrency limits)
+- **Declarative**: Dependencies in the function signature clearly document requirements
+
+Supported Docket dependencies:
+- `Timeout` - Cancel execution after a duration
+- `Retry` / `ExponentialRetry` - Retry on failure with configurable backoff
+- `ConcurrencyLimit` - Limit concurrent executions
+- `CurrentDocket` / `CurrentWorker` / `CurrentExecution` - Access Docket runtime context
 
 ---
 

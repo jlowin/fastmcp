@@ -54,6 +54,7 @@ __all__ = [
     "get_server",
     "is_docket_available",
     "require_docket",
+    "requires_docket_execution",
     "resolve_dependencies",
     "transform_context_annotations",
     "without_injected_parameters",
@@ -100,6 +101,61 @@ def require_docket(feature: str) -> None:
             f"Install with: pip install 'fastmcp[tasks]'. "
             f"(Triggered by {feature})"
         )
+
+
+def requires_docket_execution(component: Any) -> bool:
+    """Check if a component has Docket-specific dependencies requiring Docket execution.
+
+    Docket provides dependencies like Timeout, Retry, ExponentialRetry that
+    integrate with its task lifecycle. If a component's callable uses these,
+    it must be executed through Docket for them to function properly.
+
+    Args:
+        component: A FastMCP component (Tool, Resource, Prompt, etc.) with a
+            docket_callable property.
+
+    Returns:
+        True if the component's docket_callable uses Docket-specific dependencies.
+    """
+    callable_fn = getattr(component, "docket_callable", None)
+    if callable_fn is None:
+        return False
+
+    if not is_docket_available():
+        return False  # Can't have Docket deps without Docket installed
+
+    try:
+        from docket.dependencies import (
+            ConcurrencyLimit,
+            CurrentDocket,
+            CurrentExecution,
+            CurrentWorker,
+            ExponentialRetry,
+            Retry,
+            Timeout,
+        )
+        from docket.dependencies import (
+            get_dependency_parameters as _get_dep_params,
+        )
+    except ImportError:
+        return False
+
+    # Docket dependency types that require Docket execution
+    DOCKET_TYPES = (
+        Timeout,
+        Retry,
+        ExponentialRetry,
+        ConcurrencyLimit,
+        CurrentDocket,
+        CurrentWorker,
+        CurrentExecution,
+    )
+
+    # Use the DI system to find dependencies
+    deps = _get_dep_params(callable_fn)
+
+    # Check if any dependency is a Docket type
+    return any(isinstance(d, DOCKET_TYPES) for d in deps.values())
 
 
 # --- Dependency injection imports ---

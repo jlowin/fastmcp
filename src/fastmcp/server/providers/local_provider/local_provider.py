@@ -447,13 +447,22 @@ class LocalProvider(
     # =========================================================================
 
     async def get_tasks(self) -> Sequence[FastMCPComponent]:
-        """Return components eligible for background task execution.
+        """Return components eligible for Docket registration.
 
-        Returns components that have task_config.mode != 'forbidden'.
+        Returns components that:
+        - Have task_config.mode != 'forbidden' (explicit task support), OR
+        - Have Docket-specific dependencies (Timeout, Retry, etc.)
+
         This includes both FunctionTool/Resource/Prompt instances created via
         decorators and custom Tool/Resource/Prompt subclasses.
         """
-        return [c for c in self._components.values() if c.task_config.supports_tasks()]
+        from fastmcp.server.dependencies import requires_docket_execution
+
+        return [
+            c
+            for c in self._components.values()
+            if c.task_config.supports_tasks() or requires_docket_execution(c)
+        ]
 
     # =========================================================================
     # Decorator methods

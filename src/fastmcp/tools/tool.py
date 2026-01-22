@@ -149,12 +149,6 @@ class Tool(FastMCPComponent):
         AuthCheckCallable | list[AuthCheckCallable] | None,
         Field(description="Authorization checks for this tool", exclude=True),
     ] = None
-    timeout: Annotated[
-        float | None,
-        Field(
-            description="Execution timeout in seconds. If None, no timeout is applied."
-        ),
-    ] = None
 
     @model_validator(mode="after")
     def _validate_tool_name(self) -> Tool:
@@ -205,7 +199,6 @@ class Tool(FastMCPComponent):
         serializer: ToolResultSerializerType | None = None,  # Deprecated
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
-        timeout: float | None = None,
         auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
     ) -> FunctionTool:
         """Create a Tool from a function."""
@@ -225,7 +218,6 @@ class Tool(FastMCPComponent):
             serializer=serializer,
             meta=meta,
             task=task,
-            timeout=timeout,
             auth=auth,
         )
 
@@ -329,15 +321,23 @@ class Tool(FastMCPComponent):
             task_meta=task_meta,
         )
         if task_result:
-            return task_result
+            return task_result  # type: ignore[return-value]
 
         return await self.run(arguments)
+
+    @property
+    def docket_callable(self) -> Callable[..., Any]:
+        """Return the callable that would be registered with Docket.
+
+        For base Tool, this is self.run. FunctionTool overrides to return self.fn.
+        """
+        return self.run
 
     def register_with_docket(self, docket: Docket) -> None:
         """Register this tool with docket for background execution."""
         if not self.task_config.supports_tasks():
             return
-        docket.register(self.run, names=[self.key])
+        docket.register(self.docket_callable, names=[self.key])
 
     async def add_to_docket(  # type: ignore[override]
         self,
