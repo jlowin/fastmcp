@@ -756,7 +756,7 @@ requires-dist = [
     { name = "platformdirs", specifier = ">=4.0.0" },
     { name = "py-key-value-aio", extras = ["disk", "keyring", "memory"], specifier = ">=0.3.0,<0.4.0" },
     { name = "pydantic", extras = ["email"], specifier = ">=2.11.7" },
-    { name = "pydocket", git = "https://github.com/chrisguidry/docket.git?rev=fix-redis-connection-guards" },
+    { name = "pydocket", editable = "../../chrisguidry/docket" },
     { name = "pyperclip", specifier = ">=1.9.0" },
     { name = "python-dotenv", specifier = ">=1.1.0" },
     { name = "rich", specifier = ">=13.9.4" },
@@ -1732,8 +1732,7 @@ wheels = [
 
 [[package]]
 name = "pydocket"
-version = "0.17.2.dev1+g74b25f8af"
-source = { git = "https://github.com/chrisguidry/docket.git?rev=fix-redis-connection-guards#74b25f8afe8ca497fefc506008f2443f12559c60" }
+source = { editable = "../../chrisguidry/docket" }
 dependencies = [
     { name = "cloudpickle" },
     { name = "exceptiongroup", marker = "python_full_version < '3.11'" },
@@ -1744,8 +1743,67 @@ dependencies = [
     { name = "python-json-logger" },
     { name = "redis" },
     { name = "rich" },
+    { name = "taskgroup", marker = "python_full_version < '3.11'" },
     { name = "typer" },
     { name = "typing-extensions" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "cloudpickle", specifier = ">=3.1.1" },
+    { name = "exceptiongroup", marker = "python_full_version < '3.11'", specifier = ">=1.2.0" },
+    { name = "fakeredis", extras = ["lua"], specifier = ">=2.32.1" },
+    { name = "opentelemetry-api", specifier = ">=1.33.0" },
+    { name = "opentelemetry-sdk", marker = "extra == 'metrics'", specifier = ">=1.33.0" },
+    { name = "prometheus-client", specifier = ">=0.21.1" },
+    { name = "py-key-value-aio", extras = ["memory", "redis"], specifier = ">=0.3.0" },
+    { name = "python-json-logger", specifier = ">=2.0.7" },
+    { name = "redis", specifier = ">=5" },
+    { name = "rich", specifier = ">=13.9.4" },
+    { name = "taskgroup", marker = "python_full_version < '3.11'", specifier = ">=0.2.2" },
+    { name = "typer", specifier = ">=0.15.1" },
+    { name = "typing-extensions", specifier = ">=4.12.0" },
+]
+provides-extras = ["metrics"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "codespell", specifier = ">=2.4.1" },
+    { name = "docker", specifier = ">=7.1.0" },
+    { name = "ipython", specifier = ">=8.0.0" },
+    { name = "loq", specifier = ">=0.1.0a3" },
+    { name = "mypy", specifier = ">=1.14.1" },
+    { name = "opentelemetry-distro", specifier = ">=0.60b0" },
+    { name = "opentelemetry-exporter-otlp", specifier = ">=1.33.0" },
+    { name = "opentelemetry-exporter-prometheus", specifier = ">=0.60b0" },
+    { name = "opentelemetry-instrumentation", specifier = ">=0.60b0" },
+    { name = "opentelemetry-instrumentation-logging", specifier = ">=0.60b0" },
+    { name = "opentelemetry-instrumentation-redis", specifier = ">=0.60b0" },
+    { name = "opentelemetry-sdk", specifier = ">=1.33.0" },
+    { name = "prek", specifier = ">=0.2.13" },
+    { name = "pyright", specifier = ">=1.1.408" },
+    { name = "pytest", specifier = ">=8.3.4" },
+    { name = "pytest-asyncio", specifier = ">=0.24.0" },
+    { name = "pytest-cov", specifier = ">=6.0.0" },
+    { name = "pytest-flakefinder", specifier = ">=1.1.0" },
+    { name = "pytest-randomly", specifier = ">=4.0.0" },
+    { name = "pytest-repeat", specifier = ">=0.9.3" },
+    { name = "pytest-timeout", specifier = ">=2.4.0" },
+    { name = "pytest-xdist", specifier = ">=3.6.1" },
+    { name = "ruff", specifier = ">=0.9.7" },
+    { name = "urllib3", specifier = ">=2.6.3" },
+]
+docs = [
+    { name = "mkdocs", specifier = ">=1.5.3" },
+    { name = "mkdocs-material", specifier = ">=9.5.13" },
+    { name = "mkdocstrings", specifier = ">=0.24.1" },
+    { name = "mkdocstrings-python", specifier = ">=1.8.0" },
+]
+examples = [
+    { name = "fastapi", specifier = ">=0.120.0" },
+    { name = "pydantic", specifier = ">=2.11.10" },
+    { name = "starlette", specifier = ">=0.49.1" },
+    { name = "uvicorn", specifier = ">=0.38.0" },
 ]
 
 [[package]]
@@ -2398,6 +2456,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/ba/b8/73a0e6a6e079a9d9cfa64113d771e421640b6f679a52eeb9b32f72d871a1/starlette-0.50.0.tar.gz", hash = "sha256:a2a17b22203254bcbc2e1f926d2d55f3f9497f769416b3190768befe598fa3ca", size = 2646985, upload-time = "2025-11-01T15:25:27.516Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d9/52/1064f510b141bd54025f9b55105e26d1fa970b9be67ad766380a3c9b74b0/starlette-0.50.0-py3-none-any.whl", hash = "sha256:9e5391843ec9b6e472eed1365a78c8098cfceb7a74bfd4d6b1c0c0095efb3bca", size = 74033, upload-time = "2025-11-01T15:25:25.461Z" },
+]
+
+[[package]]
+name = "taskgroup"
+version = "0.2.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "exceptiongroup", marker = "python_full_version < '3.11'" },
+    { name = "typing-extensions", marker = "python_full_version < '3.11'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/f0/8d/e218e0160cc1b692e6e0e5ba34e8865dbb171efeb5fc9a704544b3020605/taskgroup-0.2.2.tar.gz", hash = "sha256:078483ac3e78f2e3f973e2edbf6941374fbea81b9c5d0a96f51d297717f4752d", size = 11504, upload-time = "2025-01-03T09:24:13.761Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d1/b1/74babcc824a57904e919f3af16d86c08b524c0691504baf038ef2d7f655c/taskgroup-0.2.2-py2.py3-none-any.whl", hash = "sha256:e2c53121609f4ae97303e9ea1524304b4de6faf9eb2c9280c7f87976479a52fb", size = 14237, upload-time = "2025-01-03T09:24:11.41Z" },
 ]
 
 [[package]]
