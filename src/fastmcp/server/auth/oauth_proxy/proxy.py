@@ -1019,6 +1019,7 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
             extract claims like sub, oid, name, preferred_username, email,
             roles, and groups.
         """
+        _ = idp_tokens
         return None
 
     async def load_refresh_token(
