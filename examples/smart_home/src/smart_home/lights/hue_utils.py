@@ -1,7 +1,7 @@
 from typing import Any
 
-from phue2 import Bridge
-from phue2.exceptions import PhueException
+from phue import Bridge
+from phue.exceptions import PhueException
 
 from smart_home.settings import settings
 
