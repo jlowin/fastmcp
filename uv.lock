@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.10"
 resolution-markers = [
     "python_full_version >= '3.11'",
@@ -756,7 +756,7 @@ requires-dist = [
     { name = "platformdirs", specifier = ">=4.0.0" },
     { name = "py-key-value-aio", extras = ["disk", "keyring", "memory"], specifier = ">=0.3.0,<0.4.0" },
     { name = "pydantic", extras = ["email"], specifier = ">=2.11.7" },
-    { name = "pydocket", editable = "../../chrisguidry/docket" },
+    { name = "pydocket", specifier = ">=0.17.2b1" },
     { name = "pyperclip", specifier = ">=1.9.0" },
     { name = "python-dotenv", specifier = ">=1.1.0" },
     { name = "rich", specifier = ">=13.9.4" },
@@ -1732,7 +1732,8 @@ wheels = [
 
 [[package]]
 name = "pydocket"
-source = { editable = "../../chrisguidry/docket" }
+version = "0.17.2b1"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cloudpickle" },
     { name = "exceptiongroup", marker = "python_full_version < '3.11'" },
@@ -1747,63 +1748,9 @@ dependencies = [
     { name = "typer" },
     { name = "typing-extensions" },
 ]
-
-[package.metadata]
-requires-dist = [
-    { name = "cloudpickle", specifier = ">=3.1.1" },
-    { name = "exceptiongroup", marker = "python_full_version < '3.11'", specifier = ">=1.2.0" },
-    { name = "fakeredis", extras = ["lua"], specifier = ">=2.32.1" },
-    { name = "opentelemetry-api", specifier = ">=1.33.0" },
-    { name = "opentelemetry-sdk", marker = "extra == 'metrics'", specifier = ">=1.33.0" },
-    { name = "prometheus-client", specifier = ">=0.21.1" },
-    { name = "py-key-value-aio", extras = ["memory", "redis"], specifier = ">=0.3.0" },
-    { name = "python-json-logger", specifier = ">=2.0.7" },
-    { name = "redis", specifier = ">=5" },
-    { name = "rich", specifier = ">=13.9.4" },
-    { name = "taskgroup", marker = "python_full_version < '3.11'", specifier = ">=0.2.2" },
-    { name = "typer", specifier = ">=0.15.1" },
-    { name = "typing-extensions", specifier = ">=4.12.0" },
-]
-provides-extras = ["metrics"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "codespell", specifier = ">=2.4.1" },
-    { name = "docker", specifier = ">=7.1.0" },
-    { name = "ipython", specifier = ">=8.0.0" },
-    { name = "loq", specifier = ">=0.1.0a3" },
-    { name = "mypy", specifier = ">=1.14.1" },
-    { name = "opentelemetry-distro", specifier = ">=0.60b0" },
-    { name = "opentelemetry-exporter-otlp", specifier = ">=1.33.0" },
-    { name = "opentelemetry-exporter-prometheus", specifier = ">=0.60b0" },
-    { name = "opentelemetry-instrumentation", specifier = ">=0.60b0" },
-    { name = "opentelemetry-instrumentation-logging", specifier = ">=0.60b0" },
-    { name = "opentelemetry-instrumentation-redis", specifier = ">=0.60b0" },
-    { name = "opentelemetry-sdk", specifier = ">=1.33.0" },
-    { name = "prek", specifier = ">=0.2.13" },
-    { name = "pyright", specifier = ">=1.1.408" },
-    { name = "pytest", specifier = ">=8.3.4" },
-    { name = "pytest-asyncio", specifier = ">=0.24.0" },
-    { name = "pytest-cov", specifier = ">=6.0.0" },
-    { name = "pytest-flakefinder", specifier = ">=1.1.0" },
-    { name = "pytest-randomly", specifier = ">=4.0.0" },
-    { name = "pytest-repeat", specifier = ">=0.9.3" },
-    { name = "pytest-timeout", specifier = ">=2.4.0" },
-    { name = "pytest-xdist", specifier = ">=3.6.1" },
-    { name = "ruff", specifier = ">=0.9.7" },
-    { name = "urllib3", specifier = ">=2.6.3" },
-]
-docs = [
-    { name = "mkdocs", specifier = ">=1.5.3" },
-    { name = "mkdocs-material", specifier = ">=9.5.13" },
-    { name = "mkdocstrings", specifier = ">=0.24.1" },
-    { name = "mkdocstrings-python", specifier = ">=1.8.0" },
-]
-examples = [
-    { name = "fastapi", specifier = ">=0.120.0" },
-    { name = "pydantic", specifier = ">=2.11.10" },
-    { name = "starlette", specifier = ">=0.49.1" },
-    { name = "uvicorn", specifier = ">=0.38.0" },
+sdist = { url = "https://files.pythonhosted.org/packages/87/3d/9fd9ecbf96e07f68a2e306037b320cd70760e540575cb76f4fbae37a6ffc/pydocket-0.17.2b1.tar.gz", hash = "sha256:cc5cbb5d891f5b751cc775a4df34173db56b840f4f5e6b980b2d776733c5073f", size = 325355, upload-time = "2026-01-24T13:07:35.034Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/88/a5/77152518f0759aba55d03b56939259b83cd9ecb52de2f4df5fc10f55668c/pydocket-0.17.2b1-py3-none-any.whl", hash = "sha256:42c2ffac7da7745d3d76f4b58ab93cb3514551995b168f3d0521e58d0a23eb0d", size = 88969, upload-time = "2026-01-24T13:07:33.713Z" },
 ]
 
 [[package]]
