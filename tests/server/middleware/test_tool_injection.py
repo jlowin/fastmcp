@@ -477,6 +477,8 @@ class TestResourceToolMiddleware:
 
     async def test_read_resource_tool_works(self, server_with_resources: FastMCP):
         """Test that the read_resource tool can be called."""
+        import json
+
         middleware = ResourceToolMiddleware()
         server_with_resources.add_middleware(middleware)
 
@@ -485,18 +487,18 @@ class TestResourceToolMiddleware:
                 name="read_resource", arguments={"uri": "file://config.txt"}
             )
 
-        assert result.content == snapshot(
-            [
-                TextContent(
-                    type="text",
-                    text='[{"content":"debug=true","mime_type":"text/plain","meta":null}]',
-                )
-            ]
-        )
-        assert result.structured_content == snapshot(
-            {
-                "result": [
-                    {"content": "debug=true", "mime_type": "text/plain", "meta": None}
-                ]
-            }
-        )
+        # Parse the JSON text content to check the actual values
+        # (MCP 1.26+ includes "meta":null in serialization, earlier versions don't)
+        assert len(result.content) == 1
+        assert result.content[0].type == "text"
+        parsed = json.loads(result.content[0].text)  # type: ignore[attr-defined]
+        assert len(parsed) == 1
+        assert parsed[0]["content"] == "debug=true"
+        assert parsed[0]["mime_type"] == "text/plain"
+
+        # Check structured content similarly
+        assert result.structured_content is not None
+        assert "result" in result.structured_content
+        assert len(result.structured_content["result"]) == 1
+        assert result.structured_content["result"][0]["content"] == "debug=true"
+        assert result.structured_content["result"][0]["mime_type"] == "text/plain"
