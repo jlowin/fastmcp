@@ -182,6 +182,9 @@ FastMCP automatically prefixes `required_scopes` with your `identifier_uri` (e.g
 |-----------|---------------|---------------------|
 | `User.Read` | `User.Read` | ✗ |
 | `Mail.Send` | `Mail.Send` | ✗ |
+| `offline_access` | `offline_access` | ✗ |
+
+We recommend including `offline_access` in `additional_authorize_scopes` to obtain refresh tokens for long-lived server sessions. FastMCP manages token refreshing automatically.
 
 <Info>
 **Why aren't `additional_authorize_scopes` validated?** Azure issues separate tokens per resource. The access token FastMCP receives is for *your API*—Graph scopes aren't in its `scp` claim. To call Graph APIs, your server uses the upstream Azure token in an on-behalf-of (OBO) flow.

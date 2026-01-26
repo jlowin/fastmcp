@@ -68,7 +68,7 @@ class AzureProvider(OAuthProxy):
             client_secret="your-client-secret",
             tenant_id="your-tenant-id",
             required_scopes=["read", "write"],  # Unprefixed scope names
-            additional_authorize_scopes=["User.Read", "Mail.Read"],  # Optional Graph scopes
+            additional_authorize_scopes=["User.Read", "Mail.Read", "offline_access"],  # Optional Graph scopes
             base_url="http://localhost:8000",
             # identifier_uri defaults to api://{client_id}
         )
@@ -135,6 +135,8 @@ class AzureProvider(OAuthProxy):
                 Example: ["User.Read", "Mail.Read", "offline_access"]
                 These scopes allow your FastMCP server to call Microsoft Graph APIs using the
                 upstream Azure token, but MCP clients are unaware of them.
+                We recommend including "offline_access" here to obtain refresh tokens, which FastMCP will handle
+                automatically.
             allowed_client_redirect_uris: List of allowed redirect URI patterns for MCP clients.
                 If None (default), all URIs are allowed. If empty list, no URIs are allowed.
             client_storage: Storage backend for OAuth state (client registrations, encrypted tokens).
