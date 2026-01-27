@@ -6,15 +6,13 @@ using the OAuth Proxy pattern for non-DCR OAuth flows.
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING, Any
 
-from authlib.common.encoding import urlsafe_b64decode
 from key_value.aio.protocols import AsyncKeyValue
 
 from fastmcp.server.auth.oauth_proxy import OAuthProxy
 from fastmcp.server.auth.providers.jwt import JWTVerifier
-from fastmcp.utilities.auth import parse_scopes
+from fastmcp.utilities.auth import decode_jwt_payload, parse_scopes
 from fastmcp.utilities.logging import get_logger
 
 if TYPE_CHECKING:
@@ -396,13 +394,7 @@ class AzureProvider(OAuthProxy):
         try:
             # Azure access tokens are JWTs - decode without verification
             # (already validated by token_verifier during token exchange)
-            parts = access_token.split(".")
-            if len(parts) != 3:
-                logger.debug("Azure token is not a valid JWT (expected 3 parts)")
-                return None
-
-            # Decode payload (urlsafe_b64decode handles padding)
-            payload = json.loads(urlsafe_b64decode(parts[1].encode()))
+            payload = decode_jwt_payload(access_token)
 
             # Extract useful identity claims
             claims: dict[str, Any] = {}
