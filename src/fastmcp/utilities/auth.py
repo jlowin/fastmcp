@@ -25,7 +25,7 @@ def _decode_jwt_part(token: str, part_index: int) -> dict[str, Any]:
         raise ValueError("Invalid JWT format (expected 3 parts)")
 
     part_b64 = parts[part_index]
-    part_b64 += "=" * (4 - len(part_b64) % 4)  # Add padding
+    part_b64 += "=" * (-len(part_b64) % 4)  # Add padding
     return json.loads(base64.urlsafe_b64decode(part_b64))
 
 

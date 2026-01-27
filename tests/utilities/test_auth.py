@@ -60,6 +60,20 @@ class TestDecodeJwtHeader:
         with pytest.raises(ValueError, match="Invalid JWT format"):
             decode_jwt_header("a.b.c.d")
 
+    def test_decode_header_length_divisible_by_4(self):
+        """Test decoding when base64 length is divisible by 4 (no padding needed).
+
+        This tests the edge case where len(part) % 4 == 0.
+        The padding calculation (-len % 4) correctly yields 0 in this case.
+        """
+        # Create a header that encodes to exactly 12 chars (divisible by 4)
+        header = {"x": ""}  # eyJ4IjogIiJ9 = 12 chars
+        payload = {"sub": "user"}
+        token = create_jwt(header, payload)
+
+        result = decode_jwt_header(token)
+        assert result == header
+
 
 class TestDecodeJwtPayload:
     """Tests for decode_jwt_payload utility."""
@@ -111,6 +125,20 @@ class TestDecodeJwtPayload:
             token = create_jwt({"alg": "RS256"}, payload)
             result = decode_jwt_payload(token)
             assert result == payload
+
+    def test_decode_payload_length_divisible_by_4(self):
+        """Test decoding when base64 length is divisible by 4 (no padding needed).
+
+        This tests the edge case where len(part) % 4 == 0.
+        The padding calculation (-len % 4) correctly yields 0 in this case.
+        """
+        # Create a payload that encodes to exactly 12 chars (divisible by 4)
+        header = {"alg": "RS256"}
+        payload = {"x": ""}  # eyJ4IjogIiJ9 = 12 chars
+        token = create_jwt(header, payload)
+
+        result = decode_jwt_payload(token)
+        assert result == payload
 
 
 class TestParseScopes:
