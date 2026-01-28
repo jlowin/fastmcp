@@ -682,6 +682,7 @@ class TransformedTool(Tool):
             "type": "object",
             "properties": new_props,
             "required": list(new_required),
+            "additionalProperties": False,
         }
 
         if parent_defs:
@@ -865,6 +866,7 @@ class TransformedTool(Tool):
             "type": "object",
             "properties": merged_props,
             "required": list(final_required),
+            "additionalProperties": False,
         }
 
         if merged_defs:
