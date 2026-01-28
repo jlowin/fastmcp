@@ -58,6 +58,7 @@ from fastmcp.prompts.function_prompt import FunctionPrompt
 from fastmcp.prompts.prompt import PromptResult
 from fastmcp.resources.resource import Resource, ResourceResult
 from fastmcp.resources.template import ResourceTemplate
+from fastmcp.server.apps import UI_MIME_TYPE, ResourceUI, ToolUI, ui_to_meta_dict
 from fastmcp.server.auth import AuthContext, AuthProvider, run_auth_checks
 from fastmcp.server.dependencies import get_access_token
 from fastmcp.server.lifespan import Lifespan
@@ -1370,6 +1371,7 @@ class FastMCP(
         annotations: ToolAnnotations | dict[str, Any] | None = None,
         exclude_args: list[str] | None = None,
         meta: dict[str, Any] | None = None,
+        ui: ToolUI | dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
         timeout: float | None = None,
         auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
@@ -1390,6 +1392,7 @@ class FastMCP(
         annotations: ToolAnnotations | dict[str, Any] | None = None,
         exclude_args: list[str] | None = None,
         meta: dict[str, Any] | None = None,
+        ui: ToolUI | dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
         timeout: float | None = None,
         auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
@@ -1409,6 +1412,7 @@ class FastMCP(
         annotations: ToolAnnotations | dict[str, Any] | None = None,
         exclude_args: list[str] | None = None,
         meta: dict[str, Any] | None = None,
+        ui: ToolUI | dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
         timeout: float | None = None,
         auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
@@ -1465,6 +1469,11 @@ class FastMCP(
             server.tool(my_function, name="custom_name")
             ```
         """
+        # Merge UI metadata into meta["ui"] before passing to provider
+        if ui is not None:
+            meta = dict(meta) if meta else {}
+            meta["ui"] = ui_to_meta_dict(ui)
+
         # Delegate to LocalProvider with server-level defaults
         result = self._local_provider.tool(
             name_or_fn,
@@ -1523,6 +1532,7 @@ class FastMCP(
         tags: set[str] | None = None,
         annotations: Annotations | dict[str, Any] | None = None,
         meta: dict[str, Any] | None = None,
+        ui: ResourceUI | dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
         auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
     ) -> Callable[[AnyFunction], Resource | ResourceTemplate | AnyFunction]:
@@ -1577,6 +1587,15 @@ class FastMCP(
                 return f"Weather for {city}: {data}"
             ```
         """
+        # Default MIME type for ui:// scheme resources
+        if mime_type is None and isinstance(uri, str) and uri.startswith("ui://"):
+            mime_type = UI_MIME_TYPE
+
+        # Merge UI metadata into meta["ui"] before passing to provider
+        if ui is not None:
+            meta = dict(meta) if meta else {}
+            meta["ui"] = ui_to_meta_dict(ui)
+
         # Delegate to LocalProvider with server-level defaults
         inner_decorator = self._local_provider.resource(
             uri,
