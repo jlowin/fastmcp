@@ -67,7 +67,7 @@ async def test_depends_with_async_function(mcp: FastMCP):
         return 42
 
     @mcp.tool()
-    async def greet_user(name: str, user_id: int = Depends(get_user_id)) -> str:
+    async def greet_user(name: str, user_id: int = Depends(get_user_id)) -> str:  # type: ignore[invalid-parameter-default]
         return f"Hello {name}, your ID is {user_id}"
 
     result = await mcp.call_tool("greet_user", {"name": "Alice"})
