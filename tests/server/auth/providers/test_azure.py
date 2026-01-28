@@ -807,3 +807,100 @@ class TestOIDCScopeHandling:
         assert "profile" in result
         assert "api://my-api/openid" not in result
         assert "api://my-api/profile" not in result
+
+
+class TestAzureTokenExchangeScopes:
+    """Tests for Azure provider's token exchange scope handling.
+
+    Azure requires scopes to be sent during the authorization code exchange.
+    The provider sets extra_token_params with properly prefixed scopes.
+    """
+
+    def test_extra_token_params_set_with_prefixed_scopes(self):
+        """Test that extra_token_params contains prefixed scopes."""
+        provider = AzureProvider(
+            client_id="test_client",
+            client_secret="test_secret",
+            tenant_id="test-tenant",
+            base_url="https://myserver.com",
+            identifier_uri="api://my-api",
+            required_scopes=["read", "write"],
+            jwt_signing_key="test-secret",
+        )
+
+        assert "scope" in provider._extra_token_params
+        scope_str = provider._extra_token_params["scope"]
+        assert "api://my-api/read" in scope_str
+        assert "api://my-api/write" in scope_str
+
+    def test_extra_token_params_includes_additional_oidc_scopes(self):
+        """Test that extra_token_params includes OIDC scopes from additional_authorize_scopes."""
+        provider = AzureProvider(
+            client_id="test_client",
+            client_secret="test_secret",
+            tenant_id="test-tenant",
+            base_url="https://myserver.com",
+            identifier_uri="api://my-api",
+            required_scopes=["read"],
+            additional_authorize_scopes=["openid", "profile", "offline_access"],
+            jwt_signing_key="test-secret",
+        )
+
+        scope_str = provider._extra_token_params["scope"]
+        assert "api://my-api/read" in scope_str
+        assert "openid" in scope_str
+        assert "profile" in scope_str
+        assert "offline_access" in scope_str
+
+    def test_extra_token_params_excludes_other_api_scopes(self):
+        """Test token exchange excludes other API scopes (Azure AADSTS28000).
+
+        Azure only allows ONE resource per token exchange. Other API scopes
+        are requested during authorization but excluded from token exchange.
+        """
+        provider = AzureProvider(
+            client_id="a29c5d50-182d-4daf-a6e3-511766907bc5",
+            client_secret="test_secret",
+            tenant_id="test-tenant",
+            base_url="https://myserver.com",
+            required_scopes=["user_impersonation"],
+            additional_authorize_scopes=[
+                "openid",
+                "profile",
+                "offline_access",
+                "api://eca032c0-13c6-452e-ad93-4588d580cd8f/user_impersonation",
+                "api://404bb359-314a-47a9-84fe-cdeae262c621/user_impersonation",
+            ],
+            jwt_signing_key="test-secret",
+        )
+
+        scope_str = provider._extra_token_params["scope"]
+        # Primary API scope should be prefixed with the provider's identifier_uri
+        assert (
+            "api://a29c5d50-182d-4daf-a6e3-511766907bc5/user_impersonation" in scope_str
+        )
+        # OIDC scopes should be included
+        assert "openid" in scope_str
+        assert "profile" in scope_str
+        assert "offline_access" in scope_str
+        # Other API scopes should NOT be included (Azure multi-resource limitation)
+        assert "api://eca032c0" not in scope_str
+        assert "api://404bb359" not in scope_str
+
+    def test_extra_token_params_deduplicates_scopes(self):
+        """Test that duplicate scopes are deduplicated."""
+        provider = AzureProvider(
+            client_id="test_client",
+            client_secret="test_secret",
+            tenant_id="test-tenant",
+            base_url="https://myserver.com",
+            identifier_uri="api://my-api",
+            required_scopes=["read"],
+            additional_authorize_scopes=["api://my-api/read", "openid"],
+            jwt_signing_key="test-secret",
+        )
+
+        scope_str = provider._extra_token_params["scope"]
+        # Should be deduplicated - api://my-api/read appears only once
+        assert scope_str.count("api://my-api/read") == 1
+        assert "openid" in scope_str
