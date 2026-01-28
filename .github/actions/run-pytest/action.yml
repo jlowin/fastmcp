@@ -6,10 +6,6 @@ inputs:
     description: "Type of tests to run: unit, integration, or client_process"
     required: false
     default: "unit"
-  resolution:
-    description: "Resolution flag for uv run (e.g., lowest-direct)"
-    required: false
-    default: ""
 
 runs:
   using: "composite"
@@ -17,11 +13,6 @@ runs:
     - name: Run pytest
       shell: bash
       run: |
-        RESOLUTION_FLAG=""
-        if [ -n "${{ inputs.resolution }}" ]; then
-          RESOLUTION_FLAG="--resolution ${{ inputs.resolution }}"
-        fi
-        
         if [ "${{ inputs.test-type }}" == "integration" ]; then
           MARKER="integration"
           TIMEOUT="30"
@@ -44,7 +35,7 @@ runs:
           PARALLEL_FLAGS="--numprocesses auto --maxprocesses $MAX_PROCS --dist worksteal"
         fi
         
-        uv run $RESOLUTION_FLAG pytest \
+        uv run --no-sync pytest \
           --inline-snapshot=disable \
           --timeout=$TIMEOUT \
           -m "$MARKER" \

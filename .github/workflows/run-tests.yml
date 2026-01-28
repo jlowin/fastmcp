@@ -62,13 +62,10 @@ jobs:
           resolution: lowest-direct
 
       - uses: ./.github/actions/run-pytest
-        with:
-          resolution: lowest-direct
 
       - uses: ./.github/actions/run-pytest
         with:
           test-type: client_process
-          resolution: lowest-direct
 
   run_integration_tests:
     name: "Integration tests"
