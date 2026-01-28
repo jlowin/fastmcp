@@ -29,12 +29,12 @@ runs:
           MAX_PROCS="4"
           EXTRA_FLAGS=""
         fi
-        
+
         PARALLEL_FLAGS=""
         if [ "$MAX_PROCS" != "0" ] && [ "${{ runner.os }}" != "Windows" ]; then
           PARALLEL_FLAGS="--numprocesses auto --maxprocesses $MAX_PROCS --dist worksteal"
         fi
-        
+
         uv run --no-sync pytest \
           --inline-snapshot=disable \
           --timeout=$TIMEOUT \

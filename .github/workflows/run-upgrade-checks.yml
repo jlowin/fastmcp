@@ -15,7 +15,7 @@ on:
 
   schedule:
     # Run daily at 2 AM UTC
-    - cron: '0 2 * * *'
+    - cron: "0 2 * * *"
 
   workflow_dispatch:
 
@@ -103,22 +103,22 @@ jobs:
           title-template: "Upgrade checks failing on main branch"
           body-template: |
             ## Upgrade Checks Failure on Main Branch
-            
+
             The upgrade checks workflow has failed on the main branch.
-            
+
             **Workflow Run**: [#{{runNumber}}]({{serverUrl}}/{{repo}}/actions/runs/{{runId}})
             **Commit**: {{sha}}
             **Branch**: {{ref}}
             **Event**: {{eventName}}
-            
+
             ### What to do
-            
+
             This likely means that upgraded dependencies have introduced new errors. Please review the failed jobs and determine if the code needs to be updated or if dependency constraints need to be adjusted.
-            
+
             - [ ] Review the failure in the workflow run
             - [ ] Identify root cause (dependency changes, new linter/type rules, etc.)
             - [ ] Implement fix or adjust dependency constraints
             - [ ] Verify fix resolves the issue
-            
+
             ---
             *This issue was automatically created by a GitHub Action.*
