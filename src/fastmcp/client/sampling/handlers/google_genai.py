@@ -1,9 +1,37 @@
-"""Google GenAI sampling handler with tool support for FastMCP."""
+"""Google GenAI sampling handler with tool support for FastMCP 3.0."""
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from uuid import uuid4
 
+try:
+    from google.genai import Client as GoogleGenaiClient
+    from google.genai.types import (
+        Candidate,
+        Content,
+        FunctionCall,
+        FunctionCallingConfig,
+        FunctionCallingConfigMode,
+        FunctionDeclaration,
+        FunctionResponse,
+        GenerateContentConfig,
+        GenerateContentResponse,
+        ModelContent,
+        Part,
+        ThinkingConfig,
+        ToolConfig,
+        UserContent,
+    )
+    from google.genai.types import Tool as GoogleTool
+except ImportError as e:
+    raise ImportError(
+        "The `google-genai` package is not installed. "
+        "Install it with `pip install fastmcp[google-genai]` or add `google-genai` "
+        "to your dependencies."
+    ) from e
+
+from mcp import ClientSession, ServerSession
+from mcp.shared.context import LifespanContextT, RequestContext
 from mcp.types import (
     AudioContent,
     CreateMessageResult,
@@ -21,35 +49,6 @@ from mcp.types import (
 from mcp.types import CreateMessageRequestParams as SamplingParams
 from mcp.types import Tool as MCPTool
 
-if TYPE_CHECKING:
-    from mcp import ClientSession, ServerSession
-    from mcp.shared.context import LifespanContextT, RequestContext
-
-try:
-    from google.genai import Client as GoogleGenaiClient  # type: ignore[import-untyped]
-    from google.genai.types import (  # type: ignore[import-untyped]
-        Candidate,
-        Content,
-        FunctionCall,
-        FunctionCallingConfig,
-        FunctionCallingConfigMode,
-        FunctionDeclaration,
-        FunctionResponse,
-        GenerateContentConfig,
-        GenerateContentResponse,
-        ModelContent,
-        Part,
-        ThinkingConfig,
-        ToolConfig,
-        UserContent,
-    )
-    from google.genai.types import Tool as GoogleTool  # type: ignore[import-untyped]
-except ImportError as e:
-    raise ImportError(
-        "The `google-genai` package is not installed. "
-        "Install it with `pip install fastmcp[google-genai]` or add `google-genai` to your dependencies."
-    ) from e
-
 __all__ = ["GoogleGenaiSamplingHandler"]
 
 
@@ -60,10 +59,12 @@ class GoogleGenaiSamplingHandler:
         ```python
         from google.genai import Client
         from fastmcp import FastMCP
-        from fastmcp.client.sampling.handlers.google_genai import GoogleGenaiSamplingHandler
+        from fastmcp.client.sampling.handlers.google_genai import (
+            GoogleGenaiSamplingHandler,
+        )
 
         handler = GoogleGenaiSamplingHandler(
-            default_model="gemini-2.0-flash-exp",
+            default_model="gemini-2.0-flash",
             client=Client(),
         )
 
@@ -72,16 +73,21 @@ class GoogleGenaiSamplingHandler:
     """
 
     def __init__(
-        self, default_model: str, client: GoogleGenaiClient | None = None
+        self,
+        default_model: str,
+        client: GoogleGenaiClient | None = None,
+        thinking_budget: int | None = None,
     ) -> None:
         self.client: GoogleGenaiClient = client or GoogleGenaiClient()
         self.default_model: str = default_model
+        self.thinking_budget: int | None = thinking_budget
 
     async def __call__(
         self,
         messages: list[SamplingMessage],
         params: SamplingParams,
-        context: Any,
+        context: RequestContext[ServerSession, LifespanContextT]
+        | RequestContext[ClientSession, LifespanContextT],
     ) -> CreateMessageResult | CreateMessageResultWithTools:
         contents: list[Content] = _convert_messages_to_google_genai_content(messages)
 
@@ -90,20 +96,32 @@ class GoogleGenaiSamplingHandler:
         tool_config: ToolConfig | None = None
 
         if params.tools:
-            google_tools = [_convert_tool_to_google_genai(tool) for tool in params.tools]
+            google_tools = [
+                _convert_tool_to_google_genai(tool) for tool in params.tools
+            ]
             tool_config = _convert_tool_choice_to_google_genai(params.toolChoice)
+
+        # Select the model based on preferences
+        selected_model = self._get_model(model_preferences=params.modelPreferences)
+
+        # Configure thinking if a budget is specified
+        thinking_config = (
+            ThinkingConfig(thinking_budget=self.thinking_budget)
+            if self.thinking_budget is not None
+            else None
+        )
 
         response: GenerateContentResponse = (
             await self.client.aio.models.generate_content(
-                model=self._get_model(model_preferences=params.modelPreferences),
+                model=selected_model,
                 contents=contents,
                 config=GenerateContentConfig(
                     system_instruction=params.systemPrompt,
                     temperature=params.temperature,
                     max_output_tokens=params.maxTokens,
                     stop_sequences=params.stopSequences,
-                    thinking_config=ThinkingConfig(thinking_budget=200),
-                    tools=google_tools,
+                    thinking_config=thinking_config,
+                    tools=google_tools,  # ty: ignore[invalid-argument-type]
                     tool_config=tool_config,
                 ),
             )
@@ -111,8 +129,8 @@ class GoogleGenaiSamplingHandler:
 
         # Return appropriate result type based on whether tools were provided
         if params.tools:
-            return _response_to_result_with_tools(response, self.default_model)
-        return _response_to_create_message_result(response, self.default_model)
+            return _response_to_result_with_tools(response, selected_model)
+        return _response_to_create_message_result(response, selected_model)
 
     def _get_model(self, model_preferences: ModelPreferences | None) -> str:
         if model_preferences and model_preferences.hints:
@@ -140,7 +158,7 @@ def _convert_tool_to_google_genai(tool: MCPTool) -> GoogleTool:
             FunctionDeclaration(
                 name=tool.name,
                 description=tool.description or "",
-                parameters={
+                parameters_json_schema={
                     "type": "OBJECT",
                     "properties": google_properties,
                     "required": required,
@@ -180,8 +198,17 @@ def _convert_json_schema_to_google_schema(schema: dict[str, Any]) -> dict[str, A
 
         return result
 
-    schema_type: str | None = schema.get("type")
-    if schema_type:
+    schema_type = schema.get("type")
+
+    # Handle type arrays (e.g., ["string", "null"]) for nullable types
+    if isinstance(schema_type, list):
+        non_null_types = [t for t in schema_type if t != "null"]
+        has_null = len(non_null_types) < len(schema_type)
+        schema_type = non_null_types[0] if non_null_types else None
+        if has_null:
+            result["nullable"] = True
+
+    if isinstance(schema_type, str):
         type_map: dict[str, str] = {
             "string": "STRING",
             "integer": "INTEGER",
@@ -213,9 +240,7 @@ def _convert_json_schema_to_google_schema(schema: dict[str, Any]) -> dict[str, A
     return result
 
 
-def _convert_tool_choice_to_google_genai(
-    tool_choice: ToolChoice | None,
-) -> ToolConfig:
+def _convert_tool_choice_to_google_genai(tool_choice: ToolChoice | None) -> ToolConfig:
     """Convert MCP ToolChoice to Google GenAI ToolConfig."""
     if tool_choice is None:
         return ToolConfig(
@@ -239,7 +264,9 @@ def _convert_tool_choice_to_google_genai(
 
     # Default to AUTO for "auto" or any other value
     return ToolConfig(
-        function_calling_config=FunctionCallingConfig(mode=FunctionCallingConfigMode.AUTO)
+        function_calling_config=FunctionCallingConfig(
+            mode=FunctionCallingConfigMode.AUTO
+        )
     )
 
 
@@ -264,14 +291,20 @@ def _sampling_content_to_google_genai_part(
 
     if isinstance(content, ToolResultContent):
         # Extract text from tool result content
-        result_text = ""
+        result_parts: list[str] = []
         if content.content:
             for item in content.content:
                 if isinstance(item, TextContent):
-                    result_text += item.text
+                    result_parts.append(item.text)
+                else:
+                    msg = f"Unsupported tool result content type: {type(item).__name__}"
+                    raise ValueError(msg)
+        result_text = "".join(result_parts)
 
         # Extract function name from toolUseId
-        # Our IDs are formatted as "{function_name}_{uuid8}", so extract the name
+        # Our IDs are formatted as "{function_name}_{uuid8}", so extract the name.
+        # Note: This is a limitation of MCP's ToolResultContent which only carries
+        # toolUseId, while Google's FunctionResponse requires the function name.
         tool_use_id = content.toolUseId
         if "_" in tool_use_id:
             # Split and rejoin all but the last part (the UUID suffix)
@@ -309,8 +342,11 @@ def _convert_messages_to_google_genai_content(
 
             if message.role == "user":
                 google_messages.append(UserContent(parts=parts))
-            else:
+            elif message.role == "assistant":
                 google_messages.append(ModelContent(parts=parts))
+            else:
+                msg = f"Invalid message role: {message.role}"
+                raise ValueError(msg)
             continue
 
         # Handle single content item
