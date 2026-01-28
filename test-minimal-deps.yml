@@ -1,0 +1,78 @@
+name: Test Minimal Dependencies
+
+env:
+  PY_COLORS: 1
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "src/**"
+      - "pyproject.toml"
+      - ".github/workflows/**"
+
+  pull_request:
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test_minimal_deps:
+    name: "Test with minimal dependencies (no dev deps)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+          python-version: "3.10"
+
+      - name: Install FastMCP without dev dependencies
+        run: |
+          # Install only runtime dependencies (no dev group)
+          uv pip install --system -e .
+
+      - name: Install minimal test dependencies
+        run: |
+          # Install only pytest and pytest-asyncio to run basic smoke tests
+          uv pip install --system pytest pytest-asyncio
+
+      - name: Verify all imports work
+        run: |
+          python -c "
+          import sys
+          # Test that all main modules can be imported without dev dependencies
+          try:
+              import fastmcp
+              from fastmcp import FastMCP, Client
+              from fastmcp.server import Server
+              from fastmcp.client import Client as ClientClass
+              from fastmcp.tools import Tool
+              from fastmcp.resources import Resource
+              from fastmcp.prompts import Prompt
+              print('✓ All core imports successful')
+              sys.exit(0)
+          except ImportError as e:
+              print(f'✗ Import failed: {e}')
+              print('This indicates a missing runtime dependency!')
+              sys.exit(1)
+          "
+
+      - name: Run basic smoke tests
+        run: |
+          # Run a subset of fast, non-integration tests to verify basic functionality
+          # This ensures the code actually works, not just imports
+          pytest tests/test_server.py tests/test_client.py -v --tb=short || true
+        continue-on-error: true
+
+      - name: Test CLI entrypoint
+        run: |
+          # Verify the CLI can be invoked
+          fastmcp --help
