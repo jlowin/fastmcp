@@ -50,6 +50,7 @@ __all__ = [
     "CurrentRequest",
     "CurrentWorker",
     "Progress",
+    "TokenClaim",
     "get_access_token",
     "get_context",
     "get_http_headers",
@@ -1027,3 +1028,62 @@ class Progress(Dependency):  # type: ignore[misc]
 
     async def __aexit__(self, *args: object) -> None:
         pass
+
+
+# --- Token Claim dependency ---
+
+
+class _TokenClaim(Dependency):  # type: ignore[misc]
+    """Dependency that extracts a specific claim from the access token."""
+
+    def __init__(self, claim_name: str):
+        self.claim_name = claim_name
+
+    async def __aenter__(self) -> str:
+        token = get_access_token()
+        if token is None:
+            raise RuntimeError(
+                f"No access token available. Cannot extract claim '{self.claim_name}'."
+            )
+        value = token.claims.get(self.claim_name)
+        if value is None:
+            raise RuntimeError(
+                f"Claim '{self.claim_name}' not found in access token. "
+                f"Available claims: {list(token.claims.keys())}"
+            )
+        return str(value)
+
+    async def __aexit__(self, *args: object) -> None:
+        pass
+
+
+def TokenClaim(name: str) -> str:
+    """Get a specific claim from the access token.
+
+    This dependency extracts a single claim value from the current access token.
+    It's useful for getting user identifiers, roles, or other token claims
+    without needing the full token object.
+
+    Args:
+        name: The name of the claim to extract (e.g., "oid", "sub", "email")
+
+    Returns:
+        A dependency that resolves to the claim value as a string
+
+    Raises:
+        RuntimeError: If no access token is available or claim is missing
+
+    Example:
+        ```python
+        from fastmcp.server.dependencies import TokenClaim
+
+        @mcp.tool()
+        async def add_expense(
+            user_id: str = TokenClaim("oid"),  # Azure object ID
+            amount: float,
+        ):
+            # user_id is automatically injected from the token
+            await db.insert({"user_id": user_id, "amount": amount})
+        ```
+    """
+    return cast(str, _TokenClaim(name))
