@@ -286,7 +286,8 @@ def _sampling_content_to_google_genai_part(
             function_call=FunctionCall(
                 name=content.name,
                 args=content.input,
-            )
+            ),
+            thought_signature=b"skip_thought_signature_validator",
         )
 
     if isinstance(content, ToolResultContent):
