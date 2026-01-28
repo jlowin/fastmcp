@@ -1,0 +1,70 @@
+"""MCP Apps support — extension negotiation and typed UI metadata models.
+
+Provides constants and Pydantic models for the MCP Apps extension
+(io.modelcontextprotocol/ui), enabling tools and resources to carry
+UI metadata for clients that support interactive app rendering.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from pydantic import BaseModel, Field
+
+UI_EXTENSION_ID = "io.modelcontextprotocol/ui"
+UI_MIME_TYPE = "text/html;profile=mcp-app"
+
+
+class ToolUI(BaseModel):
+    """Typed ``_meta.ui`` for tools — links a tool to its UI resource.
+
+    All fields use ``exclude_none`` serialization so only explicitly-set
+    values appear on the wire.  Aliases match the MCP Apps wire format
+    (camelCase).
+    """
+
+    resource_uri: str | None = Field(
+        default=None,
+        alias="resourceUri",
+        description="URI of the UI resource (typically ui:// scheme)",
+    )
+    visibility: list[str] | None = Field(
+        default=None,
+        description="Where this tool is visible: 'app', 'model', or both",
+    )
+    csp: str | None = Field(default=None, description="Content Security Policy")
+    permissions: list[str] | None = Field(
+        default=None, description="iframe permissions"
+    )
+    domain: str | None = Field(default=None, description="Domain for the iframe")
+    prefers_border: bool | None = Field(
+        default=None,
+        alias="prefersBorder",
+        description="Whether the UI prefers a visible border",
+    )
+
+    model_config = {"populate_by_name": True}
+
+
+class ResourceUI(BaseModel):
+    """Typed ``_meta.ui`` for resources — rendering hints for UI-capable clients."""
+
+    csp: str | None = Field(default=None, description="Content Security Policy")
+    permissions: list[str] | None = Field(
+        default=None, description="iframe permissions"
+    )
+    domain: str | None = Field(default=None, description="Domain for the iframe")
+    prefers_border: bool | None = Field(
+        default=None,
+        alias="prefersBorder",
+        description="Whether the UI prefers a visible border",
+    )
+
+    model_config = {"populate_by_name": True}
+
+
+def ui_to_meta_dict(ui: ToolUI | ResourceUI | dict[str, Any]) -> dict[str, Any]:
+    """Convert a UI model or dict to the wire-format dict for ``meta["ui"]``."""
+    if isinstance(ui, (ToolUI, ResourceUI)):
+        return ui.model_dump(by_alias=True, exclude_none=True)
+    return ui
