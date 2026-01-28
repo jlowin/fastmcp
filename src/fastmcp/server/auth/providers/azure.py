@@ -192,6 +192,20 @@ class AzureProvider(OAuthProxy):
         )
         token_endpoint = f"https://{base_authority}/{tenant_id}/oauth2/v2.0/token"
 
+        # Azure requires scopes during token exchange (AADSTS28003 error if missing).
+        # IMPORTANT: Azure only allows ONE resource per token exchange (AADSTS28000),
+        # so we only send the prefixed required_scopes (which are all the same resource).
+        # The returned token can be used to exchange tokens for other resources if needed through OBO flow.
+        token_exchange_scopes = self._prefix_scopes_for_azure(
+            parsed_required_scopes or []
+        )
+        if parsed_additional_scopes:
+            token_exchange_scopes.extend(
+                s for s in parsed_additional_scopes if s in OIDC_SCOPES
+            )
+        token_exchange_scopes = list(dict.fromkeys(token_exchange_scopes))
+        logger.debug("Token exchange scopes: %s", token_exchange_scopes)
+
         # Initialize OAuth proxy with Azure endpoints
         super().__init__(
             upstream_authorization_endpoint=authorization_endpoint,
@@ -206,8 +220,8 @@ class AzureProvider(OAuthProxy):
             client_storage=client_storage,
             jwt_signing_key=jwt_signing_key,
             require_authorization_consent=require_authorization_consent,
-            # Advertise full scopes including OIDC (even though we only validate non-OIDC)
             valid_scopes=parsed_required_scopes,
+            extra_token_params={"scope": " ".join(token_exchange_scopes)},
         )
 
         authority_info = ""
