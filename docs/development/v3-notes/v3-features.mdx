@@ -4,6 +4,14 @@ title: v3.0 Feature Tracking
 
 This document tracks major features in FastMCP v3.0 for release notes preparation.
 
+## 3.0.0beta2
+
+### Expanded Reload File Watching
+
+The `--reload` flag now watches common frontend file types (JavaScript, TypeScript, CSS, HTML, and more) in addition to Python files ([#3028](https://github.com/jlowin/fastmcp/pull/3028)). This enables seamless development for MCP apps that include frontend bundles, automatically restarting the server when any relevant source files change.
+
+---
+
 ## Provider-Based Architecture
 
 v3.0 introduces a provider-based component system that replaces v2's static-only registration ([#2622](https://github.com/jlowin/fastmcp/pull/2622)). Providers dynamically source tools, resources, templates, and prompts at runtime.
@@ -554,7 +562,7 @@ Environment variable: `FASTMCP_DECORATOR_MODE=object`
 
 ## CLI Auto-Reload
 
-The `--reload` flag enables file watching with automatic server restarts for development ([#2816](https://github.com/jlowin/fastmcp/pull/2816)).
+The `--reload` flag enables file watching with automatic server restarts for development ([#2816](https://github.com/jlowin/fastmcp/pull/2816)). The server watches common source file types including Python, JavaScript, TypeScript, CSS, HTML, and configuration files ([#3028](https://github.com/jlowin/fastmcp/pull/3028)).
 
 ```bash
 # Watch for changes and restart
@@ -569,6 +577,7 @@ fastmcp run server.py --reload --transport http --port 8080
 
 Implementation (`src/fastmcp/cli/run.py`):
 - Uses `watchfiles` for efficient file monitoring
+- Watches Python, JavaScript, TypeScript, CSS, HTML, and other common source files
 - Runs server as subprocess for clean restarts
 - Stateless mode for seamless reconnection after restart
 - stdio: Full MCP features including elicitation
