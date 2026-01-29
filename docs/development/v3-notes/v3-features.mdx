@@ -649,7 +649,8 @@ mcp = FastMCP("My Server")
 # Register the HTML bundle as a ui:// resource
 @mcp.resource("ui://my-app/view.html")
 def app_html() -> str:
-    return open("./dist/index.html").read()
+    from pathlib import Path
+    return Path("./dist/index.html").read_text()
 
 # Tool with UI — clients render an iframe alongside the result
 @mcp.tool(ui=ToolUI(resource_uri="ui://my-app/view.html"))

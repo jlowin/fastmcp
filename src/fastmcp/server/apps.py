@@ -87,6 +87,7 @@ def resolve_ui_mime_type(uri: str, explicit_mime_type: str | None) -> str | None
     """
     if explicit_mime_type is not None:
         return explicit_mime_type
-    if uri.startswith("ui://"):
+    # Case-insensitive scheme check per RFC 3986
+    if uri.lower().startswith("ui://"):
         return UI_MIME_TYPE
     return None
