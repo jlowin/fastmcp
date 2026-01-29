@@ -239,7 +239,7 @@ class TestStandaloneToolDecorator:
             return f"Hello, {name}!"
 
         assert greet("World") == "Hello, World!"
-        assert greet.__fastmcp__.name == "custom_name"  # type: ignore[attr-defined]
+        assert greet.__fastmcp__.name == "custom_name"
 
 
 class TestNonAsciiContent:
