@@ -523,6 +523,7 @@ async def sample_impl(
     tools: Sequence[SamplingTool | Callable[..., Any]] | None = None,
     result_type: type[ResultT] | None = None,
     mask_error_details: bool | None = None,
+    max_sampling_rounds: int = 100,
 ) -> SamplingResult[ResultT]:
     """Implementation of Context.sample().
 
@@ -531,7 +532,7 @@ async def sample_impl(
     provides a final text response.
     """
     # Safety limit to prevent infinite loops
-    max_iterations = 100
+    max_iterations = max_sampling_rounds
 
     # Convert tools to SamplingTools
     sampling_tools = prepare_tools(tools)

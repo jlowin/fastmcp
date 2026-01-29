@@ -243,7 +243,21 @@ async def research(question: str, ctx: Context) -> str:
     return result.text or ""
 ```
 
-The LLM sees each function's signature and docstring, using this information to decide when and how to call them. Tool errors are caught and sent back to the LLM, allowing it to recover gracefully. An internal safety limit prevents infinite loops.
+The LLM sees each function's signature and docstring, using this information to decide when and how to call them. Tool errors are caught and sent back to the LLM, allowing it to recover gracefully.
+
+### Iteration Limits
+
+The `max_sampling_rounds` parameter controls the maximum number of tool-calling iterations (defaults to 100). This prevents infinite loops if the LLM repeatedly calls tools without converging on a final response.
+
+```python
+result = await ctx.sample(
+    messages=question,
+    tools=[search],
+    max_sampling_rounds=50  # Allow up to 50 tool-calling iterations
+)
+```
+
+When the limit is exceeded, a `RuntimeError` is raised.
 
 ### Custom Tool Definitions
 
