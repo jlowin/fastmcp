@@ -58,7 +58,12 @@ from fastmcp.prompts.function_prompt import FunctionPrompt
 from fastmcp.prompts.prompt import PromptResult
 from fastmcp.resources.resource import Resource, ResourceResult
 from fastmcp.resources.template import ResourceTemplate
-from fastmcp.server.apps import UI_MIME_TYPE, ResourceUI, ToolUI, ui_to_meta_dict
+from fastmcp.server.apps import (
+    ResourceUI,
+    ToolUI,
+    resolve_ui_mime_type,
+    ui_to_meta_dict,
+)
 from fastmcp.server.auth import AuthContext, AuthProvider, run_auth_checks
 from fastmcp.server.dependencies import get_access_token
 from fastmcp.server.lifespan import Lifespan
@@ -1587,9 +1592,9 @@ class FastMCP(
                 return f"Weather for {city}: {data}"
             ```
         """
-        # Default MIME type for ui:// scheme resources
-        if mime_type is None and isinstance(uri, str) and uri.startswith("ui://"):
-            mime_type = UI_MIME_TYPE
+        # Apply default MIME type for ui:// scheme resources
+        if isinstance(uri, str):
+            mime_type = resolve_ui_mime_type(uri, mime_type)
 
         # Merge UI metadata into meta["ui"] before passing to provider
         if ui is not None:

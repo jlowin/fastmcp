@@ -68,3 +68,25 @@ def ui_to_meta_dict(ui: ToolUI | ResourceUI | dict[str, Any]) -> dict[str, Any]:
     if isinstance(ui, (ToolUI, ResourceUI)):
         return ui.model_dump(by_alias=True, exclude_none=True)
     return ui
+
+
+def resolve_ui_mime_type(uri: str, explicit_mime_type: str | None) -> str | None:
+    """Return the appropriate MIME type for a resource URI.
+
+    For ``ui://`` scheme resources, defaults to ``UI_MIME_TYPE`` when no
+    explicit MIME type is provided. This ensures UI resources are correctly
+    identified regardless of how they're registered (via FastMCP.resource,
+    the standalone @resource decorator, or resource templates).
+
+    Args:
+        uri: The resource URI string
+        explicit_mime_type: The MIME type explicitly provided by the user
+
+    Returns:
+        The resolved MIME type (explicit value, UI default, or None)
+    """
+    if explicit_mime_type is not None:
+        return explicit_mime_type
+    if uri.startswith("ui://"):
+        return UI_MIME_TYPE
+    return None

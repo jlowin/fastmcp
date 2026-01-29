@@ -207,6 +207,33 @@ class TestResourceWithUI:
         resources = list(await server.list_resources())
         assert resources[0].mime_type != UI_MIME_TYPE
 
+    async def test_standalone_decorator_ui_scheme_defaults_mime_type(self):
+        """Test that the standalone @resource decorator also applies ui:// MIME default."""
+        from fastmcp.resources import resource
+
+        @resource("ui://standalone-app/view.html")
+        def standalone_app() -> str:
+            return "<html>standalone</html>"
+
+        server = FastMCP("test")
+        server.add_resource(standalone_app)
+
+        resources = list(await server.list_resources())
+        assert len(resources) == 1
+        assert resources[0].mime_type == UI_MIME_TYPE
+
+    async def test_resource_template_ui_scheme_defaults_mime_type(self):
+        """Test that resource templates also apply ui:// MIME default."""
+        server = FastMCP("test")
+
+        @server.resource("ui://template-app/{view}")
+        def template_app(view: str) -> str:
+            return f"<html>{view}</html>"
+
+        templates = list(await server.list_resource_templates())
+        assert len(templates) == 1
+        assert templates[0].mime_type == UI_MIME_TYPE
+
 
 # ---------------------------------------------------------------------------
 # Extension advertisement
