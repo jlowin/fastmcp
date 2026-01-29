@@ -26,7 +26,7 @@ TransportType = Literal["stdio", "http", "sse", "streamable-http"]
 LogLevelType = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
 # File extensions to watch for reload
-WATCHED_EXTENSIONS = {
+WATCHED_EXTENSIONS: set[str] = {
     # Python
     ".py",
     # JavaScript/TypeScript
@@ -282,7 +282,7 @@ async def run_v1_server_async(
             await server.run_sse_async()
 
 
-def _watch_filter(change: Change, path: str) -> bool:
+def _watch_filter(_change: Change, path: str) -> bool:
     """Filter for files that should trigger reload."""
     return any(path.endswith(ext) for ext in WATCHED_EXTENSIONS)
 
