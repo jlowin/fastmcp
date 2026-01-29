@@ -131,6 +131,7 @@ env = [
 markers = [
     "integration: marks tests as integration tests (deselect with '-m \"not integration\"')",
     "client_process: marks tests that spawn client processes via stdio transport. These can create issues when run in the same CI environment as other subprocess-based tests.",
+    "core: marks tests that run with only core dependencies (no dev extras). Run with 'pytest tests/core/ -m core'",
 ]
 # Automatically mark all tests in integration_tests folder
 pythonpath = ["."]
