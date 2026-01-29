@@ -27,37 +27,40 @@ class TestServerCreation:
 
 
 class TestToolRegistration:
-    def test_register_tool_with_decorator(self) -> None:
+    async def test_register_tool_with_decorator(self) -> None:
         mcp = FastMCP()
 
         @mcp.tool
         def greet(name: str) -> str:
             return f"Hello, {name}!"
 
-        assert greet("World") == "Hello, World!"
+        tool = await mcp._local_provider.get_tool("greet")
+        assert tool is not None
+        assert tool.name == "greet"
 
-    def test_register_tool_with_custom_name(self) -> None:
+    async def test_register_tool_with_custom_name(self) -> None:
         mcp = FastMCP()
 
         @mcp.tool(name="custom_greet")
         def greet(name: str) -> str:
             return f"Hello, {name}!"
 
-        assert greet("World") == "Hello, World!"
+        tool = await mcp._local_provider.get_tool("custom_greet")
+        assert tool is not None
+        assert tool.name == "custom_greet"
 
-    def test_register_async_tool(self) -> None:
+    async def test_register_async_tool(self) -> None:
         mcp = FastMCP()
 
         @mcp.tool
         async def async_greet(name: str) -> str:
             return f"Hello, {name}!"
 
-        import asyncio
+        tool = await mcp._local_provider.get_tool("async_greet")
+        assert tool is not None
+        assert tool.name == "async_greet"
 
-        result = asyncio.run(async_greet("World"))
-        assert result == "Hello, World!"
-
-    def test_register_multiple_tools(self) -> None:
+    async def test_register_multiple_tools(self) -> None:
         mcp = FastMCP()
 
         @mcp.tool
@@ -68,48 +71,56 @@ class TestToolRegistration:
         def multiply(a: int, b: int) -> int:
             return a * b
 
-        assert add(2, 3) == 5
-        assert multiply(2, 3) == 6
+        add_tool = await mcp._local_provider.get_tool("add")
+        multiply_tool = await mcp._local_provider.get_tool("multiply")
+        assert add_tool is not None
+        assert multiply_tool is not None
 
 
 class TestResourceRegistration:
-    def test_register_resource_with_decorator(self) -> None:
+    async def test_register_resource_with_decorator(self) -> None:
         mcp = FastMCP()
 
         @mcp.resource(uri="data://config")
         def get_config() -> str:
             return '{"key": "value"}'
 
-        assert get_config() == '{"key": "value"}'
+        resource = await mcp._local_provider.get_resource("data://config")
+        assert resource is not None
 
-    def test_register_resource_template(self) -> None:
+    async def test_register_resource_template(self) -> None:
         mcp = FastMCP()
 
         @mcp.resource(uri="data://user/{user_id}")
         def get_user(user_id: str) -> str:
             return f'{{"id": "{user_id}"}}'
 
-        assert get_user("123") == '{"id": "123"}'
+        template = await mcp._local_provider.get_resource_template("data://user/{user_id}")
+        assert template is not None
 
 
 class TestPromptRegistration:
-    def test_register_prompt_with_decorator(self) -> None:
+    async def test_register_prompt_with_decorator(self) -> None:
         mcp = FastMCP()
 
         @mcp.prompt
         def welcome(name: str) -> str:
             return f"Welcome, {name}!"
 
-        assert welcome("User") == "Welcome, User!"
+        prompt = await mcp._local_provider.get_prompt("welcome")
+        assert prompt is not None
+        assert prompt.name == "welcome"
 
-    def test_register_prompt_with_custom_name(self) -> None:
+    async def test_register_prompt_with_custom_name(self) -> None:
         mcp = FastMCP()
 
         @mcp.prompt(name="custom_welcome")
         def welcome(name: str) -> str:
             return f"Welcome, {name}!"
 
-        assert welcome("User") == "Welcome, User!"
+        prompt = await mcp._local_provider.get_prompt("custom_welcome")
+        assert prompt is not None
+        assert prompt.name == "custom_welcome"
 
 
 class TestClientServerIntegration:
