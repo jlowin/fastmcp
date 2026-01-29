@@ -1593,7 +1593,9 @@ class FastMCP(
             ```
         """
         # Apply default MIME type for ui:// scheme resources
-        mime_type = resolve_ui_mime_type(uri, mime_type)
+        # (isinstance check needed because incorrect decorator usage passes a function)
+        if isinstance(uri, str):
+            mime_type = resolve_ui_mime_type(uri, mime_type)
 
         # Merge UI metadata into meta["ui"] before passing to provider
         if ui is not None:
