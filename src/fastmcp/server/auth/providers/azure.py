@@ -68,7 +68,7 @@ class AzureProvider(OAuthProxy):
             client_secret="your-client-secret",
             tenant_id="your-tenant-id",
             required_scopes=["read", "write"],  # Unprefixed scope names
-            additional_authorize_scopes=["User.Read", "Mail.Read", "offline_access"],  # Optional Graph scopes
+            additional_authorize_scopes=["User.Read", "Mail.Read"],  # Optional Graph scopes
             base_url="http://localhost:8000",
             # identifier_uri defaults to api://{client_id}
         )
@@ -132,11 +132,10 @@ class AzureProvider(OAuthProxy):
                 - NOT validated on tokens
                 - NOT advertised to MCP clients
                 - Used to request additional permissions from Azure (e.g., Graph API access)
-                Example: ["User.Read", "Mail.Read", "offline_access"]
+                Example: ["User.Read", "Mail.Read"]
                 These scopes allow your FastMCP server to call Microsoft Graph APIs using the
                 upstream Azure token, but MCP clients are unaware of them.
-                We recommend including "offline_access" here to obtain refresh tokens, which FastMCP will handle
-                automatically.
+                Note: "offline_access" is automatically included to obtain refresh tokens.
             allowed_client_redirect_uris: List of allowed redirect URI patterns for MCP clients.
                 If None (default), all URIs are allowed. If empty list, no URIs are allowed.
             client_storage: Storage backend for OAuth state (client registrations, encrypted tokens).
@@ -152,15 +151,19 @@ class AzureProvider(OAuthProxy):
         """
         # Parse scopes if provided as string
         parsed_required_scopes = parse_scopes(required_scopes)
-        parsed_additional_scopes = (
-            parse_scopes(additional_authorize_scopes)
+        parsed_additional_scopes: list[str] = (
+            parse_scopes(additional_authorize_scopes) or []
             if additional_authorize_scopes
             else []
         )
 
+        # Always include offline_access to get refresh tokens from Azure
+        if "offline_access" not in parsed_additional_scopes:
+            parsed_additional_scopes = [*parsed_additional_scopes, "offline_access"]
+
         # Apply defaults
         self.identifier_uri = identifier_uri or f"api://{client_id}"
-        self.additional_authorize_scopes = parsed_additional_scopes
+        self.additional_authorize_scopes: list[str] = parsed_additional_scopes
 
         # Always validate tokens against the app's API client ID using JWT
         issuer = f"https://{base_authority}/{tenant_id}/v2.0"
