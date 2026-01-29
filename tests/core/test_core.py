@@ -95,7 +95,9 @@ class TestResourceRegistration:
         def get_user(user_id: str) -> str:
             return f'{{"id": "{user_id}"}}'
 
-        template = await mcp._local_provider.get_resource_template("data://user/{user_id}")
+        template = await mcp._local_provider.get_resource_template(
+            "data://user/{user_id}"
+        )
         assert template is not None
 
 
