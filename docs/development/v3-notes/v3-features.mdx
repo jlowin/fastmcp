@@ -4,6 +4,16 @@ title: v3.0 Feature Tracking
 
 This document tracks major features in FastMCP v3.0 for release notes preparation.
 
+## v3.0.0beta2 Features
+
+### Expanded CLI Auto-Reload File Watching
+
+The `--reload` flag now watches a comprehensive set of file types beyond Python files ([#3028](https://github.com/jlowin/fastmcp/pull/3028)), making it suitable for MCP apps with frontend bundles or static assets.
+
+Watched file types include Python, JavaScript/TypeScript, markup files, stylesheets, configuration files, framework-specific files, GraphQL schemas, images, media, and fonts. The implementation uses `watchfiles` for efficient monitoring and works with all transport types (stdio, HTTP, SSE).
+
+---
+
 ## Provider-Based Architecture
 
 v3.0 introduces a provider-based component system that replaces v2's static-only registration ([#2622](https://github.com/jlowin/fastmcp/pull/2622)). Providers dynamically source tools, resources, templates, and prompts at runtime.
@@ -555,6 +565,10 @@ Environment variable: `FASTMCP_DECORATOR_MODE=object`
 ## CLI Auto-Reload
 
 The `--reload` flag enables file watching with automatic server restarts for development ([#2816](https://github.com/jlowin/fastmcp/pull/2816)).
+
+<Note>
+File watching was expanded in v3.0.0beta2 to include frontend file types - see [Expanded CLI Auto-Reload File Watching](#expanded-cli-auto-reload-file-watching) above.
+</Note>
 
 ```bash
 # Watch for changes and restart
