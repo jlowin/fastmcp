@@ -1592,10 +1592,16 @@ class FastMCP(
                 return f"Weather for {city}: {data}"
             ```
         """
+        # Catch incorrect decorator usage early (before any processing)
+        if not isinstance(uri, str):
+            raise TypeError(
+                "The @resource decorator was used incorrectly. "
+                "It requires a URI as the first argument. "
+                "Use @resource('uri') instead of @resource"
+            )
+
         # Apply default MIME type for ui:// scheme resources
-        # (isinstance check needed because incorrect decorator usage passes a function)
-        if isinstance(uri, str):
-            mime_type = resolve_ui_mime_type(uri, mime_type)
+        mime_type = resolve_ui_mime_type(uri, mime_type)
 
         # Merge UI metadata into meta["ui"] before passing to provider
         if ui is not None:
