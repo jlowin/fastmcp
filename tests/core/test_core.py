@@ -8,7 +8,6 @@ pytestmark = pytest.mark.core
 
 
 class TestServerCreation:
-
     def test_create_server_with_defaults(self) -> None:
         mcp = FastMCP()
         assert mcp.name.startswith("FastMCP-")
@@ -28,7 +27,6 @@ class TestServerCreation:
 
 
 class TestToolRegistration:
-
     def test_register_tool_with_decorator(self) -> None:
         mcp = FastMCP()
 
@@ -75,7 +73,6 @@ class TestToolRegistration:
 
 
 class TestResourceRegistration:
-
     def test_register_resource_with_decorator(self) -> None:
         mcp = FastMCP()
 
@@ -96,7 +93,6 @@ class TestResourceRegistration:
 
 
 class TestPromptRegistration:
-
     def test_register_prompt_with_decorator(self) -> None:
         mcp = FastMCP()
 
@@ -117,7 +113,6 @@ class TestPromptRegistration:
 
 
 class TestClientServerIntegration:
-
     async def test_list_tools_via_client(self) -> None:
         mcp = FastMCP()
 
@@ -203,7 +198,6 @@ class TestClientServerIntegration:
 
 
 class TestToolErrorHandling:
-
     async def test_tool_raises_exception(self) -> None:
         from fastmcp.exceptions import ToolError
 
@@ -227,7 +221,6 @@ class TestToolErrorHandling:
 
 
 class TestStandaloneToolDecorator:
-
     def test_standalone_tool_decorator(self) -> None:
         from fastmcp.tools import tool
 
@@ -250,7 +243,6 @@ class TestStandaloneToolDecorator:
 
 
 class TestNonAsciiContent:
-
     async def test_unicode_in_tool_description(self) -> None:
         mcp = FastMCP()
 
