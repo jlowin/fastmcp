@@ -1,0 +1,236 @@
+---
+title: MCP Apps — Research Notes and Patterns
+---
+
+Research notes from evaluating the [MCP Apps extension](https://modelcontextprotocol.github.io/ext-apps/api/) (SEP-1865) and the [ext-apps examples repository](https://github.com/modelcontextprotocol/ext-apps). These notes inform Phase 2+ development of FastMCP's Python app toolkit.
+
+## Architecture Overview
+
+MCP Apps enables servers to deliver interactive HTML UIs alongside tool results. Three entities collaborate:
+
+- **Server** (our territory): Declares tools with UI metadata, serves HTML resources
+- **Host** (e.g. Claude Desktop): Renders HTML in sandboxed iframes, proxies communication
+- **View/App** (browser JS): Interactive UI running inside the iframe
+
+The server's job is fundamentally simple: serve one HTML file as a `ui://` resource and link tools to it via metadata. All interactivity lives in the browser JavaScript.
+
+## What FastMCP Supports Today (Phase 1)
+
+Phase 1 provides SDK compatibility — the typed models and wiring for MCP Apps, without a component DSL or renderer.
+
+### Tool → UI resource linkage
+
+```python
+from fastmcp import FastMCP
+from fastmcp.server.apps import ToolUI, ResourceUI, ResourceCSP
+
+mcp = FastMCP("My Server")
+
+@mcp.resource("ui://my-app/view.html")
+def app_html() -> str:
+    return "<html>...</html>"
+
+@mcp.tool(ui=ToolUI(resource_uri="ui://my-app/view.html"))
+def process_data(query: str) -> dict:
+    return {"results": [...]}
+```
+
+### CSP and permissions
+
+Resources that load external scripts or request browser capabilities declare this via structured metadata:
+
+```python
+from fastmcp.server.apps import ResourceCSP, ResourcePermissions, ResourceUI
+
+@mcp.resource(
+    "ui://my-app/view.html",
+    ui=ResourceUI(
+        csp=ResourceCSP(
+            resource_domains=["https://unpkg.com", "https://cdn.jsdelivr.net"],
+            connect_domains=["https://api.example.com"],
+        ),
+        permissions=ResourcePermissions(microphone={}, clipboard_write={}),
+    ),
+)
+def app_html() -> str:
+    return "<html>...</html>"
+```
+
+### Tool visibility
+
+Tools can be hidden from the model (app-only) or hidden from the app (model-only):
+
+```python
+# App-only: the UI can call this via callServerTool(), but the model can't see it
+@mcp.tool(ui=ToolUI(resource_uri="ui://app/view.html", visibility=["app"]))
+def poll_live_data() -> dict:
+    return {"cpu": 42.5, "memory": 68.1}
+
+# Model-only: the model can call this, but the app UI doesn't see it
+@mcp.tool(ui=ToolUI(resource_uri="ui://app/view.html", visibility=["model"]))
+def get_summary() -> str:
+    return "System is healthy"
+```
+
+### Structured content
+
+Tools already support returning both `content` (text for the model) and `structured_content` (typed data for the UI). This is the mechanism by which rich data reaches the app:
+
+```python
+from fastmcp.tools.tool import ToolResult
+from mcp.types import TextContent
+
+@mcp.tool(ui=ToolUI(resource_uri="ui://dashboard/view.html"))
+def get_metrics() -> ToolResult:
+    data = {"cpu": [45, 52, 48], "memory": [68, 71, 69]}
+    return ToolResult(
+        content=[TextContent(type="text", text="CPU avg 48%, Memory avg 69%")],
+        structured_content=data,
+    )
+```
+
+### Runtime capability detection
+
+```python
+from fastmcp import Context
+from fastmcp.server.apps import UI_EXTENSION_ID
+
+@mcp.tool(ui=ToolUI(resource_uri="ui://dashboard"))
+async def dashboard(ctx: Context) -> dict:
+    data = compute_dashboard()
+    if ctx.client_supports_extension(UI_EXTENSION_ID):
+        return data  # UI client gets the structured data
+    return {"summary": format_text(data)}  # Text fallback
+```
+
+## Streaming and Partial Input
+
+A common question: how do MCP Apps show "live" data?
+
+**Partial input streaming** (`ontoolinputpartial`): As the model generates tool arguments, the host can stream partial arguments to the app before the tool executes. This enables live previews — for example, the Three.js example shows a 3D scene being built as the model writes JavaScript code. This is purely host→app; the server receives only the complete tool call.
+
+**App-driven polling**: The most common "live update" pattern. The app's JavaScript calls `app.callServerTool({name: "poll-data"})` on a timer. The server exposes an app-only tool (`visibility: ["app"]`) that returns fresh data. This looks like real-time streaming to the user but is actually repeated request/response cycles.
+
+**Background tasks**: For genuinely long-running operations, FastMCP supports background task execution. The server returns a `CreateTaskResult` and the client can poll for progress.
+
+The server's role in all three patterns is passive: expose tools, return results. The app JavaScript drives the interactivity.
+
+## The App Spectrum
+
+MCP Apps can be built at three levels of abstraction:
+
+### 1. Inline HTML (simplest)
+
+Everything lives in the Python file as string constants. No build step, no external files. Ideal for demos and simple tools.
+
+```python
+EMBEDDED_HTML = """<!DOCTYPE html>
+<html>
+<body>
+  <div id="result"></div>
+  <script type="module">
+    import { App } from "https://unpkg.com/@modelcontextprotocol/ext-apps@0.4.0/app-with-deps";
+    const app = new App({ name: "My App", version: "1.0.0" });
+    app.ontoolresult = ({ content }) => {
+      document.getElementById('result').textContent = JSON.stringify(content);
+    };
+    await app.connect();
+  </script>
+</body>
+</html>"""
+
+@mcp.resource("ui://demo/view.html")
+def view() -> str:
+    return EMBEDDED_HTML
+```
+
+See `examples/apps/qr_server.py` for a complete working example.
+
+### 2. Python toolkit (Phase 2 — future)
+
+Composable Python components that render to HTML. Two forms:
+- **Single-tool app**: A tool that returns its own UI inline
+- **Multi-tool app class**: An `App` with multiple tools for interactive sessions
+
+This is the focus of Phase 2 development.
+
+### 3. Custom frontend bundle (pre-built HTML/JS)
+
+A full frontend built with React/Vue/Svelte/vanilla JS, compiled into a single HTML file, and served from a FastMCP server. This is the most flexible approach for complex UIs.
+
+The key constraint: MCP Apps are rendered as `srcdoc` iframes, so **everything must be in one HTML file**. The ext-apps examples all use Vite with `vite-plugin-singlefile` to achieve this. External dependencies can be loaded from CDN (with CSP declarations).
+
+```python
+from pathlib import Path
+
+@mcp.resource(
+    "ui://my-app/view.html",
+    ui=ResourceUI(csp=ResourceCSP(resource_domains=["https://cdn.example.com"])),
+)
+def app_html() -> str:
+    return Path("dist/index.html").read_text()
+
+@mcp.tool(ui=ToolUI(resource_uri="ui://my-app/view.html"))
+def my_tool(query: str) -> dict:
+    return {"results": process(query)}
+```
+
+The build workflow:
+1. Scaffold a frontend project (React, Vue, Svelte, vanilla JS)
+2. Use `@modelcontextprotocol/ext-apps` SDK in the frontend code
+3. Build with `vite-plugin-singlefile` → produces `dist/index.html`
+4. Serve `dist/index.html` from a FastMCP resource function
+5. Link tools to the resource via `ToolUI(resource_uri=...)`
+
+The wiring between frontend and backend is manual: tool names called via `app.callServerTool({name: "..."})` in JavaScript must match Python tool registrations. Future tooling could validate this at startup.
+
+## Pattern Inventory from ext-apps
+
+The MCP Apps spec documents several patterns. Here's what involves the server (Python) vs what's pure browser-side:
+
+### Server-side patterns (FastMCP implements these)
+
+| Pattern | How to implement |
+|---------|-----------------|
+| Tool with UI resource | `@mcp.tool(ui=ToolUI(resource_uri="ui://..."))` |
+| App-only tools | `visibility=["app"]` — hidden from model, callable by app JS |
+| Model-only tools | `visibility=["model"]` — visible to model, hidden from app |
+| CSP domain declarations | `ResourceCSP(resource_domains=[...], connect_domains=[...])` |
+| Browser permissions | `ResourcePermissions(camera={}, microphone={}, ...)` |
+| Structured content | Return `ToolResult(content=[...], structured_content={...})` |
+| Capability detection | `ctx.client_supports_extension(UI_EXTENSION_ID)` |
+| Chunked data loading | App-only tool returning paginated chunks (offset, hasMore) |
+| View state persistence | Include unique UUID in `ToolResult(meta={"viewId": uuid})` |
+
+### Browser-side patterns (JS in the HTML resource)
+
+| Pattern | Description |
+|---------|-------------|
+| Host context adaptation | App reads theme/styles from `onhostcontextchanged` |
+| Fullscreen mode | App calls `requestDisplayMode("fullscreen")` |
+| Model context updates | App calls `updateModelContext()` to inform the model |
+| Large follow-up messages | App calls `updateModelContext()` then `sendMessage()` |
+| Offscreen optimization | App uses `IntersectionObserver` to pause when scrolled away |
+| Streaming preview | App handles `ontoolinputpartial` for live argument preview |
+| Error reporting | App calls `updateModelContext()` with error state |
+
+### React hooks (browser-side, JS-only)
+
+The ext-apps SDK provides React hooks: `useApp()`, `useAutoResize()`, `useDocumentTheme()`, `useHostStyles()`. These are purely browser-side and can't be replaced by Python. However, Phase 2's Python toolkit could ship HTML templates that already include them.
+
+## ext-apps Example Landscape
+
+27 examples total. 25 TypeScript, 2 Python (qr-server, say-server). All TypeScript examples follow the same pattern: `registerAppTool()` + `registerAppResource()` + Vite single-file build. The Python examples use inline HTML with CDN-loaded JS SDK.
+
+Notable examples for Phase 2 inspiration:
+- **system-monitor-server**: Demonstrates app-only polling tools (`visibility: ["app"]`)
+- **video-resource-server**: Binary blob resources via `readResource()` from the app
+- **transcript-server**: Browser permission requests (microphone, clipboard)
+- **threejs-server**: Streaming input preview (renders 3D scene as code streams in)
+- **debug-server**: Comprehensive test of every SDK capability
+
+## Future Considerations
+
+- **Startup validation**: Check that every `ToolUI.resource_uri` resolves to a registered resource. Catches wiring bugs early.
+- **Type bridge**: Extract tool call signatures from TypeScript app bundles to validate against Python tool definitions.
+- **Template library**: Pre-built HTML templates for common patterns (display image, render chart, show form) that users can customize.

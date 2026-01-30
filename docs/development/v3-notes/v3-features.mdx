@@ -686,7 +686,9 @@ async def dashboard(ctx: Context) -> dict:
 **Key details:**
 - `ToolUI` fields: `resource_uri`, `visibility`, `csp`, `permissions`, `domain`, `prefers_border` (all optional except for typical usage of `resource_uri`)
 - `ResourceUI` fields: `csp`, `permissions`, `domain`, `prefers_border` — metadata for the resource itself when it's a UI bundle
-- Models use Pydantic aliases for wire format (`resourceUri`, `prefersBorder`)
+- `csp` accepts a `ResourceCSP` model with structured domain lists: `connect_domains`, `resource_domains`, `frame_domains`, `base_uri_domains`
+- `permissions` accepts a `ResourcePermissions` model: `camera`, `microphone`, `geolocation`, `clipboard_write` (each set to `{}` to request)
+- Models use Pydantic aliases for wire format (`resourceUri`, `prefersBorder`, `connectDomains`, `clipboardWrite`)
 - `ctx.client_supports_extension(id)` is a general-purpose method — works for any extension, not just MCP Apps
 - `structuredContent` in tool results already works via `ToolResult` — MCP Apps clients use this to pass data into the iframe
 - Text content fallback already works — tools return both `content` and `structured_content`
