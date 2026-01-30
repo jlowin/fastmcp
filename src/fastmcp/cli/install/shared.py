@@ -45,6 +45,7 @@ async def process_common_args(
     env_vars = env_vars or []
     # Create MCPServerConfig from server_spec
     config = None
+    config_path: Path | None = None
     if server_spec.endswith(".json"):
         config_path = Path(server_spec).resolve()
         if not config_path.exists():
@@ -79,7 +80,14 @@ async def process_common_args(
 
     # Extract file and server_object from the source
     # The FileSystemSource handles parsing path:object syntax
-    file = Path(config.source.path).resolve()
+    source_path = Path(config.source.path).expanduser()
+    # If loaded from a JSON config, resolve relative paths against the config's directory
+    if not source_path.is_absolute() and config_path is not None:
+        file = (config_path.parent / source_path).resolve()
+    else:
+        file = source_path.resolve()
+    # Update the source path so load_server() resolves correctly
+    config.source.path = str(file)
     server_object = (
         config.source.entrypoint if hasattr(config.source, "entrypoint") else None
     )
@@ -94,14 +102,21 @@ async def process_common_args(
         },
     )
 
-    # Try to import server to get its name and dependencies
+    # Verify the resolved file actually exists
+    if not file.is_file():
+        print(f"[red]Server file not found: {file}[/red]")
+        sys.exit(1)
+
+    # Try to import server to get its name and dependencies.
+    # load_server() resolves paths against cwd, which may differ from our
+    # config-relative resolution, so we catch SystemExit from its file check.
     name = server_name
     server = None
     if not name:
         try:
             server = await config.source.load_server()
             name = server.name
-        except (ImportError, ModuleNotFoundError) as e:
+        except (ImportError, ModuleNotFoundError, SystemExit) as e:
             logger.debug(
                 "Could not import server (likely missing dependencies), using file name",
                 extra={"error": str(e)},

@@ -186,11 +186,12 @@ async def goose_command(
 
     if env_vars or env_file:
         print(
-            "[yellow]Goose deeplinks cannot include environment variables. "
-            "Use `fastmcp install mcp-json` to generate a config, then add it "
+            "[red]Goose deeplinks cannot include environment variables.[/red]\n"
+            "[yellow]Use `fastmcp install mcp-json` to generate a config, then add it "
             "to your Goose config file with env vars: "
             "https://block.github.io/goose/docs/getting-started/using-extensions/#config-entry[/yellow]"
         )
+        sys.exit(1)
 
     file, server_object, name, with_packages, _env_dict = await process_common_args(
         server_spec, server_name, with_packages, env_vars, env_file
