@@ -16,6 +16,7 @@ internal APIs for background task coordination.
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 from typing import TYPE_CHECKING, Any
 
@@ -82,8 +83,6 @@ async def elicit_for_task(
     request_key = ELICIT_REQUEST_KEY.format(session_id=session_id, task_id=task_id)
     response_key = ELICIT_RESPONSE_KEY.format(session_id=session_id, task_id=task_id)
     status_key = ELICIT_STATUS_KEY.format(session_id=session_id, task_id=task_id)
-
-    import json
 
     elicit_request = {
         "request_id": request_id,
@@ -192,8 +191,6 @@ async def handle_task_input(
     docket = fastmcp._docket
     if docket is None:
         return False
-
-    import json
 
     response_key = ELICIT_RESPONSE_KEY.format(session_id=session_id, task_id=task_id)
     status_key = ELICIT_STATUS_KEY.format(session_id=session_id, task_id=task_id)
