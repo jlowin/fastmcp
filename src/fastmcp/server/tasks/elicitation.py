@@ -126,10 +126,11 @@ async def elicit_for_task(
     )
 
     # Send notification (don't fail if this errors)
-    try:
+    # Best effort - task status is stored in Redis
+    import contextlib
+
+    with contextlib.suppress(Exception):
         await session.send_notification(notification)  # type: ignore[arg-type]
-    except Exception:
-        pass  # Best effort - task status is stored in Redis
 
     # Wait for response (poll Redis)
     # In a production implementation, this could use Redis pub/sub for lower latency

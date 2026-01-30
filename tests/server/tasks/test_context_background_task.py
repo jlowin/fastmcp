@@ -99,10 +99,10 @@ class TestContextDocumentation:
 
     def test_task_id_has_docstring(self):
         """task_id property should have documentation."""
-        assert Context.task_id.fget.__doc__ is not None  # type: ignore[union-attr]
-        assert "task ID" in Context.task_id.fget.__doc__  # type: ignore[union-attr]
+        assert Context.task_id.fget.__doc__ is not None
+        assert "task ID" in Context.task_id.fget.__doc__
 
     def test_session_has_docstring(self):
         """session property should document background task support."""
-        assert Context.session.fget.__doc__ is not None  # type: ignore[union-attr]
-        assert "background task" in Context.session.fget.__doc__.lower()  # type: ignore[union-attr]
+        assert Context.session.fget.__doc__ is not None
+        assert "background task" in Context.session.fget.__doc__.lower()
