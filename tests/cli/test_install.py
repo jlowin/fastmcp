@@ -25,6 +25,7 @@ class TestInstallApp:
             install_app.parse_args(["claude-desktop", "--help"])
             install_app.parse_args(["cursor", "--help"])
             install_app.parse_args(["gemini-cli", "--help"])
+            install_app.parse_args(["goose", "--help"])
             install_app.parse_args(["mcp-json", "--help"])
         except SystemExit:
             # Help commands exit with 0, that's expected
@@ -163,6 +164,53 @@ class TestCursorInstall:
         assert bound.arguments["server_name"] == "test-server"
 
 
+class TestGooseInstall:
+    """Test goose install command."""
+
+    def test_goose_basic(self):
+        """Test basic goose install command parsing."""
+        command, bound, _ = install_app.parse_args(
+            ["goose", "server.py", "--name", "test-server"]
+        )
+
+        assert command is not None
+        assert bound.arguments["server_spec"] == "server.py"
+        assert bound.arguments["server_name"] == "test-server"
+
+    def test_goose_with_options(self):
+        """Test goose install with various options."""
+        command, bound, _ = install_app.parse_args(
+            [
+                "goose",
+                "server.py",
+                "--name",
+                "test-server",
+                "--with",
+                "package1",
+                "--with",
+                "package2",
+                "--env",
+                "VAR1=value1",
+            ]
+        )
+
+        assert bound.arguments["with_packages"] == ["package1", "package2"]
+        assert bound.arguments["env_vars"] == ["VAR1=value1"]
+
+    def test_goose_with_python(self):
+        """Test goose install with --python option."""
+        command, bound, _ = install_app.parse_args(
+            [
+                "goose",
+                "server.py",
+                "--python",
+                "3.11",
+            ]
+        )
+
+        assert bound.arguments["python"] == "3.11"
+
+
 class TestMcpJsonInstall:
     """Test mcp-json install command."""
 
@@ -253,6 +301,7 @@ class TestInstallCommandParsing:
             ["claude-desktop", "server.py"],
             ["cursor", "server.py"],
             ["gemini-cli", "server.py"],
+            ["goose", "server.py"],
         ]
 
         for cmd_args in commands_to_test:
@@ -274,6 +323,7 @@ class TestInstallCommandParsing:
             ["claude-desktop", "server.py", "--python", "3.11"],
             ["cursor", "server.py", "--python", "3.11"],
             ["gemini-cli", "server.py", "--python", "3.11"],
+            ["goose", "server.py", "--python", "3.11"],
             ["mcp-json", "server.py", "--python", "3.11"],
         ]
 
