@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import base64
 import io
-import sys
 
 import qrcode  # type: ignore[import-untyped]
 from mcp import types
@@ -29,11 +28,11 @@ from mcp import types
 from fastmcp import FastMCP
 from fastmcp.server.apps import ResourceCSP, ResourceUI, ToolUI
 
-VIEW_URI = "ui://qr-server/view.html"
+VIEW_URI: str = "ui://qr-server/view.html"
 
-mcp = FastMCP("QR Code Server", stateless_http=True)
+mcp: FastMCP = FastMCP("QR Code Server")
 
-EMBEDDED_VIEW_HTML = """\
+EMBEDDED_VIEW_HTML: str = """\
 <!DOCTYPE html>
 <html>
 <head>
@@ -130,11 +129,18 @@ def generate_qr(
         "H": qrcode.constants.ERROR_CORRECT_H,
     }
 
+    if box_size <= 0:
+        raise ValueError("box_size must be > 0")
+    if border < 0:
+        raise ValueError("border must be >= 0")
+
+    error_key = error_correction.upper()
+    if error_key not in error_levels:
+        raise ValueError(f"error_correction must be one of: {', '.join(error_levels)}")
+
     qr = qrcode.QRCode(
         version=1,
-        error_correction=error_levels.get(
-            error_correction.upper(), qrcode.constants.ERROR_CORRECT_M
-        ),
+        error_correction=error_levels[error_key],
         box_size=box_size,
         border=border,
     )
@@ -158,7 +164,4 @@ def view() -> str:
 
 
 if __name__ == "__main__":
-    if "--stdio" in sys.argv:
-        mcp.run(transport="stdio")
-    else:
-        mcp.run(transport="streamable-http", host="0.0.0.0", port=3001)
+    mcp.run()
