@@ -77,7 +77,7 @@ async def process_common_args(
 
     # Extract file and server_object from the source
     # The FileSystemSource handles parsing path:object syntax
-    source_path = Path(config.source.path)
+    source_path = Path(config.source.path).expanduser()
     # If loaded from a JSON config, resolve relative paths against the config's directory
     if not source_path.is_absolute() and config_path is not None:
         file = (config_path.parent / source_path).resolve()
@@ -98,7 +98,7 @@ async def process_common_args(
     )
 
     # Verify the resolved file actually exists
-    if not file.exists():
+    if not file.is_file():
         print(f"[red]Server file not found: {file}[/red]")
         sys.exit(1)
 

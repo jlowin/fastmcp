@@ -70,7 +70,7 @@ def install_stdio(
 
         return True
 
-    except Exception as e:
+    except (OSError, ValueError, pyperclip.PyperclipException) as e:
         rich_print(f"[red]Failed to generate stdio command: {e}[/red]")
         return False
 
