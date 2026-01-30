@@ -578,14 +578,27 @@ class Context:
     def session(self) -> ServerSession:
         """Access to the underlying session for advanced usage.
 
-        Raises RuntimeError if MCP request context is not available.
+        In request mode: Returns the session from the active request context.
+        In background task mode: Returns the session stored at Context creation.
+
+        Raises RuntimeError if no session is available.
         """
-        if self.request_context is None:
-            raise RuntimeError(
-                "session is not available because the MCP session has not been established yet. "
-                "Check `context.request_context` for None before accessing this attribute."
-            )
-        return self.request_context.session
+        # Background task mode: use the stored session
+        if self.is_background_task and self._session is not None:
+            return self._session
+
+        # Request mode: use request context
+        if self.request_context is not None:
+            return self.request_context.session
+
+        # Fallback to stored session (e.g., during on_initialize)
+        if self._session is not None:
+            return self._session
+
+        raise RuntimeError(
+            "session is not available because the MCP session has not been established yet. "
+            "Check `context.request_context` for None before accessing this attribute."
+        )
 
     # Convenience methods for common log levels
     async def debug(

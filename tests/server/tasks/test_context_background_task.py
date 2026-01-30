@@ -31,6 +31,45 @@ class TestContextBackgroundTaskSupport:
             ctx.task_id = "new-id"  # type: ignore[misc]
 
 
+class TestContextSessionProperty:
+    """Tests for Context.session property in different modes."""
+
+    def test_session_raises_when_no_session_available(self):
+        """session should raise RuntimeError when no session is available."""
+        mcp = FastMCP("test")
+        ctx = Context(mcp)  # No session, not a background task
+
+        with pytest.raises(RuntimeError, match="session is not available"):
+            _ = ctx.session
+
+    def test_session_uses_stored_session_in_background_task(self):
+        """session should use _session in background task mode."""
+        mcp = FastMCP("test")
+
+        class MockSession:
+            _fastmcp_state_prefix = "test-session"
+
+        mock_session = MockSession()
+        ctx = Context(mcp, session=mock_session, task_id="test-task-123")  # type: ignore[arg-type]
+
+        # In background task mode, should return the stored session
+        assert ctx.session is mock_session
+
+    def test_session_uses_stored_session_during_on_initialize(self):
+        """session should use _session during on_initialize (no request context)."""
+        mcp = FastMCP("test")
+
+        class MockSession:
+            _fastmcp_state_prefix = "test-session"
+
+        mock_session = MockSession()
+        # Simulating on_initialize: has session but not a background task
+        ctx = Context(mcp, session=mock_session)  # type: ignore[arg-type]
+
+        # Should return the stored session as fallback
+        assert ctx.session is mock_session
+
+
 class TestContextElicitBackgroundTask:
     """Tests for Context.elicit() in background task mode."""
 
@@ -62,3 +101,8 @@ class TestContextDocumentation:
         """task_id property should have documentation."""
         assert Context.task_id.fget.__doc__ is not None  # type: ignore[union-attr]
         assert "task ID" in Context.task_id.fget.__doc__  # type: ignore[union-attr]
+
+    def test_session_has_docstring(self):
+        """session property should document background task support."""
+        assert Context.session.fget.__doc__ is not None  # type: ignore[union-attr]
+        assert "background task" in Context.session.fget.__doc__.lower()  # type: ignore[union-attr]
