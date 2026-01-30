@@ -412,6 +412,19 @@ class TestIntegration:
             assert str(resources[0].uri) == "ui://my-app/view.html"
             assert resources[0].mimeType == UI_MIME_TYPE
 
+    async def test_ui_resource_read_preserves_mime_type(self):
+        """Reading a ui:// resource returns content with the correct MIME type."""
+        server = FastMCP("test")
+
+        @server.resource("ui://my-app/view.html")
+        def app_html() -> str:
+            return "<html><body>Hello</body></html>"
+
+        async with Client(server) as client:
+            result = await client.read_resource_mcp("ui://my-app/view.html")
+            assert len(result.contents) == 1
+            assert result.contents[0].mimeType == UI_MIME_TYPE
+
     async def test_ui_tool_callable(self):
         """A tool registered with ui= is still callable normally."""
         server = FastMCP("test")
@@ -489,3 +502,24 @@ class TestIntegration:
                 "https://cdn.example.com"
             ]
             assert tool_meta["ui"]["permissions"]["camera"] == {}
+
+    async def test_resource_read_propagates_meta_to_content_items(self):
+        """resources/read must include _meta on content items so hosts can read CSP."""
+        server = FastMCP("test")
+
+        @server.resource(
+            "ui://csp-app/view.html",
+            ui=ResourceUI(
+                csp=ResourceCSP(resource_domains=["https://unpkg.com"]),
+            ),
+        )
+        def app_view() -> str:
+            return "<html>app</html>"
+
+        async with Client(server) as client:
+            read_result = await client.read_resource_mcp("ui://csp-app/view.html")
+            content_item = read_result.contents[0]
+            assert content_item.meta is not None
+            assert content_item.meta["ui"]["csp"]["resourceDomains"] == [
+                "https://unpkg.com"
+            ]

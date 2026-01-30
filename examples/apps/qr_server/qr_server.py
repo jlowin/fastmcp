@@ -27,6 +27,7 @@ from mcp import types
 
 from fastmcp import FastMCP
 from fastmcp.server.apps import ResourceCSP, ResourceUI, ToolUI
+from fastmcp.tools import ToolResult
 
 VIEW_URI: str = "ui://qr-server/view.html"
 
@@ -111,7 +112,7 @@ def generate_qr(
     error_correction: str = "M",
     fill_color: str = "black",
     back_color: str = "white",
-) -> list[types.ImageContent]:
+) -> ToolResult:
     """Generate a QR code from text.
 
     Args:
@@ -151,7 +152,9 @@ def generate_qr(
     buffer = io.BytesIO()
     img.save(buffer, format="PNG")
     b64 = base64.b64encode(buffer.getvalue()).decode()
-    return [types.ImageContent(type="image", data=b64, mimeType="image/png")]
+    return ToolResult(
+        content=[types.ImageContent(type="image", data=b64, mimeType="image/png")]
+    )
 
 
 @mcp.resource(
