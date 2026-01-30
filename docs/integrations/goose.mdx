@@ -14,7 +14,7 @@ import { LocalFocusTip } from "/snippets/local-focus.mdx"
 
 ## Requirements
 
-This integration uses Goose's deeplink protocol to register your server as a STDIO extension running via `uvx`. Goose must be installed on your system for the deeplink to open automatically.
+This integration uses Goose's deeplink protocol to register your server as a STDIO extension running via `uvx`. You must have Goose installed on your system for the deeplink to open automatically.
 
 For remote deployments, configure your FastMCP server with HTTP transport and add it to Goose directly using `goose configure` or the config file.
 
@@ -61,7 +61,7 @@ fastmcp install goose server.py:my_custom_server
 
 Under the hood, the generated command uses `uvx` to run your server in an isolated environment. Goose requires `uvx` rather than `uv run`, so the install produces a command like:
 
-```
+```bash
 uvx --with pandas fastmcp run /path/to/server.py
 ```
 

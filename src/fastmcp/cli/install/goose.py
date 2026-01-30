@@ -183,6 +183,13 @@ async def goose_command(
     """
     with_packages = with_packages or []
     env_vars = env_vars or []
+
+    if env_vars or env_file:
+        print(
+            "[yellow]Goose deeplinks cannot include environment variables; "
+            "use `fastmcp install mcp-json` for env support.[/yellow]"
+        )
+
     file, server_object, name, with_packages, _env_dict = await process_common_args(
         server_spec, server_name, with_packages, env_vars, env_file
     )
