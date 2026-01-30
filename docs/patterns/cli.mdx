@@ -300,12 +300,16 @@ Install a MCP server in MCP client applications. FastMCP currently supports the 
 - **Claude Code** - Installs via Claude Code's built-in MCP management system
 - **Claude Desktop** - Installs via direct configuration file modification
 - **Cursor** - Installs via deeplink that opens Cursor for user confirmation
+- **Gemini CLI** - Installs via Gemini CLI's built-in MCP management system
+- **Goose** - Installs via deeplink that opens Goose for user confirmation (uses `uvx`)
 - **MCP JSON** - Generates standard MCP JSON configuration for manual use
 
 ```bash
 fastmcp install claude-code server.py
 fastmcp install claude-desktop server.py
 fastmcp install cursor server.py
+fastmcp install gemini-cli server.py
+fastmcp install goose server.py
 fastmcp install mcp-json server.py
 ```
 
@@ -379,6 +383,9 @@ fastmcp install cursor server.py --env API_KEY=secret --env DEBUG=true
 
 # Install with environment file
 fastmcp install cursor server.py --env-file .env
+
+# Install in Goose (uses uvx deeplink)
+fastmcp install goose server.py --with pandas
 
 # Install with specific Python version
 fastmcp install claude-desktop server.py --python 3.11
