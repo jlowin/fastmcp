@@ -97,7 +97,14 @@ async def process_common_args(
         },
     )
 
-    # Try to import server to get its name and dependencies
+    # Verify the resolved file actually exists
+    if not file.exists():
+        print(f"[red]Server file not found: {file}[/red]")
+        sys.exit(1)
+
+    # Try to import server to get its name and dependencies.
+    # load_server() resolves paths against cwd, which may differ from our
+    # config-relative resolution, so we catch SystemExit from its file check.
     name = server_name
     server = None
     if not name:
