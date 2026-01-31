@@ -310,7 +310,8 @@
                           "python-sdk/fastmcp-cli-install-gemini_cli",
                           "python-sdk/fastmcp-cli-install-goose",
                           "python-sdk/fastmcp-cli-install-mcp_json",
-                          "python-sdk/fastmcp-cli-install-shared"
+                          "python-sdk/fastmcp-cli-install-shared",
+                          "python-sdk/fastmcp-cli-install-stdio"
                         ]
                       },
                       "python-sdk/fastmcp-cli-run",
@@ -399,6 +400,7 @@
                     "group": "fastmcp.server",
                     "pages": [
                       "python-sdk/fastmcp-server-__init__",
+                      "python-sdk/fastmcp-server-apps",
                       {
                         "group": "auth",
                         "pages": [
