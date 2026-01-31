@@ -25,29 +25,23 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
 
 def log_event(event_type: str, payload: dict[str, Any] | None = None) -> None:
     payload = payload or {}
-    conn = sqlite3.connect(DB_PATH)
-    try:
+    with sqlite3.connect(DB_PATH) as conn:
         _ensure_schema(conn)
         conn.execute(
             "INSERT INTO ledger (timestamp, event_type, payload) VALUES (?, ?, ?)",
             (datetime.now(tz=timezone.utc).isoformat(), event_type, json.dumps(payload)),
         )
         conn.commit()
-    finally:
-        conn.close()
 
 
 def get_last_events(n: int = 10) -> list[dict[str, Any]]:
-    conn = sqlite3.connect(DB_PATH)
-    try:
+    with sqlite3.connect(DB_PATH) as conn:
         _ensure_schema(conn)
         cursor = conn.execute(
             "SELECT timestamp, event_type, payload FROM ledger ORDER BY id DESC LIMIT ?",
             (n,),
         )
         rows = cursor.fetchall()
-    finally:
-        conn.close()
     events: list[dict[str, Any]] = []
     for timestamp, event_type, payload in rows:
         try:
