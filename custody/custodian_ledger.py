@@ -6,10 +6,15 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+import os
 
-DB_PATH = Path(__file__).with_name("ledger.db")
-
-
+# Determine database path: environment variable or default to ~/.custodian_ledger/ledger.db
+DB_PATH = os.environ.get(
+    "CUSTODIAN_LEDGER_DB_PATH",
+    str(Path.home() / ".custodian_ledger" / "ledger.db")
+)
+# Ensure the parent directory exists
+Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
 def _ensure_schema(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
