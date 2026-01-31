@@ -32,17 +32,12 @@ class Orchestrator:
         from telemetry.emit_heartbeat import generate_heartbeat
 
         res: dict[str, Any] = {
-            "mcp": "unknown",
+            "mcp": "ok",
             "heartbeat": None,
-            "ledger": "unknown",
+            "ledger": "ok",
         }
-
-        res["mcp"] = "ok"
 
         hb = generate_heartbeat()
         self.log("ORCH_STEP_HEARTBEAT", hb)
         res["heartbeat"] = hb
-
-        res["ledger"] = "ok"
-
         return res
