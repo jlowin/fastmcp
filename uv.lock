@@ -752,7 +752,7 @@ requires-dist = [
     { name = "authlib", specifier = ">=1.6.5" },
     { name = "cyclopts", specifier = ">=4.0.0" },
     { name = "exceptiongroup", specifier = ">=1.2.2" },
-    { name = "google-genai", marker = "extra == 'google-genai'", specifier = ">=1.0.0" },
+    { name = "google-genai", marker = "extra == 'google-genai'", specifier = ">=1.18.0" },
     { name = "httpx", specifier = ">=0.28.1,<1.0" },
     { name = "jsonref", specifier = ">=1.1.0" },
     { name = "jsonschema-path", specifier = ">=0.3.4" },

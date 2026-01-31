@@ -51,7 +51,7 @@ classifiers = [
 
 [project.optional-dependencies]
 anthropic = ["anthropic>=0.40.0"]
-google-genai = ["google-genai>=1.0.0"]
+google-genai = ["google-genai>=1.18.0"]
 openai = ["openai>=1.102.0"]
 tasks = ["pydocket>=0.17.2"]
 
