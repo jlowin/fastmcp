@@ -38,11 +38,15 @@ from mcp_registry import (
     MCP_SERVERS,
     ServerType,
     UseCase,
+    auto_enable_servers,
     build_multi_server_config,
     get_enabled_servers,
     get_servers_by_use_case,
     print_registry,
 )
+
+# Auto-enable servers based on available environment variables
+auto_enable_servers()
 
 
 async def test_server(name: str) -> tuple[str, bool, str]:

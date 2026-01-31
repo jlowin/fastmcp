@@ -6,8 +6,10 @@ This module provides:
 2. Use case mapping
 3. Unified client configuration
 4. Health checking and failover
+5. Auto-detection of secrets from environment/GitHub Secrets
 """
 
+import os
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -239,6 +241,43 @@ def build_multi_server_config(server_names: list[str] | None = None) -> dict[str
     }
 
 
+def _resolve_env_vars(env_vars: dict[str, str]) -> dict[str, str]:
+    """Resolve ${VAR} placeholders from environment."""
+    resolved = {}
+    for key, value in env_vars.items():
+        if value.startswith("${") and value.endswith("}"):
+            env_name = value[2:-1]
+            resolved[key] = os.environ.get(env_name, "")
+        else:
+            resolved[key] = value
+    return resolved
+
+
+def _check_secrets_available(env_vars: dict[str, str]) -> tuple[bool, list[str]]:
+    """Check if all required secrets are available in environment."""
+    missing = []
+    for key, value in env_vars.items():
+        if value.startswith("${") and value.endswith("}"):
+            env_name = value[2:-1]
+            if not os.environ.get(env_name):
+                missing.append(env_name)
+    return len(missing) == 0, missing
+
+
+def auto_enable_servers():
+    """
+    Auto-enable servers based on available secrets.
+    Call this after setting environment variables.
+    """
+    for name, config in MCP_SERVERS.items():
+        if config.requires_auth and config.env_vars:
+            secrets_ok, missing = _check_secrets_available(config.env_vars)
+            if secrets_ok:
+                config.enabled = True
+                # Resolve the actual values
+                config.env_vars = _resolve_env_vars(config.env_vars)
+
+
 def print_registry():
     """Print a summary of all registered MCP servers."""
     print("\n" + "=" * 70)
@@ -254,12 +293,32 @@ def print_registry():
         print(f"    Use cases: {', '.join(uc.value for uc in config.use_cases)}")
 
         if config.requires_auth and config.env_vars:
-            missing = [k for k, v in config.env_vars.items() if v.startswith("${")]
-            if missing:
+            secrets_ok, missing = _check_secrets_available(config.env_vars)
+            if not secrets_ok:
                 print(f"    ⚠️  Missing env vars: {', '.join(missing)}")
+            else:
+                print(f"    ✅ All secrets available")
 
     print("\n" + "=" * 70)
 
 
+# =============================================================================
+# GITHUB SECRETS AVAILABLE (from .github/workflows/)
+# =============================================================================
+GITHUB_SECRETS = [
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_API_KEY_FOR_CI",
+    "FASTMCP_GITHUB_TOKEN",
+    "FASTMCP_TEST_AUTH_GITHUB_CLIENT_ID",
+    "FASTMCP_TEST_AUTH_GITHUB_CLIENT_SECRET",
+    "GITHUB_TOKEN",
+    "MARVIN_APP_ID",
+    "MARVIN_APP_PRIVATE_KEY",
+    "OPENAI_API_KEY",
+]
+
+
 if __name__ == "__main__":
+    # Auto-enable based on available secrets
+    auto_enable_servers()
     print_registry()

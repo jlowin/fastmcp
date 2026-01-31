@@ -48,21 +48,54 @@ class ServiceSecrets:
 
 # =============================================================================
 # SECRET DEFINITIONS BY SERVICE
+# These match the secrets configured in GitHub Actions
 # =============================================================================
 
 SECRETS_REGISTRY: dict[str, ServiceSecrets] = {
+    # -------------------------------------------------------------------------
+    # AI/LLM APIs (confirmed in GitHub Secrets)
+    # -------------------------------------------------------------------------
     "openai": ServiceSecrets(
         service_name="OpenAI",
         secrets=[
-            SecretDefinition("OPENAI_API_KEY", "OpenAI API key for GPT models"),
+            SecretDefinition("OPENAI_API_KEY", "OpenAI API key for GPT models (RepoAgent, etc.)"),
         ],
     ),
     "anthropic": ServiceSecrets(
         service_name="Anthropic",
         secrets=[
             SecretDefinition("ANTHROPIC_API_KEY", "Anthropic API key for Claude"),
+            SecretDefinition("ANTHROPIC_API_KEY_FOR_CI", "Anthropic API key for CI workflows", required=False),
         ],
     ),
+
+    # -------------------------------------------------------------------------
+    # GitHub (confirmed in GitHub Secrets)
+    # -------------------------------------------------------------------------
+    "github": ServiceSecrets(
+        service_name="GitHub",
+        secrets=[
+            SecretDefinition("GITHUB_TOKEN", "Default GitHub token (auto-provided in Actions)"),
+            SecretDefinition("FASTMCP_GITHUB_TOKEN", "FastMCP GitHub token for API access"),
+            SecretDefinition("FASTMCP_TEST_AUTH_GITHUB_CLIENT_ID", "OAuth client ID", required=False),
+            SecretDefinition("FASTMCP_TEST_AUTH_GITHUB_CLIENT_SECRET", "OAuth client secret", required=False),
+        ],
+    ),
+
+    # -------------------------------------------------------------------------
+    # Marvin AI (confirmed in GitHub Secrets)
+    # -------------------------------------------------------------------------
+    "marvin": ServiceSecrets(
+        service_name="Marvin AI",
+        secrets=[
+            SecretDefinition("MARVIN_APP_ID", "Marvin GitHub App ID"),
+            SecretDefinition("MARVIN_APP_PRIVATE_KEY", "Marvin GitHub App private key"),
+        ],
+    ),
+
+    # -------------------------------------------------------------------------
+    # MCP Servers (need to add to GitHub Secrets)
+    # -------------------------------------------------------------------------
     "teamwork": ServiceSecrets(
         service_name="Teamwork",
         secrets=[
@@ -84,14 +117,6 @@ SECRETS_REGISTRY: dict[str, ServiceSecrets] = {
             SecretDefinition("ATPROTO_PASSWORD", "Bluesky app password"),
         ],
     ),
-    "github": ServiceSecrets(
-        service_name="GitHub",
-        secrets=[
-            SecretDefinition("FASTMCP_GITHUB_TOKEN", "GitHub token for API access"),
-            SecretDefinition("FASTMCP_TEST_AUTH_GITHUB_CLIENT_ID", "OAuth client ID", required=False),
-            SecretDefinition("FASTMCP_TEST_AUTH_GITHUB_CLIENT_SECRET", "OAuth client secret", required=False),
-        ],
-    ),
     "hue": ServiceSecrets(
         service_name="Philips Hue",
         secrets=[
@@ -100,6 +125,22 @@ SECRETS_REGISTRY: dict[str, ServiceSecrets] = {
         ],
     ),
 }
+
+
+# =============================================================================
+# GITHUB SECRETS SUMMARY (from .github/workflows/)
+# =============================================================================
+GITHUB_SECRETS_AVAILABLE = [
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_API_KEY_FOR_CI",
+    "FASTMCP_GITHUB_TOKEN",
+    "FASTMCP_TEST_AUTH_GITHUB_CLIENT_ID",
+    "FASTMCP_TEST_AUTH_GITHUB_CLIENT_SECRET",
+    "GITHUB_TOKEN",  # Auto-provided
+    "MARVIN_APP_ID",
+    "MARVIN_APP_PRIVATE_KEY",
+    "OPENAI_API_KEY",
+]
 
 
 def _load_dotenv_if_available():
