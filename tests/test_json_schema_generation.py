@@ -4,7 +4,6 @@ Validates that callable fields are properly excluded from generated schemas
 using SkipJsonSchema annotations.
 """
 
-import pytest
 
 from fastmcp.prompts.function_prompt import FunctionPrompt
 from fastmcp.resources.function_resource import FunctionResource
@@ -82,7 +81,9 @@ class TestResourceJsonSchema:
             """Return sample data."""
             return "Hello, world!"
 
-        resource = FunctionResource.from_function(sample_resource, uri="test://resource")
+        resource = FunctionResource.from_function(
+            sample_resource, uri="test://resource"
+        )
 
         # This should not raise an error
         schema = resource.model_json_schema()
@@ -226,6 +227,6 @@ class TestJsonSchemaIntegration:
 
             # Verify none of the callable fields are in the schema
             for field in callable_fields:
-                assert (
-                    field not in properties
-                ), f"Callable field '{field}' found in schema for {type(instance).__name__}"
+                assert field not in properties, (
+                    f"Callable field '{field}' found in schema for {type(instance).__name__}"
+                )
