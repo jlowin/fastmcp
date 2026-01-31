@@ -4,7 +4,6 @@ Validates that callable fields are properly excluded from generated schemas
 using SkipJsonSchema annotations.
 """
 
-
 from fastmcp.prompts.function_prompt import FunctionPrompt
 from fastmcp.resources.function_resource import FunctionResource
 from fastmcp.resources.template import FunctionResourceTemplate
