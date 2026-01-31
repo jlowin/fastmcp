@@ -86,11 +86,11 @@ All high-risk operations are:
 
 ### Security Notes
 
-- **Authentication Providers**: Secure configuration of enterprise SSO
-- **API Keys**: Never commit authentication credentials to version control
-- **Server Composition**: Review security of composed/proxied servers
-- **Tool Registration**: Validate tools before exposing to LLMs
-- **Production Deployment**: Follow security best practices for deployment
+- **Authentication Providers**: Configure OAuth/OIDC/SAML providers used by FastMCP according to your IdP’s least‑privilege and MFA policies. Limit issued scopes to only what FastMCP requires, and rotate client secrets regularly.
+- **API Keys & Secrets**: Store credentials for MCP tools and upstream APIs in environment variables or your chosen secret manager; reference them from FastMCP configuration and tool definitions, and avoid logging or serializing secrets in tool outputs.
+- **Server Composition & Proxying**: When composing or proxying other MCP servers through FastMCP, explicitly whitelist which tools and resources are re‑exposed, and sanitize prompts/responses to prevent data from crossing trust boundaries unintentionally.
+- **Tool Registration & High‑Risk Powers**: Require human review and approval for tools that access the filesystem, network, shell, or other high‑risk powers, and ensure they are only enabled for trusted models/tenants with appropriate auditing enabled.
+- **Production Deployment**: Run FastMCP behind a TLS‑terminating reverse proxy or API gateway with authentication/authorization enforced, disable debug or development‑only options, and align process/container isolation with the risk level of enabled tools and composed servers.
 
 ---
 
