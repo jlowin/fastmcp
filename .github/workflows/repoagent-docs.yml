@@ -1,0 +1,84 @@
+name: Generate Documentation with RepoAgent
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: 'LLM model to use'
+        required: false
+        default: 'gpt-4o-mini'
+        type: choice
+        options:
+          - gpt-4o-mini
+          - gpt-4o
+          - gpt-4-turbo
+      language:
+        description: 'Documentation language'
+        required: false
+        default: 'English'
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/**/*.py'
+      - 'custom_mcp_server/**/*.py'
+
+jobs:
+  generate-docs:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install RepoAgent
+        run: pip install repoagent
+
+      - name: Run RepoAgent
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          repoagent run \
+            --model "${{ inputs.model || 'gpt-4o-mini' }}" \
+            --language "${{ inputs.language || 'English' }}" \
+            --target-repo-path . \
+            --markdown-docs-path docs/generated \
+            --ignore-list ".venv,node_modules,__pycache__,.git,tests" \
+            --print-hierarchy
+
+      - name: Check for changes
+        id: changes
+        run: |
+          if [[ -n $(git status --porcelain docs/generated) ]]; then
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Pull Request
+        if: steps.changes.outputs.has_changes == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "docs: Update generated documentation via RepoAgent"
+          title: "docs: Auto-generated documentation update"
+          body: |
+            This PR updates the auto-generated documentation using RepoAgent.
+
+            **Model used:** ${{ inputs.model || 'gpt-4o-mini' }}
+            **Language:** ${{ inputs.language || 'English' }}
+
+            🤖 Generated automatically by RepoAgent
+          branch: docs/repoagent-update
+          delete-branch: true
+          labels: documentation,automated
