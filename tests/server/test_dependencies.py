@@ -2,6 +2,7 @@
 
 from contextlib import asynccontextmanager, contextmanager
 
+import mcp.types as mcp_types
 import pytest
 from mcp.types import TextContent, TextResourceContents
 
@@ -66,7 +67,7 @@ async def test_depends_with_async_function(mcp: FastMCP):
         return 42
 
     @mcp.tool()
-    async def greet_user(name: str, user_id: int = Depends(get_user_id)) -> str:  # type: ignore[assignment]
+    async def greet_user(name: str, user_id: int = Depends(get_user_id)) -> str:
         return f"Hello {name}, your ID is {user_id}"
 
     result = await mcp.call_tool("greet_user", {"name": "Alice"})
@@ -135,8 +136,8 @@ async def test_dependencies_excluded_from_schema(mcp: FastMCP):
     ) -> str:
         return f"{name} is {age} years old"
 
-    tools = await mcp._list_tools_mcp()
-    tool = next(t for t in tools if t.name == "my_tool")
+    result = await mcp._list_tools_mcp(mcp_types.ListToolsRequest())
+    tool = next(t for t in result.tools if t.name == "my_tool")
 
     assert "name" in tool.inputSchema["properties"]
     assert "age" in tool.inputSchema["properties"]
@@ -197,7 +198,7 @@ async def test_sync_tool_with_async_dependency(mcp: FastMCP):
         return "loaded_config"
 
     @mcp.tool()
-    def process_data(value: int, config: str = Depends(fetch_config)) -> str:  # type: ignore[assignment]
+    def process_data(value: int, config: str = Depends(fetch_config)) -> str:
         return f"Processing {value} with {config}"
 
     result = await mcp.call_tool("process_data", {"value": 100})
@@ -466,8 +467,8 @@ async def test_connection_dependency_excluded_from_tool_schema(mcp: FastMCP):
     ) -> str:
         return name
 
-    tools = await mcp._list_tools_mcp()
-    tool = next(t for t in tools if t.name == "with_connection")
+    result = await mcp._list_tools_mcp(mcp_types.ListToolsRequest())
+    tool = next(t for t in result.tools if t.name == "with_connection")
 
     assert "name" in tool.inputSchema["properties"]
     assert "connection" not in tool.inputSchema["properties"]
@@ -588,8 +589,8 @@ async def test_external_user_cannot_override_dependency(mcp: FastMCP):
         return f"action={action},admin={admin}"
 
     # Verify dependency is NOT in the schema
-    tools = await mcp._list_tools_mcp()
-    tool = next(t for t in tools if t.name == "check_permission")
+    result = await mcp._list_tools_mcp(mcp_types.ListToolsRequest())
+    tool = next(t for t in result.tools if t.name == "check_permission")
     assert "admin" not in tool.inputSchema["properties"]
 
     # Normal call - dependency is resolved
@@ -859,8 +860,8 @@ class TestTransformContextAnnotations:
             return f"same={ctx1 is ctx2}"
 
         # Both ctx params should be excluded from schema
-        tools = await mcp._list_tools_mcp()
-        tool = next(t for t in tools if t.name == "tool_with_multiple_ctx")
+        result = await mcp._list_tools_mcp(mcp_types.ListToolsRequest())
+        tool = next(t for t in result.tools if t.name == "tool_with_multiple_ctx")
         assert "name" in tool.inputSchema["properties"]
         assert "ctx1" not in tool.inputSchema["properties"]
         assert "ctx2" not in tool.inputSchema["properties"]

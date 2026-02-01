@@ -39,6 +39,7 @@ from fastmcp.server.providers.local_provider import LocalProvider
 from fastmcp.tools.tool import Tool
 from fastmcp.utilities.components import FastMCPComponent
 from fastmcp.utilities.logging import get_logger
+from fastmcp.utilities.versions import VersionSpec
 
 logger = get_logger(__name__)
 
@@ -173,45 +174,53 @@ class FileSystemProvider(LocalProvider):
 
     # Override provider methods to support reload mode
 
-    async def list_tools(self) -> Sequence[Tool]:
+    async def _list_tools(self) -> Sequence[Tool]:
         """Return all tools, reloading if in reload mode."""
         await self._ensure_loaded()
-        return await super().list_tools()
+        return await super()._list_tools()
 
-    async def get_tool(self, name: str) -> Tool | None:
+    async def _get_tool(
+        self, name: str, version: VersionSpec | None = None
+    ) -> Tool | None:
         """Get a tool by name, reloading if in reload mode."""
         await self._ensure_loaded()
-        return await super().get_tool(name)
+        return await super()._get_tool(name, version)
 
-    async def list_resources(self) -> Sequence[Resource]:
+    async def _list_resources(self) -> Sequence[Resource]:
         """Return all resources, reloading if in reload mode."""
         await self._ensure_loaded()
-        return await super().list_resources()
+        return await super()._list_resources()
 
-    async def get_resource(self, uri: str) -> Resource | None:
+    async def _get_resource(
+        self, uri: str, version: VersionSpec | None = None
+    ) -> Resource | None:
         """Get a resource by URI, reloading if in reload mode."""
         await self._ensure_loaded()
-        return await super().get_resource(uri)
+        return await super()._get_resource(uri, version)
 
-    async def list_resource_templates(self) -> Sequence[ResourceTemplate]:
+    async def _list_resource_templates(self) -> Sequence[ResourceTemplate]:
         """Return all resource templates, reloading if in reload mode."""
         await self._ensure_loaded()
-        return await super().list_resource_templates()
+        return await super()._list_resource_templates()
 
-    async def get_resource_template(self, uri: str) -> ResourceTemplate | None:
+    async def _get_resource_template(
+        self, uri: str, version: VersionSpec | None = None
+    ) -> ResourceTemplate | None:
         """Get a resource template, reloading if in reload mode."""
         await self._ensure_loaded()
-        return await super().get_resource_template(uri)
+        return await super()._get_resource_template(uri, version)
 
-    async def list_prompts(self) -> Sequence[Prompt]:
+    async def _list_prompts(self) -> Sequence[Prompt]:
         """Return all prompts, reloading if in reload mode."""
         await self._ensure_loaded()
-        return await super().list_prompts()
+        return await super()._list_prompts()
 
-    async def get_prompt(self, name: str) -> Prompt | None:
+    async def _get_prompt(
+        self, name: str, version: VersionSpec | None = None
+    ) -> Prompt | None:
         """Get a prompt by name, reloading if in reload mode."""
         await self._ensure_loaded()
-        return await super().get_prompt(name)
+        return await super()._get_prompt(name, version)
 
     def __repr__(self) -> str:
         return f"FileSystemProvider(root={self._root!r}, reload={self._reload})"

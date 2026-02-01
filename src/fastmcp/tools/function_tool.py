@@ -16,14 +16,14 @@ from typing import (
     runtime_checkable,
 )
 
+import anyio
 import mcp.types
-from mcp.types import Icon, ToolAnnotations, ToolExecution
+from mcp.shared.exceptions import McpError
+from mcp.types import ErrorData, Icon, ToolAnnotations, ToolExecution
 
 import fastmcp
 from fastmcp.decorators import resolve_task_config
-from fastmcp.server.dependencies import (
-    without_injected_parameters,
-)
+from fastmcp.server.dependencies import without_injected_parameters
 from fastmcp.server.tasks.config import TaskConfig
 from fastmcp.tools.function_parsing import ParsedFunction, _is_object_schema
 from fastmcp.tools.tool import (
@@ -32,11 +32,15 @@ from fastmcp.tools.tool import (
     ToolResult,
     ToolResultSerializerType,
 )
+from fastmcp.utilities.async_utils import call_sync_fn_in_threadpool
+from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.types import (
     NotSet,
     NotSetT,
     get_cached_typeadapter,
 )
+
+logger = get_logger(__name__)
 
 if TYPE_CHECKING:
     from docket import Docket
@@ -60,6 +64,7 @@ class ToolMeta:
 
     type: Literal["tool"] = field(default="tool", init=False)
     name: str | None = None
+    version: str | int | None = None
     title: str | None = None
     description: str | None = None
     icons: list[Icon] | None = None
@@ -70,7 +75,9 @@ class ToolMeta:
     task: bool | TaskConfig | None = None
     exclude_args: list[str] | None = None
     serializer: Any | None = None
+    timeout: float | None = None
     auth: AuthCheckCallable | list[AuthCheckCallable] | None = None
+    enabled: bool = True
 
 
 class FunctionTool(Tool):
@@ -78,8 +85,6 @@ class FunctionTool(Tool):
 
     def to_mcp_tool(
         self,
-        *,
-        include_fastmcp_meta: bool | None = None,
         **overrides: Any,
     ) -> mcp.types.Tool:
         """Convert the FastMCP tool to an MCP tool.
@@ -87,9 +92,7 @@ class FunctionTool(Tool):
         Extends the base implementation to add task execution mode if enabled.
         """
         # Get base MCP tool from parent
-        mcp_tool = super().to_mcp_tool(
-            include_fastmcp_meta=include_fastmcp_meta, **overrides
-        )
+        mcp_tool = super().to_mcp_tool(**overrides)
 
         # Add task execution mode per SEP-1686
         # Only set execution if not overridden and task execution is supported
@@ -106,6 +109,7 @@ class FunctionTool(Tool):
         metadata: ToolMeta | None = None,
         # Keep individual params for backwards compat
         name: str | None = None,
+        version: str | int | None = None,
         title: str | None = None,
         description: str | None = None,
         icons: list[Icon] | None = None,
@@ -116,6 +120,7 @@ class FunctionTool(Tool):
         serializer: ToolResultSerializerType | None = None,
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
+        timeout: float | None = None,
         auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
     ) -> FunctionTool:
         """Create a FunctionTool from a function.
@@ -133,6 +138,7 @@ class FunctionTool(Tool):
                 x is not None and x is not NotSet
                 for x in [
                     name,
+                    version,
                     title,
                     description,
                     icons,
@@ -141,6 +147,7 @@ class FunctionTool(Tool):
                     meta,
                     task,
                     serializer,
+                    timeout,
                     auth,
                 ]
             )
@@ -158,6 +165,7 @@ class FunctionTool(Tool):
         if metadata is None:
             metadata = ToolMeta(
                 name=name,
+                version=version,
                 title=title,
                 description=description,
                 icons=icons,
@@ -168,6 +176,7 @@ class FunctionTool(Tool):
                 task=task,
                 exclude_args=exclude_args,
                 serializer=serializer,
+                timeout=timeout,
                 auth=auth,
             )
 
@@ -220,6 +229,7 @@ class FunctionTool(Tool):
         return cls(
             fn=parsed_fn.fn,
             name=metadata.name or parsed_fn.name,
+            version=str(metadata.version) if metadata.version is not None else None,
             title=metadata.title,
             description=metadata.description or parsed_fn.description,
             icons=metadata.icons,
@@ -230,6 +240,7 @@ class FunctionTool(Tool):
             serializer=metadata.serializer,
             meta=metadata.meta,
             task_config=task_config,
+            timeout=metadata.timeout,
             auth=metadata.auth,
         )
 
@@ -237,9 +248,44 @@ class FunctionTool(Tool):
         """Run the tool with arguments."""
         wrapper_fn = without_injected_parameters(self.fn)
         type_adapter = get_cached_typeadapter(wrapper_fn)
-        result = type_adapter.validate_python(arguments)
-        if inspect.isawaitable(result):
-            result = await result
+
+        # Apply timeout if configured
+        if self.timeout is not None:
+            try:
+                with anyio.fail_after(self.timeout):
+                    # Thread pool execution for sync functions, direct await for async
+                    if inspect.iscoroutinefunction(wrapper_fn):
+                        result = await type_adapter.validate_python(arguments)
+                    else:
+                        # Sync function: run in threadpool to avoid blocking
+                        result = await call_sync_fn_in_threadpool(
+                            type_adapter.validate_python, arguments
+                        )
+                        # Handle sync wrappers that return awaitables
+                        if inspect.isawaitable(result):
+                            result = await result
+            except TimeoutError:
+                logger.warning(
+                    f"Tool '{self.name}' timed out after {self.timeout}s. "
+                    f"Consider using task=True for long-running operations. "
+                    f"See https://gofastmcp.com/servers/tasks"
+                )
+                raise McpError(
+                    ErrorData(
+                        code=-32000,
+                        message=f"Tool '{self.name}' execution timed out after {self.timeout}s",
+                    )
+                ) from None
+        else:
+            # No timeout: use existing execution path
+            if inspect.iscoroutinefunction(wrapper_fn):
+                result = await type_adapter.validate_python(arguments)
+            else:
+                result = await call_sync_fn_in_threadpool(
+                    type_adapter.validate_python, arguments
+                )
+                if inspect.isawaitable(result):
+                    result = await result
 
         return self.convert_result(result)
 
@@ -253,7 +299,7 @@ class FunctionTool(Tool):
             return
         docket.register(self.fn, names=[self.key])
 
-    async def add_to_docket(  # type: ignore[override]
+    async def add_to_docket(
         self,
         docket: Docket,
         arguments: dict[str, Any],
@@ -285,6 +331,7 @@ def tool(fn: F) -> F: ...
 def tool(
     name_or_fn: str,
     *,
+    version: str | int | None = None,
     title: str | None = None,
     description: str | None = None,
     icons: list[Icon] | None = None,
@@ -295,6 +342,7 @@ def tool(
     task: bool | TaskConfig | None = None,
     exclude_args: list[str] | None = None,
     serializer: Any | None = None,
+    timeout: float | None = None,
     auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
 ) -> Callable[[F], F]: ...
 @overload
@@ -302,6 +350,7 @@ def tool(
     name_or_fn: None = None,
     *,
     name: str | None = None,
+    version: str | int | None = None,
     title: str | None = None,
     description: str | None = None,
     icons: list[Icon] | None = None,
@@ -312,6 +361,7 @@ def tool(
     task: bool | TaskConfig | None = None,
     exclude_args: list[str] | None = None,
     serializer: Any | None = None,
+    timeout: float | None = None,
     auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
 ) -> Callable[[F], F]: ...
 
@@ -320,6 +370,7 @@ def tool(
     name_or_fn: str | Callable[..., Any] | None = None,
     *,
     name: str | None = None,
+    version: str | int | None = None,
     title: str | None = None,
     description: str | None = None,
     icons: list[Icon] | None = None,
@@ -330,6 +381,7 @@ def tool(
     task: bool | TaskConfig | None = None,
     exclude_args: list[str] | None = None,
     serializer: Any | None = None,
+    timeout: float | None = None,
     auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
 ) -> Any:
     """Standalone decorator to mark a function as an MCP tool.
@@ -350,6 +402,7 @@ def tool(
         # Create metadata first, then pass it
         tool_meta = ToolMeta(
             name=tool_name,
+            version=version,
             title=title,
             description=description,
             icons=icons,
@@ -360,6 +413,7 @@ def tool(
             task=resolve_task_config(task),
             exclude_args=exclude_args,
             serializer=serializer,
+            timeout=timeout,
             auth=auth,
         )
         return FunctionTool.from_function(fn, metadata=tool_meta)
@@ -367,6 +421,7 @@ def tool(
     def attach_metadata(fn: F, tool_name: str | None) -> F:
         metadata = ToolMeta(
             name=tool_name,
+            version=version,
             title=title,
             description=description,
             icons=icons,
@@ -377,6 +432,7 @@ def tool(
             task=task,
             exclude_args=exclude_args,
             serializer=serializer,
+            timeout=timeout,
             auth=auth,
         )
         target = fn.__func__ if hasattr(fn, "__func__") else fn

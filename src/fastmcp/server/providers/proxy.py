@@ -30,6 +30,7 @@ from fastmcp.client.client import Client, FastMCP1Server
 from fastmcp.client.elicitation import ElicitResult
 from fastmcp.client.logging import LogMessage
 from fastmcp.client.roots import RootsList
+from fastmcp.client.telemetry import client_span
 from fastmcp.client.transports import ClientTransportT
 from fastmcp.exceptions import ResourceError, ToolError
 from fastmcp.mcp_config import MCPConfig
@@ -43,7 +44,7 @@ from fastmcp.server.providers.base import Provider
 from fastmcp.server.server import FastMCP
 from fastmcp.server.tasks.config import TaskConfig
 from fastmcp.tools.tool import Tool, ToolResult
-from fastmcp.utilities.components import FastMCPComponent
+from fastmcp.utilities.components import FastMCPComponent, get_fastmcp_metadata
 from fastmcp.utilities.logging import get_logger
 
 if TYPE_CHECKING:
@@ -103,7 +104,7 @@ class ProxyTool(Tool):
             output_schema=mcp_tool.outputSchema,
             icons=mcp_tool.icons,
             meta=mcp_tool.meta,
-            tags=(mcp_tool.meta or {}).get("_fastmcp", {}).get("tags", []),
+            tags=get_fastmcp_metadata(mcp_tool.meta).get("tags", []),
         )
 
     async def run(
@@ -112,40 +113,51 @@ class ProxyTool(Tool):
         context: Context | None = None,
     ) -> ToolResult:
         """Executes the tool by making a call through the client."""
-        client = await self._get_client()
-        async with client:
-            context = get_context()
-            # Build meta dict from request context
-            meta: dict[str, Any] | None = None
-            if hasattr(context, "request_context"):
-                req_ctx = context.request_context
-                # Start with existing meta if present
-                if hasattr(req_ctx, "meta") and req_ctx.meta:
-                    meta = dict(req_ctx.meta)
-                # Add task metadata if this is a task request
-                if (
-                    hasattr(req_ctx, "experimental")
-                    and hasattr(req_ctx.experimental, "is_task")
-                    and req_ctx.experimental.is_task
-                ):
-                    task_metadata = req_ctx.experimental.task_metadata
-                    if task_metadata:
-                        meta = meta or {}
-                        meta["modelcontextprotocol.io/task"] = task_metadata.model_dump(
-                            exclude_none=True
-                        )
+        backend_name = self._backend_name or self.name
+        with client_span(
+            f"tools/call {backend_name}", "tools/call", backend_name
+        ) as span:
+            span.set_attribute("fastmcp.provider.type", "ProxyProvider")
+            client = await self._get_client()
+            async with client:
+                ctx = context or get_context()
+                # Build meta dict from request context
+                meta: dict[str, Any] | None = None
+                if hasattr(ctx, "request_context"):
+                    req_ctx = ctx.request_context
+                    # Start with existing meta if present
+                    if hasattr(req_ctx, "meta") and req_ctx.meta:
+                        meta = dict(req_ctx.meta)
+                    # Add task metadata if this is a task request
+                    if (
+                        hasattr(req_ctx, "experimental")
+                        and hasattr(req_ctx.experimental, "is_task")
+                        and req_ctx.experimental.is_task
+                    ):
+                        task_metadata = req_ctx.experimental.task_metadata
+                        if task_metadata:
+                            meta = meta or {}
+                            meta["modelcontextprotocol.io/task"] = (
+                                task_metadata.model_dump(exclude_none=True)
+                            )
 
-            result = await client.call_tool_mcp(
-                name=self._backend_name or self.name, arguments=arguments, meta=meta
+                result = await client.call_tool_mcp(
+                    name=backend_name, arguments=arguments, meta=meta
+                )
+            if result.isError:
+                raise ToolError(cast(mcp.types.TextContent, result.content[0]).text)
+            # Preserve backend's meta (includes task metadata for background tasks)
+            return ToolResult(
+                content=result.content,
+                structured_content=result.structuredContent,
+                meta=result.meta,
             )
-        if result.isError:
-            raise ToolError(cast(mcp.types.TextContent, result.content[0]).text)
-        # Preserve backend's meta (includes task metadata for background tasks)
-        return ToolResult(
-            content=result.content,
-            structured_content=result.structuredContent,
-            meta=result.meta,
-        )
+
+    def get_span_attributes(self) -> dict[str, Any]:
+        return super().get_span_attributes() | {
+            "fastmcp.provider.type": "ProxyProvider",
+            "fastmcp.proxy.backend_name": self._backend_name,
+        }
 
 
 class ProxyResource(Resource):
@@ -199,7 +211,7 @@ class ProxyResource(Resource):
             mime_type=mcp_resource.mimeType or "text/plain",
             icons=mcp_resource.icons,
             meta=mcp_resource.meta,
-            tags=(mcp_resource.meta or {}).get("_fastmcp", {}).get("tags", []),
+            tags=get_fastmcp_metadata(mcp_resource.meta).get("tags", []),
             task_config=TaskConfig(mode="forbidden"),
         )
 
@@ -209,37 +221,50 @@ class ProxyResource(Resource):
             return self._cached_content
 
         backend_uri = self._backend_uri or str(self.uri)
-        client = await self._get_client()
-        async with client:
-            result = await client.read_resource(backend_uri)
-        if not result:
-            raise ResourceError(
-                f"Remote server returned empty content for {backend_uri}"
-            )
-
-        # Process all items in the result list, not just the first one
-        contents: list[ResourceContent] = []
-        for item in result:
-            if isinstance(item, TextResourceContents):
-                contents.append(
-                    ResourceContent(
-                        content=item.text,
-                        mime_type=item.mimeType,
-                        meta=item.meta,
-                    )
+        with client_span(
+            f"resources/read {backend_uri}",
+            "resources/read",
+            backend_uri,
+            resource_uri=backend_uri,
+        ) as span:
+            span.set_attribute("fastmcp.provider.type", "ProxyProvider")
+            client = await self._get_client()
+            async with client:
+                result = await client.read_resource(backend_uri)
+            if not result:
+                raise ResourceError(
+                    f"Remote server returned empty content for {backend_uri}"
                 )
-            elif isinstance(item, BlobResourceContents):
-                contents.append(
-                    ResourceContent(
-                        content=base64.b64decode(item.blob),
-                        mime_type=item.mimeType,
-                        meta=item.meta,
-                    )
-                )
-            else:
-                raise ResourceError(f"Unsupported content type: {type(item)}")
 
-        return ResourceResult(contents=contents)
+            # Process all items in the result list, not just the first one
+            contents: list[ResourceContent] = []
+            for item in result:
+                if isinstance(item, TextResourceContents):
+                    contents.append(
+                        ResourceContent(
+                            content=item.text,
+                            mime_type=item.mimeType,
+                            meta=item.meta,
+                        )
+                    )
+                elif isinstance(item, BlobResourceContents):
+                    contents.append(
+                        ResourceContent(
+                            content=base64.b64decode(item.blob),
+                            mime_type=item.mimeType,
+                            meta=item.meta,
+                        )
+                    )
+                else:
+                    raise ResourceError(f"Unsupported content type: {type(item)}")
+
+            return ResourceResult(contents=contents)
+
+    def get_span_attributes(self) -> dict[str, Any]:
+        return super().get_span_attributes() | {
+            "fastmcp.provider.type": "ProxyProvider",
+            "fastmcp.proxy.backend_uri": self._backend_uri,
+        }
 
 
 class ProxyTemplate(ResourceTemplate):
@@ -284,7 +309,7 @@ class ProxyTemplate(ResourceTemplate):
             icons=mcp_template.icons,
             parameters={},  # Remote templates don't have local parameters
             meta=mcp_template.meta,
-            tags=(mcp_template.meta or {}).get("_fastmcp", {}).get("tags", []),
+            tags=get_fastmcp_metadata(mcp_template.meta).get("tags", []),
             task_config=TaskConfig(mode="forbidden"),
         )
 
@@ -346,9 +371,15 @@ class ProxyTemplate(ResourceTemplate):
             ].mimeType,  # Use first item's mimeType for backward compatibility
             icons=self.icons,
             meta=self.meta,
-            tags=(self.meta or {}).get("_fastmcp", {}).get("tags", []),
+            tags=get_fastmcp_metadata(self.meta).get("tags", []),
             _cached_content=cached_content,
         )
+
+    def get_span_attributes(self) -> dict[str, Any]:
+        return super().get_span_attributes() | {
+            "fastmcp.provider.type": "ProxyProvider",
+            "fastmcp.proxy.backend_uri_template": self._backend_uri_template,
+        }
 
 
 class ProxyPrompt(Prompt):
@@ -398,24 +429,37 @@ class ProxyPrompt(Prompt):
             arguments=arguments,
             icons=mcp_prompt.icons,
             meta=mcp_prompt.meta,
-            tags=(mcp_prompt.meta or {}).get("_fastmcp", {}).get("tags", []),
+            tags=get_fastmcp_metadata(mcp_prompt.meta).get("tags", []),
             task_config=TaskConfig(mode="forbidden"),
         )
 
     async def render(self, arguments: dict[str, Any]) -> PromptResult:  # type: ignore[override]
         """Render the prompt by making a call through the client."""
-        client = await self._get_client()
-        async with client:
-            result = await client.get_prompt(self._backend_name or self.name, arguments)
-        # Convert GetPromptResult to PromptResult, preserving runtime meta from the result
-        # (not the static prompt meta which includes fastmcp tags)
-        # Convert PromptMessages to Messages
-        messages = [Message(content=m.content, role=m.role) for m in result.messages]
-        return PromptResult(
-            messages=messages,
-            description=result.description,
-            meta=result.meta,
-        )
+        backend_name = self._backend_name or self.name
+        with client_span(
+            f"prompts/get {backend_name}", "prompts/get", backend_name
+        ) as span:
+            span.set_attribute("fastmcp.provider.type", "ProxyProvider")
+            client = await self._get_client()
+            async with client:
+                result = await client.get_prompt(backend_name, arguments)
+            # Convert GetPromptResult to PromptResult, preserving meta from result
+            # (not the static prompt meta which includes fastmcp tags)
+            # Convert PromptMessages to Messages
+            messages = [
+                Message(content=m.content, role=m.role) for m in result.messages
+            ]
+            return PromptResult(
+                messages=messages,
+                description=result.description,
+                meta=result.meta,
+            )
+
+    def get_span_attributes(self) -> dict[str, Any]:
+        return super().get_span_attributes() | {
+            "fastmcp.provider.type": "ProxyProvider",
+            "fastmcp.proxy.backend_name": self._backend_name,
+        }
 
 
 # -----------------------------------------------------------------------------
@@ -473,7 +517,7 @@ class ProxyProvider(Provider):
     # Tool methods
     # -------------------------------------------------------------------------
 
-    async def list_tools(self) -> Sequence[Tool]:
+    async def _list_tools(self) -> Sequence[Tool]:
         """List all tools from the remote server."""
         try:
             client = await self._get_client()
@@ -491,7 +535,7 @@ class ProxyProvider(Provider):
     # Resource methods
     # -------------------------------------------------------------------------
 
-    async def list_resources(self) -> Sequence[Resource]:
+    async def _list_resources(self) -> Sequence[Resource]:
         """List all resources from the remote server."""
         try:
             client = await self._get_client()
@@ -510,7 +554,7 @@ class ProxyProvider(Provider):
     # Resource template methods
     # -------------------------------------------------------------------------
 
-    async def list_resource_templates(self) -> Sequence[ResourceTemplate]:
+    async def _list_resource_templates(self) -> Sequence[ResourceTemplate]:
         """List all resource templates from the remote server."""
         try:
             client = await self._get_client()
@@ -529,7 +573,7 @@ class ProxyProvider(Provider):
     # Prompt methods
     # -------------------------------------------------------------------------
 
-    async def list_prompts(self) -> Sequence[Prompt]:
+    async def _list_prompts(self) -> Sequence[Prompt]:
         """List all prompts from the remote server."""
         try:
             client = await self._get_client()

@@ -14,11 +14,11 @@ Example:
             super().__init__()
             self.db = Database(db_url)
 
-        async def list_tools(self) -> list[Tool]:
+        async def _list_tools(self) -> list[Tool]:
             rows = await self.db.fetch("SELECT * FROM tools")
             return [self._make_tool(row) for row in rows]
 
-        async def get_tool(self, name: str) -> Tool | None:
+        async def _get_tool(self, name: str) -> Tool | None:
             row = await self.db.fetchone("SELECT * FROM tools WHERE name = ?", name)
             return self._make_tool(row) if row else None
 
@@ -31,7 +31,9 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from functools import partial
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Literal, cast
+
+from typing_extensions import Self
 
 from fastmcp.prompts.prompt import Prompt
 from fastmcp.resources.resource import Resource
@@ -40,6 +42,7 @@ from fastmcp.server.transforms.visibility import Visibility
 from fastmcp.tools.tool import Tool
 from fastmcp.utilities.async_utils import gather
 from fastmcp.utilities.components import FastMCPComponent
+from fastmcp.utilities.versions import VersionSpec, version_sort_key
 
 if TYPE_CHECKING:
     from fastmcp.server.transforms import Transform
@@ -64,12 +67,15 @@ class Provider:
     """
 
     def __init__(self) -> None:
-        # Visibility is the first (innermost) transform - closest to the base provider
-        self._visibility = Visibility()
-        self._transforms: list[Transform] = [self._visibility]
+        self._transforms: list[Transform] = []
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}()"
+
+    @property
+    def transforms(self) -> list[Transform]:
+        """All transforms applied to components from this provider."""
+        return list(self._transforms)
 
     def add_transform(self, transform: Transform) -> None:
         """Add a transform to this provider.
@@ -91,203 +97,319 @@ class Provider:
         """
         self._transforms.append(transform)
 
+    def wrap_transform(self, transform: Transform) -> Provider:
+        """Return a new provider with this transform applied (immutable).
+
+        Unlike add_transform() which mutates this provider, wrap_transform()
+        returns a new provider that wraps this one. The original provider
+        is unchanged.
+
+        This is useful when you want to apply transforms without side effects,
+        such as adding the same provider to multiple aggregators with different
+        namespaces.
+
+        Args:
+            transform: The transform to apply.
+
+        Returns:
+            A new provider that wraps this one with the transform applied.
+
+        Example:
+            ```python
+            from fastmcp.server.transforms import Namespace
+
+            provider = MyProvider()
+            namespaced = provider.wrap_transform(Namespace("api"))
+            # provider is unchanged
+            # namespaced returns tools as "api_toolname"
+            ```
+        """
+        # Import here to avoid circular imports
+        from fastmcp.server.providers.wrapped_provider import _WrappedProvider
+
+        return _WrappedProvider(self, transform)
+
     # -------------------------------------------------------------------------
     # Internal transform chain building
     # -------------------------------------------------------------------------
 
-    async def _list_tools(self) -> Sequence[Tool]:
+    async def list_tools(self) -> Sequence[Tool]:
         """List tools with all transforms applied.
 
-        Builds a middleware chain: base → transforms (in order).
-        Each transform wraps the previous via call_next.
+        Applies transforms sequentially: base → transforms (in order).
+        Each transform receives the result from the previous transform.
+        Components may be marked as disabled but are NOT filtered here -
+        filtering happens at the server level to allow session transforms to override.
 
         Returns:
-            Transformed sequence of tools.
+            Transformed sequence of tools (including disabled ones).
         """
+        tools = await self._list_tools()
+        for transform in self.transforms:
+            tools = await transform.list_tools(tools)
+        return tools
 
-        async def base() -> Sequence[Tool]:
-            return await self.list_tools()
-
-        chain = base
-        for transform in self._transforms:
-            chain = partial(transform.list_tools, call_next=chain)
-
-        return await chain()
-
-    async def _get_tool(self, name: str) -> Tool | None:
+    async def get_tool(
+        self, name: str, version: VersionSpec | None = None
+    ) -> Tool | None:
         """Get tool by transformed name with all transforms applied.
+
+        Note: This method does NOT filter disabled components. The Server
+        (FastMCP) performs enabled filtering after all transforms complete,
+        allowing session-level transforms to override provider-level disables.
 
         Args:
             name: The transformed tool name to look up.
+            version: Optional version filter. If None, returns highest version.
 
         Returns:
-            The tool if found and enabled, None otherwise.
+            The tool if found (may be marked disabled), None if not found.
         """
 
-        async def base(n: str) -> Tool | None:
-            return await self.get_tool(n)
+        async def base(n: str, version: VersionSpec | None = None) -> Tool | None:
+            return await self._get_tool(n, version)
 
         chain = base
-        for transform in self._transforms:
+        for transform in self.transforms:
             chain = partial(transform.get_tool, call_next=chain)
 
-        return await chain(name)
+        return await chain(name, version=version)
 
-    async def _list_resources(self) -> Sequence[Resource]:
-        """List resources with all transforms applied."""
+    async def list_resources(self) -> Sequence[Resource]:
+        """List resources with all transforms applied.
 
-        async def base() -> Sequence[Resource]:
-            return await self.list_resources()
+        Components may be marked as disabled but are NOT filtered here.
+        """
+        resources = await self._list_resources()
+        for transform in self.transforms:
+            resources = await transform.list_resources(resources)
+        return resources
+
+    async def get_resource(
+        self, uri: str, version: VersionSpec | None = None
+    ) -> Resource | None:
+        """Get resource by transformed URI with all transforms applied.
+
+        Note: This method does NOT filter disabled components. The Server
+        (FastMCP) performs enabled filtering after all transforms complete.
+
+        Args:
+            uri: The transformed resource URI to look up.
+            version: Optional version filter. If None, returns highest version.
+
+        Returns:
+            The resource if found (may be marked disabled), None if not found.
+        """
+
+        async def base(u: str, version: VersionSpec | None = None) -> Resource | None:
+            return await self._get_resource(u, version)
 
         chain = base
-        for transform in self._transforms:
-            chain = partial(transform.list_resources, call_next=chain)
-
-        return await chain()
-
-    async def _get_resource(self, uri: str) -> Resource | None:
-        """Get resource by transformed URI with all transforms applied."""
-
-        async def base(u: str) -> Resource | None:
-            return await self.get_resource(u)
-
-        chain = base
-        for transform in self._transforms:
+        for transform in self.transforms:
             chain = partial(transform.get_resource, call_next=chain)
 
-        return await chain(uri)
+        return await chain(uri, version=version)
 
-    async def _list_resource_templates(self) -> Sequence[ResourceTemplate]:
-        """List resource templates with all transforms applied."""
+    async def list_resource_templates(self) -> Sequence[ResourceTemplate]:
+        """List resource templates with all transforms applied.
 
-        async def base() -> Sequence[ResourceTemplate]:
-            return await self.list_resource_templates()
+        Components may be marked as disabled but are NOT filtered here.
+        """
+        templates = await self._list_resource_templates()
+        for transform in self.transforms:
+            templates = await transform.list_resource_templates(templates)
+        return templates
+
+    async def get_resource_template(
+        self, uri: str, version: VersionSpec | None = None
+    ) -> ResourceTemplate | None:
+        """Get resource template by transformed URI with all transforms applied.
+
+        Note: This method does NOT filter disabled components. The Server
+        (FastMCP) performs enabled filtering after all transforms complete.
+
+        Args:
+            uri: The transformed template URI to look up.
+            version: Optional version filter. If None, returns highest version.
+
+        Returns:
+            The template if found (may be marked disabled), None if not found.
+        """
+
+        async def base(
+            u: str, version: VersionSpec | None = None
+        ) -> ResourceTemplate | None:
+            return await self._get_resource_template(u, version)
 
         chain = base
-        for transform in self._transforms:
-            chain = partial(transform.list_resource_templates, call_next=chain)
-
-        return await chain()
-
-    async def _get_resource_template(self, uri: str) -> ResourceTemplate | None:
-        """Get resource template by transformed URI with all transforms applied."""
-
-        async def base(u: str) -> ResourceTemplate | None:
-            return await self.get_resource_template(u)
-
-        chain = base
-        for transform in self._transforms:
+        for transform in self.transforms:
             chain = partial(transform.get_resource_template, call_next=chain)
 
-        return await chain(uri)
+        return await chain(uri, version=version)
 
-    async def _list_prompts(self) -> Sequence[Prompt]:
-        """List prompts with all transforms applied."""
+    async def list_prompts(self) -> Sequence[Prompt]:
+        """List prompts with all transforms applied.
 
-        async def base() -> Sequence[Prompt]:
-            return await self.list_prompts()
+        Components may be marked as disabled but are NOT filtered here.
+        """
+        prompts = await self._list_prompts()
+        for transform in self.transforms:
+            prompts = await transform.list_prompts(prompts)
+        return prompts
+
+    async def get_prompt(
+        self, name: str, version: VersionSpec | None = None
+    ) -> Prompt | None:
+        """Get prompt by transformed name with all transforms applied.
+
+        Note: This method does NOT filter disabled components. The Server
+        (FastMCP) performs enabled filtering after all transforms complete.
+
+        Args:
+            name: The transformed prompt name to look up.
+            version: Optional version filter. If None, returns highest version.
+
+        Returns:
+            The prompt if found (may be marked disabled), None if not found.
+        """
+
+        async def base(n: str, version: VersionSpec | None = None) -> Prompt | None:
+            return await self._get_prompt(n, version)
 
         chain = base
-        for transform in self._transforms:
-            chain = partial(transform.list_prompts, call_next=chain)
-
-        return await chain()
-
-    async def _get_prompt(self, name: str) -> Prompt | None:
-        """Get prompt by transformed name with all transforms applied."""
-
-        async def base(n: str) -> Prompt | None:
-            return await self.get_prompt(n)
-
-        chain = base
-        for transform in self._transforms:
+        for transform in self.transforms:
             chain = partial(transform.get_prompt, call_next=chain)
 
-        return await chain(name)
+        return await chain(name, version=version)
 
     # -------------------------------------------------------------------------
-    # Public list/get methods (override these to provide components)
+    # Private list/get methods (override these to provide components)
     # -------------------------------------------------------------------------
 
-    async def list_tools(self) -> Sequence[Tool]:
+    async def _list_tools(self) -> Sequence[Tool]:
         """Return all available tools.
 
-        Override to provide tools dynamically.
+        Override to provide tools dynamically. Returns ALL versions of all tools.
+        The server handles deduplication to show one tool per name.
         """
         return []
 
-    async def get_tool(self, name: str) -> Tool | None:
+    async def _get_tool(
+        self, name: str, version: VersionSpec | None = None
+    ) -> Tool | None:
         """Get a specific tool by name.
 
-        Default implementation lists all tools and finds by name.
-        Override for more efficient single-tool lookup.
+        Default implementation filters _list_tools() and picks the highest version
+        that matches the spec.
+
+        Args:
+            name: The tool name.
+            version: Optional version filter. If None, returns highest version.
+                     If specified, returns highest version matching the spec.
 
         Returns:
             The Tool if found, or None to continue searching other providers.
         """
-        tools = await self.list_tools()
-        return next((t for t in tools if t.name == name), None)
+        tools = await self._list_tools()
+        matching = [t for t in tools if t.name == name]
+        if version:
+            matching = [t for t in matching if version.matches(t.version)]
+        if not matching:
+            return None
+        return max(matching, key=version_sort_key)  # type: ignore[type-var]
 
-    async def list_resources(self) -> Sequence[Resource]:
+    async def _list_resources(self) -> Sequence[Resource]:
         """Return all available resources.
 
-        Override to provide resources dynamically.
+        Override to provide resources dynamically. Returns ALL versions of all resources.
+        The server handles deduplication to show one resource per URI.
         """
         return []
 
-    async def get_resource(self, uri: str) -> Resource | None:
+    async def _get_resource(
+        self, uri: str, version: VersionSpec | None = None
+    ) -> Resource | None:
         """Get a specific resource by URI.
 
-        Default implementation lists all resources and finds by URI.
-        Override for more efficient single-resource lookup.
+        Default implementation filters _list_resources() and returns highest
+        version matching the spec.
+
+        Args:
+            uri: The resource URI.
+            version: Optional version filter. If None, returns highest version.
 
         Returns:
             The Resource if found, or None to continue searching other providers.
         """
-        resources = await self.list_resources()
-        return next((r for r in resources if str(r.uri) == uri), None)
+        resources = await self._list_resources()
+        matching = [r for r in resources if str(r.uri) == uri]
+        if version:
+            matching = [r for r in matching if version.matches(r.version)]
+        if not matching:
+            return None
+        return max(matching, key=version_sort_key)  # type: ignore[type-var]
 
-    async def list_resource_templates(self) -> Sequence[ResourceTemplate]:
+    async def _list_resource_templates(self) -> Sequence[ResourceTemplate]:
         """Return all available resource templates.
 
-        Override to provide resource templates dynamically.
+        Override to provide resource templates dynamically. Returns ALL versions.
+        The server handles deduplication.
         """
         return []
 
-    async def get_resource_template(self, uri: str) -> ResourceTemplate | None:
+    async def _get_resource_template(
+        self, uri: str, version: VersionSpec | None = None
+    ) -> ResourceTemplate | None:
         """Get a resource template that matches the given URI.
 
-        Default implementation lists all templates and finds one whose pattern
-        matches the URI.
-        Override for more efficient lookup.
+        Default implementation lists all templates, finds those whose pattern
+        matches the URI, and returns the highest version matching the spec.
+
+        Args:
+            uri: The URI to match against templates.
+            version: Optional version filter. If None, returns highest version.
 
         Returns:
             The ResourceTemplate if a matching one is found, or None to continue searching.
         """
-        templates = await self.list_resource_templates()
-        return next(
-            (t for t in templates if t.matches(uri) is not None),
-            None,
-        )
+        templates = await self._list_resource_templates()
+        matching = [t for t in templates if t.matches(uri) is not None]
+        if version:
+            matching = [t for t in matching if version.matches(t.version)]
+        if not matching:
+            return None
+        return max(matching, key=version_sort_key)  # type: ignore[type-var]
 
-    async def list_prompts(self) -> Sequence[Prompt]:
+    async def _list_prompts(self) -> Sequence[Prompt]:
         """Return all available prompts.
 
-        Override to provide prompts dynamically.
+        Override to provide prompts dynamically. Returns ALL versions of all prompts.
+        The server handles deduplication to show one prompt per name.
         """
         return []
 
-    async def get_prompt(self, name: str) -> Prompt | None:
+    async def _get_prompt(
+        self, name: str, version: VersionSpec | None = None
+    ) -> Prompt | None:
         """Get a specific prompt by name.
 
-        Default implementation lists all prompts and finds by name.
-        Override for more efficient single-prompt lookup.
+        Default implementation filters _list_prompts() and picks the highest version
+        matching the spec.
+
+        Args:
+            name: The prompt name.
+            version: Optional version filter. If None, returns highest version.
 
         Returns:
             The Prompt if found, or None to continue searching other providers.
         """
-        prompts = await self.list_prompts()
-        return next((p for p in prompts if p.name == name), None)
+        prompts = await self._list_prompts()
+        matching = [p for p in prompts if p.name == name]
+        if version:
+            matching = [p for p in matching if version.matches(p.version)]
+        if not matching:
+            return None
+        return max(matching, key=version_sort_key)  # type: ignore[type-var]
 
     # -------------------------------------------------------------------------
     # Task registration
@@ -304,60 +426,31 @@ class Provider:
         """
         # Fetch all component types in parallel
         results = await gather(
-            self.list_tools(),
-            self.list_resources(),
-            self.list_resource_templates(),
-            self.list_prompts(),
+            self._list_tools(),
+            self._list_resources(),
+            self._list_resource_templates(),
+            self._list_prompts(),
         )
         tools = cast(Sequence[Tool], results[0])
         resources = cast(Sequence[Resource], results[1])
         templates = cast(Sequence[ResourceTemplate], results[2])
         prompts = cast(Sequence[Prompt], results[3])
 
-        # Apply provider's own transforms to components using the chain pattern
-        # For tasks, we need the fully-transformed names, so use the list_ chain
-        # Note: We build mini-chains for each component type
-
-        async def tools_base() -> Sequence[Tool]:
-            return tools
-
-        async def resources_base() -> Sequence[Resource]:
-            return resources
-
-        async def templates_base() -> Sequence[ResourceTemplate]:
-            return templates
-
-        async def prompts_base() -> Sequence[Prompt]:
-            return prompts
-
-        # Apply transforms in order (first is innermost)
-        tools_chain = tools_base
-        resources_chain = resources_base
-        templates_chain = templates_base
-        prompts_chain = prompts_base
-
-        for transform in self._transforms:
-            tools_chain = partial(transform.list_tools, call_next=tools_chain)
-            resources_chain = partial(
-                transform.list_resources, call_next=resources_chain
-            )
-            templates_chain = partial(
-                transform.list_resource_templates, call_next=templates_chain
-            )
-            prompts_chain = partial(transform.list_prompts, call_next=prompts_chain)
-
-        transformed_tools = await tools_chain()
-        transformed_resources = await resources_chain()
-        transformed_templates = await templates_chain()
-        transformed_prompts = await prompts_chain()
+        # Apply provider's own transforms sequentially
+        # For tasks, we need the fully-transformed names
+        for transform in self.transforms:
+            tools = await transform.list_tools(tools)
+            resources = await transform.list_resources(resources)
+            templates = await transform.list_resource_templates(templates)
+            prompts = await transform.list_prompts(prompts)
 
         return [
             c
             for c in [
-                *transformed_tools,
-                *transformed_resources,
-                *transformed_templates,
-                *transformed_prompts,
+                *tools,
+                *resources,
+                *templates,
+                *prompts,
             ]
             if c.task_config.supports_tasks()
         ]
@@ -399,42 +492,87 @@ class Provider:
     def enable(
         self,
         *,
-        keys: Sequence[str] | None = None,
+        names: set[str] | None = None,
+        keys: set[str] | None = None,
+        version: VersionSpec | None = None,
         tags: set[str] | None = None,
+        components: set[Literal["tool", "resource", "template", "prompt"]]
+        | None = None,
         only: bool = False,
-    ) -> None:
-        """Enable components by removing from blocklist, or set allowlist with only=True.
+    ) -> Self:
+        """Enable components matching all specified criteria.
+
+        Adds a visibility transform that marks matching components as enabled.
+        Later transforms override earlier ones, so enable after disable makes
+        the component enabled.
+
+        With only=True, switches to allowlist mode - first disables everything,
+        then enables matching components.
 
         Args:
-            keys: Keys to enable (e.g., "tool:my_tool").
-            tags: Tags to enable - components with these tags will be enabled.
-            only: If True, switches to allowlist mode - ONLY show these keys/tags.
+            names: Component names or URIs to enable.
+            keys: Component keys to enable (e.g., {"tool:my_tool@v1"}).
+            version: Component version spec to enable (e.g., VersionSpec(eq="v1") or
+                VersionSpec(gte="v2")). Unversioned components will not match.
+            tags: Enable components with these tags.
+            components: Component types to include (e.g., {"tool", "prompt"}).
+            only: If True, ONLY enable matching components (allowlist mode).
+
+        Returns:
+            Self for method chaining.
         """
-        self._visibility.enable(keys=keys, tags=tags, only=only)
+        if only:
+            # Allowlist: disable everything, then enable matching
+            # The enable transform runs later on return path, so it overrides
+            self._transforms.append(Visibility(False, match_all=True))
+        self._transforms.append(
+            Visibility(
+                True,
+                names=names,
+                keys=keys,
+                version=version,
+                components=set(components) if components else None,
+                tags=set(tags) if tags else None,
+            )
+        )
+
+        return self
 
     def disable(
         self,
         *,
-        keys: Sequence[str] | None = None,
+        names: set[str] | None = None,
+        keys: set[str] | None = None,
+        version: VersionSpec | None = None,
         tags: set[str] | None = None,
-    ) -> None:
-        """Disable components by adding to the blocklist.
+        components: set[Literal["tool", "resource", "template", "prompt"]]
+        | None = None,
+    ) -> Self:
+        """Disable components matching all specified criteria.
+
+        Adds a visibility transform that marks matching components as disabled.
+        Components can be re-enabled by calling enable() with matching criteria
+        (the later transform wins).
 
         Args:
-            keys: Keys to disable (e.g., "tool:my_tool").
-            tags: Tags to disable - components with these tags will be disabled.
-        """
-        self._visibility.disable(keys=keys, tags=tags)
-
-    def _is_component_enabled(self, component: FastMCPComponent) -> bool:
-        """Check if a component is enabled.
-
-        Delegates to the visibility filter which handles blocklist and allowlist logic.
-
-        Args:
-            component: The component to check.
+            names: Component names or URIs to disable.
+            keys: Component keys to disable (e.g., {"tool:my_tool@v1"}).
+            version: Component version spec to disable (e.g., VersionSpec(eq="v1") or
+                VersionSpec(gte="v2")). Unversioned components will not match.
+            tags: Disable components with these tags.
+            components: Component types to include (e.g., {"tool", "prompt"}).
 
         Returns:
-            True if the component should be served, False otherwise.
+            Self for method chaining.
         """
-        return self._visibility.is_enabled(component)
+        self._transforms.append(
+            Visibility(
+                False,
+                names=names,
+                keys=keys,
+                version=version,
+                components=set(components) if components else None,
+                tags=set(tags) if tags else None,
+            )
+        )
+        return self

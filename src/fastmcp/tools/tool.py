@@ -149,6 +149,12 @@ class Tool(FastMCPComponent):
         AuthCheckCallable | list[AuthCheckCallable] | None,
         Field(description="Authorization checks for this tool", exclude=True),
     ] = None
+    timeout: Annotated[
+        float | None,
+        Field(
+            description="Execution timeout in seconds. If None, no timeout is applied."
+        ),
+    ] = None
 
     @model_validator(mode="after")
     def _validate_tool_name(self) -> Tool:
@@ -158,8 +164,6 @@ class Tool(FastMCPComponent):
 
     def to_mcp_tool(
         self,
-        *,
-        include_fastmcp_meta: bool | None = None,
         **overrides: Any,
     ) -> MCPTool:
         """Convert the FastMCP tool to an MCP tool."""
@@ -180,7 +184,7 @@ class Tool(FastMCPComponent):
             annotations=overrides.get("annotations", self.annotations),
             execution=overrides.get("execution", self.execution),
             _meta=overrides.get(  # type: ignore[call-arg]  # _meta is Pydantic alias for meta field
-                "_meta", self.get_meta(include_fastmcp_meta=include_fastmcp_meta)
+                "_meta", self.get_meta()
             ),
         )
 
@@ -190,6 +194,7 @@ class Tool(FastMCPComponent):
         fn: Callable[..., Any],
         *,
         name: str | None = None,
+        version: str | int | None = None,
         title: str | None = None,
         description: str | None = None,
         icons: list[Icon] | None = None,
@@ -200,6 +205,7 @@ class Tool(FastMCPComponent):
         serializer: ToolResultSerializerType | None = None,  # Deprecated
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
+        timeout: float | None = None,
         auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
     ) -> FunctionTool:
         """Create a Tool from a function."""
@@ -208,6 +214,7 @@ class Tool(FastMCPComponent):
         return FunctionTool.from_function(
             fn=fn,
             name=name,
+            version=version,
             title=title,
             description=description,
             icons=icons,
@@ -218,6 +225,7 @@ class Tool(FastMCPComponent):
             serializer=serializer,
             meta=meta,
             task=task,
+            timeout=timeout,
             auth=auth,
         )
 
@@ -385,6 +393,12 @@ class Tool(FastMCPComponent):
             serializer=serializer,
             meta=meta,
         )
+
+    def get_span_attributes(self) -> dict[str, Any]:
+        return super().get_span_attributes() | {
+            "fastmcp.component.type": "tool",
+            "fastmcp.provider.type": "LocalProvider",
+        }
 
 
 def _serialize_with_fallback(

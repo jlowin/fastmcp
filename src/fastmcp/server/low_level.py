@@ -24,6 +24,7 @@ from mcp.shared.message import SessionMessage
 from mcp.shared.session import RequestResponder
 from pydantic import AnyUrl
 
+from fastmcp.server.apps import UI_EXTENSION_ID
 from fastmcp.utilities.logging import get_logger
 
 if TYPE_CHECKING:
@@ -48,6 +49,25 @@ class MiddlewareServerSession(ServerSession):
         if fastmcp is None:
             raise RuntimeError("FastMCP instance is no longer available")
         return fastmcp
+
+    def client_supports_extension(self, extension_id: str) -> bool:
+        """Check if the connected client supports a given MCP extension.
+
+        Inspects the ``extensions`` extra field on ``ClientCapabilities``
+        sent by the client during initialization.
+        """
+        client_params = self._client_params
+        if client_params is None:
+            return False
+        caps = client_params.capabilities
+        if caps is None:
+            return False
+        # ClientCapabilities uses extra="allow" — extensions is an extra field
+        extras = caps.model_extra or {}
+        extensions: dict[str, Any] | None = extras.get("extensions")
+        if not extensions:
+            return False
+        return extension_id in extensions
 
     async def _received_request(
         self,
@@ -96,7 +116,7 @@ class MiddlewareServerSession(ServerSession):
                 return None
 
             async with fastmcp.server.context.Context(
-                fastmcp=self.fastmcp
+                fastmcp=self.fastmcp, session=self
             ) as fastmcp_ctx:
                 # Create the middleware context.
                 mw_context = MiddlewareContext(
@@ -164,6 +184,40 @@ class LowLevelServer(_Server[LifespanResultT, RequestT]):
             experimental_capabilities=experimental_capabilities,
             **kwargs,
         )
+
+    def get_capabilities(
+        self,
+        notification_options: NotificationOptions,
+        experimental_capabilities: dict[str, dict[str, Any]],
+    ) -> mcp.types.ServerCapabilities:
+        """Override to set capabilities.tasks as a first-class field per SEP-1686.
+
+        This ensures task capabilities appear in capabilities.tasks instead of
+        capabilities.experimental.tasks, which is required by the MCP spec and
+        enables proper task detection by clients like VS Code Copilot 1.107+.
+        """
+        from fastmcp.server.tasks.capabilities import get_task_capabilities
+
+        # Get base capabilities from SDK (pass empty dict for experimental)
+        # since we'll set tasks as a first-class field instead
+        capabilities = super().get_capabilities(
+            notification_options,
+            experimental_capabilities or {},
+        )
+
+        # Set tasks as a first-class field (not experimental) per SEP-1686
+        capabilities.tasks = get_task_capabilities()
+
+        # Advertise MCP Apps extension support (io.modelcontextprotocol/ui)
+        # Uses the same extra-field pattern as tasks above — ServerCapabilities
+        # has extra="allow" so this survives serialization.
+        # Merge with any existing extensions to avoid clobbering other features.
+        existing_extensions: dict[str, Any] = (
+            getattr(capabilities, "extensions", None) or {}
+        )
+        capabilities.extensions = {**existing_extensions, UI_EXTENSION_ID: {}}
+
+        return capabilities
 
     async def run(
         self,

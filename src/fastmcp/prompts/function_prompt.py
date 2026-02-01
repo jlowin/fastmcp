@@ -30,6 +30,7 @@ from fastmcp.server.dependencies import (
 )
 from fastmcp.server.tasks.config import TaskConfig
 from fastmcp.tools.tool import AuthCheckCallable
+from fastmcp.utilities.async_utils import call_sync_fn_in_threadpool
 from fastmcp.utilities.json_schema import compress_schema
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.types import get_cached_typeadapter
@@ -58,6 +59,7 @@ class PromptMeta:
 
     type: Literal["prompt"] = field(default="prompt", init=False)
     name: str | None = None
+    version: str | int | None = None
     title: str | None = None
     description: str | None = None
     icons: list[Icon] | None = None
@@ -65,6 +67,7 @@ class PromptMeta:
     meta: dict[str, Any] | None = None
     task: bool | TaskConfig | None = None
     auth: AuthCheckCallable | list[AuthCheckCallable] | None = None
+    enabled: bool = True
 
 
 class FunctionPrompt(Prompt):
@@ -80,6 +83,7 @@ class FunctionPrompt(Prompt):
         metadata: PromptMeta | None = None,
         # Keep individual params for backwards compat
         name: str | None = None,
+        version: str | int | None = None,
         title: str | None = None,
         description: str | None = None,
         icons: list[Icon] | None = None,
@@ -105,7 +109,7 @@ class FunctionPrompt(Prompt):
         # Check mutual exclusion
         individual_params_provided = any(
             x is not None
-            for x in [name, title, description, icons, tags, meta, task, auth]
+            for x in [name, version, title, description, icons, tags, meta, task, auth]
         )
 
         if metadata is not None and individual_params_provided:
@@ -118,6 +122,7 @@ class FunctionPrompt(Prompt):
         if metadata is None:
             metadata = PromptMeta(
                 name=name,
+                version=version,
                 title=title,
                 description=description,
                 icons=icons,
@@ -216,6 +221,7 @@ class FunctionPrompt(Prompt):
 
         return cls(
             name=func_name,
+            version=str(metadata.version) if metadata.version is not None else None,
             title=metadata.title,
             description=description,
             icons=metadata.icons,
@@ -293,9 +299,14 @@ class FunctionPrompt(Prompt):
 
             # self.fn is wrapped by without_injected_parameters which handles
             # dependency resolution internally
-            result = self.fn(**kwargs)
-            if inspect.isawaitable(result):
-                result = await result
+            if inspect.iscoroutinefunction(self.fn):
+                result = await self.fn(**kwargs)
+            else:
+                # Run sync functions in threadpool to avoid blocking the event loop
+                result = await call_sync_fn_in_threadpool(self.fn, **kwargs)
+                # Handle sync wrappers that return awaitables (e.g., partial(async_fn))
+                if inspect.isawaitable(result):
+                    result = await result
 
             return self.convert_result(result)
         except Exception as e:
@@ -312,7 +323,7 @@ class FunctionPrompt(Prompt):
             return
         docket.register(self.fn, names=[self.key])
 
-    async def add_to_docket(  # type: ignore[override]
+    async def add_to_docket(
         self,
         docket: Docket,
         arguments: dict[str, Any] | None,
@@ -344,6 +355,7 @@ def prompt(fn: F) -> F: ...
 def prompt(
     name_or_fn: str,
     *,
+    version: str | int | None = None,
     title: str | None = None,
     description: str | None = None,
     icons: list[Icon] | None = None,
@@ -357,6 +369,7 @@ def prompt(
     name_or_fn: None = None,
     *,
     name: str | None = None,
+    version: str | int | None = None,
     title: str | None = None,
     description: str | None = None,
     icons: list[Icon] | None = None,
@@ -371,6 +384,7 @@ def prompt(
     name_or_fn: str | Callable[..., Any] | None = None,
     *,
     name: str | None = None,
+    version: str | int | None = None,
     title: str | None = None,
     description: str | None = None,
     icons: list[Icon] | None = None,
@@ -396,6 +410,7 @@ def prompt(
         # Create metadata first, then pass it
         prompt_meta = PromptMeta(
             name=prompt_name,
+            version=version,
             title=title,
             description=description,
             icons=icons,
@@ -409,6 +424,7 @@ def prompt(
     def attach_metadata(fn: F, prompt_name: str | None) -> F:
         metadata = PromptMeta(
             name=prompt_name,
+            version=version,
             title=title,
             description=description,
             icons=icons,

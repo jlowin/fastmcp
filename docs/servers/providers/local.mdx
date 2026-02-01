@@ -3,6 +3,7 @@ title: Local Provider
 sidebarTitle: Local
 description: The default provider for decorator-registered components
 icon: house
+tag: NEW
 ---
 
 import { VersionBadge } from '/snippets/version-badge.mdx'
@@ -102,7 +103,7 @@ Configure this when creating the server:
 mcp = FastMCP("MyServer", on_duplicate="warn")
 ```
 
-## Visibility Control
+## Component Visibility
 
 <VersionBadge version="3.0.0" />
 
@@ -119,14 +120,14 @@ def get_status() -> str:
     """Get system status."""
     return "OK"
 
-# Hide admin tools
+# Disable admin tools
 mcp.disable(tags={"admin"})
 
-# Or only show specific tools
-mcp.enable(keys=["tool:get_status"], only=True)
+# Or only enable specific tools
+mcp.enable(keys={"tool:get_status"}, only=True)
 ```
 
-See [Visibility](/servers/visibility) for the full documentation on keys, tags, allowlist mode, and provider-level visibility.
+See [Visibility](/servers/visibility) for the full documentation on keys, tags, allowlist mode, and provider-level control.
 
 ## Standalone LocalProvider
 

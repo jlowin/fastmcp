@@ -79,7 +79,7 @@ def search_products_implementation(query: str, category: str | None = None) -> l
 
 <ParamField body="enabled" type="bool" default="True">
   <Warning>Deprecated in v3.0.0. Use `mcp.enable()` / `mcp.disable()` at the server level instead.</Warning>
-  A boolean to enable or disable the tool. See [Visibility Control](#visibility-control) for the recommended approach.
+  A boolean to enable or disable the tool. See [Component Visibility](#component-visibility) for the recommended approach.
 </ParamField>
 
 <ParamField body="icons" type="list[Icon] | None">
@@ -111,8 +111,20 @@ def search_products_implementation(query: str, category: str | None = None) -> l
 
 <ParamField body="meta" type="dict[str, Any] | None">
   <VersionBadge version="2.11.0" />
-  
+
   Optional meta information about the tool. This data is passed through to the MCP client as the `meta` field of the client-side tool object and can be used for custom metadata, versioning, or other application-specific purposes.
+</ParamField>
+
+<ParamField body="timeout" type="float | None">
+  <VersionBadge version="3.0.0" />
+
+  Execution timeout in seconds. If the tool takes longer than this to complete, an MCP error is returned to the client. See [Timeouts](#timeouts) for details.
+</ParamField>
+
+<ParamField body="version" type="str | int | None">
+  <VersionBadge version="3.0.0" />
+
+  Optional version identifier for this tool. See [Versioning](/servers/versioning) for details.
 </ParamField>
 </Card>
 
@@ -140,56 +152,22 @@ mcp.add_tool(calc.multiply)  # Registers with correct schema (only 'x', not 'sel
 
 ### Async Support
 
-FastMCP is an async-first framework that seamlessly supports both asynchronous (`async def`) and synchronous (`def`) functions as tools. Async tools are preferred for I/O-bound operations to keep your server responsive.
+FastMCP supports both asynchronous (`async def`) and synchronous (`def`) functions as tools. Synchronous tools automatically run in a threadpool to avoid blocking the event loop, so multiple tool calls can execute concurrently even if individual tools perform blocking operations.
 
-While synchronous tools work seamlessly in FastMCP, they can block the event loop during execution. For CPU-intensive or potentially blocking synchronous operations, consider alternative strategies. One approach is to use `anyio` (which FastMCP already uses internally) to wrap them as async functions, for example:
-
-```python {1, 13}
-import anyio
+```python
 from fastmcp import FastMCP
+import time
 
 mcp = FastMCP()
-
-def cpu_intensive_task(data: str) -> str:
-    # Some heavy computation that could block the event loop
-    return processed_data
 
 @mcp.tool
-async def wrapped_cpu_task(data: str) -> str:
-    """CPU-intensive task wrapped to prevent blocking."""
-    return await anyio.to_thread.run_sync(cpu_intensive_task, data)
+def slow_tool(x: int) -> int:
+    """This sync function won't block other concurrent requests."""
+    time.sleep(2)  # Runs in threadpool, not on the event loop
+    return x * 2
 ```
 
-Alternative approaches include using `asyncio.get_event_loop().run_in_executor()` or other threading techniques to manage blocking operations without impacting server responsiveness. For example, here's a recipe for using the `asyncer` library (not included in FastMCP) to create a decorator that wraps synchronous functions, courtesy of [@hsheth2](https://github.com/jlowin/fastmcp/issues/864#issuecomment-3103678258):
-
-<CodeGroup>
-```python Decorator Recipe
-import asyncer
-import functools
-from typing import Callable, ParamSpec, TypeVar, Awaitable
-
-_P = ParamSpec("_P")
-_R = TypeVar("_R")
-
-def make_async_background(fn: Callable[_P, _R]) -> Callable[_P, Awaitable[_R]]:
-    @functools.wraps(fn)
-    async def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
-        return await asyncer.asyncify(fn)(*args, **kwargs)
-
-    return wrapper
-```
-
-```python Using the Decorator {6}
-from fastmcp import FastMCP
-
-mcp = FastMCP()
-
-@mcp.tool()
-@make_async_background
-def my_tool() -> None:
-    time.sleep(5)
-```
-</CodeGroup>
+For I/O-bound operations like network requests or database queries, async tools are still preferred since they're more efficient than threadpool dispatch. Use sync tools when working with synchronous libraries or for simple operations where the threading overhead doesn't matter.
 
 ## Arguments
 
@@ -801,11 +779,63 @@ def divide(a: float, b: float) -> float:
 
 When `mask_error_details=True`, only error messages from `ToolError` will include details, other exceptions will be converted to a generic message.
 
-## Visibility Control
+## Timeouts
 
 <VersionBadge version="3.0.0" />
 
-You can control which tools are visible to clients using server-level visibility control. Disabled tools don't appear in `list_tools` and can't be called.
+Tools can specify a `timeout` parameter to limit how long execution can take. When the timeout is exceeded, the client receives an MCP error and the tool stops processing. This protects your server from unexpectedly slow operations that could block resources or leave clients waiting indefinitely.
+
+```python
+from fastmcp import FastMCP
+
+mcp = FastMCP()
+
+@mcp.tool(timeout=30.0)
+async def fetch_data(url: str) -> dict:
+    """Fetch data with a 30-second timeout."""
+    # If this takes longer than 30 seconds,
+    # the client receives an MCP error
+    ...
+```
+
+Timeouts are specified in seconds as a float. When a tool exceeds its timeout, FastMCP returns an MCP error with code `-32000` and a message indicating which tool timed out and how long it ran. Both sync and async tools support timeouts—sync functions run in thread pools, so the timeout applies to the entire operation regardless of execution model.
+
+<Note>
+Tools must explicitly opt-in to timeouts. There is no server-level default timeout setting.
+</Note>
+
+### Timeouts vs Background Tasks
+
+Timeouts apply to **foreground execution**—when a tool runs directly in response to a client request. They protect your server from tools that unexpectedly hang due to network issues, resource contention, or other transient problems.
+
+<Warning>
+The `timeout` parameter does **not** apply to background tasks. When a tool runs as a background task (`task=True`), execution happens in a Docket worker where the FastMCP timeout is not enforced.
+
+For task timeouts, use Docket's `Timeout` dependency directly in your function signature:
+
+```python
+from datetime import timedelta
+from docket import Timeout
+
+@mcp.tool(task=True)
+async def long_running_task(
+    data: str,
+    timeout: Timeout = Timeout(timedelta(minutes=10))
+) -> str:
+    """Task with a 10-minute timeout enforced by Docket."""
+    ...
+```
+
+See the [Docket documentation](https://chrisguidry.github.io/docket/dependencies/#task-timeouts) for more on task timeouts and retries.
+</Warning>
+
+When a tool times out, FastMCP logs a warning suggesting task mode. For operations you know will be long-running, use `task=True` instead—background tasks offload work to distributed workers and let clients poll for progress.
+
+## Component Visibility
+
+<VersionBadge version="3.0.0" />
+
+You can control which tools are enabled for clients using server-level enabled control. Disabled tools don't appear in `list_tools` and can't be called.
 
 ```python
 from fastmcp import FastMCP
@@ -823,16 +853,16 @@ def public_action() -> str:
     return "Done"
 
 # Disable specific tools by key
-mcp.disable(keys=["tool:admin_action"])
+mcp.disable(keys={"tool:admin_action"})
 
 # Disable tools by tag
 mcp.disable(tags={"admin"})
 
-# Or use allowlist mode - only show tools with specific tags
+# Or use allowlist mode - only enable tools with specific tags
 mcp.enable(tags={"public"}, only=True)
 ```
 
-See [Local Provider](/servers/providers/local#visibility-control) for the complete visibility control API including key formats and tag-based filtering.
+See [Visibility](/servers/visibility) for the complete visibility control API including key formats, tag-based filtering, and provider-level control.
 
 ## MCP Annotations
 
@@ -937,14 +967,14 @@ def example_tool() -> str:
 
 # These operations trigger notifications:
 mcp.add_tool(example_tool)              # Sends tools/list_changed notification
-mcp.disable(keys=["tool:example_tool"]) # Sends tools/list_changed notification
-mcp.enable(keys=["tool:example_tool"])  # Sends tools/list_changed notification
+mcp.disable(keys={"tool:example_tool"}) # Sends tools/list_changed notification
+mcp.enable(keys={"tool:example_tool"})  # Sends tools/list_changed notification
 mcp.remove_tool("example_tool")         # Sends tools/list_changed notification
 ```
 
 Notifications are only sent when these operations occur within an active MCP request context (e.g., when called from within a tool or other MCP operation). Operations performed during server initialization do not trigger notifications.
 
-Clients can handle these notifications using a [message handler](/clients/messages) to automatically refresh their tool lists or update their interfaces.
+Clients can handle these notifications using a [message handler](/clients/notifications) to automatically refresh their tool lists or update their interfaces.
 
 ## Accessing the MCP Context
 
@@ -1038,3 +1068,9 @@ def calculate_sum(a: int, b: int) -> int:
 
 mcp.remove_tool("calculate_sum")
 ```
+
+## Versioning
+
+<VersionBadge version="3.0.0" />
+
+Tools support versioning, allowing you to maintain multiple implementations under the same name while clients automatically receive the highest version. See [Versioning](/servers/versioning) for complete documentation on version comparison, retrieval, and migration patterns.

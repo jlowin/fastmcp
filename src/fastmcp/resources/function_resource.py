@@ -14,13 +14,14 @@ from pydantic import AnyUrl
 import fastmcp
 from fastmcp.decorators import resolve_task_config
 from fastmcp.resources.resource import Resource, ResourceResult
+from fastmcp.server.apps import resolve_ui_mime_type
 from fastmcp.server.dependencies import (
     transform_context_annotations,
     without_injected_parameters,
 )
 from fastmcp.server.tasks.config import TaskConfig
 from fastmcp.tools.tool import AuthCheckCallable
-from fastmcp.utilities.types import get_fn_name
+from fastmcp.utilities.async_utils import call_sync_fn_in_threadpool
 
 if TYPE_CHECKING:
     from docket import Docket
@@ -46,6 +47,7 @@ class ResourceMeta:
     type: Literal["resource"] = field(default="resource", init=False)
     uri: str
     name: str | None = None
+    version: str | int | None = None
     title: str | None = None
     description: str | None = None
     icons: list[Icon] | None = None
@@ -55,6 +57,7 @@ class ResourceMeta:
     meta: dict[str, Any] | None = None
     task: bool | TaskConfig | None = None
     auth: AuthCheckCallable | list[AuthCheckCallable] | None = None
+    enabled: bool = True
 
 
 class FunctionResource(Resource):
@@ -81,6 +84,7 @@ class FunctionResource(Resource):
         metadata: ResourceMeta | None = None,
         # Keep individual params for backwards compat
         name: str | None = None,
+        version: str | int | None = None,
         title: str | None = None,
         description: str | None = None,
         icons: list[Icon] | None = None,
@@ -107,6 +111,7 @@ class FunctionResource(Resource):
                 x is not None
                 for x in [
                     name,
+                    version,
                     title,
                     description,
                     icons,
@@ -134,6 +139,7 @@ class FunctionResource(Resource):
             metadata = ResourceMeta(
                 uri=str(uri),
                 name=name,
+                version=version,
                 title=title,
                 description=description,
                 icons=icons,
@@ -147,8 +153,10 @@ class FunctionResource(Resource):
 
         uri_obj = AnyUrl(metadata.uri)
 
-        # Get function name before any transformations
-        func_name = metadata.name or get_fn_name(fn)
+        # Get function name - use class name for callable objects
+        func_name = (
+            metadata.name or getattr(fn, "__name__", None) or fn.__class__.__name__
+        )
 
         # Normalize task to TaskConfig and validate
         task_value = metadata.task
@@ -160,20 +168,31 @@ class FunctionResource(Resource):
             task_config = task_value
         task_config.validate_function(fn, func_name)
 
+        # if the fn is a callable class, we need to get the __call__ method from here out
+        if not inspect.isroutine(fn):
+            fn = fn.__call__
+        # if the fn is a staticmethod, we need to work with the underlying function
+        if isinstance(fn, staticmethod):
+            fn = fn.__func__
+
         # Transform Context type annotations to Depends() for unified DI
         fn = transform_context_annotations(fn)
 
         # Wrap fn to handle dependency resolution internally
         wrapped_fn = without_injected_parameters(fn)
 
+        # Apply ui:// MIME default, then fall back to text/plain
+        resolved_mime = resolve_ui_mime_type(metadata.uri, metadata.mime_type)
+
         return cls(
             fn=wrapped_fn,
             uri=uri_obj,
             name=func_name,
+            version=str(metadata.version) if metadata.version is not None else None,
             title=metadata.title,
             description=metadata.description or inspect.getdoc(fn),
             icons=metadata.icons,
-            mime_type=metadata.mime_type or "text/plain",
+            mime_type=resolved_mime or "text/plain",
             tags=metadata.tags or set(),
             annotations=metadata.annotations,
             meta=metadata.meta,
@@ -187,9 +206,14 @@ class FunctionResource(Resource):
         """Read the resource by calling the wrapped function."""
         # self.fn is wrapped by without_injected_parameters which handles
         # dependency resolution internally
-        result = self.fn()
-        if inspect.isawaitable(result):
-            result = await result
+        if inspect.iscoroutinefunction(self.fn):
+            result = await self.fn()
+        else:
+            # Run sync functions in threadpool to avoid blocking the event loop
+            result = await call_sync_fn_in_threadpool(self.fn)
+            # Handle sync wrappers that return awaitables (e.g., partial(async_fn))
+            if inspect.isawaitable(result):
+                result = await result
 
         # If user returned another Resource, read it recursively
         if isinstance(result, Resource):
@@ -212,6 +236,7 @@ def resource(
     uri: str,
     *,
     name: str | None = None,
+    version: str | int | None = None,
     title: str | None = None,
     description: str | None = None,
     icons: list[Icon] | None = None,
@@ -249,6 +274,7 @@ def resource(
         resource_meta = ResourceMeta(
             uri=uri,
             name=name,
+            version=version,
             title=title,
             description=description,
             icons=icons,
@@ -266,6 +292,7 @@ def resource(
                 fn=fn,
                 uri_template=uri,
                 name=name,
+                version=version,
                 title=title,
                 description=description,
                 icons=icons,
@@ -283,6 +310,7 @@ def resource(
         metadata = ResourceMeta(
             uri=uri,
             name=name,
+            version=version,
             title=title,
             description=description,
             icons=icons,

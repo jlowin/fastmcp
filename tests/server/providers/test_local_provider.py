@@ -35,8 +35,8 @@ class TestLocalProviderStorage:
         )
         provider.add_tool(tool)
 
-        assert "tool:test_tool" in provider._components
-        assert provider._components["tool:test_tool"] is tool
+        assert "tool:test_tool@" in provider._components
+        assert provider._components["tool:test_tool@"] is tool
 
     def test_add_multiple_tools(self):
         """Test adding multiple tools."""
@@ -55,8 +55,8 @@ class TestLocalProviderStorage:
         provider.add_tool(tool1)
         provider.add_tool(tool2)
 
-        assert "tool:tool1" in provider._components
-        assert "tool:tool2" in provider._components
+        assert "tool:tool1@" in provider._components
+        assert "tool:tool2@" in provider._components
 
     def test_remove_tool(self):
         """Test removing a tool from LocalProvider."""
@@ -70,7 +70,7 @@ class TestLocalProviderStorage:
         provider.add_tool(tool)
         provider.remove_tool("test_tool")
 
-        assert "tool:test_tool" not in provider._components
+        assert "tool:test_tool@" not in provider._components
 
     def test_remove_nonexistent_tool_raises(self):
         """Test that removing a nonexistent tool raises KeyError."""
@@ -87,7 +87,7 @@ class TestLocalProviderStorage:
         def test_resource() -> str:
             return "content"
 
-        assert "resource:resource://test" in provider._components
+        assert "resource:resource://test@" in provider._components
 
     def test_remove_resource(self):
         """Test removing a resource from LocalProvider."""
@@ -99,7 +99,7 @@ class TestLocalProviderStorage:
 
         provider.remove_resource("resource://test")
 
-        assert "resource:resource://test" not in provider._components
+        assert "resource:resource://test@" not in provider._components
 
     def test_add_template(self):
         """Test adding a resource template to LocalProvider."""
@@ -109,7 +109,7 @@ class TestLocalProviderStorage:
         def template_fn(id: str) -> str:
             return f"Resource {id}"
 
-        assert "template:resource://{id}" in provider._components
+        assert "template:resource://{id}@" in provider._components
 
     def test_remove_template(self):
         """Test removing a resource template from LocalProvider."""
@@ -121,7 +121,7 @@ class TestLocalProviderStorage:
 
         provider.remove_template("resource://{id}")
 
-        assert "template:resource://{id}" not in provider._components
+        assert "template:resource://{id}@" not in provider._components
 
     def test_add_prompt(self):
         """Test adding a prompt to LocalProvider."""
@@ -133,7 +133,7 @@ class TestLocalProviderStorage:
         )
         provider.add_prompt(prompt)
 
-        assert "prompt:test_prompt" in provider._components
+        assert "prompt:test_prompt@" in provider._components
 
     def test_remove_prompt(self):
         """Test removing a prompt from LocalProvider."""
@@ -146,7 +146,7 @@ class TestLocalProviderStorage:
         provider.add_prompt(prompt)
         provider.remove_prompt("test_prompt")
 
-        assert "prompt:test_prompt" not in provider._components
+        assert "prompt:test_prompt@" not in provider._components
 
 
 class TestLocalProviderInterface:
@@ -310,8 +310,8 @@ class TestLocalProviderDecorators:
         def my_tool(x: int) -> int:
             return x * 2
 
-        assert "tool:my_tool" in provider._components
-        assert provider._components["tool:my_tool"].name == "my_tool"
+        assert "tool:my_tool@" in provider._components
+        assert provider._components["tool:my_tool@"].name == "my_tool"
 
     def test_tool_decorator_with_custom_name_registers(self):
         """Tool with custom name should register under that name."""
@@ -321,8 +321,8 @@ class TestLocalProviderDecorators:
         def my_tool(x: int) -> int:
             return x * 2
 
-        assert "tool:custom_name" in provider._components
-        assert "tool:my_tool" not in provider._components
+        assert "tool:custom_name@" in provider._components
+        assert "tool:my_tool@" not in provider._components
 
     def test_tool_direct_call(self):
         """provider.tool(fn) should register the function."""
@@ -333,22 +333,29 @@ class TestLocalProviderDecorators:
 
         provider.tool(my_tool, name="direct_tool")
 
-        assert "tool:direct_tool" in provider._components
+        assert "tool:direct_tool@" in provider._components
 
     def test_tool_enabled_false(self):
-        """Tool with enabled=False should be disabled."""
+        """Tool with enabled=False should add a Visibility transform."""
         provider = LocalProvider()
 
         @provider.tool(enabled=False)
         def disabled_tool() -> str:
             return "should be disabled"
 
-        assert "tool:disabled_tool" in provider._components
-        tool = provider._components["tool:disabled_tool"]
-        assert not provider._is_component_enabled(tool)
+        assert "tool:disabled_tool@" in provider._components
+        # enabled=False adds a Visibility transform to disable the tool
+        from fastmcp.server.transforms.visibility import Visibility
+
+        enabled_transforms = [
+            t for t in provider.transforms if isinstance(t, Visibility)
+        ]
+        assert len(enabled_transforms) == 1
+        assert enabled_transforms[0]._enabled is False
+        assert enabled_transforms[0].keys == {"tool:disabled_tool@"}
 
     async def test_tool_enabled_false_not_listed(self):
-        """Disabled tool should not appear in list_tools."""
+        """Disabled tool should not appear in get_tools (filtering happens at server level)."""
         provider = LocalProvider()
 
         @provider.tool(enabled=False)
@@ -359,10 +366,31 @@ class TestLocalProviderDecorators:
         def enabled_tool() -> str:
             return "should be enabled"
 
-        tools = await provider.list_tools()
+        # Filtering happens at the server level, not provider level
+        server = FastMCP("Test", providers=[provider])
+        tools = await server.list_tools()
         names = {t.name for t in tools}
         assert "enabled_tool" in names
         assert "disabled_tool" not in names
+
+    async def test_server_enable_overrides_provider_disable(self):
+        """Server-level enable should override provider-level disable."""
+        provider = LocalProvider()
+
+        @provider.tool(enabled=False)
+        def my_tool() -> str:
+            return "result"
+
+        server = FastMCP("Test", providers=[provider])
+
+        # Tool is disabled at provider level
+        assert await server.get_tool("my_tool") is None
+
+        # Server-level enable overrides it
+        server.enable(names={"my_tool"})
+        tool = await server.get_tool("my_tool")
+        assert tool is not None
+        assert tool.name == "my_tool"
 
     async def test_tool_roundtrip(self):
         """Tool should execute correctly via Client."""
@@ -386,7 +414,7 @@ class TestLocalProviderDecorators:
         def my_resource() -> str:
             return "test content"
 
-        assert "resource:resource://test" in provider._components
+        assert "resource:resource://test@" in provider._components
 
     def test_resource_with_custom_name_registers(self):
         """Resource with custom name should register with that name."""
@@ -396,22 +424,29 @@ class TestLocalProviderDecorators:
         def my_resource() -> str:
             return "test content"
 
-        assert provider._components["resource:resource://test"].name == "custom_name"
+        assert provider._components["resource:resource://test@"].name == "custom_name"
 
     def test_resource_enabled_false(self):
-        """Resource with enabled=False should be disabled."""
+        """Resource with enabled=False should add a Visibility transform."""
         provider = LocalProvider()
 
         @provider.resource("resource://test", enabled=False)
         def disabled_resource() -> str:
             return "should be disabled"
 
-        assert "resource:resource://test" in provider._components
-        resource = provider._components["resource:resource://test"]
-        assert not provider._is_component_enabled(resource)
+        assert "resource:resource://test@" in provider._components
+        # enabled=False adds a Visibility transform to disable the resource
+        from fastmcp.server.transforms.visibility import Visibility
+
+        enabled_transforms = [
+            t for t in provider.transforms if isinstance(t, Visibility)
+        ]
+        assert len(enabled_transforms) == 1
+        assert enabled_transforms[0]._enabled is False
+        assert enabled_transforms[0].keys == {"resource:resource://test@"}
 
     async def test_resource_enabled_false_not_listed(self):
-        """Disabled resource should not appear in list_resources."""
+        """Disabled resource should not appear in get_resources (filtering at server level)."""
         provider = LocalProvider()
 
         @provider.resource("resource://disabled", enabled=False)
@@ -422,25 +457,34 @@ class TestLocalProviderDecorators:
         def enabled_resource() -> str:
             return "should be enabled"
 
-        resources = await provider.list_resources()
+        # Filtering happens at the server level, not provider level
+        server = FastMCP("Test", providers=[provider])
+        resources = await server.list_resources()
         uris = {str(r.uri) for r in resources}
         assert "resource://enabled" in uris
         assert "resource://disabled" not in uris
 
     def test_template_enabled_false(self):
-        """Template with enabled=False should be disabled."""
+        """Template with enabled=False should add a Visibility transform."""
         provider = LocalProvider()
 
         @provider.resource("data://{id}", enabled=False)
         def disabled_template(id: str) -> str:
             return f"Data {id}"
 
-        assert "template:data://{id}" in provider._components
-        template = provider._components["template:data://{id}"]
-        assert not provider._is_component_enabled(template)
+        assert "template:data://{id}@" in provider._components
+        # enabled=False adds a Visibility transform to disable the template
+        from fastmcp.server.transforms.visibility import Visibility
+
+        enabled_transforms = [
+            t for t in provider.transforms if isinstance(t, Visibility)
+        ]
+        assert len(enabled_transforms) == 1
+        assert enabled_transforms[0]._enabled is False
+        assert enabled_transforms[0].keys == {"template:data://{id}@"}
 
     async def test_template_enabled_false_not_listed(self):
-        """Disabled template should not appear in list_resource_templates."""
+        """Disabled template should not appear in get_resource_templates (filtering at server level)."""
         provider = LocalProvider()
 
         @provider.resource("data://{id}", enabled=False)
@@ -451,7 +495,9 @@ class TestLocalProviderDecorators:
         def enabled_template(id: str) -> str:
             return f"Item {id}"
 
-        templates = await provider.list_resource_templates()
+        # Filtering happens at the server level, not provider level
+        server = FastMCP("Test", providers=[provider])
+        templates = await server.list_resource_templates()
         uris = {t.uri_template for t in templates}
         assert "items://{id}" in uris
         assert "data://{id}" not in uris
@@ -478,7 +524,7 @@ class TestLocalProviderDecorators:
         def my_prompt() -> str:
             return "A prompt"
 
-        assert "prompt:my_prompt" in provider._components
+        assert "prompt:my_prompt@" in provider._components
 
     def test_prompt_with_custom_name_registers(self):
         """Prompt with custom name should register under that name."""
@@ -488,23 +534,30 @@ class TestLocalProviderDecorators:
         def my_prompt() -> str:
             return "A prompt"
 
-        assert "prompt:custom_prompt" in provider._components
-        assert "prompt:my_prompt" not in provider._components
+        assert "prompt:custom_prompt@" in provider._components
+        assert "prompt:my_prompt@" not in provider._components
 
     def test_prompt_enabled_false(self):
-        """Prompt with enabled=False should be disabled."""
+        """Prompt with enabled=False should add a Visibility transform."""
         provider = LocalProvider()
 
         @provider.prompt(enabled=False)
         def disabled_prompt() -> str:
             return "should be disabled"
 
-        assert "prompt:disabled_prompt" in provider._components
-        prompt = provider._components["prompt:disabled_prompt"]
-        assert not provider._is_component_enabled(prompt)
+        assert "prompt:disabled_prompt@" in provider._components
+        # enabled=False adds a Visibility transform to disable the prompt
+        from fastmcp.server.transforms.visibility import Visibility
+
+        enabled_transforms = [
+            t for t in provider.transforms if isinstance(t, Visibility)
+        ]
+        assert len(enabled_transforms) == 1
+        assert enabled_transforms[0]._enabled is False
+        assert enabled_transforms[0].keys == {"prompt:disabled_prompt@"}
 
     async def test_prompt_enabled_false_not_listed(self):
-        """Disabled prompt should not appear in list_prompts."""
+        """Disabled prompt should not appear in get_prompts (filtering at server level)."""
         provider = LocalProvider()
 
         @provider.prompt(enabled=False)
@@ -515,7 +568,9 @@ class TestLocalProviderDecorators:
         def enabled_prompt() -> str:
             return "should be enabled"
 
-        prompts = await provider.list_prompts()
+        # Filtering happens at the server level, not provider level
+        server = FastMCP("Test", providers=[provider])
+        prompts = await server.list_prompts()
         names = {p.name for p in prompts}
         assert "enabled_prompt" in names
         assert "disabled_prompt" not in names
@@ -553,11 +608,9 @@ class TestProviderToolTransformations:
         layer = ToolTransform({"my_tool": ToolTransformConfig(name="renamed_tool")})
         provider.add_transform(layer)
 
-        # Use call_next pattern
-        async def get_tools():
-            return await provider.list_tools()
-
-        transformed_tools = await layer.list_tools(get_tools)
+        # Get tools and pass directly to transform
+        tools = await provider.list_tools()
+        transformed_tools = await layer.list_tools(tools)
         assert len(transformed_tools) == 1
         assert transformed_tools[0].name == "renamed_tool"
 
@@ -577,8 +630,8 @@ class TestProviderToolTransformations:
         )
 
         # Get tool through layer with call_next
-        async def get_tool(name: str):
-            return await provider.get_tool(name)
+        async def get_tool(name: str, version=None):
+            return await provider._get_tool(name, version)
 
         tool = await layer.get_tool("transformed_tool", get_tool)
         assert tool is not None
@@ -603,8 +656,8 @@ class TestProviderToolTransformations:
             {"my_tool": ToolTransformConfig(description="New description")}
         )
 
-        async def get_tool(name: str):
-            return await provider.get_tool(name)
+        async def get_tool(name: str, version=None):
+            return await provider._get_tool(name, version)
 
         tool = await layer.get_tool("my_tool", get_tool)
         assert tool is not None
@@ -621,19 +674,16 @@ class TestProviderToolTransformations:
         def my_tool(x: int) -> int:
             return x
 
-        # Add layer to provider (layers are applied by server, not list_tools)
+        # Add layer to provider (layers are applied by server, not _list_tools)
         layer = ToolTransform({"my_tool": ToolTransformConfig(name="renamed")})
         provider.add_transform(layer)
 
-        # Provider's list_tools returns raw tools (transforms applied when queried via chain)
-        original_tools = await provider.list_tools()
+        # Provider's _list_tools returns raw tools (transforms applied when queried via list_tools)
+        original_tools = await provider._list_tools()
         assert original_tools[0].name == "my_tool"
 
-        # Transform modifies them when applied via call_next
-        async def get_tools():
-            return original_tools
-
-        transformed_tools = await layer.list_tools(get_tools)
+        # Transform modifies them when applied directly
+        transformed_tools = await layer.list_tools(original_tools)
         assert transformed_tools[0].name == "renamed"
 
     def test_transform_layer_duplicate_target_name_raises_error(self):
@@ -731,7 +781,7 @@ class TestLocalProviderStandaloneUsage:
             assert any(t.name == "shared_tool" for t in tools2)
 
     async def test_tools_visible_via_server_get_tools(self):
-        """Test that provider tools are visible via server.get_tools()."""
+        """Test that provider tools are visible via server.list_tools()."""
         provider = LocalProvider()
 
         @provider.tool
@@ -740,7 +790,7 @@ class TestLocalProviderStandaloneUsage:
 
         server = FastMCP("Test", providers=[provider])
 
-        tools = await server.get_tools()
+        tools = await server.list_tools()
         assert any(t.name == "provider_tool" for t in tools)
 
     async def test_server_decorator_and_provider_tools_coexist(self):
@@ -757,7 +807,7 @@ class TestLocalProviderStandaloneUsage:
         def server_tool() -> str:
             return "from server"
 
-        tools = await server.get_tools()
+        tools = await server.list_tools()
         assert any(t.name == "provider_tool" for t in tools)
         assert any(t.name == "server_tool" for t in tools)
 
@@ -776,7 +826,7 @@ class TestLocalProviderStandaloneUsage:
             return "from server"
 
         # Server's LocalProvider is first, so its tool wins
-        tools = await server.get_tools()
+        tools = await server.list_tools()
         assert any(t.name == "duplicate_tool" for t in tools)
 
         async with Client(server) as client:

@@ -2,13 +2,13 @@
 
 from unittest.mock import Mock
 
+import mcp.types as mcp_types
 import pytest
 from mcp.server.auth.middleware.auth_context import auth_context_var
 from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
 
 from fastmcp import FastMCP
 from fastmcp.client import Client
-from fastmcp.exceptions import NotFoundError
 from fastmcp.server.auth import (
     AccessToken,
     AuthContext,
@@ -237,7 +237,7 @@ class TestToolLevelAuth:
         def public_tool() -> str:
             return "public"
 
-        tools = await mcp.get_tools()
+        tools = await mcp.list_tools()
         assert len(tools) == 1
         assert tools[0].name == "public_tool"
 
@@ -249,7 +249,7 @@ class TestToolLevelAuth:
             return "protected"
 
         # No token set - tool should be hidden
-        tools = await mcp.get_tools()
+        tools = await mcp.list_tools()
         assert len(tools) == 0
 
     async def test_tool_with_auth_visible_with_token(self):
@@ -263,7 +263,7 @@ class TestToolLevelAuth:
         token = make_token()
         tok = set_token(token)
         try:
-            tools = await mcp.get_tools()
+            tools = await mcp.list_tools()
             assert len(tools) == 1
             assert tools[0].name == "protected_tool"
         finally:
@@ -280,7 +280,7 @@ class TestToolLevelAuth:
         token = make_token(scopes=["read"])
         tok = set_token(token)
         try:
-            tools = await mcp.get_tools()
+            tools = await mcp.list_tools()
             assert len(tools) == 0
         finally:
             auth_context_var.reset(tok)
@@ -296,21 +296,23 @@ class TestToolLevelAuth:
         token = make_token(scopes=["admin"])
         tok = set_token(token)
         try:
-            tools = await mcp.get_tools()
+            tools = await mcp.list_tools()
             assert len(tools) == 1
             assert tools[0].name == "admin_tool"
         finally:
             auth_context_var.reset(tok)
 
-    async def test_get_tool_returns_not_found_without_auth(self):
+    async def test_get_tool_returns_none_without_auth(self):
+        """get_tool() returns None for unauthorized tools (consistent with list filtering)."""
         mcp = FastMCP()
 
         @mcp.tool(auth=require_auth)
         def protected_tool() -> str:
             return "protected"
 
-        with pytest.raises(NotFoundError):
-            await mcp.get_tool("protected_tool")
+        # get_tool() returns None for unauthorized tools
+        tool = await mcp.get_tool("protected_tool")
+        assert tool is None
 
     async def test_get_tool_returns_tool_with_auth(self):
         mcp = FastMCP()
@@ -323,6 +325,7 @@ class TestToolLevelAuth:
         tok = set_token(token)
         try:
             tool = await mcp.get_tool("protected_tool")
+            assert tool is not None
             assert tool.name == "protected_tool"
         finally:
             auth_context_var.reset(tok)
@@ -334,6 +337,12 @@ class TestToolLevelAuth:
 
 
 class TestAuthMiddleware:
+    """Tests for middleware filtering via MCP handler layer.
+
+    These tests call _list_tools_mcp() which applies middleware during list,
+    simulating what happens when a client calls list_tools over MCP.
+    """
+
     async def test_middleware_filters_tools_without_token(self):
         mcp = FastMCP(middleware=[AuthMiddleware(auth=require_auth)])
 
@@ -342,8 +351,8 @@ class TestAuthMiddleware:
             return "public"
 
         # No token - all tools filtered by middleware
-        tools = await mcp.get_tools(run_middleware=True)
-        assert len(tools) == 0
+        result = await mcp._list_tools_mcp(mcp_types.ListToolsRequest())
+        assert len(result.tools) == 0
 
     async def test_middleware_allows_tools_with_token(self):
         mcp = FastMCP(middleware=[AuthMiddleware(auth=require_auth)])
@@ -355,8 +364,8 @@ class TestAuthMiddleware:
         token = make_token()
         tok = set_token(token)
         try:
-            tools = await mcp.get_tools(run_middleware=True)
-            assert len(tools) == 1
+            result = await mcp._list_tools_mcp(mcp_types.ListToolsRequest())
+            assert len(result.tools) == 1
         finally:
             auth_context_var.reset(tok)
 
@@ -371,8 +380,8 @@ class TestAuthMiddleware:
         token = make_token(scopes=["read"])
         tok = set_token(token)
         try:
-            tools = await mcp.get_tools(run_middleware=True)
-            assert len(tools) == 0
+            result = await mcp._list_tools_mcp(mcp_types.ListToolsRequest())
+            assert len(result.tools) == 0
         finally:
             auth_context_var.reset(tok)
 
@@ -380,8 +389,8 @@ class TestAuthMiddleware:
         token = make_token(scopes=["api"])
         tok = set_token(token)
         try:
-            tools = await mcp.get_tools(run_middleware=True)
-            assert len(tools) == 1
+            result = await mcp._list_tools_mcp(mcp_types.ListToolsRequest())
+            assert len(result.tools) == 1
         finally:
             auth_context_var.reset(tok)
 
@@ -399,16 +408,16 @@ class TestAuthMiddleware:
             return "admin"
 
         # No token - public tool allowed, admin tool blocked
-        tools = await mcp.get_tools(run_middleware=True)
-        assert len(tools) == 1
-        assert tools[0].name == "public_tool"
+        result = await mcp._list_tools_mcp(mcp_types.ListToolsRequest())
+        assert len(result.tools) == 1
+        assert result.tools[0].name == "public_tool"
 
         # Token with admin scope - both allowed
         token = make_token(scopes=["admin"])
         tok = set_token(token)
         try:
-            tools = await mcp.get_tools(run_middleware=True)
-            assert len(tools) == 2
+            result = await mcp._list_tools_mcp(mcp_types.ListToolsRequest())
+            assert len(result.tools) == 2
         finally:
             auth_context_var.reset(tok)
 
@@ -508,7 +517,7 @@ class TestTransformedToolAuth:
         )
 
         # Without token, transformed tool should not be visible
-        tools = await mcp.get_tools()
+        tools = await mcp.list_tools()
         assert len(tools) == 0
 
     async def test_transformed_tool_visible_with_token(self):
@@ -530,7 +539,7 @@ class TestTransformedToolAuth:
         token = make_token()
         tok = set_token(token)
         try:
-            tools = await mcp.get_tools()
+            tools = await mcp.list_tools()
             assert len(tools) == 1
             assert tools[0].name == "renamed_protected"
         finally:
