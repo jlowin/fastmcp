@@ -3,21 +3,27 @@
 import json
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import mcp.types
 import pytest
 
 from fastmcp import FastMCP
+from fastmcp.cli import client as client_module
 from fastmcp.cli.client import (
     Client,
     _build_client,
     _build_stdio_from_command,
+    _format_call_result_text,
     _is_http_target,
+    call_command,
     coerce_value,
     format_tool_signature,
+    list_command,
     parse_tool_arguments,
     resolve_server_spec,
 )
+from fastmcp.client.client import CallToolResult
 from fastmcp.client.transports.stdio import StdioTransport
 
 # ---------------------------------------------------------------------------
@@ -384,7 +390,7 @@ class TestBuildClient:
 
 
 # ---------------------------------------------------------------------------
-# Integration tests with in-process FastMCP server
+# Integration tests — invoke actual CLI commands via monkeypatched _build_client
 # ---------------------------------------------------------------------------
 
 
@@ -415,63 +421,137 @@ def _build_test_server() -> FastMCP:
     return server
 
 
-class TestListCommand:
+@pytest.fixture()
+def _patch_client():
+    """Patch resolve_server_spec and _build_client so CLI commands use the
+    in-process test server without needing a real transport."""
+    server = _build_test_server()
+
+    def fake_resolve(server_spec: Any, **kwargs: Any) -> str:
+        return "fake"
+
+    def fake_build_client(resolved: Any, **kwargs: Any) -> Client:
+        return Client(server)
+
+    with (
+        patch.object(client_module, "resolve_server_spec", side_effect=fake_resolve),
+        patch.object(client_module, "_build_client", side_effect=fake_build_client),
+    ):
+        yield
+
+
+class TestListCommandCLI:
+    @pytest.mark.usefixtures("_patch_client")
     async def test_list_tools(self, capsys: pytest.CaptureFixture[str]):
-        server = _build_test_server()
-        client = Client(server)
-        async with client:
-            tools = await client.list_tools()
-        assert len(tools) >= 2
-        names = {t.name for t in tools}
+        await list_command("fake://server")
+        captured = capsys.readouterr()
+        assert "greet" in captured.out
+        assert "add" in captured.out
+
+    @pytest.mark.usefixtures("_patch_client")
+    async def test_list_json(self, capsys: pytest.CaptureFixture[str]):
+        await list_command("fake://server", json_output=True)
+        captured = capsys.readouterr()
+        data = json.loads(captured.out)
+        names = {t["name"] for t in data["tools"]}
         assert "greet" in names
         assert "add" in names
 
-    async def test_list_tools_signatures(self):
-        server = _build_test_server()
-        client = Client(server)
-        async with client:
-            tools = await client.list_tools()
-        greet = next(t for t in tools if t.name == "greet")
-        sig = format_tool_signature(greet)
-        assert "greet" in sig
-        assert "name" in sig
+    @pytest.mark.usefixtures("_patch_client")
+    async def test_list_resources(self, capsys: pytest.CaptureFixture[str]):
+        await list_command("fake://server", resources=True)
+        captured = capsys.readouterr()
+        assert "test://greeting" in captured.out
+
+    @pytest.mark.usefixtures("_patch_client")
+    async def test_list_prompts(self, capsys: pytest.CaptureFixture[str]):
+        await list_command("fake://server", prompts=True)
+        captured = capsys.readouterr()
+        assert "ask" in captured.out
 
 
-class TestCallCommand:
-    async def test_call_tool_success(self):
-        server = _build_test_server()
-        client = Client(server)
-        async with client:
-            result = await client.call_tool("greet", {"name": "World"})
-        assert not result.is_error
-        assert any(
-            isinstance(b, mcp.types.TextContent) and "Hello, World!" in b.text
-            for b in result.content
+class TestCallCommandCLI:
+    @pytest.mark.usefixtures("_patch_client")
+    async def test_call_tool(self, capsys: pytest.CaptureFixture[str]):
+        await call_command("fake://server", "greet", "name=World")
+        captured = capsys.readouterr()
+        assert "Hello, World!" in captured.out
+
+    @pytest.mark.usefixtures("_patch_client")
+    async def test_call_tool_json(self, capsys: pytest.CaptureFixture[str]):
+        await call_command("fake://server", "greet", "name=World", json_output=True)
+        captured = capsys.readouterr()
+        data = json.loads(captured.out)
+        assert data["is_error"] is False
+
+    @pytest.mark.usefixtures("_patch_client")
+    async def test_call_tool_not_found(self):
+        with pytest.raises(SystemExit):
+            await call_command("fake://server", "nonexistent")
+
+    @pytest.mark.usefixtures("_patch_client")
+    async def test_call_tool_missing_args(self):
+        with pytest.raises(SystemExit):
+            await call_command("fake://server", "greet")
+
+    @pytest.mark.usefixtures("_patch_client")
+    async def test_call_resource_by_uri(self, capsys: pytest.CaptureFixture[str]):
+        await call_command("fake://server", "test://greeting")
+        captured = capsys.readouterr()
+        assert "Hello from resource!" in captured.out
+
+    @pytest.mark.usefixtures("_patch_client")
+    async def test_call_resource_json(self, capsys: pytest.CaptureFixture[str]):
+        await call_command("fake://server", "test://greeting", json_output=True)
+        captured = capsys.readouterr()
+        data = json.loads(captured.out)
+        assert isinstance(data, list)
+        assert data[0]["text"] == "Hello from resource!"
+
+    @pytest.mark.usefixtures("_patch_client")
+    async def test_call_prompt(self, capsys: pytest.CaptureFixture[str]):
+        await call_command("fake://server", "ask", "topic=Python", prompt=True)
+        captured = capsys.readouterr()
+        assert "Python" in captured.out
+
+    @pytest.mark.usefixtures("_patch_client")
+    async def test_call_prompt_json(self, capsys: pytest.CaptureFixture[str]):
+        await call_command(
+            "fake://server", "ask", "topic=Python", prompt=True, json_output=True
         )
+        captured = capsys.readouterr()
+        data = json.loads(captured.out)
+        assert "messages" in data
 
-    async def test_call_tool_with_coerced_args(self):
-        server = _build_test_server()
-        client = Client(server)
-        async with client:
-            args = parse_tool_arguments(
-                ("a=3", "b=4"),
-                None,
-                {
-                    "type": "object",
-                    "properties": {
-                        "a": {"type": "integer"},
-                        "b": {"type": "integer"},
-                    },
-                    "required": ["a", "b"],
-                },
-            )
-            result = await client.call_tool("add", args)
-        assert not result.is_error
+    @pytest.mark.usefixtures("_patch_client")
+    async def test_call_prompt_not_found(self):
+        with pytest.raises(SystemExit):
+            await call_command("fake://server", "nonexistent", prompt=True)
 
-    async def test_call_nonexistent_tool(self):
-        server = _build_test_server()
-        client = Client(server)
-        async with client:
-            tools = await client.list_tools()
-            tool_map = {t.name: t for t in tools}
-            assert "nonexistent" not in tool_map
+    async def test_call_missing_target(self):
+        with pytest.raises(SystemExit):
+            await call_command("fake://server", "")
+
+
+# ---------------------------------------------------------------------------
+# Structured content serialization
+# ---------------------------------------------------------------------------
+
+
+class TestFormatCallResult:
+    def test_structured_content_uses_dict_not_data(
+        self, capsys: pytest.CaptureFixture[str]
+    ):
+        """structured_content (raw dict) is used for display, not data (which may
+        be a non-serializable dataclass)."""
+        result = CallToolResult(
+            content=[mcp.types.TextContent(type="text", text="ok")],
+            structured_content={"key": "value"},
+            meta=None,
+            data=object(),  # non-serializable on purpose
+            is_error=False,
+        )
+        # Should not raise — uses structured_content, not data
+        _format_call_result_text(result)
+        captured = capsys.readouterr()
+        assert "value" in captured.out

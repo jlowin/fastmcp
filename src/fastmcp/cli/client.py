@@ -418,8 +418,8 @@ def _format_call_result_text(result: CallToolResult) -> None:
                 console.print(f"[bold red]Error:[/bold red] {block}")
         return
 
-    if result.data is not None:
-        console.print_json(json.dumps(result.data))
+    if result.structured_content is not None:
+        console.print_json(json.dumps(result.structured_content))
         return
 
     for block in result.content:
@@ -435,24 +435,21 @@ def _format_call_result_text(result: CallToolResult) -> None:
             console.print(str(block))
 
 
+def _content_block_to_dict(block: mcp.types.ContentBlock) -> dict[str, Any]:
+    """Serialize a single content block to a JSON-safe dict."""
+    if isinstance(block, mcp.types.TextContent):
+        return {"type": "text", "text": block.text}
+    if isinstance(block, mcp.types.ImageContent):
+        return {"type": "image", "mimeType": block.mimeType, "data": block.data}
+    if isinstance(block, mcp.types.AudioContent):
+        return {"type": "audio", "mimeType": block.mimeType, "data": block.data}
+    return {"type": "unknown", "value": str(block)}
+
+
 def _call_result_to_dict(result: CallToolResult) -> dict[str, Any]:
     """Serialize a ``CallToolResult`` to a JSON-safe dict."""
 
-    content_list: list[dict[str, Any]] = []
-    for block in result.content:
-        if isinstance(block, mcp.types.TextContent):
-            content_list.append({"type": "text", "text": block.text})
-        elif isinstance(block, mcp.types.ImageContent):
-            content_list.append(
-                {"type": "image", "mimeType": block.mimeType, "data": block.data}
-            )
-        elif isinstance(block, mcp.types.AudioContent):
-            content_list.append(
-                {"type": "audio", "mimeType": block.mimeType, "data": block.data}
-            )
-        else:
-            content_list.append({"type": "unknown", "value": str(block)})
-
+    content_list = [_content_block_to_dict(block) for block in result.content]
     out: dict[str, Any] = {"content": content_list, "is_error": result.is_error}
     if result.structured_content is not None:
         out["structured_content"] = result.structured_content
@@ -471,6 +468,155 @@ def _tools_to_json(tools: list[mcp.types.Tool]) -> list[dict[str, Any]]:
         }
         for t in tools
     ]
+
+
+# ---------------------------------------------------------------------------
+# Call handlers (tool, resource, prompt)
+# ---------------------------------------------------------------------------
+
+
+async def _handle_tool_call(
+    client: Client,
+    tool_name: str,
+    arguments: tuple[str, ...],
+    input_json: str | None,
+    json_output: bool,
+) -> None:
+    """Handle a tool call within an open client session."""
+    tools = await client.list_tools()
+    tool_map = {t.name: t for t in tools}
+
+    if tool_name not in tool_map:
+        close_matches = difflib.get_close_matches(
+            tool_name, tool_map.keys(), n=3, cutoff=0.5
+        )
+        msg = f"Tool [cyan]{tool_name}[/cyan] not found."
+        if close_matches:
+            suggestions = ", ".join(f"[cyan]{m}[/cyan]" for m in close_matches)
+            msg += f" Did you mean: {suggestions}?"
+        console.print(f"[bold red]Error:[/bold red] {msg}")
+        sys.exit(1)
+
+    tool = tool_map[tool_name]
+    parsed_args = parse_tool_arguments(arguments, input_json, tool.inputSchema)
+
+    required = set(tool.inputSchema.get("required", []))
+    provided = set(parsed_args.keys())
+    missing = required - provided
+    if missing:
+        missing_str = ", ".join(f"[cyan]{m}[/cyan]" for m in sorted(missing))
+        console.print(
+            f"[bold red]Error:[/bold red] Missing required arguments: {missing_str}"
+        )
+        console.print()
+        sig = format_tool_signature(tool)
+        console.print(f"  [dim]{sig}[/dim]")
+        sys.exit(1)
+
+    result = await client.call_tool(tool_name, parsed_args, raise_on_error=False)
+
+    if json_output:
+        console.print_json(json.dumps(_call_result_to_dict(result)))
+    else:
+        _format_call_result_text(result)
+
+    if result.is_error:
+        sys.exit(1)
+
+
+async def _handle_resource(
+    client: Client,
+    uri: str,
+    json_output: bool,
+) -> None:
+    """Handle a resource read within an open client session."""
+    contents = await client.read_resource(uri)
+
+    if json_output:
+        data = []
+        for block in contents:
+            if isinstance(block, mcp.types.TextResourceContents):
+                data.append(
+                    {
+                        "uri": str(block.uri),
+                        "mimeType": block.mimeType,
+                        "text": block.text,
+                    }
+                )
+            elif isinstance(block, mcp.types.BlobResourceContents):
+                data.append(
+                    {
+                        "uri": str(block.uri),
+                        "mimeType": block.mimeType,
+                        "blob": block.blob,
+                    }
+                )
+        console.print_json(json.dumps(data))
+        return
+
+    for block in contents:
+        if isinstance(block, mcp.types.TextResourceContents):
+            console.print(block.text)
+        elif isinstance(block, mcp.types.BlobResourceContents):
+            size = len(block.blob) * 3 // 4
+            console.print(f"[dim][Blob: {block.mimeType}, ~{size} bytes][/dim]")
+
+
+async def _handle_prompt(
+    client: Client,
+    prompt_name: str,
+    arguments: tuple[str, ...],
+    input_json: str | None,
+    json_output: bool,
+) -> None:
+    """Handle a prompt get within an open client session."""
+    # Prompt arguments are always string->string, but we reuse
+    # parse_tool_arguments for the key=value / --input-json parsing.
+    # Pass an empty schema so values stay as strings.
+    parsed_args = parse_tool_arguments(arguments, input_json, {"type": "object"})
+
+    prompts = await client.list_prompts()
+    prompt_map = {p.name: p for p in prompts}
+
+    if prompt_name not in prompt_map:
+        close_matches = difflib.get_close_matches(
+            prompt_name, prompt_map.keys(), n=3, cutoff=0.5
+        )
+        msg = f"Prompt [cyan]{prompt_name}[/cyan] not found."
+        if close_matches:
+            suggestions = ", ".join(f"[cyan]{m}[/cyan]" for m in close_matches)
+            msg += f" Did you mean: {suggestions}?"
+        console.print(f"[bold red]Error:[/bold red] {msg}")
+        sys.exit(1)
+
+    result = await client.get_prompt(prompt_name, parsed_args or None)
+
+    if json_output:
+        data: dict[str, Any] = {}
+        if result.description:
+            data["description"] = result.description
+        data["messages"] = [
+            {
+                "role": msg.role,
+                "content": _content_block_to_dict(msg.content),
+            }
+            for msg in result.messages
+        ]
+        console.print_json(json.dumps(data))
+        return
+
+    for msg in result.messages:
+        console.print(f"[bold]{msg.role}:[/bold]")
+        if isinstance(msg.content, mcp.types.TextContent):
+            console.print(f"  {msg.content.text}")
+        elif isinstance(msg.content, mcp.types.ImageContent):
+            size = len(msg.content.data) * 3 // 4
+            console.print(
+                f"  [dim][Image: {msg.content.mimeType}, ~{size} bytes][/dim]"
+            )
+        else:
+            console.print(f"  {msg.content}")
+        console.print()
 
 
 # ---------------------------------------------------------------------------
@@ -634,7 +780,12 @@ async def call_command(
             help="Server URL, Python file, MCPConfig JSON, or .js file",
         ),
     ] = None,
-    tool_name: str = "",
+    target: Annotated[
+        str,
+        cyclopts.Parameter(
+            help="Tool name, resource URI, or prompt name (with --prompt)",
+        ),
+    ] = "",
     *arguments: str,
     command: Annotated[
         str | None,
@@ -650,11 +801,15 @@ async def call_command(
             help="Force transport type for URL targets (http or sse)",
         ),
     ] = None,
+    prompt: Annotated[
+        bool,
+        cyclopts.Parameter("--prompt", help="Treat target as a prompt name"),
+    ] = False,
     input_json: Annotated[
         str | None,
         cyclopts.Parameter(
             "--input-json",
-            help="JSON string of tool arguments (merged with key=value args)",
+            help="JSON string of arguments (merged with key=value args)",
         ),
     ] = None,
     json_output: Annotated[
@@ -673,22 +828,27 @@ async def call_command(
         ),
     ] = None,
 ) -> None:
-    """Call a tool on an MCP server.
+    """Call a tool, read a resource, or get a prompt on an MCP server.
+
+    By default the target is treated as a tool name. If the target
+    contains ``://`` it is treated as a resource URI. Pass ``--prompt``
+    to treat it as a prompt name.
 
     Arguments are passed as key=value pairs. Use --input-json for complex
     or nested arguments.
 
     Examples:
-        fastmcp call http://localhost:8000/mcp search query=hello limit=5
         fastmcp call server.py greet name=World
-        fastmcp call --command 'npx -y @mcp/server' tool_name arg=val
+        fastmcp call server.py resource://docs/readme
+        fastmcp call server.py analyze --prompt data='[1,2,3]'
         fastmcp call http://server/mcp create --input-json '{"tags": ["a","b"]}'
     """
 
-    if not tool_name:
+    if not target:
         console.print(
-            "[bold red]Error:[/bold red] Missing tool name.\n\n"
-            "Usage: fastmcp call <server> <tool_name> [key=value ...]\n\n"
+            "[bold red]Error:[/bold red] Missing target.\n\n"
+            "Usage: fastmcp call <server> <target> [key=value ...]\n\n"
+            "  target can be a tool name, a resource URI, or a prompt name (with --prompt).\n\n"
             "Use [cyan]fastmcp list <server>[/cyan] to see available tools."
         )
         sys.exit(1)
@@ -698,49 +858,14 @@ async def call_command(
 
     try:
         async with client:
-            # Fetch tool list so we can validate and get the schema
-            tools = await client.list_tools()
-            tool_map = {t.name: t for t in tools}
-
-            if tool_name not in tool_map:
-                close_matches = difflib.get_close_matches(
-                    tool_name, tool_map.keys(), n=3, cutoff=0.5
-                )
-                msg = f"Tool [cyan]{tool_name}[/cyan] not found."
-                if close_matches:
-                    suggestions = ", ".join(f"[cyan]{m}[/cyan]" for m in close_matches)
-                    msg += f" Did you mean: {suggestions}?"
-                console.print(f"[bold red]Error:[/bold red] {msg}")
-                sys.exit(1)
-
-            tool = tool_map[tool_name]
-            parsed_args = parse_tool_arguments(arguments, input_json, tool.inputSchema)
-
-            # Check for missing required arguments
-            required = set(tool.inputSchema.get("required", []))
-            provided = set(parsed_args.keys())
-            missing = required - provided
-            if missing:
-                missing_str = ", ".join(f"[cyan]{m}[/cyan]" for m in sorted(missing))
-                console.print(
-                    f"[bold red]Error:[/bold red] Missing required arguments: {missing_str}"
-                )
-                console.print()
-                sig = format_tool_signature(tool)
-                console.print(f"  [dim]{sig}[/dim]")
-                sys.exit(1)
-
-            result = await client.call_tool(
-                tool_name, parsed_args, raise_on_error=False
-            )
-
-            if json_output:
-                console.print_json(json.dumps(_call_result_to_dict(result)))
+            if prompt:
+                await _handle_prompt(client, target, arguments, input_json, json_output)
+            elif "://" in target:
+                await _handle_resource(client, target, json_output)
             else:
-                _format_call_result_text(result)
-
-            if result.is_error:
-                sys.exit(1)
+                await _handle_tool_call(
+                    client, target, arguments, input_json, json_output
+                )
 
     except Exception as exc:
         console.print(f"[bold red]Error:[/bold red] {exc}")
