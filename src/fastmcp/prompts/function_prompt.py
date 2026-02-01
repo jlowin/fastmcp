@@ -306,7 +306,7 @@ class FunctionPrompt(Prompt):
             kwargs = {k: v for k, v in kwargs.items() if k in valid_params}
 
             # Use type adapter to validate arguments and handle Field() defaults
-            # This matches the behavior of tools in function_tool.py:258,282
+            # This matches the behavior of tools in function_tool
             type_adapter = get_cached_typeadapter(self.fn)
 
             # self.fn is wrapped by without_injected_parameters which handles
