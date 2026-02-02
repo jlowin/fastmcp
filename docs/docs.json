@@ -156,20 +156,7 @@
               {
                 "group": "MCP Transforms",
                 "pages": [
-                  "servers/authorization",
-                  "servers/context",
-                  "servers/elicitation",
                   "servers/error-handling",
-                  "servers/icons",
-                  "servers/lifespan",
-                  "servers/logging",
-                  "servers/middleware",
-                  "servers/progress",
-                  "servers/sampling",
-                  "servers/storage-backends",
-                  "servers/tasks",
-                  "servers/telemetry",
-                  "servers/visibility"
                   "servers/transforms/transforms",
                   "servers/transforms/namespace",
                   "servers/transforms/tool-transformation",

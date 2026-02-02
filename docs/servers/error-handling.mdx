@@ -1,7 +1,7 @@
 ---
 title: Error Handling
 sidebarTitle: Error Handling
-description: Reduce boilerplate with built-in error handling for MCP tools.
+description: How FastMCP handles errors and provides actionable feedback to LLMs.
 icon: shield-exclamation
 ---
 
@@ -9,61 +9,62 @@ import { VersionBadge } from '/snippets/version-badge.mdx'
 
 <VersionBadge version="3.1.0" />
 
-When building MCP tools that interact with external APIs, you'll often need to handle various error conditions: network timeouts, rate limits, server errors, and more. Without a standardized approach, this leads to repetitive try/catch blocks across every tool.
+FastMCP provides intelligent error handling that balances security (hiding internal details) with usefulness (giving LLMs actionable feedback). This page explains how error handling works and how to customize it.
 
-FastMCP provides the `@handle_tool_errors` decorator to automatically convert common HTTP exceptions into user-friendly error messages, reducing boilerplate by up to 90%.
+## Built-in Actionable Error Handling
 
-## The Problem
+FastMCP automatically converts certain "actionable" errors into helpful messages that LLMs can understand and act on—even when error masking is enabled. These are errors where the LLM can take meaningful action:
 
-Consider a typical tool that fetches data from an API:
+| Error Type | Message Sent to LLM |
+|-----------|---------------------|
+| HTTP 429 (Rate Limited) | "Rate limited by upstream API, please retry later" |
+| Request Timeout | "Upstream request timed out, please retry" |
+
+These messages pass through regardless of the `mask_error_details` setting because they represent actionable guidance, not internal implementation details.
+
+## Error Masking
+
+By default, FastMCP passes error details through to clients. In production, you may want to hide internal error details:
 
 ```python
 from fastmcp import FastMCP
-from fastmcp.exceptions import ToolError
-import httpx
 
-mcp = FastMCP("MyServer")
-
-@mcp.tool
-async def fetch_user(username: str) -> dict:
-    """Fetch user data from the API."""
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(f"https://api.example.com/users/{username}")
-            response.raise_for_status()
-            return response.json()
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 404:
-            raise ToolError(f"User '{username}' not found")
-        elif e.response.status_code == 429:
-            raise ToolError("Rate limit exceeded. Please retry later.")
-        elif e.response.status_code >= 500:
-            raise ToolError("API server error. Please try again later.")
-        else:
-            raise ToolError(f"API error: HTTP {e.response.status_code}")
-    except httpx.TimeoutException:
-        raise ToolError("Request timed out. Please try again.")
-    except httpx.RequestError:
-        raise ToolError("Network connection error.")
-    except Exception:
-        raise ToolError("An unexpected error occurred")
+# Enable error masking for production
+mcp = FastMCP("MyServer", mask_error_details=True)
 ```
 
-This pattern repeats across every tool that makes HTTP requests. The `@handle_tool_errors` decorator eliminates this boilerplate.
+With masking enabled:
+- **Actionable errors** (429, timeouts) still show helpful messages
+- **Other errors** show generic messages like "Error calling tool 'my_tool'"
+- **ToolError exceptions** you raise explicitly always pass through unchanged
 
-## Basic Usage
+<Tip>
+Use `ToolError` when you want to send a specific message to the LLM:
 
-The `@handle_tool_errors` decorator wraps your tool function and automatically converts exceptions into appropriate `ToolError` messages:
+```python
+from fastmcp.exceptions import ToolError
+
+@mcp.tool
+async def fetch_user(user_id: str) -> dict:
+    if not user_id.isdigit():
+        raise ToolError("User ID must be a number")
+    # ... rest of implementation
+```
+</Tip>
+
+## Optional: HTTP Error Decorator
+
+For tools that make HTTP requests and need granular error handling beyond the built-in actionable errors, FastMCP provides an optional `@handle_http_errors()` decorator:
 
 ```python
 from fastmcp import FastMCP
-from fastmcp.error_handling import handle_tool_errors
+from fastmcp.error_handling import handle_http_errors
 import httpx
 
 mcp = FastMCP("MyServer")
 
 @mcp.tool
-@handle_tool_errors(api_name="User API")
+@handle_http_errors()
 async def fetch_user(username: str) -> dict:
     """Fetch user data from the API."""
     async with httpx.AsyncClient() as client:
@@ -72,246 +73,170 @@ async def fetch_user(username: str) -> dict:
         return response.json()
 ```
 
-That's it! The decorator handles all the error cases automatically. If the API returns a 404, the LLM receives "User API: Resource not found". If there's a timeout, it sees "User API: Request timed out. Please try again."
+This decorator converts all httpx exceptions into user-friendly messages:
 
-<Tip>
-The decorator works with both sync and async tools. You don't need different decorators for each.
-</Tip>
+| Exception | Message |
+|-----------|---------|
+| `httpx.HTTPStatusError` (401) | "Authentication failed or missing credentials" |
+| `httpx.HTTPStatusError` (403) | "Access denied - insufficient permissions" |
+| `httpx.HTTPStatusError` (404) | "Resource not found" |
+| `httpx.HTTPStatusError` (429) | "Rate limit exceeded, please retry later" |
+| `httpx.HTTPStatusError` (5xx) | "Server error, please try again later" |
+| `httpx.HTTPStatusError` (other) | "HTTP error {status_code}" |
+| `httpx.TimeoutException` | "Request timed out, please try again" |
+| `httpx.RequestError` | "Network connection error" |
 
-## Built-in Error Mappings
+### When to Use the Decorator
 
-The decorator automatically maps common httpx exceptions to user-friendly messages:
+Use `@handle_http_errors()` when you want:
+- **All HTTP errors** to have friendly messages (not just 429/timeouts)
+- **404 errors** to show "Resource not found" instead of a generic error
+- **Authentication errors** (401, 403) to have specific messages
 
-| Exception | Condition | Message |
-|-----------|-----------|---------|
-| `httpx.HTTPStatusError` | Status 404 | "Resource not found" |
-| `httpx.HTTPStatusError` | Status 429 | "Rate limit exceeded. Please retry later." |
-| `httpx.HTTPStatusError` | Status 5xx | "Server error. Please try again later." |
-| `httpx.HTTPStatusError` | Other status | "HTTP error {status_code}" |
-| `httpx.TimeoutException` | Any | "Request timed out. Please try again." |
-| `httpx.RequestError` | Any | "Network connection error." |
-| Generic `Exception` | When masked | "An unexpected error occurred" |
+If you only need rate limiting and timeout handling, the built-in behavior is sufficient.
 
-All messages are prefixed with the `api_name` parameter if provided.
-
-## Decorator Parameters
-
-### `api_name`
-
-The `api_name` parameter adds context to error messages, helping users understand which service encountered the error:
+### Decorator Options
 
 ```python
-@mcp.tool
-@handle_tool_errors(api_name="GitHub API")
-async def get_repo(owner: str, repo: str) -> dict:
-    """Get repository information."""
-    async with httpx.AsyncClient() as client:
-        response = await client.get(f"https://api.github.com/repos/{owner}/{repo}")
-        response.raise_for_status()
-        return response.json()
-```
+# Default: mask generic exceptions
+@handle_http_errors()
+async def my_tool(): ...
 
-Error messages will include the API name:
-- "GitHub API: Resource not found"
-- "GitHub API: Rate limit exceeded. Please retry later."
-- "GitHub API: Request timed out. Please try again."
-
-Without `api_name`, messages appear without a prefix:
-- "Resource not found"
-- "Rate limit exceeded. Please retry later."
-
-### `mask_internal_errors`
-
-The `mask_internal_errors` parameter controls how generic (non-httpx) exceptions are reported:
-
-```python
-# Default behavior: mask internal error details (production-safe)
-@mcp.tool
-@handle_tool_errors(api_name="My API", mask_internal_errors=True)
-async def safe_tool() -> str:
-    raise ValueError("Internal database connection string: user:pass@host")
-    # LLM sees: "My API: An unexpected error occurred"
-
-# Development/debugging: show error details
-@mcp.tool
-@handle_tool_errors(api_name="My API", mask_internal_errors=False)
-async def debug_tool() -> str:
-    raise ValueError("Missing required field 'email'")
-    # LLM sees: "My API: An unexpected error occurred: Missing required field 'email'"
+# Development: show exception details for non-HTTP errors
+@handle_http_errors(mask_errors=False)
+async def my_tool(): ...
 ```
 
 <Warning>
-When `mask_internal_errors=False`, exception details are exposed to the LLM. Be careful not to leak sensitive information like credentials, internal paths, or system details.
+When `mask_errors=False`, exception details are exposed to the LLM. Don't use this in production as it may leak sensitive information.
 </Warning>
 
-## Sync and Async Support
+### Sync and Async Support
 
-The decorator automatically detects whether your function is sync or async and wraps it appropriately:
+The decorator works with both sync and async functions:
 
 ```python
-from fastmcp import FastMCP
-from fastmcp.error_handling import handle_tool_errors
-import httpx
-
-mcp = FastMCP("MyServer")
-
 # Async tool
 @mcp.tool
-@handle_tool_errors(api_name="Async API")
+@handle_http_errors()
 async def async_fetch(url: str) -> str:
-    """Fetch data asynchronously."""
     async with httpx.AsyncClient() as client:
         response = await client.get(url)
         response.raise_for_status()
         return response.text
 
-# Sync tool - same decorator!
+# Sync tool - same decorator
 @mcp.tool
-@handle_tool_errors(api_name="Sync API")
+@handle_http_errors()
 def sync_fetch(url: str) -> str:
-    """Fetch data synchronously."""
     response = httpx.get(url)
     response.raise_for_status()
     return response.text
 ```
 
-## Custom Error Handling
+### Custom Error Messages
 
-If you need to provide a custom error message for a specific case, you can still raise `ToolError` directly. The decorator passes through any `ToolError` exceptions unchanged:
+The decorator passes through `ToolError` exceptions unchanged, so you can override the default behavior for specific cases:
 
 ```python
-from fastmcp import FastMCP
-from fastmcp.error_handling import handle_tool_errors
 from fastmcp.exceptions import ToolError
-import httpx
-
-mcp = FastMCP("MyServer")
 
 @mcp.tool
-@handle_tool_errors(api_name="User API")
+@handle_http_errors()
 async def fetch_user(username: str) -> dict:
-    """Fetch user with custom error for specific case."""
     async with httpx.AsyncClient() as client:
         response = await client.get(f"https://api.example.com/users/{username}")
         
-        # Custom handling for a specific case
+        # Custom message for 404
         if response.status_code == 404:
-            raise ToolError(f"User '{username}' does not exist. Check the spelling.")
+            raise ToolError(f"User '{username}' does not exist")
         
         response.raise_for_status()  # Other errors handled by decorator
         return response.json()
 ```
 
-## How It Works
-
-Under the hood, `@handle_tool_errors` catches exceptions and converts them to `ToolError`. The `ToolError` exception is FastMCP's mechanism for passing user-friendly error messages to LLMs—it bypasses the server's error masking and delivers your message directly.
-
-The decorator follows this sequence:
-
-<Steps>
-  <Step>Wraps your function in a try/except block</Step>
-  <Step>Catches httpx exceptions and maps them to appropriate messages</Step>
-  <Step>Logs the original exception for debugging</Step>
-  <Step>Raises `ToolError` with the user-friendly message</Step>
-  <Step>Chains the original exception for debugging (`__cause__`)</Step>
-</Steps>
-
 ## Complete Example
 
-Here's a complete example showing a server with multiple tools using error handling:
+Here's a server demonstrating both built-in error handling and the optional decorator:
 
 ```python
 from fastmcp import FastMCP
-from fastmcp.error_handling import handle_tool_errors
+from fastmcp.error_handling import handle_http_errors
+from fastmcp.exceptions import ToolError
 import httpx
 
-mcp = FastMCP("DataServer")
+# Production server with error masking
+mcp = FastMCP("DataServer", mask_error_details=True)
 
+# Tool using built-in error handling only
+# - 429 and timeouts automatically get friendly messages
+# - Other errors show "Error calling tool 'get_data'"
 @mcp.tool
-@handle_tool_errors(api_name="Weather API")
-async def get_weather(city: str) -> dict:
-    """Get current weather for a city."""
+async def get_data(id: str) -> dict:
+    """Get data by ID."""
     async with httpx.AsyncClient() as client:
-        response = await client.get(
-            f"https://api.weather.example.com/current",
-            params={"city": city}
-        )
+        response = await client.get(f"https://api.example.com/data/{id}")
         response.raise_for_status()
         return response.json()
 
+# Tool using decorator for granular HTTP error messages
+# - All HTTP errors get specific friendly messages
 @mcp.tool
-@handle_tool_errors(api_name="News API")
-async def get_headlines(topic: str, count: int = 5) -> list[dict]:
-    """Get top news headlines for a topic."""
+@handle_http_errors()
+async def get_user(username: str) -> dict:
+    """Get user profile."""
     async with httpx.AsyncClient() as client:
-        response = await client.get(
-            f"https://api.news.example.com/headlines",
-            params={"topic": topic, "count": count}
-        )
+        response = await client.get(f"https://api.example.com/users/{username}")
         response.raise_for_status()
-        return response.json()["articles"]
+        return response.json()
 
+# Tool with custom error for business logic
 @mcp.tool
-@handle_tool_errors(api_name="Stock API")
-def get_stock_price(symbol: str) -> dict:
-    """Get current stock price (sync for demonstration)."""
-    response = httpx.get(
-        f"https://api.stocks.example.com/price/{symbol}"
-    )
-    response.raise_for_status()
-    return response.json()
-
-if __name__ == "__main__":
-    mcp.run()
+async def transfer_funds(from_account: str, to_account: str, amount: float) -> dict:
+    """Transfer funds between accounts."""
+    if amount <= 0:
+        raise ToolError("Amount must be positive")
+    if amount > 10000:
+        raise ToolError("Amount exceeds daily limit of $10,000")
+    # ... implementation
 ```
-
-With this setup:
-- Network failures show clean messages like "Weather API: Network connection error."
-- Rate limits show "News API: Rate limit exceeded. Please retry later."
-- Server errors show "Stock API: Server error. Please try again later."
-- All without any manual try/except blocks in your tool code!
 
 ## Troubleshooting
 
-<Accordion title="AttributeError: module 'httpx' has no attribute...">
-  **Problem:** The decorator references httpx classes that don't exist in your version.
+<Accordion title="Generic error message instead of specific HTTP error">
+  **Problem:** You're seeing "Error calling tool 'my_tool'" instead of "Resource not found" for a 404.
   
-  **Solution:** Ensure httpx is installed and up-to-date:
-  ```bash
-  pip install --upgrade httpx
-  ```
-  Then verify the version supports the exceptions you're using.
+  **Cause:** The built-in error handling only provides friendly messages for actionable errors (429, timeouts). Other HTTP errors are masked.
+  
+  **Solution:** Use the `@handle_http_errors()` decorator to get friendly messages for all HTTP status codes.
 </Accordion>
 
-<Accordion title="Unexpected error: Got a non-200 response from API">
-  **Problem:** The decorator is catching the exception but showing a generic error instead of your custom message.
+<Accordion title="Sensitive information appearing in error messages">
+  **Problem:** Internal error details are being sent to the LLM.
   
-  **Cause:** By default, `mask_internal_errors=True` hides the specific error. The decorator correctly maps httpx.HTTPStatusError to user-friendly messages (404, 429, 5xx), but other exceptions are masked.
+  **Cause:** Either `mask_error_details=False` on the server or `mask_errors=False` on the decorator.
   
-  **Solution:** Set `mask_internal_errors=False` during development to see full details:
+  **Solution:** For production, ensure:
   ```python
-  @handle_tool_errors(api_name="MyAPI", mask_internal_errors=False)
-  ```
-  Or ensure you're raising `httpx.HTTPStatusError` via `response.raise_for_status()`.
-</Accordion>
-
-<Accordion title="Rate limiting isn't being caught">
-  **Problem:** Tool still hits rate limits without showing the friendly message.
+  mcp = FastMCP("MyServer", mask_error_details=True)
   
-  **Cause:** The API may not return HTTP 429, or exceptions are raised outside the decorated function.
-  
-  **Solution:** Verify your API returns 429 for rate limiting. Check logs to see the actual exception:
-  ```python
-  @handle_tool_errors(api_name="MyAPI", mask_internal_errors=False)
-  async def my_tool(...):
-      # Now logs will show the exact exception type
+  # If using decorator:
+  @handle_http_errors()  # mask_errors=True by default
   ```
 </Accordion>
 
-<Accordion title="Tool hangs or doesn't respond on cancellation">
-  **Problem:** Tool continues running after the client disconnects or timeout occurs.
+<Accordion title="ToolError message being modified">
+  **Problem:** Your custom ToolError message is being changed.
   
-  **Cause:** The decorator explicitly re-raises `asyncio.CancelledError` to allow proper cancellation propagation.
+  **Cause:** This shouldn't happen—both the built-in handling and decorator pass ToolError through unchanged.
   
-    **Solution:** Ensure your async code uses `await` properly and doesn't suppress `CancelledError`. The decorator handles this automatically—verify your underlying function respects cancellation tokens.
+  **Solution:** Check that you're raising `ToolError` directly and not wrapping it in another exception.
+</Accordion>
+
+<Accordion title="Tool hangs on cancellation">
+  **Problem:** Tool continues running after client disconnects.
+  
+  **Cause:** The decorator re-raises `asyncio.CancelledError` to allow proper cancellation.
+  
+  **Solution:** Ensure your async code uses `await` properly and doesn't suppress `CancelledError`.
 </Accordion>

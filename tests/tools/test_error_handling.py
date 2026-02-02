@@ -1,10 +1,10 @@
-"""Unit tests for the handle_tool_errors decorator."""
+"""Unit tests for the handle_http_errors decorator."""
 
 import httpx
 import pytest
 from httpx import Request, Response
 
-from fastmcp.error_handling import handle_tool_errors
+from fastmcp.error_handling import handle_http_errors
 from fastmcp.exceptions import ToolError
 
 
@@ -22,90 +22,86 @@ class TestHTTPStatusErrorMapping:
     async def test_404_error(self):
         """Test that 404 status maps to 'Resource not found'."""
 
-        @handle_tool_errors(api_name="Test API")
+        @handle_http_errors()
         async def tool():
             raise self._make_status_error(404)
 
         with pytest.raises(ToolError) as exc_info:
             await tool()
 
-        assert "Test API: Resource not found" in str(exc_info.value)
+        assert "Resource not found" in str(exc_info.value)
 
     async def test_429_error(self):
         """Test that 429 status maps to rate limit message."""
 
-        @handle_tool_errors(api_name="Test API")
+        @handle_http_errors()
         async def tool():
             raise self._make_status_error(429)
 
         with pytest.raises(ToolError) as exc_info:
             await tool()
 
-        assert "Test API: Rate limit exceeded" in str(exc_info.value)
+        assert "Rate limit exceeded" in str(exc_info.value)
 
     async def test_500_error(self):
         """Test that 500 status maps to server error message."""
 
-        @handle_tool_errors(api_name="Test API")
+        @handle_http_errors()
         async def tool():
             raise self._make_status_error(500)
 
         with pytest.raises(ToolError) as exc_info:
             await tool()
 
-        assert "Test API: Server error" in str(exc_info.value)
+        assert "Server error" in str(exc_info.value)
 
     async def test_502_error(self):
         """Test that 502 status maps to server error message."""
 
-        @handle_tool_errors(api_name="Test API")
+        @handle_http_errors()
         async def tool():
             raise self._make_status_error(502)
 
         with pytest.raises(ToolError) as exc_info:
             await tool()
 
-        assert "Test API: Server error" in str(exc_info.value)
+        assert "Server error" in str(exc_info.value)
 
     async def test_503_error(self):
         """Test that 503 status maps to server error message."""
 
-        @handle_tool_errors(api_name="Test API")
+        @handle_http_errors()
         async def tool():
             raise self._make_status_error(503)
 
         with pytest.raises(ToolError) as exc_info:
             await tool()
 
-        assert "Test API: Server error" in str(exc_info.value)
+        assert "Server error" in str(exc_info.value)
 
     async def test_401_error(self):
         """Test that 401 status shows authentication failed message."""
 
-        @handle_tool_errors(api_name="Test API")
+        @handle_http_errors()
         async def tool():
             raise self._make_status_error(401)
 
         with pytest.raises(ToolError) as exc_info:
             await tool()
 
-        assert "Test API: Authentication failed or missing credentials" in str(
-            exc_info.value
-        )
+        assert "Authentication failed or missing credentials" in str(exc_info.value)
 
     async def test_403_error(self):
         """Test that 403 status shows access denied message."""
 
-        @handle_tool_errors(api_name="Test API")
+        @handle_http_errors()
         async def tool():
             raise self._make_status_error(403)
 
         with pytest.raises(ToolError) as exc_info:
             await tool()
 
-        assert "Test API: Access denied - insufficient permissions" in str(
-            exc_info.value
-        )
+        assert "Access denied - insufficient permissions" in str(exc_info.value)
 
 
 class TestTimeoutExceptionMapping:
@@ -114,38 +110,38 @@ class TestTimeoutExceptionMapping:
     async def test_timeout_exception(self):
         """Test that TimeoutException maps to timeout message."""
 
-        @handle_tool_errors(api_name="Test API")
+        @handle_http_errors()
         async def tool():
             raise httpx.TimeoutException("Connection timed out")
 
         with pytest.raises(ToolError) as exc_info:
             await tool()
 
-        assert "Test API: Request timed out" in str(exc_info.value)
+        assert "Request timed out" in str(exc_info.value)
 
     async def test_connect_timeout(self):
         """Test that ConnectTimeout (subclass) maps to timeout message."""
 
-        @handle_tool_errors(api_name="Test API")
+        @handle_http_errors()
         async def tool():
             raise httpx.ConnectTimeout("Connection timed out")
 
         with pytest.raises(ToolError) as exc_info:
             await tool()
 
-        assert "Test API: Request timed out" in str(exc_info.value)
+        assert "Request timed out" in str(exc_info.value)
 
     async def test_read_timeout(self):
         """Test that ReadTimeout (subclass) maps to timeout message."""
 
-        @handle_tool_errors(api_name="Test API")
+        @handle_http_errors()
         async def tool():
             raise httpx.ReadTimeout("Read timed out")
 
         with pytest.raises(ToolError) as exc_info:
             await tool()
 
-        assert "Test API: Request timed out" in str(exc_info.value)
+        assert "Request timed out" in str(exc_info.value)
 
 
 class TestRequestErrorMapping:
@@ -154,35 +150,35 @@ class TestRequestErrorMapping:
     async def test_request_error(self):
         """Test that RequestError maps to network connection message."""
 
-        @handle_tool_errors(api_name="Test API")
+        @handle_http_errors()
         async def tool():
             raise httpx.RequestError("Network error")
 
         with pytest.raises(ToolError) as exc_info:
             await tool()
 
-        assert "Test API: Network connection error" in str(exc_info.value)
+        assert "Network connection error" in str(exc_info.value)
 
     async def test_connect_error(self):
         """Test ConnectError (subclass) maps to network message."""
 
-        @handle_tool_errors(api_name="Test API")
+        @handle_http_errors()
         async def tool():
             raise httpx.ConnectError("Failed to connect")
 
         with pytest.raises(ToolError) as exc_info:
             await tool()
 
-        assert "Test API: Network connection error" in str(exc_info.value)
+        assert "Network connection error" in str(exc_info.value)
 
 
 class TestGenericExceptionMapping:
-    """Test generic exception handling with mask_internal_errors."""
+    """Test generic exception handling with mask_errors."""
 
     async def test_generic_exception_masked(self):
         """Test that generic exceptions are masked by default."""
 
-        @handle_tool_errors(api_name="Test API")
+        @handle_http_errors()
         async def tool():
             raise ValueError("Sensitive internal error details")
 
@@ -190,13 +186,13 @@ class TestGenericExceptionMapping:
             await tool()
 
         error_msg = str(exc_info.value)
-        assert "Test API: An unexpected error occurred" in error_msg
+        assert "An unexpected error occurred" in error_msg
         assert "Sensitive internal error details" not in error_msg
 
     async def test_generic_exception_unmasked(self):
         """Test generic exceptions show details when unmasked."""
 
-        @handle_tool_errors(api_name="Test API", mask_internal_errors=False)
+        @handle_http_errors(mask_errors=False)
         async def tool():
             raise ValueError("Error details here")
 
@@ -204,52 +200,7 @@ class TestGenericExceptionMapping:
             await tool()
 
         error_msg = str(exc_info.value)
-        expected = "Test API: An unexpected error occurred: Error details here"
-        assert expected in error_msg
-
-
-class TestApiNameParameter:
-    """Test the api_name parameter behavior."""
-
-    async def test_api_name_in_message(self):
-        """Test that api_name appears in error messages."""
-
-        @handle_tool_errors(api_name="GitHub API")
-        async def tool():
-            raise httpx.TimeoutException("timeout")
-
-        with pytest.raises(ToolError) as exc_info:
-            await tool()
-
-        assert "GitHub API:" in str(exc_info.value)
-
-    async def test_no_api_name(self):
-        """Test error messages without api_name."""
-
-        @handle_tool_errors()
-        async def tool():
-            raise httpx.TimeoutException("timeout")
-
-        with pytest.raises(ToolError) as exc_info:
-            await tool()
-
-        error_msg = str(exc_info.value)
-        assert "Request timed out" in error_msg
-        # Should not have a colon prefix since no api_name
-        assert not error_msg.startswith(":")
-
-    async def test_api_name_none_explicit(self):
-        """Test error messages with explicit api_name=None."""
-
-        @handle_tool_errors(api_name=None)
-        async def tool():
-            raise httpx.TimeoutException("timeout")
-
-        with pytest.raises(ToolError) as exc_info:
-            await tool()
-
-        error_msg = str(exc_info.value)
-        assert "Request timed out" in error_msg
+        assert "An unexpected error occurred: Error details here" in error_msg
 
 
 class TestSyncAsyncSupport:
@@ -258,7 +209,7 @@ class TestSyncAsyncSupport:
     async def test_async_function(self):
         """Test decorator works with async functions."""
 
-        @handle_tool_errors(api_name="Test")
+        @handle_http_errors()
         async def async_tool() -> str:
             raise httpx.TimeoutException("timeout")
 
@@ -270,7 +221,7 @@ class TestSyncAsyncSupport:
     def test_sync_function(self):
         """Test decorator works with sync functions."""
 
-        @handle_tool_errors(api_name="Test")
+        @handle_http_errors()
         def sync_tool() -> str:
             raise httpx.TimeoutException("timeout")
 
@@ -282,7 +233,7 @@ class TestSyncAsyncSupport:
     async def test_async_function_success(self):
         """Test that successful async functions return normally."""
 
-        @handle_tool_errors(api_name="Test")
+        @handle_http_errors()
         async def async_tool() -> str:
             return "success"
 
@@ -292,7 +243,7 @@ class TestSyncAsyncSupport:
     def test_sync_function_success(self):
         """Test that successful sync functions return normally."""
 
-        @handle_tool_errors(api_name="Test")
+        @handle_http_errors()
         def sync_tool() -> str:
             return "success"
 
@@ -306,7 +257,7 @@ class TestFunctionMetadataPreservation:
     async def test_preserves_name(self):
         """Test that decorated function preserves __name__."""
 
-        @handle_tool_errors()
+        @handle_http_errors()
         async def my_custom_tool():
             """My custom docstring."""
             pass
@@ -316,7 +267,7 @@ class TestFunctionMetadataPreservation:
     async def test_preserves_docstring(self):
         """Test that decorated function preserves __doc__."""
 
-        @handle_tool_errors()
+        @handle_http_errors()
         async def my_custom_tool():
             """This is my custom docstring for testing."""
             pass
@@ -327,7 +278,7 @@ class TestFunctionMetadataPreservation:
     def test_sync_preserves_name(self):
         """Test that decorated sync function preserves __name__."""
 
-        @handle_tool_errors()
+        @handle_http_errors()
         def my_sync_tool():
             """Sync tool docstring."""
             pass
@@ -337,7 +288,7 @@ class TestFunctionMetadataPreservation:
     def test_sync_preserves_docstring(self):
         """Test that decorated sync function preserves __doc__."""
 
-        @handle_tool_errors()
+        @handle_http_errors()
         def my_sync_tool():
             """This is my sync tool docstring."""
             pass
@@ -351,7 +302,7 @@ class TestToolErrorPassthrough:
     async def test_tool_error_passthrough_async(self):
         """Test that ToolError from async function passes through."""
 
-        @handle_tool_errors(api_name="Test API")
+        @handle_http_errors()
         async def tool():
             raise ToolError("Custom user error message")
 
@@ -360,12 +311,11 @@ class TestToolErrorPassthrough:
 
         # Should be the exact message, not wrapped
         assert str(exc_info.value) == "Custom user error message"
-        assert "Test API" not in str(exc_info.value)
 
     def test_tool_error_passthrough_sync(self):
         """Test that ToolError from sync function passes through."""
 
-        @handle_tool_errors(api_name="Test API")
+        @handle_http_errors()
         def tool():
             raise ToolError("Custom user error message")
 
@@ -374,7 +324,6 @@ class TestToolErrorPassthrough:
 
         # Should be the exact message, not wrapped
         assert str(exc_info.value) == "Custom user error message"
-        assert "Test API" not in str(exc_info.value)
 
 
 class TestExceptionChaining:
@@ -383,7 +332,7 @@ class TestExceptionChaining:
     async def test_exception_chained(self):
         """Test that original exception is available via __cause__."""
 
-        @handle_tool_errors(api_name="Test")
+        @handle_http_errors()
         async def tool():
             raise ValueError("Original error")
 
@@ -397,7 +346,7 @@ class TestExceptionChaining:
     async def test_httpx_exception_chained(self):
         """Test that httpx exceptions are chained properly."""
 
-        @handle_tool_errors(api_name="Test")
+        @handle_http_errors()
         async def tool():
             raise httpx.TimeoutException("Connection timed out")
 

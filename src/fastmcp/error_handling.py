@@ -1,7 +1,14 @@
-"""Error handling utilities for FastMCP tools.
+"""HTTP error handling utilities for FastMCP tools.
 
-This module provides decorators for standardized error handling in MCP tools,
-reducing boilerplate and ensuring consistent error messages.
+This module provides an optional decorator for converting httpx exceptions
+into user-friendly ToolError messages. This is a utility for users who want
+more granular control over HTTP error handling beyond what FastMCP's core
+error masking provides.
+
+Note: FastMCP's core error handling already handles actionable errors like
+rate limiting (429) and timeouts automatically. This decorator is useful when
+you want to customize error messages for specific HTTP status codes or when
+you want all HTTP errors (not just actionable ones) to have friendly messages.
 """
 
 from __future__ import annotations
@@ -11,14 +18,14 @@ import functools
 import inspect
 import logging
 from collections.abc import Callable, Coroutine
-from typing import Any, TypeVar, overload
+from typing import Any, TypeVar, cast
 
 import httpx
 from typing_extensions import ParamSpec
 
 from fastmcp.exceptions import ToolError
 
-__all__ = ["handle_tool_errors"]
+__all__ = ["handle_http_errors"]
 
 logger = logging.getLogger(__name__)
 
@@ -26,37 +33,19 @@ P = ParamSpec("P")
 R = TypeVar("R")
 
 
-def _format_message(api_name: str | None, message: str) -> str:
-    """Format error message with optional API name prefix.
-
-    Args:
-        api_name: Optional name of the API being called, used as prefix.
-        message: The base error message to format.
-
-    Returns:
-        Formatted message with API name prefix if provided.
-    """
-    if api_name:
-        return f"{api_name}: {message}"
-    return message
-
-
-def _handle_httpx_status_error(
-    error: httpx.HTTPStatusError, api_name: str | None
-) -> ToolError:
+def _handle_httpx_status_error(error: httpx.HTTPStatusError) -> ToolError:
     """Convert httpx HTTPStatusError to ToolError with appropriate message.
 
     Maps HTTP status codes to user-friendly error messages:
     - 401: "Authentication failed or missing credentials"
     - 403: "Access denied - insufficient permissions"
     - 404: "Resource not found"
-    - 429: "Rate limit exceeded. Please retry later."
-    - 5xx: "Server error. Please try again later."
+    - 429: "Rate limit exceeded, please retry later"
+    - 5xx: "Server error, please try again later"
     - Other: "HTTP error {status_code}"
 
     Args:
         error: The HTTPStatusError to convert.
-        api_name: Optional name of the API, included in formatted message.
 
     Returns:
         ToolError with appropriate user-friendly message.
@@ -70,20 +59,16 @@ def _handle_httpx_status_error(
     elif status_code == 404:
         message = "Resource not found"
     elif status_code == 429:
-        message = "Rate limit exceeded. Please retry later."
+        message = "Rate limit exceeded, please retry later"
     elif status_code >= 500:
-        message = "Server error. Please try again later."
+        message = "Server error, please try again later"
     else:
         message = f"HTTP error {status_code}"
 
-    return ToolError(_format_message(api_name, message))
+    return ToolError(message)
 
 
-def _handle_exception(
-    error: Exception,
-    api_name: str | None,
-    mask_internal_errors: bool,
-) -> ToolError:
+def _handle_exception(error: Exception, mask_errors: bool) -> ToolError:
     """Convert any exception to ToolError with appropriate message.
 
     Handles httpx-specific exceptions with user-friendly messages, and
@@ -91,89 +76,61 @@ def _handle_exception(
 
     Args:
         error: The exception to convert.
-        api_name: Optional name of the API, included in formatted message.
-        mask_internal_errors: If True, mask internal exception details.
+        mask_errors: If True, mask internal exception details.
 
     Returns:
         ToolError with appropriate message based on exception type.
     """
     # Handle httpx-specific exceptions
     if isinstance(error, httpx.HTTPStatusError):
-        return _handle_httpx_status_error(error, api_name)
+        return _handle_httpx_status_error(error)
 
     if isinstance(error, httpx.TimeoutException):
-        message = "Request timed out. Please try again."
-        return ToolError(_format_message(api_name, message))
+        return ToolError("Request timed out, please try again")
 
     if isinstance(error, httpx.RequestError):
-        message = "Network connection error."
-        return ToolError(_format_message(api_name, message))
+        return ToolError("Network connection error")
 
     # Generic exception handling
-    if mask_internal_errors:
-        message = "An unexpected error occurred"
-        return ToolError(_format_message(api_name, message))
+    if mask_errors:
+        return ToolError("An unexpected error occurred")
     else:
-        message = f"An unexpected error occurred: {error}"
-        return ToolError(_format_message(api_name, message))
+        return ToolError(f"An unexpected error occurred: {error}")
 
 
-@overload
-def handle_tool_errors(
-    api_name: str | None = None,
-    *,
-    mask_internal_errors: bool = True,
-) -> Callable[[Callable[P, R]], Callable[P, R]]: ...
+def handle_http_errors(
+    mask_errors: bool = True,
+) -> Callable[[Callable[P, R]], Callable[P, R]]:
+    """Decorator that converts httpx exceptions into user-friendly ToolError.
 
+    This is an optional utility decorator for users who want more granular
+    control over HTTP error handling. FastMCP's core error handling already
+    handles actionable errors (429 rate limits, timeouts) automatically.
 
-@overload
-def handle_tool_errors(
-    api_name: str | None = None,
-    *,
-    mask_internal_errors: bool = True,
-) -> Callable[
-    [Callable[P, Coroutine[Any, Any, R]]], Callable[P, Coroutine[Any, Any, R]]
-]: ...
-
-
-def handle_tool_errors(
-    api_name: str | None = None,
-    *,
-    mask_internal_errors: bool = True,
-) -> (
-    Callable[[Callable[P, R]], Callable[P, R]]
-    | Callable[
-        [Callable[P, Coroutine[Any, Any, R]]], Callable[P, Coroutine[Any, Any, R]]
-    ]
-):
-    """Decorator that converts common HTTP/network exceptions into ToolError.
-
-    This decorator automatically catches exceptions from HTTP client libraries
-    (httpx) and converts them into user-friendly ToolError messages. This
-    reduces boilerplate error handling code in MCP tools.
+    Use this decorator when you want:
+    - All HTTP errors to have friendly messages (not just actionable ones)
+    - Custom error message formatting
+    - To bypass FastMCP's default error masking for HTTP errors
 
     Args:
-        api_name: Optional name of the API being called. When provided, this
-            name is included as a prefix in error messages (e.g., "GitHub API:
-            Resource not found").
-        mask_internal_errors: If True (default), generic exceptions show a
-            safe message without internal details. If False, exception details
-            are included in the message. httpx-specific exceptions always show
-            user-friendly messages regardless of this setting.
+        mask_errors: If True (default), generic exceptions show a safe message
+            without internal details. If False, exception details are included.
+            httpx-specific exceptions always show user-friendly messages
+            regardless of this setting.
 
     Returns:
-        A decorator that wraps the function with error handling.
+        A decorator that wraps the function with HTTP error handling.
 
     Example:
         ```python
         from fastmcp import FastMCP
-        from fastmcp.error_handling import handle_tool_errors
+        from fastmcp.error_handling import handle_http_errors
         import httpx
 
         mcp = FastMCP("MyServer")
 
         @mcp.tool
-        @handle_tool_errors(api_name="GitHub API")
+        @handle_http_errors()
         async def get_user(username: str) -> dict:
             async with httpx.AsyncClient() as client:
                 response = await client.get(
@@ -187,12 +144,12 @@ def handle_tool_errors(
         - httpx.HTTPStatusError (401): "Authentication failed or missing credentials"
         - httpx.HTTPStatusError (403): "Access denied - insufficient permissions"
         - httpx.HTTPStatusError (404): "Resource not found"
-        - httpx.HTTPStatusError (429): "Rate limit exceeded..."
-        - httpx.HTTPStatusError (5xx): "Server error..."
+        - httpx.HTTPStatusError (429): "Rate limit exceeded, please retry later"
+        - httpx.HTTPStatusError (5xx): "Server error, please try again later"
         - httpx.HTTPStatusError (other): "HTTP error {status_code}"
-        - httpx.TimeoutException: "Request timed out..."
-        - httpx.RequestError: "Network connection error."
-        - Generic Exception: "An unexpected error occurred" (masked)
+        - httpx.TimeoutException: "Request timed out, please try again"
+        - httpx.RequestError: "Network connection error"
+        - Generic Exception: "An unexpected error occurred" (when masked)
     """
 
     def decorator(func: Callable[P, R]) -> Callable[P, R]:
@@ -201,7 +158,8 @@ def handle_tool_errors(
             @functools.wraps(func)
             async def async_wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
                 try:
-                    return await func(*args, **kwargs)  # type: ignore[await-not-coroutine]
+                    result = await cast(Coroutine[Any, Any, R], func(*args, **kwargs))
+                    return result
                 except ToolError:
                     # Re-raise ToolError as-is (user explicitly raised it)
                     raise
@@ -210,12 +168,10 @@ def handle_tool_errors(
                     raise
                 except Exception as e:
                     func_name = getattr(func, "__name__", repr(func))
-                    logger.exception(
-                        "Error in tool %r (api_name=%r)", func_name, api_name
-                    )
-                    raise _handle_exception(e, api_name, mask_internal_errors) from e
+                    logger.exception("HTTP error in %r", func_name)
+                    raise _handle_exception(e, mask_errors) from e
 
-            return async_wrapper  # type: ignore[return-value]
+            return cast(Callable[P, R], async_wrapper)
         else:
             # Sync wrapper
             @functools.wraps(func)
@@ -227,11 +183,9 @@ def handle_tool_errors(
                     raise
                 except Exception as e:
                     func_name = getattr(func, "__name__", repr(func))
-                    logger.exception(
-                        "Error in tool %r (api_name=%r)", func_name, api_name
-                    )
-                    raise _handle_exception(e, api_name, mask_internal_errors) from e
+                    logger.exception("HTTP error in %r", func_name)
+                    raise _handle_exception(e, mask_errors) from e
 
-            return sync_wrapper  # type: ignore[return-value]
+            return sync_wrapper
 
     return decorator
