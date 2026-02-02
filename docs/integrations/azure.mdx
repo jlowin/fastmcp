@@ -336,7 +336,7 @@ The On-Behalf-Of (OBO) flow allows your FastMCP server to call downstream Micros
 This pattern is useful when your tools need to access user-specific data from Microsoft services: reading emails, accessing calendar events, querying SharePoint, or any other Graph API operation that requires user context.
 
 <Note>
-OBO features require the `azure` extra for MSAL support:
+OBO features require the `azure` extra:
 
 ```bash
 pip install 'fastmcp[azure]'
@@ -451,53 +451,9 @@ The `graph_token` parameter receives a ready-to-use access token for Microsoft G
 **Scope alignment is critical.** The scopes passed to `EntraOBOToken` must be a subset of the scopes in `additional_authorize_scopes`. If you request a scope during OBO that wasn't included in the initial authorization, the exchange will fail.
 </Warning>
 
-### MSALApp Dependency
-
-For advanced OBO scenarios or when you need more control over the token exchange, use the `MSALApp` dependency to get a pre-configured MSAL `ConfidentialClientApplication`.
-
-```python
-from fastmcp import FastMCP
-from fastmcp.server.auth.providers.azure import AzureProvider, MSALApp
-from fastmcp.server.dependencies import CurrentAccessToken
-from fastmcp.server.auth import AccessToken
-from msal import ConfidentialClientApplication
-
-auth_provider = AzureProvider(
-    client_id="your-client-id",
-    client_secret="your-client-secret",
-    tenant_id="your-tenant-id",
-    base_url="http://localhost:8000",
-    required_scopes=["mcp-access"],
-    additional_authorize_scopes=["https://graph.microsoft.com/.default"],
-)
-
-mcp = FastMCP(name="Custom OBO Server", auth=auth_provider)
-
-@mcp.tool
-async def custom_graph_call(
-    token: AccessToken = CurrentAccessToken(),
-    msal: ConfidentialClientApplication = MSALApp(),
-) -> dict:
-    """Perform a custom OBO exchange with error handling."""
-    result = msal.acquire_token_on_behalf_of(
-        user_assertion=token.token,
-        scopes=["https://graph.microsoft.com/User.Read"],
-    )
-
-    if "error" in result:
-        error_desc = result.get("error_description", result["error"])
-        raise RuntimeError(f"OBO exchange failed: {error_desc}")
-
-    graph_token = result["access_token"]
-    # Use graph_token for API calls...
-    return {"status": "success", "token_type": result.get("token_type")}
-```
-
-The `MSALApp` dependency provides a `ConfidentialClientApplication` configured with your Azure credentials. Unlike `EntraOBOToken`, you're responsible for calling `acquire_token_on_behalf_of` and handling errors yourself.
-
-<Note>
-Use `MSALApp` when you need to handle token caching across multiple calls, need detailed error information, or want to use other MSAL features like silent token acquisition.
-</Note>
+<Tip>
+For advanced OBO scenarios, use `CurrentAccessToken()` to get the user's token, then construct an `azure.identity.aio.OnBehalfOfCredential` directly with your Azure credentials.
+</Tip>
 
 <Tip>
 For a complete working example of Azure OBO with FastMCP, see [Pamela Fox's blog post on OBO flow for Entra-based MCP servers](https://blog.pamelafox.org/2026/01/using-on-behalf-of-flow-for-entra-based.html).

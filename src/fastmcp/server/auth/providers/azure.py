@@ -16,13 +16,9 @@ from fastmcp.utilities.auth import decode_jwt_payload, parse_scopes
 from fastmcp.utilities.logging import get_logger
 
 if TYPE_CHECKING:
+    from azure.identity.aio import OnBehalfOfCredential
     from mcp.server.auth.provider import AuthorizationParams
     from mcp.shared.auth import OAuthClientInformationFull
-
-    try:
-        from msal import ConfidentialClientApplication
-    except ImportError:
-        ConfidentialClientApplication = Any  # type: ignore[assignment, misc]
 
 logger = get_logger(__name__)
 
@@ -166,7 +162,7 @@ class AzureProvider(OAuthProxy):
         if "offline_access" not in parsed_additional_scopes:
             parsed_additional_scopes = [*parsed_additional_scopes, "offline_access"]
 
-        # Store Azure-specific config for get_msal_app()
+        # Store Azure-specific config for OBO credential creation
         self._tenant_id = tenant_id
         self._base_authority = base_authority
 
@@ -462,61 +458,36 @@ class AzureProvider(OAuthProxy):
             logger.debug("Failed to extract Azure claims: %s", e)
             return None
 
-    def get_msal_app(self) -> ConfidentialClientApplication:
-        """Get a pre-configured MSAL ConfidentialClientApplication for OBO token exchanges.
+    def create_obo_credential(self, user_assertion: str) -> OnBehalfOfCredential:
+        """Create an OnBehalfOfCredential for OBO token exchange.
 
-        This method creates an MSAL client using the same credentials configured for
-        the AzureProvider, avoiding the need to duplicate configuration. The MSAL
-        app can be used for On-Behalf-Of (OBO) token exchanges to call downstream
-        APIs like Microsoft Graph.
+        Uses the AzureProvider's configuration (client_id, client_secret,
+        tenant_id, authority) to create a credential that can exchange the
+        user's token for downstream API tokens.
+
+        Args:
+            user_assertion: The user's access token to exchange via OBO.
 
         Returns:
-            A configured ConfidentialClientApplication ready for OBO exchanges
+            A configured OnBehalfOfCredential ready for get_token() calls.
 
         Raises:
-            ImportError: If the `msal` package is not installed (requires fastmcp[azure])
-
-        Example:
-            ```python
-            from fastmcp.server.dependencies import get_access_token
-
-            @mcp.tool()
-            async def call_graph():
-                access_token = get_access_token()
-                msal_app = mcp.auth.get_msal_app()
-
-                result = msal_app.acquire_token_on_behalf_of(
-                    user_assertion=access_token.token,
-                    scopes=["https://graph.microsoft.com/User.Read"]
-                )
-
-                if "error" in result:
-                    raise RuntimeError(result.get("error_description"))
-
-                graph_token = result["access_token"]
-                # Use graph_token to call Microsoft Graph APIs
-            ```
-
-        Note:
-            For OBO to work, ensure the scopes you need are included in
-            `additional_authorize_scopes` when configuring the AzureProvider,
-            and that admin consent has been granted for those scopes.
+            ImportError: If azure-identity is not installed (requires fastmcp[azure]).
         """
         try:
-            from msal import ConfidentialClientApplication, TokenCache
+            from azure.identity.aio import OnBehalfOfCredential
         except ImportError as e:
             raise ImportError(
-                "MSAL is required for get_msal_app(). "
+                "azure-identity is required for OBO token exchange. "
                 "Install with: pip install 'fastmcp[azure]'"
             ) from e
 
-        authority = f"https://{self._base_authority}/{self._tenant_id}"
-
-        return ConfidentialClientApplication(
+        return OnBehalfOfCredential(
+            tenant_id=self._tenant_id,
             client_id=self._upstream_client_id,
-            client_credential=self._upstream_client_secret.get_secret_value(),
-            authority=authority,
-            token_cache=TokenCache(),
+            client_secret=self._upstream_client_secret.get_secret_value(),
+            user_assertion=user_assertion,
+            authority=f"https://{self._base_authority}",
         )
 
 
@@ -621,7 +592,7 @@ class AzureJWTVerifier(JWTVerifier):
 
 
 # --- Dependency injection support ---
-# These require fastmcp[azure] extra for MSAL
+# These require fastmcp[azure] extra for azure-identity
 
 # Check if DI engine is available
 try:
@@ -630,10 +601,10 @@ except ImportError:
     from fastmcp._vendor.docket_di import Dependency
 
 
-def _require_msal(feature: str) -> None:
-    """Raise ImportError with install instructions if MSAL is not available."""
+def _require_azure_identity(feature: str) -> None:
+    """Raise ImportError with install instructions if azure-identity is not available."""
     try:
-        import msal  # noqa: F401
+        import azure.identity  # noqa: F401
     except ImportError as e:
         raise ImportError(
             f"{feature} requires the `azure` extra. "
@@ -641,86 +612,28 @@ def _require_msal(feature: str) -> None:
         ) from e
 
 
-class _MSALApp(Dependency):  # type: ignore[misc]
-    """Dependency that provides a pre-configured MSAL ConfidentialClientApplication.
-
-    Raises ImportError if fastmcp[azure] is not installed or if the auth provider
-    is not an AzureProvider.
-    """
-
-    async def __aenter__(self) -> ConfidentialClientApplication:
-        _require_msal("MSALApp")
-
-        from fastmcp.server.dependencies import get_server
-
-        server = get_server()
-        if not isinstance(server.auth, AzureProvider):
-            raise RuntimeError(
-                "MSALApp requires an AzureProvider as the auth provider. "
-                f"Current provider: {type(server.auth).__name__}"
-            )
-
-        return server.auth.get_msal_app()
-
-    async def __aexit__(self, *args: object) -> None:
-        pass
-
-
-def MSALApp() -> ConfidentialClientApplication:
-    """Get a pre-configured MSAL ConfidentialClientApplication as a dependency.
-
-    This dependency provides an MSAL client configured with the same credentials
-    as the AzureProvider. Use it for custom OBO scenarios or other MSAL operations.
-
-    Returns:
-        A dependency that resolves to a ConfidentialClientApplication
-
-    Raises:
-        ImportError: If fastmcp[azure] is not installed
-        RuntimeError: If the auth provider is not an AzureProvider
-
-    Example:
-        ```python
-        from fastmcp.server.auth.providers.azure import MSALApp
-        from fastmcp.server.dependencies import get_access_token
-        from msal import ConfidentialClientApplication
-
-        @mcp.tool()
-        async def custom_obo(msal: ConfidentialClientApplication = MSALApp()):
-            token = get_access_token()
-            result = msal.acquire_token_on_behalf_of(
-                user_assertion=token.token,
-                scopes=["https://graph.microsoft.com/.default"]
-            )
-            return result["access_token"]
-        ```
-    """
-    return cast(ConfidentialClientApplication, _MSALApp())
-
-
 class _EntraOBOToken(Dependency):  # type: ignore[misc]
     """Dependency that performs OBO token exchange for Microsoft Entra.
 
-    This dependency handles the complete On-Behalf-Of flow, exchanging the
-    user's access token for a token that can call downstream APIs.
+    Uses azure.identity's OnBehalfOfCredential for async-native OBO,
+    with automatic token caching and refresh.
     """
 
     def __init__(self, scopes: list[str]):
         self.scopes = scopes
+        self._credential: OnBehalfOfCredential | None = None
 
     async def __aenter__(self) -> str:
-        _require_msal("EntraOBOToken")
+        _require_azure_identity("EntraOBOToken")
 
         from fastmcp.server.dependencies import get_access_token, get_server
 
-        # Get the current access token
         access_token = get_access_token()
         if access_token is None:
             raise RuntimeError(
                 "No access token available. Cannot perform OBO exchange."
             )
 
-        # Get the MSAL app from the server's auth provider
         server = get_server()
         if not isinstance(server.auth, AzureProvider):
             raise RuntimeError(
@@ -728,29 +641,23 @@ class _EntraOBOToken(Dependency):  # type: ignore[misc]
                 f"Current provider: {type(server.auth).__name__}"
             )
 
-        msal_app = server.auth.get_msal_app()
-
-        # Perform the OBO exchange in a thread pool to avoid blocking the event loop
-        # (MSAL uses synchronous requests under the hood)
-        import asyncio
-
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(
-            None,
-            lambda: msal_app.acquire_token_on_behalf_of(
-                user_assertion=access_token.token,
-                scopes=self.scopes,
-            ),
+        self._credential = server.auth.create_obo_credential(
+            user_assertion=access_token.token,
         )
 
-        if "error" in result:
-            error_desc = result.get("error_description", result.get("error"))
-            raise RuntimeError(f"OBO token exchange failed: {error_desc}")
+        try:
+            result = await self._credential.get_token(*self.scopes)
+        except BaseException:
+            await self._credential.close()
+            self._credential = None
+            raise
 
-        return result["access_token"]
+        return result.token
 
     async def __aexit__(self, *args: object) -> None:
-        pass
+        if self._credential is not None:
+            await self._credential.close()
+            self._credential = None
 
 
 def EntraOBOToken(scopes: list[str]) -> str:
