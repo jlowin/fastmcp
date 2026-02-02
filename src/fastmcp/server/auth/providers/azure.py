@@ -500,7 +500,9 @@ class AzureJWTVerifier(JWTVerifier):
 
         Args:
             client_id: Azure application (client) ID from your App registration
-            tenant_id: Azure tenant ID (specific tenant GUID, "organizations", or "consumers")
+            tenant_id: Azure tenant ID (specific tenant GUID, "organizations", or "consumers").
+                For multi-tenant apps ("organizations" or "consumers"), issuer validation
+                is skipped since Azure tokens carry the actual tenant GUID as issuer.
             required_scopes: Scope names as they appear in Azure Portal under "Expose an API"
                 (e.g., ["access_as_user", "read"]). These are validated against
                 the short-form scopes in token ``scp`` claims, and automatically
@@ -513,9 +515,19 @@ class AzureJWTVerifier(JWTVerifier):
         """
         self._identifier_uri = identifier_uri or f"api://{client_id}"
 
+        # For multi-tenant apps, Azure tokens carry the actual tenant GUID as
+        # issuer, not the literal "organizations" or "consumers" string. Skip
+        # issuer validation for these — audience still protects against wrong-app tokens.
+        multi_tenant_values = {"organizations", "consumers", "common"}
+        issuer: str | None = (
+            None
+            if tenant_id in multi_tenant_values
+            else f"https://{base_authority}/{tenant_id}/v2.0"
+        )
+
         super().__init__(
             jwks_uri=f"https://{base_authority}/{tenant_id}/discovery/v2.0/keys",
-            issuer=f"https://{base_authority}/{tenant_id}/v2.0",
+            issuer=issuer,
             audience=client_id,
             algorithm="RS256",
             required_scopes=required_scopes,

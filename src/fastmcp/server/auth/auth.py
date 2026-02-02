@@ -360,8 +360,11 @@ class RemoteAuthProvider(AuthProvider):
                 create_protected_resource_routes(
                     resource_url=resource_url,
                     authorization_servers=self.authorization_servers,
-                    scopes_supported=self._scopes_supported
-                    or self.token_verifier.scopes_supported,
+                    scopes_supported=(
+                        self._scopes_supported
+                        if self._scopes_supported is not None
+                        else self.token_verifier.scopes_supported
+                    ),
                     resource_name=self.resource_name,
                     resource_documentation=self.resource_documentation,
                 )

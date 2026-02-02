@@ -1091,3 +1091,34 @@ class TestAzureJWTVerifier:
             required_scopes=["read"],
         )
         assert verifier.scopes_supported == ["api://abc-123/read"]
+
+    def test_multi_tenant_organizations_skips_issuer(self):
+        verifier = AzureJWTVerifier(
+            client_id="my-client-id",
+            tenant_id="organizations",
+        )
+        assert verifier.issuer is None
+
+    def test_multi_tenant_consumers_skips_issuer(self):
+        verifier = AzureJWTVerifier(
+            client_id="my-client-id",
+            tenant_id="consumers",
+        )
+        assert verifier.issuer is None
+
+    def test_multi_tenant_common_skips_issuer(self):
+        verifier = AzureJWTVerifier(
+            client_id="my-client-id",
+            tenant_id="common",
+        )
+        assert verifier.issuer is None
+
+    def test_specific_tenant_sets_issuer(self):
+        verifier = AzureJWTVerifier(
+            client_id="my-client-id",
+            tenant_id="12345678-1234-1234-1234-123456789012",
+        )
+        assert (
+            verifier.issuer
+            == "https://login.microsoftonline.com/12345678-1234-1234-1234-123456789012/v2.0"
+        )
