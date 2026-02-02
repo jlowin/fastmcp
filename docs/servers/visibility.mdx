@@ -1,23 +1,24 @@
 ---
-title: Visibility
+title: Component Visibility
 sidebarTitle: Visibility
-description: Control which components are visible to clients
-icon: eye
+description: Control which components are available to clients
+icon: toggle-on
+tag: NEW
 ---
 
 import { VersionBadge } from '/snippets/version-badge.mdx'
 
 <VersionBadge version="3.0.0" />
 
-Visibility control lets you dynamically show or hide components from clients. A disabled tool disappears from listings and cannot be called. This enables runtime access control, feature flags, and context-aware component exposure.
+Components can be dynamically enabled or disabled at runtime. A disabled tool disappears from listings and cannot be called. This enables runtime access control, feature flags, and context-aware component exposure.
 
-## Enable and Disable
+## Component Visibility
 
-Every FastMCP server provides `enable()` and `disable()` methods for controlling component visibility.
+Every FastMCP server provides `enable()` and `disable()` methods for controlling component availability.
 
 ### Disabling Components
 
-The `disable()` method adds components to a blocklist. Blocked components are hidden from all client queries.
+The `disable()` method marks components as disabled. Disabled components are filtered out from all client queries.
 
 ```python
 from fastmcp import FastMCP
@@ -39,7 +40,7 @@ def get_status() -> str:
     """Get system status."""
     return "OK"
 
-# Hide admin tools
+# Disable admin tools
 mcp.disable(tags={"admin"})
 
 # Clients only see: get_status
@@ -47,7 +48,7 @@ mcp.disable(tags={"admin"})
 
 ### Enabling Components
 
-The `enable()` method removes components from the blocklist, making them visible again.
+The `enable()` method re-enables previously disabled components.
 
 ```python
 # Re-enable admin tools
@@ -75,10 +76,10 @@ Use keys to target specific components.
 
 ```python
 # Disable a specific tool
-mcp.disable(keys=["tool:delete_everything"])
+mcp.disable(keys={"tool:delete_everything"})
 
 # Disable multiple specific components
-mcp.disable(keys=["tool:reset_system", "resource:data://secrets"])
+mcp.disable(keys={"tool:reset_system", "resource:data://secrets"})
 ```
 
 ### Tags
@@ -109,7 +110,7 @@ mcp.disable(tags={"admin"})
 mcp.disable(tags={"dangerous"})
 ```
 
-A component is hidden if it has **any** of the disabled tags. The component doesn't need all the tags; one match is enough.
+A component is disabled if it has **any** of the disabled tags. The component doesn't need all the tags; one match is enough.
 
 ### Combining Keys and Tags
 
@@ -117,12 +118,12 @@ You can specify both keys and tags in a single call. The filters combine additiv
 
 ```python
 # Disable specific tools AND all dangerous-tagged components
-mcp.disable(keys=["tool:debug_info"], tags={"dangerous"})
+mcp.disable(keys={"tool:debug_info"}, tags={"dangerous"})
 ```
 
 ## Allowlist Mode
 
-By default, visibility uses blocklist mode: everything is visible unless explicitly disabled. The `only=True` parameter switches to allowlist mode, where **only** specified components are visible.
+By default, visibility filtering uses blocklist mode: everything is enabled unless explicitly disabled. The `only=True` parameter switches to allowlist mode, where **only** specified components are enabled.
 
 ```python
 from fastmcp import FastMCP
@@ -145,11 +146,11 @@ def delete_all() -> str:
 def untagged_tool() -> str:
     return "Untagged"
 
-# Only show safe tools - everything else is hidden
+# Only enable safe tools - everything else is disabled
 mcp.enable(tags={"safe"}, only=True)
 
 # Clients see: read_only_operation, list_items
-# Hidden: delete_all, untagged_tool
+# Disabled: delete_all, untagged_tool
 ```
 
 Allowlist mode is useful for restrictive environments where you want to explicitly opt-in components rather than opt-out.
@@ -158,38 +159,38 @@ Allowlist mode is useful for restrictive environments where you want to explicit
 
 When you call `enable(only=True)`:
 
-1. Default visibility switches to "hidden"
+1. Default visibility state switches to "disabled"
 2. Previous allowlists are cleared
-3. Only specified keys/tags become visible
+3. Only specified keys/tags become enabled
 
 ```python
-# Start fresh - only show these specific tools
-mcp.enable(keys=["tool:safe_read", "tool:safe_write"], only=True)
+# Start fresh - only enable these specific tools
+mcp.enable(keys={"tool:safe_read", "tool:safe_write"}, only=True)
 
 # Later, switch to a different allowlist
 mcp.enable(tags={"production"}, only=True)
 ```
 
-### Blocklist Precedence
+### Ordering and Overrides
 
-Even in allowlist mode, the blocklist takes precedence. A component that's both allowlisted and blocklisted remains hidden.
+Later `enable()` and `disable()` calls override earlier ones. This lets you create broad rules with specific exceptions.
 
 ```python
 mcp.enable(tags={"api"}, only=True)  # Allow all api-tagged
-mcp.disable(keys=["tool:api_admin"])  # But block this specific one
+mcp.disable(keys={"tool:api_admin"})  # Later disable overrides for this tool
 
-# api_admin is hidden despite having the "api" tag
+# api_admin is disabled because the later disable() overrides the allowlist
 ```
 
-This lets you create broad allowlists with specific exceptions.
+You can always re-enable something that was disabled by adding another `enable()` call after it.
 
-## Server vs Provider Visibility
+## Server vs Provider
 
-Visibility operates at two levels: the server and individual providers.
+Visibility state operates at two levels: the server and individual providers.
 
-### Server-Level Visibility
+### Server-Level
 
-Server visibility applies to all components from all providers. When you call `mcp.enable()` or `mcp.disable()`, you're filtering the final view that clients see.
+Server-level visibility state applies to all components from all providers. When you call `mcp.enable()` or `mcp.disable()`, you're filtering the final view that clients see.
 
 ```python
 from fastmcp import FastMCP
@@ -201,13 +202,13 @@ main.mount(sub_server, namespace="api")
 def local_debug() -> str:
     return "Debug"
 
-# Hide internal tools from ALL sources
+# Disable internal tools from ALL sources
 main.disable(tags={"internal"})
 ```
 
-### Provider-Level Visibility
+### Provider-Level
 
-Each provider maintains its own visibility state. Provider visibility filters components before they reach the server.
+Each provider can add its own visibility transforms. These run before server-level transforms, so the server can override provider-level disables.
 
 ```python
 from fastmcp import FastMCP
@@ -224,18 +225,19 @@ def admin_action() -> str:
 def regular_action() -> str:
     return "Regular"
 
-# Filter at provider level
+# Disable at provider level
 admin_tools.disable(tags={"admin"})
 
-# Server receives only regular_action
+# Server can override if needed
 mcp = FastMCP("Server", providers=[admin_tools])
+mcp.enable(names={"admin_action"})  # Re-enables despite provider disable
 ```
 
-Provider-level visibility is useful when different servers should see different subsets of the same provider's components.
+Provider-level transforms are useful for setting default visibility that servers can selectively override.
 
-### Layered Filtering
+### Layered Transforms
 
-When both server and provider have visibility rules, they stack. A component must pass both filters to be visible.
+Provider transforms run first, then server transforms. Later transforms override earlier ones, so the server has final say.
 
 ```python
 from fastmcp import FastMCP
@@ -247,50 +249,167 @@ provider = LocalProvider()
 def new_feature() -> str:
     return "New"
 
-# Provider allows feature-tagged
+# Provider enables feature-tagged
 provider.enable(tags={"feature"}, only=True)
 
-# Server blocks beta-tagged
+# Server disables beta-tagged (runs after provider)
 mcp = FastMCP("Server", providers=[provider])
 mcp.disable(tags={"beta"})
 
-# new_feature is hidden (blocked at server level)
+# new_feature is disabled (server's later disable overrides provider's enable)
 ```
 
-## Dynamic Visibility
+## Per-Session Visibility
 
-Visibility changes take effect immediately. You can adjust visibility during request handling based on context.
+Server-level visibility changes affect all connected clients simultaneously. When you need different clients to see different components, use per-session visibility instead.
+
+Session visibility lets individual sessions customize their view of available components. When a tool calls `ctx.enable_components()` or `ctx.disable_components()`, those rules apply only to the current session. Other sessions continue to see the global defaults. This enables patterns like progressive disclosure, role-based access, and on-demand feature activation.
 
 ```python
 from fastmcp import FastMCP
-from fastmcp.server import Context
+from fastmcp.server.context import Context
 
-mcp = FastMCP("Server")
+mcp = FastMCP("Session-Aware Server")
 
-@mcp.tool(tags={"admin"})
-def admin_action() -> str:
-    return "Admin action performed"
+@mcp.tool(tags={"premium"})
+def premium_analysis(data: str) -> str:
+    """Advanced analysis available to premium users."""
+    return f"Premium analysis of: {data}"
 
 @mcp.tool
-def check_permissions(ctx: Context) -> str:
-    """Check if admin tools should be available."""
-    user = ctx.request_context.get_user()
+async def unlock_premium(ctx: Context) -> str:
+    """Unlock premium features for this session."""
+    await ctx.enable_components(tags={"premium"})
+    return "Premium features unlocked"
 
-    if user and user.is_admin:
-        mcp.enable(tags={"admin"})
-        return "Admin tools enabled"
-    else:
-        mcp.disable(tags={"admin"})
-        return "Admin tools disabled"
+@mcp.tool
+async def reset_features(ctx: Context) -> str:
+    """Reset to default feature set."""
+    await ctx.reset_visibility()
+    return "Features reset to defaults"
+
+# Premium tools are disabled globally by default
+mcp.disable(tags={"premium"})
 ```
 
-<Warning>
-Dynamic visibility affects all connected clients. For per-user visibility, consider using separate server instances or implementing authorization in the tools themselves.
-</Warning>
+All sessions start with `premium_analysis` hidden. When a session calls `unlock_premium`, that session gains access to premium tools while other sessions remain unaffected. Calling `reset_features` returns the session to the global defaults.
+
+### How Session Rules Work
+
+Session rules override global transforms. When listing components, FastMCP first applies global enable/disable rules, then applies session-specific rules on top. Rules within a session accumulate, and later rules override earlier ones for the same component.
+
+```python
+@mcp.tool
+async def customize_session(ctx: Context) -> str:
+    # Enable finance tools for this session
+    await ctx.enable_components(tags={"finance"})
+
+    # Also enable admin tools
+    await ctx.enable_components(tags={"admin"})
+
+    # Later: disable a specific admin tool
+    await ctx.disable_components(names={"dangerous_admin_tool"})
+
+    return "Session customized"
+```
+
+Each call adds a rule to the session. The `dangerous_admin_tool` ends up disabled because its disable rule was added after the admin enable rule.
+
+### Filter Criteria
+
+The session visibility methods accept the same filter criteria as `server.enable()` and `server.disable()`:
+
+| Parameter | Description |
+|-----------|-------------|
+| `names` | Component names or URIs to match |
+| `keys` | Component keys (e.g., `{"tool:my_tool"}`) |
+| `tags` | Tags to match (component must have at least one) |
+| `version` | Version specification to match |
+| `components` | Component types (`{"tool"}`, `{"resource"}`, `{"prompt"}`, `{"template"}`) |
+| `match_all` | If `True`, matches all components regardless of other criteria |
+
+```python
+from fastmcp.utilities.versions import VersionSpec
+
+@mcp.tool
+async def enable_recent_tools(ctx: Context) -> str:
+    """Enable only tools from version 2.0.0 or later."""
+    await ctx.enable_components(
+        version=VersionSpec(gte="2.0.0"),
+        components={"tool"}
+    )
+    return "Recent tools enabled"
+```
+
+### Automatic Notifications
+
+When session visibility changes, FastMCP automatically sends notifications to that session. Clients receive `ToolListChangedNotification`, `ResourceListChangedNotification`, and `PromptListChangedNotification` so they can refresh their component lists. These notifications go only to the affected session.
+
+When you specify the `components` parameter, FastMCP optimizes by sending only the relevant notifications:
+
+```python
+# Only sends ToolListChangedNotification
+await ctx.enable_components(tags={"finance"}, components={"tool"})
+
+# Sends all three notifications (no components filter)
+await ctx.enable_components(tags={"finance"})
+```
+
+### Namespace Activation Pattern
+
+A common pattern organizes tools into namespaces using tag prefixes, disables them globally, then provides activation tools that unlock namespaces on demand:
+
+```python
+from fastmcp import FastMCP
+from fastmcp.server.context import Context
+
+server = FastMCP("Multi-Domain Assistant")
+
+# Finance namespace
+@server.tool(tags={"namespace:finance"})
+def analyze_portfolio(symbols: list[str]) -> str:
+    return f"Analysis for: {', '.join(symbols)}"
+
+@server.tool(tags={"namespace:finance"})
+def get_market_data(symbol: str) -> dict:
+    return {"symbol": symbol, "price": 150.25}
+
+# Admin namespace
+@server.tool(tags={"namespace:admin"})
+def list_users() -> list[str]:
+    return ["alice", "bob", "charlie"]
+
+# Activation tools - always visible
+@server.tool
+async def activate_finance(ctx: Context) -> str:
+    await ctx.enable_components(tags={"namespace:finance"})
+    return "Finance tools activated"
+
+@server.tool
+async def activate_admin(ctx: Context) -> str:
+    await ctx.enable_components(tags={"namespace:admin"})
+    return "Admin tools activated"
+
+@server.tool
+async def deactivate_all(ctx: Context) -> str:
+    await ctx.reset_visibility()
+    return "All namespaces deactivated"
+
+# Disable namespace tools globally
+server.disable(tags={"namespace:finance", "namespace:admin"})
+```
+
+Sessions start seeing only the activation tools. Calling `activate_finance` reveals finance tools for that session only. Multiple namespaces can be activated independently, and `deactivate_all` returns to the initial state.
+
+### Method Reference
+
+- **`await ctx.enable_components(...) -> None`**: Enable matching components for this session
+- **`await ctx.disable_components(...) -> None`**: Disable matching components for this session
+- **`await ctx.reset_visibility() -> None`**: Clear all session rules, returning to global defaults
 
 ## Client Notifications
 
-When visibility changes, FastMCP automatically notifies connected clients. Clients supporting the MCP notification protocol receive `list_changed` events and can refresh their component lists.
+When visibility state changes, FastMCP automatically notifies connected clients. Clients supporting the MCP notification protocol receive `list_changed` events and can refresh their component lists.
 
 This happens automatically. You don't need to trigger notifications manually.
 
@@ -303,13 +422,31 @@ mcp.disable(tags={"maintenance"})
 
 ## Filtering Logic
 
-Understanding the filtering logic helps when debugging visibility issues.
+Understanding the filtering logic helps when debugging visibility state issues.
 
-The rules evaluate in this order:
+The `is_enabled()` function checks a component's internal metadata:
 
-1. **Blocklist by key**: If the component's key is in `_disabled_keys`, it's hidden
-2. **Blocklist by tag**: If any of the component's tags are in `_disabled_tags`, it's hidden
-3. **Allowlist check**: If default visibility is off (allowlist mode) and the component isn't in the allowlist, it's hidden
-4. **Default**: Otherwise, the component is visible
+1. If the component has `meta.fastmcp._internal.visibility = False`, it's disabled
+2. If the component has `meta.fastmcp._internal.visibility = True`, it's enabled
+3. If no visibility state is set, the component is enabled by default
 
-The blocklist always wins over the allowlist. A component that matches both is hidden.
+When multiple `enable()` and `disable()` calls are made, transforms are applied in order. **Later transforms override earlier ones**, so the last matching transform wins.
+
+## The Visibility Transform
+
+Under the hood, `enable()` and `disable()` add `Visibility` transforms to the server or provider. The `Visibility` transform marks components with visibility metadata, and the server applies the final filter after all provider and server transforms complete.
+
+```python
+from fastmcp import FastMCP
+from fastmcp.server.transforms import Visibility
+
+mcp = FastMCP("Server")
+
+# Using the convenience method (recommended)
+mcp.disable(names={"secret_tool"})
+
+# Equivalent to:
+mcp.add_transform(Visibility(False, names={"secret_tool"}))
+```
+
+Server-level transforms override provider-level transforms. If a component is disabled at the provider level but enabled at the server level, the server-level `enable()` can re-enable it.

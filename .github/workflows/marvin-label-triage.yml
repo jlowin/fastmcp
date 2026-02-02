@@ -19,6 +19,7 @@ concurrency:
 
 jobs:
   label-issue-or-pr:
+    if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -135,6 +136,7 @@ jobs:
           prompt: ${{ steps.triage-prompt.outputs.PROMPT }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY_FOR_CI }}
           allowed_non_write_users: "*"
+          allowed_bots: "marvin-context-protocol"
           claude_args: |
             --allowedTools Bash(gh label list),mcp__github__get_issue,mcp__github__get_issue_comments,mcp__github__update_issue,mcp__github__get_pull_request_files
           settings: |

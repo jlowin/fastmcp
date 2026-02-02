@@ -1,5 +1,6 @@
 from typing import Any
 
+import mcp.types as mcp_types
 from mcp.types import Tool as MCPTool
 from mcp.types import ToolAnnotations, ToolExecution
 
@@ -23,7 +24,7 @@ async def test_tool_annotations_in_tool_manager():
         return message
 
     # Check internal tool objects directly
-    tools = await mcp.get_tools()
+    tools = await mcp.list_tools()
     assert len(tools) == 1
     assert tools[0].annotations is not None
     assert tools[0].annotations.title == "Echo Tool"
@@ -47,12 +48,12 @@ async def test_tool_annotations_in_mcp_protocol():
         return message
 
     # Check via MCP protocol
-    mcp_tools = await mcp._list_tools_mcp()
-    assert len(mcp_tools) == 1
-    assert mcp_tools[0].annotations is not None
-    assert mcp_tools[0].annotations.title == "Echo Tool"
-    assert mcp_tools[0].annotations.readOnlyHint is True
-    assert mcp_tools[0].annotations.openWorldHint is False
+    result = await mcp._list_tools_mcp(mcp_types.ListToolsRequest())
+    assert len(result.tools) == 1
+    assert result.tools[0].annotations is not None
+    assert result.tools[0].annotations.title == "Echo Tool"
+    assert result.tools[0].annotations.readOnlyHint is True
+    assert result.tools[0].annotations.openWorldHint is False
 
 
 async def test_tool_annotations_in_client_api():
@@ -125,7 +126,7 @@ async def test_direct_tool_annotations_in_tool_manager():
         return {"modified": True, **data}
 
     # Check internal tool objects directly
-    tools = await mcp.get_tools()
+    tools = await mcp.list_tools()
     assert len(tools) == 1
     assert tools[0].annotations is not None
     assert tools[0].annotations.title == "Direct Tool"
@@ -184,7 +185,7 @@ async def test_add_tool_method_annotations():
     mcp.add_tool(tool)
 
     # Check internal tool objects directly
-    tools = await mcp.get_tools()
+    tools = await mcp.list_tools()
     assert len(tools) == 1
     assert tools[0].annotations is not None
     assert tools[0].annotations.title == "Create Item"

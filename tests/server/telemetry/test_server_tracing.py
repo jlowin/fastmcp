@@ -28,15 +28,19 @@ class TestToolTracing:
         assert len(spans) == 1
 
         span = spans[0]
-        assert span.name == "tool greet"
+        assert span.name == "tools/call greet"
         assert span.kind == SpanKind.SERVER
         assert span.attributes is not None
+        # Standard MCP semantic conventions
+        assert span.attributes["mcp.method.name"] == "tools/call"
+        # Standard RPC semantic conventions
         assert span.attributes["rpc.system"] == "mcp"
         assert span.attributes["rpc.service"] == "test-server"
         assert span.attributes["rpc.method"] == "tools/call"
+        # FastMCP-specific attributes
         assert span.attributes["fastmcp.server.name"] == "test-server"
         assert span.attributes["fastmcp.component.type"] == "tool"
-        assert span.attributes["fastmcp.component.key"] == "tool:greet"
+        assert span.attributes["fastmcp.component.key"] == "tool:greet@"
 
     async def test_call_tool_with_error_sets_status(
         self, trace_exporter: InMemorySpanExporter
@@ -54,7 +58,7 @@ class TestToolTracing:
         assert len(spans) == 1
 
         span = spans[0]
-        assert span.name == "tool failing_tool"
+        assert span.name == "tools/call failing_tool"
         assert span.status.status_code == StatusCode.ERROR
         assert len(span.events) > 0  # Exception recorded
 
@@ -70,7 +74,7 @@ class TestToolTracing:
         assert len(spans) == 1
 
         span = spans[0]
-        assert span.name == "tool nonexistent"
+        assert span.name == "tools/call nonexistent"
         assert span.status.status_code == StatusCode.ERROR
 
 
@@ -91,15 +95,20 @@ class TestResourceTracing:
         assert len(spans) == 1
 
         span = spans[0]
-        assert span.name == "resource config://app"
+        assert span.name == "resources/read config://app"
         assert span.kind == SpanKind.SERVER
         assert span.attributes is not None
+        # Standard MCP semantic conventions
+        assert span.attributes["mcp.method.name"] == "resources/read"
+        assert span.attributes["mcp.resource.uri"] == "config://app"
+        # Standard RPC semantic conventions
         assert span.attributes["rpc.system"] == "mcp"
         assert span.attributes["rpc.service"] == "test-server"
         assert span.attributes["rpc.method"] == "resources/read"
+        # FastMCP-specific attributes
         assert span.attributes["fastmcp.server.name"] == "test-server"
         assert span.attributes["fastmcp.component.type"] == "resource"
-        assert span.attributes["fastmcp.component.key"] == "resource:config://app"
+        assert span.attributes["fastmcp.component.key"] == "resource:config://app@"
 
     async def test_read_resource_template_creates_span(
         self, trace_exporter: InMemorySpanExporter
@@ -117,15 +126,19 @@ class TestResourceTracing:
         assert len(spans) == 1
 
         span = spans[0]
-        assert span.name == "resource users://123/profile"
+        assert span.name == "resources/read users://123/profile"
         assert span.kind == SpanKind.SERVER
         assert span.attributes is not None
+        # Standard MCP semantic conventions
+        assert span.attributes["mcp.method.name"] == "resources/read"
+        assert span.attributes["mcp.resource.uri"] == "users://123/profile"
+        # Standard RPC semantic conventions
         assert span.attributes["rpc.method"] == "resources/read"
         # Template component type is set by get_span_attributes
         assert span.attributes["fastmcp.component.type"] == "resource_template"
         assert (
             span.attributes["fastmcp.component.key"]
-            == "template:users://{user_id}/profile"
+            == "template:users://{user_id}/profile@"
         )
 
     async def test_read_nonexistent_resource_sets_error(
@@ -140,7 +153,7 @@ class TestResourceTracing:
         assert len(spans) == 1
 
         span = spans[0]
-        assert span.name == "resource nonexistent://resource"
+        assert span.name == "resources/read nonexistent://resource"
         assert span.status.status_code == StatusCode.ERROR
 
 
@@ -161,15 +174,19 @@ class TestPromptTracing:
         assert len(spans) == 1
 
         span = spans[0]
-        assert span.name == "prompt greeting"
+        assert span.name == "prompts/get greeting"
         assert span.kind == SpanKind.SERVER
         assert span.attributes is not None
+        # Standard MCP semantic conventions
+        assert span.attributes["mcp.method.name"] == "prompts/get"
+        # Standard RPC semantic conventions
         assert span.attributes["rpc.system"] == "mcp"
         assert span.attributes["rpc.service"] == "test-server"
         assert span.attributes["rpc.method"] == "prompts/get"
+        # FastMCP-specific attributes
         assert span.attributes["fastmcp.server.name"] == "test-server"
         assert span.attributes["fastmcp.component.type"] == "prompt"
-        assert span.attributes["fastmcp.component.key"] == "prompt:greeting"
+        assert span.attributes["fastmcp.component.key"] == "prompt:greeting@"
 
     async def test_render_nonexistent_prompt_sets_error(
         self, trace_exporter: InMemorySpanExporter
@@ -183,7 +200,7 @@ class TestPromptTracing:
         assert len(spans) == 1
 
         span = spans[0]
-        assert span.name == "prompt nonexistent"
+        assert span.name == "prompts/get nonexistent"
         assert span.status.status_code == StatusCode.ERROR
 
 

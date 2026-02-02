@@ -6,15 +6,17 @@ authors = [{ name = "Jeremiah Lowin" }]
 dependencies = [
     "python-dotenv>=1.1.0",
     "exceptiongroup>=1.2.2",
-    "httpx>=0.28.1",
+    "httpx>=0.28.1,<1.0",
     "mcp>=1.24.0,<2.0",
     "openapi-pydantic>=0.5.1",
     "opentelemetry-api>=1.20.0",
+    "packaging>=24.0",
     "platformdirs>=4.0.0",
     "rich>=13.9.4",
     "cyclopts>=4.0.0",
     "authlib>=1.6.5",
     "pydantic[email]>=2.11.7",
+    "pyyaml>=6.0,<7.0",
     "pyperclip>=1.9.0",
     "py-key-value-aio[disk,keyring,memory]>=0.3.0,<0.4.0",
     "uvicorn>=0.35",
@@ -51,7 +53,7 @@ classifiers = [
 [project.optional-dependencies]
 anthropic = ["anthropic>=0.40.0"]
 openai = ["openai>=1.102.0"]
-tasks = ["pydocket>=0.16.4"]
+tasks = ["pydocket>=0.17.2"]
 
 [dependency-groups]
 dev = [
@@ -172,6 +174,8 @@ extend-select = [
     "UP",  # flake8-unused-imports: Catches unused imports
 ]
 
+[tool.ruff.lint.isort]
+known-first-party = ["fastmcp"]
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401", "I001", "RUF013"]

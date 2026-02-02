@@ -23,11 +23,9 @@ class TestNamespaceTransform:
         provider = FastMCPProvider(server)
         layer = Namespace("ns")
 
-        # Use call_next pattern - create a callable that returns the tools
-        async def get_tools():
-            return await provider.list_tools()
-
-        transformed_tools = await layer.list_tools(get_tools)
+        # Get tools and pass directly to transform
+        tools = await provider.list_tools()
+        transformed_tools = await layer.list_tools(tools)
 
         assert len(transformed_tools) == 1
         assert transformed_tools[0].name == "ns_my_tool"
@@ -43,10 +41,8 @@ class TestNamespaceTransform:
         provider = FastMCPProvider(server)
         layer = Namespace("ns")
 
-        async def get_prompts():
-            return await provider.list_prompts()
-
-        transformed_prompts = await layer.list_prompts(get_prompts)
+        prompts = await provider.list_prompts()
+        transformed_prompts = await layer.list_prompts(prompts)
 
         assert len(transformed_prompts) == 1
         assert transformed_prompts[0].name == "ns_my_prompt"
@@ -62,10 +58,8 @@ class TestNamespaceTransform:
         provider = FastMCPProvider(server)
         layer = Namespace("ns")
 
-        async def get_resources():
-            return await provider.list_resources()
-
-        transformed_resources = await layer.list_resources(get_resources)
+        resources = await provider.list_resources()
+        transformed_resources = await layer.list_resources(resources)
 
         assert len(transformed_resources) == 1
         assert str(transformed_resources[0].uri) == "resource://ns/data"
@@ -81,10 +75,8 @@ class TestNamespaceTransform:
         provider = FastMCPProvider(server)
         layer = Namespace("ns")
 
-        async def get_templates():
-            return await provider.list_resource_templates()
-
-        transformed_templates = await layer.list_resource_templates(get_templates)
+        templates = await provider.list_resource_templates()
+        transformed_templates = await layer.list_resource_templates(templates)
 
         assert len(transformed_templates) == 1
         assert transformed_templates[0].uri_template == "resource://ns/{name}/data"
@@ -104,10 +96,8 @@ class TestToolTransformRenames:
         provider = FastMCPProvider(server)
         layer = ToolTransform({"verbose_tool_name": ToolTransformConfig(name="short")})
 
-        async def get_tools():
-            return await provider.list_tools()
-
-        transformed_tools = await layer.list_tools(get_tools)
+        tools = await provider.list_tools()
+        transformed_tools = await layer.list_tools(tools)
 
         assert len(transformed_tools) == 1
         assert transformed_tools[0].name == "short"
@@ -126,7 +116,7 @@ class TestToolTransformRenames:
         provider.add_transform(
             ToolTransform({"original": ToolTransformConfig(name="renamed")})
         )
-        main._providers.append(provider)
+        main.add_provider(provider)
 
         async with Client(main) as client:
             result = await client.call_tool("renamed", {})
@@ -158,8 +148,8 @@ class TestTransformReverseLookup:
         layer = Namespace("ns")
 
         # Create call_next that delegates to provider
-        async def get_tool(name: str):
-            return await provider.get_tool(name)
+        async def get_tool(name: str, version=None):
+            return await provider._get_tool(name, version)
 
         tool = await layer.get_tool("ns_my_tool", get_tool)
 
@@ -177,8 +167,8 @@ class TestTransformReverseLookup:
         provider = FastMCPProvider(server)
         layer = ToolTransform({"original": ToolTransformConfig(name="renamed")})
 
-        async def get_tool(name: str):
-            return await provider.get_tool(name)
+        async def get_tool(name: str, version=None):
+            return await provider._get_tool(name, version)
 
         tool = await layer.get_tool("renamed", get_tool)
 
@@ -196,8 +186,8 @@ class TestTransformReverseLookup:
         provider = FastMCPProvider(server)
         layer = Namespace("ns")
 
-        async def get_resource(uri: str):
-            return await provider.get_resource(uri)
+        async def get_resource(uri: str, version=None):
+            return await provider._get_resource(uri, version)
 
         resource = await layer.get_resource("resource://ns/data", get_resource)
 
@@ -215,8 +205,8 @@ class TestTransformReverseLookup:
         provider = FastMCPProvider(server)
         layer = Namespace("ns")
 
-        async def get_tool(name: str):
-            return await provider.get_tool(name)
+        async def get_tool(name: str, version=None):
+            return await provider._get_tool(name, version)
 
         # Wrong namespace prefix
         assert await layer.get_tool("wrong_my_tool", get_tool) is None
@@ -239,14 +229,10 @@ class TestTransformStacking:
         inner_layer = Namespace("inner")
         outer_layer = Namespace("outer")
 
-        # Build chain: base -> inner -> outer
-        async def base():
-            return await provider.list_tools()
-
-        async def inner_chain():
-            return await inner_layer.list_tools(base)
-
-        tools = await outer_layer.list_tools(inner_chain)
+        # Apply transforms sequentially: base -> inner -> outer
+        tools = await provider.list_tools()
+        tools = await inner_layer.list_tools(tools)
+        tools = await outer_layer.list_tools(tools)
 
         assert len(tools) == 1
         assert tools[0].name == "outer_inner_my_tool"
@@ -266,7 +252,7 @@ class TestTransformStacking:
         provider.add_transform(
             ToolTransform({"ns_my_tool": ToolTransformConfig(name="short")})
         )
-        main._providers.append(provider)
+        main.add_provider(provider)
 
         async with Client(main) as client:
             result = await client.call_tool("short", {})
@@ -289,10 +275,8 @@ class TestNoTransformation:
         provider = FastMCPProvider(server)
         transform = Transform()
 
-        async def get_tools():
-            return await provider.list_tools()
-
-        transformed_tools = await transform.list_tools(get_tools)
+        tools = await provider.list_tools()
+        transformed_tools = await transform.list_tools(tools)
 
         assert len(transformed_tools) == 1
         assert transformed_tools[0].name == "my_tool"
@@ -308,10 +292,8 @@ class TestNoTransformation:
         provider = FastMCPProvider(server)
         layer = ToolTransform({})
 
-        async def get_tools():
-            return await provider.list_tools()
-
-        transformed_tools = await layer.list_tools(get_tools)
+        tools = await provider.list_tools()
+        transformed_tools = await layer.list_tools(tools)
 
         assert len(transformed_tools) == 1
         assert transformed_tools[0].name == "my_tool"

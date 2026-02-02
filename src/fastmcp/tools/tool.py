@@ -24,6 +24,7 @@ from mcp.types import (
 )
 from mcp.types import Tool as MCPTool
 from pydantic import BaseModel, Field, model_validator
+from pydantic.json_schema import SkipJsonSchema
 
 from fastmcp.server.tasks.config import TaskConfig, TaskMeta
 from fastmcp.utilities.components import FastMCPComponent
@@ -140,13 +141,13 @@ class Tool(FastMCPComponent):
         Field(description="Task execution configuration (SEP-1686)"),
     ] = None
     serializer: Annotated[
-        ToolResultSerializerType | None,
+        SkipJsonSchema[ToolResultSerializerType | None],
         Field(
             description="Deprecated. Return ToolResult from your tools for full control over serialization."
         ),
     ] = None
     auth: Annotated[
-        AuthCheckCallable | list[AuthCheckCallable] | None,
+        SkipJsonSchema[AuthCheckCallable | list[AuthCheckCallable] | None],
         Field(description="Authorization checks for this tool", exclude=True),
     ] = None
     timeout: Annotated[
@@ -164,8 +165,6 @@ class Tool(FastMCPComponent):
 
     def to_mcp_tool(
         self,
-        *,
-        include_fastmcp_meta: bool | None = None,
         **overrides: Any,
     ) -> MCPTool:
         """Convert the FastMCP tool to an MCP tool."""
@@ -186,7 +185,7 @@ class Tool(FastMCPComponent):
             annotations=overrides.get("annotations", self.annotations),
             execution=overrides.get("execution", self.execution),
             _meta=overrides.get(  # type: ignore[call-arg]  # _meta is Pydantic alias for meta field
-                "_meta", self.get_meta(include_fastmcp_meta=include_fastmcp_meta)
+                "_meta", self.get_meta()
             ),
         )
 
@@ -196,6 +195,7 @@ class Tool(FastMCPComponent):
         fn: Callable[..., Any],
         *,
         name: str | None = None,
+        version: str | int | None = None,
         title: str | None = None,
         description: str | None = None,
         icons: list[Icon] | None = None,
@@ -215,6 +215,7 @@ class Tool(FastMCPComponent):
         return FunctionTool.from_function(
             fn=fn,
             name=name,
+            version=version,
             title=title,
             description=description,
             icons=icons,

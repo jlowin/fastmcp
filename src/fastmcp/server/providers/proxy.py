@@ -44,7 +44,7 @@ from fastmcp.server.providers.base import Provider
 from fastmcp.server.server import FastMCP
 from fastmcp.server.tasks.config import TaskConfig
 from fastmcp.tools.tool import Tool, ToolResult
-from fastmcp.utilities.components import FastMCPComponent
+from fastmcp.utilities.components import FastMCPComponent, get_fastmcp_metadata
 from fastmcp.utilities.logging import get_logger
 
 if TYPE_CHECKING:
@@ -104,7 +104,7 @@ class ProxyTool(Tool):
             output_schema=mcp_tool.outputSchema,
             icons=mcp_tool.icons,
             meta=mcp_tool.meta,
-            tags=(mcp_tool.meta or {}).get("_fastmcp", {}).get("tags", []),
+            tags=get_fastmcp_metadata(mcp_tool.meta).get("tags", []),
         )
 
     async def run(
@@ -115,7 +115,7 @@ class ProxyTool(Tool):
         """Executes the tool by making a call through the client."""
         backend_name = self._backend_name or self.name
         with client_span(
-            f"proxy tool {backend_name}", "tools/call", backend_name
+            f"tools/call {backend_name}", "tools/call", backend_name
         ) as span:
             span.set_attribute("fastmcp.provider.type", "ProxyProvider")
             client = await self._get_client()
@@ -211,7 +211,7 @@ class ProxyResource(Resource):
             mime_type=mcp_resource.mimeType or "text/plain",
             icons=mcp_resource.icons,
             meta=mcp_resource.meta,
-            tags=(mcp_resource.meta or {}).get("_fastmcp", {}).get("tags", []),
+            tags=get_fastmcp_metadata(mcp_resource.meta).get("tags", []),
             task_config=TaskConfig(mode="forbidden"),
         )
 
@@ -222,7 +222,10 @@ class ProxyResource(Resource):
 
         backend_uri = self._backend_uri or str(self.uri)
         with client_span(
-            f"proxy resource {backend_uri}", "resources/read", backend_uri
+            f"resources/read {backend_uri}",
+            "resources/read",
+            backend_uri,
+            resource_uri=backend_uri,
         ) as span:
             span.set_attribute("fastmcp.provider.type", "ProxyProvider")
             client = await self._get_client()
@@ -306,7 +309,7 @@ class ProxyTemplate(ResourceTemplate):
             icons=mcp_template.icons,
             parameters={},  # Remote templates don't have local parameters
             meta=mcp_template.meta,
-            tags=(mcp_template.meta or {}).get("_fastmcp", {}).get("tags", []),
+            tags=get_fastmcp_metadata(mcp_template.meta).get("tags", []),
             task_config=TaskConfig(mode="forbidden"),
         )
 
@@ -368,7 +371,7 @@ class ProxyTemplate(ResourceTemplate):
             ].mimeType,  # Use first item's mimeType for backward compatibility
             icons=self.icons,
             meta=self.meta,
-            tags=(self.meta or {}).get("_fastmcp", {}).get("tags", []),
+            tags=get_fastmcp_metadata(self.meta).get("tags", []),
             _cached_content=cached_content,
         )
 
@@ -426,7 +429,7 @@ class ProxyPrompt(Prompt):
             arguments=arguments,
             icons=mcp_prompt.icons,
             meta=mcp_prompt.meta,
-            tags=(mcp_prompt.meta or {}).get("_fastmcp", {}).get("tags", []),
+            tags=get_fastmcp_metadata(mcp_prompt.meta).get("tags", []),
             task_config=TaskConfig(mode="forbidden"),
         )
 
@@ -434,7 +437,7 @@ class ProxyPrompt(Prompt):
         """Render the prompt by making a call through the client."""
         backend_name = self._backend_name or self.name
         with client_span(
-            f"proxy prompt {backend_name}", "prompts/get", backend_name
+            f"prompts/get {backend_name}", "prompts/get", backend_name
         ) as span:
             span.set_attribute("fastmcp.provider.type", "ProxyProvider")
             client = await self._get_client()
@@ -514,7 +517,7 @@ class ProxyProvider(Provider):
     # Tool methods
     # -------------------------------------------------------------------------
 
-    async def list_tools(self) -> Sequence[Tool]:
+    async def _list_tools(self) -> Sequence[Tool]:
         """List all tools from the remote server."""
         try:
             client = await self._get_client()
@@ -532,7 +535,7 @@ class ProxyProvider(Provider):
     # Resource methods
     # -------------------------------------------------------------------------
 
-    async def list_resources(self) -> Sequence[Resource]:
+    async def _list_resources(self) -> Sequence[Resource]:
         """List all resources from the remote server."""
         try:
             client = await self._get_client()
@@ -551,7 +554,7 @@ class ProxyProvider(Provider):
     # Resource template methods
     # -------------------------------------------------------------------------
 
-    async def list_resource_templates(self) -> Sequence[ResourceTemplate]:
+    async def _list_resource_templates(self) -> Sequence[ResourceTemplate]:
         """List all resource templates from the remote server."""
         try:
             client = await self._get_client()
@@ -570,7 +573,7 @@ class ProxyProvider(Provider):
     # Prompt methods
     # -------------------------------------------------------------------------
 
-    async def list_prompts(self) -> Sequence[Prompt]:
+    async def _list_prompts(self) -> Sequence[Prompt]:
         """List all prompts from the remote server."""
         try:
             client = await self._get_client()

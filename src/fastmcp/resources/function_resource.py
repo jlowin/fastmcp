@@ -10,10 +10,12 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeVar, runtime_check
 
 from mcp.types import Annotations, Icon
 from pydantic import AnyUrl
+from pydantic.json_schema import SkipJsonSchema
 
 import fastmcp
 from fastmcp.decorators import resolve_task_config
 from fastmcp.resources.resource import Resource, ResourceResult
+from fastmcp.server.apps import resolve_ui_mime_type
 from fastmcp.server.dependencies import (
     transform_context_annotations,
     without_injected_parameters,
@@ -46,6 +48,7 @@ class ResourceMeta:
     type: Literal["resource"] = field(default="resource", init=False)
     uri: str
     name: str | None = None
+    version: str | int | None = None
     title: str | None = None
     description: str | None = None
     icons: list[Icon] | None = None
@@ -55,6 +58,7 @@ class ResourceMeta:
     meta: dict[str, Any] | None = None
     task: bool | TaskConfig | None = None
     auth: AuthCheckCallable | list[AuthCheckCallable] | None = None
+    enabled: bool = True
 
 
 class FunctionResource(Resource):
@@ -70,7 +74,7 @@ class FunctionResource(Resource):
     - other types will be converted to JSON
     """
 
-    fn: Callable[..., Any]
+    fn: SkipJsonSchema[Callable[..., Any]]
 
     @classmethod
     def from_function(
@@ -81,6 +85,7 @@ class FunctionResource(Resource):
         metadata: ResourceMeta | None = None,
         # Keep individual params for backwards compat
         name: str | None = None,
+        version: str | int | None = None,
         title: str | None = None,
         description: str | None = None,
         icons: list[Icon] | None = None,
@@ -107,6 +112,7 @@ class FunctionResource(Resource):
                 x is not None
                 for x in [
                     name,
+                    version,
                     title,
                     description,
                     icons,
@@ -134,6 +140,7 @@ class FunctionResource(Resource):
             metadata = ResourceMeta(
                 uri=str(uri),
                 name=name,
+                version=version,
                 title=title,
                 description=description,
                 icons=icons,
@@ -175,14 +182,18 @@ class FunctionResource(Resource):
         # Wrap fn to handle dependency resolution internally
         wrapped_fn = without_injected_parameters(fn)
 
+        # Apply ui:// MIME default, then fall back to text/plain
+        resolved_mime = resolve_ui_mime_type(metadata.uri, metadata.mime_type)
+
         return cls(
             fn=wrapped_fn,
             uri=uri_obj,
             name=func_name,
+            version=str(metadata.version) if metadata.version is not None else None,
             title=metadata.title,
             description=metadata.description or inspect.getdoc(fn),
             icons=metadata.icons,
-            mime_type=metadata.mime_type or "text/plain",
+            mime_type=resolved_mime or "text/plain",
             tags=metadata.tags or set(),
             annotations=metadata.annotations,
             meta=metadata.meta,
@@ -226,6 +237,7 @@ def resource(
     uri: str,
     *,
     name: str | None = None,
+    version: str | int | None = None,
     title: str | None = None,
     description: str | None = None,
     icons: list[Icon] | None = None,
@@ -263,6 +275,7 @@ def resource(
         resource_meta = ResourceMeta(
             uri=uri,
             name=name,
+            version=version,
             title=title,
             description=description,
             icons=icons,
@@ -280,6 +293,7 @@ def resource(
                 fn=fn,
                 uri_template=uri,
                 name=name,
+                version=version,
                 title=title,
                 description=description,
                 icons=icons,
@@ -297,6 +311,7 @@ def resource(
         metadata = ResourceMeta(
             uri=uri,
             name=name,
+            version=version,
             title=title,
             description=description,
             icons=icons,
