@@ -23,7 +23,7 @@ import secrets
 import time
 from base64 import urlsafe_b64encode
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse, urlunparse
 
 import httpx
 from authlib.common.security import generate_token
@@ -76,6 +76,30 @@ from fastmcp.server.auth.oauth_proxy.ui import create_error_html
 from fastmcp.utilities.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def _normalize_resource_url(url: str) -> str:
+    """Normalize a resource URL by removing query parameters and trailing slashes.
+
+    RFC 8707 allows clients to include query parameters in resource URLs, but the
+    server's configured resource URL typically doesn't include them. This function
+    normalizes URLs for comparison by stripping query params and fragments.
+
+    Args:
+        url: The URL to normalize
+
+    Returns:
+        Normalized URL with scheme, host, and path only (no query/fragment)
+    """
+    parsed = urlparse(str(url))
+    return urlunparse(
+        (parsed.scheme, parsed.netloc, parsed.path.rstrip("/"), "", "", "")
+    )
+
+
+def _server_url_has_query(url: str) -> bool:
+    """Check if a URL has query parameters."""
+    return bool(urlparse(str(url)).query)
 
 
 class OAuthProxy(OAuthProvider, ConsentMixin):
@@ -617,9 +641,32 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
         """
         # Security check: validate client's requested resource matches this server
         # This prevents tokens intended for one server from being used on another
+        #
+        # Per RFC 8707, clients may include query parameters in resource URLs (e.g.,
+        # ChatGPT sends ?kb_name=X). We handle two cases:
+        #
+        # 1. Server URL has NO query params: normalize both URLs (strip query/fragment)
+        #    to allow clients like ChatGPT that add query params to still match.
+        #
+        # 2. Server URL HAS query params (e.g., multi-tenant ?tenant=X): require exact
+        #    match to prevent clients from bypassing tenant isolation by changing params.
+        #
+        # Claude doesn't send a resource parameter at all, so this check is skipped.
         client_resource = getattr(params, "resource", None)
         if client_resource and self._resource_url:
-            if str(client_resource) != str(self._resource_url):
+            server_url = str(self._resource_url)
+            client_url = str(client_resource)
+
+            if _server_url_has_query(server_url):
+                # Server has query params - require exact match for security
+                urls_match = client_url.rstrip("/") == server_url.rstrip("/")
+            else:
+                # Server has no query params - normalize both for comparison
+                urls_match = _normalize_resource_url(
+                    client_url
+                ) == _normalize_resource_url(server_url)
+
+            if not urls_match:
                 logger.warning(
                     "Resource mismatch: client requested %s but server is %s",
                     client_resource,
@@ -851,6 +898,9 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
         )
         logger.debug("Stored encrypted upstream tokens (jti=%s)", access_jti[:8])
 
+        # Extract upstream claims to embed in FastMCP JWT (if subclass implements)
+        upstream_claims = await self._extract_upstream_claims(idp_tokens)
+
         # Issue minimal FastMCP access token (just a reference via JTI)
         if client.client_id is None:
             raise TokenError("invalid_client", "Client ID is required")
@@ -859,6 +909,7 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
             scopes=authorization_code.scopes,
             jti=access_jti,
             expires_in=expires_in,
+            upstream_claims=upstream_claims,
         )
 
         # Issue minimal FastMCP refresh token if upstream provided one
@@ -870,6 +921,7 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
                 scopes=authorization_code.scopes,
                 jti=refresh_jti,
                 expires_in=refresh_expires_in,
+                upstream_claims=upstream_claims,
             )
 
         # Store JTI mappings
@@ -926,6 +978,20 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
     # Refresh Token Flow
     # -------------------------------------------------------------------------
 
+    def _prepare_scopes_for_token_exchange(self, scopes: list[str]) -> list[str]:
+        """Prepare scopes for initial token exchange (auth code -> tokens).
+
+        Override this method to provide scopes during the authorization
+        code exchange. Some providers (like Azure) require scopes to be sent.
+
+        Args:
+            scopes: Scopes from the authorization request
+
+        Returns:
+            List of scopes to send, or empty list to omit scope parameter
+        """
+        return scopes
+
     def _prepare_scopes_for_upstream_refresh(self, scopes: list[str]) -> list[str]:
         """Prepare scopes for upstream token refresh request.
 
@@ -942,6 +1008,33 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
             Scopes to send to upstream provider (may be transformed/augmented)
         """
         return scopes
+
+    async def _extract_upstream_claims(
+        self, idp_tokens: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """Extract upstream claims to embed in FastMCP JWT.
+
+        Override this method to decode upstream tokens, call userinfo endpoints,
+        or otherwise extract claims that should be embedded in the FastMCP JWT
+        issued to MCP clients. This enables gateways to inspect upstream identity
+        information by decoding the JWT without server-side storage lookups.
+
+        Args:
+            idp_tokens: Full token response from upstream provider. Contains
+                access_token, and for OIDC providers may include id_token,
+                refresh_token, and other response fields.
+
+        Returns:
+            Dict of claims to embed in JWT under the "upstream_claims" key,
+            or None to not embed any upstream claims.
+
+        Example:
+            For Azure/Entra ID, you might decode the access_token JWT and
+            extract claims like sub, oid, name, preferred_username, email,
+            roles, and groups.
+        """
+        _ = idp_tokens
+        return None
 
     async def load_refresh_token(
         self,
@@ -1109,6 +1202,11 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
             ),  # Keep until longest-lived token expires (min 1s for safety)
         )
 
+        # Re-extract upstream claims from refreshed token response
+        upstream_claims = await self._extract_upstream_claims(
+            upstream_token_set.raw_token_data
+        )
+
         # Issue new minimal FastMCP access token (just a reference via JTI)
         if client.client_id is None:
             raise TokenError("invalid_client", "Client ID is required")
@@ -1118,6 +1216,7 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
             scopes=scopes,
             jti=new_access_jti,
             expires_in=new_expires_in,
+            upstream_claims=upstream_claims,
         )
 
         # Store new access token JTI mapping
@@ -1140,6 +1239,7 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
             jti=new_refresh_jti,
             expires_in=new_refresh_expires_in
             or 60 * 60 * 24 * 30,  # Fallback to 30 days
+            upstream_claims=upstream_claims,
         )
 
         # Store new refresh token JTI mapping with aligned expiry
@@ -1445,6 +1545,13 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
                         "Including proxy code_verifier in token exchange for transaction %s",
                         txn_id,
                     )
+
+                # Allow providers to specify scope for token exchange
+                exchange_scopes = self._prepare_scopes_for_token_exchange(
+                    transaction.get("scopes") or []
+                )
+                if exchange_scopes:
+                    token_params["scope"] = " ".join(exchange_scopes)
 
                 # Add any extra token parameters configured for this proxy
                 if self._extra_token_params:
