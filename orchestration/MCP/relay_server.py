@@ -1,4 +1,5 @@
 """Lightweight relay server shim."""
+
 from __future__ import annotations
 
 from custody.custodian_ledger import log_event

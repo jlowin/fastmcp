@@ -1,4 +1,5 @@
 """Slack relay stub."""
+
 from __future__ import annotations
 
 from custody.custodian_ledger import log_event

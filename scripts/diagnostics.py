@@ -1,4 +1,5 @@
 """Diagnostics helpers for quick repo health checks."""
+
 from __future__ import annotations
 
 import json

@@ -1,7 +1,9 @@
 """Simple orchestrator that routes commands and records them in the ledger."""
+
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 
 class Orchestrator:
@@ -12,10 +14,14 @@ class Orchestrator:
     def log(self, event_type: str, payload: dict[str, Any] | None = None) -> None:
         self.ledger.log_event(event_type, payload or {})
 
-    def run_command(self, cmd: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    def run_command(
+        self, cmd: str, payload: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         self.log("ORCH_COMMAND_RECEIVED", {"cmd": cmd})
 
-        handler: Callable[[dict[str, Any]], Any] | None = getattr(self, f"cmd_{cmd}", None)
+        handler: Callable[[dict[str, Any]], Any] | None = getattr(
+            self, f"cmd_{cmd}", None
+        )
         if not handler:
             self.log("ORCH_COMMAND_UNKNOWN", {"cmd": cmd})
             return {"status": "unknown_command"}

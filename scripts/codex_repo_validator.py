@@ -1,4 +1,5 @@
 """Validate required MAOS file paths exist."""
+
 from __future__ import annotations
 
 import json

@@ -1,4 +1,5 @@
 """Notion relay stub for diagnostics."""
+
 from __future__ import annotations
 
 from custody.custodian_ledger import log_event

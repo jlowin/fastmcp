@@ -1,10 +1,14 @@
-from custody.custodian_ledger import get_last_events, log_event
-from telemetry.emit_heartbeat import generate_heartbeat
 from unittest.mock import patch
 
+from custody.custodian_ledger import get_last_events, log_event
+from telemetry.emit_heartbeat import generate_heartbeat
+
+
 def test_heartbeat_write():
-    with patch("custody.custodian_ledger.get_last_events") as mock_get_last_events, \
-         patch("custody.custodian_ledger.log_event") as mock_log_event:
+    with (
+        patch("custody.custodian_ledger.get_last_events") as mock_get_last_events,
+        patch("custody.custodian_ledger.log_event") as _mock_log_event,  # noqa: F841
+    ):
         # Simulate initial state: 5 events
         mock_get_last_events.return_value = [object()] * 5
         before = len(get_last_events(100))
