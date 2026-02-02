@@ -29,6 +29,20 @@ class Orchestrator:
             return {"status": "error", "error": str(exc)}
 
     def cmd_mvp_health_check(self, payload: dict[str, Any]):
+        """Perform a comprehensive health check of the MCP system components.
+
+        This command verifies the operational status of core system components
+        and generates telemetry data for monitoring purposes.
+
+        Args:
+            payload: Command payload (currently unused, reserved for future extensions).
+
+        Returns:
+            A dictionary containing health status of system components:
+                - mcp: Status of the MCP server ("ok" or "unknown")
+                - heartbeat: Telemetry data including timestamp, hostname, platform info
+                - ledger: Status of the event ledger ("ok" or "unknown")
+        """
         from telemetry.emit_heartbeat import generate_heartbeat
 
         res: dict[str, Any] = {
