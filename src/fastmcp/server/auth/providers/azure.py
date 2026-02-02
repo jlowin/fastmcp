@@ -474,13 +474,8 @@ class AzureProvider(OAuthProxy):
         Raises:
             ImportError: If azure-identity is not installed (requires fastmcp[azure]).
         """
-        try:
-            from azure.identity.aio import OnBehalfOfCredential
-        except ImportError as e:
-            raise ImportError(
-                "azure-identity is required for OBO token exchange. "
-                "Install with: pip install 'fastmcp[azure]'"
-            ) from e
+        _require_azure_identity("OBO token exchange")
+        from azure.identity.aio import OnBehalfOfCredential
 
         return OnBehalfOfCredential(
             tenant_id=self._tenant_id,
