@@ -332,3 +332,42 @@ class TestFunctionResourceCallable:
             resource.read(),
         )
         assert results == ["done", "done", "done"]
+
+    async def test_custom_attributes_preserved(self):
+        """Test that custom function attributes are preserved on FunctionResource."""
+
+        def custom_decorator(**metadata):
+            """Decorator that adds custom attributes to functions."""
+
+            def decorator(fn):
+                fn._custom_metadata = metadata
+                return fn
+
+            return decorator
+
+        # Test with a decorated function
+        @custom_decorator(client="mobile", format="json")
+        def my_resource() -> str:
+            return "content"
+
+        resource = FunctionResource.from_function(
+            uri="function://test",
+            fn=my_resource,
+        )
+
+        # Custom attributes should be accessible on the stored function
+        assert hasattr(my_resource, "_custom_metadata")
+        assert my_resource._custom_metadata == {
+            "client": "mobile",
+            "format": "json",
+        }
+
+        # Verify the resource.fn also preserves the custom attribute
+        assert hasattr(resource.fn, "_custom_metadata"), (
+            "Custom attribute lost on wrapped function"
+        )
+        assert resource.fn._custom_metadata == {"client": "mobile", "format": "json"}
+
+        # Verify the resource works correctly when called
+        result = await resource.read()
+        assert result == "content"

@@ -179,14 +179,11 @@ class FunctionResource(Resource):
         # Transform Context type annotations to Depends() for unified DI
         fn = transform_context_annotations(fn)
 
-        # Wrap fn to handle dependency resolution internally
-        wrapped_fn = without_injected_parameters(fn)
-
         # Apply ui:// MIME default, then fall back to text/plain
         resolved_mime = resolve_ui_mime_type(metadata.uri, metadata.mime_type)
 
         return cls(
-            fn=wrapped_fn,
+            fn=fn,
             uri=uri_obj,
             name=func_name,
             version=str(metadata.version) if metadata.version is not None else None,
@@ -205,13 +202,15 @@ class FunctionResource(Resource):
         self,
     ) -> str | bytes | ResourceResult:
         """Read the resource by calling the wrapped function."""
-        # self.fn is wrapped by without_injected_parameters which handles
-        # dependency resolution internally
-        if inspect.iscoroutinefunction(self.fn):
-            result = await self.fn()
+        # Wrap fn to handle dependency resolution internally
+        # This is done at call time to preserve custom attributes on the original function
+        wrapped_fn = without_injected_parameters(self.fn)
+
+        if inspect.iscoroutinefunction(wrapped_fn):
+            result = await wrapped_fn()
         else:
             # Run sync functions in threadpool to avoid blocking the event loop
-            result = await call_sync_fn_in_threadpool(self.fn)
+            result = await call_sync_fn_in_threadpool(wrapped_fn)
             # Handle sync wrappers that return awaitables (e.g., partial(async_fn))
             if inspect.isawaitable(result):
                 result = await result
