@@ -771,3 +771,90 @@ class TestBackgroundTaskContextWiring:
         assert result.action == "accept"
         assert result.data == "Alice"  # The value from content["value"]
 
+    async def test_context_elicit_with_real_docket_memory_backend(self):
+        """E2E test using Docket's real memory:// backend.
+
+        This test uses the real Docket memory backend instead of mocking Redis,
+        as suggested by Chris Guidry during code review. The memory:// backend
+        provides a fully functional in-memory Redis-like store that Docket uses
+        automatically when running tests.
+
+        Flow:
+        1. Create FastMCP server with task-enabled tool that calls ctx.elicit()
+        2. Start the task via Client (which initializes Docket with memory://)
+        3. Background task blocks waiting for client input
+        4. Simulate client sending input via handle_task_input()
+        5. Task resumes and completes with the elicited value
+
+        This demonstrates the complete elicitation flow with real infrastructure.
+        """
+        import asyncio
+
+        from fastmcp import FastMCP
+        from fastmcp.client import Client
+        from fastmcp.server.context import Context
+        from fastmcp.server.tasks.elicitation import handle_task_input
+
+        mcp = FastMCP("elicit-memory-test")
+
+        # Track task state using mutable container (avoids nonlocal)
+        elicit_started = asyncio.Event()
+        captured: dict[str, str | None] = {"task_id": None, "session_id": None}
+
+        @mcp.tool(task=True)
+        async def ask_for_name(ctx: Context) -> str:
+            """Tool that elicits user's name via background task."""
+            # Capture IDs for handle_task_input call
+            captured["task_id"] = ctx.task_id
+            captured["session_id"] = ctx.session_id
+            elicit_started.set()
+
+            # This will block until client sends input
+            result = await ctx.elicit("What is your name?", str)
+
+            if result.action == "accept":
+                return f"Hello, {result.data}!"
+            else:
+                return "Elicitation was declined or cancelled"
+
+        async with Client(mcp) as client:
+            # Start the background task
+            task = await client.call_tool("ask_for_name", {}, task=True)
+            assert task is not None
+            assert task.task_id is not None
+
+            # Wait for task to reach elicit() call
+            await asyncio.wait_for(elicit_started.wait(), timeout=5.0)
+
+            # Poll until handle_task_input succeeds
+            # We need to wait for elicit_for_task to store the "waiting" status in Redis
+            # before we can send input. Using fixed-interval polling (not exponential
+            # backoff) because we're waiting for state, not recovering from errors.
+            assert captured["task_id"] is not None
+            assert captured["session_id"] is not None
+
+            max_attempts = 40
+            poll_interval_seconds = 0.05  # 50ms - fast for tests, 2s max total
+            success = False
+            for _ in range(max_attempts):
+                success = await handle_task_input(
+                    task_id=captured["task_id"],
+                    session_id=captured["session_id"],
+                    action="accept",
+                    content={"value": "Bob"},
+                    fastmcp=mcp,
+                )
+                if success:
+                    break
+                await asyncio.sleep(poll_interval_seconds)
+
+            assert success is True, (
+                f"handle_task_input should succeed within {max_attempts * poll_interval_seconds}s"
+            )
+
+            # Wait for task to complete
+            await task.wait(timeout=10.0)
+            result = await task.result()
+
+            # Verify the tool received the elicited value and returned correctly
+            assert result.data == "Hello, Bob!"
