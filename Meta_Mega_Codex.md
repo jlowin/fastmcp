@@ -16,7 +16,7 @@ The Codex is:
 - 🔁 Loop-aware and self-improving
 - 🛡 Vault-sealed and governance aligned
 
-This is **not an idea**. It is a **toolchain**.
+This is a **toolchain** for real-world execution.
 
 ---
 
