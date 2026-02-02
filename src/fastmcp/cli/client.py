@@ -55,7 +55,7 @@ def resolve_server_spec(
        If ``--transport`` is ``sse``, the URL is rewritten to end with ``/sse``
        so ``infer_transport`` picks the right transport.
     2. Existing file paths, or strings ending in ``.py``/``.js``/``.json``.
-    3. Anything else — error with guidance.
+    3. Anything else — name-based resolution via ``resolve_name``.
 
     When ``command`` is provided, the string is shell-split into a
     ``StdioTransport(command, args)``.

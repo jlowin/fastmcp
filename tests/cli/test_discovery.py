@@ -461,6 +461,7 @@ class TestScanGoose:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ):
         monkeypatch.setattr("fastmcp.cli.discovery.Path.home", lambda: tmp_path)
+        monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
         config_dir = tmp_path / ".config" / "goose"
         config_path = config_dir / "config.yaml"
         config_path.parent.mkdir(parents=True)
@@ -478,6 +479,7 @@ class TestScanGoose:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ):
         monkeypatch.setattr("fastmcp.cli.discovery.Path.home", lambda: tmp_path)
+        monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
         config_dir = tmp_path / ".config" / "goose"
         config_path = config_dir / "config.yaml"
         config_path.parent.mkdir(parents=True)
