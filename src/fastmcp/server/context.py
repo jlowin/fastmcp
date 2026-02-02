@@ -207,13 +207,8 @@ class Context:
             ```python
             @server.tool(task=True)
             async def my_task(ctx: Context) -> str:
-                if ctx.is_background_task:
-                    # Running as a background task
-                    result = await ctx.elicit("Need input", str)
-                else:
-                    # Running synchronously
-                    result = await ctx.elicit("Need input", str)
-                # Both work transparently!
+                # Works transparently in both foreground and background task modes
+                result = await ctx.elicit("Need input", str)
                 return str(result)
             ```
         """

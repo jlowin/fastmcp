@@ -4,6 +4,7 @@ import pytest
 
 from fastmcp import FastMCP
 from fastmcp.server.context import Context
+from fastmcp.server.elicitation import AcceptedElicitation
 from fastmcp.server.tasks.elicitation import elicit_for_task, handle_task_input
 
 
@@ -165,13 +166,13 @@ class TestBackgroundTaskElicitationE2E:
 
                 result = await elicit_for_task(
                     task_id="test-task-123",
-                    session=mock_session,  # type: ignore[arg-type]
+                    session=mock_session,
                     message="Please provide a number",
                     schema={
                         "type": "object",
                         "properties": {"value": {"type": "integer"}},
                     },
-                    fastmcp=mock_fastmcp,  # type: ignore[arg-type]
+                    fastmcp=mock_fastmcp,
                 )
 
         # Verify the result
@@ -209,7 +210,7 @@ class TestBackgroundTaskElicitationE2E:
             session_id="test-session-id",
             action="accept",
             content={"value": 42},
-            fastmcp=mock_fastmcp,  # type: ignore[arg-type]
+            fastmcp=mock_fastmcp,
         )
 
         # Verify success
@@ -243,7 +244,7 @@ class TestBackgroundTaskElicitationE2E:
             session_id="test-session-id",
             action="accept",
             content={"value": 42},
-            fastmcp=mock_fastmcp,  # type: ignore[arg-type]
+            fastmcp=mock_fastmcp,
         )
 
         # Should fail because no task is waiting
@@ -280,10 +281,10 @@ class TestBackgroundTaskElicitationE2E:
         with patch("fastmcp.server.tasks.elicitation.asyncio.sleep", AsyncMock()):
             await elicit_for_task(
                 task_id="my-task-id",
-                session=mock_session,  # type: ignore[arg-type]
+                session=mock_session,
                 message="Enter value",
                 schema={"type": "object"},
-                fastmcp=mock_fastmcp,  # type: ignore[arg-type]
+                fastmcp=mock_fastmcp,
             )
 
         # Verify notification was sent
@@ -325,10 +326,10 @@ class TestBackgroundTaskElicitationE2E:
             ):
                 result = await elicit_for_task(
                     task_id="timeout-task",
-                    session=mock_session,  # type: ignore[arg-type]
+                    session=mock_session,
                     message="This will timeout",
                     schema={"type": "object"},
-                    fastmcp=mock_fastmcp,  # type: ignore[arg-type]
+                    fastmcp=mock_fastmcp,
                 )
 
         # Should return cancel on timeout
@@ -429,6 +430,7 @@ class TestBackgroundTaskElicitationE2E:
 
         # Verify the result is properly parsed into the Pydantic model
         assert result.action == "accept"
+        assert isinstance(result, AcceptedElicitation)  # Type narrowing
         assert isinstance(result.data, UserInfo)
         assert result.data.name == "Alice"
         assert result.data.age == 30
@@ -812,7 +814,7 @@ class TestBackgroundTaskContextWiring:
             # This will block until client sends input
             result = await ctx.elicit("What is your name?", str)
 
-            if result.action == "accept":
+            if isinstance(result, AcceptedElicitation):
                 return f"Hello, {result.data}!"
             else:
                 return "Elicitation was declined or cancelled"

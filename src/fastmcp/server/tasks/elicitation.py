@@ -17,11 +17,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import uuid
 from typing import TYPE_CHECKING, Any
 
 import mcp.types
 from mcp import ServerSession
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from fastmcp.server.server import FastMCP
@@ -124,12 +127,16 @@ async def elicit_for_task(
         },
     )
 
-    # Send notification (don't fail if this errors)
-    # Best effort - task status is stored in Redis
-    import contextlib
-
-    with contextlib.suppress(Exception):
+    # Send notification (best effort - task status is stored in Redis)
+    # Log failures for debugging but don't fail the elicitation
+    try:
         await session.send_notification(notification)  # type: ignore[arg-type]
+    except Exception as e:
+        logger.warning(
+            "Failed to send input_required notification for task %s: %s",
+            task_id,
+            e,
+        )
 
     # Wait for response (poll Redis)
     # In a production implementation, this could use Redis pub/sub for lower latency
