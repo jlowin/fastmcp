@@ -91,7 +91,28 @@ The generated script is a client, not a server. It doesn't bundle or embed the M
 
 At the top of the generated file, a `CLIENT_SPEC` variable holds the resolved transport: either a URL string or a `StdioTransport` with the command and arguments baked in. Every invocation connects through this spec, so the script works without any external configuration.
 
-Parameters are mapped from JSON Schema to Python annotations: `string` → `str`, `integer` → `int`, `number` → `float`, `boolean` → `bool`, `array` → `list`, `object` → `dict`. Union types (`anyOf`) become Python unions like `str | int`. Required parameters are mandatory flags; optional ones use their schema default or `None`, and `None` values are filtered out before calling the server — so you only pass what matters.
+### Parameter Handling
+
+Parameters are mapped intelligently based on their complexity:
+
+**Simple types** (`string`, `integer`, `number`, `boolean`) become typed Python parameters with clean flags:
+```bash
+python cli.py call-tool get_forecast --city London --days 3
+```
+
+**Arrays of simple types** (`array` with `string`/`integer`/`number`/`boolean` items) become `list[T]` parameters that accept multiple flags:
+```bash
+python cli.py call-tool tag_items --tags python --tags fastapi --tags mcp
+```
+
+**Complex types** (objects, nested arrays, or unions) accept JSON strings. The tool's `--help` displays the full JSON schema so you know exactly what structure to pass:
+```bash
+python cli.py call-tool create_user \
+  --name John \
+  --metadata '{"role": "admin", "dept": "engineering"}'
+```
+
+Required parameters are mandatory flags; optional ones default to their schema default or `None`. Empty values are filtered out before calling the server.
 
 Beyond tool commands, the script includes generic commands that work regardless of what the server exposes: `list-tools`, `list-resources`, `read-resource`, `list-prompts`, and `get-prompt`. These connect to the server at runtime, so they always reflect the server's current state even if the tools have changed since generation.
 
