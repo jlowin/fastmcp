@@ -70,6 +70,29 @@ class TestProxyDCRClient:
         with pytest.raises(InvalidRedirectUriError):
             client.validate_redirect_uri(AnyUrl("cursor://anysphere.cursor-mcp/oauth/callback"))
 
+    def test_default_not_applied_when_custom_patterns_supplied(self):
+        """Test that default validation is not applied when custom patterns are supplied."""
+        allowed_patterns = ["cursor://anysphere.cursor-mcp/oauth/callback", "https://app.example.com/*"]
+
+        client = ProxyDCRClient(
+            client_id="test",
+            client_secret="secret",
+            redirect_uris=[AnyUrl("http://localhost:3000")],
+            allowed_redirect_uri_patterns=allowed_patterns,
+        )
+
+        assert client.validate_redirect_uri(AnyUrl("https://app.example.com/oauth/callback"))
+        assert client.validate_redirect_uri(AnyUrl("cursor://anysphere.cursor-mcp/oauth/callback"))
+
+        with pytest.raises(InvalidRedirectUriError):
+            client.validate_redirect_uri(AnyUrl("http://localhost:3000"))
+        with pytest.raises(InvalidRedirectUriError):
+            client.validate_redirect_uri(AnyUrl("http://127.0.0.1:3000"))
+        with pytest.raises(InvalidRedirectUriError):
+            client.validate_redirect_uri(AnyUrl("https://example.com"))
+
+
+        
 
     def test_empty_list_allows_none(self):
         """Test that empty pattern list allows no URIs."""
@@ -138,7 +161,7 @@ class TestOAuthProxyRedirectValidation:
             client_storage=MemoryStore(),
         )
 
-        assert proxy._allowed_client_redirect_uris == custom_patterns
+        assert proxy._allowed_client_redirect_uris == custom_patterns        
 
     def test_proxy_empty_list_validation(self):
         """Test OAuth proxy with empty list (allow none)."""
@@ -209,3 +232,6 @@ class TestOAuthProxyRedirectValidation:
         # Get an unregistered client
         client = await proxy.get_client("unknown-client")
         assert client is None
+
+
+        
