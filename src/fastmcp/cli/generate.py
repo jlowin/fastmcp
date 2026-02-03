@@ -133,8 +133,8 @@ def _tool_function_source(tool: mcp.types.Tool) -> str:
     # Function name: sanitize to valid Python identifier
     fn_name = _to_python_identifier(tool.name)
 
-    # Docstring
-    description = (tool.description or "").replace('"""', '\\"\\"\\"')
+    # Docstring - use single-quoted docstrings to avoid triple-quote escaping issues
+    description = (tool.description or "").replace("\\", "\\\\").replace("'", "\\'")
 
     lines = []
     lines.append("")
@@ -148,7 +148,7 @@ def _tool_function_source(tool: mcp.types.Tool) -> str:
         lines.extend(param_lines)
 
     lines.append(") -> None:")
-    lines.append(f'    """{description}"""')
+    lines.append(f"    '''{description}'''")
     dict_items = ", ".join(call_args)
     lines.append(f"    await _call_tool({tool.name!r}, {{{dict_items}}})")
     lines.append("")
@@ -170,8 +170,10 @@ def generate_cli_script(
 ) -> str:
     """Generate the full CLI script source code."""
 
-    # Determine app name from server_name
-    app_name = server_name.replace(" ", "-").lower()
+    # Determine app name from server_name - sanitize for use in string literal
+    app_name = (
+        server_name.replace(" ", "-").lower().replace("\\", "\\\\").replace('"', '\\"')
+    )
 
     # --- Header ---
     lines: list[str] = []

@@ -230,7 +230,22 @@ class TestToolFunctionSource:
             },
         )
         source = _tool_function_source(tool)
-        assert '"""Say hello to someone."""' in source
+        assert "'''Say hello to someone.'''" in source
+
+    def test_description_with_quotes(self):
+        tool = mcp.types.Tool(
+            name="fetch",
+            description="Fetch data from 'source' API.",
+            inputSchema={
+                "properties": {"url": {"type": "string"}},
+                "required": ["url"],
+            },
+        )
+        source = _tool_function_source(tool)
+        # Should escape single quotes in the description
+        assert r"Fetch data from \'source\' API." in source
+        # Generated code should compile
+        compile(source, "<test>", "exec")
 
 
 # ---------------------------------------------------------------------------
@@ -342,6 +357,20 @@ class TestGenerateCliScript:
         )
         compile(script, "<generated>", "exec")
         assert "call_tool_app" in script
+
+    def test_server_name_with_quotes(self):
+        """Test that server names with quotes are properly escaped."""
+        script = generate_cli_script(
+            server_name='Test "Server" Name',
+            server_spec="test",
+            transport_code='"http://localhost"',
+            extra_imports=set(),
+            tools=[],
+        )
+        # Should compile without syntax errors
+        compile(script, "<generated>", "exec")
+        # App name should have escaped quotes
+        assert r'app = cyclopts.App(name="test-\"server\"-name"' in script
 
     def test_compiles_with_unusual_names(self):
         tools = [
