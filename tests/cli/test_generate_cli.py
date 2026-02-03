@@ -13,7 +13,7 @@ from fastmcp.cli import generate as generate_module
 from fastmcp.cli.client import Client
 from fastmcp.cli.generate import (
     _derive_server_name,
-    _schema_type_to_python,
+    _schema_to_python_type,
     _to_python_identifier,
     _tool_function_source,
     generate_cli_command,
@@ -23,47 +23,61 @@ from fastmcp.cli.generate import (
 from fastmcp.client.transports.stdio import StdioTransport
 
 # ---------------------------------------------------------------------------
-# _schema_type_to_python
+# _schema_to_python_type
 # ---------------------------------------------------------------------------
 
 
-class TestSchemaTypeToPython:
-    def test_string(self):
-        assert _schema_type_to_python({"type": "string"}) == "str"
+class TestSchemaToPythonType:
+    def test_simple_string(self):
+        py_type, needs_json = _schema_to_python_type({"type": "string"})
+        assert py_type == "str"
+        assert needs_json is False
 
-    def test_integer(self):
-        assert _schema_type_to_python({"type": "integer"}) == "int"
+    def test_simple_integer(self):
+        py_type, needs_json = _schema_to_python_type({"type": "integer"})
+        assert py_type == "int"
+        assert needs_json is False
 
-    def test_number(self):
-        assert _schema_type_to_python({"type": "number"}) == "float"
+    def test_simple_number(self):
+        py_type, needs_json = _schema_to_python_type({"type": "number"})
+        assert py_type == "float"
+        assert needs_json is False
 
-    def test_boolean(self):
-        assert _schema_type_to_python({"type": "boolean"}) == "bool"
+    def test_simple_boolean(self):
+        py_type, needs_json = _schema_to_python_type({"type": "boolean"})
+        assert py_type == "bool"
+        assert needs_json is False
 
-    def test_array(self):
-        assert _schema_type_to_python({"type": "array"}) == "list"
-
-    def test_object(self):
-        assert _schema_type_to_python({"type": "object"}) == "dict"
-
-    def test_null(self):
-        assert _schema_type_to_python({"type": "null"}) == "None"
-
-    def test_unknown_defaults_to_str(self):
-        assert _schema_type_to_python({"type": "foobar"}) == "str"
-
-    def test_missing_type_defaults_to_str(self):
-        assert _schema_type_to_python({}) == "str"
-
-    def test_any_of(self):
-        result = _schema_type_to_python(
-            {"anyOf": [{"type": "string"}, {"type": "integer"}]}
+    def test_array_of_strings(self):
+        py_type, needs_json = _schema_to_python_type(
+            {"type": "array", "items": {"type": "string"}}
         )
-        assert result == "str | int"
+        assert py_type == "list[str]"
+        assert needs_json is False
 
-    def test_type_list(self):
-        result = _schema_type_to_python({"type": ["string", "null"]})
-        assert result == "str | None"
+    def test_array_of_integers(self):
+        py_type, needs_json = _schema_to_python_type(
+            {"type": "array", "items": {"type": "integer"}}
+        )
+        assert py_type == "list[int]"
+        assert needs_json is False
+
+    def test_complex_object(self):
+        py_type, needs_json = _schema_to_python_type({"type": "object"})
+        assert py_type == "str"
+        assert needs_json is True
+
+    def test_complex_nested_array(self):
+        py_type, needs_json = _schema_to_python_type(
+            {"type": "array", "items": {"type": "object"}}
+        )
+        assert py_type == "str"
+        assert needs_json is True
+
+    def test_union_of_simple_types(self):
+        py_type, needs_json = _schema_to_python_type({"type": ["string", "null"]})
+        assert py_type == "str | None"
+        assert needs_json is False
 
 
 # ---------------------------------------------------------------------------
@@ -245,6 +259,79 @@ class TestToolFunctionSource:
         # Should escape single quotes in the description
         assert r"Fetch data from \'source\' API." in source
         # Generated code should compile
+        compile(source, "<test>", "exec")
+
+    def test_array_of_strings_parameter(self):
+        tool = mcp.types.Tool(
+            name="tag_items",
+            description="Tag multiple items.",
+            inputSchema={
+                "properties": {
+                    "item_id": {"type": "string"},
+                    "tags": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["item_id"],
+            },
+        )
+        source = _tool_function_source(tool)
+        # Should use list[str] type
+        assert "tags: list[str] = []" in source
+        # Should not have JSON parsing for simple arrays
+        assert "json.loads" not in source
+        compile(source, "<test>", "exec")
+
+    def test_complex_object_parameter(self):
+        tool = mcp.types.Tool(
+            name="create_user",
+            description="Create a user.",
+            inputSchema={
+                "properties": {
+                    "name": {"type": "string"},
+                    "metadata": {
+                        "type": "object",
+                        "properties": {
+                            "role": {"type": "string"},
+                            "dept": {"type": "string"},
+                        },
+                    },
+                },
+                "required": ["name"],
+            },
+        )
+        source = _tool_function_source(tool)
+        # Should use str type for complex object
+        assert "metadata: Annotated[str | None" in source
+        # Should include JSON schema in help (with escaped quotes)
+        assert "JSON Schema:" in source
+        assert '\\"type\\": \\"object\\"' in source
+        # Should have JSON parsing
+        assert "metadata_parsed = json.loads(metadata) if metadata else None" in source
+        # Should use parsed version in call
+        assert "'metadata': metadata_parsed" in source
+        compile(source, "<test>", "exec")
+
+    def test_nested_array_parameter(self):
+        tool = mcp.types.Tool(
+            name="batch_process",
+            description="Process batches.",
+            inputSchema={
+                "properties": {
+                    "batches": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {"id": {"type": "string"}},
+                        },
+                    },
+                },
+                "required": ["batches"],
+            },
+        )
+        source = _tool_function_source(tool)
+        # Nested arrays need JSON parsing
+        assert "batches: Annotated[str" in source
+        assert "JSON Schema:" in source
+        assert "batches_parsed = json.loads(batches)" in source
         compile(source, "<test>", "exec")
 
 
