@@ -334,20 +334,40 @@ def prepare_messages(
 
 
 def prepare_tools(
-    tools: Sequence[SamplingTool | Callable[..., Any]] | None,
+    tools: Sequence[SamplingTool | Callable[..., Any] | Any] | None,
 ) -> list[SamplingTool] | None:
-    """Convert tools to SamplingTool objects."""
+    """Convert tools to SamplingTool objects.
+
+    Accepts SamplingTool instances, FunctionTool instances, TransformedTool instances,
+    or plain callable functions. FunctionTool and TransformedTool are converted using
+    from_callable_tool(), while plain functions use from_function().
+
+    Args:
+        tools: Sequence of tools to prepare. Can be SamplingTool, FunctionTool,
+            TransformedTool, or plain callable functions.
+
+    Returns:
+        List of SamplingTool instances, or None if tools is None.
+    """
     if tools is None:
         return None
+
+    # Import here to avoid circular dependencies and check for tool types
+    from fastmcp.tools.function_tool import FunctionTool
+    from fastmcp.tools.tool_transform import TransformedTool
 
     sampling_tools: list[SamplingTool] = []
     for t in tools:
         if isinstance(t, SamplingTool):
             sampling_tools.append(t)
+        elif isinstance(t, (FunctionTool, TransformedTool)):
+            sampling_tools.append(SamplingTool.from_callable_tool(t))
         elif callable(t):
             sampling_tools.append(SamplingTool.from_function(t))
         else:
-            raise TypeError(f"Expected SamplingTool or callable, got {type(t)}")
+            raise TypeError(
+                f"Expected SamplingTool, FunctionTool, TransformedTool, or callable, got {type(t)}"
+            )
 
     return sampling_tools if sampling_tools else None
 
