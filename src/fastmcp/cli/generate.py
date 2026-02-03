@@ -98,10 +98,10 @@ def _schema_to_python_type(schema: dict[str, Any]) -> tuple[str, bool]:
 
 def _format_schema_for_help(schema: dict[str, Any]) -> str:
     """Format a JSON schema for display in help text."""
-    import json
+    import pydantic_core
 
     # Pretty print the schema, indented for help text
-    schema_str = json.dumps(schema, indent=2)
+    schema_str = pydantic_core.to_json(schema, indent=2).decode()
     # Indent each line for help text alignment
     lines = schema_str.split("\n")
     indented = "\n                          ".join(lines)
@@ -202,9 +202,9 @@ def _tool_function_source(tool: mcp.types.Tool) -> str:
             if default is not None:
                 # For complex types with defaults, serialize to JSON string
                 if needs_json:
-                    import json
+                    import pydantic_core
 
-                    default_str = json.dumps(default)
+                    default_str = pydantic_core.to_json(default, fallback=str).decode()
                     annotation = f'Annotated[{py_type}, cyclopts.Parameter(help="{help_escaped}")]'
                     param_lines.append(
                         f"    {safe_name}: {annotation} = {default_str!r},"

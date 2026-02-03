@@ -356,7 +356,8 @@ class TestToolFunctionSource:
         )
         source = _tool_function_source(tool)
         # Default should be JSON string, not Python dict
-        assert '= \'{"timeout": 30, "retry": true}\'' in source
+        # pydantic_core.to_json produces compact JSON
+        assert '= \'{"timeout":30,"retry":true}\'' in source
         # Should parse safely even with default
         assert "isinstance(options, str)" in source
         compile(source, "<test>", "exec")
