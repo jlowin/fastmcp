@@ -9,6 +9,7 @@ import hashlib
 from typing import Any, Final
 
 from mcp.shared.auth import OAuthClientInformationFull
+from mcp.shared.auth import InvalidRedirectUriError
 from pydantic import AnyUrl, BaseModel, Field
 
 from fastmcp.server.auth.redirect_validation import validate_redirect_uri
@@ -174,10 +175,10 @@ class ProxyDCRClient(OAuthClientInformationFull):
                 return redirect_uri
             
             # If patterns are explicitly configured (not None), reject non-matching URIs
-            if self.allowed_redirect_uri_patterns is not None:
-                from mcp.server.auth.provider import InvalidRedirectURIError
-                raise InvalidRedirectURIError(
-                    f"Redirect URI '{redirect_uri}' does not match allowed patterns: "
+            if self.allowed_redirect_uri_patterns is not None and any(self.allowed_redirect_uri_patterns):
+                
+                raise InvalidRedirectUriError(
+                    f"Redirect URI '{redirect_uri}' does not match allowed patterns: "  
                     f"{self.allowed_redirect_uri_patterns}"
                 )
                 
