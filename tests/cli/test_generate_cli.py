@@ -1,5 +1,6 @@
 """Tests for fastmcp generate-cli command."""
 
+import sys
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -396,6 +397,9 @@ class TestGenerateCliCommand:
         assert content != "existing"
         assert "async def greet(" in content
 
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="Unix executable bits N/A on Windows"
+    )
     @pytest.mark.usefixtures("_patch_client")
     async def test_file_is_executable(self, tmp_path: Path):
         output = tmp_path / "cli.py"

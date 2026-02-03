@@ -30,7 +30,7 @@ fastmcp generate-cli weather -f
 fastmcp generate-cli weather my_cli.py -f
 ```
 
-Name-based resolution works here too, so if you have a server configured in Claude Desktop, Cursor, or any other supported editor, you can reference it by name:
+Name-based resolution works here too, so if you have a server configured in Claude Desktop, Cursor, or any other supported editor, you can reference it by name. Run [`fastmcp discover`](/clients/cli#discovering-configured-servers) to see what's available.
 
 ```bash
 fastmcp generate-cli claude-code:my-server output.py
@@ -99,4 +99,8 @@ The most common edit is changing `CLIENT_SPEC`. If you generated from a local de
 
 Beyond that, it's a regular Python file. You can add commands, change the output formatting, integrate it into a larger application, or strip out the parts you don't need. The helper functions (`_call_tool`, `_print_tool_result`) are thin wrappers around `fastmcp.Client` that are easy to adapt.
 
-The generated script requires `fastmcp` and `cyclopts` as dependencies.
+The generated script requires `fastmcp` as a dependency. If the script lives outside a project that already has fastmcp installed, `uv run` is the easiest way to run it without permanent installation:
+
+```bash
+uv run --with fastmcp python cli.py call-tool get_forecast --city London
+```
