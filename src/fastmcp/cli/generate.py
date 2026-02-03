@@ -1,5 +1,6 @@
 """Generate a standalone CLI script from an MCP server's capabilities."""
 
+import re
 import sys
 import textwrap
 from pathlib import Path
@@ -7,6 +8,7 @@ from typing import Annotated, Any
 
 import cyclopts
 import mcp.types
+from mcp import McpError
 from rich.console import Console
 
 from fastmcp.cli.client import _build_client, resolve_server_spec
@@ -83,6 +85,14 @@ def serialize_transport(
 # ---------------------------------------------------------------------------
 
 
+def _to_python_identifier(name: str) -> str:
+    """Sanitize a string into a valid Python identifier."""
+    safe = re.sub(r"[^a-zA-Z0-9_]", "_", name)
+    if safe and safe[0].isdigit():
+        safe = f"_{safe}"
+    return safe or "_unnamed"
+
+
 def _tool_function_source(tool: mcp.types.Tool) -> str:
     """Generate the source for a single ``@call_tool_app.command`` function."""
     schema = tool.inputSchema
@@ -97,6 +107,7 @@ def _tool_function_source(tool: mcp.types.Tool) -> str:
         py_type = _schema_type_to_python(prop_schema)
         help_text = prop_schema.get("description", "")
         is_required = prop_name in required
+        safe_name = _to_python_identifier(prop_name)
 
         # Escape quotes in help text
         help_escaped = help_text.replace("\\", "\\\\").replace('"', '\\"')
@@ -105,22 +116,22 @@ def _tool_function_source(tool: mcp.types.Tool) -> str:
             annotation = (
                 f'Annotated[{py_type}, cyclopts.Parameter(help="{help_escaped}")]'
             )
-            param_lines.append(f"    {prop_name}: {annotation},")
+            param_lines.append(f"    {safe_name}: {annotation},")
         else:
             default = prop_schema.get("default")
             if default is not None:
                 annotation = (
                     f'Annotated[{py_type}, cyclopts.Parameter(help="{help_escaped}")]'
                 )
-                param_lines.append(f"    {prop_name}: {annotation} = {default!r},")
+                param_lines.append(f"    {safe_name}: {annotation} = {default!r},")
             else:
                 annotation = f'Annotated[{py_type} | None, cyclopts.Parameter(help="{help_escaped}")]'
-                param_lines.append(f"    {prop_name}: {annotation} = None,")
+                param_lines.append(f"    {safe_name}: {annotation} = None,")
 
-        call_args.append(f"{prop_name!r}: {prop_name}")
+        call_args.append(f"{prop_name!r}: {safe_name}")
 
-    # Function name: use tool name directly (preserve underscores)
-    fn_name = tool.name.replace("-", "_")
+    # Function name: sanitize to valid Python identifier
+    fn_name = _to_python_identifier(tool.name)
 
     # Docstring
     description = (tool.description or "").replace('"""', '\\"\\"\\"')
@@ -191,8 +202,9 @@ def generate_cli_script(
     lines.append("")
 
     # --- App setup ---
+    server_name_escaped = server_name.replace("\\", "\\\\").replace('"', '\\"')
     lines.append(
-        f'app = cyclopts.App(name="{app_name}", help="CLI for {server_name} MCP server")'
+        f'app = cyclopts.App(name="{app_name}", help="CLI for {server_name_escaped} MCP server")'
     )
     lines.append(
         'call_tool_app = cyclopts.App(name="call-tool", help="Call a tool on the server")'
@@ -454,7 +466,7 @@ async def generate_cli_command(
                 f"[dim]Discovered {len(tools)} tool(s) from {server_spec}[/dim]"
             )
 
-    except Exception as exc:
+    except (RuntimeError, TimeoutError, McpError, OSError) as exc:
         console.print(f"[bold red]Error:[/bold red] Could not connect: {exc}")
         sys.exit(1)
 
@@ -492,6 +504,7 @@ def _derive_server_name(server_spec: str) -> str:
 
     # Bare name or qualified name
     if ":" in server_spec:
-        return server_spec.split(":", 1)[1]
+        name = server_spec.split(":", 1)[1]
+        return name or server_spec.split(":", 1)[0]
 
     return server_spec

@@ -14,6 +14,7 @@ from fastmcp.cli.client import Client
 from fastmcp.cli.generate import (
     _derive_server_name,
     _schema_type_to_python,
+    _to_python_identifier,
     _tool_function_source,
     generate_cli_command,
     generate_cli_script,
@@ -63,6 +64,31 @@ class TestSchemaTypeToPython:
     def test_type_list(self):
         result = _schema_type_to_python({"type": ["string", "null"]})
         assert result == "str | None"
+
+
+# ---------------------------------------------------------------------------
+# _to_python_identifier
+# ---------------------------------------------------------------------------
+
+
+class TestToPythonIdentifier:
+    def test_plain_name(self):
+        assert _to_python_identifier("hello") == "hello"
+
+    def test_hyphens(self):
+        assert _to_python_identifier("get-forecast") == "get_forecast"
+
+    def test_dots_and_slashes(self):
+        assert _to_python_identifier("a.b/c") == "a_b_c"
+
+    def test_leading_digit(self):
+        assert _to_python_identifier("3d_render") == "_3d_render"
+
+    def test_spaces(self):
+        assert _to_python_identifier("my tool") == "my_tool"
+
+    def test_empty_string(self):
+        assert _to_python_identifier("") == "_unnamed"
 
 
 # ---------------------------------------------------------------------------
@@ -173,6 +199,27 @@ class TestToolFunctionSource:
         source = _tool_function_source(tool)
         assert "async def get_forecast(" in source
 
+    def test_sanitizes_tool_name(self):
+        tool = mcp.types.Tool(
+            name="my.tool/v2",
+            inputSchema={"properties": {}},
+        )
+        source = _tool_function_source(tool)
+        assert "async def my_tool_v2(" in source
+        assert "name='my.tool/v2'" in source
+
+    def test_sanitizes_param_name(self):
+        tool = mcp.types.Tool(
+            name="fetch",
+            inputSchema={
+                "properties": {"content-type": {"type": "string", "description": "CT"}},
+                "required": ["content-type"],
+            },
+        )
+        source = _tool_function_source(tool)
+        assert "content_type: Annotated[str" in source
+        assert "'content-type': content_type" in source
+
     def test_description_in_docstring(self):
         tool = mcp.types.Tool(
             name="greet",
@@ -203,6 +250,9 @@ class TestDeriveServerName:
 
     def test_url(self):
         assert _derive_server_name("http://localhost:8000/mcp") == "localhost"
+
+    def test_trailing_colon(self):
+        assert _derive_server_name("source:") == "source"
 
 
 # ---------------------------------------------------------------------------
@@ -292,6 +342,28 @@ class TestGenerateCliScript:
         )
         compile(script, "<generated>", "exec")
         assert "call_tool_app" in script
+
+    def test_compiles_with_unusual_names(self):
+        tools = [
+            mcp.types.Tool(
+                name="my.tool/v2",
+                description="A tool with dots and slashes",
+                inputSchema={
+                    "properties": {
+                        "content-type": {"type": "string", "description": "CT"},
+                    },
+                    "required": ["content-type"],
+                },
+            ),
+        ]
+        script = generate_cli_script(
+            server_name="test",
+            server_spec="test",
+            transport_code='"http://localhost:8000/mcp"',
+            extra_imports=set(),
+            tools=tools,
+        )
+        compile(script, "<generated>", "exec")
 
     def test_compiles_with_stdio_transport(self):
         transport = StdioTransport(command="fastmcp", args=["run", "server.py"])

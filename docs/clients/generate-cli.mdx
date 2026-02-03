@@ -87,6 +87,8 @@ Tool names are preserved exactly as the server defines them — underscores stay
 
 ## How It Works
 
+The generated script is a client, not a server. It doesn't bundle or embed the MCP server — it connects to it on every invocation. For URL-based servers, the server needs to be running. For stdio-based servers, the command specified in `CLIENT_SPEC` must be available on the system's `PATH`.
+
 At the top of the generated file, a `CLIENT_SPEC` variable holds the resolved transport: either a URL string or a `StdioTransport` with the command and arguments baked in. Every invocation connects through this spec, so the script works without any external configuration.
 
 Parameters are mapped from JSON Schema to Python annotations: `string` → `str`, `integer` → `int`, `number` → `float`, `boolean` → `bool`, `array` → `list`, `object` → `dict`. Union types (`anyOf`) become Python unions like `str | int`. Required parameters are mandatory flags; optional ones use their schema default or `None`, and `None` values are filtered out before calling the server — so you only pass what matters.
