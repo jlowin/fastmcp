@@ -67,6 +67,9 @@ class TestProxyDCRClient:
         # Not allowed by patterns - will fallback to base validation
         with pytest.raises(InvalidRedirectUriError):
             client.validate_redirect_uri(AnyUrl("http://127.0.0.1:3000"))
+        with pytest.raises(InvalidRedirectUriError):
+            client.validate_redirect_uri(AnyUrl("cursor://anysphere.cursor-mcp/oauth/callback"))
+
 
     def test_empty_list_allows_none(self):
         """Test that empty pattern list allows no URIs."""

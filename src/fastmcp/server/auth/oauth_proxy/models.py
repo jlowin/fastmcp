@@ -8,8 +8,7 @@ from __future__ import annotations
 import hashlib
 from typing import Any, Final
 
-from mcp.shared.auth import OAuthClientInformationFull
-from mcp.shared.auth import InvalidRedirectUriError
+from mcp.shared.auth import OAuthClientInformationFull, InvalidRedirectUriError
 from pydantic import AnyUrl, BaseModel, Field
 
 from fastmcp.server.auth.redirect_validation import validate_redirect_uri
