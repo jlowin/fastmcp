@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
+from contextlib import asynccontextmanager
 from typing import Any, Literal
 
 import httpx
@@ -94,6 +95,7 @@ class OpenAPIProvider(Provider):
         """
         super().__init__()
 
+        self._owns_client = client is None
         if client is None:
             client = self._create_default_client(openapi_spec)
         self._client = client
@@ -168,6 +170,15 @@ class OpenAPIProvider(Provider):
             )
         base_url = servers[0]["url"]
         return httpx.AsyncClient(base_url=base_url, timeout=DEFAULT_TIMEOUT)
+
+    @asynccontextmanager
+    async def lifespan(self) -> AsyncIterator[None]:
+        """Manage the lifecycle of the auto-created httpx client."""
+        if self._owns_client:
+            async with self._client:
+                yield
+        else:
+            yield
 
     def _generate_default_name(
         self, route: HTTPRoute, mcp_names_map: dict[str, str] | None = None
