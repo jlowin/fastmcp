@@ -172,7 +172,17 @@ class ProxyDCRClient(OAuthClientInformationFull):
                 allowed_patterns=self.allowed_redirect_uri_patterns,
             ):
                 return redirect_uri
-            # Fall back to normal validation if not in allowed patterns
+            
+            # If patterns are explicitly configured (not None), reject non-matching URIs
+            if self.allowed_redirect_uri_patterns is not None:
+                from mcp.server.auth.provider import InvalidRedirectURIError
+                raise InvalidRedirectURIError(
+                    f"Redirect URI '{redirect_uri}' does not match allowed patterns: "
+                    f"{self.allowed_redirect_uri_patterns}"
+                )
+            
+            # Only fall back to parent validation if no patterns configured (None)
             return super().validate_redirect_uri(redirect_uri)
+        
         # If no redirect_uri provided, use default behavior
         return super().validate_redirect_uri(redirect_uri)
