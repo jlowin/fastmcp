@@ -121,8 +121,6 @@ class TestProxyDCRClient:
         with pytest.raises(InvalidRedirectUriError):
             client.validate_redirect_uri(AnyUrl("http://localhost:5000"))
 
-
-
     def test_none_redirect_uri(self):
         """Test that None redirect URI uses default behavior."""
         client = ProxyDCRClient(
