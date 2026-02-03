@@ -31,6 +31,8 @@ from typing_extensions import TypeVar
 from fastmcp import settings
 from fastmcp.exceptions import ToolError
 from fastmcp.server.sampling.sampling_tool import SamplingTool
+from fastmcp.tools.function_tool import FunctionTool
+from fastmcp.tools.tool_transform import TransformedTool
 from fastmcp.utilities.json_schema import compress_schema
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.types import get_cached_typeadapter
@@ -334,7 +336,8 @@ def prepare_messages(
 
 
 def prepare_tools(
-    tools: Sequence[SamplingTool | Callable[..., Any] | Any] | None,
+    tools: Sequence[SamplingTool | FunctionTool | TransformedTool | Callable[..., Any]]
+    | None,
 ) -> list[SamplingTool] | None:
     """Convert tools to SamplingTool objects.
 
@@ -351,10 +354,6 @@ def prepare_tools(
     """
     if tools is None:
         return None
-
-    # Import here to avoid circular dependencies and check for tool types
-    from fastmcp.tools.function_tool import FunctionTool
-    from fastmcp.tools.tool_transform import TransformedTool
 
     sampling_tools: list[SamplingTool] = []
     for t in tools:
@@ -428,7 +427,8 @@ async def sample_step_impl(
     temperature: float | None = None,
     max_tokens: int | None = None,
     model_preferences: ModelPreferences | str | list[str] | None = None,
-    tools: Sequence[SamplingTool | Callable[..., Any]] | None = None,
+    tools: Sequence[SamplingTool | FunctionTool | TransformedTool | Callable[..., Any]]
+    | None = None,
     tool_choice: ToolChoiceOption | str | None = None,
     auto_execute_tools: bool = True,
     mask_error_details: bool | None = None,
@@ -540,7 +540,8 @@ async def sample_impl(
     temperature: float | None = None,
     max_tokens: int | None = None,
     model_preferences: ModelPreferences | str | list[str] | None = None,
-    tools: Sequence[SamplingTool | Callable[..., Any]] | None = None,
+    tools: Sequence[SamplingTool | FunctionTool | TransformedTool | Callable[..., Any]]
+    | None = None,
     result_type: type[ResultT] | None = None,
     mask_error_details: bool | None = None,
 ) -> SamplingResult[ResultT]:

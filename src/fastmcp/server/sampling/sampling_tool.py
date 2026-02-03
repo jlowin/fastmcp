@@ -10,6 +10,9 @@ from mcp.types import Tool as SDKTool
 from pydantic import ConfigDict
 
 from fastmcp.tools.function_parsing import ParsedFunction
+from fastmcp.tools.function_tool import FunctionTool
+from fastmcp.tools.tool import ToolResult
+from fastmcp.tools.tool_transform import TransformedTool
 from fastmcp.utilities.types import FastMCPBaseModel
 
 
@@ -111,7 +114,7 @@ class SamplingTool(FastMCPBaseModel):
     @classmethod
     def from_callable_tool(
         cls,
-        tool: Any,
+        tool: FunctionTool | TransformedTool,
         *,
         name: str | None = None,
         description: str | None = None,
@@ -135,7 +138,7 @@ class SamplingTool(FastMCPBaseModel):
             A SamplingTool that wraps the tool's functionality.
 
         Raises:
-            AttributeError: If the tool doesn't have required attributes (.fn, .name, etc.).
+            TypeError: If the tool is not a FunctionTool or TransformedTool.
 
         Examples:
             Convert a FunctionTool to SamplingTool:
@@ -153,11 +156,6 @@ class SamplingTool(FastMCPBaseModel):
                     tools=[SamplingTool.from_callable_tool(search)]
                 )
         """
-        # Import here to avoid circular dependencies
-        from fastmcp.tools.function_tool import FunctionTool
-        from fastmcp.tools.tool import ToolResult
-        from fastmcp.tools.tool_transform import TransformedTool
-
         # Validate that the tool is a supported type
         if not isinstance(tool, (FunctionTool, TransformedTool)):
             raise TypeError(
