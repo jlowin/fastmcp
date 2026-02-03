@@ -274,8 +274,9 @@ class TestToolFunctionSource:
             },
         )
         source = _tool_function_source(tool)
-        # Should use list[str] type
-        assert "tags: list[str] = []" in source
+        # Should use list[str] type with help metadata
+        assert "tags: Annotated[list[str]" in source
+        assert "= []" in source
         # Should not have JSON parsing for simple arrays
         assert "json.loads" not in source
         compile(source, "<test>", "exec")
@@ -304,8 +305,11 @@ class TestToolFunctionSource:
         # Should include JSON schema in help (with escaped quotes)
         assert "JSON Schema:" in source
         assert '\\"type\\": \\"object\\"' in source
-        # Should have JSON parsing
-        assert "metadata_parsed = json.loads(metadata) if metadata else None" in source
+        # Should have JSON parsing with isinstance check
+        assert (
+            "metadata_parsed = json.loads(metadata) if isinstance(metadata, str) else metadata"
+            in source
+        )
         # Should use parsed version in call
         assert "'metadata': metadata_parsed" in source
         compile(source, "<test>", "exec")
@@ -331,8 +335,46 @@ class TestToolFunctionSource:
         # Nested arrays need JSON parsing
         assert "batches: Annotated[str" in source
         assert "JSON Schema:" in source
-        assert "batches_parsed = json.loads(batches)" in source
+        assert (
+            "batches_parsed = json.loads(batches) if isinstance(batches, str) else batches"
+            in source
+        )
         compile(source, "<test>", "exec")
+
+    def test_complex_type_with_default(self):
+        """Test that complex types with defaults are JSON-serialized."""
+        tool = mcp.types.Tool(
+            name="configure",
+            inputSchema={
+                "properties": {
+                    "options": {
+                        "type": "object",
+                        "default": {"timeout": 30, "retry": True},
+                    },
+                },
+            },
+        )
+        source = _tool_function_source(tool)
+        # Default should be JSON string, not Python dict
+        assert '= \'{"timeout": 30, "retry": true}\'' in source
+        # Should parse safely even with default
+        assert "isinstance(options, str)" in source
+        compile(source, "<test>", "exec")
+
+    def test_name_collision_detection(self):
+        """Test that parameter name collisions are detected."""
+        tool = mcp.types.Tool(
+            name="test",
+            inputSchema={
+                "properties": {
+                    "content-type": {"type": "string"},
+                    "content_type": {"type": "string"},
+                },
+            },
+        )
+        # Should raise ValueError for collision
+        with pytest.raises(ValueError, match="both sanitize to 'content_type'"):
+            _tool_function_source(tool)
 
 
 # ---------------------------------------------------------------------------

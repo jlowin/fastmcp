@@ -164,12 +164,21 @@ def _tool_function_source(tool: mcp.types.Tool) -> str:
     param_lines: list[str] = []
     call_args: list[str] = []
     json_params: list[tuple[str, str]] = []  # (prop_name, safe_name)
+    seen_names: dict[str, str] = {}  # safe_name -> original prop_name
 
     for prop_name, prop_schema in properties.items():
         py_type, needs_json = _schema_to_python_type(prop_schema)
         help_text = prop_schema.get("description", "")
         is_required = prop_name in required
         safe_name = _to_python_identifier(prop_name)
+
+        # Check for name collisions after sanitization
+        if safe_name in seen_names:
+            raise ValueError(
+                f"Parameter name collision: '{prop_name}' and '{seen_names[safe_name]}' "
+                f"both sanitize to '{safe_name}'"
+            )
+        seen_names[safe_name] = prop_name
 
         # For complex types, add schema to help text
         if needs_json:
@@ -191,14 +200,23 @@ def _tool_function_source(tool: mcp.types.Tool) -> str:
         else:
             default = prop_schema.get("default")
             if default is not None:
-                annotation = (
-                    f'Annotated[{py_type}, cyclopts.Parameter(help="{help_escaped}")]'
-                )
-                param_lines.append(f"    {safe_name}: {annotation} = {default!r},")
+                # For complex types with defaults, serialize to JSON string
+                if needs_json:
+                    import json
+
+                    default_str = json.dumps(default)
+                    annotation = f'Annotated[{py_type}, cyclopts.Parameter(help="{help_escaped}")]'
+                    param_lines.append(
+                        f"    {safe_name}: {annotation} = {default_str!r},"
+                    )
+                else:
+                    annotation = f'Annotated[{py_type}, cyclopts.Parameter(help="{help_escaped}")]'
+                    param_lines.append(f"    {safe_name}: {annotation} = {default!r},")
             else:
                 # For list types, default to empty list; others default to None
                 if py_type.startswith("list["):
-                    param_lines.append(f"    {safe_name}: {py_type} = [],")
+                    annotation = f'Annotated[{py_type}, cyclopts.Parameter(help="{help_escaped}")]'
+                    param_lines.append(f"    {safe_name}: {annotation} = [],")
                 else:
                     annotation = f'Annotated[{py_type} | None, cyclopts.Parameter(help="{help_escaped}")]'
                     param_lines.append(f"    {safe_name}: {annotation} = None,")
@@ -230,7 +248,7 @@ def _tool_function_source(tool: mcp.types.Tool) -> str:
         lines.append("    # Parse JSON parameters")
         for _prop_name, safe_name in json_params:
             lines.append(
-                f"    {safe_name}_parsed = json.loads({safe_name}) if {safe_name} else None"
+                f"    {safe_name}_parsed = json.loads({safe_name}) if isinstance({safe_name}, str) else {safe_name}"
             )
         lines.append("")
 
