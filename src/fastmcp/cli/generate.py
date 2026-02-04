@@ -1,5 +1,6 @@
 """Generate a standalone CLI script from an MCP server's capabilities."""
 
+import keyword
 import re
 import sys
 import textwrap
@@ -51,13 +52,18 @@ def _is_simple_array(schema: dict[str, Any]) -> tuple[bool, str | None]:
 
     # Map JSON Schema type to Python type
     item_type = items.get("type", "string")
+    if isinstance(item_type, list):
+        return False, None
     type_map = {
         "string": "str",
         "integer": "int",
         "number": "float",
         "boolean": "bool",
     }
-    return True, type_map.get(item_type, "str")
+    py_type = type_map.get(item_type)
+    if py_type is None:
+        return False, None
+    return True, py_type
 
 
 def _schema_to_python_type(schema: dict[str, Any]) -> tuple[str, bool]:
@@ -151,7 +157,10 @@ def _to_python_identifier(name: str) -> str:
     safe = re.sub(r"[^a-zA-Z0-9_]", "_", name)
     if safe and safe[0].isdigit():
         safe = f"_{safe}"
-    return safe or "_unnamed"
+    safe = safe or "_unnamed"
+    if keyword.iskeyword(safe):
+        safe = f"{safe}_"
+    return safe
 
 
 def _tool_function_source(tool: mcp.types.Tool) -> str:
