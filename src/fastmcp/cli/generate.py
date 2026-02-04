@@ -5,9 +5,11 @@ import sys
 import textwrap
 from pathlib import Path
 from typing import Annotated, Any
+from urllib.parse import urlparse
 
 import cyclopts
 import mcp.types
+import pydantic_core
 from mcp import McpError
 from rich.console import Console
 
@@ -98,8 +100,6 @@ def _schema_to_python_type(schema: dict[str, Any]) -> tuple[str, bool]:
 
 def _format_schema_for_help(schema: dict[str, Any]) -> str:
     """Format a JSON schema for display in help text."""
-    import pydantic_core
-
     # Pretty print the schema, indented for help text
     schema_str = pydantic_core.to_json(schema, indent=2).decode()
     # Indent each line for help text alignment
@@ -202,8 +202,6 @@ def _tool_function_source(tool: mcp.types.Tool) -> str:
             if default is not None:
                 # For complex types with defaults, serialize to JSON string
                 if needs_json:
-                    import pydantic_core
-
                     default_str = pydantic_core.to_json(default, fallback=str).decode()
                     annotation = f'Annotated[{py_type}, cyclopts.Parameter(help="{help_escaped}")]'
                     param_lines.append(
@@ -612,8 +610,6 @@ def _derive_server_name(server_spec: str) -> str:
     """Derive a human-friendly name from a server spec."""
     # URL — use hostname
     if server_spec.startswith(("http://", "https://")):
-        from urllib.parse import urlparse
-
         parsed = urlparse(server_spec)
         return parsed.hostname or "server"
 
