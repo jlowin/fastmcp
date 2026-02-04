@@ -372,7 +372,8 @@ async def run_with_reload(
                 stdin=None,
                 stdout=None,
                 stderr=None,
-                start_new_session=True,
+                # Own process group so _terminate_process can kill the whole tree
+                start_new_session=sys.platform != "win32",
             )
 
             # Watch for either: file changes OR process death
