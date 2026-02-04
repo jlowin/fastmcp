@@ -156,7 +156,6 @@
               {
                 "group": "MCP Transforms",
                 "pages": [
-                  "servers/error-handling",
                   "servers/transforms/transforms",
                   "servers/transforms/namespace",
                   "servers/transforms/tool-transformation",
