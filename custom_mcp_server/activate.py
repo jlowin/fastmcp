@@ -65,6 +65,8 @@ async def test_server(name: str) -> tuple[str, bool, str]:
             source = config.script_path
         elif config.server_type in (ServerType.LOCAL_HTTP, ServerType.REMOTE_HTTP):
             source = config.http_url
+        elif config.server_type == ServerType.NPX:
+            source = config.to_client_config()
         else:
             return name, False, f"Unsupported server type: {config.server_type}"
 

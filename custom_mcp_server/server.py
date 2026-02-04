@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import socket
 import subprocess
 import sys
@@ -108,15 +109,23 @@ def read_file(path: str, max_lines: int = 100) -> dict[str, Any]:
 def run_command(command: str) -> dict[str, Any]:
     """Run a safe shell command (limited to read-only operations)."""
     safe_commands = {"ls", "pwd", "whoami", "date", "uname", "cat", "head", "tail", "wc"}
-    cmd_base = command.split()[0] if command else ""
+    command = command.strip()
+    if not command:
+        return {"error": "Command must not be empty"}
+
+    try:
+        args = shlex.split(command)
+    except ValueError as exc:
+        return {"error": f"Invalid command syntax: {exc}"}
+
+    cmd_base = args[0] if args else ""
 
     if cmd_base not in safe_commands:
         return {"error": f"Command '{cmd_base}' not in allowed list: {safe_commands}"}
 
     try:
         result = subprocess.run(
-            command,
-            shell=True,
+            args,
             capture_output=True,
             text=True,
             timeout=10,

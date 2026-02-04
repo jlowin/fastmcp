@@ -50,8 +50,16 @@ class RedundantMCPClient:
 
             try:
                 client = Client(source)
-                await client.__aenter__()
-                await client.ping()  # Verify connection
+                entered = False
+                try:
+                    await client.__aenter__()
+                    entered = True
+                    await client.ping()  # Verify connection
+                except Exception as e:
+                    if entered:
+                        await client.__aexit__(type(e), e, e.__traceback__)
+                    raise
+
                 self._active_client = client
                 self._transport_type = transport_type
                 print(f"Connected via {transport_type}")
