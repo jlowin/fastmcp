@@ -1,22 +1,43 @@
-# Custom MCP Server
+# Activ8-AI MCP Server
 
-A reference implementation for running MCP servers locally and on the web with redundant connections.
+A unified MCP (Model Context Protocol) infrastructure for the Activ8-AI organization. Provides 21 tools across 10 categories plus a registry of all organization MCP servers.
 
 ## Quick Start
 
 ```bash
-# Install dependencies (from repo root)
-uv sync
+# Install (from this directory)
+pip install -e .
 
-# Run locally (STDIO)
-uv run python custom_mcp_server/server.py
+# Or with uv
+uv pip install -e .
+
+# Run locally (STDIO) - for Claude Desktop
+activ8-mcp serve
 
 # Run as web server (HTTP)
-uv run python custom_mcp_server/server.py --http --port 8000
+activ8-mcp serve --http --port 8000
 
-# Test the client
-uv run python custom_mcp_server/client.py
+# List all registered servers
+activ8-mcp list
+
+# Generate Claude Desktop config
+activ8-mcp config
 ```
+
+## Tools Available (21 total)
+
+| Category | Tools |
+|----------|-------|
+| **System** | `get_system_info`, `get_env_var` |
+| **Files** | `list_directory`, `read_file` |
+| **Utility** | `run_command`, `calculate` |
+| **Git** | `git_status`, `git_diff` |
+| **Search** | `search_files`, `find_files` |
+| **JSON** | `parse_json`, `format_json` |
+| **HTTP** | `http_get`, `check_url` |
+| **Text** | `text_stats`, `regex_search`, `hash_text` |
+| **Network** | `check_port`, `dns_lookup` |
+| **DateTime** | `current_time`, `parse_timestamp` |
 
 ## Architecture
 
@@ -26,124 +47,64 @@ uv run python custom_mcp_server/client.py
 └─────────────────────────┬───────────────────────────────────┘
                           │
               ┌───────────▼───────────┐
-              │   RedundantMCPClient  │
-              │   (Failover Logic)    │
+              │    Activ8-AI MCP      │
+              │    Server + Registry  │
               └───────────┬───────────┘
                           │
         ┌─────────────────┼─────────────────┐
         ▼                 ▼                 ▼
 ┌───────────────┐ ┌───────────────┐ ┌───────────────┐
-│   In-Memory   │ │    STDIO      │ │     HTTP      │
-│  (Testing)    │ │   (Local)     │ │    (Web)      │
+│    STDIO      │ │     HTTP      │ │   External    │
+│ (Local/CLI)   │ │   (Web API)   │ │  MCP Servers  │
 └───────────────┘ └───────────────┘ └───────────────┘
-        │                 │                 │
-        └─────────────────┼─────────────────┘
-                          ▼
-              ┌───────────────────────┐
-              │    CustomMCP Server   │
-              │   - System tools      │
-              │   - File tools        │
-              │   - Utility tools     │
-              └───────────────────────┘
 ```
 
-## Transports
+## MCP Server Registry
 
-| Transport | Use Case | Command |
-|-----------|----------|---------|
-| **In-Memory** | Unit tests, development | `Client(mcp_server)` |
-| **STDIO** | Local processes, Claude Desktop | `uv run python server.py` |
-| **HTTP** | Web deployment, remote access | `uv run python server.py --http` |
+The `activ8_mcp.registry` module provides a unified registry of all Activ8-AI MCP servers:
 
-## Tools Available
-
-| Tool | Description |
-|------|-------------|
-| `get_system_info` | OS, Python version, timestamp |
-| `get_env_var` | Safe environment variable access |
-| `list_directory` | List files/directories |
-| `read_file` | Read text files (line-limited) |
-| `run_command` | Safe shell commands (whitelist) |
-| `calculate` | Math expression evaluation |
-
-## Redundant Connection Example
+| Server | Type | Tools | Use Case | Status |
+|--------|------|-------|----------|--------|
+| **teamwork** | NPX | 30 | Project Management | Enabled |
+| **notion** | NPX | 8 | Documentation | Enabled |
+| **firecrawl** | NPX | 7 | Web Scraping | Enabled |
+| **desktop_commander** | NPX | 15 | Terminal/Dev | Enabled |
+| **docker_hub** | NPX | 10 | Containers | Disabled |
 
 ```python
-from client import RedundantMCPClient
-from server import mcp
+from activ8_mcp import MCP_REGISTRY, get_enabled_servers, get_servers_by_use_case, UseCase
 
-client = RedundantMCPClient(
-    in_memory_server=mcp,                    # Priority 1: fastest
-    stdio_script="./server.py",              # Priority 2: local
-    http_url="http://localhost:8000/mcp",    # Priority 3: remote
-)
+# Get all enabled servers
+enabled = get_enabled_servers()
 
-await client.connect(preferred="memory")  # Tries in order until success
-result = await client.call_tool("get_system_info", {})
-await client.disconnect()
+# Get servers for a specific use case
+project_servers = get_servers_by_use_case(UseCase.PROJECT_MGMT)
 ```
 
-## Integration with External MCP
+## Claude Desktop Integration
 
-If you have an existing custom MCP elsewhere:
-
-```python
-from fastmcp import Client
-
-# Connect to your external MCP
-async with Client("http://your-mcp-server.com/mcp") as client:
-    tools = await client.list_tools()
-    result = await client.call_tool("your_tool", {"arg": "value"})
-```
-
-Or mount it into this server:
-
-```python
-from fastmcp import FastMCP
-
-mcp = FastMCP("Combined")
-mcp.mount("http://your-mcp-server.com/mcp", prefix="external")
-# Now tools are: external_your_tool, external_other_tool, etc.
-```
-
-## Activ8-AI MCP Server Registry
-
-The `mcp_registry.py` provides a central configuration for all Activ8-AI MCP servers:
-
-| Server | Type | Use Case | Status |
-|--------|------|----------|--------|
-| **custom** | Local | Development, Testing | ✅ Enabled |
-| **echo** | Local | Testing | ✅ Enabled |
-| **memory** | Local | AI Memory | 🔐 Needs config |
-| **smart_home** | Local | IoT | 🔐 Needs config |
-| **atproto** | Local | Social Media | 🔐 Needs config |
-| **teamwork** | NPX | Project Management | 🔐 Needs config |
-| **notion** | NPX | Documentation | 🔐 Needs config |
-| **fastmcp_docs** | Remote | Reference | ✅ Enabled |
-
-## Activation CLI
+Generate configuration for Claude Desktop:
 
 ```bash
-# List all servers and status
-uv run python custom_mcp_server/activate.py --list
-
-# Test server connections
-uv run python custom_mcp_server/activate.py --test custom
-uv run python custom_mcp_server/activate.py --test-all
-
-# Generate Claude Desktop config
-uv run python custom_mcp_server/activate.py --claude-desktop
-
-# Run server in HTTP mode
-uv run python custom_mcp_server/activate.py --serve custom --port 8000
-
-# Connect to multiple servers
-uv run python custom_mcp_server/activate.py --connect custom teamwork
+activ8-mcp config
 ```
 
-## Enabling Servers
+This outputs JSON to add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
-To enable servers that require authentication, set environment variables:
+```json
+{
+  "mcpServers": {
+    "activ8": {
+      "command": "activ8-mcp",
+      "args": ["serve"]
+    }
+  }
+}
+```
+
+## Environment Variables
+
+For servers that require authentication, set these environment variables:
 
 ```bash
 # Teamwork
@@ -152,11 +113,64 @@ export TEAMWORK_USER="email@example.com"
 export TEAMWORK_PASS="password"
 
 # Notion
-export NOTION_TOKEN="secret_xxx"
+export NOTION_TOKEN="secret_..."
 
-# Bluesky/ATProto
-export ATPROTO_HANDLE="you.bsky.social"
-export ATPROTO_PASSWORD="app-password"
+# Firecrawl
+export FIRECRAWL_API_KEY="fc-..."
 ```
 
-Then edit `mcp_registry.py` and set `enabled=True` for the servers you want to use.
+## Development
+
+```bash
+# Install dev dependencies
+pip install -e ".[dev]"
+
+# Run tests
+pytest
+
+# Lint
+ruff check .
+
+# Format
+ruff format .
+```
+
+## Package Structure
+
+```
+activ8-mcp/
+├── pyproject.toml          # Package configuration
+├── README.md               # This file
+├── src/
+│   └── activ8_mcp/
+│       ├── __init__.py     # Package exports
+│       ├── server.py       # MCP server with 21 tools
+│       ├── registry.py     # Unified server registry
+│       └── cli.py          # Command-line interface
+└── tests/
+    └── test_server.py      # Server tests
+```
+
+## Extraction to Standalone Repo
+
+This package is designed to be extracted to its own repository:
+
+```bash
+# From parent directory
+mkdir activ8-mcp
+cp -r custom_mcp_server/* activ8-mcp/
+cd activ8-mcp
+
+# Initialize git
+git init
+git add .
+git commit -m "Initial commit: Activ8-AI MCP Server"
+
+# Push to new repo
+git remote add origin git@github.com:Activ8-AI/activ8-mcp.git
+git push -u origin main
+```
+
+## License
+
+MIT
