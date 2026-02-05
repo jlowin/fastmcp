@@ -26,7 +26,7 @@ from typing import Any, Literal
 from urllib.parse import urlparse
 
 import httpx
-from pydantic import AnyHttpUrl, BaseModel, Field, field_validator
+from pydantic import AnyHttpUrl, AnyUrl, BaseModel, Field, field_validator
 
 from fastmcp.server.auth.ssrf import format_ip_for_url
 from fastmcp.utilities.logging import get_logger
@@ -808,17 +808,24 @@ class CIMDClientManager:
         from fastmcp.server.auth.oauth_proxy import OAuthProxyClient
 
         # Create synthetic client from CIMD document
-        # Use proxy's allowed_redirect_uri_patterns, NOT the CIMD document's redirect_uris
+        # Pass CIMD redirect_uris for validation alongside proxy's patterns
+        # Convert str URIs to AnyUrl for type compatibility with OAuthClientInformationFull
+        redirect_uris = (
+            [AnyUrl(uri) for uri in cimd_doc.redirect_uris]
+            if cimd_doc.redirect_uris
+            else None
+        )
         client = OAuthProxyClient(
             client_id=client_id_url,
             client_secret=None,
-            redirect_uris=None,
+            redirect_uris=redirect_uris,
             grant_types=cimd_doc.grant_types,
             scope=cimd_doc.scope or self.default_scope,
             token_endpoint_auth_method=cimd_doc.token_endpoint_auth_method,
             allowed_redirect_uri_patterns=self.allowed_redirect_uri_patterns,
             client_name=cimd_doc.client_name,
             cimd_document=cimd_doc,
+            cimd_fetched_at=time.time(),
         )
 
         self.logger.debug(

@@ -11,7 +11,6 @@ from fastmcp.server.auth.ssrf import (
     SSRFError,
     SSRFFetchError,
     is_ip_allowed,
-    resolve_hostname,
     ssrf_safe_fetch,
     validate_url,
 )
@@ -385,7 +384,9 @@ class TestStreamingResponseSizeLimit:
             mock_stream.__aexit__ = AsyncMock(return_value=None)
 
             # aiter_bytes should never be called if Content-Length is checked
-            mock_stream.aiter_bytes = MagicMock(side_effect=AssertionError("Should not stream"))
+            mock_stream.aiter_bytes = MagicMock(
+                side_effect=AssertionError("Should not stream")
+            )
 
             mock_client = AsyncMock()
             mock_client.stream = MagicMock(return_value=mock_stream)

@@ -47,7 +47,11 @@ from mcp.server.auth.settings import (
     ClientRegistrationOptions,
     RevocationOptions,
 )
-from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
+from mcp.shared.auth import (
+    InvalidRedirectUriError,
+    OAuthClientInformationFull,
+    OAuthToken,
+)
 from pydantic import AnyHttpUrl, AnyUrl, BaseModel, Field, SecretStr
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse
@@ -196,6 +200,12 @@ def _hash_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
+# Default TTL for cached CIMD clients (1 hour)
+# After this time, the CIMD document will be refetched to pick up changes
+# like JWKS rotation or redirect_uri updates
+CIMD_CACHE_TTL: Final[float] = 3600.0
+
+
 class OAuthProxyClient(OAuthClientInformationFull):
     """Client for OAuth proxy supporting both DCR and CIMD clients.
 
@@ -226,25 +236,47 @@ class OAuthProxyClient(OAuthClientInformationFull):
     allowed_redirect_uri_patterns: list[str] | None = Field(default=None)
     client_name: str | None = Field(default=None)
     cimd_document: CIMDDocument | None = Field(default=None)
+    cimd_fetched_at: float | None = Field(default=None)
 
     def validate_redirect_uri(self, redirect_uri: AnyUrl | None) -> AnyUrl:
-        """Validate redirect URI against allowed patterns.
+        """Validate redirect URI against proxy patterns and optionally CIMD redirect_uris.
 
-        Since we're acting as a proxy and clients register dynamically,
-        we validate their redirect URIs against configurable patterns.
-        This is essential for cached token scenarios where the client may
-        reconnect with a different port.
+        For CIMD clients: validates against BOTH the CIMD document's redirect_uris
+        AND the proxy's allowed patterns (if configured). Both must pass.
+
+        For DCR clients: validates against proxy patterns first, falling back to
+        base validation (registered redirect_uris) if patterns don't match.
+
+        This dual validation ensures CIMD clients can't bypass their declared
+        redirect_uris by just matching proxy patterns.
         """
         if redirect_uri is not None:
-            # Validate against allowed patterns
-            if validate_redirect_uri(
+            is_cimd_client = self.cimd_document is not None
+
+            # For CIMD clients with declared redirect_uris, validate against them
+            if is_cimd_client and self.redirect_uris is not None:
+                super().validate_redirect_uri(redirect_uri)
+
+            # Validate against proxy patterns
+            pattern_matches = validate_redirect_uri(
                 redirect_uri=redirect_uri,
                 allowed_patterns=self.allowed_redirect_uri_patterns,
-            ):
-                return redirect_uri
-            # Fall back to normal validation if not in allowed patterns
-            return super().validate_redirect_uri(redirect_uri)
-        # If no redirect_uri provided, use default behavior
+            )
+
+            if is_cimd_client:
+                # CIMD clients MUST match proxy patterns (both CIMD URIs and patterns required)
+                if not pattern_matches:
+                    raise InvalidRedirectUriError(
+                        f"Redirect URI '{redirect_uri}' not allowed by server patterns"
+                    )
+            else:
+                # DCR clients: patterns match OR fallback to base validation
+                if not pattern_matches:
+                    return super().validate_redirect_uri(redirect_uri)
+
+            return redirect_uri
+
+        # No redirect_uri provided - use default behavior
         return super().validate_redirect_uri(redirect_uri)
 
 
@@ -1043,9 +1075,29 @@ class OAuthProxy(OAuthProvider):
         For CIMD clients, this is the HTTPS URL where their metadata document is hosted.
 
         For unregistered clients (and CIMD URLs when CIMD is disabled), returns None.
+
+        CIMD clients are refreshed after CIMD_CACHE_TTL to pick up changes like
+        JWKS rotation or redirect_uri updates.
         """
         # Check storage first (both DCR and CIMD clients are stored)
         if client := await self._client_store.get(key=client_id):
+            # Check if CIMD client needs refresh
+            if client.cimd_document is not None and client.cimd_fetched_at is not None:
+                age = time.time() - client.cimd_fetched_at
+                if age > CIMD_CACHE_TTL:
+                    logger.debug(
+                        "CIMD client %s cache expired (age=%.1fs), refreshing",
+                        client_id,
+                        age,
+                    )
+                    if refreshed := await self._get_cimd_client(client_id):
+                        await self._client_store.put(key=client_id, value=refreshed)
+                        return refreshed
+                    # If refresh fails, continue with cached client
+                    logger.warning(
+                        "CIMD refresh failed for %s, using cached client", client_id
+                    )
+
             if client.allowed_redirect_uri_patterns is None:
                 client.allowed_redirect_uri_patterns = (
                     self._allowed_client_redirect_uris

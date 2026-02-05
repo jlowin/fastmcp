@@ -626,3 +626,145 @@ class TestCIMDClientManager:
         assert client is None
 
     # Trust policy and consent bypass tests removed - functionality removed from CIMD
+
+
+class TestCIMDRedirectUriEnforcement:
+    """Tests for CIMD redirect_uri validation security.
+
+    Verifies that CIMD clients enforce BOTH:
+    1. CIMD document's redirect_uris
+    2. Proxy's allowed_redirect_uri_patterns
+    """
+
+    @pytest.fixture
+    def mock_dns(self):
+        """Mock DNS resolution to return test public IP."""
+        with patch(
+            "fastmcp.server.auth.cimd._resolve_hostname",
+            return_value=[TEST_PUBLIC_IP],
+        ):
+            yield
+
+    async def test_cimd_redirect_uris_enforced(self, httpx_mock, mock_dns):
+        """Test that CIMD document redirect_uris are enforced.
+
+        Even if proxy patterns allow http://localhost:*, a CIMD client
+        should only accept URIs declared in its document.
+        """
+        from mcp.shared.auth import InvalidRedirectUriError
+        from pydantic import AnyUrl
+
+        from fastmcp.server.auth.cimd import CIMDClientManager
+
+        url = "https://example.com/client.json"
+        doc_data = {
+            "client_id": url,
+            "client_name": "Test App",
+            # CIMD only declares port 3000
+            "redirect_uris": ["http://localhost:3000/callback"],
+            "token_endpoint_auth_method": "none",
+        }
+        httpx_mock.add_response(
+            json=doc_data,
+            headers={"content-length": "200"},
+        )
+
+        # Proxy allows any localhost port
+        manager = CIMDClientManager(
+            enable_cimd=True,
+            allowed_redirect_uri_patterns=["http://localhost:*"],
+        )
+        client = await manager.get_client(url)
+        assert client is not None
+
+        # Declared URI should work
+        validated = client.validate_redirect_uri(
+            AnyUrl("http://localhost:3000/callback")
+        )
+        assert str(validated) == "http://localhost:3000/callback"
+
+        # Different port should fail (not in CIMD redirect_uris)
+        with pytest.raises(InvalidRedirectUriError):
+            client.validate_redirect_uri(AnyUrl("http://localhost:4000/callback"))
+
+    async def test_proxy_patterns_also_checked(self, httpx_mock, mock_dns):
+        """Test that proxy patterns are checked even for CIMD clients.
+
+        A CIMD client should not be able to use a redirect_uri that's
+        in its document but not allowed by proxy patterns.
+        """
+        from mcp.shared.auth import InvalidRedirectUriError
+        from pydantic import AnyUrl
+
+        from fastmcp.server.auth.cimd import CIMDClientManager
+
+        url = "https://example.com/client.json"
+        doc_data = {
+            "client_id": url,
+            "client_name": "Test App",
+            # CIMD declares both localhost and external URI
+            "redirect_uris": [
+                "http://localhost:3000/callback",
+                "https://evil.com/callback",
+            ],
+            "token_endpoint_auth_method": "none",
+        }
+        httpx_mock.add_response(
+            json=doc_data,
+            headers={"content-length": "200"},
+        )
+
+        # Proxy only allows localhost
+        manager = CIMDClientManager(
+            enable_cimd=True,
+            allowed_redirect_uri_patterns=["http://localhost:*"],
+        )
+        client = await manager.get_client(url)
+        assert client is not None
+
+        # Localhost should work (in CIMD and matches pattern)
+        validated = client.validate_redirect_uri(
+            AnyUrl("http://localhost:3000/callback")
+        )
+        assert str(validated) == "http://localhost:3000/callback"
+
+        # Evil.com should fail (in CIMD but doesn't match proxy patterns)
+        with pytest.raises(InvalidRedirectUriError):
+            client.validate_redirect_uri(AnyUrl("https://evil.com/callback"))
+
+    async def test_cimd_without_redirect_uris_uses_patterns(self, httpx_mock, mock_dns):
+        """Test that CIMD clients without redirect_uris use proxy patterns.
+
+        When CIMD document has no redirect_uris, validation falls back to
+        the proxy's allowed_redirect_uri_patterns.
+        """
+        from pydantic import AnyUrl
+
+        from fastmcp.server.auth.cimd import CIMDClientManager
+
+        url = "https://example.com/client.json"
+        doc_data = {
+            "client_id": url,
+            "client_name": "Test App",
+            # No redirect_uris declared
+            "token_endpoint_auth_method": "none",
+        }
+        httpx_mock.add_response(
+            json=doc_data,
+            headers={"content-length": "200"},
+        )
+
+        # Proxy allows any localhost port
+        manager = CIMDClientManager(
+            enable_cimd=True,
+            allowed_redirect_uri_patterns=["http://localhost:*"],
+        )
+        client = await manager.get_client(url)
+        assert client is not None
+        assert client.redirect_uris is None
+
+        # Any localhost port should work (no CIMD restriction, proxy allows)
+        validated = client.validate_redirect_uri(
+            AnyUrl("http://localhost:5000/callback")
+        )
+        assert str(validated) == "http://localhost:5000/callback"

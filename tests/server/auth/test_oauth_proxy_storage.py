@@ -206,5 +206,6 @@ class TestOAuthProxyStorage:
                 "client_secret_expires_at": None,
                 "allowed_redirect_uri_patterns": None,
                 "cimd_document": None,
+                "cimd_fetched_at": None,
             }
         )
