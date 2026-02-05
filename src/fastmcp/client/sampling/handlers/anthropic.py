@@ -19,8 +19,8 @@ from mcp.types import (
 )
 
 try:
-    from anthropic import AsyncAnthropic, NotGiven
-    from anthropic._types import NOT_GIVEN
+    from anthropic import AsyncAnthropic, Omit
+    from anthropic._types import omit
     from anthropic.types import (
         Message,
         MessageParam,
@@ -81,33 +81,31 @@ class AnthropicSamplingHandler:
         model: ModelParam = self._select_model_from_preferences(params.modelPreferences)
 
         # Convert MCP tools to Anthropic format
-        anthropic_tools: list[ToolParam] | NotGiven = NOT_GIVEN
+        anthropic_tools: list[ToolParam] | Omit = omit
         if params.tools:
             anthropic_tools = self._convert_tools_to_anthropic(params.tools)
 
         # Convert tool_choice to Anthropic format
         # Returns None if mode is "none", signaling tools should be omitted
-        anthropic_tool_choice: ToolChoiceParam | NotGiven = NOT_GIVEN
+        anthropic_tool_choice: ToolChoiceParam | Omit = omit
         if params.toolChoice:
             converted = self._convert_tool_choice_to_anthropic(params.toolChoice)
             if converted is None:
                 # tool_choice="none" means don't use tools
-                anthropic_tools = NOT_GIVEN
+                anthropic_tools = omit
             else:
                 anthropic_tool_choice = converted
 
         response = await self.client.messages.create(
             model=model,
             messages=anthropic_messages,
-            system=(
-                params.systemPrompt if params.systemPrompt is not None else NOT_GIVEN
-            ),
+            system=(params.systemPrompt if params.systemPrompt is not None else omit),
             temperature=(
-                params.temperature if params.temperature is not None else NOT_GIVEN
+                params.temperature if params.temperature is not None else omit
             ),
             max_tokens=params.maxTokens,
             stop_sequences=(
-                params.stopSequences if params.stopSequences is not None else NOT_GIVEN
+                params.stopSequences if params.stopSequences is not None else omit
             ),
             tools=anthropic_tools,
             tool_choice=anthropic_tool_choice,
