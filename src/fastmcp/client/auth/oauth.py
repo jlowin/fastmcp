@@ -152,6 +152,8 @@ class OAuth(OAuthClientProvider):
         additional_client_metadata: dict[str, Any] | None = None,
         callback_port: int | None = None,
         httpx_client_factory: McpHttpClientFactory | None = None,
+        client_id: str | None = None,
+        client_secret: str | None = None,
     ):
         """
         Initialize OAuth client provider for an MCP server.
@@ -164,6 +166,9 @@ class OAuth(OAuthClientProvider):
             token_storage: An AsyncKeyValue-compatible token store, tokens are stored in memory if not provided
             additional_client_metadata: Extra fields for OAuthClientMetadata
             callback_port: Fixed port for OAuth callback (default: random available port)
+            client_id: Pre-registered OAuth client ID. When provided, skips dynamic
+                client registration and uses these static credentials instead.
+            client_secret: OAuth client secret (optional, used with client_id)
         """
         # Normalize the MCP URL (strip trailing slashes for consistency)
         mcp_url = mcp_url.rstrip("/")
@@ -203,11 +208,30 @@ class OAuth(OAuthClientProvider):
                 + "See https://gofastmcp.com/clients/auth/oauth#token-storage for details.",
                 stacklevel=2,
             )
-
+                    
         # Use full URL for token storage to properly separate tokens per MCP endpoint
         self.token_storage_adapter: TokenStorageAdapter = TokenStorageAdapter(
             async_key_value=token_storage, server_url=mcp_url
         )
+        
+        # Handle static client credentials (bypasses dynamic client registration)
+        # If client_id is provided, we construct OAuthClientInformationFull and inject
+        # it during initialization to prevent the SDK from performing dynamic registration
+        if client_id and client_secret:
+            logger.info(
+                "Using static OAuth client credentials (client_id provided)"
+            )
+            # Create the full client information for static credentials
+            self._static_client_info = OAuthClientInformationFull(
+                client_id=client_id,
+                client_secret=client_secret,
+            )
+            # Inject static client info into token storage
+            anyio.run(
+                self.token_storage_adapter.set_client_info, 
+                self._static_client_info
+            )
+            
 
         # Store full MCP URL for use in callback_handler display
         self.mcp_url = mcp_url
@@ -225,6 +249,12 @@ class OAuth(OAuthClientProvider):
         """Load stored tokens and client info, properly setting token expiry."""
         # Call parent's _initialize to load tokens and client info
         await super()._initialize()
+
+        # If static client credentials were provided, inject them into the context
+        # This prevents the SDK's dynamic client registration flow (in async_auth_flow)
+        # from executing, since it checks `if not self.context.client_info`
+        if self._static_client_info is not None:
+            self.context.client_info = self._static_client_info
 
         # If tokens were loaded and have expires_in, update the context's token_expiry_time
         if self.context.current_tokens and self.context.current_tokens.expires_in:
