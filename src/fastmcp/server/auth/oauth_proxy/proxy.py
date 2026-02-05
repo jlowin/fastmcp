@@ -18,15 +18,12 @@ production use with enterprise identity providers.
 
 from __future__ import annotations
 
-import base64
 import hashlib
-import hmac
-import json
 import secrets
 import time
 from base64 import urlsafe_b64encode
-from typing import Any, Final
-from urllib.parse import urlencode, urlparse
+from typing import Any
+from urllib.parse import urlencode, urlparse, urlunparse
 
 import httpx
 from authlib.common.security import generate_token
@@ -47,12 +44,8 @@ from mcp.server.auth.settings import (
     ClientRegistrationOptions,
     RevocationOptions,
 )
-from mcp.shared.auth import (
-    InvalidRedirectUriError,
-    OAuthClientInformationFull,
-    OAuthToken,
-)
-from pydantic import AnyHttpUrl, AnyUrl, BaseModel, Field, SecretStr
+from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
+from pydantic import AnyHttpUrl, AnyUrl, SecretStr
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse
 from starlette.routing import Route
@@ -60,543 +53,56 @@ from typing_extensions import override
 
 from fastmcp import settings
 from fastmcp.server.auth.auth import OAuthProvider, TokenVerifier
-from fastmcp.server.auth.cimd import CIMDDocument
 from fastmcp.server.auth.handlers.authorize import AuthorizationHandler
 from fastmcp.server.auth.jwt_issuer import (
     JWTIssuer,
     derive_jwt_key,
 )
-from fastmcp.server.auth.redirect_validation import (
-    validate_redirect_uri,
+from fastmcp.server.auth.oauth_proxy.consent import ConsentMixin
+from fastmcp.server.auth.oauth_proxy.models import (
+    DEFAULT_ACCESS_TOKEN_EXPIRY_NO_REFRESH_SECONDS,
+    DEFAULT_ACCESS_TOKEN_EXPIRY_SECONDS,
+    DEFAULT_AUTH_CODE_EXPIRY_SECONDS,
+    HTTP_TIMEOUT_SECONDS,
+    ClientCode,
+    JTIMapping,
+    OAuthTransaction,
+    ProxyDCRClient,
+    RefreshTokenMetadata,
+    UpstreamTokenSet,
+    _hash_token,
 )
+from fastmcp.server.auth.oauth_proxy.ui import create_error_html
 from fastmcp.utilities.logging import get_logger
-from fastmcp.utilities.ui import (
-    BUTTON_STYLES,
-    DETAIL_BOX_STYLES,
-    DETAILS_STYLES,
-    INFO_BOX_STYLES,
-    REDIRECT_SECTION_STYLES,
-    TOOLTIP_STYLES,
-    create_logo,
-    create_page,
-    create_secure_html_response,
-)
 
 logger = get_logger(__name__)
 
 
-# -------------------------------------------------------------------------
-# Constants
-# -------------------------------------------------------------------------
+def _normalize_resource_url(url: str) -> str:
+    """Normalize a resource URL by removing query parameters and trailing slashes.
 
-# Default token expiration times
-DEFAULT_ACCESS_TOKEN_EXPIRY_SECONDS: Final[int] = 60 * 60  # 1 hour
-DEFAULT_ACCESS_TOKEN_EXPIRY_NO_REFRESH_SECONDS: Final[int] = (
-    60 * 60 * 24 * 365
-)  # 1 year
-DEFAULT_AUTH_CODE_EXPIRY_SECONDS: Final[int] = 5 * 60  # 5 minutes
-
-# HTTP client timeout
-HTTP_TIMEOUT_SECONDS: Final[int] = 30
-
-
-# -------------------------------------------------------------------------
-# Pydantic Models
-# -------------------------------------------------------------------------
-
-
-class OAuthTransaction(BaseModel):
-    """OAuth transaction state for consent flow.
-
-    Stored server-side to track active authorization flows with client context.
-    Includes CSRF tokens for consent protection per MCP security best practices.
-    """
-
-    txn_id: str
-    client_id: str
-    client_redirect_uri: str
-    client_state: str
-    code_challenge: str | None
-    code_challenge_method: str
-    scopes: list[str]
-    created_at: float
-    resource: str | None = None
-    proxy_code_verifier: str | None = None
-    csrf_token: str | None = None
-    csrf_expires_at: float | None = None
-
-
-class ClientCode(BaseModel):
-    """Client authorization code with PKCE and upstream tokens.
-
-    Stored server-side after upstream IdP callback. Contains the upstream
-    tokens bound to the client's PKCE challenge for secure token exchange.
-    """
-
-    code: str
-    client_id: str
-    redirect_uri: str
-    code_challenge: str | None
-    code_challenge_method: str
-    scopes: list[str]
-    idp_tokens: dict[str, Any]
-    expires_at: float
-    created_at: float
-
-
-class UpstreamTokenSet(BaseModel):
-    """Stored upstream OAuth tokens from identity provider.
-
-    These tokens are obtained from the upstream provider (Google, GitHub, etc.)
-    and stored in plaintext within this model. Encryption is handled transparently
-    at the storage layer via FernetEncryptionWrapper. Tokens are never exposed to MCP clients.
-    """
-
-    upstream_token_id: str  # Unique ID for this token set
-    access_token: str  # Upstream access token
-    refresh_token: str | None  # Upstream refresh token
-    refresh_token_expires_at: (
-        float | None
-    )  # Unix timestamp when refresh token expires (if known)
-    expires_at: float  # Unix timestamp when access token expires
-    token_type: str  # Usually "Bearer"
-    scope: str  # Space-separated scopes
-    client_id: str  # MCP client this is bound to
-    created_at: float  # Unix timestamp
-    raw_token_data: dict[str, Any] = Field(default_factory=dict)  # Full token response
-
-
-class JTIMapping(BaseModel):
-    """Maps FastMCP token JTI to upstream token ID.
-
-    This allows stateless JWT validation while still being able to look up
-    the corresponding upstream token when tools need to access upstream APIs.
-    """
-
-    jti: str  # JWT ID from FastMCP-issued token
-    upstream_token_id: str  # References UpstreamTokenSet
-    created_at: float  # Unix timestamp
-
-
-class RefreshTokenMetadata(BaseModel):
-    """Metadata for a refresh token, stored keyed by token hash.
-
-    We store only metadata (not the token itself) for security - if storage
-    is compromised, attackers get hashes they can't reverse into usable tokens.
-    """
-
-    client_id: str
-    scopes: list[str]
-    expires_at: int | None = None
-    created_at: float
-
-
-def _hash_token(token: str) -> str:
-    """Hash a token for secure storage lookup.
-
-    Uses SHA-256 to create a one-way hash. The original token cannot be
-    recovered from the hash, providing defense in depth if storage is compromised.
-    """
-    return hashlib.sha256(token.encode()).hexdigest()
-
-
-# Default TTL for cached CIMD clients (1 hour)
-# After this time, the CIMD document will be refetched to pick up changes
-# like JWKS rotation or redirect_uri updates
-CIMD_CACHE_TTL: Final[float] = 3600.0
-
-
-class OAuthProxyClient(OAuthClientInformationFull):
-    """Client for OAuth proxy supporting both DCR and CIMD clients.
-
-    This special client class is critical for the OAuth proxy to work correctly
-    with both Dynamic Client Registration (DCR) and CIMD (Client ID Metadata
-    Document) clients. Here's why it exists:
-
-    Problem:
-    --------
-    When MCP clients use OAuth, they dynamically register with random localhost
-    ports (e.g., http://localhost:55454/callback). The OAuth proxy needs to:
-    1. Accept these dynamic redirect URIs from clients based on configured patterns
-    2. Use its own fixed redirect URI with the upstream provider (Google, GitHub, etc.)
-    3. Forward the authorization code back to the client's dynamic URI
-
-    Solution:
-    ---------
-    This class validates redirect URIs against configurable patterns,
-    while the proxy internally uses its own fixed redirect URI with the upstream
-    provider. This allows the flow to work even when clients reconnect with
-    different ports or when tokens are cached.
-
-    Without proper validation, clients could get "Redirect URI not registered" errors
-    when trying to authenticate with cached tokens, or security vulnerabilities could
-    arise from accepting arbitrary redirect URIs.
-    """
-
-    allowed_redirect_uri_patterns: list[str] | None = Field(default=None)
-    client_name: str | None = Field(default=None)
-    cimd_document: CIMDDocument | None = Field(default=None)
-    cimd_fetched_at: float | None = Field(default=None)
-
-    def validate_redirect_uri(self, redirect_uri: AnyUrl | None) -> AnyUrl:
-        """Validate redirect URI against proxy patterns and optionally CIMD redirect_uris.
-
-        For CIMD clients: validates against BOTH the CIMD document's redirect_uris
-        AND the proxy's allowed patterns (if configured). Both must pass.
-
-        For DCR clients: validates against proxy patterns first, falling back to
-        base validation (registered redirect_uris) if patterns don't match.
-
-        This dual validation ensures CIMD clients can't bypass their declared
-        redirect_uris by just matching proxy patterns.
-        """
-        if redirect_uri is not None:
-            is_cimd_client = self.cimd_document is not None
-
-            # For CIMD clients with declared redirect_uris, validate against them
-            if is_cimd_client and self.redirect_uris is not None:
-                super().validate_redirect_uri(redirect_uri)
-
-            # Validate against proxy patterns
-            pattern_matches = validate_redirect_uri(
-                redirect_uri=redirect_uri,
-                allowed_patterns=self.allowed_redirect_uri_patterns,
-            )
-
-            if is_cimd_client:
-                # CIMD clients MUST match proxy patterns (both CIMD URIs and patterns required)
-                if not pattern_matches:
-                    raise InvalidRedirectUriError(
-                        f"Redirect URI '{redirect_uri}' not allowed by server patterns"
-                    )
-            else:
-                # DCR clients: patterns match OR fallback to base validation
-                if not pattern_matches:
-                    return super().validate_redirect_uri(redirect_uri)
-
-            return redirect_uri
-
-        # No redirect_uri provided - use default behavior
-        return super().validate_redirect_uri(redirect_uri)
-
-
-# -------------------------------------------------------------------------
-# Helper Functions
-# -------------------------------------------------------------------------
-
-
-def create_consent_html(
-    client_id: str,
-    redirect_uri: str,
-    scopes: list[str],
-    txn_id: str,
-    csrf_token: str,
-    client_name: str | None = None,
-    title: str = "Application Access Request",
-    server_name: str | None = None,
-    server_icon_url: str | None = None,
-    server_website_url: str | None = None,
-    client_website_url: str | None = None,
-    csp_policy: str | None = None,
-    is_cimd_client: bool = False,
-    cimd_domain: str | None = None,
-) -> str:
-    """Create a styled HTML consent page for OAuth authorization requests.
+    RFC 8707 allows clients to include query parameters in resource URLs, but the
+    server's configured resource URL typically doesn't include them. This function
+    normalizes URLs for comparison by stripping query params and fragments.
 
     Args:
-        csp_policy: Content Security Policy override.
-            If None, uses the built-in CSP policy with appropriate directives.
-            If empty string "", disables CSP entirely (no meta tag is rendered).
-            If a non-empty string, uses that as the CSP policy value.
-        is_cimd_client: Whether this is a CIMD client (URL-based client_id)
-        cimd_domain: The verified domain for CIMD clients
-    """
-    import html as html_module
-
-    client_display = html_module.escape(client_name or client_id)
-    server_name_escaped = html_module.escape(server_name or "FastMCP")
-
-    # Make server name a hyperlink if website URL is available
-    if server_website_url:
-        website_url_escaped = html_module.escape(server_website_url)
-        server_display = f'<a href="{website_url_escaped}" target="_blank" rel="noopener noreferrer" class="server-name-link">{server_name_escaped}</a>'
-    else:
-        server_display = server_name_escaped
-
-    # Build verification badge
-    if is_cimd_client and cimd_domain:
-        domain_escaped = html_module.escape(cimd_domain)
-        verification_badge = f"""
-            <div class="verification-badge verified">
-                <span class="badge-icon">✓</span>
-                <span class="badge-text">Verified: <strong>{domain_escaped}</strong></span>
-            </div>
-        """
-    else:
-        verification_badge = """
-            <div class="verification-badge unverified">
-                <span class="badge-icon">⚠</span>
-                <span class="badge-text">Unverified client</span>
-            </div>
-        """
-
-    # Build intro box with call-to-action
-    intro_box = f"""
-        {verification_badge}
-        <div class="info-box">
-            <p>The application <strong>{client_display}</strong> wants to access the MCP server <strong>{server_display}</strong>. Please ensure you recognize the callback address below.</p>
-        </div>
-    """
-
-    # Build redirect URI section (yellow box, centered)
-    redirect_uri_escaped = html_module.escape(redirect_uri)
-    redirect_section = f"""
-        <div class="redirect-section">
-            <span class="label">Credentials will be sent to:</span>
-            <div class="value">{redirect_uri_escaped}</div>
-        </div>
-    """
-
-    # Build advanced details with collapsible section
-    detail_rows = [
-        ("Application Name", html_module.escape(client_name or client_id)),
-        ("Application Website", html_module.escape(client_website_url or "N/A")),
-        ("Application ID", client_id),
-        ("Redirect URI", redirect_uri_escaped),
-        (
-            "Requested Scopes",
-            ", ".join(html_module.escape(s) for s in scopes) if scopes else "None",
-        ),
-    ]
-
-    detail_rows_html = "\n".join(
-        [
-            f"""
-        <div class="detail-row">
-            <div class="detail-label">{label}:</div>
-            <div class="detail-value">{value}</div>
-        </div>
-        """
-            for label, value in detail_rows
-        ]
-    )
-
-    advanced_details = f"""
-        <details>
-            <summary>Advanced Details</summary>
-            <div class="detail-box">
-                {detail_rows_html}
-            </div>
-        </details>
-    """
-
-    # Build form with buttons
-    # Use empty action to submit to current URL (/consent or /mcp/consent)
-    # The POST handler is registered at the same path as GET
-    form = f"""
-        <form id="consentForm" method="POST" action="">
-            <input type="hidden" name="txn_id" value="{txn_id}" />
-            <input type="hidden" name="csrf_token" value="{csrf_token}" />
-            <input type="hidden" name="submit" value="true" />
-            <div class="button-group">
-                <button type="submit" name="action" value="approve" class="btn-approve">Allow Access</button>
-                <button type="submit" name="action" value="deny" class="btn-deny">Deny</button>
-            </div>
-        </form>
-    """
-
-    # Build help link with tooltip (identical to current implementation)
-    help_link = """
-        <div class="help-link-container">
-            <span class="help-link">
-                Why am I seeing this?
-                <span class="tooltip">
-                    This FastMCP server requires your consent to allow a new client
-                    to connect. This protects you from <a
-                    href="https://modelcontextprotocol.io/specification/2025-06-18/basic/security_best_practices#confused-deputy-problem"
-                    target="_blank" class="tooltip-link">confused deputy
-                    attacks</a>, where malicious clients could impersonate you
-                    and steal access.<br><br>
-                    <a
-                    href="https://gofastmcp.com/servers/auth/oauth-proxy#confused-deputy-attacks"
-                    target="_blank" class="tooltip-link">Learn more about
-                    FastMCP security →</a>
-                </span>
-            </span>
-        </div>
-    """
-
-    # Build the page content
-    content = f"""
-        <div class="container">
-            {create_logo(icon_url=server_icon_url, alt_text=server_name or "FastMCP")}
-            <h1>Application Access Request</h1>
-            {intro_box}
-            {redirect_section}
-            {advanced_details}
-            {form}
-        </div>
-        {help_link}
-    """
-
-    # Verification badge styles
-    verification_badge_styles = """
-        .verification-badge {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            padding: 12px 20px;
-            border-radius: 8px;
-            margin-bottom: 16px;
-            font-size: 14px;
-        }
-        .verification-badge.verified {
-            background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
-            border: 1px solid #28a745;
-            color: #155724;
-        }
-        .verification-badge.unverified {
-            background: linear-gradient(135deg, #fff3cd 0%, #ffeeba 100%);
-            border: 1px solid #ffc107;
-            color: #856404;
-        }
-        .verification-badge .badge-icon {
-            font-size: 18px;
-        }
-        .verification-badge .badge-text strong {
-            font-weight: 600;
-        }
-    """
-
-    # Additional styles needed for this page
-    additional_styles = (
-        INFO_BOX_STYLES
-        + REDIRECT_SECTION_STYLES
-        + DETAILS_STYLES
-        + DETAIL_BOX_STYLES
-        + BUTTON_STYLES
-        + TOOLTIP_STYLES
-        + verification_badge_styles
-    )
-
-    # Determine CSP policy to use
-    # If csp_policy is None, build the default CSP policy
-    # If csp_policy is empty string, CSP will be disabled entirely in create_page
-    # If csp_policy is a non-empty string, use it as-is
-    if csp_policy is None:
-        # Need to allow form-action for form submission
-        # Chrome requires explicit scheme declarations in CSP form-action when redirect chains
-        # end in custom protocol schemes (e.g., cursor://). Parse redirect_uri to include its scheme.
-        parsed_redirect = urlparse(redirect_uri)
-        redirect_scheme = parsed_redirect.scheme.lower()
-
-        # Build form-action directive with standard schemes plus custom protocol if present
-        form_action_schemes = ["https:", "http:"]
-        if redirect_scheme and redirect_scheme not in ("http", "https"):
-            # Custom protocol scheme (e.g., cursor:, vscode:, etc.)
-            form_action_schemes.append(f"{redirect_scheme}:")
-
-        form_action_directive = " ".join(form_action_schemes)
-        csp_policy = f"default-src 'none'; style-src 'unsafe-inline'; img-src https: data:; base-uri 'none'; form-action {form_action_directive}"
-
-    return create_page(
-        content=content,
-        title=title,
-        additional_styles=additional_styles,
-        csp_policy=csp_policy,
-    )
-
-
-def create_error_html(
-    error_title: str,
-    error_message: str,
-    error_details: dict[str, str] | None = None,
-    server_name: str | None = None,
-    server_icon_url: str | None = None,
-) -> str:
-    """Create a styled HTML error page for OAuth errors.
-
-    Args:
-        error_title: The error title (e.g., "OAuth Error", "Authorization Failed")
-        error_message: The main error message to display
-        error_details: Optional dictionary of error details to show (e.g., `{"Error Code": "invalid_client"}`)
-        server_name: Optional server name to display
-        server_icon_url: Optional URL to server icon/logo
+        url: The URL to normalize
 
     Returns:
-        Complete HTML page as a string
+        Normalized URL with scheme, host, and path only (no query/fragment)
     """
-    import html as html_module
-
-    error_message_escaped = html_module.escape(error_message)
-
-    # Build error message box
-    error_box = f"""
-        <div class="info-box error">
-            <p>{error_message_escaped}</p>
-        </div>
-    """
-
-    # Build error details section if provided
-    details_section = ""
-    if error_details:
-        detail_rows_html = "\n".join(
-            [
-                f"""
-            <div class="detail-row">
-                <div class="detail-label">{html_module.escape(label)}:</div>
-                <div class="detail-value">{html_module.escape(value)}</div>
-            </div>
-            """
-                for label, value in error_details.items()
-            ]
-        )
-
-        details_section = f"""
-            <details>
-                <summary>Error Details</summary>
-                <div class="detail-box">
-                    {detail_rows_html}
-                </div>
-            </details>
-        """
-
-    # Build the page content
-    content = f"""
-        <div class="container">
-            {create_logo(icon_url=server_icon_url, alt_text=server_name or "FastMCP")}
-            <h1>{html_module.escape(error_title)}</h1>
-            {error_box}
-            {details_section}
-        </div>
-    """
-
-    # Additional styles needed for this page
-    # Override .info-box.error to use normal text color instead of red
-    additional_styles = (
-        INFO_BOX_STYLES
-        + DETAILS_STYLES
-        + DETAIL_BOX_STYLES
-        + """
-        .info-box.error {
-            color: #111827;
-        }
-        """
-    )
-
-    # Simple CSP policy for error pages (no forms needed)
-    csp_policy = "default-src 'none'; style-src 'unsafe-inline'; img-src https: data:; base-uri 'none'"
-
-    return create_page(
-        content=content,
-        title=error_title,
-        additional_styles=additional_styles,
-        csp_policy=csp_policy,
+    parsed = urlparse(str(url))
+    return urlunparse(
+        (parsed.scheme, parsed.netloc, parsed.path.rstrip("/"), "", "", "")
     )
 
 
-class OAuthProxy(OAuthProvider):
+def _server_url_has_query(url: str) -> bool:
+    """Check if a URL has query parameters."""
+    return bool(urlparse(str(url)).query)
+
+
+class OAuthProxy(OAuthProvider, ConsentMixin):
     """OAuth provider that presents a DCR-compliant interface while proxying to non-DCR IDPs.
 
     Purpose
@@ -650,7 +156,7 @@ class OAuthProxy(OAuthProvider):
     ------------------------
     1. Client Registration (DCR):
        - Accept any client registration request
-       - Store OAuthProxyClient that accepts dynamic redirect URIs
+       - Store ProxyDCRClient that accepts dynamic redirect URIs
 
     2. Authorization:
        - Store transaction mapping client details to proxy flow
@@ -742,8 +248,6 @@ class OAuthProxy(OAuthProvider):
         consent_csp_policy: str | None = None,
         # Token expiry fallback
         fallback_access_token_expiry_seconds: int | None = None,
-        # CIMD (Client ID Metadata Document) configuration
-        enable_cimd: bool = True,
     ):
         """Initialize the OAuth proxy provider.
 
@@ -798,10 +302,6 @@ class OAuthProxy(OAuthProvider):
                 defaults: 1 hour if a refresh token is available (since we can refresh),
                 or 1 year if no refresh token (for API-key-style tokens like GitHub OAuth Apps).
                 Set explicitly to override these defaults.
-            enable_cimd: Whether to support CIMD (Client ID Metadata Documents) for client
-                authentication (default True). When enabled, clients can use HTTPS URLs as
-                client_ids instead of registering via DCR. The server fetches and validates
-                the CIMD document from the URL.
         """
 
         # Always enable DCR since we implement it locally for MCP clients
@@ -878,20 +378,6 @@ class OAuthProxy(OAuthProvider):
             fallback_access_token_expiry_seconds
         )
 
-        # CIMD configuration - delegate to manager
-        from fastmcp.server.auth.cimd import CIMDClientManager
-
-        self._cimd = CIMDClientManager(
-            enable_cimd=enable_cimd,
-            default_scope=self._default_scope_str,
-            allowed_redirect_uri_patterns=self._allowed_client_redirect_uris,
-        )
-        if enable_cimd:
-            logger.warning(
-                "CIMD support is enabled (beta feature). "
-                "The CIMD API may change in future releases."
-            )
-
         if jwt_signing_key is None:
             jwt_signing_key = derive_jwt_key(
                 high_entropy_material=upstream_client_secret,
@@ -946,11 +432,11 @@ class OAuthProxy(OAuthProvider):
             raise_on_validation_error=True,
         )
 
-        self._client_store: PydanticAdapter[OAuthProxyClient] = PydanticAdapter[
-            OAuthProxyClient
+        self._client_store: PydanticAdapter[ProxyDCRClient] = PydanticAdapter[
+            ProxyDCRClient
         ](
             key_value=self._client_storage,
-            pydantic_model=OAuthProxyClient,
+            pydantic_model=ProxyDCRClient,
             default_collection="mcp-oauth-proxy-clients",
             raise_on_validation_error=True,
         )
@@ -1069,80 +555,38 @@ class OAuthProxy(OAuthProvider):
 
     @override
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
-        """Get client information by ID.
+        """Get client information by ID. This is generally the random ID
+        provided to the DCR client during registration, not the upstream client ID.
 
-        For DCR clients, this is the random ID provided during registration.
-        For CIMD clients, this is the HTTPS URL where their metadata document is hosted.
-
-        For unregistered clients (and CIMD URLs when CIMD is disabled), returns None.
-
-        CIMD clients are refreshed after CIMD_CACHE_TTL to pick up changes like
-        JWKS rotation or redirect_uri updates.
+        For unregistered clients, returns None (which will raise an error in the SDK).
         """
-        # Check storage first (both DCR and CIMD clients are stored)
-        if client := await self._client_store.get(key=client_id):
-            # Check if CIMD client needs refresh
-            if client.cimd_document is not None and client.cimd_fetched_at is not None:
-                age = time.time() - client.cimd_fetched_at
-                if age > CIMD_CACHE_TTL:
-                    logger.debug(
-                        "CIMD client %s cache expired (age=%.1fs), refreshing",
-                        client_id,
-                        age,
-                    )
-                    if refreshed := await self._get_cimd_client(client_id):
-                        await self._client_store.put(key=client_id, value=refreshed)
-                        return refreshed
-                    # If refresh fails, continue with cached client
-                    logger.warning(
-                        "CIMD refresh failed for %s, using cached client", client_id
-                    )
+        # Load from storage
+        if not (client := await self._client_store.get(key=client_id)):
+            return None
 
-            if client.allowed_redirect_uri_patterns is None:
-                client.allowed_redirect_uri_patterns = (
-                    self._allowed_client_redirect_uris
-                )
-            return client
+        if client.allowed_redirect_uri_patterns is None:
+            client.allowed_redirect_uri_patterns = self._allowed_client_redirect_uris
 
-        # If not in storage and looks like CIMD URL, fetch and store it
-        if self._cimd.is_cimd_client_id(client_id):
-            if cimd_client := await self._get_cimd_client(client_id):
-                # Store CIMD client just like DCR clients
-                await self._client_store.put(key=client_id, value=cimd_client)
-                return cimd_client
-
-        return None
-
-    async def _get_cimd_client(self, client_id_url: str) -> OAuthProxyClient | None:
-        """Fetch and validate a CIMD document, returning synthetic client info.
-
-        Args:
-            client_id_url: The HTTPS URL to fetch as client_id
-
-        Returns:
-            OAuthProxyClient based on CIMD document, or None if fetch fails
-        """
-        # Delegate to CIMD client manager
-        return await self._cimd.get_client(client_id_url)
+        return client
 
     @override
     async def register_client(self, client_info: OAuthClientInformationFull) -> None:
         """Register a client locally
 
-        When a client registers, we create a OAuthProxyClient that is more
+        When a client registers, we create a ProxyDCRClient that is more
         forgiving about validating redirect URIs, since the DCR client's
         redirect URI will likely be localhost or unknown to the proxied IDP. The
         proxied IDP only knows about this server's fixed redirect URI.
         """
 
-        # Create a OAuthProxyClient with configured redirect URI validation
+        # Create a ProxyDCRClient with configured redirect URI validation
         if client_info.client_id is None:
             raise ValueError("client_id is required for client registration")
         # We use token_endpoint_auth_method="none" because the proxy handles
         # all upstream authentication. The client_secret must also be None
         # because the SDK requires secrets to be provided if they're set,
         # regardless of auth method.
-        proxy_client: OAuthProxyClient = OAuthProxyClient(
+        proxy_client: ProxyDCRClient = ProxyDCRClient(
             client_id=client_info.client_id,
             client_secret=None,
             redirect_uris=client_info.redirect_uris or [AnyUrl("http://localhost")],
@@ -1197,9 +641,32 @@ class OAuthProxy(OAuthProvider):
         """
         # Security check: validate client's requested resource matches this server
         # This prevents tokens intended for one server from being used on another
+        #
+        # Per RFC 8707, clients may include query parameters in resource URLs (e.g.,
+        # ChatGPT sends ?kb_name=X). We handle two cases:
+        #
+        # 1. Server URL has NO query params: normalize both URLs (strip query/fragment)
+        #    to allow clients like ChatGPT that add query params to still match.
+        #
+        # 2. Server URL HAS query params (e.g., multi-tenant ?tenant=X): require exact
+        #    match to prevent clients from bypassing tenant isolation by changing params.
+        #
+        # Claude doesn't send a resource parameter at all, so this check is skipped.
         client_resource = getattr(params, "resource", None)
         if client_resource and self._resource_url:
-            if str(client_resource) != str(self._resource_url):
+            server_url = str(self._resource_url)
+            client_url = str(client_resource)
+
+            if _server_url_has_query(server_url):
+                # Server has query params - require exact match for security
+                urls_match = client_url.rstrip("/") == server_url.rstrip("/")
+            else:
+                # Server has no query params - normalize both for comparison
+                urls_match = _normalize_resource_url(
+                    client_url
+                ) == _normalize_resource_url(server_url)
+
+            if not urls_match:
                 logger.warning(
                     "Resource mismatch: client requested %s but server is %s",
                     client_resource,
@@ -1431,6 +898,9 @@ class OAuthProxy(OAuthProvider):
         )
         logger.debug("Stored encrypted upstream tokens (jti=%s)", access_jti[:8])
 
+        # Extract upstream claims to embed in FastMCP JWT (if subclass implements)
+        upstream_claims = await self._extract_upstream_claims(idp_tokens)
+
         # Issue minimal FastMCP access token (just a reference via JTI)
         if client.client_id is None:
             raise TokenError("invalid_client", "Client ID is required")
@@ -1439,6 +909,7 @@ class OAuthProxy(OAuthProvider):
             scopes=authorization_code.scopes,
             jti=access_jti,
             expires_in=expires_in,
+            upstream_claims=upstream_claims,
         )
 
         # Issue minimal FastMCP refresh token if upstream provided one
@@ -1450,6 +921,7 @@ class OAuthProxy(OAuthProvider):
                 scopes=authorization_code.scopes,
                 jti=refresh_jti,
                 expires_in=refresh_expires_in,
+                upstream_claims=upstream_claims,
             )
 
         # Store JTI mappings
@@ -1506,6 +978,20 @@ class OAuthProxy(OAuthProvider):
     # Refresh Token Flow
     # -------------------------------------------------------------------------
 
+    def _prepare_scopes_for_token_exchange(self, scopes: list[str]) -> list[str]:
+        """Prepare scopes for initial token exchange (auth code -> tokens).
+
+        Override this method to provide scopes during the authorization
+        code exchange. Some providers (like Azure) require scopes to be sent.
+
+        Args:
+            scopes: Scopes from the authorization request
+
+        Returns:
+            List of scopes to send, or empty list to omit scope parameter
+        """
+        return scopes
+
     def _prepare_scopes_for_upstream_refresh(self, scopes: list[str]) -> list[str]:
         """Prepare scopes for upstream token refresh request.
 
@@ -1522,6 +1008,33 @@ class OAuthProxy(OAuthProvider):
             Scopes to send to upstream provider (may be transformed/augmented)
         """
         return scopes
+
+    async def _extract_upstream_claims(
+        self, idp_tokens: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """Extract upstream claims to embed in FastMCP JWT.
+
+        Override this method to decode upstream tokens, call userinfo endpoints,
+        or otherwise extract claims that should be embedded in the FastMCP JWT
+        issued to MCP clients. This enables gateways to inspect upstream identity
+        information by decoding the JWT without server-side storage lookups.
+
+        Args:
+            idp_tokens: Full token response from upstream provider. Contains
+                access_token, and for OIDC providers may include id_token,
+                refresh_token, and other response fields.
+
+        Returns:
+            Dict of claims to embed in JWT under the "upstream_claims" key,
+            or None to not embed any upstream claims.
+
+        Example:
+            For Azure/Entra ID, you might decode the access_token JWT and
+            extract claims like sub, oid, name, preferred_username, email,
+            roles, and groups.
+        """
+        _ = idp_tokens
+        return None
 
     async def load_refresh_token(
         self,
@@ -1611,7 +1124,7 @@ class OAuthProxy(OAuthProvider):
 
         try:
             logger.debug("Refreshing upstream token (jti=%s)", refresh_jti[:8])
-            token_response: dict[str, Any] = await oauth_client.refresh_token(  # type: ignore[assignment]
+            token_response: dict[str, Any] = await oauth_client.refresh_token(
                 url=self._upstream_token_endpoint,
                 refresh_token=upstream_token_set.refresh_token,
                 scope=" ".join(upstream_scopes) if upstream_scopes else None,
@@ -1689,6 +1202,11 @@ class OAuthProxy(OAuthProvider):
             ),  # Keep until longest-lived token expires (min 1s for safety)
         )
 
+        # Re-extract upstream claims from refreshed token response
+        upstream_claims = await self._extract_upstream_claims(
+            upstream_token_set.raw_token_data
+        )
+
         # Issue new minimal FastMCP access token (just a reference via JTI)
         if client.client_id is None:
             raise TokenError("invalid_client", "Client ID is required")
@@ -1698,6 +1216,7 @@ class OAuthProxy(OAuthProvider):
             scopes=scopes,
             jti=new_access_jti,
             expires_in=new_expires_in,
+            upstream_claims=upstream_claims,
         )
 
         # Store new access token JTI mapping
@@ -1720,6 +1239,7 @@ class OAuthProxy(OAuthProvider):
             jti=new_refresh_jti,
             expires_in=new_refresh_expires_in
             or 60 * 60 * 24 * 30,  # Fallback to 30 days
+            upstream_claims=upstream_claims,
         )
 
         # Store new refresh token JTI mapping with aligned expiry
@@ -1876,7 +1396,6 @@ class OAuthProxy(OAuthProvider):
         This method creates standard OAuth routes and replaces:
         - /authorize endpoint: Enhanced error responses for unregistered clients
         - /token endpoint: OAuth 2.1 compliant error codes
-        - /.well-known/oauth-authorization-server: Adds CIMD support metadata
 
         Args:
             mcp_path: The path where the MCP endpoint is mounted (e.g., "/mcp")
@@ -1916,150 +1435,6 @@ class OAuthProxy(OAuthProvider):
                         path="/authorize",
                         endpoint=authorize_handler.handle,
                         methods=["GET", "POST"],
-                    )
-                )
-            # Replace /token endpoint with one that supports private_key_jwt
-            elif (
-                isinstance(route, Route)
-                and route.path == "/token"
-                and route.methods is not None
-                and "POST" in route.methods
-            ):
-                # Import here to avoid circular dependency
-                from mcp.server.auth.routes import cors_middleware
-
-                from fastmcp.server.auth.auth import (
-                    PrivateKeyJWTClientAuthenticator,
-                    TokenHandler,
-                )
-
-                # Build token endpoint URL for audience validation
-                token_endpoint_url = f"{self.base_url}/token"
-
-                # Create authenticator with private_key_jwt support
-                authenticator = PrivateKeyJWTClientAuthenticator(
-                    provider=self,
-                    cimd_manager=self._cimd,
-                    token_endpoint_url=token_endpoint_url,
-                )
-
-                # Create token handler with our custom authenticator
-                token_handler = TokenHandler(
-                    provider=self,
-                    client_authenticator=authenticator,
-                )
-
-                custom_routes.append(
-                    Route(
-                        path="/token",
-                        endpoint=cors_middleware(
-                            token_handler.handle, ["POST", "OPTIONS"]
-                        ),
-                        methods=["POST", "OPTIONS"],
-                    )
-                )
-            # Wrap metadata endpoint to add CIMD support field
-            elif (
-                isinstance(route, Route)
-                and route.path.startswith("/.well-known/oauth-authorization-server")
-                and route.methods is not None
-                and "GET" in route.methods
-            ):
-                # Wrap the original endpoint to add CIMD metadata
-                # Note: endpoint might be wrapped in CORS middleware
-
-                # Create wrapper function with explicit closure to avoid loop binding issues
-                def make_metadata_wrapper(endpoint):
-                    async def metadata_with_cimd(request):
-                        import json
-
-                        # Call the original endpoint (might be CORS wrapped)
-                        # We need to handle it as ASGI app
-                        from starlette.responses import JSONResponse
-
-                        body_parts = []
-                        original_status = 200
-                        original_headers: dict[str, str] = {}
-
-                        # Headers we want to preserve from the original response
-                        preserve_headers = {
-                            "cache-control",
-                            "access-control-allow-origin",
-                            "access-control-allow-methods",
-                            "access-control-allow-headers",
-                            "access-control-max-age",
-                            "access-control-expose-headers",
-                            "vary",
-                        }
-
-                        async def receive():
-                            return {"type": "http.request", "body": b""}
-
-                        async def send(message):
-                            nonlocal original_status, original_headers
-                            if message["type"] == "http.response.start":
-                                original_status = message.get("status", 200)
-                                headers = message.get("headers", [])
-                                for key, value in headers:
-                                    key_str = (
-                                        key.decode() if isinstance(key, bytes) else key
-                                    )
-                                    value_str = (
-                                        value.decode()
-                                        if isinstance(value, bytes)
-                                        else value
-                                    )
-                                    if key_str.lower() in preserve_headers:
-                                        original_headers[key_str] = value_str
-                            elif message["type"] == "http.response.body":
-                                body_parts.append(message.get("body", b""))
-
-                        await endpoint(request.scope, receive, send)
-
-                        # Combine body parts
-                        body = b"".join(body_parts)
-
-                        # For non-200 responses, pass through raw body without modification
-                        # This handles error pages, HTML responses from middleware, etc.
-                        if original_status != 200:
-                            from starlette.responses import Response
-
-                            return Response(
-                                content=body,
-                                status_code=original_status,
-                                headers=original_headers,
-                            )
-
-                        # Try to parse as JSON; if it fails, pass through raw body
-                        try:
-                            metadata = json.loads(body)
-                        except (json.JSONDecodeError, ValueError):
-                            from starlette.responses import Response
-
-                            return Response(
-                                content=body,
-                                status_code=original_status,
-                                headers=original_headers,
-                            )
-
-                        # Add CIMD field
-                        metadata["client_id_metadata_document_supported"] = (
-                            self._cimd.enabled
-                        )
-
-                        return JSONResponse(
-                            metadata,
-                            status_code=original_status,
-                            headers=original_headers,
-                        )
-
-                    return metadata_with_cimd
-
-                custom_routes.append(
-                    Route(
-                        path=route.path,
-                        endpoint=make_metadata_wrapper(route.endpoint),
-                        methods=route.methods,
                     )
                 )
             else:
@@ -2171,6 +1546,13 @@ class OAuthProxy(OAuthProvider):
                         txn_id,
                     )
 
+                # Allow providers to specify scope for token exchange
+                exchange_scopes = self._prepare_scopes_for_token_exchange(
+                    transaction.get("scopes") or []
+                )
+                if exchange_scopes:
+                    token_params["scope"] = " ".join(exchange_scopes)
+
                 # Add any extra token parameters configured for this proxy
                 if self._extra_token_params:
                     token_params.update(self._extra_token_params)
@@ -2182,7 +1564,7 @@ class OAuthProxy(OAuthProvider):
 
                 idp_tokens: dict[str, Any] = await oauth_client.fetch_token(
                     **token_params
-                )  # type: ignore[assignment]
+                )
 
                 logger.debug(
                     f"Successfully exchanged IdP code for tokens (transaction: {txn_id}, PKCE: {bool(proxy_code_verifier)})"
@@ -2251,342 +1633,3 @@ class OAuthProxy(OAuthProvider):
                 error_message="Internal server error during OAuth callback processing. Please try again.",
             )
             return HTMLResponse(content=html_content, status_code=500)
-
-    # -------------------------------------------------------------------------
-    # Consent Interstitial
-    # -------------------------------------------------------------------------
-
-    def _normalize_uri(self, uri: str) -> str:
-        """Normalize a URI to a canonical form for consent tracking."""
-        parsed = urlparse(uri)
-        path = parsed.path or ""
-        normalized = f"{parsed.scheme.lower()}://{parsed.netloc.lower()}{path}"
-        if normalized.endswith("/") and len(path) > 1:
-            normalized = normalized[:-1]
-        return normalized
-
-    def _make_client_key(self, client_id: str, redirect_uri: str | AnyUrl) -> str:
-        """Create a stable key for consent tracking from client_id and redirect_uri."""
-        normalized = self._normalize_uri(str(redirect_uri))
-        return f"{client_id}:{normalized}"
-
-    def _cookie_name(self, base_name: str) -> str:
-        """Return secure cookie name for HTTPS, fallback for HTTP development."""
-        if self._is_https:
-            return f"__Host-{base_name}"
-        return f"__{base_name}"
-
-    def _sign_cookie(self, payload: str) -> str:
-        """Sign a cookie payload with HMAC-SHA256.
-
-        Returns: base64(payload).base64(signature)
-        """
-        # Use upstream client secret as signing key
-        key = self._upstream_client_secret.get_secret_value().encode()
-        signature = hmac.new(key, payload.encode(), hashlib.sha256).digest()
-        signature_b64 = base64.b64encode(signature).decode()
-        return f"{payload}.{signature_b64}"
-
-    def _verify_cookie(self, signed_value: str) -> str | None:
-        """Verify and extract payload from signed cookie.
-
-        Returns: payload if signature valid, None otherwise
-        """
-        try:
-            if "." not in signed_value:
-                return None
-            payload, signature_b64 = signed_value.rsplit(".", 1)
-
-            # Verify signature
-            key = self._upstream_client_secret.get_secret_value().encode()
-            expected_sig = hmac.new(key, payload.encode(), hashlib.sha256).digest()
-            provided_sig = base64.b64decode(signature_b64.encode())
-
-            # Constant-time comparison
-            if not hmac.compare_digest(expected_sig, provided_sig):
-                return None
-
-            return payload
-        except Exception:
-            return None
-
-    def _decode_list_cookie(self, request: Request, base_name: str) -> list[str]:
-        """Decode and verify a signed base64-encoded JSON list from cookie. Returns [] if missing/invalid."""
-        # Prefer secure name, but also check non-secure variant for dev
-        secure_name = self._cookie_name(base_name)
-        raw = request.cookies.get(secure_name) or request.cookies.get(f"__{base_name}")
-        if not raw:
-            return []
-        try:
-            # Verify signature
-            payload = self._verify_cookie(raw)
-            if not payload:
-                logger.debug("Cookie signature verification failed for %s", secure_name)
-                return []
-
-            # Decode payload
-            data = base64.b64decode(payload.encode())
-            value = json.loads(data.decode())
-            if isinstance(value, list):
-                return [str(x) for x in value]
-        except Exception:
-            logger.debug("Failed to decode cookie %s; treating as empty", secure_name)
-        return []
-
-    def _encode_list_cookie(self, values: list[str]) -> str:
-        """Encode values to base64 and sign with HMAC.
-
-        Returns: signed cookie value (payload.signature)
-        """
-        payload = json.dumps(values, separators=(",", ":")).encode()
-        payload_b64 = base64.b64encode(payload).decode()
-        return self._sign_cookie(payload_b64)
-
-    def _set_list_cookie(
-        self,
-        response: HTMLResponse | RedirectResponse,
-        base_name: str,
-        value_b64: str,
-        max_age: int,
-    ) -> None:
-        name = self._cookie_name(base_name)
-        response.set_cookie(
-            name,
-            value_b64,
-            max_age=max_age,
-            secure=self._is_https,
-            httponly=True,
-            samesite="lax",
-            path="/",
-        )
-
-    def _build_upstream_authorize_url(
-        self, txn_id: str, transaction: dict[str, Any]
-    ) -> str:
-        """Construct the upstream IdP authorization URL using stored transaction data."""
-        query_params: dict[str, Any] = {
-            "response_type": "code",
-            "client_id": self._upstream_client_id,
-            "redirect_uri": f"{str(self.base_url).rstrip('/')}{self._redirect_path}",
-            "state": txn_id,
-        }
-
-        scopes_to_use = transaction.get("scopes") or self.required_scopes or []
-        if scopes_to_use:
-            query_params["scope"] = " ".join(scopes_to_use)
-
-        # If PKCE forwarding was enabled, include the proxy challenge
-        proxy_code_verifier = transaction.get("proxy_code_verifier")
-        if proxy_code_verifier:
-            challenge_bytes = hashlib.sha256(proxy_code_verifier.encode()).digest()
-            proxy_code_challenge = (
-                urlsafe_b64encode(challenge_bytes).decode().rstrip("=")
-            )
-            query_params["code_challenge"] = proxy_code_challenge
-            query_params["code_challenge_method"] = "S256"
-
-        # Forward resource indicator if present in transaction
-        if resource := transaction.get("resource"):
-            query_params["resource"] = resource
-
-        # Extra configured parameters
-        if self._extra_authorize_params:
-            query_params.update(self._extra_authorize_params)
-
-        separator = "&" if "?" in self._upstream_authorization_endpoint else "?"
-        return f"{self._upstream_authorization_endpoint}{separator}{urlencode(query_params)}"
-
-    async def _handle_consent(
-        self, request: Request
-    ) -> HTMLResponse | RedirectResponse:
-        """Handle consent page - dispatch to GET or POST handler based on method."""
-        if request.method == "POST":
-            return await self._submit_consent(request)
-        return await self._show_consent_page(request)
-
-    async def _show_consent_page(
-        self, request: Request
-    ) -> HTMLResponse | RedirectResponse:
-        """Display consent page or auto-approve/deny based on cookies."""
-        from fastmcp.server.server import FastMCP
-
-        txn_id = request.query_params.get("txn_id")
-        if not txn_id:
-            return create_secure_html_response(
-                "<h1>Error</h1><p>Invalid or expired transaction</p>", status_code=400
-            )
-
-        txn_model = await self._transaction_store.get(key=txn_id)
-        if not txn_model:
-            return create_secure_html_response(
-                "<h1>Error</h1><p>Invalid or expired transaction</p>", status_code=400
-            )
-
-        txn = txn_model.model_dump()
-        client_key = self._make_client_key(txn["client_id"], txn["client_redirect_uri"])
-
-        approved = set(self._decode_list_cookie(request, "MCP_APPROVED_CLIENTS"))
-        denied = set(self._decode_list_cookie(request, "MCP_DENIED_CLIENTS"))
-
-        if client_key in approved:
-            upstream_url = self._build_upstream_authorize_url(txn_id, txn)
-            return RedirectResponse(url=upstream_url, status_code=302)
-
-        if client_key in denied:
-            callback_params = {
-                "error": "access_denied",
-                "state": txn.get("client_state") or "",
-            }
-            sep = "&" if "?" in txn["client_redirect_uri"] else "?"
-            return RedirectResponse(
-                url=f"{txn['client_redirect_uri']}{sep}{urlencode(callback_params)}",
-                status_code=302,
-            )
-
-        # Load client to check for CIMD and get client_name
-        client = await self.get_client(txn["client_id"])
-        client_name = getattr(client, "client_name", None) if client else None
-
-        # Check if this is a validated CIMD client (document was fetched and verified)
-        is_cimd_client = (
-            hasattr(client, "cimd_document") and client.cimd_document is not None
-        )  # type: ignore[union-attr]
-
-        # Extract domain from CIMD URL for display in consent screen
-        cimd_domain = None
-        if is_cimd_client:
-            try:
-                from urllib.parse import urlparse
-
-                parsed = urlparse(txn["client_id"])
-                cimd_domain = parsed.hostname
-            except Exception:
-                pass
-
-        # Need consent: issue CSRF token and show HTML
-        csrf_token = secrets.token_urlsafe(32)
-        csrf_expires_at = time.time() + 15 * 60
-
-        # Update transaction with CSRF token
-        txn_model.csrf_token = csrf_token
-        txn_model.csrf_expires_at = csrf_expires_at
-        await self._transaction_store.put(
-            key=txn_id, value=txn_model, ttl=15 * 60
-        )  # Auto-expire after 15 minutes
-
-        # Update dict for use in HTML generation
-        txn["csrf_token"] = csrf_token
-        txn["csrf_expires_at"] = csrf_expires_at
-
-        # Extract server metadata from app state
-        fastmcp = getattr(request.app.state, "fastmcp_server", None)
-
-        if isinstance(fastmcp, FastMCP):
-            server_name = fastmcp.name
-            icons = fastmcp.icons
-            server_icon_url = icons[0].src if icons else None
-            server_website_url = fastmcp.website_url
-        else:
-            server_name = None
-            server_icon_url = None
-            server_website_url = None
-
-        html = create_consent_html(
-            client_id=txn["client_id"],
-            redirect_uri=txn["client_redirect_uri"],
-            scopes=txn.get("scopes") or [],
-            txn_id=txn_id,
-            csrf_token=csrf_token,
-            client_name=client_name,
-            server_name=server_name,
-            server_icon_url=server_icon_url,
-            server_website_url=server_website_url,
-            csp_policy=self._consent_csp_policy,
-            is_cimd_client=is_cimd_client,
-            cimd_domain=cimd_domain,
-        )
-        response = create_secure_html_response(html)
-        # Store CSRF in cookie with short lifetime
-        self._set_list_cookie(
-            response,
-            "MCP_CONSENT_STATE",
-            self._encode_list_cookie([csrf_token]),
-            max_age=15 * 60,
-        )
-        return response
-
-    async def _submit_consent(
-        self, request: Request
-    ) -> RedirectResponse | HTMLResponse:
-        """Handle consent approval/denial, set cookies, and redirect appropriately."""
-        form = await request.form()
-        txn_id = str(form.get("txn_id", ""))
-        action = str(form.get("action", ""))
-        csrf_token = str(form.get("csrf_token", ""))
-
-        if not txn_id:
-            return create_secure_html_response(
-                "<h1>Error</h1><p>Invalid or expired transaction</p>", status_code=400
-            )
-
-        txn_model = await self._transaction_store.get(key=txn_id)
-        if not txn_model:
-            return create_secure_html_response(
-                "<h1>Error</h1><p>Invalid or expired transaction</p>", status_code=400
-            )
-
-        txn = txn_model.model_dump()
-        expected_csrf = txn.get("csrf_token")
-        expires_at = float(txn.get("csrf_expires_at") or 0)
-
-        if not expected_csrf or csrf_token != expected_csrf or time.time() > expires_at:
-            return create_secure_html_response(
-                "<h1>Error</h1><p>Invalid or expired consent token</p>", status_code=400
-            )
-
-        client_key = self._make_client_key(txn["client_id"], txn["client_redirect_uri"])
-
-        if action == "approve":
-            approved = set(self._decode_list_cookie(request, "MCP_APPROVED_CLIENTS"))
-            if client_key not in approved:
-                approved.add(client_key)
-            approved_b64 = self._encode_list_cookie(sorted(approved))
-
-            upstream_url = self._build_upstream_authorize_url(txn_id, txn)
-            response = RedirectResponse(url=upstream_url, status_code=302)
-            self._set_list_cookie(
-                response, "MCP_APPROVED_CLIENTS", approved_b64, max_age=365 * 24 * 3600
-            )
-            # Clear CSRF cookie by setting empty short-lived value
-            self._set_list_cookie(
-                response, "MCP_CONSENT_STATE", self._encode_list_cookie([]), max_age=60
-            )
-            return response
-
-        elif action == "deny":
-            denied = set(self._decode_list_cookie(request, "MCP_DENIED_CLIENTS"))
-            if client_key not in denied:
-                denied.add(client_key)
-            denied_b64 = self._encode_list_cookie(sorted(denied))
-
-            callback_params = {
-                "error": "access_denied",
-                "state": txn.get("client_state") or "",
-            }
-            sep = "&" if "?" in txn["client_redirect_uri"] else "?"
-            client_callback_url = (
-                f"{txn['client_redirect_uri']}{sep}{urlencode(callback_params)}"
-            )
-            response = RedirectResponse(url=client_callback_url, status_code=302)
-            self._set_list_cookie(
-                response, "MCP_DENIED_CLIENTS", denied_b64, max_age=365 * 24 * 3600
-            )
-            self._set_list_cookie(
-                response, "MCP_CONSENT_STATE", self._encode_list_cookie([]), max_age=60
-            )
-            return response
-
-        else:
-            return create_secure_html_response(
-                "<h1>Error</h1><p>Invalid action</p>", status_code=400
-            )

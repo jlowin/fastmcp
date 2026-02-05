@@ -805,7 +805,7 @@ class CIMDClientManager:
             return None
 
         # Import here to avoid circular dependency
-        from fastmcp.server.auth.oauth_proxy import OAuthProxyClient
+        from fastmcp.server.auth.oauth_proxy.models import ProxyDCRClient
 
         # Create synthetic client from CIMD document
         # Pass CIMD redirect_uris for validation alongside proxy's patterns
@@ -815,7 +815,7 @@ class CIMDClientManager:
             if cimd_doc.redirect_uris
             else None
         )
-        client = OAuthProxyClient(
+        client = ProxyDCRClient(
             client_id=client_id_url,
             client_secret=None,
             redirect_uris=redirect_uris,

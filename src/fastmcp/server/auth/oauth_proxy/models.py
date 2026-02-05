@@ -11,6 +11,7 @@ from typing import Any, Final
 from mcp.shared.auth import InvalidRedirectUriError, OAuthClientInformationFull
 from pydantic import AnyUrl, BaseModel, Field
 
+from fastmcp.server.auth.cimd import CIMDDocument
 from fastmcp.server.auth.redirect_validation import validate_redirect_uri
 
 # -------------------------------------------------------------------------
@@ -156,6 +157,8 @@ class ProxyDCRClient(OAuthClientInformationFull):
 
     allowed_redirect_uri_patterns: list[str] | None = Field(default=None)
     client_name: str | None = Field(default=None)
+    cimd_document: CIMDDocument | None = Field(default=None)
+    cimd_fetched_at: float | None = Field(default=None)
 
     def validate_redirect_uri(self, redirect_uri: AnyUrl | None) -> AnyUrl:
         """Validate redirect URI against allowed patterns.
