@@ -40,6 +40,7 @@ from mcp.server.auth.provider import (
     RefreshToken,
     TokenError,
 )
+from mcp.server.auth.routes import cors_middleware
 from mcp.server.auth.settings import (
     ClientRegistrationOptions,
     RevocationOptions,
@@ -52,7 +53,13 @@ from starlette.routing import Route
 from typing_extensions import override
 
 from fastmcp import settings
-from fastmcp.server.auth.auth import OAuthProvider, TokenVerifier
+from fastmcp.server.auth.auth import (
+    OAuthProvider,
+    PrivateKeyJWTClientAuthenticator,
+    TokenHandler,
+    TokenVerifier,
+)
+from fastmcp.server.auth.cimd import CIMDClientManager
 from fastmcp.server.auth.handlers.authorize import AuthorizationHandler
 from fastmcp.server.auth.jwt_issuer import (
     JWTIssuer,
@@ -60,6 +67,7 @@ from fastmcp.server.auth.jwt_issuer import (
 )
 from fastmcp.server.auth.oauth_proxy.consent import ConsentMixin
 from fastmcp.server.auth.oauth_proxy.models import (
+    CIMD_CACHE_TTL_SECONDS,
     DEFAULT_ACCESS_TOKEN_EXPIRY_NO_REFRESH_SECONDS,
     DEFAULT_ACCESS_TOKEN_EXPIRY_SECONDS,
     DEFAULT_AUTH_CODE_EXPIRY_SECONDS,
@@ -248,6 +256,8 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
         consent_csp_policy: str | None = None,
         # Token expiry fallback
         fallback_access_token_expiry_seconds: int | None = None,
+        # CIMD (Client ID Metadata Document) support
+        enable_cimd: bool = False,
     ):
         """Initialize the OAuth proxy provider.
 
@@ -302,6 +312,9 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
                 defaults: 1 hour if a refresh token is available (since we can refresh),
                 or 1 year if no refresh token (for API-key-style tokens like GitHub OAuth Apps).
                 Set explicitly to override these defaults.
+            enable_cimd: Enable CIMD (Client ID Metadata Document) support for URL-based
+                client IDs. When True, clients can authenticate using HTTPS URLs as client
+                IDs, with metadata fetched from the URL. Supports private_key_jwt auth.
         """
 
         # Always enable DCR since we implement it locally for MCP clients
@@ -484,6 +497,15 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
         # Use the provided token validator
         self._token_validator: TokenVerifier = token_verifier
 
+        # CIMD (Client ID Metadata Document) support
+        self._cimd_manager: CIMDClientManager | None = None
+        if enable_cimd:
+            self._cimd_manager = CIMDClientManager(
+                enable_cimd=True,
+                default_scope=self._default_scope_str,
+                allowed_redirect_uri_patterns=self._allowed_client_redirect_uris,
+            )
+
         logger.debug(
             "Initialized OAuth proxy provider with upstream server %s",
             self._upstream_authorization_endpoint,
@@ -559,15 +581,46 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
         provided to the DCR client during registration, not the upstream client ID.
 
         For unregistered clients, returns None (which will raise an error in the SDK).
+        CIMD clients (URL-based client IDs) are looked up and cached automatically.
         """
         # Load from storage
-        if not (client := await self._client_store.get(key=client_id)):
-            return None
+        client = await self._client_store.get(key=client_id)
 
-        if client.allowed_redirect_uri_patterns is None:
-            client.allowed_redirect_uri_patterns = self._allowed_client_redirect_uris
+        if client is not None:
+            if client.allowed_redirect_uri_patterns is None:
+                client.allowed_redirect_uri_patterns = (
+                    self._allowed_client_redirect_uris
+                )
 
-        return client
+            # Refresh stale CIMD clients (e.g. to pick up JWKS rotation)
+            if (
+                self._cimd_manager is not None
+                and client.cimd_document is not None
+                and client.cimd_fetched_at is not None
+                and (time.time() - client.cimd_fetched_at) > CIMD_CACHE_TTL_SECONDS
+            ):
+                try:
+                    refreshed = await self._cimd_manager.get_client(client_id)
+                    if refreshed is not None:
+                        await self._client_store.put(key=client_id, value=refreshed)
+                        return refreshed
+                except Exception:
+                    logger.debug(
+                        "CIMD refresh failed for %s, using cached client", client_id
+                    )
+
+            return client
+
+        # Client not in storage — try CIMD lookup for URL-based client IDs
+        if self._cimd_manager is not None and self._cimd_manager.is_cimd_client_id(
+            client_id
+        ):
+            cimd_client = await self._cimd_manager.get_client(client_id)
+            if cimd_client is not None:
+                await self._client_store.put(key=client_id, value=cimd_client)
+                return cimd_client
+
+        return None
 
     @override
     async def register_client(self, client_info: OAuthClientInformationFull) -> None:
@@ -1435,6 +1488,33 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
                         path="/authorize",
                         endpoint=authorize_handler.handle,
                         methods=["GET", "POST"],
+                    )
+                )
+            elif (
+                self._cimd_manager is not None
+                and isinstance(route, Route)
+                and route.path == "/token"
+                and route.methods is not None
+                and "POST" in route.methods
+            ):
+                # Replace the token endpoint authenticator with one that supports
+                # private_key_jwt for CIMD clients
+                token_endpoint_url = f"{self.base_url}/token"
+                cimd_authenticator = PrivateKeyJWTClientAuthenticator(
+                    provider=self,
+                    cimd_manager=self._cimd_manager,
+                    token_endpoint_url=token_endpoint_url,
+                )
+                token_handler = TokenHandler(
+                    provider=self, client_authenticator=cimd_authenticator
+                )
+                custom_routes.append(
+                    Route(
+                        path="/token",
+                        endpoint=cors_middleware(
+                            token_handler.handle, ["POST", "OPTIONS"]
+                        ),
+                        methods=["POST", "OPTIONS"],
                     )
                 )
             else:

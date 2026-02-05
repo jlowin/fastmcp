@@ -356,6 +356,7 @@ class OIDCProxy(OAuthProxy):
             "require_authorization_consent": require_authorization_consent,
             "consent_csp_policy": consent_csp_policy,
             "fallback_access_token_expiry_seconds": fallback_access_token_expiry_seconds,
+            "enable_cimd": enable_cimd,
         }
 
         if redirect_path:

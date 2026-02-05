@@ -18,6 +18,9 @@ from fastmcp.server.auth.redirect_validation import validate_redirect_uri
 # Constants
 # -------------------------------------------------------------------------
 
+# CIMD client cache TTL
+CIMD_CACHE_TTL_SECONDS: Final[int] = 60 * 60  # 1 hour
+
 # Default token expiration times
 DEFAULT_ACCESS_TOKEN_EXPIRY_SECONDS: Final[int] = 60 * 60  # 1 hour
 DEFAULT_ACCESS_TOKEN_EXPIRY_NO_REFRESH_SECONDS: Final[int] = (
@@ -161,26 +164,31 @@ class ProxyDCRClient(OAuthClientInformationFull):
     cimd_fetched_at: float | None = Field(default=None)
 
     def validate_redirect_uri(self, redirect_uri: AnyUrl | None) -> AnyUrl:
-        """Validate redirect URI against allowed patterns.
+        """Validate redirect URI against proxy patterns and optionally CIMD redirect_uris.
 
-        Since we're acting as a proxy and clients register dynamically,
-        we validate their redirect URIs against configurable patterns.
-        This is essential for cached token scenarios where the client may
-        reconnect with a different port.
+        For CIMD clients: validates against BOTH the CIMD document's redirect_uris
+        AND the proxy's allowed patterns (if configured). Both must pass.
+
+        For DCR clients: validates against proxy patterns first, falling back to
+        base validation (registered redirect_uris) if patterns don't match.
         """
         if redirect_uri is not None:
-            # Validate against allowed patterns
-            if validate_redirect_uri(
+            pattern_matches = validate_redirect_uri(
                 redirect_uri=redirect_uri,
                 allowed_patterns=self.allowed_redirect_uri_patterns,
-            ):
+            )
+
+            if pattern_matches:
+                # For CIMD clients with declared redirect_uris, also enforce them
+                if self.cimd_document is not None and self.redirect_uris is not None:
+                    return super().validate_redirect_uri(redirect_uri)
                 return redirect_uri
 
-            # If patterns are explicitly configured then reject non-matching URIs
+            # Patterns configured but didn't match
             if self.allowed_redirect_uri_patterns:
                 raise InvalidRedirectUriError(
                     f"Redirect URI '{redirect_uri}' does not match allowed patterns."
                 )
 
-        # If no redirect_uri provided, use default behavior
+        # No redirect_uri provided or no patterns configured — use base validation
         return super().validate_redirect_uri(redirect_uri)
