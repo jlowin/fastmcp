@@ -231,7 +231,6 @@ class OAuth(OAuthClientProvider):
                 self.token_storage_adapter.set_client_info, 
                 self._static_client_info
             )
-            
 
         # Store full MCP URL for use in callback_handler display
         self.mcp_url = mcp_url
