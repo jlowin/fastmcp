@@ -167,6 +167,7 @@ class _CIMDCacheEntry:
     etag: str | None
     last_modified: str | None
     expires_at: float
+    freshness_lifetime: float
     must_revalidate: bool
 
 
@@ -177,6 +178,7 @@ class _CIMDCachePolicy:
     etag: str | None
     last_modified: str | None
     expires_at: float
+    freshness_lifetime: float
     no_store: bool
     must_revalidate: bool
 
@@ -249,11 +251,13 @@ class CIMDFetcher:
 
         if expires_at is None:
             expires_at = now + self.DEFAULT_CACHE_TTL_SECONDS
+        freshness_lifetime = max(0.0, expires_at - now)
 
         return _CIMDCachePolicy(
             etag=normalized.get("etag"),
             last_modified=normalized.get("last-modified"),
             expires_at=expires_at,
+            freshness_lifetime=freshness_lifetime,
             no_store=no_store,
             must_revalidate=must_revalidate,
         )
@@ -347,7 +351,8 @@ class CIMDFetcher:
                 policy = _CIMDCachePolicy(
                     etag=None,
                     last_modified=None,
-                    expires_at=cached.expires_at,
+                    expires_at=now + cached.freshness_lifetime,
+                    freshness_lifetime=cached.freshness_lifetime,
                     no_store=False,
                     must_revalidate=cached.must_revalidate,
                 )
@@ -358,6 +363,7 @@ class CIMDFetcher:
                     etag=policy.etag or cached.etag,
                     last_modified=policy.last_modified or cached.last_modified,
                     expires_at=policy.expires_at,
+                    freshness_lifetime=policy.freshness_lifetime,
                     must_revalidate=policy.must_revalidate,
                 )
             else:
@@ -405,6 +411,7 @@ class CIMDFetcher:
                 etag=policy.etag,
                 last_modified=policy.last_modified,
                 expires_at=policy.expires_at,
+                freshness_lifetime=policy.freshness_lifetime,
                 must_revalidate=policy.must_revalidate,
             )
         else:

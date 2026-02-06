@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -443,6 +444,46 @@ class TestCIMDFetcherHTTP:
         assert len(requests) == 3
         assert requests[1].headers.get("if-none-match") == '"v3"'
         assert requests[2].headers.get("if-none-match") == '"v3"'
+
+    async def test_fetch_304_without_cache_headers_refreshes_cached_freshness(
+        self, fetcher: CIMDFetcher, httpx_mock, mock_dns
+    ):
+        """A header-less 304 should renew freshness using cached lifetime."""
+        url = "https://example.com/client.json"
+        doc_data = {
+            "client_id": url,
+            "client_name": "Headerless 304 Freshness App",
+            "redirect_uris": ["http://localhost:3000/callback"],
+            "token_endpoint_auth_method": "none",
+        }
+        httpx_mock.add_response(
+            json=doc_data,
+            headers={
+                "cache-control": "max-age=60",
+                "etag": '"v4"',
+                "content-length": "200",
+            },
+        )
+        httpx_mock.add_response(
+            status_code=304,
+            headers={"content-length": "0"},
+        )
+
+        first = await fetcher.fetch(url)
+
+        # Simulate cache expiry so the next request triggers revalidation.
+        cached_entry = fetcher._cache[url]
+        cached_entry.expires_at = time.time() - 1
+
+        second = await fetcher.fetch(url)
+        third = await fetcher.fetch(url)
+        requests = httpx_mock.get_requests()
+
+        assert first.client_name == "Headerless 304 Freshness App"
+        assert second.client_name == "Headerless 304 Freshness App"
+        assert third.client_name == "Headerless 304 Freshness App"
+        assert len(requests) == 2
+        assert requests[1].headers.get("if-none-match") == '"v4"'
 
     async def test_fetch_client_id_mismatch(
         self, fetcher: CIMDFetcher, httpx_mock, mock_dns
