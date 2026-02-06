@@ -258,6 +258,11 @@ class CIMDFetcher:
             must_revalidate=must_revalidate,
         )
 
+    def _has_freshness_headers(self, headers: Mapping[str, str]) -> bool:
+        """Return True when response includes cache freshness directives."""
+        normalized = {k.lower() for k in headers}
+        return "cache-control" in normalized or "expires" in normalized
+
     def is_cimd_client_id(self, client_id: str) -> bool:
         """Check if a client_id looks like a CIMD URL.
 
@@ -327,13 +332,24 @@ class CIMDFetcher:
         except SSRFFetchError as e:
             raise CIMDFetchError(str(e)) from e
 
-        now = time.time()
-        policy = self._parse_cache_policy(response.headers, now)
-
         if response.status_code == 304:
             if cached is None:
                 raise CIMDFetchError(
                     "CIMD server returned 304 Not Modified without cached document"
+                )
+
+            now = time.time()
+            if self._has_freshness_headers(response.headers):
+                policy = self._parse_cache_policy(response.headers, now)
+            else:
+                # RFC allows 304 to omit unchanged headers. Preserve existing
+                # cache policy rather than resetting to fallback defaults.
+                policy = _CIMDCachePolicy(
+                    etag=None,
+                    last_modified=None,
+                    expires_at=cached.expires_at,
+                    no_store=False,
+                    must_revalidate=cached.must_revalidate,
                 )
 
             if not policy.no_store:
@@ -347,6 +363,9 @@ class CIMDFetcher:
             else:
                 self._cache.pop(client_id_url, None)
             return cached.doc
+
+        now = time.time()
+        policy = self._parse_cache_policy(response.headers, now)
 
         try:
             data = json.loads(response.content)

@@ -403,6 +403,47 @@ class TestCIMDFetcherHTTP:
         assert len(requests) == 2
         assert requests[1].headers.get("if-none-match") == '"v2"'
 
+    async def test_fetch_304_without_cache_headers_preserves_policy(
+        self, fetcher: CIMDFetcher, httpx_mock, mock_dns
+    ):
+        """304 responses without cache headers should not reset cached policy."""
+        url = "https://example.com/client.json"
+        doc_data = {
+            "client_id": url,
+            "client_name": "No-Header-304 App",
+            "redirect_uris": ["http://localhost:3000/callback"],
+            "token_endpoint_auth_method": "none",
+        }
+        httpx_mock.add_response(
+            json=doc_data,
+            headers={
+                "cache-control": "no-cache",
+                "etag": '"v3"',
+                "content-length": "200",
+            },
+        )
+        # Intentionally omit cache-control/expires on 304.
+        httpx_mock.add_response(
+            status_code=304,
+            headers={"content-length": "0"},
+        )
+        httpx_mock.add_response(
+            status_code=304,
+            headers={"content-length": "0"},
+        )
+
+        first = await fetcher.fetch(url)
+        second = await fetcher.fetch(url)
+        third = await fetcher.fetch(url)
+        requests = httpx_mock.get_requests()
+
+        assert first.client_name == "No-Header-304 App"
+        assert second.client_name == "No-Header-304 App"
+        assert third.client_name == "No-Header-304 App"
+        assert len(requests) == 3
+        assert requests[1].headers.get("if-none-match") == '"v3"'
+        assert requests[2].headers.get("if-none-match") == '"v3"'
+
     async def test_fetch_client_id_mismatch(
         self, fetcher: CIMDFetcher, httpx_mock, mock_dns
     ):
