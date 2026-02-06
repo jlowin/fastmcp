@@ -18,6 +18,7 @@ async def main():
         async with Client(
             SERVER_URL,
             auth=OAuth(
+                # Replace with your own CIMD document URL
                 client_metadata_url="https://www.jlowin.dev/mcp-client.json",
             ),
         ) as client:

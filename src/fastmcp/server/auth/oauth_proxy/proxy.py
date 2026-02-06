@@ -599,9 +599,11 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
                     if refreshed is not None:
                         await self._client_store.put(key=client_id, value=refreshed)
                         return refreshed
-                except Exception:
+                except Exception as e:
                     logger.debug(
-                        "CIMD refresh failed for %s, using cached client", client_id
+                        "CIMD refresh failed for %s, using cached client: %s",
+                        client_id,
+                        e,
                     )
 
             return client

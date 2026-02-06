@@ -107,6 +107,30 @@ class TestCIMDDocument:
             )
         assert "redirect_uris" in str(exc_info.value)
 
+    def test_redirect_uri_without_scheme_rejected(self):
+        """Test that redirect_uris without a scheme are rejected."""
+        with pytest.raises(ValidationError, match="must have a scheme"):
+            CIMDDocument(
+                client_id=AnyHttpUrl("https://example.com/client.json"),
+                redirect_uris=["/just/a/path"],
+            )
+
+    def test_redirect_uri_without_host_rejected(self):
+        """Test that redirect_uris without a host are rejected."""
+        with pytest.raises(ValidationError, match="must have a host"):
+            CIMDDocument(
+                client_id=AnyHttpUrl("https://example.com/client.json"),
+                redirect_uris=["http://"],
+            )
+
+    def test_redirect_uri_whitespace_only_rejected(self):
+        """Test that whitespace-only redirect_uris are rejected."""
+        with pytest.raises(ValidationError, match="non-empty"):
+            CIMDDocument(
+                client_id=AnyHttpUrl("https://example.com/client.json"),
+                redirect_uris=["   "],
+            )
+
 
 class TestCIMDFetcher:
     """Tests for CIMDFetcher."""
@@ -171,7 +195,7 @@ class TestCIMDFetcherHTTP:
     @pytest.fixture
     def fetcher(self):
         """Create a CIMDFetcher for testing."""
-        return CIMDFetcher(cache_ttl=60)
+        return CIMDFetcher()
 
     @pytest.fixture
     def mock_dns(self):

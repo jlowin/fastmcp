@@ -167,6 +167,7 @@ class JWTVerifier(TokenVerifier):
         algorithm: str | None = None,
         required_scopes: list[str] | None = None,
         base_url: AnyHttpUrl | str | None = None,
+        ssrf_safe: bool = False,
     ):
         """
         Initialize a JWTVerifier configured to validate JWTs using either a static key or a JWKS endpoint.
@@ -179,6 +180,10 @@ class JWTVerifier(TokenVerifier):
             algorithm: JWT signing algorithm to accept (default: "RS256"). Supported: HS256/384/512, RS256/384/512, ES256/384/512, PS256/384/512.
             required_scopes: Scopes that must be present in validated tokens.
             base_url: Base URL passed to the parent TokenVerifier.
+            ssrf_safe: If True, JWKS fetches use SSRF protection (HTTPS-only,
+                public IPs, DNS pinning). Enable when the JWKS URI comes from
+                untrusted input (e.g. CIMD documents). Defaults to False so
+                operator-configured JWKS URIs (including localhost) work normally.
 
         Raises:
             ValueError: If neither or both of `public_key` and `jwks_uri` are provided, or if `algorithm` is unsupported.
@@ -222,6 +227,7 @@ class JWTVerifier(TokenVerifier):
         self.audience = audience
         self.public_key = public_key
         self.jwks_uri = jwks_uri
+        self.ssrf_safe = ssrf_safe
         self.jwt = JsonWebToken([self.algorithm])
         self.logger = get_logger(__name__)
 
@@ -259,16 +265,9 @@ class JWTVerifier(TokenVerifier):
                 # If no kid but only one key cached, use it
                 return next(iter(self._jwks_cache.values()))
 
-        # Fetch JWKS with SSRF protection
-        # This validates the URL, resolves DNS, checks IPs, and pins to validated IP
+        # Fetch JWKS — with SSRF protection when enabled (untrusted URIs)
         try:
-            content = await ssrf_safe_fetch(
-                self.jwks_uri,
-                max_size=65536,  # 64KB for JWKS (can be larger than CIMD)
-                timeout=10.0,
-                overall_timeout=30.0,
-            )
-            jwks_data = json.loads(content)
+            jwks_data = await self._fetch_jwks()
 
             # Cache all keys
             self._jwks_cache = {}
@@ -314,6 +313,25 @@ class JWTVerifier(TokenVerifier):
         except (JoseError, TypeError, KeyError) as e:
             self.logger.debug("JWKS key processing failed: %s", e)
             raise ValueError(f"Failed to process JWKS: {e}") from e
+
+    async def _fetch_jwks(self) -> dict[str, Any]:
+        """Fetch JWKS data, using SSRF-safe or standard fetch based on config."""
+        if not self.jwks_uri:
+            raise ValueError("JWKS URI not configured")
+
+        if self.ssrf_safe:
+            content = await ssrf_safe_fetch(
+                self.jwks_uri,
+                max_size=65536,
+                timeout=10.0,
+                overall_timeout=30.0,
+            )
+            return json.loads(content)
+        else:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(self.jwks_uri)
+                response.raise_for_status()
+                return response.json()
 
     def _extract_scopes(self, claims: dict[str, Any]) -> list[str]:
         """

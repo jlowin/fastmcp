@@ -111,7 +111,7 @@ async def resolve_hostname(hostname: str, port: int = 443) -> list[str]:
     Raises:
         SSRFError: If resolution fails
     """
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         infos = await loop.run_in_executor(
             None,

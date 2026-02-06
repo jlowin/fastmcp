@@ -120,10 +120,7 @@ encrypted_storage = FernetEncryptionWrapper(
     fernet=Fernet(os.environ["OAUTH_STORAGE_ENCRYPTION_KEY"])
 )
 
-oauth = OAuth(
-    mcp_url="https://your-server.fastmcp.app/mcp",
-    token_storage=encrypted_storage
-)
+oauth = OAuth(token_storage=encrypted_storage)
 
 async with Client("https://your-server.fastmcp.app/mcp", auth=oauth) as client:
     await client.ping()

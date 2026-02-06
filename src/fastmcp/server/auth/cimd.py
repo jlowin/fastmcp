@@ -25,7 +25,7 @@ import time
 from dataclasses import dataclass
 from datetime import timezone
 from email.utils import parsedate_to_datetime
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import urlparse
 
 import httpx
@@ -33,6 +33,9 @@ from pydantic import AnyHttpUrl, BaseModel, Field, field_validator
 
 from fastmcp.server.auth.ssrf import format_ip_for_url
 from fastmcp.utilities.logging import get_logger
+
+if TYPE_CHECKING:
+    from fastmcp.server.auth.providers.jwt import JWTVerifier
 
 logger = get_logger(__name__)
 
@@ -104,7 +107,7 @@ async def _resolve_hostname(hostname: str, port: int = 443) -> list[str]:
     Raises:
         CIMDValidationError: If resolution fails
     """
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         # Run DNS resolution in thread pool
         infos = await loop.run_in_executor(
@@ -217,11 +220,19 @@ class CIMDDocument(BaseModel):
     @field_validator("redirect_uris")
     @classmethod
     def validate_redirect_uris(cls, v: list[str]) -> list[str]:
-        """Ensure redirect_uris is non-empty and contains valid entries."""
+        """Ensure redirect_uris is non-empty and each entry is a valid URI."""
         if not v:
             raise ValueError("CIMD documents must include at least one redirect_uri")
-        if any(not uri for uri in v):
-            raise ValueError("CIMD redirect_uris must be non-empty strings")
+        for uri in v:
+            if not uri or not uri.strip():
+                raise ValueError("CIMD redirect_uris must be non-empty strings")
+            parsed = urlparse(uri)
+            if not parsed.scheme:
+                raise ValueError(
+                    f"CIMD redirect_uri must have a scheme (e.g. http:// or https://): {uri!r}"
+                )
+            if not parsed.netloc and not uri.startswith("urn:"):
+                raise ValueError(f"CIMD redirect_uri must have a host: {uri!r}")
         return v
 
 
@@ -267,17 +278,11 @@ class CIMDFetcher:
 
     def __init__(
         self,
-        cache_ttl: int = 3600,  # Kept for backwards compatibility, unused
-        min_cache_ttl: int = 300,  # Kept for backwards compatibility, unused
-        max_cache_ttl: int = 86400,  # Kept for backwards compatibility, unused
         timeout: float = 10.0,
     ):
         """Initialize the CIMD fetcher.
 
         Args:
-            cache_ttl: Deprecated, unused (kept for compatibility)
-            min_cache_ttl: Deprecated, unused (kept for compatibility)
-            max_cache_ttl: Deprecated, unused (kept for compatibility)
             timeout: HTTP request timeout in seconds (default 10.0)
         """
         self.timeout = timeout
@@ -714,6 +719,9 @@ class CIMDAssertionValidator:
         self._jti_cache_max_size = 10000
         self._last_cleanup = time.monotonic()
         self._cleanup_interval = 60  # Cleanup every 60 seconds
+        # Cache JWTVerifier per jwks_uri so JWKS keys are not re-fetched
+        # on every token exchange
+        self._verifier_cache: dict[str, JWTVerifier] = {}
         self.logger = get_logger(__name__)
 
     def _cleanup_expired_jtis(self) -> None:
@@ -753,23 +761,28 @@ class CIMDAssertionValidator:
         Raises:
             ValueError: If validation fails
         """
-        from fastmcp.server.auth.providers.jwt import JWTVerifier
+        from fastmcp.server.auth.providers.jwt import JWTVerifier as _JWTVerifier
 
         # Periodic cleanup of expired JTIs
         self._maybe_cleanup()
 
-        # 1. Validate CIMD document has key material
+        # 1. Validate CIMD document has key material and get/create verifier
         if cimd_doc.jwks_uri:
-            # Use JWTVerifier to handle JWKS fetching, caching, and JWT validation
-            verifier = JWTVerifier(
-                jwks_uri=str(cimd_doc.jwks_uri),
-                issuer=client_id,  # Must match client_id per RFC 7523
-                audience=token_endpoint,  # Must match token endpoint
-            )
+            jwks_uri_str = str(cimd_doc.jwks_uri)
+            cache_key = f"{jwks_uri_str}|{client_id}|{token_endpoint}"
+            verifier = self._verifier_cache.get(cache_key)
+            if verifier is None:
+                verifier = _JWTVerifier(
+                    jwks_uri=jwks_uri_str,
+                    issuer=client_id,
+                    audience=token_endpoint,
+                    ssrf_safe=True,
+                )
+                self._verifier_cache[cache_key] = verifier
         elif cimd_doc.jwks:
-            # Extract public key from inline JWKS
+            # Inline JWKS — no caching since the key is embedded
             public_key = self._extract_public_key_from_jwks(assertion, cimd_doc.jwks)
-            verifier = JWTVerifier(
+            verifier = _JWTVerifier(
                 public_key=public_key,
                 issuer=client_id,
                 audience=token_endpoint,

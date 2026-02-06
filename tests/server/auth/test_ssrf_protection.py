@@ -263,6 +263,7 @@ class TestJWKSSSRFProtection:
         verifier = JWTVerifier(
             jwks_uri="https://internal.example.com/.well-known/jwks.json",
             issuer="https://issuer.example.com",
+            ssrf_safe=True,
         )
 
         with patch(
@@ -280,6 +281,7 @@ class TestJWKSSSRFProtection:
         verifier = JWTVerifier(
             jwks_uri="https://cgnat.example.com/.well-known/jwks.json",
             issuer="https://issuer.example.com",
+            ssrf_safe=True,
         )
 
         with patch(
@@ -296,6 +298,7 @@ class TestJWKSSSRFProtection:
         verifier = JWTVerifier(
             jwks_uri="https://localhost/.well-known/jwks.json",
             issuer="https://issuer.example.com",
+            ssrf_safe=True,
         )
 
         with patch(
