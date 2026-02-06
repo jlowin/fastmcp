@@ -171,3 +171,86 @@ For detailed instructions on using Postman's MCP features, see [Postman's MCP do
 - Validating complex assertions on response data
 
 Both approaches are complementary. Use Postman for interactive exploration and debugging, and Pytest for automated, repeatable testing as part of your development workflow.
+
+## Testing with MCPJam Inspector
+
+MCPJam Inspector is a local-first developer tool that provides a visual interface for testing, debugging, and inspecting MCP servers. It functions like "Postman for MCP" and is particularly useful for exploring server capabilities, testing tools with different parameters, and debugging protocol-level interactions.
+
+### Prerequisites
+
+To test your FastMCP server with MCPJam Inspector, you'll need:
+
+1. **A running FastMCP server** - MCPJam Inspector supports all transport protocols (STDIO, HTTP, and SSE). See the [HTTP Deployment guide](/deployment/http) for HTTP transport setup.
+
+2. **MCPJam Inspector running locally** - The inspector runs as a local web application at `http://127.0.0.1:6274` in your browser. Visit [MCPJam](https://www.mcpjam.com/) to get started.
+
+### Setting Up MCPJam Inspector
+
+Deploy your FastMCP server with your preferred transport. For HTTP:
+
+```python server.py
+from fastmcp import FastMCP
+
+mcp = FastMCP("My Server")
+
+@mcp.tool
+def process_data(input: str) -> str:
+    """Process data on the server"""
+    return f"Processed: {input}"
+
+if __name__ == "__main__":
+    mcp.run(transport="http", host="0.0.0.0", port=8000)
+```
+
+Start your server:
+```bash
+python server.py
+```
+
+Your server is now accessible at `http://localhost:8000/mcp`.
+
+### Connecting to Your Server
+
+In MCPJam Inspector:
+
+1. Navigate to the local dashboard at `http://127.0.0.1:6274`
+2. Click the "Add Server" button
+3. Select your connection type (STDIO, HTTP, or SSE)
+4. Enter your server name and connection details (URL, credentials if needed)
+5. Confirm to establish the connection
+
+For HTTP servers with authentication, include your credentials in the connection setup. MCPJam Inspector supports OAuth debugging for OAuth-protected servers.
+
+### Testing Server Capabilities
+
+MCPJam Inspector provides several testing features:
+
+- **Tools Tab** - Browse available tools, fill in parameter values, execute calls, and review structured response data
+- **Resources Tab** - Inspect and browse available resources and resource templates
+- **Prompts Tab** - Test prompt templates with different inputs
+- **LLM Playground** - Connect your server to real AI models (Claude, GPT, Ollama) and test full conversational flows
+- **JSON-RPC Logs** - View real-time protocol messages between the inspector and your server for low-level debugging
+
+The LLM Playground is particularly powerful—it lets you test how your MCP server behaves when integrated with actual language models, helping you validate tool descriptions, parameter schemas, and response formats in realistic scenarios.
+
+### When to Use MCPJam Inspector vs Other Tools
+
+**Use MCPJam Inspector when:**
+- Testing protocol-level interactions and debugging JSON-RPC messages
+- Validating server behavior across different transport protocols (STDIO, HTTP, SSE)
+- Testing OAuth authentication flows and debugging authorization issues
+- Exploring how your server integrates with different LLM models
+- Working locally without deploying to a remote environment
+
+**Use Postman when:**
+- Testing remote HTTP servers that are already deployed
+- Sharing test requests with team members via Postman collections
+- Working in an environment where you're already using Postman for API testing
+
+**Use Pytest when:**
+- Building automated test suites for CI/CD pipelines
+- Testing multiple scenarios with parameterized inputs
+- Ensuring consistent behavior across code changes
+- Writing regression tests for bug fixes
+
+All three approaches are complementary. Use MCPJam Inspector for local, protocol-level testing and LLM integration validation; Postman for remote HTTP testing and collaboration; and Pytest for automated, repeatable testing in your development workflow.
