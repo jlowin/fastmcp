@@ -328,7 +328,7 @@ class JWTVerifier(TokenVerifier):
             )
             return json.loads(content)
         else:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
                 response = await client.get(self.jwks_uri)
                 response.raise_for_status()
                 return response.json()

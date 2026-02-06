@@ -287,7 +287,7 @@ class TestOAuthProxyCIMDClient:
     def mock_dns(self):
         """Mock DNS resolution to return test public IP."""
         with patch(
-            "fastmcp.server.auth.cimd._resolve_hostname",
+            "fastmcp.server.auth.ssrf.resolve_hostname",
             return_value=[TEST_PUBLIC_IP],
         ):
             yield

@@ -13,15 +13,11 @@ import ipaddress
 import socket
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 import httpx
 
 from fastmcp.utilities.logging import get_logger
-
-if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
 
 logger = get_logger(__name__)
 
@@ -295,112 +291,6 @@ async def ssrf_safe_fetch(
                     chunks.append(chunk)
 
                 return b"".join(chunks)
-
-        except httpx.TimeoutException as e:
-            last_error = e
-            continue
-        except httpx.RequestError as e:
-            last_error = e
-            continue
-
-    if last_error is not None:
-        if isinstance(last_error, httpx.TimeoutException):
-            raise SSRFFetchError(f"Timeout fetching {url}") from last_error
-        raise SSRFFetchError(f"Error fetching {url}: {last_error}") from last_error
-
-    raise SSRFFetchError(f"Error fetching {url}: no resolved IPs succeeded")
-
-
-async def ssrf_safe_stream(
-    url: str,
-    *,
-    require_path: bool = False,
-    max_size: int = 5120,
-    timeout: float = 10.0,
-    overall_timeout: float = 30.0,
-) -> AsyncIterator[tuple[int, AsyncIterator[bytes]]]:
-    """Stream URL with SSRF protection and DNS pinning.
-
-    Same security measures as ssrf_safe_fetch but returns a streaming response.
-    Yields (status_code, chunk_iterator) for streaming large responses.
-
-    Args:
-        url: URL to fetch
-        require_path: If True, require non-root path
-        max_size: Maximum response size in bytes
-        timeout: Per-operation timeout in seconds
-        overall_timeout: Overall timeout for entire operation
-
-    Yields:
-        Tuple of (status_code, async iterator of chunks)
-
-    Raises:
-        SSRFError: If SSRF validation fails
-        SSRFFetchError: If fetch fails
-    """
-    start_time = time.monotonic()
-
-    validated = await validate_url(url, require_path=require_path)
-
-    last_error: Exception | None = None
-
-    for pinned_ip in validated.resolved_ips:
-        elapsed = time.monotonic() - start_time
-        if elapsed > overall_timeout:
-            raise SSRFFetchError(f"Overall timeout exceeded: {url}")
-        remaining = max(1.0, overall_timeout - elapsed)
-
-        pinned_url = (
-            f"https://{format_ip_for_url(pinned_ip)}:{validated.port}{validated.path}"
-        )
-
-        try:
-            async with (
-                httpx.AsyncClient(
-                    timeout=httpx.Timeout(
-                        connect=min(timeout, remaining),
-                        read=min(timeout, remaining),
-                        write=min(timeout, remaining),
-                        pool=min(timeout, remaining),
-                    ),
-                    follow_redirects=False,
-                    verify=True,
-                ) as client,
-                client.stream(
-                    "GET",
-                    pinned_url,
-                    headers={"Host": validated.hostname},
-                    extensions={"sni_hostname": validated.hostname},
-                ) as response,
-            ):
-                # Check content-length if available
-                content_length = response.headers.get("content-length")
-                if content_length:
-                    try:
-                        size = int(content_length)
-                        if size > max_size:
-                            raise SSRFFetchError(
-                                f"Response too large: {size} bytes (max {max_size})"
-                            )
-                    except ValueError:
-                        pass
-
-                async def checked_chunks() -> AsyncIterator[bytes]:
-                    total = 0
-                    async for chunk in response.aiter_bytes():
-                        if time.monotonic() - start_time > overall_timeout:
-                            raise SSRFFetchError(
-                                f"Overall timeout exceeded streaming {url}"
-                            )
-                        total += len(chunk)
-                        if total > max_size:
-                            raise SSRFFetchError(
-                                f"Response too large: exceeded {max_size} bytes"
-                            )
-                        yield chunk
-
-                yield response.status_code, checked_chunks()
-                return
 
         except httpx.TimeoutException as e:
             last_error = e

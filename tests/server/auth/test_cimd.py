@@ -162,8 +162,6 @@ class TestCIMDFetcher:
         assert not fetcher.is_cimd_client_id("")
         assert not fetcher.is_cimd_client_id("not a url")
 
-    # URL validation tests moved to test_cimd_ssrf_protection.py
-
     def test_validate_redirect_uri_exact_match(self, fetcher: CIMDFetcher):
         """Test redirect_uri validation with exact match."""
         doc = CIMDDocument(
@@ -201,7 +199,7 @@ class TestCIMDFetcherHTTP:
     def mock_dns(self):
         """Mock DNS resolution to return test public IP."""
         with patch(
-            "fastmcp.server.auth.cimd._resolve_hostname",
+            "fastmcp.server.auth.ssrf.resolve_hostname",
             return_value=[TEST_PUBLIC_IP],
         ):
             yield
@@ -229,10 +227,8 @@ class TestCIMDFetcherHTTP:
         assert str(doc.client_id) == url
         assert doc.client_name == "Test App"
 
-    async def test_fetch_cache_max_age(
-        self, fetcher: CIMDFetcher, httpx_mock, mock_dns
-    ):
-        """Test that max-age caching skips refetch."""
+    async def test_fetch_ttl_cache(self, fetcher: CIMDFetcher, httpx_mock, mock_dns):
+        """Test that fetched documents are cached and served from cache within TTL."""
         url = "https://example.com/client.json"
         doc_data = {
             "client_id": url,
@@ -242,7 +238,7 @@ class TestCIMDFetcherHTTP:
         }
         httpx_mock.add_response(
             json=doc_data,
-            headers={"content-length": "200", "cache-control": "max-age=60"},
+            headers={"content-length": "200"},
         )
 
         first = await fetcher.fetch(url)
@@ -250,126 +246,6 @@ class TestCIMDFetcherHTTP:
 
         assert first.client_id == second.client_id
         assert len(httpx_mock.get_requests()) == 1
-
-    async def test_fetch_cache_etag_revalidate(
-        self, fetcher: CIMDFetcher, httpx_mock, mock_dns
-    ):
-        """Test ETag revalidation with 304 response."""
-        url = "https://example.com/client.json"
-        doc_data = {
-            "client_id": url,
-            "client_name": "Test App",
-            "redirect_uris": ["http://localhost:3000/callback"],
-            "token_endpoint_auth_method": "none",
-        }
-        httpx_mock.add_response(
-            json=doc_data,
-            headers={
-                "content-length": "200",
-                "cache-control": "max-age=0",
-                "etag": 'W/"abc"',
-            },
-        )
-        httpx_mock.add_response(
-            status_code=304,
-            headers={"cache-control": "max-age=60", "etag": 'W/"abc"'},
-        )
-
-        first = await fetcher.fetch(url)
-        second = await fetcher.fetch(url)
-
-        assert first.client_id == second.client_id
-        requests = httpx_mock.get_requests()
-        assert len(requests) == 2
-        assert requests[1].headers.get("if-none-match") == 'W/"abc"'
-
-    async def test_fetch_cache_last_modified_revalidate(
-        self, fetcher: CIMDFetcher, httpx_mock, mock_dns
-    ):
-        """Test Last-Modified revalidation with 304 response."""
-        url = "https://example.com/client.json"
-        last_modified = "Wed, 21 Oct 2015 07:28:00 GMT"
-        doc_data = {
-            "client_id": url,
-            "client_name": "Test App",
-            "redirect_uris": ["http://localhost:3000/callback"],
-            "token_endpoint_auth_method": "none",
-        }
-        httpx_mock.add_response(
-            json=doc_data,
-            headers={
-                "content-length": "200",
-                "cache-control": "max-age=0",
-                "last-modified": last_modified,
-            },
-        )
-        httpx_mock.add_response(
-            status_code=304,
-            headers={"cache-control": "max-age=60", "last-modified": last_modified},
-        )
-
-        await fetcher.fetch(url)
-        await fetcher.fetch(url)
-
-        requests = httpx_mock.get_requests()
-        assert len(requests) == 2
-        assert requests[1].headers.get("if-modified-since") == last_modified
-
-    async def test_fetch_cache_no_store(
-        self, fetcher: CIMDFetcher, httpx_mock, mock_dns
-    ):
-        """Test that no-store disables caching."""
-        url = "https://example.com/client.json"
-        doc_data = {
-            "client_id": url,
-            "client_name": "Test App",
-            "redirect_uris": ["http://localhost:3000/callback"],
-            "token_endpoint_auth_method": "none",
-        }
-        httpx_mock.add_response(
-            json=doc_data,
-            headers={"content-length": "200", "cache-control": "no-store"},
-        )
-        httpx_mock.add_response(
-            json=doc_data,
-            headers={"content-length": "200", "cache-control": "no-store"},
-        )
-
-        await fetcher.fetch(url)
-        await fetcher.fetch(url)
-
-        assert len(httpx_mock.get_requests()) == 2
-
-    async def test_fetch_cache_no_cache(
-        self, fetcher: CIMDFetcher, httpx_mock, mock_dns
-    ):
-        """Test that no-cache forces revalidation."""
-        url = "https://example.com/client.json"
-        doc_data = {
-            "client_id": url,
-            "client_name": "Test App",
-            "redirect_uris": ["http://localhost:3000/callback"],
-            "token_endpoint_auth_method": "none",
-        }
-        httpx_mock.add_response(
-            json=doc_data,
-            headers={
-                "content-length": "200",
-                "cache-control": "no-cache",
-                "etag": '"abc"',
-            },
-        )
-        httpx_mock.add_response(
-            status_code=304,
-            headers={"cache-control": "no-cache", "etag": '"abc"'},
-        )
-
-        await fetcher.fetch(url)
-        await fetcher.fetch(url)
-
-        requests = httpx_mock.get_requests()
-        assert len(requests) == 2
-        assert requests[1].headers.get("if-none-match") == '"abc"'
 
     async def test_fetch_client_id_mismatch(
         self, fetcher: CIMDFetcher, httpx_mock, mock_dns
@@ -755,7 +631,7 @@ class TestCIMDClientManager:
     def mock_dns(self):
         """Mock DNS resolution to return test public IP."""
         with patch(
-            "fastmcp.server.auth.cimd._resolve_hostname",
+            "fastmcp.server.auth.ssrf.resolve_hostname",
             return_value=[TEST_PUBLIC_IP],
         ):
             yield
@@ -814,7 +690,7 @@ class TestCIMDClientManagerGetClientOptions:
     def mock_dns(self):
         """Mock DNS resolution to return test public IP."""
         with patch(
-            "fastmcp.server.auth.cimd._resolve_hostname",
+            "fastmcp.server.auth.ssrf.resolve_hostname",
             return_value=[TEST_PUBLIC_IP],
         ):
             yield
@@ -1006,7 +882,7 @@ class TestCIMDRedirectUriEnforcement:
     def mock_dns(self):
         """Mock DNS resolution to return test public IP."""
         with patch(
-            "fastmcp.server.auth.cimd._resolve_hostname",
+            "fastmcp.server.auth.ssrf.resolve_hostname",
             return_value=[TEST_PUBLIC_IP],
         ):
             yield

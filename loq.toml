@@ -12,7 +12,7 @@ exclude = [
 
 [[rules]]
 path = "src/fastmcp/server/auth/cimd.py"
-max_lines = 683
+max_lines = 651
 
 [[rules]]
 path = "src/fastmcp/server/auth/oauth_proxy.py"
@@ -48,7 +48,7 @@ max_lines = 954
 
 [[rules]]
 path = "tests/server/auth/test_cimd.py"
-max_lines = 672
+max_lines = 973
 
 [[rules]]
 path = "tests/server/middleware/test_tool_injection.py"

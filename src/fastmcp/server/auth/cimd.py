@@ -16,115 +16,26 @@ This module provides:
 
 from __future__ import annotations
 
-import asyncio
 import fnmatch
-import ipaddress
 import json
-import socket
 import time
-from dataclasses import dataclass
-from datetime import timezone
-from email.utils import parsedate_to_datetime
 from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import urlparse
 
-import httpx
 from pydantic import AnyHttpUrl, BaseModel, Field, field_validator
 
-from fastmcp.server.auth.ssrf import format_ip_for_url
+from fastmcp.server.auth.ssrf import (
+    SSRFError,
+    SSRFFetchError,
+    ssrf_safe_fetch,
+    validate_url,
+)
 from fastmcp.utilities.logging import get_logger
 
 if TYPE_CHECKING:
     from fastmcp.server.auth.providers.jwt import JWTVerifier
 
 logger = get_logger(__name__)
-
-
-def _is_ip_allowed(ip_str: str) -> bool:
-    """Check if an IP address is allowed (must be globally routable unicast).
-
-    This is the core SSRF protection - it validates actual resolved IP addresses,
-    not hostnames. This prevents DNS rebinding and IP obfuscation attacks.
-
-    Uses ip.is_global which catches:
-    - Private (10.x, 172.16-31.x, 192.168.x)
-    - Loopback (127.x, ::1)
-    - Link-local (169.254.x, fe80::) - includes AWS metadata!
-    - Reserved, unspecified
-    - RFC6598 Carrier-Grade NAT (100.64.0.0/10) - can point to internal networks
-
-    Additionally blocks multicast addresses (not caught by is_global).
-
-    Args:
-        ip_str: IP address string to check
-
-    Returns:
-        True if the IP is allowed (public unicast internet), False if blocked
-    """
-    try:
-        ip = ipaddress.ip_address(ip_str)
-    except ValueError:
-        # If we can't parse it as an IP, block it
-        return False
-
-    # Must be globally routable
-    if not ip.is_global:
-        return False
-
-    # Block multicast (not caught by is_global for some ranges)
-    if ip.is_multicast:
-        return False
-
-    # IPv6-specific checks for embedded IPv4 addresses
-    if isinstance(ip, ipaddress.IPv6Address):
-        # Block IPv4-mapped IPv6 addresses (::ffff:127.0.0.1)
-        if ip.ipv4_mapped:
-            return _is_ip_allowed(str(ip.ipv4_mapped))
-        # Block 6to4 addresses (2002::/16) - can encode IPv4
-        if ip.sixtofour:
-            return _is_ip_allowed(str(ip.sixtofour))
-        # Block Teredo addresses (2001::/32) - can tunnel to IPv4
-        if ip.teredo:
-            # teredo returns (server, client) tuple
-            server, client = ip.teredo
-            return _is_ip_allowed(str(server)) and _is_ip_allowed(str(client))
-
-    return True
-
-
-async def _resolve_hostname(hostname: str, port: int = 443) -> list[str]:
-    """Resolve hostname to IP addresses using DNS.
-
-    This runs DNS resolution in a thread pool to avoid blocking.
-
-    Args:
-        hostname: Hostname to resolve
-        port: Port number (used for getaddrinfo)
-
-    Returns:
-        List of resolved IP addresses
-
-    Raises:
-        CIMDValidationError: If resolution fails
-    """
-    loop = asyncio.get_running_loop()
-    try:
-        # Run DNS resolution in thread pool
-        infos = await loop.run_in_executor(
-            None,
-            lambda: socket.getaddrinfo(
-                hostname, port, socket.AF_UNSPEC, socket.SOCK_STREAM
-            ),
-        )
-        # Extract unique IP addresses
-        ips = list({info[4][0] for info in infos})
-        if not ips:
-            raise CIMDValidationError(
-                f"DNS resolution returned no addresses for {hostname}"
-            )
-        return ips
-    except socket.gaierror as e:
-        raise CIMDValidationError(f"DNS resolution failed for {hostname}: {e}") from e
 
 
 class CIMDDocument(BaseModel):
@@ -244,36 +155,17 @@ class CIMDFetchError(Exception):
     """Raised when CIMD document fetching fails."""
 
 
-@dataclass(slots=True)
-class CIMDCacheEntry:
-    """Cached CIMD document with HTTP cache metadata."""
-
-    document: CIMDDocument
-    etag: str | None
-    last_modified: str | None
-    expires_at: float
-    must_revalidate: bool
-
-
 class CIMDFetcher:
-    """Fetch and validate CIMD documents with comprehensive SSRF protection.
+    """Fetch and validate CIMD documents with SSRF protection.
 
-    Security measures:
-    - URL validation (HTTPS only, non-root path required)
-    - DNS resolution with IP validation (prevents DNS rebinding)
-    - Blocks private/loopback/link-local/multicast IPs
-    - Response size limit (5KB max, enforced via streaming)
-    - Redirects disabled (prevents redirect-based SSRF)
-    - Overall timeout (prevents slow-stream DoS)
+    Delegates HTTP fetching to ssrf_safe_fetch which provides DNS pinning,
+    IP validation, size limits, and timeout enforcement. Documents are cached
+    with a simple TTL.
     """
 
-    # Overall fetch timeout (seconds) - prevents slow-stream DoS
-    FETCH_TIMEOUT = 30.0
-    # Per-operation timeout (seconds)
-    OPERATION_TIMEOUT = 10.0
     # Maximum response size (bytes)
     MAX_RESPONSE_SIZE = 5120  # 5KB
-    # Default cache TTL when headers are absent (seconds)
+    # Default cache TTL (seconds)
     DEFAULT_CACHE_TTL_SECONDS = 3600
 
     def __init__(
@@ -286,79 +178,7 @@ class CIMDFetcher:
             timeout: HTTP request timeout in seconds (default 10.0)
         """
         self.timeout = timeout
-        self._cache: dict[str, CIMDCacheEntry] = {}
-
-    def _parse_cache_headers(
-        self, headers: httpx.Headers
-    ) -> tuple[float | None, bool, bool]:
-        """Parse cache headers into (expires_at, must_revalidate, no_store)."""
-        cache_control = headers.get("cache-control", "")
-        directives: dict[str, str | None] = {}
-        for part in cache_control.split(","):
-            part = part.strip()
-            if not part:
-                continue
-            if "=" in part:
-                key, value = part.split("=", 1)
-                directives[key.strip().lower()] = value.strip().strip('"')
-            else:
-                directives[part.lower()] = None
-
-        no_store = "no-store" in directives
-        must_revalidate = "no-cache" in directives
-
-        max_age: int | None = None
-        max_age_value = directives.get("max-age")
-        if max_age_value is not None:
-            try:
-                max_age = int(max_age_value)
-            except ValueError:
-                max_age = None
-
-        now = time.time()
-        if max_age is not None:
-            return now + max_age, must_revalidate, no_store
-
-        expires_header = headers.get("expires")
-        if expires_header:
-            try:
-                dt = parsedate_to_datetime(expires_header)
-                if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=timezone.utc)
-                return dt.timestamp(), must_revalidate, no_store
-            except (TypeError, ValueError):
-                pass
-
-        return None, must_revalidate, no_store
-
-    def _build_cache_entry(
-        self,
-        document: CIMDDocument,
-        headers: httpx.Headers,
-        *,
-        previous: CIMDCacheEntry | None = None,
-    ) -> CIMDCacheEntry | None:
-        """Build a cache entry from response headers."""
-        expires_at, must_revalidate, no_store = self._parse_cache_headers(headers)
-        if no_store:
-            return None
-
-        now = time.time()
-        if expires_at is None:
-            expires_at = now + self.DEFAULT_CACHE_TTL_SECONDS
-
-        etag = headers.get("etag") or (previous.etag if previous else None)
-        last_modified = headers.get("last-modified") or (
-            previous.last_modified if previous else None
-        )
-
-        return CIMDCacheEntry(
-            document=document,
-            etag=etag,
-            last_modified=last_modified,
-            expires_at=expires_at,
-            must_revalidate=must_revalidate,
-        )
+        self._cache: dict[str, tuple[CIMDDocument, float]] = {}
 
     def is_cimd_client_id(self, client_id: str) -> bool:
         """Check if a client_id looks like a CIMD URL.
@@ -371,80 +191,21 @@ class CIMDFetcher:
             parsed = urlparse(client_id)
             return (
                 parsed.scheme == "https"
-                and bool(parsed.netloc)  # Must have a host
+                and bool(parsed.netloc)
                 and parsed.path not in ("", "/")
             )
         except (ValueError, AttributeError):
             return False
 
-    async def _validate_url_and_resolve(self, url: str) -> tuple[str, int, list[str]]:
-        """Validate URL format and resolve hostname to IPs with SSRF protection.
-
-        This is the core SSRF protection. It:
-        1. Validates URL format (HTTPS, has host, non-root path)
-        2. Resolves hostname to IP addresses via DNS
-        3. Validates ALL resolved IPs are allowed (public internet only)
-
-        Args:
-            url: URL to validate and resolve
-
-        Returns:
-            Tuple of (hostname, port, list of allowed IP addresses)
-
-        Raises:
-            CIMDValidationError: If validation fails or IPs are blocked
-        """
-        # Parse URL
-        try:
-            parsed = urlparse(url)
-        except (ValueError, AttributeError) as e:
-            raise CIMDValidationError(f"Invalid URL: {e}") from e
-
-        # Require HTTPS
-        if parsed.scheme != "https":
-            raise CIMDValidationError(f"CIMD URLs must use HTTPS, got: {parsed.scheme}")
-
-        # Require host
-        if not parsed.netloc:
-            raise CIMDValidationError("CIMD URLs must have a host")
-
-        # Require non-root path
-        if parsed.path in ("", "/"):
-            raise CIMDValidationError(
-                "CIMD URLs must have a non-root path (e.g., /client.json)"
-            )
-
-        hostname = parsed.hostname or parsed.netloc
-        port = parsed.port or 443
-
-        # Log non-standard ports
-        if port != 443:
-            logger.warning("CIMD URL uses non-standard port %d: %s", port, url)
-
-        # Resolve hostname to IP addresses
-        resolved_ips = await _resolve_hostname(hostname, port)
-
-        # Validate ALL resolved IPs are allowed
-        blocked_ips = [ip for ip in resolved_ips if not _is_ip_allowed(ip)]
-        if blocked_ips:
-            raise CIMDValidationError(
-                f"CIMD URL resolves to blocked IP address(es): {blocked_ips}. "
-                f"Private, loopback, link-local, and reserved IPs are not allowed."
-            )
-
-        return hostname, port, resolved_ips
-
     async def fetch(self, client_id_url: str) -> CIMDDocument:
-        """Fetch and validate a CIMD document with comprehensive SSRF protection.
+        """Fetch and validate a CIMD document with SSRF protection.
 
-        Security measures:
-        1. HTTPS only (no HTTP)
-        2. DNS resolution with IP validation
-        3. DNS pinning - connects to validated IP directly (prevents rebinding TOCTOU)
-        4. Blocks private/loopback/link-local/multicast/reserved/RFC6598 IPs
-        5. Response size limit (5KB, enforced via streaming)
-        6. Redirects disabled (prevents redirect-based SSRF)
-        7. Overall timeout (prevents slow-stream DoS)
+        Uses ssrf_safe_fetch for the HTTP layer, which provides:
+        - HTTPS only, DNS resolution with IP validation
+        - DNS pinning (connects to validated IP directly)
+        - Blocks private/loopback/link-local/multicast IPs
+        - Response size limit and timeout enforcement
+        - Redirects disabled
 
         Args:
             client_id_url: The URL to fetch (also the expected client_id)
@@ -456,197 +217,49 @@ class CIMDFetcher:
             CIMDValidationError: If document is invalid or URL blocked
             CIMDFetchError: If document cannot be fetched
         """
-        cache_entry = self._cache.get(client_id_url)
-        now = time.time()
-        if (
-            cache_entry
-            and not cache_entry.must_revalidate
-            and now < cache_entry.expires_at
-        ):
-            return cache_entry.document
+        cached = self._cache.get(client_id_url)
+        if cached is not None:
+            doc, expires_at = cached
+            if time.time() < expires_at:
+                return doc
 
-        conditional_headers: dict[str, str] = {}
-        if cache_entry:
-            if cache_entry.etag:
-                conditional_headers["If-None-Match"] = cache_entry.etag
-            if cache_entry.last_modified:
-                conditional_headers["If-Modified-Since"] = cache_entry.last_modified
-
-        # Track overall time to prevent slow-stream DoS
-        start_time = time.monotonic()
-
-        # Validate URL and resolve DNS with IP validation
-        hostname, port, resolved_ips = await self._validate_url_and_resolve(
-            client_id_url
-        )
-
-        # Log resolved IPs for debugging
-        logger.debug("CIMD URL %s resolved to IPs: %s", client_id_url, resolved_ips)
-
-        parsed = urlparse(client_id_url)
-        path = parsed.path + ("?" + parsed.query if parsed.query else "")
-        content: bytes | None = None
-        response_headers: httpx.Headers | None = None
-        last_error: Exception | None = None
-
-        for pinned_ip in resolved_ips:
-            elapsed = time.monotonic() - start_time
-            if elapsed > self.FETCH_TIMEOUT:
-                raise CIMDFetchError(
-                    f"Overall timeout exceeded fetching CIMD document: {client_id_url}"
-                )
-            remaining_timeout = max(1.0, self.FETCH_TIMEOUT - elapsed)
-
-            # DNS Pinning: Connect to validated IP directly to prevent rebinding TOCTOU
-            # This ensures httpx can't re-resolve DNS to a different (malicious) IP
-            pinned_url = f"https://{format_ip_for_url(pinned_ip)}:{port}{path}"
-
-            logger.debug(
-                "DNS pinning: %s -> %s (connecting to %s)",
+        try:
+            content = await ssrf_safe_fetch(
                 client_id_url,
-                pinned_url,
-                pinned_ip,
+                require_path=True,
+                max_size=self.MAX_RESPONSE_SIZE,
+                timeout=self.timeout,
+                overall_timeout=30.0,
             )
+        except SSRFError as e:
+            raise CIMDValidationError(str(e)) from e
+        except SSRFFetchError as e:
+            raise CIMDFetchError(str(e)) from e
 
-            # Fetch document with streaming to prevent memory exhaustion
-            try:
-                async with (
-                    httpx.AsyncClient(
-                        timeout=httpx.Timeout(
-                            connect=min(self.timeout, remaining_timeout),
-                            read=min(self.timeout, remaining_timeout),
-                            write=min(self.timeout, remaining_timeout),
-                            pool=min(self.timeout, remaining_timeout),
-                        ),
-                        follow_redirects=False,  # Disable redirects to prevent SSRF bypass
-                        verify=True,  # Verify TLS against original hostname via SNI
-                    ) as client,
-                    client.stream(
-                        "GET",
-                        pinned_url,
-                        headers={
-                            "Host": hostname,
-                            **conditional_headers,
-                        },  # Set Host header for virtual hosting
-                        extensions={
-                            "sni_hostname": hostname
-                        },  # TLS SNI for cert validation
-                    ) as response,
-                ):
-                    # Check if we've exceeded overall timeout
-                    if time.monotonic() - start_time > self.FETCH_TIMEOUT:
-                        raise CIMDFetchError(
-                            f"Overall timeout exceeded fetching CIMD document: {client_id_url}"
-                        )
-
-                    if response.status_code == 304:
-                        if cache_entry is None:
-                            raise CIMDFetchError(
-                                f"CIMD document returned 304 without cached document: {client_id_url}"
-                            )
-
-                        updated_entry = self._build_cache_entry(
-                            cache_entry.document, response.headers, previous=cache_entry
-                        )
-                        if updated_entry:
-                            self._cache[client_id_url] = updated_entry
-                        else:
-                            self._cache.pop(client_id_url, None)
-
-                        return cache_entry.document
-
-                    if response.status_code != 200:
-                        raise CIMDFetchError(
-                            f"CIMD document returned status {response.status_code}: {client_id_url}"
-                        )
-
-                    # Check Content-Length header first if available
-                    content_length = response.headers.get("content-length")
-                    if content_length:
-                        try:
-                            size = int(content_length)
-                            if size > self.MAX_RESPONSE_SIZE:
-                                raise CIMDFetchError(
-                                    f"Response too large: {size} bytes (max {self.MAX_RESPONSE_SIZE} bytes)"
-                                )
-                        except ValueError:
-                            pass  # Invalid header, will check during streaming
-
-                    # Stream response with size and time limits
-                    chunks = []
-                    total_size = 0
-                    async for chunk in response.aiter_bytes():
-                        # Check overall timeout
-                        if time.monotonic() - start_time > self.FETCH_TIMEOUT:
-                            raise CIMDFetchError(
-                                "Overall timeout exceeded while streaming CIMD document: "
-                                f"{client_id_url}"
-                            )
-
-                        total_size += len(chunk)
-                        if total_size > self.MAX_RESPONSE_SIZE:
-                            raise CIMDFetchError(
-                                f"Response too large: exceeded {self.MAX_RESPONSE_SIZE} bytes"
-                            )
-                        chunks.append(chunk)
-
-                    content = b"".join(chunks)
-                    response_headers = response.headers
-                    break
-
-            except httpx.TimeoutException as e:
-                last_error = e
-                continue
-            except httpx.RequestError as e:
-                last_error = e
-                continue
-
-        if content is None:
-            if isinstance(last_error, httpx.TimeoutException):
-                raise CIMDFetchError(
-                    f"Timeout fetching CIMD document: {client_id_url}"
-                ) from last_error
-            if last_error is not None:
-                raise CIMDFetchError(
-                    f"Error fetching CIMD document: {last_error}"
-                ) from last_error
-            raise CIMDFetchError(
-                "Error fetching CIMD document: no resolved IPs succeeded"
-            )
-
-        # Parse document
         try:
             data = json.loads(content)
         except json.JSONDecodeError as e:
             raise CIMDValidationError(f"CIMD document is not valid JSON: {e}") from e
 
-        # Validate as CIMDDocument
         try:
             doc = CIMDDocument.model_validate(data)
         except Exception as e:
             raise CIMDValidationError(f"Invalid CIMD document: {e}") from e
 
-        # Critical: client_id must match the URL
         if str(doc.client_id).rstrip("/") != client_id_url.rstrip("/"):
             raise CIMDValidationError(
                 f"CIMD client_id mismatch: document says '{doc.client_id}' "
                 f"but was fetched from '{client_id_url}'"
             )
 
-        # Validate jwks_uri if present (SSRF protection for JWKS fetch)
+        # Validate jwks_uri if present (SSRF check for JWKS endpoint)
         if doc.jwks_uri:
             jwks_uri_str = str(doc.jwks_uri)
-            # Must be HTTPS
-            if not jwks_uri_str.startswith("https://"):
-                raise CIMDValidationError(
-                    f"CIMD jwks_uri must use HTTPS: {jwks_uri_str}"
-                )
-            # Validate and resolve to ensure it's not pointing to internal resources
             try:
-                await self._validate_url_and_resolve(jwks_uri_str)
-            except CIMDValidationError as e:
+                await validate_url(jwks_uri_str)
+            except SSRFError as e:
                 raise CIMDValidationError(
-                    f"CIMD jwks_uri failed validation: {e}"
+                    f"CIMD jwks_uri failed SSRF validation: {e}"
                 ) from e
 
         logger.info(
@@ -655,17 +268,7 @@ class CIMDFetcher:
             doc.client_name,
         )
 
-        if response_headers is None:
-            raise CIMDFetchError(
-                f"Error fetching CIMD document: missing response headers for {client_id_url}"
-            )
-
-        cache_entry = self._build_cache_entry(doc, response_headers)
-        if cache_entry:
-            self._cache[client_id_url] = cache_entry
-        else:
-            self._cache.pop(client_id_url, None)
-
+        self._cache[client_id_url] = (doc, time.time() + self.DEFAULT_CACHE_TTL_SECONDS)
         return doc
 
     def validate_redirect_uri(self, doc: CIMDDocument, redirect_uri: str) -> bool:
@@ -722,6 +325,7 @@ class CIMDAssertionValidator:
         # Cache JWTVerifier per jwks_uri so JWKS keys are not re-fetched
         # on every token exchange
         self._verifier_cache: dict[str, JWTVerifier] = {}
+        self._verifier_cache_max_size = 100
         self.logger = get_logger(__name__)
 
     def _cleanup_expired_jtis(self) -> None:
@@ -778,6 +382,9 @@ class CIMDAssertionValidator:
                     audience=token_endpoint,
                     ssrf_safe=True,
                 )
+                if len(self._verifier_cache) >= self._verifier_cache_max_size:
+                    oldest_key = next(iter(self._verifier_cache))
+                    del self._verifier_cache[oldest_key]
                 self._verifier_cache[cache_key] = verifier
         elif cimd_doc.jwks:
             # Inline JWKS — no caching since the key is embedded
