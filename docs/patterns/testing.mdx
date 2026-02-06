@@ -102,3 +102,72 @@ async def test_add(
 <Tip>
 The [FastMCP Repository contains thousands of tests](https://github.com/jlowin/fastmcp/tree/main/tests) for the FastMCP Client and Server. Everything from connecting to remote MCP servers, to testing tools, resources, and prompts is covered, take a look for inspiration!
 </Tip>
+
+## Testing with Postman
+
+Postman now provides native support for the Model Context Protocol, allowing you to interactively test and debug your FastMCP servers through its visual interface. This is particularly useful for manual testing, exploring your server's capabilities, and validating behavior during development.
+
+### Prerequisites
+
+To test your FastMCP server with Postman, you'll need:
+
+1. **A running FastMCP server over HTTP** - Postman connects to servers via HTTP transport. See the [HTTP Deployment guide](/deployment/http) for setup instructions.
+
+2. **Postman desktop application** - MCP support is available in the Postman desktop app. [Download Postman](https://www.postman.com/downloads/) if you haven't already.
+
+### Setting Up Postman
+
+Deploy your FastMCP server with HTTP transport:
+
+```python server.py
+from fastmcp import FastMCP
+
+mcp = FastMCP("My Server")
+
+@mcp.tool
+def process_data(input: str) -> str:
+    """Process data on the server"""
+    return f"Processed: {input}"
+
+if __name__ == "__main__":
+    mcp.run(transport="http", host="0.0.0.0", port=8000)
+```
+
+Start your server:
+```bash
+python server.py
+```
+
+Your server is now accessible at `http://localhost:8000/mcp`.
+
+### Making MCP Requests
+
+Postman's MCP request feature allows you to:
+
+- **List available tools, resources, and prompts** - Discover what your server exposes
+- **Call tools with arguments** - Test tool execution with different inputs
+- **Read resources** - Verify resource content and templates
+- **Execute prompts** - Test prompt responses
+- **Debug server responses** - Inspect request/response details and error messages
+
+In Postman, create a new MCP request and point it to your server's URL (`http://localhost:8000/mcp`). Use the Postman interface to interact with your server's capabilities.
+
+For detailed instructions on using Postman's MCP features, see [Postman's MCP documentation](https://learning.postman.com/docs/postman-ai/mcp-requests/overview).
+
+### When to Use Postman vs Pytest
+
+**Use Postman when:**
+- Exploring your server's capabilities interactively
+- Manually testing specific scenarios during development
+- Debugging unexpected behavior or error messages
+- Demonstrating server functionality to team members
+- Working on a server that's already deployed remotely
+
+**Use Pytest when:**
+- Building automated test suites for CI/CD pipelines
+- Testing multiple scenarios with parameterized inputs
+- Ensuring consistent behavior across code changes
+- Writing regression tests for bug fixes
+- Validating complex assertions on response data
+
+Both approaches are complementary. Use Postman for interactive exploration and debugging, and Pytest for automated, repeatable testing as part of your development workflow.
