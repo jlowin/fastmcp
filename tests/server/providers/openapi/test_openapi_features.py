@@ -540,6 +540,15 @@ class TestMimeTypeExtraction:
         )
         assert _extract_mime_type_from_route(route) == "text/plain"
 
+    def test_media_type_without_schema(self):
+        """Media type declared without a schema still infers MIME type."""
+        route = HTTPRoute(
+            path="/health",
+            method="GET",
+            responses={"200": ResponseInfo(content_schema={"text/plain": {}})},
+        )
+        assert _extract_mime_type_from_route(route) == "text/plain"
+
 
 class TestResourceTemplateMimeType:
     """Test that OpenAPIResourceTemplate uses inferred MIME types."""
@@ -710,6 +719,39 @@ class TestResourceMimeType:
                                 "content": {
                                     "text/plain": {"schema": {"type": "string"}}
                                 },
+                            }
+                        },
+                    }
+                }
+            },
+        }
+        route_maps = [RouteMap(methods=["GET"], mcp_type=MCPType.RESOURCE)]
+        async with httpx.AsyncClient(base_url="https://api.example.com") as client:
+            provider = OpenAPIProvider(
+                openapi_spec=spec, client=client, route_maps=route_maps
+            )
+            mcp = FastMCP("Test")
+            mcp.add_provider(provider)
+            async with Client(mcp) as mcp_client:
+                resources = await mcp_client.list_resources()
+                assert len(resources) == 1
+                assert resources[0].mimeType == "text/plain"
+
+    async def test_resource_mime_type_without_schema(self):
+        """Resource with media type but no schema still infers MIME type."""
+        spec = {
+            "openapi": "3.0.0",
+            "info": {"title": "Health API", "version": "1.0.0"},
+            "servers": [{"url": "https://api.example.com"}],
+            "paths": {
+                "/health": {
+                    "get": {
+                        "operationId": "healthcheck",
+                        "summary": "Health check",
+                        "responses": {
+                            "200": {
+                                "description": "Health status",
+                                "content": {"text/plain": {}},
                             }
                         },
                     }
