@@ -7,19 +7,15 @@ in CIMD document fetching:
 2. Response size limits via streaming (5KB max)
 3. HTTP redirect blocking
 4. HTTPS requirement
-5. Redirect URI validation using proxy's allowed patterns
-6. Non-standard port handling
+5. Non-standard port handling
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
-from pydantic import AnyHttpUrl
 
 from fastmcp.server.auth.cimd import (
-    CIMDClientManager,
-    CIMDDocument,
     CIMDFetcher,
     CIMDFetchError,
     CIMDValidationError,
@@ -232,6 +228,7 @@ class TestSSRFResponseSizeLimits:
             # Create valid CIMD document
             doc_content = b"""{
                 "client_id": "https://example.com/client.json",
+                "redirect_uris": ["http://localhost:3000/callback"],
                 "grant_types": ["authorization_code"],
                 "token_endpoint_auth_method": "none"
             }"""
@@ -291,88 +288,6 @@ class TestSSRFRedirectPrevention:
             assert call_kwargs["follow_redirects"] is False
 
 
-class TestCIMDRedirectURIValidation:
-    """Tests for CIMD redirect URI validation using proxy's allowed patterns."""
-
-    async def test_cimd_uses_proxy_redirect_patterns(self):
-        """CIMD clients should validate redirect URIs against proxy's allowed_client_redirect_uris."""
-        manager = CIMDClientManager(
-            enable_cimd=True,
-            default_scope="profile",
-            allowed_redirect_uri_patterns=["http://localhost:*"],
-        )
-
-        # Mock the fetcher to return a CIMD document
-        mock_doc = CIMDDocument(
-            client_id=AnyHttpUrl("https://example.com/client.json"),
-            grant_types=["authorization_code"],
-            token_endpoint_auth_method="none",
-            redirect_uris=[
-                "https://example.com/callback"
-            ],  # Document specifies different URIs
-        )
-
-        with patch.object(manager._fetcher, "fetch", return_value=mock_doc):
-            client = await manager.get_client("https://example.com/client.json")
-
-            # Verify client uses proxy's patterns, NOT the document's redirect_uris
-            assert client is not None
-            assert client.allowed_redirect_uri_patterns == ["http://localhost:*"]
-            assert client.allowed_redirect_uri_patterns != mock_doc.redirect_uris
-
-    async def test_cimd_redirect_uris_are_documentation_only(self):
-        """CIMD document redirect_uris should not override proxy configuration."""
-        # Manager with restrictive patterns
-        manager = CIMDClientManager(
-            enable_cimd=True,
-            allowed_redirect_uri_patterns=["http://127.0.0.1:*"],
-        )
-
-        # CIMD document claims broader redirect URIs
-        mock_doc = CIMDDocument(
-            client_id=AnyHttpUrl("https://example.com/client.json"),
-            grant_types=["authorization_code"],
-            token_endpoint_auth_method="none",
-            redirect_uris=[
-                "https://evil.com/steal-tokens"
-            ],  # Attacker's URL in document
-        )
-
-        with patch.object(manager._fetcher, "fetch", return_value=mock_doc):
-            client = await manager.get_client("https://example.com/client.json")
-
-            # Client should use proxy's restrictive patterns
-            assert client.allowed_redirect_uri_patterns == ["http://127.0.0.1:*"]
-
-            # Verify the document's redirect_uris are stored but not used for validation
-            assert (
-                str(client.cimd_document.redirect_uris[0])
-                == "https://evil.com/steal-tokens"
-            )
-            assert client.allowed_redirect_uri_patterns != [
-                str(uri) for uri in client.cimd_document.redirect_uris
-            ]
-
-    async def test_cimd_with_none_redirect_patterns_allows_all(self):
-        """CIMD clients with None patterns should allow all redirect URIs (DCR compatibility)."""
-        manager = CIMDClientManager(
-            enable_cimd=True,
-            allowed_redirect_uri_patterns=None,  # Allow all
-        )
-
-        mock_doc = CIMDDocument(
-            client_id=AnyHttpUrl("https://example.com/client.json"),
-            grant_types=["authorization_code"],
-            token_endpoint_auth_method="none",
-        )
-
-        with patch.object(manager._fetcher, "fetch", return_value=mock_doc):
-            client = await manager.get_client("https://example.com/client.json")
-
-            # Should be None (allow all)
-            assert client.allowed_redirect_uri_patterns is None
-
-
 class TestSSRFURLValidation:
     """Tests for basic URL validation."""
 
@@ -415,6 +330,7 @@ class TestSSRFPortHandling:
             # Create valid CIMD document
             doc_content = b"""{
                 "client_id": "https://example.com:8443/client.json",
+                "redirect_uris": ["http://localhost:3000/callback"],
                 "grant_types": ["authorization_code"],
                 "token_endpoint_auth_method": "none"
             }"""
@@ -453,6 +369,7 @@ class TestSSRFPortHandling:
             # Create valid CIMD document
             doc_content = b"""{
                 "client_id": "https://example.com/client.json",
+                "redirect_uris": ["http://localhost:3000/callback"],
                 "grant_types": ["authorization_code"],
                 "token_endpoint_auth_method": "none"
             }"""
@@ -530,6 +447,7 @@ class TestDNSPinning:
             # Create valid CIMD document
             doc_content = b"""{
                 "client_id": "https://example.com/client.json",
+                "redirect_uris": ["http://localhost:3000/callback"],
                 "grant_types": ["authorization_code"],
                 "token_endpoint_auth_method": "none"
             }"""
@@ -578,6 +496,7 @@ class TestDNSPinning:
         ):
             doc_content = b"""{
                 "client_id": "https://example.com/client.json",
+                "redirect_uris": ["http://localhost:3000/callback"],
                 "grant_types": ["authorization_code"],
                 "token_endpoint_auth_method": "none"
             }"""
@@ -621,6 +540,7 @@ class TestDNSPinning:
         ):
             doc_content = b"""{
                 "client_id": "https://example.com/client.json",
+                "redirect_uris": ["http://localhost:3000/callback"],
                 "grant_types": ["authorization_code"],
                 "token_endpoint_auth_method": "none"
             }"""
@@ -690,6 +610,7 @@ class TestIPv6URLFormatting:
         ):
             doc_content = b"""{
                 "client_id": "https://example.com/client.json",
+                "redirect_uris": ["http://localhost:3000/callback"],
                 "grant_types": ["authorization_code"],
                 "token_endpoint_auth_method": "none"
             }"""

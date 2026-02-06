@@ -22,11 +22,14 @@ import ipaddress
 import json
 import socket
 import time
+from dataclasses import dataclass
+from datetime import timezone
+from email.utils import parsedate_to_datetime
 from typing import Any, Literal
 from urllib.parse import urlparse
 
 import httpx
-from pydantic import AnyHttpUrl, AnyUrl, BaseModel, Field, field_validator
+from pydantic import AnyHttpUrl, BaseModel, Field, field_validator
 
 from fastmcp.server.auth.ssrf import format_ip_for_url
 from fastmcp.utilities.logging import get_logger
@@ -130,6 +133,8 @@ class CIMDDocument(BaseModel):
 
     Key constraint: token_endpoint_auth_method MUST NOT use shared secrets
     (client_secret_post, client_secret_basic, client_secret_jwt).
+
+    redirect_uris is required and must contain at least one entry.
     """
 
     client_id: AnyHttpUrl = Field(
@@ -148,8 +153,8 @@ class CIMDDocument(BaseModel):
         default=None,
         description="URL of the client's logo image",
     )
-    redirect_uris: list[str] | None = Field(
-        default=None,
+    redirect_uris: list[str] = Field(
+        ...,
         description="Array of allowed redirect URIs (may include wildcards like http://localhost:*/callback)",
     )
     token_endpoint_auth_method: Literal["none", "private_key_jwt"] = Field(
@@ -209,6 +214,16 @@ class CIMDDocument(BaseModel):
             )
         return v
 
+    @field_validator("redirect_uris")
+    @classmethod
+    def validate_redirect_uris(cls, v: list[str]) -> list[str]:
+        """Ensure redirect_uris is non-empty and contains valid entries."""
+        if not v:
+            raise ValueError("CIMD documents must include at least one redirect_uri")
+        if any(not uri for uri in v):
+            raise ValueError("CIMD redirect_uris must be non-empty strings")
+        return v
+
 
 class CIMDValidationError(Exception):
     """Raised when CIMD document validation fails."""
@@ -216,6 +231,17 @@ class CIMDValidationError(Exception):
 
 class CIMDFetchError(Exception):
     """Raised when CIMD document fetching fails."""
+
+
+@dataclass(slots=True)
+class CIMDCacheEntry:
+    """Cached CIMD document with HTTP cache metadata."""
+
+    document: CIMDDocument
+    etag: str | None
+    last_modified: str | None
+    expires_at: float
+    must_revalidate: bool
 
 
 class CIMDFetcher:
@@ -236,6 +262,8 @@ class CIMDFetcher:
     OPERATION_TIMEOUT = 10.0
     # Maximum response size (bytes)
     MAX_RESPONSE_SIZE = 5120  # 5KB
+    # Default cache TTL when headers are absent (seconds)
+    DEFAULT_CACHE_TTL_SECONDS = 3600
 
     def __init__(
         self,
@@ -253,6 +281,79 @@ class CIMDFetcher:
             timeout: HTTP request timeout in seconds (default 10.0)
         """
         self.timeout = timeout
+        self._cache: dict[str, CIMDCacheEntry] = {}
+
+    def _parse_cache_headers(
+        self, headers: httpx.Headers
+    ) -> tuple[float | None, bool, bool]:
+        """Parse cache headers into (expires_at, must_revalidate, no_store)."""
+        cache_control = headers.get("cache-control", "")
+        directives: dict[str, str | None] = {}
+        for part in cache_control.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            if "=" in part:
+                key, value = part.split("=", 1)
+                directives[key.strip().lower()] = value.strip().strip('"')
+            else:
+                directives[part.lower()] = None
+
+        no_store = "no-store" in directives
+        must_revalidate = "no-cache" in directives
+
+        max_age: int | None = None
+        max_age_value = directives.get("max-age")
+        if max_age_value is not None:
+            try:
+                max_age = int(max_age_value)
+            except ValueError:
+                max_age = None
+
+        now = time.time()
+        if max_age is not None:
+            return now + max_age, must_revalidate, no_store
+
+        expires_header = headers.get("expires")
+        if expires_header:
+            try:
+                dt = parsedate_to_datetime(expires_header)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return dt.timestamp(), must_revalidate, no_store
+            except (TypeError, ValueError):
+                pass
+
+        return None, must_revalidate, no_store
+
+    def _build_cache_entry(
+        self,
+        document: CIMDDocument,
+        headers: httpx.Headers,
+        *,
+        previous: CIMDCacheEntry | None = None,
+    ) -> CIMDCacheEntry | None:
+        """Build a cache entry from response headers."""
+        expires_at, must_revalidate, no_store = self._parse_cache_headers(headers)
+        if no_store:
+            return None
+
+        now = time.time()
+        if expires_at is None:
+            expires_at = now + self.DEFAULT_CACHE_TTL_SECONDS
+
+        etag = headers.get("etag") or (previous.etag if previous else None)
+        last_modified = headers.get("last-modified") or (
+            previous.last_modified if previous else None
+        )
+
+        return CIMDCacheEntry(
+            document=document,
+            etag=etag,
+            last_modified=last_modified,
+            expires_at=expires_at,
+            must_revalidate=must_revalidate,
+        )
 
     def is_cimd_client_id(self, client_id: str) -> bool:
         """Check if a client_id looks like a CIMD URL.
@@ -350,6 +451,22 @@ class CIMDFetcher:
             CIMDValidationError: If document is invalid or URL blocked
             CIMDFetchError: If document cannot be fetched
         """
+        cache_entry = self._cache.get(client_id_url)
+        now = time.time()
+        if (
+            cache_entry
+            and not cache_entry.must_revalidate
+            and now < cache_entry.expires_at
+        ):
+            return cache_entry.document
+
+        conditional_headers: dict[str, str] = {}
+        if cache_entry:
+            if cache_entry.etag:
+                conditional_headers["If-None-Match"] = cache_entry.etag
+            if cache_entry.last_modified:
+                conditional_headers["If-Modified-Since"] = cache_entry.last_modified
+
         # Track overall time to prevent slow-stream DoS
         start_time = time.monotonic()
 
@@ -361,94 +478,136 @@ class CIMDFetcher:
         # Log resolved IPs for debugging
         logger.debug("CIMD URL %s resolved to IPs: %s", client_id_url, resolved_ips)
 
-        # Calculate remaining time budget
-        elapsed = time.monotonic() - start_time
-        remaining_timeout = max(1.0, self.FETCH_TIMEOUT - elapsed)
-
-        # DNS Pinning: Connect to validated IP directly to prevent rebinding TOCTOU
-        # This ensures httpx can't re-resolve DNS to a different (malicious) IP
-        pinned_ip = resolved_ips[0]
         parsed = urlparse(client_id_url)
         path = parsed.path + ("?" + parsed.query if parsed.query else "")
-        pinned_url = f"https://{format_ip_for_url(pinned_ip)}:{port}{path}"
+        content: bytes | None = None
+        response_headers: httpx.Headers | None = None
+        last_error: Exception | None = None
 
-        logger.debug(
-            "DNS pinning: %s -> %s (connecting to %s)",
-            client_id_url,
-            pinned_url,
-            pinned_ip,
-        )
+        for pinned_ip in resolved_ips:
+            elapsed = time.monotonic() - start_time
+            if elapsed > self.FETCH_TIMEOUT:
+                raise CIMDFetchError(
+                    f"Overall timeout exceeded fetching CIMD document: {client_id_url}"
+                )
+            remaining_timeout = max(1.0, self.FETCH_TIMEOUT - elapsed)
 
-        # Fetch document with streaming to prevent memory exhaustion
-        try:
-            async with (
-                httpx.AsyncClient(
-                    timeout=httpx.Timeout(
-                        connect=min(self.timeout, remaining_timeout),
-                        read=min(self.timeout, remaining_timeout),
-                        write=min(self.timeout, remaining_timeout),
-                        pool=min(self.timeout, remaining_timeout),
-                    ),
-                    follow_redirects=False,  # Disable redirects to prevent SSRF bypass
-                    verify=True,  # Verify TLS against original hostname via SNI
-                ) as client,
-                client.stream(
-                    "GET",
-                    pinned_url,
-                    headers={"Host": hostname},  # Set Host header for virtual hosting
-                    extensions={
-                        "sni_hostname": hostname
-                    },  # TLS SNI for cert validation
-                ) as response,
-            ):
-                # Check if we've exceeded overall timeout
-                if time.monotonic() - start_time > self.FETCH_TIMEOUT:
-                    raise CIMDFetchError(
-                        f"Overall timeout exceeded fetching CIMD document: {client_id_url}"
-                    )
+            # DNS Pinning: Connect to validated IP directly to prevent rebinding TOCTOU
+            # This ensures httpx can't re-resolve DNS to a different (malicious) IP
+            pinned_url = f"https://{format_ip_for_url(pinned_ip)}:{port}{path}"
 
-                if response.status_code != 200:
-                    raise CIMDFetchError(
-                        f"CIMD document returned status {response.status_code}: {client_id_url}"
-                    )
+            logger.debug(
+                "DNS pinning: %s -> %s (connecting to %s)",
+                client_id_url,
+                pinned_url,
+                pinned_ip,
+            )
 
-                # Check Content-Length header first if available
-                content_length = response.headers.get("content-length")
-                if content_length:
-                    try:
-                        size = int(content_length)
-                        if size > self.MAX_RESPONSE_SIZE:
-                            raise CIMDFetchError(
-                                f"Response too large: {size} bytes (max {self.MAX_RESPONSE_SIZE} bytes)"
-                            )
-                    except ValueError:
-                        pass  # Invalid header, will check during streaming
-
-                # Stream response with size and time limits
-                chunks = []
-                total_size = 0
-                async for chunk in response.aiter_bytes():
-                    # Check overall timeout
+            # Fetch document with streaming to prevent memory exhaustion
+            try:
+                async with (
+                    httpx.AsyncClient(
+                        timeout=httpx.Timeout(
+                            connect=min(self.timeout, remaining_timeout),
+                            read=min(self.timeout, remaining_timeout),
+                            write=min(self.timeout, remaining_timeout),
+                            pool=min(self.timeout, remaining_timeout),
+                        ),
+                        follow_redirects=False,  # Disable redirects to prevent SSRF bypass
+                        verify=True,  # Verify TLS against original hostname via SNI
+                    ) as client,
+                    client.stream(
+                        "GET",
+                        pinned_url,
+                        headers={
+                            "Host": hostname,
+                            **conditional_headers,
+                        },  # Set Host header for virtual hosting
+                        extensions={
+                            "sni_hostname": hostname
+                        },  # TLS SNI for cert validation
+                    ) as response,
+                ):
+                    # Check if we've exceeded overall timeout
                     if time.monotonic() - start_time > self.FETCH_TIMEOUT:
                         raise CIMDFetchError(
-                            f"Overall timeout exceeded while streaming CIMD document: {client_id_url}"
+                            f"Overall timeout exceeded fetching CIMD document: {client_id_url}"
                         )
 
-                    total_size += len(chunk)
-                    if total_size > self.MAX_RESPONSE_SIZE:
+                    if response.status_code == 304:
+                        if cache_entry is None:
+                            raise CIMDFetchError(
+                                f"CIMD document returned 304 without cached document: {client_id_url}"
+                            )
+
+                        updated_entry = self._build_cache_entry(
+                            cache_entry.document, response.headers, previous=cache_entry
+                        )
+                        if updated_entry:
+                            self._cache[client_id_url] = updated_entry
+                        else:
+                            self._cache.pop(client_id_url, None)
+
+                        return cache_entry.document
+
+                    if response.status_code != 200:
                         raise CIMDFetchError(
-                            f"Response too large: exceeded {self.MAX_RESPONSE_SIZE} bytes"
+                            f"CIMD document returned status {response.status_code}: {client_id_url}"
                         )
-                    chunks.append(chunk)
 
-                content = b"".join(chunks)
+                    # Check Content-Length header first if available
+                    content_length = response.headers.get("content-length")
+                    if content_length:
+                        try:
+                            size = int(content_length)
+                            if size > self.MAX_RESPONSE_SIZE:
+                                raise CIMDFetchError(
+                                    f"Response too large: {size} bytes (max {self.MAX_RESPONSE_SIZE} bytes)"
+                                )
+                        except ValueError:
+                            pass  # Invalid header, will check during streaming
 
-        except httpx.TimeoutException as e:
+                    # Stream response with size and time limits
+                    chunks = []
+                    total_size = 0
+                    async for chunk in response.aiter_bytes():
+                        # Check overall timeout
+                        if time.monotonic() - start_time > self.FETCH_TIMEOUT:
+                            raise CIMDFetchError(
+                                "Overall timeout exceeded while streaming CIMD document: "
+                                f"{client_id_url}"
+                            )
+
+                        total_size += len(chunk)
+                        if total_size > self.MAX_RESPONSE_SIZE:
+                            raise CIMDFetchError(
+                                f"Response too large: exceeded {self.MAX_RESPONSE_SIZE} bytes"
+                            )
+                        chunks.append(chunk)
+
+                    content = b"".join(chunks)
+                    response_headers = response.headers
+                    break
+
+            except httpx.TimeoutException as e:
+                last_error = e
+                continue
+            except httpx.RequestError as e:
+                last_error = e
+                continue
+
+        if content is None:
+            if isinstance(last_error, httpx.TimeoutException):
+                raise CIMDFetchError(
+                    f"Timeout fetching CIMD document: {client_id_url}"
+                ) from last_error
+            if last_error is not None:
+                raise CIMDFetchError(
+                    f"Error fetching CIMD document: {last_error}"
+                ) from last_error
             raise CIMDFetchError(
-                f"Timeout fetching CIMD document: {client_id_url}"
-            ) from e
-        except httpx.RequestError as e:
-            raise CIMDFetchError(f"Error fetching CIMD document: {e}") from e
+                "Error fetching CIMD document: no resolved IPs succeeded"
+            )
 
         # Parse document
         try:
@@ -490,6 +649,17 @@ class CIMDFetcher:
             client_id_url,
             doc.client_name,
         )
+
+        if response_headers is None:
+            raise CIMDFetchError(
+                f"Error fetching CIMD document: missing response headers for {client_id_url}"
+            )
+
+        cache_entry = self._build_cache_entry(doc, response_headers)
+        if cache_entry:
+            self._cache[client_id_url] = cache_entry
+        else:
+            self._cache.pop(client_id_url, None)
 
         return doc
 
@@ -743,7 +913,6 @@ class CIMDClientManager:
     - CIMD client detection
     - Document fetching and validation
     - Synthetic OAuth client creation
-    - Trust policy enforcement
     - Private key JWT assertion validation
 
     This allows the OAuth proxy to delegate all CIMD-specific logic to a
@@ -807,14 +976,10 @@ class CIMDClientManager:
         # Import here to avoid circular dependency
         from fastmcp.server.auth.oauth_proxy.models import ProxyDCRClient
 
-        # Create synthetic client from CIMD document
-        # Pass CIMD redirect_uris for validation alongside proxy's patterns
-        # Convert str URIs to AnyUrl for type compatibility with OAuthClientInformationFull
-        redirect_uris = (
-            [AnyUrl(uri) for uri in cimd_doc.redirect_uris]
-            if cimd_doc.redirect_uris
-            else None
-        )
+        # Create synthetic client from CIMD document.
+        # Keep CIMD redirect_uris as strings on the document itself so wildcard
+        # patterns like http://localhost:*/callback remain valid.
+        redirect_uris = None
         client = ProxyDCRClient(
             client_id=client_id_url,
             client_secret=None,

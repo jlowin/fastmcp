@@ -32,6 +32,7 @@ from cryptography.fernet import Fernet
 from key_value.aio.adapters.pydantic import PydanticAdapter
 from key_value.aio.protocols import AsyncKeyValue
 from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
+from mcp.server.auth.handlers.metadata import MetadataHandler
 from mcp.server.auth.provider import (
     AccessToken,
     AuthorizationCode,
@@ -40,7 +41,7 @@ from mcp.server.auth.provider import (
     RefreshToken,
     TokenError,
 )
-from mcp.server.auth.routes import cors_middleware
+from mcp.server.auth.routes import build_metadata, cors_middleware
 from mcp.server.auth.settings import (
     ClientRegistrationOptions,
     RevocationOptions,
@@ -67,7 +68,6 @@ from fastmcp.server.auth.jwt_issuer import (
 )
 from fastmcp.server.auth.oauth_proxy.consent import ConsentMixin
 from fastmcp.server.auth.oauth_proxy.models import (
-    CIMD_CACHE_TTL_SECONDS,
     DEFAULT_ACCESS_TOKEN_EXPIRY_NO_REFRESH_SECONDS,
     DEFAULT_ACCESS_TOKEN_EXPIRY_SECONDS,
     DEFAULT_AUTH_CODE_EXPIRY_SECONDS,
@@ -257,7 +257,7 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
         # Token expiry fallback
         fallback_access_token_expiry_seconds: int | None = None,
         # CIMD (Client ID Metadata Document) support
-        enable_cimd: bool = False,
+        enable_cimd: bool = True,
     ):
         """Initialize the OAuth proxy provider.
 
@@ -592,13 +592,8 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
                     self._allowed_client_redirect_uris
                 )
 
-            # Refresh stale CIMD clients (e.g. to pick up JWKS rotation)
-            if (
-                self._cimd_manager is not None
-                and client.cimd_document is not None
-                and client.cimd_fetched_at is not None
-                and (time.time() - client.cimd_fetched_at) > CIMD_CACHE_TTL_SECONDS
-            ):
+            # Refresh CIMD clients using HTTP cache-aware fetcher.
+            if self._cimd_manager is not None and client.cimd_document is not None:
                 try:
                     refreshed = await self._cimd_manager.get_client(client_id)
                     if refreshed is not None:
@@ -1515,6 +1510,34 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
                             token_handler.handle, ["POST", "OPTIONS"]
                         ),
                         methods=["POST", "OPTIONS"],
+                    )
+                )
+            elif (
+                self._cimd_manager is not None
+                and isinstance(route, Route)
+                and route.path.startswith("/.well-known/oauth-authorization-server")
+            ):
+                client_registration_options = (
+                    self.client_registration_options or ClientRegistrationOptions()
+                )
+                revocation_options = self.revocation_options or RevocationOptions()
+                metadata = build_metadata(
+                    self.base_url,  # ty: ignore[invalid-argument-type]
+                    self.service_documentation_url,
+                    client_registration_options,
+                    revocation_options,
+                )
+                metadata.client_id_metadata_document_supported = True
+                handler = MetadataHandler(metadata)
+                methods = route.methods or ["GET", "OPTIONS"]
+
+                custom_routes.append(
+                    Route(
+                        path=route.path,
+                        endpoint=cors_middleware(handler.handle, ["GET", "OPTIONS"]),
+                        methods=methods,
+                        name=route.name,
+                        include_in_schema=route.include_in_schema,
                     )
                 )
             else:

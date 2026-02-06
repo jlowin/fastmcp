@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from pydantic import AnyHttpUrl, ValidationError
 
 from fastmcp.server.auth.cimd import (
+    CIMDAssertionValidator,
+    CIMDClientManager,
     CIMDDocument,
     CIMDFetcher,
     CIMDFetchError,
     CIMDValidationError,
 )
+from fastmcp.server.auth.oauth_proxy.models import ProxyDCRClient
 
 # Standard public IP used for DNS mocking in tests
 TEST_PUBLIC_IP = "93.184.216.34"
@@ -25,6 +28,7 @@ class TestCIMDDocument:
         """Test that minimal valid document passes validation."""
         doc = CIMDDocument(
             client_id=AnyHttpUrl("https://example.com/client.json"),
+            redirect_uris=["http://localhost:3000/callback"],
         )
         assert str(doc.client_id) == "https://example.com/client.json"
         assert doc.token_endpoint_auth_method == "none"
@@ -51,6 +55,7 @@ class TestCIMDDocument:
         """Test that private_key_jwt is allowed for CIMD."""
         doc = CIMDDocument(
             client_id=AnyHttpUrl("https://example.com/client.json"),
+            redirect_uris=["http://localhost:3000/callback"],
             token_endpoint_auth_method="private_key_jwt",
             jwks_uri=AnyHttpUrl("https://example.com/.well-known/jwks.json"),
         )
@@ -61,6 +66,7 @@ class TestCIMDDocument:
         with pytest.raises(ValidationError) as exc_info:
             CIMDDocument(
                 client_id=AnyHttpUrl("https://example.com/client.json"),
+                redirect_uris=["http://localhost:3000/callback"],
                 token_endpoint_auth_method="client_secret_basic",  # type: ignore[arg-type] - testing invalid value
             )
         # Literal type rejects invalid values before custom validator
@@ -71,6 +77,7 @@ class TestCIMDDocument:
         with pytest.raises(ValidationError) as exc_info:
             CIMDDocument(
                 client_id=AnyHttpUrl("https://example.com/client.json"),
+                redirect_uris=["http://localhost:3000/callback"],
                 token_endpoint_auth_method="client_secret_post",  # type: ignore[arg-type] - testing invalid value
             )
         assert "token_endpoint_auth_method" in str(exc_info.value)
@@ -80,9 +87,25 @@ class TestCIMDDocument:
         with pytest.raises(ValidationError) as exc_info:
             CIMDDocument(
                 client_id=AnyHttpUrl("https://example.com/client.json"),
+                redirect_uris=["http://localhost:3000/callback"],
                 token_endpoint_auth_method="client_secret_jwt",  # type: ignore[arg-type] - testing invalid value
             )
         assert "token_endpoint_auth_method" in str(exc_info.value)
+
+    def test_missing_redirect_uris_rejected(self):
+        """Test that redirect_uris is required for CIMD."""
+        with pytest.raises(ValidationError) as exc_info:
+            CIMDDocument(client_id=AnyHttpUrl("https://example.com/client.json"))
+        assert "redirect_uris" in str(exc_info.value)
+
+    def test_empty_redirect_uris_rejected(self):
+        """Test that empty redirect_uris is rejected."""
+        with pytest.raises(ValidationError) as exc_info:
+            CIMDDocument(
+                client_id=AnyHttpUrl("https://example.com/client.json"),
+                redirect_uris=[],
+            )
+        assert "redirect_uris" in str(exc_info.value)
 
 
 class TestCIMDFetcher:
@@ -136,14 +159,6 @@ class TestCIMDFetcher:
         assert fetcher.validate_redirect_uri(doc, "http://localhost:8080/callback")
         assert not fetcher.validate_redirect_uri(doc, "http://localhost:3000/other")
 
-    def test_validate_redirect_uri_no_uris(self, fetcher: CIMDFetcher):
-        """Test redirect_uri validation when no URIs specified."""
-        doc = CIMDDocument(
-            client_id=AnyHttpUrl("https://example.com/client.json"),
-            redirect_uris=None,
-        )
-        assert not fetcher.validate_redirect_uri(doc, "http://localhost:3000/callback")
-
 
 class TestCIMDFetcherHTTP:
     """Tests for CIMDFetcher HTTP fetching (using httpx mock).
@@ -190,6 +205,148 @@ class TestCIMDFetcherHTTP:
         assert str(doc.client_id) == url
         assert doc.client_name == "Test App"
 
+    async def test_fetch_cache_max_age(
+        self, fetcher: CIMDFetcher, httpx_mock, mock_dns
+    ):
+        """Test that max-age caching skips refetch."""
+        url = "https://example.com/client.json"
+        doc_data = {
+            "client_id": url,
+            "client_name": "Test App",
+            "redirect_uris": ["http://localhost:3000/callback"],
+            "token_endpoint_auth_method": "none",
+        }
+        httpx_mock.add_response(
+            json=doc_data,
+            headers={"content-length": "200", "cache-control": "max-age=60"},
+        )
+
+        first = await fetcher.fetch(url)
+        second = await fetcher.fetch(url)
+
+        assert first.client_id == second.client_id
+        assert len(httpx_mock.get_requests()) == 1
+
+    async def test_fetch_cache_etag_revalidate(
+        self, fetcher: CIMDFetcher, httpx_mock, mock_dns
+    ):
+        """Test ETag revalidation with 304 response."""
+        url = "https://example.com/client.json"
+        doc_data = {
+            "client_id": url,
+            "client_name": "Test App",
+            "redirect_uris": ["http://localhost:3000/callback"],
+            "token_endpoint_auth_method": "none",
+        }
+        httpx_mock.add_response(
+            json=doc_data,
+            headers={
+                "content-length": "200",
+                "cache-control": "max-age=0",
+                "etag": 'W/"abc"',
+            },
+        )
+        httpx_mock.add_response(
+            status_code=304,
+            headers={"cache-control": "max-age=60", "etag": 'W/"abc"'},
+        )
+
+        first = await fetcher.fetch(url)
+        second = await fetcher.fetch(url)
+
+        assert first.client_id == second.client_id
+        requests = httpx_mock.get_requests()
+        assert len(requests) == 2
+        assert requests[1].headers.get("if-none-match") == 'W/"abc"'
+
+    async def test_fetch_cache_last_modified_revalidate(
+        self, fetcher: CIMDFetcher, httpx_mock, mock_dns
+    ):
+        """Test Last-Modified revalidation with 304 response."""
+        url = "https://example.com/client.json"
+        last_modified = "Wed, 21 Oct 2015 07:28:00 GMT"
+        doc_data = {
+            "client_id": url,
+            "client_name": "Test App",
+            "redirect_uris": ["http://localhost:3000/callback"],
+            "token_endpoint_auth_method": "none",
+        }
+        httpx_mock.add_response(
+            json=doc_data,
+            headers={
+                "content-length": "200",
+                "cache-control": "max-age=0",
+                "last-modified": last_modified,
+            },
+        )
+        httpx_mock.add_response(
+            status_code=304,
+            headers={"cache-control": "max-age=60", "last-modified": last_modified},
+        )
+
+        await fetcher.fetch(url)
+        await fetcher.fetch(url)
+
+        requests = httpx_mock.get_requests()
+        assert len(requests) == 2
+        assert requests[1].headers.get("if-modified-since") == last_modified
+
+    async def test_fetch_cache_no_store(
+        self, fetcher: CIMDFetcher, httpx_mock, mock_dns
+    ):
+        """Test that no-store disables caching."""
+        url = "https://example.com/client.json"
+        doc_data = {
+            "client_id": url,
+            "client_name": "Test App",
+            "redirect_uris": ["http://localhost:3000/callback"],
+            "token_endpoint_auth_method": "none",
+        }
+        httpx_mock.add_response(
+            json=doc_data,
+            headers={"content-length": "200", "cache-control": "no-store"},
+        )
+        httpx_mock.add_response(
+            json=doc_data,
+            headers={"content-length": "200", "cache-control": "no-store"},
+        )
+
+        await fetcher.fetch(url)
+        await fetcher.fetch(url)
+
+        assert len(httpx_mock.get_requests()) == 2
+
+    async def test_fetch_cache_no_cache(
+        self, fetcher: CIMDFetcher, httpx_mock, mock_dns
+    ):
+        """Test that no-cache forces revalidation."""
+        url = "https://example.com/client.json"
+        doc_data = {
+            "client_id": url,
+            "client_name": "Test App",
+            "redirect_uris": ["http://localhost:3000/callback"],
+            "token_endpoint_auth_method": "none",
+        }
+        httpx_mock.add_response(
+            json=doc_data,
+            headers={
+                "content-length": "200",
+                "cache-control": "no-cache",
+                "etag": '"abc"',
+            },
+        )
+        httpx_mock.add_response(
+            status_code=304,
+            headers={"cache-control": "no-cache", "etag": '"abc"'},
+        )
+
+        await fetcher.fetch(url)
+        await fetcher.fetch(url)
+
+        requests = httpx_mock.get_requests()
+        assert len(requests) == 2
+        assert requests[1].headers.get("if-none-match") == '"abc"'
+
     async def test_fetch_client_id_mismatch(
         self, fetcher: CIMDFetcher, httpx_mock, mock_dns
     ):
@@ -198,6 +355,7 @@ class TestCIMDFetcherHTTP:
         doc_data = {
             "client_id": "https://other.com/client.json",  # Different URL
             "client_name": "Test App",
+            "redirect_uris": ["http://localhost:3000/callback"],
         }
         httpx_mock.add_response(
             json=doc_data,
@@ -236,6 +394,7 @@ class TestCIMDFetcherHTTP:
         url = "https://example.com/client.json"
         doc_data = {
             "client_id": url,
+            "redirect_uris": ["http://localhost:3000/callback"],
             "token_endpoint_auth_method": "client_secret_basic",  # Not allowed
         }
         httpx_mock.add_response(
@@ -254,8 +413,6 @@ class TestCIMDAssertionValidator:
     @pytest.fixture
     def validator(self):
         """Create a CIMDAssertionValidator for testing."""
-        from fastmcp.server.auth.cimd import CIMDAssertionValidator
-
         return CIMDAssertionValidator()
 
     @pytest.fixture
@@ -311,6 +468,7 @@ class TestCIMDAssertionValidator:
         """Create CIMD document with jwks_uri."""
         return CIMDDocument(
             client_id=AnyHttpUrl("https://example.com/client.json"),
+            redirect_uris=["http://localhost:3000/callback"],
             token_endpoint_auth_method="private_key_jwt",
             jwks_uri=AnyHttpUrl("https://example.com/.well-known/jwks.json"),
         )
@@ -320,6 +478,7 @@ class TestCIMDAssertionValidator:
         """Create CIMD document with inline JWKS."""
         return CIMDDocument(
             client_id=AnyHttpUrl("https://example.com/client.json"),
+            redirect_uris=["http://localhost:3000/callback"],
             token_endpoint_auth_method="private_key_jwt",
             jwks=jwks,
         )
@@ -561,15 +720,11 @@ class TestCIMDClientManager:
     @pytest.fixture
     def manager(self):
         """Create a CIMDClientManager for testing."""
-        from fastmcp.server.auth.cimd import CIMDClientManager
-
         return CIMDClientManager(enable_cimd=True)
 
     @pytest.fixture
     def disabled_manager(self):
         """Create a disabled CIMDClientManager for testing."""
-        from fastmcp.server.auth.cimd import CIMDClientManager
-
         return CIMDClientManager(enable_cimd=False)
 
     @pytest.fixture
@@ -628,6 +783,193 @@ class TestCIMDClientManager:
     # Trust policy and consent bypass tests removed - functionality removed from CIMD
 
 
+class TestCIMDClientManagerGetClientOptions:
+    """Tests for CIMDClientManager.get_client with default_scope and allowed patterns."""
+
+    @pytest.fixture
+    def mock_dns(self):
+        """Mock DNS resolution to return test public IP."""
+        with patch(
+            "fastmcp.server.auth.cimd._resolve_hostname",
+            return_value=[TEST_PUBLIC_IP],
+        ):
+            yield
+
+    async def test_default_scope_applied_when_doc_has_no_scope(
+        self, httpx_mock, mock_dns
+    ):
+        """When the CIMD document omits scope, the manager's default_scope is used."""
+
+        url = "https://example.com/client.json"
+        doc_data = {
+            "client_id": url,
+            "client_name": "Test App",
+            "redirect_uris": ["http://localhost:3000/callback"],
+            "token_endpoint_auth_method": "none",
+            # No scope field
+        }
+        httpx_mock.add_response(
+            json=doc_data,
+            headers={"content-length": "200"},
+        )
+
+        manager = CIMDClientManager(
+            enable_cimd=True,
+            default_scope="read write admin",
+        )
+        client = await manager.get_client(url)
+        assert client is not None
+        assert client.scope == "read write admin"
+
+    async def test_doc_scope_takes_precedence_over_default(self, httpx_mock, mock_dns):
+        """When the CIMD document specifies scope, it wins over the default."""
+
+        url = "https://example.com/client.json"
+        doc_data = {
+            "client_id": url,
+            "client_name": "Test App",
+            "redirect_uris": ["http://localhost:3000/callback"],
+            "token_endpoint_auth_method": "none",
+            "scope": "custom-scope",
+        }
+        httpx_mock.add_response(
+            json=doc_data,
+            headers={"content-length": "200"},
+        )
+
+        manager = CIMDClientManager(
+            enable_cimd=True,
+            default_scope="default-scope",
+        )
+        client = await manager.get_client(url)
+        assert client is not None
+        assert client.scope == "custom-scope"
+
+    async def test_allowed_redirect_uri_patterns_stored_on_client(
+        self, httpx_mock, mock_dns
+    ):
+        """Proxy's allowed_redirect_uri_patterns are forwarded to the created client."""
+
+        url = "https://example.com/client.json"
+        doc_data = {
+            "client_id": url,
+            "client_name": "Test App",
+            "redirect_uris": ["http://localhost:*/callback"],
+            "token_endpoint_auth_method": "none",
+        }
+        httpx_mock.add_response(
+            json=doc_data,
+            headers={"content-length": "200"},
+        )
+
+        patterns = ["http://localhost:*", "https://app.example.com/*"]
+        manager = CIMDClientManager(
+            enable_cimd=True,
+            allowed_redirect_uri_patterns=patterns,
+        )
+        client = await manager.get_client(url)
+        assert client is not None
+        assert client.allowed_redirect_uri_patterns == patterns
+
+    async def test_cimd_document_attached_to_client(self, httpx_mock, mock_dns):
+        """The fetched CIMDDocument is attached to the created client."""
+
+        url = "https://example.com/client.json"
+        doc_data = {
+            "client_id": url,
+            "client_name": "Attached Doc App",
+            "redirect_uris": ["http://localhost:3000/callback"],
+            "token_endpoint_auth_method": "none",
+        }
+        httpx_mock.add_response(
+            json=doc_data,
+            headers={"content-length": "200"},
+        )
+
+        manager = CIMDClientManager(enable_cimd=True)
+        client = await manager.get_client(url)
+        assert client is not None
+        assert client.cimd_document is not None
+        assert client.cimd_document.client_name == "Attached Doc App"
+        assert str(client.cimd_document.client_id) == url
+
+
+class TestCIMDClientManagerValidatePrivateKeyJwt:
+    """Tests for CIMDClientManager.validate_private_key_jwt wrapper."""
+
+    @pytest.fixture
+    def manager(self):
+        return CIMDClientManager(enable_cimd=True)
+
+    async def test_missing_cimd_document_raises(self, manager):
+        """validate_private_key_jwt raises ValueError if client has no cimd_document."""
+
+        client = ProxyDCRClient(
+            client_id="https://example.com/client.json",
+            client_secret=None,
+            redirect_uris=None,
+            cimd_document=None,
+        )
+        with pytest.raises(ValueError, match="must have CIMD document"):
+            await manager.validate_private_key_jwt(
+                "fake.jwt.token",
+                client,
+                "https://oauth.example.com/token",
+            )
+
+    async def test_wrong_auth_method_raises(self, manager):
+        """validate_private_key_jwt raises ValueError if auth method is not private_key_jwt."""
+
+        cimd_doc = CIMDDocument(
+            client_id=AnyHttpUrl("https://example.com/client.json"),
+            redirect_uris=["http://localhost:3000/callback"],
+            token_endpoint_auth_method="none",  # Not private_key_jwt
+        )
+        client = ProxyDCRClient(
+            client_id="https://example.com/client.json",
+            client_secret=None,
+            redirect_uris=None,
+            cimd_document=cimd_doc,
+        )
+        with pytest.raises(ValueError, match="private_key_jwt"):
+            await manager.validate_private_key_jwt(
+                "fake.jwt.token",
+                client,
+                "https://oauth.example.com/token",
+            )
+
+    async def test_success_delegates_to_assertion_validator(self, manager):
+        """On success, validate_private_key_jwt delegates to the assertion validator."""
+
+        cimd_doc = CIMDDocument(
+            client_id=AnyHttpUrl("https://example.com/client.json"),
+            redirect_uris=["http://localhost:3000/callback"],
+            token_endpoint_auth_method="private_key_jwt",
+            jwks_uri=AnyHttpUrl("https://example.com/.well-known/jwks.json"),
+        )
+        client = ProxyDCRClient(
+            client_id="https://example.com/client.json",
+            client_secret=None,
+            redirect_uris=None,
+            cimd_document=cimd_doc,
+        )
+
+        manager._assertion_validator.validate_assertion = AsyncMock(return_value=True)
+
+        result = await manager.validate_private_key_jwt(
+            "test.jwt.assertion",
+            client,
+            "https://oauth.example.com/token",
+        )
+        assert result is True
+        manager._assertion_validator.validate_assertion.assert_awaited_once_with(
+            "test.jwt.assertion",
+            "https://example.com/client.json",
+            "https://oauth.example.com/token",
+            cimd_doc,
+        )
+
+
 class TestCIMDRedirectUriEnforcement:
     """Tests for CIMD redirect_uri validation security.
 
@@ -653,8 +995,6 @@ class TestCIMDRedirectUriEnforcement:
         """
         from mcp.shared.auth import InvalidRedirectUriError
         from pydantic import AnyUrl
-
-        from fastmcp.server.auth.cimd import CIMDClientManager
 
         url = "https://example.com/client.json"
         doc_data = {
@@ -696,8 +1036,6 @@ class TestCIMDRedirectUriEnforcement:
         from mcp.shared.auth import InvalidRedirectUriError
         from pydantic import AnyUrl
 
-        from fastmcp.server.auth.cimd import CIMDClientManager
-
         url = "https://example.com/client.json"
         doc_data = {
             "client_id": url,
@@ -731,40 +1069,3 @@ class TestCIMDRedirectUriEnforcement:
         # Evil.com should fail (in CIMD but doesn't match proxy patterns)
         with pytest.raises(InvalidRedirectUriError):
             client.validate_redirect_uri(AnyUrl("https://evil.com/callback"))
-
-    async def test_cimd_without_redirect_uris_uses_patterns(self, httpx_mock, mock_dns):
-        """Test that CIMD clients without redirect_uris use proxy patterns.
-
-        When CIMD document has no redirect_uris, validation falls back to
-        the proxy's allowed_redirect_uri_patterns.
-        """
-        from pydantic import AnyUrl
-
-        from fastmcp.server.auth.cimd import CIMDClientManager
-
-        url = "https://example.com/client.json"
-        doc_data = {
-            "client_id": url,
-            "client_name": "Test App",
-            # No redirect_uris declared
-            "token_endpoint_auth_method": "none",
-        }
-        httpx_mock.add_response(
-            json=doc_data,
-            headers={"content-length": "200"},
-        )
-
-        # Proxy allows any localhost port
-        manager = CIMDClientManager(
-            enable_cimd=True,
-            allowed_redirect_uri_patterns=["http://localhost:*"],
-        )
-        client = await manager.get_client(url)
-        assert client is not None
-        assert client.redirect_uris is None
-
-        # Any localhost port should work (no CIMD restriction, proxy allows)
-        validated = client.validate_redirect_uri(
-            AnyUrl("http://localhost:5000/callback")
-        )
-        assert str(validated) == "http://localhost:5000/callback"

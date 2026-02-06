@@ -12,14 +12,14 @@ from mcp.shared.auth import InvalidRedirectUriError, OAuthClientInformationFull
 from pydantic import AnyUrl, BaseModel, Field
 
 from fastmcp.server.auth.cimd import CIMDDocument
-from fastmcp.server.auth.redirect_validation import validate_redirect_uri
+from fastmcp.server.auth.redirect_validation import (
+    matches_allowed_pattern,
+    validate_redirect_uri,
+)
 
 # -------------------------------------------------------------------------
 # Constants
 # -------------------------------------------------------------------------
-
-# CIMD client cache TTL
-CIMD_CACHE_TTL_SECONDS: Final[int] = 60 * 60  # 1 hour
 
 # Default token expiration times
 DEFAULT_ACCESS_TOKEN_EXPIRY_SECONDS: Final[int] = 60 * 60  # 1 hour
@@ -172,16 +172,58 @@ class ProxyDCRClient(OAuthClientInformationFull):
         For DCR clients: validates against proxy patterns first, falling back to
         base validation (registered redirect_uris) if patterns don't match.
         """
+        if redirect_uri is None and self.cimd_document is not None:
+            cimd_redirect_uris = self.cimd_document.redirect_uris
+            if len(cimd_redirect_uris) == 1:
+                candidate = cimd_redirect_uris[0]
+                if "*" in candidate:
+                    raise InvalidRedirectUriError(
+                        "redirect_uri must be specified when CIMD redirect_uris uses wildcards."
+                    )
+                try:
+                    return AnyUrl(candidate)
+                except Exception as e:
+                    raise InvalidRedirectUriError(
+                        f"Invalid CIMD redirect_uri: {e}"
+                    ) from e
+
+            raise InvalidRedirectUriError(
+                "redirect_uri must be specified when CIMD lists multiple redirect_uris."
+            )
+
         if redirect_uri is not None:
+            cimd_redirect_uris = (
+                self.cimd_document.redirect_uris if self.cimd_document else None
+            )
+
+            if cimd_redirect_uris:
+                uri_str = str(redirect_uri)
+                cimd_match = any(
+                    matches_allowed_pattern(uri_str, pattern)
+                    for pattern in cimd_redirect_uris
+                )
+                if not cimd_match:
+                    raise InvalidRedirectUriError(
+                        f"Redirect URI '{redirect_uri}' does not match CIMD redirect_uris."
+                    )
+
+                if self.allowed_redirect_uri_patterns:
+                    if not validate_redirect_uri(
+                        redirect_uri=redirect_uri,
+                        allowed_patterns=self.allowed_redirect_uri_patterns,
+                    ):
+                        raise InvalidRedirectUriError(
+                            f"Redirect URI '{redirect_uri}' does not match allowed patterns."
+                        )
+
+                return redirect_uri
+
             pattern_matches = validate_redirect_uri(
                 redirect_uri=redirect_uri,
                 allowed_patterns=self.allowed_redirect_uri_patterns,
             )
 
             if pattern_matches:
-                # For CIMD clients with declared redirect_uris, also enforce them
-                if self.cimd_document is not None and self.redirect_uris is not None:
-                    return super().validate_redirect_uri(redirect_uri)
                 return redirect_uri
 
             # Patterns configured but didn't match

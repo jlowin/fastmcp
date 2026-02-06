@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+from pathlib import Path
 from typing import Annotated
 
 import cyclopts
@@ -41,6 +42,13 @@ def create_command(
             help="Allowed redirect URIs (can specify multiple)",
         ),
     ],
+    client_id: Annotated[
+        str | None,
+        cyclopts.Parameter(
+            name="--client-id",
+            help="The URL where this document will be hosted (sets client_id directly)",
+        ),
+    ] = None,
     client_uri: Annotated[
         str | None,
         cyclopts.Parameter(
@@ -88,10 +96,8 @@ def create_command(
     for example: https://myapp.example.com/oauth/client.json
     """
     # Build the document
-    # Note: client_id will be the URL where this document is hosted
-    # We use a placeholder that the user should replace
     doc = {
-        "client_id": "https://YOUR-DOMAIN.com/path/to/client.json",
+        "client_id": client_id or "https://YOUR-DOMAIN.com/path/to/client.json",
         "client_name": name,
         "redirect_uris": redirect_uri,
         "token_endpoint_auth_method": "none",
@@ -112,22 +118,26 @@ def create_command(
 
     # Write output
     if output:
-        with open(output, "w") as f:
+        output_path = Path(output).expanduser().resolve()
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(output_path, "w") as f:
             f.write(json_output)
             f.write("\n")
         console.print(f"[green]✓[/green] CIMD document written to {output}")
-        console.print()
-        console.print(
-            "[yellow]Important:[/yellow] Before hosting, update the client_id field"
-        )
-        console.print("to match the URL where you will host this document.")
+        if not client_id:
+            console.print(
+                "\n[yellow]Important:[/yellow] client_id is a placeholder. Update it to the URL where you will host this document, or re-run with --client-id."
+            )
     else:
         print(json_output)
-        # Print instructions to stderr so they don't interfere with piping
-        stderr_console = Console(stderr=True)
-        stderr_console.print(
-            "\n[yellow]Important:[/yellow] Update client_id to match your hosting URL."
-        )
+        if not client_id:
+            # Print instructions to stderr so they don't interfere with piping
+            stderr_console = Console(stderr=True)
+            stderr_console.print(
+                "\n[yellow]Important:[/yellow] client_id is a placeholder."
+                " Update it to the URL where you will host this document,"
+                " or re-run with --client-id."
+            )
 
 
 @cimd_app.command(name="validate")

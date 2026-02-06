@@ -546,61 +546,13 @@ This flow happens transparently. MCP clients that support CIMD simply provide th
 
 ### CIMD Configuration
 
-CIMD support is enabled by default. You can customize its behavior with these parameters:
+CIMD support is enabled by default for `OAuthProxy`.
 
 <Card icon="code" title="CIMD Parameters">
 <ParamField body="enable_cimd" type="bool" default="True">
   Whether to accept CIMD URLs as client identifiers. When enabled, clients can use HTTPS URLs pointing to metadata documents as their `client_id` instead of registering via DCR.
 </ParamField>
-
-<ParamField body="cimd_trust_policy" type="CIMDTrustPolicy | None">
-  Controls how CIMD clients are treated during authorization. You can configure trusted domains that skip consent entirely, or block specific domains from connecting.
-
-```python
-from fastmcp.server.auth.cimd import CIMDTrustPolicy
-
-auth = OAuthProxy(
-    ...,
-    cimd_trust_policy=CIMDTrustPolicy(
-        # These domains skip the consent screen entirely
-        trusted_domains=["vscode.dev", "internal.mycompany.com"],
-        # These domains are always rejected
-        blocked_domains=["malicious-site.com"],
-    ),
-)
-```
-
-Subdomain matching is enabled, so trusting `example.com` also trusts `sub.example.com`.
-
-</ParamField>
 </Card>
-
-### Trust Policies
-
-By default, all CIMD clients show a consent screen with their verified domain. You can configure trust policies to automatically approve clients from domains you control or commonly use:
-
-```python
-from fastmcp import FastMCP
-from fastmcp.server.auth import OAuthProxy
-from fastmcp.server.auth.cimd import CIMDTrustPolicy
-
-auth = OAuthProxy(
-    upstream_authorization_endpoint="https://provider.com/oauth/authorize",
-    upstream_token_endpoint="https://provider.com/oauth/token",
-    upstream_client_id="your-client-id",
-    upstream_client_secret="your-client-secret",
-    token_verifier=token_verifier,
-    base_url="https://your-server.com",
-    # Trust VS Code and internal tools to skip consent
-    cimd_trust_policy=CIMDTrustPolicy(
-        trusted_domains=["vscode.dev", "insiders.vscode.dev"],
-    ),
-)
-
-mcp = FastMCP(name="My Server", auth=auth)
-```
-
-Trusted domains bypass the consent screen entirely, providing a seamless experience for known clients while maintaining security for unknown ones.
 
 ### Private Key JWT Authentication
 
@@ -626,8 +578,10 @@ CIMD provides several security advantages over DCR:
 
 - **Verified identity**: The domain in the `client_id` URL is verified by HTTPS, so users know which organization is requesting access
 - **No registration required**: Clients don't need to store or manage dynamically-issued credentials
+- **Redirect URI enforcement**: CIMD documents must declare `redirect_uris`, which are enforced by the proxy (wildcard patterns supported)
 - **SSRF protection**: The OAuth proxy blocks fetches to localhost, private IPs, and reserved addresses
 - **Replay prevention**: For `private_key_jwt` clients, JTI claims are tracked to prevent assertion replay
+- **Cache-aware fetching**: CIMD documents are cached according to HTTP cache headers and revalidated when required
 
 To disable CIMD support entirely (for example, to require all clients to register via DCR):
 

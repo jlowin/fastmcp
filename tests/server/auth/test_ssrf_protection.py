@@ -5,6 +5,7 @@ This module tests the ssrf.py module which provides SSRF-protected HTTP fetching
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 from fastmcp.server.auth.ssrf import (
@@ -138,6 +139,51 @@ class TestSSRFSafeFetch:
             call_args = mock_client.stream.call_args
             url_called = call_args[0][1]
             assert resolved_ip in url_called
+
+    async def test_fallback_to_second_ip(self):
+        """If the first IP fails, the next resolved IP should be tried."""
+        resolved_ips = ["2001:4860:4860::8888", "93.184.216.34"]
+
+        with (
+            patch(
+                "fastmcp.server.auth.ssrf.resolve_hostname",
+                return_value=resolved_ips,
+            ),
+            patch("httpx.AsyncClient") as mock_client_class,
+        ):
+            request = httpx.Request("GET", "https://example.com/api")
+
+            first_client = AsyncMock()
+            first_client.stream = MagicMock(
+                side_effect=httpx.RequestError("boom", request=request)
+            )
+            first_client.__aenter__.return_value = first_client
+            first_client.__aexit__ = AsyncMock(return_value=None)
+
+            mock_stream = MagicMock()
+            mock_stream.status_code = 200
+            mock_stream.headers = {"content-length": "2"}
+            mock_stream.__aenter__ = AsyncMock(return_value=mock_stream)
+            mock_stream.__aexit__ = AsyncMock(return_value=None)
+
+            async def aiter_bytes():
+                yield b"ok"
+
+            mock_stream.aiter_bytes = aiter_bytes
+
+            second_client = AsyncMock()
+            second_client.stream = MagicMock(return_value=mock_stream)
+            second_client.__aenter__.return_value = second_client
+            second_client.__aexit__ = AsyncMock(return_value=None)
+
+            mock_client_class.side_effect = [first_client, second_client]
+
+            content = await ssrf_safe_fetch("https://example.com/api")
+            assert content == b"ok"
+
+            call_args = second_client.stream.call_args
+            url_called = call_args[0][1]
+            assert resolved_ips[1] in url_called
 
     async def test_host_header_set(self):
         """Verify Host header is set to original hostname."""

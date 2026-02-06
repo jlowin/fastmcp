@@ -238,32 +238,13 @@ Dynamic clients created by the proxy will automatically include these scopes in 
 
 The OIDC proxy inherits full CIMD (Client ID Metadata Document) support from `OAuthProxy`. Clients can use HTTPS URLs as their `client_id` instead of registering dynamically, and the proxy will fetch and validate their metadata document.
 
-See the [OAuth Proxy CIMD documentation](/servers/auth/oauth-proxy#cimd-support) for complete details on how CIMD works, including trust policies, private key JWT authentication, and security considerations.
+See the [OAuth Proxy CIMD documentation](/servers/auth/oauth-proxy#cimd-support) for complete details on how CIMD works, including private key JWT authentication and security considerations.
 
 The CIMD-related parameters available on `OIDCProxy` are:
 
 <Card icon="code" title="CIMD Parameters">
 <ParamField body="enable_cimd" type="bool" default="True">
   Whether to accept CIMD URLs as client identifiers.
-</ParamField>
-
-<ParamField body="cimd_trust_policy" type="CIMDTrustPolicy | None">
-  Controls trusted and blocked domains for CIMD clients.
-
-```python
-from fastmcp.server.auth.cimd import CIMDTrustPolicy
-
-auth = OIDCProxy(
-    config_url="https://provider.com/.well-known/openid-configuration",
-    client_id="your-client-id",
-    client_secret="your-client-secret",
-    base_url="https://your-server.com",
-    cimd_trust_policy=CIMDTrustPolicy(
-        trusted_domains=["vscode.dev"],
-    ),
-)
-```
-
 </ParamField>
 </Card>
 
