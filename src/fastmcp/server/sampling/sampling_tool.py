@@ -10,6 +10,9 @@ from mcp.types import Tool as SDKTool
 from pydantic import ConfigDict
 
 from fastmcp.tools.function_parsing import ParsedFunction
+from fastmcp.tools.function_tool import FunctionTool
+from fastmcp.tools.tool import ToolResult
+from fastmcp.tools.tool_transform import TransformedTool
 from fastmcp.utilities.types import FastMCPBaseModel
 
 
@@ -106,4 +109,93 @@ class SamplingTool(FastMCPBaseModel):
             description=description or parsed.description,
             parameters=parsed.input_schema,
             fn=parsed.fn,
+        )
+
+    @classmethod
+    def from_callable_tool(
+        cls,
+        tool: FunctionTool | TransformedTool,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+    ) -> SamplingTool:
+        """Create a SamplingTool from a FunctionTool or TransformedTool.
+
+        This helper enables reusing existing server tools in sampling contexts
+        without duplication. Both FunctionTool and TransformedTool have callable
+        .fn attributes that can be directly used for sampling.
+
+        For TransformedTool instances, the tool's .run() method is used instead
+        of .fn to ensure proper argument transformation and execution. The result
+        is automatically unwrapped from ToolResult if needed.
+
+        Args:
+            tool: A FunctionTool or TransformedTool with a callable .fn attribute.
+            name: Optional name override. Defaults to tool.name.
+            description: Optional description override. Defaults to tool.description.
+
+        Returns:
+            A SamplingTool that wraps the tool's functionality.
+
+        Raises:
+            TypeError: If the tool is not a FunctionTool or TransformedTool.
+
+        Examples:
+            Convert a FunctionTool to SamplingTool:
+
+                @mcp.tool
+                def search(query: str) -> str:
+                    return do_search(query)
+
+                sampling_tool = SamplingTool.from_callable_tool(search)
+
+            Use in sampling context:
+
+                result = await ctx.sample(
+                    "Research Python",
+                    tools=[SamplingTool.from_callable_tool(search)]
+                )
+        """
+        # Validate that the tool is a supported type
+        if not isinstance(tool, (FunctionTool, TransformedTool)):
+            raise TypeError(
+                f"Expected FunctionTool or TransformedTool, got {type(tool).__name__}. "
+                "Only callable tools can be converted to SamplingTools."
+            )
+
+        # For TransformedTool, we need to use .run() and unwrap ToolResult
+        # because .fn might be a forwarding function that returns ToolResult
+        if isinstance(tool, TransformedTool):
+
+            async def wrapper(**kwargs: Any) -> Any:
+                result = await tool.run(kwargs)
+                # Unwrap ToolResult - extract the actual value
+                if isinstance(result, ToolResult):
+                    # If there's structured_content, use that
+                    if result.structured_content is not None:
+                        # Handle wrapped results
+                        if (
+                            isinstance(result.structured_content, dict)
+                            and "result" in result.structured_content
+                        ):
+                            return result.structured_content["result"]
+                        return result.structured_content
+                    # Otherwise, extract from text content
+                    if result.content and len(result.content) > 0:
+                        first_content = result.content[0]
+                        if hasattr(first_content, "text"):
+                            return first_content.text
+                return result
+
+            fn = wrapper
+        else:
+            # FunctionTool.fn can be used directly
+            fn = tool.fn
+
+        # Extract the callable function, name, description, and parameters
+        return cls(
+            name=name or tool.name,
+            description=description or tool.description,
+            parameters=tool.parameters,
+            fn=fn,
         )
