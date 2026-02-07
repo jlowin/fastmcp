@@ -1,6 +1,7 @@
 """Tests for OAuth proxy redirect URI validation."""
 
 import pytest
+from key_value.aio.stores.memory import MemoryStore
 from mcp.shared.auth import InvalidRedirectUriError
 from pydantic import AnyUrl
 
@@ -111,6 +112,7 @@ class TestOAuthProxyRedirectValidation:
             token_verifier=MockTokenVerifier(),
             base_url="http://localhost:8000",
             jwt_signing_key="test-secret",
+            client_storage=MemoryStore(),
         )
 
         # The proxy should store None for default (allow all)
@@ -129,6 +131,7 @@ class TestOAuthProxyRedirectValidation:
             base_url="http://localhost:8000",
             allowed_client_redirect_uris=custom_patterns,
             jwt_signing_key="test-secret",
+            client_storage=MemoryStore(),
         )
 
         assert proxy._allowed_client_redirect_uris == custom_patterns
@@ -144,6 +147,7 @@ class TestOAuthProxyRedirectValidation:
             base_url="http://localhost:8000",
             allowed_client_redirect_uris=[],
             jwt_signing_key="test-secret",
+            client_storage=MemoryStore(),
         )
 
         assert proxy._allowed_client_redirect_uris == []
@@ -161,6 +165,7 @@ class TestOAuthProxyRedirectValidation:
             base_url="http://localhost:8000",
             allowed_client_redirect_uris=custom_patterns,
             jwt_signing_key="test-secret",
+            client_storage=MemoryStore(),
         )
 
         # Register a client
@@ -194,6 +199,7 @@ class TestOAuthProxyRedirectValidation:
             base_url="http://localhost:8000",
             allowed_client_redirect_uris=custom_patterns,
             jwt_signing_key="test-secret",
+            client_storage=MemoryStore(),
         )
 
         # Get an unregistered client
