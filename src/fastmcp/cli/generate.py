@@ -576,7 +576,11 @@ def _tool_skill_section(tool: mcp.types.Tool, cli_filename: str) -> str:
     flag_parts_list: list[str] = []
     for p, p_schema in properties.items():
         flag = _param_to_cli_flag(p)
-        if p_schema.get("type") == "boolean":
+        schema_type = p_schema.get("type")
+        is_bool = schema_type == "boolean" or (
+            isinstance(schema_type, list) and "boolean" in schema_type
+        )
+        if is_bool:
             flag_parts_list.append(flag)
         else:
             flag_parts_list.append(f"{flag} <value>")
