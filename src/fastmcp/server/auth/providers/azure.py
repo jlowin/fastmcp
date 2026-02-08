@@ -132,9 +132,10 @@ class AzureProvider(OAuthProxy):
                 - NOT validated on tokens
                 - NOT advertised to MCP clients
                 - Used to request additional permissions from Azure (e.g., Graph API access)
-                Example: ["User.Read", "Mail.Read", "offline_access"]
+                Example: ["User.Read", "Mail.Read"]
                 These scopes allow your FastMCP server to call Microsoft Graph APIs using the
                 upstream Azure token, but MCP clients are unaware of them.
+                Note: "offline_access" is automatically included to obtain refresh tokens.
             allowed_client_redirect_uris: List of allowed redirect URI patterns for MCP clients.
                 If None (default), all URIs are allowed. If empty list, no URIs are allowed.
             client_storage: Storage backend for OAuth state (client registrations, encrypted tokens).
@@ -150,15 +151,19 @@ class AzureProvider(OAuthProxy):
         """
         # Parse scopes if provided as string
         parsed_required_scopes = parse_scopes(required_scopes)
-        parsed_additional_scopes = (
-            parse_scopes(additional_authorize_scopes)
+        parsed_additional_scopes: list[str] = (
+            parse_scopes(additional_authorize_scopes) or []
             if additional_authorize_scopes
             else []
         )
 
+        # Always include offline_access to get refresh tokens from Azure
+        if "offline_access" not in parsed_additional_scopes:
+            parsed_additional_scopes = [*parsed_additional_scopes, "offline_access"]
+
         # Apply defaults
         self.identifier_uri = identifier_uri or f"api://{client_id}"
-        self.additional_authorize_scopes = parsed_additional_scopes
+        self.additional_authorize_scopes: list[str] = parsed_additional_scopes
 
         # Always validate tokens against the app's API client ID using JWT
         issuer = f"https://{base_authority}/{tenant_id}/v2.0"
@@ -193,6 +198,8 @@ class AzureProvider(OAuthProxy):
         token_endpoint = f"https://{base_authority}/{tenant_id}/oauth2/v2.0/token"
 
         # Initialize OAuth proxy with Azure endpoints
+        # Remember there's hooks called, such as _prepare_scopes_for_token_exchange
+        # and _prepare_scopes_for_upstream_refresh
         super().__init__(
             upstream_authorization_endpoint=authorization_endpoint,
             upstream_token_endpoint=token_endpoint,
@@ -206,7 +213,6 @@ class AzureProvider(OAuthProxy):
             client_storage=client_storage,
             jwt_signing_key=jwt_signing_key,
             require_authorization_consent=require_authorization_consent,
-            # Advertise full scopes including OIDC (even though we only validate non-OIDC)
             valid_scopes=parsed_required_scopes,
         )
 
@@ -318,16 +324,37 @@ class AzureProvider(OAuthProxy):
         # Let parent build the URL with prefixed scopes
         return super()._build_upstream_authorize_url(txn_id, modified_transaction)
 
+    def _prepare_scopes_for_token_exchange(self, scopes: list[str]) -> list[str]:
+        """Prepare scopes for Azure authorization code exchange.
+
+        Azure requires scopes during token exchange (AADSTS28003 error if missing).
+        Azure only allows ONE resource per token request (AADSTS28000), so we only
+        include scopes for this API plus OIDC scopes.
+
+        Args:
+            scopes: Scopes from the authorization request (unprefixed)
+
+        Returns:
+            List of scopes for Azure token endpoint
+        """
+        # Prefix scopes for this API
+        prefixed_scopes = self._prefix_scopes_for_azure(scopes or [])
+
+        # Add OIDC scopes only (not other API scopes) to avoid AADSTS28000
+        if self.additional_authorize_scopes:
+            prefixed_scopes.extend(
+                s for s in self.additional_authorize_scopes if s in OIDC_SCOPES
+            )
+
+        deduplicated = list(dict.fromkeys(prefixed_scopes))
+        logger.debug("Token exchange scopes: %s", deduplicated)
+        return deduplicated
+
     def _prepare_scopes_for_upstream_refresh(self, scopes: list[str]) -> list[str]:
         """Prepare scopes for Azure token refresh.
 
-        Azure requires:
-        1. Fully-qualified custom scopes (e.g., "api://xxx/read" not "read")
-        2. Microsoft Graph scopes (e.g., "User.Read", "openid") sent as-is
-        3. Additional scopes from provider config (additional_authorize_scopes)
-
-        This method transforms base client scopes for Azure while keeping them
-        unprefixed in storage to prevent accumulation.
+        Azure requires fully-qualified scopes and only allows ONE resource per
+        token request (AADSTS28000). We include scopes for this API plus OIDC scopes.
 
         Args:
             scopes: Base scopes from RefreshToken (unprefixed, e.g., ["read"])
@@ -338,22 +365,19 @@ class AzureProvider(OAuthProxy):
         logger.debug("Base scopes from storage: %s", scopes)
 
         # Filter out any additional_authorize_scopes that may have been stored
-        # (they shouldn't be in storage, but clean them up if they are)
         additional_scopes_set = set(self.additional_authorize_scopes or [])
         base_scopes = [s for s in scopes if s not in additional_scopes_set]
 
-        # Prefix base scopes with identifier_uri for Azure using shared helper
+        # Prefix base scopes with identifier_uri for Azure
         prefixed_scopes = self._prefix_scopes_for_azure(base_scopes)
 
-        # Add additional scopes (Graph + OIDC) for the Azure request
-        # These are NOT stored in RefreshToken, only sent to Azure
+        # Add OIDC scopes only (not other API scopes) to avoid AADSTS28000
         if self.additional_authorize_scopes:
-            prefixed_scopes.extend(self.additional_authorize_scopes)
+            prefixed_scopes.extend(
+                s for s in self.additional_authorize_scopes if s in OIDC_SCOPES
+            )
 
-        # Deduplicate while preserving order (in case older tokens have duplicates)
-        # Use dict.fromkeys() for O(n) deduplication with order preservation
         deduplicated_scopes = list(dict.fromkeys(prefixed_scopes))
-
         logger.debug("Scopes for Azure token endpoint: %s", deduplicated_scopes)
         return deduplicated_scopes
 
@@ -428,3 +452,103 @@ class AzureProvider(OAuthProxy):
         except Exception as e:
             logger.debug("Failed to extract Azure claims: %s", e)
             return None
+
+
+class AzureJWTVerifier(JWTVerifier):
+    """JWT verifier pre-configured for Azure AD / Microsoft Entra ID.
+
+    Auto-configures JWKS URI, issuer, audience, and scope handling from your
+    Azure app registration details. Designed for Managed Identity and other
+    token-verification-only scenarios where AzureProvider's full OAuth proxy
+    isn't needed.
+
+    Handles Azure's scope format automatically:
+    - Validates tokens using short-form scopes (what Azure puts in ``scp`` claims)
+    - Advertises full-URI scopes in OAuth metadata (what clients need to request)
+
+    Example::
+
+        from fastmcp.server.auth import RemoteAuthProvider
+        from fastmcp.server.auth.providers.azure import AzureJWTVerifier
+        from pydantic import AnyHttpUrl
+
+        verifier = AzureJWTVerifier(
+            client_id="your-client-id",
+            tenant_id="your-tenant-id",
+            required_scopes=["access_as_user"],
+        )
+
+        auth = RemoteAuthProvider(
+            token_verifier=verifier,
+            authorization_servers=[
+                AnyHttpUrl("https://login.microsoftonline.com/your-tenant-id/v2.0")
+            ],
+            base_url="https://my-server.com",
+        )
+    """
+
+    def __init__(
+        self,
+        *,
+        client_id: str,
+        tenant_id: str,
+        required_scopes: list[str] | None = None,
+        identifier_uri: str | None = None,
+        base_authority: str = "login.microsoftonline.com",
+    ):
+        """Initialize Azure JWT verifier.
+
+        Args:
+            client_id: Azure application (client) ID from your App registration
+            tenant_id: Azure tenant ID (specific tenant GUID, "organizations", or "consumers").
+                For multi-tenant apps ("organizations" or "consumers"), issuer validation
+                is skipped since Azure tokens carry the actual tenant GUID as issuer.
+            required_scopes: Scope names as they appear in Azure Portal under "Expose an API"
+                (e.g., ["access_as_user", "read"]). These are validated against
+                the short-form scopes in token ``scp`` claims, and automatically
+                prefixed with identifier_uri for OAuth metadata.
+            identifier_uri: Application ID URI (defaults to ``api://{client_id}``).
+                Used to prefix scopes in OAuth metadata so clients know the full
+                scope URIs to request from Azure.
+            base_authority: Azure authority base URL (defaults to "login.microsoftonline.com").
+                For Azure Government, use "login.microsoftonline.us".
+        """
+        self._identifier_uri = identifier_uri or f"api://{client_id}"
+
+        # For multi-tenant apps, Azure tokens carry the actual tenant GUID as
+        # issuer, not the literal "organizations" or "consumers" string. Skip
+        # issuer validation for these — audience still protects against wrong-app tokens.
+        multi_tenant_values = {"organizations", "consumers", "common"}
+        issuer: str | None = (
+            None
+            if tenant_id in multi_tenant_values
+            else f"https://{base_authority}/{tenant_id}/v2.0"
+        )
+
+        super().__init__(
+            jwks_uri=f"https://{base_authority}/{tenant_id}/discovery/v2.0/keys",
+            issuer=issuer,
+            audience=client_id,
+            algorithm="RS256",
+            required_scopes=required_scopes,
+        )
+
+    @property
+    def scopes_supported(self) -> list[str]:
+        """Return scopes with Azure URI prefix for OAuth metadata.
+
+        Azure tokens contain short-form scopes (e.g., ``read``) in the ``scp``
+        claim, but clients must request full URI scopes (e.g.,
+        ``api://client-id/read``) from the Azure authorization endpoint. This
+        property returns the full-URI form for OAuth metadata while
+        ``required_scopes`` retains the short form for token validation.
+        """
+        if not self.required_scopes:
+            return []
+        prefixed = []
+        for scope in self.required_scopes:
+            if scope in OIDC_SCOPES or "://" in scope or "/" in scope:
+                prefixed.append(scope)
+            else:
+                prefixed.append(f"{self._identifier_uri}/{scope}")
+        return prefixed

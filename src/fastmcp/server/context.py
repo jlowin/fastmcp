@@ -33,6 +33,7 @@ from fastmcp.server.elicitation import (
     handle_elicit_accept,
     parse_elicit_response_type,
 )
+from fastmcp.server.low_level import MiddlewareServerSession
 from fastmcp.server.sampling import SampleStep, SamplingResult, SamplingTool
 from fastmcp.server.sampling.run import (
     sample_impl,
@@ -181,10 +182,45 @@ class Context:
     # Default TTL for session state: 1 day in seconds
     _STATE_TTL_SECONDS: int = 86400
 
-    def __init__(self, fastmcp: FastMCP, session: ServerSession | None = None):
+    def __init__(
+        self,
+        fastmcp: FastMCP,
+        session: ServerSession | None = None,
+        *,
+        task_id: str | None = None,
+    ):
         self._fastmcp: weakref.ref[FastMCP] = weakref.ref(fastmcp)
         self._session: ServerSession | None = session  # For state ops during init
         self._tokens: list[Token] = []
+        # Background task support (SEP-1686)
+        self._task_id: str | None = task_id
+
+    @property
+    def is_background_task(self) -> bool:
+        """True when this context is running in a background task (Docket worker).
+
+        When True, certain operations like elicit() and sample() will use
+        task-aware implementations that can pause the task and wait for
+        client input.
+
+        Example:
+            ```python
+            @server.tool(task=True)
+            async def my_task(ctx: Context) -> str:
+                # Works transparently in both foreground and background task modes
+                result = await ctx.elicit("Need input", str)
+                return str(result)
+            ```
+        """
+        return self._task_id is not None
+
+    @property
+    def task_id(self) -> str | None:
+        """Get the background task ID if running in a background task.
+
+        Returns None if not running in a background task context.
+        """
+        return self._task_id
 
     @property
     def fastmcp(self) -> FastMCP:
@@ -455,6 +491,33 @@ class Context:
         """
         return _current_transport.get()
 
+    def client_supports_extension(self, extension_id: str) -> bool:
+        """Check whether the connected client supports a given MCP extension.
+
+        Inspects the ``extensions`` extra field on ``ClientCapabilities``
+        sent by the client during initialization.
+
+        Returns ``False`` when no session is available (e.g., outside a
+        request context) or when the client did not advertise the extension.
+
+        Example::
+
+            from fastmcp.server.apps import UI_EXTENSION_ID
+
+            @mcp.tool
+            async def my_tool(ctx: Context) -> str:
+                if ctx.client_supports_extension(UI_EXTENSION_ID):
+                    return "UI-capable client"
+                return "text-only client"
+        """
+        rc = self.request_context
+        if rc is None:
+            return False
+        session = rc.session
+        if not isinstance(session, MiddlewareServerSession):
+            return False
+        return session.client_supports_extension(extension_id)
+
     @property
     def client_id(self) -> str | None:
         """Get the client ID if available."""
@@ -538,14 +601,27 @@ class Context:
     def session(self) -> ServerSession:
         """Access to the underlying session for advanced usage.
 
-        Raises RuntimeError if MCP request context is not available.
+        In request mode: Returns the session from the active request context.
+        In background task mode: Returns the session stored at Context creation.
+
+        Raises RuntimeError if no session is available.
         """
-        if self.request_context is None:
-            raise RuntimeError(
-                "session is not available because the MCP session has not been established yet. "
-                "Check `context.request_context` for None before accessing this attribute."
-            )
-        return self.request_context.session
+        # Background task mode: use the stored session
+        if self.is_background_task and self._session is not None:
+            return self._session
+
+        # Request mode: use request context
+        if self.request_context is not None:
+            return self.request_context.session
+
+        # Fallback to stored session (e.g., during on_initialize)
+        if self._session is not None:
+            return self._session
+
+        raise RuntimeError(
+            "session is not available because the MCP session has not been established yet. "
+            "Check `context.request_context` for None before accessing this attribute."
+        )
 
     # Convenience methods for common log levels
     async def debug(
@@ -830,7 +906,13 @@ class Context:
             - .text: The text representation (raw text or JSON for structured)
             - .result: The typed result (str for text, parsed object for structured)
             - .history: All messages exchanged during sampling
+
+        Note:
+            Background task support for sampling is planned for a future release.
+            Currently, sampling in background tasks requires using the low-level
+            session.create_message() API directly.
         """
+        # TODO: Add background task support similar to elicit() when is_background_task
         return await sample_impl(
             self,
             messages=messages,
@@ -950,14 +1032,27 @@ class Context:
             response_type: The type of the response, which should be a primitive
                 type or dataclass or BaseModel. If it is a primitive type, an
                 object schema with a single "value" field will be generated.
+
+        Note:
+            This method works transparently in both request and background task
+            contexts. In background task mode (SEP-1686), it will set the task
+            status to "input_required" and wait for the client to provide input.
         """
         config = parse_elicit_response_type(response_type)
 
-        result = await self.session.elicit(
-            message=message,
-            requestedSchema=config.schema,
-            related_request_id=self.request_id,
-        )
+        if self.is_background_task:
+            # Background task mode: use task-aware elicitation
+            result = await self._elicit_for_task(
+                message=message,
+                schema=config.schema,
+            )
+        else:
+            # Standard request mode: use session.elicit directly
+            result = await self.session.elicit(
+                message=message,
+                requestedSchema=config.schema,
+                related_request_id=self.request_id,
+            )
 
         if result.action == "accept":
             return handle_elicit_accept(config, result.content)
@@ -967,6 +1062,46 @@ class Context:
             return CancelledElicitation()
         else:
             raise ValueError(f"Unexpected elicitation action: {result.action}")
+
+    async def _elicit_for_task(
+        self,
+        message: str,
+        schema: dict[str, Any],
+    ) -> mcp.types.ElicitResult:
+        """Send an elicitation request from a background task (SEP-1686).
+
+        This method handles elicitation when running in a Docket worker context,
+        where there's no active MCP request. It:
+        1. Sets the task status to "input_required"
+        2. Sends the elicitation request with task metadata
+        3. Waits for the client to provide input via tasks/sendInput
+        4. Returns the result and resumes task execution
+
+        Args:
+            message: The message to display to the user
+            schema: The JSON schema for the expected response
+
+        Returns:
+            ElicitResult with the user's response
+
+        Raises:
+            RuntimeError: If not running in a background task context
+        """
+        if not self.is_background_task:
+            raise RuntimeError(
+                "_elicit_for_task called but not in a background task context"
+            )
+
+        # Import here to avoid circular imports and optional dependency issues
+        from fastmcp.server.tasks.elicitation import elicit_for_task
+
+        return await elicit_for_task(
+            task_id=self._task_id,  # type: ignore[arg-type]
+            session=self.session,
+            message=message,
+            schema=schema,
+            fastmcp=self.fastmcp,
+        )
 
     def _make_state_key(self, key: str) -> str:
         """Create session-prefixed key for state storage."""

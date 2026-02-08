@@ -33,9 +33,63 @@ __all__ = [
     "OpenAPIResource",
     "OpenAPIResourceTemplate",
     "OpenAPITool",
+    "_extract_mime_type_from_route",
 ]
 
 logger = get_logger(__name__)
+
+# Default MIME type when no response content type can be inferred
+_DEFAULT_MIME_TYPE = "application/json"
+
+
+def _extract_mime_type_from_route(route: HTTPRoute) -> str:
+    """Extract the primary MIME type from an HTTPRoute's response definitions.
+
+    Looks for the first successful response (2xx) and returns its content type.
+    Prefers JSON-compatible types when multiple are available.
+    Falls back to "application/json" when no response content type is declared.
+    """
+    if not route.responses:
+        return _DEFAULT_MIME_TYPE
+
+    # Priority order for success status codes
+    success_codes = ["200", "201", "202", "204"]
+
+    response_info = None
+    for status_code in success_codes:
+        if status_code in route.responses:
+            response_info = route.responses[status_code]
+            break
+
+    # If no explicit success codes, try any 2xx response
+    if response_info is None:
+        for status_code, resp_info in route.responses.items():
+            if status_code.startswith("2"):
+                response_info = resp_info
+                break
+
+    if response_info is None or not response_info.content_schema:
+        return _DEFAULT_MIME_TYPE
+
+    # If there's only one content type, use it directly
+    content_types = list(response_info.content_schema.keys())
+    if len(content_types) == 1:
+        return content_types[0]
+
+    # When multiple types exist, prefer JSON-compatible types
+    json_compatible_types = [
+        "application/json",
+        "application/vnd.api+json",
+        "application/hal+json",
+        "application/ld+json",
+        "text/json",
+    ]
+    for ct in json_compatible_types:
+        if ct in response_info.content_schema:
+            return ct
+
+    # Fall back to the first available content type
+    return content_types[0]
 
 
 def _slugify(text: str) -> str:
@@ -76,7 +130,6 @@ class OpenAPITool(Tool):
         parameters: dict[str, Any],
         output_schema: dict[str, Any] | None = None,
         tags: set[str] | None = None,
-        timeout: float | None = None,
         annotations: ToolAnnotations | None = None,
         serializer: Callable[[Any], str] | None = None,  # Deprecated
     ):
@@ -100,7 +153,6 @@ class OpenAPITool(Tool):
         self._client = client
         self._route = route
         self._director = director
-        self._timeout = timeout
 
     def __repr__(self) -> str:
         return f"OpenAPITool(name={self.name!r}, method={self._route.method}, path={self._route.path})"
@@ -160,8 +212,11 @@ class OpenAPITool(Tool):
                     error_message += f" - {e.response.text}"
             raise ValueError(error_message) from e
 
+        except httpx.TimeoutException as e:
+            raise ValueError(f"HTTP request timed out ({type(e).__name__})") from e
+
         except httpx.RequestError as e:
-            raise ValueError(f"Request error: {e!s}") from e
+            raise ValueError(f"Request error ({type(e).__name__}): {e!s}") from e
 
 
 class OpenAPIResource(Resource):
@@ -179,7 +234,6 @@ class OpenAPIResource(Resource):
         description: str,
         mime_type: str = "application/json",
         tags: set[str] | None = None,
-        timeout: float | None = None,
     ):
         super().__init__(
             uri=AnyUrl(uri),
@@ -191,7 +245,6 @@ class OpenAPIResource(Resource):
         self._client = client
         self._route = route
         self._director = director
-        self._timeout = timeout
 
     def __repr__(self) -> str:
         return f"OpenAPIResource(name={self.name!r}, uri={self.uri!r}, path={self._route.path})"
@@ -232,7 +285,6 @@ class OpenAPIResource(Resource):
                 method=self._route.method,
                 url=path,
                 headers=headers,
-                timeout=self._timeout,
             )
             response.raise_for_status()
 
@@ -274,8 +326,11 @@ class OpenAPIResource(Resource):
                     error_message += f" - {e.response.text}"
             raise ValueError(error_message) from e
 
+        except httpx.TimeoutException as e:
+            raise ValueError(f"HTTP request timed out ({type(e).__name__})") from e
+
         except httpx.RequestError as e:
-            raise ValueError(f"Request error: {e!s}") from e
+            raise ValueError(f"Request error ({type(e).__name__}): {e!s}") from e
 
 
 class OpenAPIResourceTemplate(ResourceTemplate):
@@ -293,7 +348,7 @@ class OpenAPIResourceTemplate(ResourceTemplate):
         description: str,
         parameters: dict[str, Any],
         tags: set[str] | None = None,
-        timeout: float | None = None,
+        mime_type: str = _DEFAULT_MIME_TYPE,
     ):
         super().__init__(
             uri_template=uri_template,
@@ -301,11 +356,11 @@ class OpenAPIResourceTemplate(ResourceTemplate):
             description=description,
             parameters=parameters,
             tags=tags or set(),
+            mime_type=mime_type,
         )
         self._client = client
         self._route = route
         self._director = director
-        self._timeout = timeout
 
     def __repr__(self) -> str:
         return f"OpenAPIResourceTemplate(name={self.name!r}, uri_template={self.uri_template!r}, path={self._route.path})"
@@ -326,7 +381,6 @@ class OpenAPIResourceTemplate(ResourceTemplate):
             uri=uri,
             name=f"{self.name}-{'-'.join(uri_parts)}",
             description=self.description or f"Resource for {self._route.path}",
-            mime_type="application/json",
+            mime_type=self.mime_type,
             tags=set(self._route.tags or []),
-            timeout=self._timeout,
         )

@@ -26,6 +26,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from pydantic.json_schema import SkipJsonSchema
 from typing_extensions import Self
 
 from fastmcp.server.tasks.config import TaskConfig, TaskMeta
@@ -226,7 +227,7 @@ class Resource(FastMCPComponent):
         Field(description="Optional annotations about the resource's behavior"),
     ] = None
     auth: Annotated[
-        AuthCheckCallable | list[AuthCheckCallable] | None,
+        SkipJsonSchema[AuthCheckCallable | list[AuthCheckCallable] | None],
         Field(description="Authorization checks for this resource", exclude=True),
     ] = None
 
@@ -307,12 +308,27 @@ class Resource(FastMCPComponent):
         2. In tasks_result_handler() to convert Docket task results to ResourceResult
 
         Handles ResourceResult passthrough and converts raw values using
-        ResourceResult's normalization.
+        ResourceResult's normalization.  When the raw value is a plain
+        string or bytes, the resource's own ``mime_type`` is forwarded so
+        that ``ui://`` resources (and others with non-default MIME types)
+        don't fall back to ``text/plain``.
+
+        The resource's component-level ``meta`` (e.g. ``ui`` metadata for
+        MCP Apps CSP/permissions) is propagated to each content item so
+        that hosts can read it from the ``resources/read`` response.
         """
         if isinstance(raw_value, ResourceResult):
             return raw_value
 
-        # ResourceResult.__init__ handles all normalization
+        # For plain str/bytes returns, wrap in ResourceContent with the
+        # resource's MIME type and component meta so the wire response
+        # carries the correct type and metadata (e.g. CSP for MCP Apps).
+        if isinstance(raw_value, (str, bytes)):
+            return ResourceResult(
+                [ResourceContent(raw_value, mime_type=self.mime_type, meta=self.meta)]
+            )
+
+        # ResourceResult.__init__ handles all other normalization
         return ResourceResult(raw_value)
 
     @overload

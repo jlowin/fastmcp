@@ -10,6 +10,7 @@ from urllib.parse import parse_qs, unquote
 
 import mcp.types
 from mcp.types import Annotations, Icon
+from pydantic.json_schema import SkipJsonSchema
 
 if TYPE_CHECKING:
     from docket import Docket
@@ -22,6 +23,7 @@ from pydantic import (
 )
 
 from fastmcp.resources.resource import Resource, ResourceResult
+from fastmcp.server.apps import resolve_ui_mime_type
 from fastmcp.server.dependencies import (
     transform_context_annotations,
     without_injected_parameters,
@@ -115,7 +117,7 @@ class ResourceTemplate(FastMCPComponent):
     annotations: Annotations | None = Field(
         default=None, description="Optional annotations about the resource's behavior"
     )
-    auth: AuthCheckCallable | list[AuthCheckCallable] | None = Field(
+    auth: SkipJsonSchema[AuthCheckCallable | list[AuthCheckCallable] | None] = Field(
         default=None,
         description="Authorization checks for this resource template",
         exclude=True,
@@ -326,7 +328,7 @@ class ResourceTemplate(FastMCPComponent):
 class FunctionResourceTemplate(ResourceTemplate):
     """A template for dynamically creating resources."""
 
-    fn: Callable[..., Any]
+    fn: SkipJsonSchema[Callable[..., Any]]
 
     @overload
     async def _read(
@@ -567,6 +569,9 @@ class FunctionResourceTemplate(ResourceTemplate):
         # Use validate_call on wrapper for runtime type coercion
         fn = validate_call(wrapper_fn)
 
+        # Apply ui:// MIME default, then fall back to text/plain
+        resolved_mime = resolve_ui_mime_type(uri_template, mime_type)
+
         return cls(
             uri_template=uri_template,
             name=func_name,
@@ -574,7 +579,7 @@ class FunctionResourceTemplate(ResourceTemplate):
             title=title,
             description=description,
             icons=icons,
-            mime_type=mime_type or "text/plain",
+            mime_type=resolved_mime or "text/plain",
             fn=fn,
             parameters=parameters,
             tags=tags or set(),

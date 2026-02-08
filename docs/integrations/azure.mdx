@@ -125,7 +125,7 @@ auth_provider = AzureProvider(
     # identifier_uri defaults to api://{client_id}
     # identifier_uri="api://your-api-id",
     # Optional: request additional upstream scopes in the authorize request
-    # additional_authorize_scopes=["User.Read", "offline_access", "openid", "email"],
+    # additional_authorize_scopes=["User.Read", "openid", "email"],
     # redirect_path="/auth/callback"                  # Default value, customize if needed
     # base_authority="login.microsoftonline.us"      # For Azure Government (default: login.microsoftonline.com)
 )
@@ -182,6 +182,10 @@ FastMCP automatically prefixes `required_scopes` with your `identifier_uri` (e.g
 |-----------|---------------|---------------------|
 | `User.Read` | `User.Read` | ✗ |
 | `Mail.Send` | `Mail.Send` | ✗ |
+
+<Note>
+`offline_access` is automatically included to obtain refresh tokens. FastMCP manages token refreshing automatically.
+</Note>
 
 <Info>
 **Why aren't `additional_authorize_scopes` validated?** Azure issues separate tokens per resource. The access token FastMCP receives is for *your API*—Graph scopes aren't in its `scp` claim. To call Graph APIs, your server uses the upstream Azure token in an on-behalf-of (OBO) flow.
@@ -277,4 +281,48 @@ mcp = FastMCP(name="Production Azure App", auth=auth_provider)
 Parameters (`jwt_signing_key` and `client_storage`) work together to ensure tokens and client registrations survive server restarts. **Wrap your storage in `FernetEncryptionWrapper` to encrypt sensitive OAuth tokens at rest** - without it, tokens are stored in plaintext. Store secrets in environment variables and use a persistent storage backend like Redis for distributed deployments.
 
 For complete details on these parameters, see the [OAuth Proxy documentation](/servers/auth/oauth-proxy#configuration-parameters).
+</Note>
+
+## Token Verification Only (Managed Identity)
+
+<VersionBadge version="2.15.0" />
+
+For deployments where your server only needs to **validate incoming tokens** — such as Azure Container Apps with Managed Identity — use `AzureJWTVerifier` with `RemoteAuthProvider` instead of the full `AzureProvider`.
+
+This pattern is ideal when:
+- Your infrastructure handles authentication (e.g., Managed Identity)
+- You don't need the OAuth proxy flow (no `client_secret` required)
+- You just need to verify that incoming Azure AD tokens are valid
+
+```python server.py
+from fastmcp import FastMCP
+from fastmcp.server.auth import RemoteAuthProvider
+from fastmcp.server.auth.providers.azure import AzureJWTVerifier
+from pydantic import AnyHttpUrl
+
+tenant_id = "your-tenant-id"
+client_id = "your-client-id"
+
+# AzureJWTVerifier auto-configures JWKS, issuer, and audience
+verifier = AzureJWTVerifier(
+    client_id=client_id,
+    tenant_id=tenant_id,
+    required_scopes=["access_as_user"],  # Scope names from Azure Portal
+)
+
+auth = RemoteAuthProvider(
+    token_verifier=verifier,
+    authorization_servers=[
+        AnyHttpUrl(f"https://login.microsoftonline.com/{tenant_id}/v2.0")
+    ],
+    base_url="https://your-container-app.azurecontainerapps.io",
+)
+
+mcp = FastMCP(name="Azure MI App", auth=auth)
+```
+
+`AzureJWTVerifier` handles Azure's scope format automatically. You write scope names exactly as they appear in Azure Portal under **Expose an API** (e.g., `access_as_user`). The verifier validates tokens using the short-form scopes that Azure puts in the `scp` claim, while advertising the full URI scopes (e.g., `api://your-client-id/access_as_user`) in OAuth metadata so MCP clients know what to request.
+
+<Note>
+For Azure Government, pass `base_authority="login.microsoftonline.us"` to `AzureJWTVerifier`.
 </Note>
