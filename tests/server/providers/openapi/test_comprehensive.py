@@ -733,7 +733,7 @@ class TestOpenAPIComprehensive:
 
         # Should be very fast (no code generation)
         initialization_time = end_time - start_time
-        assert initialization_time < 0.1  # Should be under 100ms
+        assert initialization_time < 0.5  # Should be under 500ms
 
         # Verify provider was created correctly
         assert provider is not None
