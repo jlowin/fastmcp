@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
+from contextlib import asynccontextmanager
 from typing import Any, Literal
 
 import httpx
@@ -16,6 +17,7 @@ from fastmcp.server.providers.openapi.components import (
     OpenAPIResource,
     OpenAPIResourceTemplate,
     OpenAPITool,
+    _extract_mime_type_from_route,
     _slugify,
 )
 from fastmcp.server.providers.openapi.routing import (
@@ -44,6 +46,8 @@ __all__ = [
 
 logger = get_logger(__name__)
 
+DEFAULT_TIMEOUT: float = 30.0
+
 
 class OpenAPIProvider(Provider):
     """Provider that creates MCP components from an OpenAPI specification.
@@ -68,31 +72,34 @@ class OpenAPIProvider(Provider):
     def __init__(
         self,
         openapi_spec: dict[str, Any],
-        client: httpx.AsyncClient,
+        client: httpx.AsyncClient | None = None,
         *,
         route_maps: list[RouteMap] | None = None,
         route_map_fn: RouteMapFn | None = None,
         mcp_component_fn: ComponentFn | None = None,
         mcp_names: dict[str, str] | None = None,
         tags: set[str] | None = None,
-        timeout: float | None = None,
     ):
         """Initialize provider by parsing OpenAPI spec and creating components.
 
         Args:
             openapi_spec: OpenAPI schema as a dictionary
-            client: httpx AsyncClient for making HTTP requests
+            client: Optional httpx AsyncClient for making HTTP requests.
+                If not provided, a default client is created using the first
+                server URL from the OpenAPI spec with a 30-second timeout.
+                To customize timeout or other settings, pass your own client.
             route_maps: Optional list of RouteMap objects defining route mappings
             route_map_fn: Optional callable for advanced route type mapping
             mcp_component_fn: Optional callable for component customization
             mcp_names: Optional dictionary mapping operationId to component names
             tags: Optional set of tags to add to all components
-            timeout: Optional timeout (in seconds) for all requests
         """
         super().__init__()
 
+        self._owns_client = client is None
+        if client is None:
+            client = self._create_default_client(openapi_spec)
         self._client = client
-        self._timeout = timeout
         self._mcp_component_fn = mcp_component_fn
 
         # Keep track of names to detect collisions
@@ -152,6 +159,27 @@ class OpenAPIProvider(Provider):
                 logger.debug(f"Excluding route: {route.method} {route.path}")
 
         logger.debug(f"Created OpenAPIProvider with {len(http_routes)} routes")
+
+    @classmethod
+    def _create_default_client(cls, openapi_spec: dict[str, Any]) -> httpx.AsyncClient:
+        """Create a default httpx client from the OpenAPI spec's server URL."""
+        servers = openapi_spec.get("servers", [])
+        if not servers or not servers[0].get("url"):
+            raise ValueError(
+                "No server URL found in OpenAPI spec. Either add a 'servers' "
+                "entry to the spec or provide an httpx.AsyncClient explicitly."
+            )
+        base_url = servers[0]["url"]
+        return httpx.AsyncClient(base_url=base_url, timeout=DEFAULT_TIMEOUT)
+
+    @asynccontextmanager
+    async def lifespan(self) -> AsyncIterator[None]:
+        """Manage the lifecycle of the auto-created httpx client."""
+        if self._owns_client:
+            async with self._client:
+                yield
+        else:
+            yield
 
     def _generate_default_name(
         self, route: HTTPRoute, mcp_names_map: dict[str, str] | None = None
@@ -225,7 +253,6 @@ class OpenAPIProvider(Provider):
             parameters=combined_schema,
             output_schema=output_schema,
             tags=set(route.tags or []) | tags,
-            timeout=self._timeout,
         )
 
         if self._mcp_component_fn is not None:
@@ -262,8 +289,8 @@ class OpenAPIProvider(Provider):
             uri=resource_uri,
             name=resource_name,
             description=enhanced_description,
+            mime_type=_extract_mime_type_from_route(route),
             tags=set(route.tags or []) | tags,
-            timeout=self._timeout,
         )
 
         if self._mcp_component_fn is not None:
@@ -331,7 +358,7 @@ class OpenAPIProvider(Provider):
             description=enhanced_description,
             parameters=template_params_schema,
             tags=set(route.tags or []) | tags,
-            timeout=self._timeout,
+            mime_type=_extract_mime_type_from_route(route),
         )
 
         if self._mcp_component_fn is not None:

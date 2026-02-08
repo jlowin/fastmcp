@@ -1095,6 +1095,18 @@ class FastMCP(
                     raise
                 except Exception as e:
                     logger.exception(f"Error calling tool {name!r}")
+                    # Handle actionable errors that should reach the LLM
+                    # even when masking is enabled
+                    if isinstance(e, httpx.HTTPStatusError):
+                        if e.response.status_code == 429:
+                            raise ToolError(
+                                "Rate limited by upstream API, please retry later"
+                            ) from e
+                    if isinstance(e, httpx.TimeoutException):
+                        raise ToolError(
+                            "Upstream request timed out, please retry"
+                        ) from e
+                    # Standard masking logic
                     if self._mask_error_details:
                         raise ToolError(f"Error calling tool {name!r}") from e
                     raise ToolError(f"Error calling tool {name!r}: {e}") from e
@@ -1198,6 +1210,17 @@ class FastMCP(
                         raise
                     except Exception as e:
                         logger.exception(f"Error reading resource {uri!r}")
+                        # Handle actionable errors that should reach the LLM
+                        if isinstance(e, httpx.HTTPStatusError):
+                            if e.response.status_code == 429:
+                                raise ResourceError(
+                                    "Rate limited by upstream API, please retry later"
+                                ) from e
+                        if isinstance(e, httpx.TimeoutException):
+                            raise ResourceError(
+                                "Upstream request timed out, please retry"
+                            ) from e
+                        # Standard masking logic
                         if self._mask_error_details:
                             raise ResourceError(
                                 f"Error reading resource {uri!r}"
@@ -1226,6 +1249,17 @@ class FastMCP(
                     raise
                 except Exception as e:
                     logger.exception(f"Error reading resource {uri!r}")
+                    # Handle actionable errors that should reach the LLM
+                    if isinstance(e, httpx.HTTPStatusError):
+                        if e.response.status_code == 429:
+                            raise ResourceError(
+                                "Rate limited by upstream API, please retry later"
+                            ) from e
+                    if isinstance(e, httpx.TimeoutException):
+                        raise ResourceError(
+                            "Upstream request timed out, please retry"
+                        ) from e
+                    # Standard masking logic
                     if self._mask_error_details:
                         raise ResourceError(f"Error reading resource {uri!r}") from e
                     raise ResourceError(f"Error reading resource {uri!r}: {e}") from e
@@ -1969,14 +2003,13 @@ class FastMCP(
     def from_openapi(
         cls,
         openapi_spec: dict[str, Any],
-        client: httpx.AsyncClient,
+        client: httpx.AsyncClient | None = None,
         name: str = "OpenAPI Server",
         route_maps: list[RouteMap] | None = None,
         route_map_fn: OpenAPIRouteMapFn | None = None,
         mcp_component_fn: OpenAPIComponentFn | None = None,
         mcp_names: dict[str, str] | None = None,
         tags: set[str] | None = None,
-        timeout: float | None = None,
         **settings: Any,
     ) -> Self:
         """
@@ -1984,14 +2017,15 @@ class FastMCP(
 
         Args:
             openapi_spec: OpenAPI schema as a dictionary
-            client: httpx AsyncClient for making HTTP requests
+            client: Optional httpx AsyncClient for making HTTP requests.
+                If not provided, a default client is created using the first
+                server URL from the OpenAPI spec with a 30-second timeout.
             name: Name for the MCP server
             route_maps: Optional list of RouteMap objects defining route mappings
             route_map_fn: Optional callable for advanced route type mapping
             mcp_component_fn: Optional callable for component customization
             mcp_names: Optional dictionary mapping operationId to component names
             tags: Optional set of tags to add to all components
-            timeout: Optional timeout (in seconds) for all requests
             **settings: Additional settings passed to FastMCP
 
         Returns:
@@ -2007,7 +2041,6 @@ class FastMCP(
             mcp_component_fn=mcp_component_fn,
             mcp_names=mcp_names,
             tags=tags,
-            timeout=timeout,
         )
         return cls(name=name, providers=[provider], **settings)
 
@@ -2022,7 +2055,6 @@ class FastMCP(
         mcp_names: dict[str, str] | None = None,
         httpx_client_kwargs: dict[str, Any] | None = None,
         tags: set[str] | None = None,
-        timeout: float | None = None,
         **settings: Any,
     ) -> Self:
         """
@@ -2035,9 +2067,9 @@ class FastMCP(
             route_map_fn: Optional callable for advanced route type mapping
             mcp_component_fn: Optional callable for component customization
             mcp_names: Optional dictionary mapping operationId to component names
-            httpx_client_kwargs: Optional kwargs passed to httpx.AsyncClient
+            httpx_client_kwargs: Optional kwargs passed to httpx.AsyncClient.
+                Use this to configure timeout and other client settings.
             tags: Optional set of tags to add to all components
-            timeout: Optional timeout (in seconds) for all requests
             **settings: Additional settings passed to FastMCP
 
         Returns:
@@ -2064,7 +2096,6 @@ class FastMCP(
             mcp_component_fn=mcp_component_fn,
             mcp_names=mcp_names,
             tags=tags,
-            timeout=timeout,
         )
         return cls(name=server_name, providers=[provider], **settings)
 
