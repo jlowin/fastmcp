@@ -687,7 +687,7 @@ class TestGenerateCliCommand:
         output = tmp_path / "my_weather.py"
         await generate_cli_command("test-server", str(output))
         content = (tmp_path / "SKILL.md").read_text()
-        assert "python my_weather.py" in content
+        assert "uv run --with fastmcp python my_weather.py" in content
 
 
 # ---------------------------------------------------------------------------
@@ -851,8 +851,8 @@ class TestGenerateSkillContent:
 
     def test_cli_filename_in_utility_commands(self):
         content = generate_skill_content("test", "my_cli.py", [])
-        assert "python my_cli.py list-tools" in content
-        assert "python my_cli.py list-resources" in content
+        assert "uv run --with fastmcp python my_cli.py list-tools" in content
+        assert "uv run --with fastmcp python my_cli.py list-resources" in content
 
     def test_pipe_in_description_escaped(self):
         tools = [

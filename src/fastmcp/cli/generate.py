@@ -571,7 +571,7 @@ def _tool_skill_section(tool: mcp.types.Tool, cli_filename: str) -> str:
 
     # Build example invocation flags
     flag_parts = " ".join(f"{_param_to_cli_flag(p)} <value>" for p in properties)
-    invocation = f"python {cli_filename} call-tool {tool.name}"
+    invocation = f"uv run --with fastmcp python {cli_filename} call-tool {tool.name}"
     if flag_parts:
         invocation += f" {flag_parts}"
 
@@ -636,11 +636,11 @@ def generate_skill_content(
             "## Utility Commands",
             "",
             "```bash",
-            f"python {cli_filename} list-tools",
-            f"python {cli_filename} list-resources",
-            f"python {cli_filename} read-resource <uri>",
-            f"python {cli_filename} list-prompts",
-            f"python {cli_filename} get-prompt <name> [key=value ...]",
+            f"uv run --with fastmcp python {cli_filename} list-tools",
+            f"uv run --with fastmcp python {cli_filename} list-resources",
+            f"uv run --with fastmcp python {cli_filename} read-resource <uri>",
+            f"uv run --with fastmcp python {cli_filename} list-prompts",
+            f"uv run --with fastmcp python {cli_filename} get-prompt <name> [key=value ...]",
             "```",
             "",
         ]
