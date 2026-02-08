@@ -623,7 +623,8 @@ def generate_skill_content(
     skill_name = (
         server_name.replace(" ", "-").lower().replace("\\", "").replace('"', "")
     )
-    description = f"CLI for the {server_name} MCP server. Call tools, list resources, and get prompts."
+    safe_name = server_name.replace("\\", "").replace('"', "")
+    description = f"CLI for the {safe_name} MCP server. Call tools, list resources, and get prompts."
 
     lines = [
         "---",
