@@ -711,8 +711,15 @@ class TestParamToCliFlag:
         assert _param_to_cli_flag("3d_mode") == "--3d-mode"
 
     def test_trailing_underscore(self):
-        # from → from_ after identifier sanitization; Cyclopts strips trailing "_"
+        # from → from_ after identifier sanitization; Cyclopts strips trailing "-"
         assert _param_to_cli_flag("from") == "--from"
+
+    def test_camel_case(self):
+        # camelCase → camel-case (cyclopts default_name_transform)
+        assert _param_to_cli_flag("myParam") == "--my-param"
+
+    def test_pascal_case(self):
+        assert _param_to_cli_flag("MyParam") == "--my-param"
 
 
 # ---------------------------------------------------------------------------
@@ -754,7 +761,7 @@ class TestGenerateSkillContent:
     def test_frontmatter(self):
         content = generate_skill_content("weather", "cli.py", [])
         assert content.startswith("---\n")
-        assert "name: weather-cli" in content
+        assert 'name: "weather-cli"' in content
         assert "description:" in content
 
     def test_no_tools(self):
@@ -870,7 +877,42 @@ class TestGenerateSkillContent:
         content = generate_skill_content("test", "cli.py", tools)
         assert "a\\|b\\|c" in content
 
+    def test_union_type_pipes_escaped(self):
+        tools = [
+            mcp.types.Tool(
+                name="test",
+                description="Test",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "val": {"type": ["string", "null"]},
+                    },
+                },
+            ),
+        ]
+        content = generate_skill_content("test", "cli.py", tools)
+        # Pipes in type label must be escaped so markdown table renders correctly
+        assert "string \\| null" in content
+
+    def test_boolean_param_no_value_placeholder(self):
+        tools = [
+            mcp.types.Tool(
+                name="run",
+                description="Run something",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "verbose": {"type": "boolean", "description": "Verbose output"},
+                        "name": {"type": "string"},
+                    },
+                },
+            ),
+        ]
+        content = generate_skill_content("test", "cli.py", tools)
+        assert "--verbose <value>" not in content
+        assert "--name <value>" in content
+
     def test_server_name_in_header(self):
         content = generate_skill_content("My Weather API", "cli.py", [])
         assert "# My Weather API CLI" in content
-        assert "name: my-weather-api-cli" in content
+        assert 'name: "my-weather-api-cli"' in content

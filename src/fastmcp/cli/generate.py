@@ -536,12 +536,15 @@ _JSON_SCHEMA_TYPE_LABELS: dict[str, str] = {
 def _param_to_cli_flag(prop_name: str) -> str:
     """Convert a JSON Schema property name to its CLI flag form.
 
-    Cyclopts derives flags from Python parameter names by stripping
-    leading/trailing underscores, then replacing remaining underscores
-    with hyphens.
+    Replicates cyclopts' default_name_transform: camelCase → snake_case,
+    lowercase, underscores → hyphens, strip leading/trailing hyphens.
     """
     safe = _to_python_identifier(prop_name)
-    return f"--{safe.strip('_').replace('_', '-')}"
+    # camelCase / PascalCase → snake_case
+    safe = re.sub(r"(.)([A-Z][a-z]+)", r"\1_\2", safe)
+    safe = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", safe)
+    safe = safe.lower().replace("_", "-").strip("-")
+    return f"--{safe}" if safe else "--arg"
 
 
 def _schema_type_label(prop_schema: dict[str, Any]) -> str:
@@ -570,7 +573,14 @@ def _tool_skill_section(tool: mcp.types.Tool, cli_filename: str) -> str:
     required = set(schema.get("required", []))
 
     # Build example invocation flags
-    flag_parts = " ".join(f"{_param_to_cli_flag(p)} <value>" for p in properties)
+    flag_parts_list: list[str] = []
+    for p, p_schema in properties.items():
+        flag = _param_to_cli_flag(p)
+        if p_schema.get("type") == "boolean":
+            flag_parts_list.append(flag)
+        else:
+            flag_parts_list.append(f"{flag} <value>")
+    flag_parts = " ".join(flag_parts_list)
     invocation = f"uv run --with fastmcp python {cli_filename} call-tool {tool.name}"
     if flag_parts:
         invocation += f" {flag_parts}"
@@ -579,7 +589,7 @@ def _tool_skill_section(tool: mcp.types.Tool, cli_filename: str) -> str:
     rows: list[str] = []
     for prop_name, prop_schema in properties.items():
         flag = f"`{_param_to_cli_flag(prop_name)}`"
-        type_label = _schema_type_label(prop_schema)
+        type_label = _schema_type_label(prop_schema).replace("|", "\\|")
         is_required = "yes" if prop_name in required else "no"
         description = prop_schema.get("description", "")
         _, needs_json = _schema_to_python_type(prop_schema)
@@ -617,8 +627,8 @@ def generate_skill_content(
 
     lines = [
         "---",
-        f"name: {skill_name}-cli",
-        f"description: {description}",
+        f'name: "{skill_name}-cli"',
+        f'description: "{description}"',
         "---",
         "",
         f"# {server_name} CLI",
