@@ -597,7 +597,7 @@ def _tool_skill_section(tool: mcp.types.Tool, cli_filename: str) -> str:
             description = (
                 f"{description} (JSON string)" if description else "JSON string"
             )
-        description = description.replace("|", "\\|")
+        description = description.replace("\n", " ").replace("|", "\\|")
         rows.append(f"| {flag} | {type_label} | {is_required} | {description} |")
 
     param_table = ""
