@@ -198,6 +198,7 @@
                     "icon": "key",
                     "pages": [
                       "clients/auth/oauth",
+                      "clients/auth/cimd",
                       "clients/auth/bearer"
                     ]
                   }
@@ -301,6 +302,8 @@
                     "group": "fastmcp.cli",
                     "pages": [
                       "python-sdk/fastmcp-cli-__init__",
+                      "python-sdk/fastmcp-cli-auth",
+                      "python-sdk/fastmcp-cli-cimd",
                       "python-sdk/fastmcp-cli-cli",
                       "python-sdk/fastmcp-cli-client",
                       "python-sdk/fastmcp-cli-discovery",
@@ -412,6 +415,7 @@
                           "python-sdk/fastmcp-server-auth-__init__",
                           "python-sdk/fastmcp-server-auth-auth",
                           "python-sdk/fastmcp-server-auth-authorization",
+                          "python-sdk/fastmcp-server-auth-cimd",
                           "python-sdk/fastmcp-server-auth-jwt_issuer",
                           "python-sdk/fastmcp-server-auth-middleware",
                           {
@@ -446,7 +450,8 @@
                               "python-sdk/fastmcp-server-auth-providers-workos"
                             ]
                           },
-                          "python-sdk/fastmcp-server-auth-redirect_validation"
+                          "python-sdk/fastmcp-server-auth-redirect_validation",
+                          "python-sdk/fastmcp-server-auth-ssrf"
                         ]
                       },
                       "python-sdk/fastmcp-server-context",
@@ -467,6 +472,7 @@
                           "python-sdk/fastmcp-server-middleware-middleware",
                           "python-sdk/fastmcp-server-middleware-ping",
                           "python-sdk/fastmcp-server-middleware-rate_limiting",
+                          "python-sdk/fastmcp-server-middleware-response_limiting",
                           "python-sdk/fastmcp-server-middleware-timing",
                           "python-sdk/fastmcp-server-middleware-tool_injection"
                         ]
@@ -659,7 +665,7 @@
             "icon": "code"
           }
         ],
-        "version": "v3.0.0 (beta 1)"
+        "version": "v3.0.0 (beta 2)"
       },
       {
         "dropdowns": [
