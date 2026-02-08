@@ -696,14 +696,13 @@ async def generate_cli_command(
             help="Auth method: 'oauth', a bearer token string, or 'none' to disable",
         ),
     ] = None,
-    skill: Annotated[
+    no_skill: Annotated[
         bool,
         cyclopts.Parameter(
-            "--skill",
-            negative="--no-skill",
-            help="Generate a SKILL.md agent skill alongside the CLI",
+            "--no-skill",
+            help="Skip generating a SKILL.md agent skill alongside the CLI",
         ),
-    ] = True,
+    ] = False,
 ) -> None:
     """Generate a standalone CLI script from an MCP server.
 
@@ -725,7 +724,7 @@ async def generate_cli_command(
     existing: list[Path] = []
     if output_path.exists() and not force:
         existing.append(output_path)
-    if skill and skill_path.exists() and not force:
+    if not no_skill and skill_path.exists() and not force:
         existing.append(skill_path)
     if existing:
         names = ", ".join(f"[cyan]{p}[/cyan]" for p in existing)
@@ -773,7 +772,7 @@ async def generate_cli_command(
         f"with {len(tools)} tool command(s)"
     )
 
-    if skill:
+    if not no_skill:
         skill_content = generate_skill_content(
             server_name=server_name,
             cli_filename=output_path.name,

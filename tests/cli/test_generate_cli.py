@@ -663,7 +663,7 @@ class TestGenerateCliCommand:
     @pytest.mark.usefixtures("_patch_client")
     async def test_no_skill_flag(self, tmp_path: Path):
         output = tmp_path / "cli.py"
-        await generate_cli_command("test-server", str(output), skill=False)
+        await generate_cli_command("test-server", str(output), no_skill=True)
         assert not (tmp_path / "SKILL.md").exists()
 
     @pytest.mark.usefixtures("_patch_client")
