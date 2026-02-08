@@ -223,7 +223,7 @@ class TestSamplingToolFromCallableTool:
             TypeError,
             match="Expected FunctionTool or TransformedTool",
         ):
-            SamplingTool.from_callable_tool(NotATool())
+            SamplingTool.from_callable_tool(NotATool())  # type: ignore[arg-type]
 
     def test_from_plain_function_fails(self):
         """Test that plain functions are rejected by from_callable_tool."""
@@ -232,4 +232,4 @@ class TestSamplingToolFromCallableTool:
             pass
 
         with pytest.raises(TypeError, match="Expected FunctionTool or TransformedTool"):
-            SamplingTool.from_callable_tool(my_function)
+            SamplingTool.from_callable_tool(my_function)  # type: ignore[arg-type]

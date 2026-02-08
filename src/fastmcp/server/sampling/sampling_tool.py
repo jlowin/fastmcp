@@ -173,13 +173,15 @@ class SamplingTool(FastMCPBaseModel):
                 if isinstance(result, ToolResult):
                     # If there's structured_content, use that
                     if result.structured_content is not None:
-                        # Handle wrapped results
-                        if (
-                            isinstance(result.structured_content, dict)
-                            and "result" in result.structured_content
+                        # Check tool's schema - this is the source of truth
+                        if tool.output_schema and tool.output_schema.get(
+                            "x-fastmcp-wrap-result"
                         ):
-                            return result.structured_content["result"]
-                        return result.structured_content
+                            # Tool wraps results: {"result": value} -> value
+                            return result.structured_content.get("result")
+                        else:
+                            # No wrapping: use structured_content directly
+                            return result.structured_content
                     # Otherwise, extract from text content
                     if result.content and len(result.content) > 0:
                         first_content = result.content[0]
