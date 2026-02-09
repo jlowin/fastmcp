@@ -1124,6 +1124,50 @@ class Progress(Dependency):  # type: ignore[misc]
         pass
 
 
+# --- Access Token dependency ---
+
+
+class _CurrentAccessToken(Dependency):  # type: ignore[misc]
+    """Async context manager for AccessToken dependency."""
+
+    async def __aenter__(self) -> AccessToken:
+        token = get_access_token()
+        if token is None:
+            raise RuntimeError(
+                "No access token found. Ensure authentication is configured "
+                "and the request is authenticated."
+            )
+        return token
+
+    async def __aexit__(self, *args: object) -> None:
+        pass
+
+
+def CurrentAccessToken() -> AccessToken:
+    """Get the current access token for the authenticated user.
+
+    This dependency provides access to the AccessToken for the current
+    authenticated request. Raises an error if no authentication is present.
+
+    Returns:
+        A dependency that resolves to the active AccessToken
+
+    Raises:
+        RuntimeError: If no authenticated user (use get_access_token() for optional)
+
+    Example:
+        ```python
+        from fastmcp.server.dependencies import CurrentAccessToken
+        from fastmcp.server.auth import AccessToken
+
+        @mcp.tool()
+        async def get_user_id(token: AccessToken = CurrentAccessToken()) -> str:
+            return token.claims.get("sub", "unknown")
+        ```
+    """
+    return cast(AccessToken, _CurrentAccessToken())
+
+
 # --- Token Claim dependency ---
 
 
