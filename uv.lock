@@ -707,6 +707,9 @@ dependencies = [
 anthropic = [
     { name = "anthropic" },
 ]
+apps = [
+    { name = "prefab-ui" },
+]
 openai = [
     { name = "openai" },
 ]
@@ -718,7 +721,7 @@ tasks = [
 dev = [
     { name = "dirty-equals" },
     { name = "fastapi" },
-    { name = "fastmcp", extra = ["anthropic", "openai", "tasks"] },
+    { name = "fastmcp", extra = ["anthropic", "apps", "openai", "tasks"] },
     { name = "inline-snapshot", extra = ["dirty-equals"] },
     { name = "ipython", version = "8.38.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "ipython", version = "9.9.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
@@ -759,6 +762,7 @@ requires-dist = [
     { name = "opentelemetry-api", specifier = ">=1.20.0" },
     { name = "packaging", specifier = ">=24.0" },
     { name = "platformdirs", specifier = ">=4.0.0" },
+    { name = "prefab-ui", marker = "extra == 'apps'", editable = "../prefab" },
     { name = "py-key-value-aio", extras = ["disk", "keyring", "memory"], specifier = ">=0.3.0,<0.4.0" },
     { name = "pydantic", extras = ["email"], specifier = ">=2.11.7" },
     { name = "pydocket", marker = "extra == 'tasks'", specifier = ">=0.17.2" },
@@ -770,13 +774,13 @@ requires-dist = [
     { name = "watchfiles", specifier = ">=1.0.0" },
     { name = "websockets", specifier = ">=15.0.1" },
 ]
-provides-extras = ["anthropic", "openai", "tasks"]
+provides-extras = ["anthropic", "apps", "openai", "tasks"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "dirty-equals", specifier = ">=0.9.0" },
     { name = "fastapi", specifier = ">=0.115.12" },
-    { name = "fastmcp", extras = ["anthropic", "openai", "tasks"] },
+    { name = "fastmcp", extras = ["anthropic", "apps", "openai", "tasks"] },
     { name = "inline-snapshot", extras = ["dirty-equals"], specifier = ">=0.27.2" },
     { name = "ipython", specifier = ">=8.12.3" },
     { name = "loq", specifier = ">=0.1.0a3" },
@@ -1603,6 +1607,35 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/f9/e2/3e91f31a7d2b083fe6ef3fa267035b518369d9511ffab804f839851d2779/pluggy-1.6.0.tar.gz", hash = "sha256:7dcc130b76258d33b90f61b658791dede3486c3e6bfb003ee5c9bfb396dd22f3", size = 69412, upload-time = "2025-05-15T12:30:07.975Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/54/20/4d324d65cc6d9205fabedc306948156824eb9f0ee1633355a8f7ec5c66bf/pluggy-1.6.0-py3-none-any.whl", hash = "sha256:e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746", size = 20538, upload-time = "2025-05-15T12:30:06.134Z" },
+]
+
+[[package]]
+name = "prefab-ui"
+source = { editable = "../prefab" }
+dependencies = [
+    { name = "cyclopts" },
+    { name = "pydantic" },
+    { name = "rich" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "cyclopts", specifier = ">=4" },
+    { name = "pydantic", specifier = ">=2.10" },
+    { name = "rich", specifier = ">=13" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "jsonschema", specifier = ">=4.26.0" },
+    { name = "loq", specifier = ">=0.1.0a3" },
+    { name = "prek", specifier = ">=0.1.0" },
+    { name = "pytest", specifier = ">=8.3.3" },
+    { name = "pytest-asyncio", specifier = ">=1.2.0" },
+    { name = "pytest-timeout", specifier = ">=2.4.0" },
+    { name = "pytest-xdist", specifier = ">=3.6.1" },
+    { name = "ruff", specifier = ">=0.12.8" },
+    { name = "ty", specifier = ">=0.0.7" },
 ]
 
 [[package]]

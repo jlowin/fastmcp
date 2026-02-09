@@ -27,6 +27,14 @@ from fastmcp.utilities.types import (
     replace_type,
 )
 
+try:
+    from prefab_ui import UIResponse as _PrefabUIResponse
+    from prefab_ui.components.base import Component as _PrefabComponent
+
+    _PREFAB_TYPES: tuple[type, ...] = (_PrefabUIResponse, _PrefabComponent)
+except ImportError:
+    _PREFAB_TYPES = ()
+
 T = TypeVarExt("T", default=Any)
 
 logger = get_logger(__name__)
@@ -65,6 +73,7 @@ class ParsedFunction:
     description: str | None
     input_schema: dict[str, Any]
     output_schema: dict[str, Any] | None
+    return_type: Any = None
 
     @classmethod
     def from_function(
@@ -145,7 +154,20 @@ class ParsedFunction:
                 # If resolution fails, keep the string annotation
                 logger.debug("Failed to resolve type hint for return annotation: %s", e)
 
+        # Save original for return_type before any schema-related replacement
+        original_output_type = output_type
+
         if output_type not in (inspect._empty, None, Any, ...):
+            # Prefab component subclasses (Column, Card, etc.) shouldn't
+            # produce output schemas — replace_type only does exact matching,
+            # so we handle subclass matching explicitly here.
+            if (
+                _PREFAB_TYPES
+                and isinstance(output_type, type)
+                and issubclass(output_type, _PREFAB_TYPES)
+            ):
+                output_type = _UnserializableType
+
             # there are a variety of types that we don't want to attempt to
             # serialize because they are either used by FastMCP internally,
             # or are MCP content types that explicitly don't form structured
@@ -164,6 +186,7 @@ class ParsedFunction:
                         mcp.types.AudioContent,
                         mcp.types.ResourceLink,
                         mcp.types.EmbeddedResource,
+                        *_PREFAB_TYPES,
                     ),
                     _UnserializableType,
                 ),
@@ -198,4 +221,5 @@ class ParsedFunction:
             description=fn_doc,
             input_schema=input_schema,
             output_schema=output_schema or None,
+            return_type=original_output_type,
         )
