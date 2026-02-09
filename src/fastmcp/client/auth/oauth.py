@@ -228,7 +228,7 @@ class OAuth(OAuthClientProvider):
             scope=scopes_str,
             **(self._additional_client_metadata or {}),
         )
-        
+
         if self._client_id:
             # Create the full static client info directly which will avoid DCR
             self._static_client_info = OAuthClientInformationFull(
@@ -248,7 +248,7 @@ class OAuth(OAuthClientProvider):
                 + "See https://gofastmcp.com/clients/auth/oauth#token-storage for details.",
                 stacklevel=2,
             )
-                    
+
         # Use full URL for token storage to properly separate tokens per MCP endpoint
         self.token_storage_adapter: TokenStorageAdapter = TokenStorageAdapter(
             async_key_value=token_storage, server_url=mcp_url
