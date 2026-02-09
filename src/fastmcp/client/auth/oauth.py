@@ -191,6 +191,7 @@ class OAuth(OAuthClientProvider):
         self._client_metadata_url = client_metadata_url
         self._client_id = client_id
         self._client_secret = client_secret
+        self._static_client_info = None
         self.httpx_client_factory = httpx_client_factory or httpx.AsyncClient
         self._bound = False
 
