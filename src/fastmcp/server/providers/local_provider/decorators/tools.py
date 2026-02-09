@@ -21,11 +21,112 @@ from fastmcp.tools.function_tool import FunctionTool
 from fastmcp.tools.tool import AuthCheckCallable, Tool
 from fastmcp.utilities.types import NotSet, NotSetT
 
+try:
+    from prefab_ui import UIResponse as _PrefabUIResponse
+    from prefab_ui.components.base import Component as _PrefabComponent
+
+    _HAS_PREFAB = True
+except ImportError:
+    _HAS_PREFAB = False
+
 if TYPE_CHECKING:
     from fastmcp.server.providers.local_provider import LocalProvider
     from fastmcp.tools.tool import ToolResultSerializerType
 
 DuplicateBehavior = Literal["error", "warn", "replace", "ignore"]
+
+PREFAB_RENDERER_URI = "ui://prefab/renderer.html"
+
+
+def _has_prefab_return_type(tool: Tool) -> bool:
+    """Check if a FunctionTool's return type annotation is a prefab type."""
+    if not _HAS_PREFAB or not isinstance(tool, FunctionTool):
+        return False
+    rt = tool.return_type
+    if rt is None or rt is inspect.Parameter.empty:
+        return False
+    # Direct type check
+    if isinstance(rt, type) and issubclass(rt, (_PrefabUIResponse, _PrefabComponent)):
+        return True
+    # Check Union args (e.g., UIResponse | None)
+    from typing import get_args
+
+    args = get_args(rt)
+    return any(
+        isinstance(a, type) and issubclass(a, (_PrefabUIResponse, _PrefabComponent))
+        for a in args
+    )
+
+
+def _ensure_prefab_renderer(provider: LocalProvider) -> None:
+    """Lazily register the shared prefab renderer as a ui:// resource."""
+    from prefab_ui.renderer import get_renderer_csp, get_renderer_html
+
+    from fastmcp.resources.types import TextResource
+    from fastmcp.server.apps import (
+        UI_MIME_TYPE,
+        AppConfig,
+        ResourceCSP,
+        app_config_to_meta_dict,
+    )
+
+    renderer_key = f"resource:{PREFAB_RENDERER_URI}@"
+    if renderer_key in provider._components:
+        return
+
+    csp = get_renderer_csp()
+    resource_app = AppConfig(
+        csp=ResourceCSP(
+            resource_domains=csp.get("resource_domains"),
+            connect_domains=csp.get("connect_domains"),
+        )
+    )
+    resource = TextResource(
+        uri=PREFAB_RENDERER_URI,  # type: ignore[arg-type]  # AnyUrl accepts ui:// scheme at runtime
+        name="Prefab Renderer",
+        text=get_renderer_html(),
+        mime_type=UI_MIME_TYPE,
+        meta={"ui": app_config_to_meta_dict(resource_app)},
+    )
+    provider._add_component(resource)
+
+
+def _expand_prefab_ui_meta(tool: Tool) -> None:
+    """Expand meta["ui"] = True into the full AppConfig dict for a prefab tool."""
+    from prefab_ui.renderer import get_renderer_csp
+
+    from fastmcp.server.apps import AppConfig, ResourceCSP, app_config_to_meta_dict
+
+    csp = get_renderer_csp()
+    app_config = AppConfig(
+        resource_uri=PREFAB_RENDERER_URI,
+        csp=ResourceCSP(
+            resource_domains=csp.get("resource_domains"),
+            connect_domains=csp.get("connect_domains"),
+        ),
+    )
+    meta = dict(tool.meta) if tool.meta else {}
+    meta["ui"] = app_config_to_meta_dict(app_config)
+    tool.meta = meta
+
+
+def _maybe_apply_prefab_ui(provider: LocalProvider, tool: Tool) -> None:
+    """Auto-wire prefab UI metadata and renderer resource if needed."""
+    if not _HAS_PREFAB:
+        return
+
+    meta = tool.meta or {}
+    ui = meta.get("ui")
+
+    if ui is True:
+        # Explicit app=True: expand to full AppConfig and register renderer
+        _ensure_prefab_renderer(provider)
+        _expand_prefab_ui_meta(tool)
+    elif ui is None and _has_prefab_return_type(tool):
+        # Inference: return type is a prefab type, auto-wire
+        _ensure_prefab_renderer(provider)
+        _expand_prefab_ui_meta(tool)
+    # If ui is a dict, it's already manually configured — leave it alone
 
 
 class ToolDecoratorMixin:
@@ -84,6 +185,7 @@ class ToolDecoratorMixin:
         self._add_component(tool)
         if not enabled:
             self.disable(keys={tool.key})
+        _maybe_apply_prefab_ui(self, tool)
         return tool
 
     @overload
@@ -261,6 +363,7 @@ class ToolDecoratorMixin:
                 self._add_component(tool_obj)
                 if not enabled:
                     self.disable(keys={tool_obj.key})
+                _maybe_apply_prefab_ui(self, tool_obj)
                 return tool_obj
             else:
                 from fastmcp.tools.function_tool import ToolMeta

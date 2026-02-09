@@ -37,6 +37,14 @@ from fastmcp.utilities.types import (
     NotSetT,
 )
 
+try:
+    from prefab_ui import UIResponse as _PrefabUIResponse
+    from prefab_ui.components.base import Component as _PrefabComponent
+
+    _HAS_PREFAB = True
+except ImportError:
+    _HAS_PREFAB = False
+
 # Runtime type alias for auth checks to avoid circular imports with authorization.py
 # AuthCheck is Callable[[AuthContext], bool] but we use Any to avoid the import
 AuthCheckCallable: TypeAlias = Callable[[Any], bool]
@@ -251,6 +259,12 @@ class Tool(FastMCPComponent):
         if isinstance(raw_value, ToolResult):
             return raw_value
 
+        if _HAS_PREFAB:
+            if isinstance(raw_value, _PrefabUIResponse):
+                return _ui_response_to_tool_result(raw_value)
+            if isinstance(raw_value, _PrefabComponent):
+                return _ui_response_to_tool_result(_PrefabUIResponse(view=raw_value))
+
         content = _convert_to_content(raw_value, serializer=self.serializer)
 
         # Skip structured content for ContentBlock types only if no output_schema
@@ -438,6 +452,16 @@ def _convert_to_single_content_block(
         return TextContent(type="text", text=item)
 
     return TextContent(type="text", text=_serialize_with_fallback(item, serializer))
+
+
+def _ui_response_to_tool_result(response: Any) -> ToolResult:
+    """Convert a prefab UIResponse to a FastMCP ToolResult."""
+    text = response.text_fallback()
+    envelope = response.to_json()
+    return ToolResult(
+        content=[TextContent(type="text", text=text)],
+        structured_content=envelope,
+    )
 
 
 def _convert_to_content(
