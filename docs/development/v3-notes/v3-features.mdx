@@ -73,22 +73,150 @@ fastmcp install stdio server.py
 
 The command automatically detects the project directory and generates the appropriate `uv run` invocation, making it easy to integrate FastMCP servers with MCP clients.
 
+### CIMD (Client ID Metadata Documents)
+
+CIMD provides an alternative to Dynamic Client Registration for OAuth-authenticated MCP servers. Instead of registering with each server dynamically, clients host a static JSON document at an HTTPS URL. That URL becomes the client's `client_id`, and servers verify identity through domain ownership.
+
+**Client usage:**
+
+```python
+from fastmcp import Client
+from fastmcp.client.auth import OAuth
+
+async with Client(
+    "https://mcp-server.example.com/mcp",
+    auth=OAuth(
+        client_metadata_url="https://myapp.example.com/oauth/client.json",
+    ),
+) as client:
+    await client.ping()
+```
+
+The `OAuth` helper now supports deferred binding — `mcp_url` is optional when using `OAuth` with `Client(auth=...)`, since the transport provides the server URL automatically.
+
+**CLI tools for document management:**
+
+```bash
+# Generate a CIMD document
+fastmcp auth cimd create --name "My App" \
+  --redirect-uri "http://localhost:*/callback" \
+  --client-id "https://myapp.example.com/oauth/client.json" \
+  --output client.json
+
+# Validate a hosted document
+fastmcp auth cimd validate https://myapp.example.com/oauth/client.json
+```
+
+**Server-side support:**
+
+CIMD is enabled by default on `OAuthProxy` and its provider subclasses (GitHub, Google, etc.). The server-side implementation includes SSRF-hardened document fetching with DNS pinning, dual redirect URI validation (both CIMD document patterns and proxy patterns must match), HTTP cache-aware revalidation, and `private_key_jwt` assertion validation for clients that need stronger authentication than public client auth.
+
+Key details:
+- CIMD URLs must be HTTPS with a non-root path
+- `token_endpoint_auth_method` limited to `none` or `private_key_jwt` (no shared secrets)
+- `redirect_uris` in CIMD documents support wildcard port patterns (`http://localhost:*/callback`)
+- Servers fetch and cache documents with standard HTTP caching (ETag, Last-Modified, Cache-Control)
+- CIMD is a protocol-level feature — any auth provider implementing the spec can support it
+
+Documentation: [CIMD Authentication](/clients/auth/cimd), [OAuth Proxy CIMD config](/servers/auth/oauth-proxy#cimd-support)
+
+### CLI: `fastmcp generate-cli`
+
+`fastmcp generate-cli` connects to any MCP server, reads its tool schemas, and writes a standalone Python CLI script where every tool becomes a typed subcommand with flags, help text, and tab completion ([#3065](https://github.com/jlowin/fastmcp/pull/3065)). The insight is that MCP tool schemas already contain everything a CLI framework needs — parameter names, types, descriptions, required/optional status — so the generator maps JSON Schema directly into [cyclopts](https://cyclopts.readthedocs.io/) commands.
+
+```bash
+# Generate from any server spec
+fastmcp generate-cli weather
+fastmcp generate-cli http://localhost:8000/mcp
+fastmcp generate-cli server.py my_weather_cli.py
+
+# Use the generated script
+python my_weather_cli.py call-tool get_forecast --city London --days 3
+python my_weather_cli.py list-tools
+python my_weather_cli.py read-resource docs://readme
+```
+
+The generated script embeds the resolved transport (URL or stdio command), so it's self-contained — users don't need to know about MCP or FastMCP to use it. Supports `-f` to overwrite existing files, and name-based resolution via `fastmcp discover`.
+
+Documentation: [Generate CLI](/clients/generate-cli)
+
+### CLI: Goose Integration
+
+New `fastmcp install goose` command that generates a `goose://extension?...` deeplink URL and opens it, prompting Goose to install the server as a STDIO extension ([#3040](https://github.com/jlowin/fastmcp/pull/3040)). Goose requires `uvx` rather than `uv run`, so the command builds the appropriate invocation automatically.
+
+```bash
+fastmcp install goose server.py
+fastmcp install goose server.py --with pandas --python 3.11
+```
+
+Also adds a full integration guide at [Goose Integration](/integrations/goose).
+
+### ResponseLimitingMiddleware
+
+New middleware for controlling tool response sizes, preventing large outputs from overwhelming LLM context windows ([#3072](https://github.com/jlowin/fastmcp/pull/3072)). Text responses are truncated at UTF-8 character boundaries; structured responses (tools with `output_schema`) raise `ToolError` since truncation would corrupt the schema.
+
+```python
+from fastmcp.server.middleware.response_limiting import ResponseLimitingMiddleware
+
+# Limit all tool responses to 500KB
+mcp.add_middleware(ResponseLimitingMiddleware(max_size=500_000))
+
+# Limit only specific tools, raise errors instead of truncating
+mcp.add_middleware(ResponseLimitingMiddleware(
+    max_size=100_000,
+    tools=["search", "fetch_data"],
+    raise_on_unstructured=True,
+))
+```
+
+Key features:
+- Configurable size limit (default 1MB)
+- Tool-specific filtering via `tools` parameter
+- Size metadata added to result's `meta` field for monitoring
+- Configurable `raise_on_structured` and `raise_on_unstructured` behavior
+
+Documentation: [Middleware](/servers/middleware)
+
+### Background Task Context (SEP-1686)
+
+`Context` now works transparently in background tasks running in Docket workers ([#2905](https://github.com/jlowin/fastmcp/pull/2905)). Previously, tools running as background tasks couldn't use `ctx.elicit()` because there was no active request context. Now, when a tool executes in a Docket worker, `Context` detects this via its `task_id` and routes elicitation through Redis-based coordination: the task sets its status to `input_required`, sends a `notifications/tasks/updated` notification with elicitation metadata, and waits for the client to respond via `tasks/sendInput`.
+
+```python
+@mcp.tool(task=True)
+async def interactive_task(ctx: Context) -> str:
+    # Works transparently in both foreground and background task modes
+    result = await ctx.elicit("Please provide additional input", str)
+
+    if isinstance(result, AcceptedElicitation):
+        return f"You provided: {result.data}"
+    else:
+        return "Elicitation was declined or cancelled"
+```
+
+`ctx.is_background_task` and `ctx.task_id` are available for tools that need to branch on execution mode.
+
+### `require_auth` Removed
+
+The `require_auth` authorization check introduced in beta1 has been removed in favor of scope-based authorization via `require_scopes` ([#3103](https://github.com/jlowin/fastmcp/pull/3103)). Since configuring an `AuthProvider` already rejects unauthenticated requests at the transport level, `require_auth` was redundant — `require_scopes` provides the same guarantee with better granularity. The beta1 Component Authorization section has been updated to reflect this.
+
 ### MCP Apps (SDK Compatibility)
 
 Support for [MCP Apps](https://modelcontextprotocol.io/specification/2025-06-18/server/apps) — the spec extension that lets MCP servers deliver interactive UIs via sandboxed iframes. Extension negotiation, typed UI metadata on tools and resources, and the `ui://` resource scheme. No component DSL, renderer, or `FastMCPApp` class yet — those are future phases.
 
-**Registering tools with UI metadata:**
+**Breaking change from beta 2:** The `ui=` parameter on `@mcp.tool()` and `@mcp.resource()` has been renamed to `app=`, and the `ToolUI`/`ResourceUI` classes have been consolidated into a single `AppConfig` class. This follows the established `task=True`/`TaskConfig` pattern. The wire format (`meta["ui"]`, `_meta.ui`) is unchanged.
+
+**Registering tools with app metadata:**
 
 ```python
 from fastmcp import FastMCP
-from fastmcp.server.apps import ToolUI, ResourceUI, ResourceCSP, ResourcePermissions
+from fastmcp.server.apps import AppConfig, ResourceCSP, ResourcePermissions
 
 mcp = FastMCP("My Server")
 
 # Register the HTML bundle as a ui:// resource with CSP
 @mcp.resource(
     "ui://my-app/view.html",
-    ui=ResourceUI(
+    app=AppConfig(
         csp=ResourceCSP(resource_domains=["https://unpkg.com"]),
         permissions=ResourcePermissions(clipboard_write={}),
     ),
@@ -98,17 +226,17 @@ def app_html() -> str:
     return Path("./dist/index.html").read_text()
 
 # Tool with UI — clients render an iframe alongside the result
-@mcp.tool(ui=ToolUI(resource_uri="ui://my-app/view.html"))
+@mcp.tool(app=AppConfig(resource_uri="ui://my-app/view.html"))
 async def list_users() -> list[dict]:
     return [{"id": "1", "name": "Alice"}]
 
 # App-only tool — visible to the UI but hidden from the model
-@mcp.tool(ui=ToolUI(resource_uri="ui://my-app/view.html", visibility=["app"]))
+@mcp.tool(app=AppConfig(resource_uri="ui://my-app/view.html", visibility=["app"]))
 async def delete_user(id: str) -> dict:
     return {"deleted": True}
 ```
 
-The `ui=` parameter accepts either a typed model (`ToolUI`, `ResourceUI`) or a raw dict for forward compatibility. It merges into `meta["ui"]` — alongside any other metadata you set.
+The `app=` parameter accepts `True` (enable with defaults), an `AppConfig` instance, or a raw dict for forward compatibility. It merges into `meta["ui"]` — alongside any other metadata you set.
 
 **`ui://` resources** automatically get the correct MIME type (`text/html;profile=mcp-app`) unless you override it explicitly.
 
@@ -116,9 +244,9 @@ The `ui=` parameter accepts either a typed model (`ToolUI`, `ResourceUI`) or a r
 
 ```python
 from fastmcp import Context
-from fastmcp.server.apps import ToolUI, UI_EXTENSION_ID
+from fastmcp.server.apps import AppConfig, UI_EXTENSION_ID
 
-@mcp.tool(ui=ToolUI(resource_uri="ui://dashboard"))
+@mcp.tool(app=AppConfig(resource_uri="ui://dashboard"))
 async def dashboard(ctx: Context) -> dict:
     data = compute_dashboard()
     if ctx.client_supports_extension(UI_EXTENSION_ID):
@@ -127,11 +255,10 @@ async def dashboard(ctx: Context) -> dict:
 ```
 
 **Key details:**
-- `ToolUI` fields: `resource_uri`, `visibility`, `csp`, `permissions`, `domain`, `prefers_border` (all optional except for typical usage of `resource_uri`)
-- `ResourceUI` fields: `csp`, `permissions`, `domain`, `prefers_border` — metadata for the resource itself when it's a UI bundle
+- `AppConfig` fields: `resource_uri`, `visibility`, `csp`, `permissions`, `domain`, `prefers_border` (all optional). On resources, `resource_uri` and `visibility` are validated as not-applicable and will raise `ValueError` if set.
 - `csp` accepts a `ResourceCSP` model with structured domain lists: `connect_domains`, `resource_domains`, `frame_domains`, `base_uri_domains`
 - `permissions` accepts a `ResourcePermissions` model: `camera`, `microphone`, `geolocation`, `clipboard_write` (each set to `{}` to request)
-- Both models use `extra="allow"` for forward compatibility with future spec additions
+- `AppConfig` uses `extra="allow"` for forward compatibility with future spec additions
 - Models use Pydantic aliases for wire format (`resourceUri`, `prefersBorder`, `connectDomains`, `clipboardWrite`)
 - Resource metadata (including CSP/permissions) is propagated to `resources/read` response content items so hosts can read it when rendering the iframe
 - `ctx.client_supports_extension(id)` is a general-purpose method — works for any extension, not just MCP Apps
@@ -731,11 +858,11 @@ v3.0 introduces callable-based authorization for tools, resources, and prompts (
 
 ```python
 from fastmcp import FastMCP
-from fastmcp.server.auth import require_auth, require_scopes
+from fastmcp.server.auth import require_scopes
 
 mcp = FastMCP()
 
-@mcp.tool(auth=require_auth)
+@mcp.tool(auth=require_scopes("write"))
 def protected_tool(): ...
 
 @mcp.resource("data://secret", auth=require_scopes("read"))
@@ -749,10 +876,10 @@ def admin_prompt(): ...
 
 ```python
 from fastmcp.server.middleware import AuthMiddleware
-from fastmcp.server.auth import require_auth, restrict_tag
+from fastmcp.server.auth import require_scopes, restrict_tag
 
-# Require auth for all components
-mcp = FastMCP(middleware=[AuthMiddleware(auth=require_auth)])
+# Require specific scope for all components
+mcp = FastMCP(middleware=[AuthMiddleware(auth=require_scopes("api"))])
 
 # Tag-based restrictions
 mcp = FastMCP(middleware=[
@@ -761,7 +888,6 @@ mcp = FastMCP(middleware=[
 ```
 
 Built-in checks:
-- `require_auth`: Requires any valid token
 - `require_scopes(*scopes)`: Requires specific OAuth scopes
 - `restrict_tag(tag, scopes)`: Requires scopes only for tagged components
 

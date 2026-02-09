@@ -73,6 +73,7 @@ class ToolMeta:
     output_schema: dict[str, Any] | NotSetT | None = NotSet
     annotations: ToolAnnotations | None = None
     meta: dict[str, Any] | None = None
+    app: Any = None
     task: bool | TaskConfig | None = None
     exclude_args: list[str] | None = None
     serializer: Any | None = None
@@ -193,7 +194,7 @@ class FunctionTool(Tool):
             warnings.warn(
                 "The `exclude_args` parameter is deprecated as of FastMCP 2.14. "
                 "Use dependency injection with `Depends()` instead for better lifecycle management. "
-                "See https://gofastmcp.com/servers/dependencies for examples.",
+                "See https://gofastmcp.com/servers/dependency-injection#using-depends for examples.",
                 DeprecationWarning,
                 stacklevel=2,
             )
