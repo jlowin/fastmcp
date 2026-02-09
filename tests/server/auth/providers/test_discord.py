@@ -15,7 +15,7 @@ def memory_storage() -> MemoryStore:
 class TestDiscordProvider:
     """Test Discord OAuth provider functionality."""
 
-    def test_init_with_explicit_params(self, memory_storage):  # type: ignore[arg-type]
+    def test_init_with_explicit_params(self, memory_storage: MemoryStore):
         """Test DiscordProvider initialization with explicit parameters."""
         provider = DiscordProvider(
             client_id="env_client_id",
@@ -30,7 +30,7 @@ class TestDiscordProvider:
         assert provider._upstream_client_secret.get_secret_value() == "GOCSPX-test123"
         assert str(provider.base_url) == "https://myserver.com/"
 
-    def test_init_defaults(self, memory_storage):  # type: ignore[arg-type]
+    def test_init_defaults(self, memory_storage: MemoryStore):
         """Test that default values are applied correctly."""
         provider = DiscordProvider(
             client_id="env_client_id",
@@ -43,7 +43,7 @@ class TestDiscordProvider:
         # Check defaults
         assert provider._redirect_path == "/auth/callback"
 
-    def test_oauth_endpoints_configured_correctly(self, memory_storage):  # type: ignore[arg-type]
+    def test_oauth_endpoints_configured_correctly(self, memory_storage: MemoryStore):
         """Test that OAuth endpoints are configured correctly."""
         provider = DiscordProvider(
             client_id="env_client_id",
@@ -64,7 +64,7 @@ class TestDiscordProvider:
         # Discord provider doesn't currently set a revocation endpoint
         assert provider._upstream_revocation_endpoint is None
 
-    def test_discord_specific_scopes(self, memory_storage):  # type: ignore[arg-type]
+    def test_discord_specific_scopes(self, memory_storage: MemoryStore):
         """Test handling of Discord-specific scope formats."""
         # Just test that the provider accepts Discord-specific scopes without error
         provider = DiscordProvider(

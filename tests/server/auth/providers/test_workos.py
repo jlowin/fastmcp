@@ -21,7 +21,7 @@ def memory_storage() -> MemoryStore:
 class TestWorkOSProvider:
     """Test WorkOS OAuth provider functionality."""
 
-    def test_init_with_explicit_params(self, memory_storage):  # type: ignore[arg-type]
+    def test_init_with_explicit_params(self, memory_storage: MemoryStore):
         """Test WorkOSProvider initialization with explicit parameters."""
         provider = WorkOSProvider(
             client_id="client_test123",
@@ -37,7 +37,7 @@ class TestWorkOSProvider:
         assert provider._upstream_client_secret.get_secret_value() == "secret_test456"
         assert str(provider.base_url) == "https://myserver.com/"
 
-    def test_authkit_domain_https_prefix_handling(self, memory_storage):  # type: ignore[arg-type]
+    def test_authkit_domain_https_prefix_handling(self, memory_storage: MemoryStore):
         """Test that authkit_domain handles missing https:// prefix."""
         # Without https:// - should add it
         provider1 = WorkOSProvider(
@@ -81,7 +81,7 @@ class TestWorkOSProvider:
         assert parsed.netloc == "localhost:8080"
         assert parsed.path == "/oauth2/authorize"
 
-    def test_init_defaults(self, memory_storage):  # type: ignore[arg-type]
+    def test_init_defaults(self, memory_storage: MemoryStore):
         """Test that default values are applied correctly."""
         provider = WorkOSProvider(
             client_id="test_client",
@@ -96,7 +96,7 @@ class TestWorkOSProvider:
         assert provider._redirect_path == "/auth/callback"
         # WorkOS provider has no default scopes but we can't easily verify without accessing internals
 
-    def test_oauth_endpoints_configured_correctly(self, memory_storage):  # type: ignore[arg-type]
+    def test_oauth_endpoints_configured_correctly(self, memory_storage: MemoryStore):
         """Test that OAuth endpoints are configured correctly."""
         provider = WorkOSProvider(
             client_id="test_client",
@@ -148,7 +148,9 @@ def client_with_headless_oauth(mcp_server_url: str) -> Client:
 
 
 class TestAuthKitProvider:
-    async def test_unauthorized_access(self, memory_storage,  # type: ignore[arg-type] mcp_server_url: str):
+    async def test_unauthorized_access(
+        self, memory_storage: MemoryStore, mcp_server_url: str
+    ):
         with pytest.raises(httpx.HTTPStatusError) as exc_info:
             async with Client(mcp_server_url) as client:
                 tools = await client.list_tools()  # noqa: F841

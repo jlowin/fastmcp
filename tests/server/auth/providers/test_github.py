@@ -20,7 +20,7 @@ def memory_storage() -> MemoryStore:
 class TestGitHubProvider:
     """Test GitHubProvider initialization."""
 
-    def test_init_with_explicit_params(self, memory_storage):  # type: ignore[arg-type]
+    def test_init_with_explicit_params(self, memory_storage: MemoryStore):
         """Test initialization with explicit parameters."""
         provider = GitHubProvider(
             client_id="test_client",
@@ -41,7 +41,7 @@ class TestGitHubProvider:
         )  # URLs get normalized with trailing slash
         assert provider._redirect_path == "/custom/callback"
 
-    def test_init_defaults(self, memory_storage):  # type: ignore[arg-type]
+    def test_init_defaults(self, memory_storage: MemoryStore):
         """Test that default values are applied correctly."""
         provider = GitHubProvider(
             client_id="test_client",
@@ -60,7 +60,7 @@ class TestGitHubProvider:
 class TestGitHubTokenVerifier:
     """Test GitHubTokenVerifier."""
 
-    def test_init_with_custom_scopes(self, memory_storage):  # type: ignore[arg-type]
+    def test_init_with_custom_scopes(self, memory_storage: MemoryStore):
         """Test initialization with custom required scopes."""
         verifier = GitHubTokenVerifier(
             required_scopes=["user", "repo"],
@@ -70,7 +70,7 @@ class TestGitHubTokenVerifier:
         assert verifier.required_scopes == ["user", "repo"]
         assert verifier.timeout_seconds == 30
 
-    def test_init_defaults(self, memory_storage):  # type: ignore[arg-type]
+    def test_init_defaults(self, memory_storage: MemoryStore):
         """Test initialization with defaults."""
         verifier = GitHubTokenVerifier()
 
@@ -79,7 +79,7 @@ class TestGitHubTokenVerifier:
         )  # Parent TokenVerifier sets empty list as default
         assert verifier.timeout_seconds == 10
 
-    async def test_verify_token_github_api_failure(self, memory_storage):  # type: ignore[arg-type]
+    async def test_verify_token_github_api_failure(self):
         """Test token verification when GitHub API returns error."""
         verifier = GitHubTokenVerifier()
 
@@ -97,7 +97,7 @@ class TestGitHubTokenVerifier:
             result = await verifier.verify_token("invalid_token")
             assert result is None
 
-    async def test_verify_token_success(self, memory_storage):  # type: ignore[arg-type]
+    async def test_verify_token_success(self):
         """Test successful token verification."""
         from unittest.mock import AsyncMock
 

@@ -15,7 +15,7 @@ def memory_storage() -> MemoryStore:
 class TestGoogleProvider:
     """Test Google OAuth provider functionality."""
 
-    def test_init_with_explicit_params(self, memory_storage):  # type: ignore[arg-type]
+    def test_init_with_explicit_params(self, memory_storage: MemoryStore):
         """Test GoogleProvider initialization with explicit parameters."""
         provider = GoogleProvider(
             client_id="123456789.apps.googleusercontent.com",
@@ -30,7 +30,7 @@ class TestGoogleProvider:
         assert provider._upstream_client_secret.get_secret_value() == "GOCSPX-test123"
         assert str(provider.base_url) == "https://myserver.com/"
 
-    def test_init_defaults(self, memory_storage):  # type: ignore[arg-type]
+    def test_init_defaults(self, memory_storage: MemoryStore):
         """Test that default values are applied correctly."""
         provider = GoogleProvider(
             client_id="123456789.apps.googleusercontent.com",
@@ -44,7 +44,7 @@ class TestGoogleProvider:
         assert provider._redirect_path == "/auth/callback"
         # Google provider has ["openid"] as default but we can't easily verify without accessing internals
 
-    def test_oauth_endpoints_configured_correctly(self, memory_storage):  # type: ignore[arg-type]
+    def test_oauth_endpoints_configured_correctly(self, memory_storage: MemoryStore):
         """Test that OAuth endpoints are configured correctly."""
         provider = GoogleProvider(
             client_id="123456789.apps.googleusercontent.com",
@@ -65,7 +65,7 @@ class TestGoogleProvider:
         # Google provider doesn't currently set a revocation endpoint
         assert provider._upstream_revocation_endpoint is None
 
-    def test_google_specific_scopes(self, memory_storage):  # type: ignore[arg-type]
+    def test_google_specific_scopes(self, memory_storage: MemoryStore):
         """Test handling of Google-specific scope formats."""
         # Just test that the provider accepts Google-specific scopes without error
         provider = GoogleProvider(
@@ -84,7 +84,7 @@ class TestGoogleProvider:
         # Provider should initialize successfully with these scopes
         assert provider is not None
 
-    def test_extra_authorize_params_defaults(self, memory_storage):  # type: ignore[arg-type]
+    def test_extra_authorize_params_defaults(self, memory_storage: MemoryStore):
         """Test that Google-specific defaults are set for refresh token support."""
         provider = GoogleProvider(
             client_id="123456789.apps.googleusercontent.com",
@@ -100,7 +100,9 @@ class TestGoogleProvider:
             "prompt": "consent",
         }
 
-    def test_extra_authorize_params_override_defaults(self, memory_storage):  # type: ignore[arg-type]
+    def test_extra_authorize_params_override_defaults(
+        self, memory_storage: MemoryStore
+    ):
         """Test that user can override default extra authorize params."""
         provider = GoogleProvider(
             client_id="123456789.apps.googleusercontent.com",
@@ -116,7 +118,7 @@ class TestGoogleProvider:
         # But other defaults should remain
         assert provider._extra_authorize_params["access_type"] == "offline"
 
-    def test_extra_authorize_params_add_new_params(self, memory_storage):  # type: ignore[arg-type]
+    def test_extra_authorize_params_add_new_params(self, memory_storage: MemoryStore):
         """Test that user can add additional authorize params."""
         provider = GoogleProvider(
             client_id="123456789.apps.googleusercontent.com",

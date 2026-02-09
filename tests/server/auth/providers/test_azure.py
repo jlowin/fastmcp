@@ -25,7 +25,7 @@ def memory_storage() -> MemoryStore:
 class TestAzureProvider:
     """Test Azure OAuth provider functionality."""
 
-    def test_init_with_explicit_params(self, memory_storage):  # type: ignore[arg-type]
+    def test_init_with_explicit_params(self, memory_storage: MemoryStore):
         """Test AzureProvider initialization with explicit parameters."""
         provider = AzureProvider(
             client_id="12345678-1234-1234-1234-123456789012",
@@ -46,7 +46,7 @@ class TestAzureProvider:
         parsed_token = urlparse(provider._upstream_token_endpoint)
         assert "87654321-4321-4321-4321-210987654321" in parsed_token.path
 
-    def test_init_defaults(self, memory_storage):  # type: ignore[arg-type]
+    def test_init_defaults(self, memory_storage: MemoryStore):
         """Test that default values are applied correctly."""
         provider = AzureProvider(
             client_id="test_client",
@@ -62,7 +62,7 @@ class TestAzureProvider:
         assert provider._redirect_path == "/auth/callback"
         # Azure provider defaults are set but we can't easily verify them without accessing internals
 
-    def test_offline_access_automatically_included(self, memory_storage):  # type: ignore[arg-type]
+    def test_offline_access_automatically_included(self, memory_storage: MemoryStore):
         """Test that offline_access is automatically added to get refresh tokens."""
         # Without specifying offline_access
         provider = AzureProvider(
@@ -77,7 +77,7 @@ class TestAzureProvider:
 
         assert "offline_access" in provider.additional_authorize_scopes
 
-    def test_offline_access_not_duplicated(self, memory_storage):  # type: ignore[arg-type]
+    def test_offline_access_not_duplicated(self, memory_storage: MemoryStore):
         """Test that offline_access is not duplicated if already specified."""
         provider = AzureProvider(
             client_id="test_client",
@@ -94,7 +94,7 @@ class TestAzureProvider:
         assert provider.additional_authorize_scopes.count("offline_access") == 1
         assert "User.Read" in provider.additional_authorize_scopes
 
-    def test_oauth_endpoints_configured_correctly(self, memory_storage):  # type: ignore[arg-type]
+    def test_oauth_endpoints_configured_correctly(self, memory_storage: MemoryStore):
         """Test that OAuth endpoints are configured correctly."""
         provider = AzureProvider(
             client_id="test_client",
@@ -119,7 +119,7 @@ class TestAzureProvider:
             provider._upstream_revocation_endpoint is None
         )  # Azure doesn't support revocation
 
-    def test_special_tenant_values(self, memory_storage):  # type: ignore[arg-type]
+    def test_special_tenant_values(self, memory_storage: MemoryStore):
         """Test that special tenant values are accepted."""
         # Test with "organizations"
         provider1 = AzureProvider(
@@ -147,7 +147,7 @@ class TestAzureProvider:
         parsed = urlparse(provider2._upstream_authorization_endpoint)
         assert "/consumers/" in parsed.path
 
-    def test_azure_specific_scopes(self, memory_storage):  # type: ignore[arg-type]
+    def test_azure_specific_scopes(self, memory_storage: MemoryStore):
         """Test handling of custom API scope formats."""
         # Test that the provider accepts custom API scopes without error
         provider = AzureProvider(
@@ -174,7 +174,9 @@ class TestAzureProvider:
             "admin",
         ]
 
-    def test_init_does_not_require_api_client_id_anymore(self, memory_storage):  # type: ignore[arg-type]
+    def test_init_does_not_require_api_client_id_anymore(
+        self, memory_storage: MemoryStore
+    ):
         """API client ID is no longer required; audience is client_id."""
         provider = AzureProvider(
             client_id="test_client",
@@ -187,7 +189,9 @@ class TestAzureProvider:
         )
         assert provider is not None
 
-    def test_init_with_custom_audience_uses_jwt_verifier(self, memory_storage):  # type: ignore[arg-type]
+    def test_init_with_custom_audience_uses_jwt_verifier(
+        self, memory_storage: MemoryStore
+    ):
         """When audience is provided, JWTVerifier is configured with JWKS and issuer."""
         from fastmcp.server.auth.providers.jwt import JWTVerifier
 
@@ -216,7 +220,7 @@ class TestAzureProvider:
         assert verifier.required_scopes == [".default"]
 
     async def test_authorize_filters_resource_and_stores_unprefixed_scopes(
-        self, memory_storage
+        self, memory_storage: MemoryStore
     ):
         """authorize() should drop resource parameter and store unprefixed scopes for MCP clients."""
         provider = AzureProvider(
@@ -285,7 +289,9 @@ class TestAzureProvider:
             or "api://my-api/write" in upstream_url
         )
 
-    async def test_authorize_appends_additional_scopes(self, memory_storage):  # type: ignore[arg-type]
+    async def test_authorize_appends_additional_scopes(
+        self, memory_storage: MemoryStore
+    ):
         """authorize() should append additional_authorize_scopes to the authorization request."""
         provider = AzureProvider(
             client_id="test_client",
@@ -348,7 +354,7 @@ class TestAzureProvider:
         assert "Mail.Read" in upstream_url
         assert "User.Read" in upstream_url
 
-    def test_base_authority_defaults_to_public_cloud(self, memory_storage):  # type: ignore[arg-type]
+    def test_base_authority_defaults_to_public_cloud(self, memory_storage: MemoryStore):
         """Test that base_authority defaults to login.microsoftonline.com."""
         provider = AzureProvider(
             client_id="test_client",
@@ -378,7 +384,7 @@ class TestAzureProvider:
             == "https://login.microsoftonline.com/test-tenant/discovery/v2.0/keys"
         )
 
-    def test_base_authority_azure_government(self, memory_storage):  # type: ignore[arg-type]
+    def test_base_authority_azure_government(self, memory_storage: MemoryStore):
         """Test Azure Government endpoints with login.microsoftonline.us."""
         provider = AzureProvider(
             client_id="test_client",
@@ -409,7 +415,7 @@ class TestAzureProvider:
             == "https://login.microsoftonline.us/gov-tenant-id/discovery/v2.0/keys"
         )
 
-    def test_base_authority_from_parameter(self, memory_storage):  # type: ignore[arg-type]
+    def test_base_authority_from_parameter(self, memory_storage: MemoryStore):
         """Test that base_authority can be set via parameter."""
         provider = AzureProvider(
             client_id="env-client-id",
@@ -440,7 +446,9 @@ class TestAzureProvider:
             == "https://login.microsoftonline.us/env-tenant-id/discovery/v2.0/keys"
         )
 
-    def test_base_authority_with_special_tenant_values(self, memory_storage):  # type: ignore[arg-type]
+    def test_base_authority_with_special_tenant_values(
+        self, memory_storage: MemoryStore
+    ):
         """Test that base_authority works with special tenant values like 'organizations'."""
         provider = AzureProvider(
             client_id="test_client",
@@ -457,7 +465,9 @@ class TestAzureProvider:
         assert parsed.netloc == "login.microsoftonline.us"
         assert "/organizations/" in parsed.path
 
-    def test_prepare_scopes_for_upstream_refresh_basic_prefixing(self, memory_storage):  # type: ignore[arg-type]
+    def test_prepare_scopes_for_upstream_refresh_basic_prefixing(
+        self, memory_storage: MemoryStore
+    ):
         """Test that unprefixed scopes are correctly prefixed for Azure token refresh."""
         provider = AzureProvider(
             client_id="test_client",
@@ -478,7 +488,9 @@ class TestAzureProvider:
         assert "offline_access" in result  # Auto-included for refresh tokens
         assert len(result) == 3
 
-    def test_prepare_scopes_for_upstream_refresh_already_prefixed(self, memory_storage):  # type: ignore[arg-type]
+    def test_prepare_scopes_for_upstream_refresh_already_prefixed(
+        self, memory_storage: MemoryStore
+    ):
         """Test that already-prefixed scopes remain unchanged."""
         provider = AzureProvider(
             client_id="test_client",
@@ -502,7 +514,7 @@ class TestAzureProvider:
         assert len(result) == 3
 
     def test_prepare_scopes_for_upstream_refresh_with_additional_scopes(
-        self, memory_storage
+        self, memory_storage: MemoryStore
     ):
         """Test that only OIDC scopes from additional_authorize_scopes are added.
 
@@ -539,7 +551,7 @@ class TestAzureProvider:
 
     def test_prepare_scopes_for_upstream_refresh_filters_duplicate_additional_scopes(
         self,
-        memory_storage,  # type: ignore[arg-type]
+        memory_storage: MemoryStore,
     ):
         """Test that accidentally stored additional_authorize_scopes are filtered out."""
         provider = AzureProvider(
@@ -568,7 +580,9 @@ class TestAzureProvider:
         assert "offline_access" in result  # Auto-included and is OIDC
         assert len(result) == 3
 
-    def test_prepare_scopes_for_upstream_refresh_mixed_scopes(self, memory_storage):  # type: ignore[arg-type]
+    def test_prepare_scopes_for_upstream_refresh_mixed_scopes(
+        self, memory_storage: MemoryStore
+    ):
         """Test mixed scenario with both prefixed and unprefixed scopes."""
         provider = AzureProvider(
             client_id="test_client",
@@ -594,7 +608,9 @@ class TestAzureProvider:
         assert "offline_access" in result  # Auto-included
         assert len(result) == 5
 
-    def test_prepare_scopes_for_upstream_refresh_scope_with_slash(self, memory_storage):  # type: ignore[arg-type]
+    def test_prepare_scopes_for_upstream_refresh_scope_with_slash(
+        self, memory_storage: MemoryStore
+    ):
         """Test that scopes containing '/' are not prefixed."""
         provider = AzureProvider(
             client_id="test_client",
@@ -617,7 +633,9 @@ class TestAzureProvider:
             "https://graph.microsoft.com/.default" in result
         )  # Not prefixed (contains ://)
 
-    def test_prepare_scopes_for_upstream_refresh_empty_scopes(self, memory_storage):  # type: ignore[arg-type]
+    def test_prepare_scopes_for_upstream_refresh_empty_scopes(
+        self, memory_storage: MemoryStore
+    ):
         """Test behavior with empty scopes list."""
         provider = AzureProvider(
             client_id="test_client",
@@ -640,7 +658,7 @@ class TestAzureProvider:
         assert len(result) == 2  # Only OIDC scopes: openid + offline_access
 
     def test_prepare_scopes_for_upstream_refresh_no_additional_scopes(
-        self, memory_storage
+        self, memory_storage: MemoryStore
     ):
         """Test behavior when no additional_authorize_scopes are configured."""
         provider = AzureProvider(
@@ -663,7 +681,7 @@ class TestAzureProvider:
         assert len(result) == 3
 
     def test_prepare_scopes_for_upstream_refresh_deduplicates_scopes(
-        self, memory_storage
+        self, memory_storage: MemoryStore
     ):
         """Test that duplicate scopes are deduplicated while preserving order."""
         provider = AzureProvider(
@@ -694,7 +712,7 @@ class TestAzureProvider:
         assert len(result) == 5
 
     def test_prepare_scopes_for_upstream_refresh_deduplicates_prefixed_variants(
-        self, memory_storage
+        self, memory_storage: MemoryStore
     ):
         """Test that both prefixed and unprefixed variants are deduplicated."""
         provider = AzureProvider(
@@ -733,11 +751,13 @@ class TestOIDCScopeHandling:
     3. OIDC scopes are still advertised to clients via valid_scopes
     """
 
-    def test_oidc_scopes_constant(self, memory_storage):  # type: ignore[arg-type]
+    def test_oidc_scopes_constant(self, memory_storage: MemoryStore):
         """Verify OIDC_SCOPES contains the standard OIDC scopes."""
         assert OIDC_SCOPES == {"openid", "profile", "email", "offline_access"}
 
-    def test_prefix_scopes_does_not_prefix_oidc_scopes(self, memory_storage):  # type: ignore[arg-type]
+    def test_prefix_scopes_does_not_prefix_oidc_scopes(
+        self, memory_storage: MemoryStore
+    ):
         """Test that _prefix_scopes_for_azure never prefixes OIDC scopes."""
         provider = AzureProvider(
             client_id="test_client",
@@ -757,7 +777,7 @@ class TestOIDCScopeHandling:
 
         assert result == ["openid", "profile", "email", "offline_access"]
 
-    def test_prefix_scopes_mixed_oidc_and_custom(self, memory_storage):  # type: ignore[arg-type]
+    def test_prefix_scopes_mixed_oidc_and_custom(self, memory_storage: MemoryStore):
         """Test prefixing with a mix of OIDC and custom scopes."""
         provider = AzureProvider(
             client_id="test_client",
@@ -783,7 +803,9 @@ class TestOIDCScopeHandling:
         assert "api://my-api/openid" not in result
         assert "api://my-api/profile" not in result
 
-    def test_prefix_scopes_dot_notation_gets_prefixed(self, memory_storage):  # type: ignore[arg-type]
+    def test_prefix_scopes_dot_notation_gets_prefixed(
+        self, memory_storage: MemoryStore
+    ):
         """Test that dot-notation scopes get prefixed (use additional_authorize_scopes for Graph)."""
         provider = AzureProvider(
             client_id="test_client",
@@ -802,7 +824,9 @@ class TestOIDCScopeHandling:
 
         assert result == ["api://my-api/my.scope", "api://my-api/admin.read"]
 
-    def test_prefix_scopes_fully_qualified_graph_not_prefixed(self, memory_storage):  # type: ignore[arg-type]
+    def test_prefix_scopes_fully_qualified_graph_not_prefixed(
+        self, memory_storage: MemoryStore
+    ):
         """Test that fully-qualified Graph scopes are not prefixed."""
         provider = AzureProvider(
             client_id="test_client",
@@ -828,7 +852,9 @@ class TestOIDCScopeHandling:
             "https://graph.microsoft.com/Mail.Send",
         ]
 
-    def test_required_scopes_with_oidc_filters_validation(self, memory_storage):  # type: ignore[arg-type]
+    def test_required_scopes_with_oidc_filters_validation(
+        self, memory_storage: MemoryStore
+    ):
         """Test that OIDC scopes in required_scopes are filtered from token validation."""
         provider = AzureProvider(
             client_id="test_client",
@@ -844,7 +870,9 @@ class TestOIDCScopeHandling:
         # Token validator should only require non-OIDC scopes
         assert provider._token_validator.required_scopes == ["read"]
 
-    def test_required_scopes_all_oidc_results_in_no_validation(self, memory_storage):  # type: ignore[arg-type]
+    def test_required_scopes_all_oidc_results_in_no_validation(
+        self, memory_storage: MemoryStore
+    ):
         """Test that if all required_scopes are OIDC, no scope validation occurs."""
         provider = AzureProvider(
             client_id="test_client",
@@ -860,7 +888,7 @@ class TestOIDCScopeHandling:
         # Token validator should have empty required scopes (all were OIDC)
         assert provider._token_validator.required_scopes == []
 
-    def test_valid_scopes_includes_oidc_scopes(self, memory_storage):  # type: ignore[arg-type]
+    def test_valid_scopes_includes_oidc_scopes(self, memory_storage: MemoryStore):
         """Test that valid_scopes advertises OIDC scopes to clients."""
         provider = AzureProvider(
             client_id="test_client",
@@ -883,7 +911,9 @@ class TestOIDCScopeHandling:
             "profile",
         ]
 
-    def test_prepare_scopes_for_refresh_handles_oidc_scopes(self, memory_storage):  # type: ignore[arg-type]
+    def test_prepare_scopes_for_refresh_handles_oidc_scopes(
+        self, memory_storage: MemoryStore
+    ):
         """Test that token refresh correctly handles OIDC scopes."""
         provider = AzureProvider(
             client_id="test_client",
@@ -917,7 +947,7 @@ class TestAzureTokenExchangeScopes:
     properly prefixed scopes.
     """
 
-    def test_prepare_scopes_returns_prefixed_scopes(self, memory_storage):  # type: ignore[arg-type]
+    def test_prepare_scopes_returns_prefixed_scopes(self, memory_storage: MemoryStore):
         """Test that _prepare_scopes_for_token_exchange returns prefixed scopes."""
         provider = AzureProvider(
             client_id="test_client",
@@ -935,7 +965,9 @@ class TestAzureTokenExchangeScopes:
         assert "api://my-api/read" in scopes
         assert "api://my-api/write" in scopes
 
-    def test_prepare_scopes_includes_additional_oidc_scopes(self, memory_storage):  # type: ignore[arg-type]
+    def test_prepare_scopes_includes_additional_oidc_scopes(
+        self, memory_storage: MemoryStore
+    ):
         """Test that _prepare_scopes_for_token_exchange includes OIDC scopes."""
         provider = AzureProvider(
             client_id="test_client",
@@ -956,7 +988,9 @@ class TestAzureTokenExchangeScopes:
         assert "profile" in scopes
         assert "offline_access" in scopes
 
-    def test_prepare_scopes_excludes_other_api_scopes(self, memory_storage):  # type: ignore[arg-type]
+    def test_prepare_scopes_excludes_other_api_scopes(
+        self, memory_storage: MemoryStore
+    ):
         """Test token exchange excludes other API scopes (Azure AADSTS28000).
 
         Azure only allows ONE resource per token exchange. Other API scopes
@@ -991,7 +1025,7 @@ class TestAzureTokenExchangeScopes:
         assert not any("api://aaaaaaaa" in s for s in scopes)
         assert not any("api://11111111" in s for s in scopes)
 
-    def test_prepare_scopes_deduplicates_scopes(self, memory_storage):  # type: ignore[arg-type]
+    def test_prepare_scopes_deduplicates_scopes(self, memory_storage: MemoryStore):
         """Test that duplicate scopes are deduplicated."""
         provider = AzureProvider(
             client_id="test_client",
@@ -1012,7 +1046,9 @@ class TestAzureTokenExchangeScopes:
         assert scopes.count("api://my-api/read") == 1
         assert "openid" in scopes
 
-    def test_extra_token_params_does_not_contain_scope(self, memory_storage):  # type: ignore[arg-type]
+    def test_extra_token_params_does_not_contain_scope(
+        self, memory_storage: MemoryStore
+    ):
         """Test that extra_token_params doesn't contain scope to avoid TypeError.
 
         Previously, Azure provider set extra_token_params={"scope": ...} during init.
