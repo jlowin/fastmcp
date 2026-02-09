@@ -112,20 +112,11 @@ class AppConfig(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-# Backward-compatible aliases
-ToolUI = AppConfig
-ResourceUI = AppConfig
-
-
 def app_config_to_meta_dict(app: AppConfig | dict[str, Any]) -> dict[str, Any]:
     """Convert an AppConfig or dict to the wire-format dict for ``meta["ui"]``."""
     if isinstance(app, AppConfig):
         return app.model_dump(by_alias=True, exclude_none=True)
     return app
-
-
-# Backward-compatible alias
-ui_to_meta_dict = app_config_to_meta_dict
 
 
 def resolve_ui_mime_type(uri: str, explicit_mime_type: str | None) -> str | None:
