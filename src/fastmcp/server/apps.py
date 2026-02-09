@@ -109,7 +109,7 @@ class AppConfig(BaseModel):
         description="Whether the UI prefers a visible border",
     )
 
-    model_config = {"populate_by_name": True}
+    model_config = {"populate_by_name": True, "extra": "allow"}
 
 
 def app_config_to_meta_dict(app: AppConfig | dict[str, Any]) -> dict[str, Any]:
