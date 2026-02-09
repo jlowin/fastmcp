@@ -3,7 +3,9 @@
 import pytest
 
 from fastmcp import FastMCP
+from fastmcp.server.auth import AccessToken
 from fastmcp.server.context import Context
+from fastmcp.server.dependencies import get_access_token
 from fastmcp.server.elicitation import AcceptedElicitation
 from fastmcp.server.tasks.elicitation import elicit_for_task, handle_task_input
 
@@ -860,3 +862,332 @@ class TestBackgroundTaskContextWiring:
 
             # Verify the tool received the elicited value and returned correctly
             assert result.data == "Hello, Bob!"
+
+
+class TestAccessTokenInBackgroundTasks:
+    """Tests for access token availability in background tasks (#3095)."""
+
+    async def test_access_token_stored_in_redis_at_submit_time(self):
+        """Verify submit_to_docket() snapshots the access token in Redis."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from fastmcp.server.tasks.handlers import submit_to_docket
+
+        # Create a mock access token
+        token = AccessToken(
+            token="test-jwt-token-123",
+            client_id="test-client",
+            scopes=["read", "write"],
+            claims={"sub": "user-1"},
+        )
+
+        # Track Redis set calls
+        redis_data: dict[str, str | bytes] = {}
+
+        mock_redis = AsyncMock()
+
+        async def mock_set(key, value, ex=None):
+            redis_data[key] = value
+
+        mock_redis.set = mock_set
+
+        mock_docket = MagicMock()
+        mock_docket.redis = MagicMock(return_value=AsyncMock())
+        mock_docket.redis.return_value.__aenter__ = AsyncMock(return_value=mock_redis)
+        mock_docket.redis.return_value.__aexit__ = AsyncMock()
+        mock_docket.key = lambda k: k
+        mock_docket.execution_ttl.total_seconds.return_value = 300
+
+        # Mock context
+        mock_session = MagicMock()
+        mock_session._fastmcp_state_prefix = "test-session"
+        mock_session.send_notification = AsyncMock()
+        mock_session._subscription_task_group = None
+
+        mock_ctx = MagicMock()
+        mock_ctx.session_id = "test-session"
+        mock_ctx.session = mock_session
+
+        # Mock component
+        mock_component = MagicMock()
+        mock_component.task_config.poll_interval.total_seconds.return_value = 1.0
+        mock_component.add_to_docket = AsyncMock()
+
+        with (
+            patch("fastmcp.server.tasks.handlers.get_context", return_value=mock_ctx),
+            patch(
+                "fastmcp.server.tasks.handlers._current_docket",
+                MagicMock(get=MagicMock(return_value=mock_docket)),
+            ),
+            patch(
+                "fastmcp.server.tasks.handlers.get_access_token",
+                return_value=token,
+            ),
+        ):
+            result = await submit_to_docket(
+                task_type="tool",
+                key="test_tool",
+                component=mock_component,
+                arguments={"x": 1},
+            )
+
+        # Verify token was stored in Redis
+        task_id = result.task.taskId
+        token_key = f"fastmcp:task:test-session:{task_id}:access_token"
+        assert token_key in redis_data
+
+        # Verify stored token can be deserialized
+        restored = AccessToken.model_validate_json(redis_data[token_key])
+        assert restored.token == "test-jwt-token-123"
+        assert restored.client_id == "test-client"
+        assert restored.scopes == ["read", "write"]
+        assert restored.claims == {"sub": "user-1"}
+
+    async def test_access_token_not_stored_when_unauthenticated(self):
+        """Verify submit_to_docket() doesn't store token when no auth."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from fastmcp.server.tasks.handlers import submit_to_docket
+
+        redis_data: dict[str, str | bytes] = {}
+
+        mock_redis = AsyncMock()
+
+        async def mock_set(key, value, ex=None):
+            redis_data[key] = value
+
+        mock_redis.set = mock_set
+
+        mock_docket = MagicMock()
+        mock_docket.redis = MagicMock(return_value=AsyncMock())
+        mock_docket.redis.return_value.__aenter__ = AsyncMock(return_value=mock_redis)
+        mock_docket.redis.return_value.__aexit__ = AsyncMock()
+        mock_docket.key = lambda k: k
+        mock_docket.execution_ttl.total_seconds.return_value = 300
+
+        mock_session = MagicMock()
+        mock_session._fastmcp_state_prefix = "test-session"
+        mock_session.send_notification = AsyncMock()
+        mock_session._subscription_task_group = None
+
+        mock_ctx = MagicMock()
+        mock_ctx.session_id = "test-session"
+        mock_ctx.session = mock_session
+
+        mock_component = MagicMock()
+        mock_component.task_config.poll_interval.total_seconds.return_value = 1.0
+        mock_component.add_to_docket = AsyncMock()
+
+        with (
+            patch("fastmcp.server.tasks.handlers.get_context", return_value=mock_ctx),
+            patch(
+                "fastmcp.server.tasks.handlers._current_docket",
+                MagicMock(get=MagicMock(return_value=mock_docket)),
+            ),
+            patch(
+                "fastmcp.server.tasks.handlers.get_access_token",
+                return_value=None,
+            ),
+        ):
+            result = await submit_to_docket(
+                task_type="tool",
+                key="test_tool",
+                component=mock_component,
+                arguments={"x": 1},
+            )
+
+        # Verify no token key was stored
+        task_id = result.task.taskId
+        token_key = f"fastmcp:task:test-session:{task_id}:access_token"
+        assert token_key not in redis_data
+
+    async def test_access_token_restored_in_background_task_context(self):
+        """Verify _CurrentContext restores access token from Redis in workers."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from fastmcp.server.dependencies import (
+            TaskContextInfo,
+            _current_docket,
+            _current_server,
+            _CurrentContext,
+            _task_access_token,
+            _task_sessions,
+        )
+
+        # Create token to store
+        token = AccessToken(
+            token="bg-task-token",
+            client_id="bg-client",
+            scopes=["admin"],
+            claims={"sub": "admin-user"},
+        )
+
+        # Set up mock Redis with pre-stored token
+        mock_redis = AsyncMock()
+        mock_redis.get = AsyncMock(return_value=token.model_dump_json().encode())
+
+        mock_docket = MagicMock()
+        mock_docket.redis = MagicMock(return_value=AsyncMock())
+        mock_docket.redis.return_value.__aenter__ = AsyncMock(return_value=mock_redis)
+        mock_docket.redis.return_value.__aexit__ = AsyncMock()
+        mock_docket.key = lambda k: k
+
+        # Set up server and session
+        mock_server = MagicMock()
+        mock_server._docket = mock_docket
+        server_token = _current_server.set(MagicMock(return_value=mock_server))
+        docket_token = _current_docket.set(mock_docket)
+
+        mock_session = MagicMock()
+        mock_session._fastmcp_state_prefix = "test-session-id"
+        _task_sessions["test-session-id"] = MagicMock(return_value=mock_session)
+
+        try:
+            task_info = TaskContextInfo(
+                task_id="test-task-123",
+                session_id="test-session-id",
+            )
+            with patch(
+                "fastmcp.server.dependencies.get_task_context",
+                return_value=task_info,
+            ):
+                dep = _CurrentContext()
+                ctx = await dep.__aenter__()
+
+                # Verify context is task-aware
+                assert ctx.is_background_task is True
+
+                # Verify access token was restored into ContextVar
+                restored = _task_access_token.get()
+                assert restored is not None
+                assert restored.token == "bg-task-token"
+                assert restored.client_id == "bg-client"
+                assert restored.claims == {"sub": "admin-user"}
+
+                # Verify get_access_token() returns the restored token
+                result = get_access_token()
+                assert result is not None
+                assert result.token == "bg-task-token"
+
+                # Clean up
+                await dep.__aexit__(None, None, None)
+
+            # Verify ContextVar was reset after exit
+            assert _task_access_token.get() is None
+        finally:
+            _current_server.reset(server_token)
+            _current_docket.reset(docket_token)
+            _task_sessions.pop("test-session-id", None)
+
+    async def test_expired_access_token_returns_none(self):
+        """Verify expired tokens return None from get_access_token()."""
+        from datetime import datetime, timezone
+
+        from fastmcp.server.dependencies import _task_access_token
+
+        # Create an expired token (expired 1 hour ago)
+        expired_token = AccessToken(
+            token="expired-token",
+            client_id="test-client",
+            scopes=["read"],
+            expires_at=int(datetime.now(timezone.utc).timestamp()) - 3600,
+        )
+
+        token = _task_access_token.set(expired_token)
+        try:
+            result = get_access_token()
+            assert result is None
+        finally:
+            _task_access_token.reset(token)
+
+    async def test_valid_access_token_with_future_expiry(self):
+        """Verify non-expired tokens are returned from get_access_token()."""
+        from datetime import datetime, timezone
+
+        from fastmcp.server.dependencies import _task_access_token
+
+        # Create a valid token (expires in 1 hour)
+        valid_token = AccessToken(
+            token="valid-token",
+            client_id="test-client",
+            scopes=["read"],
+            expires_at=int(datetime.now(timezone.utc).timestamp()) + 3600,
+        )
+
+        token = _task_access_token.set(valid_token)
+        try:
+            result = get_access_token()
+            assert result is not None
+            assert result.token == "valid-token"
+        finally:
+            _task_access_token.reset(token)
+
+    async def test_access_token_without_expiry_returned(self):
+        """Verify tokens without expires_at are returned (no expiry check)."""
+        from fastmcp.server.dependencies import _task_access_token
+
+        token_no_expiry = AccessToken(
+            token="no-expiry-token",
+            client_id="test-client",
+            scopes=["read"],
+        )
+
+        token = _task_access_token.set(token_no_expiry)
+        try:
+            result = get_access_token()
+            assert result is not None
+            assert result.token == "no-expiry-token"
+        finally:
+            _task_access_token.reset(token)
+
+
+class TestLifespanContextInBackgroundTasks:
+    """Tests for lifespan_context availability in background tasks (#3095)."""
+
+    def test_lifespan_context_falls_back_to_server_result(self):
+        """Verify lifespan_context reads from server when request_context is None."""
+        mcp = FastMCP("test")
+        # Simulate lifespan result being set (as would happen during server startup)
+        mcp._lifespan_result = {"db": "mock-db-connection", "cache": "mock-cache"}
+        mcp._lifespan_result_set = True
+
+        # Create context without request_context (background task scenario)
+        ctx = Context(mcp, task_id="test-task")
+
+        # request_context should be None (no MCP session)
+        assert ctx.request_context is None
+
+        # lifespan_context should fall back to server's lifespan result
+        assert ctx.lifespan_context == {
+            "db": "mock-db-connection",
+            "cache": "mock-cache",
+        }
+
+    def test_lifespan_context_returns_empty_dict_when_no_lifespan(self):
+        """Verify lifespan_context returns {} when no lifespan configured."""
+        mcp = FastMCP("test")
+
+        ctx = Context(mcp, task_id="test-task")
+        assert ctx.request_context is None
+        assert ctx.lifespan_context == {}
+
+    def test_lifespan_context_still_uses_request_context_when_available(self):
+        """Verify lifespan_context prefers request_context when available."""
+        from unittest.mock import MagicMock, patch
+
+        mcp = FastMCP("test")
+        mcp._lifespan_result = {"server": "value"}
+        mcp._lifespan_result_set = True
+
+        ctx = Context(mcp)
+
+        # Mock request_context with different lifespan data
+        mock_rc = MagicMock()
+        mock_rc.lifespan_context = {"request": "value"}
+
+        with patch.object(
+            type(ctx),
+            "request_context",
+            new_callable=lambda: property(lambda self: mock_rc),
+        ):
+            assert ctx.lifespan_context == {"request": "value"}
