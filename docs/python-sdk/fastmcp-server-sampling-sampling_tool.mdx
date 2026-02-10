@@ -87,39 +87,15 @@ from_callable_tool(cls, tool: FunctionTool | TransformedTool) -> SamplingTool
 
 Create a SamplingTool from a FunctionTool or TransformedTool.
 
-This helper enables reusing existing server tools in sampling contexts
-without duplication. Both FunctionTool and TransformedTool have callable
-.fn attributes that can be directly used for sampling.
-
-For TransformedTool instances, the tool's .run() method is used instead
-of .fn to ensure proper argument transformation and execution. The result
-is automatically unwrapped from ToolResult if needed.
+Reuses existing server tools in sampling contexts. For TransformedTool,
+the tool's .run() method is used to ensure proper argument transformation,
+and the ToolResult is automatically unwrapped.
 
 **Args:**
-- `tool`: A FunctionTool or TransformedTool with a callable .fn attribute.
+- `tool`: A FunctionTool or TransformedTool to convert.
 - `name`: Optional name override. Defaults to tool.name.
 - `description`: Optional description override. Defaults to tool.description.
 
-**Returns:**
-- A SamplingTool that wraps the tool's functionality.
-
 **Raises:**
 - `TypeError`: If the tool is not a FunctionTool or TransformedTool.
-
-**Examples:**
-
-Convert a FunctionTool to SamplingTool:
-
-    @mcp.tool
-    def search(query: str) -> str:
-        return do_search(query)
-
-    sampling_tool = SamplingTool.from_callable_tool(search)
-
-Use in sampling context:
-
-    result = await ctx.sample(
-        "Research Python",
-        tools=[SamplingTool.from_callable_tool(search)]
-    )
 
