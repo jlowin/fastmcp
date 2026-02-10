@@ -206,20 +206,10 @@ def format_simple_description(
     Returns:
         str: The formatted description string with minimal details.
     """
-    desc_parts = [base_description]
-
-    # Only add critical parameter information if they have descriptions
-    if parameters:
-        path_params = [p for p in parameters if p.location == "path" and p.description]
-        if path_params:
-            desc_parts.append("\n\n**Path Parameters:**")
-            for param in path_params:
-                desc_parts.append(f"\n- **{param.name}**: {param.description}")
-
-    # Skip query parameters, request body details, and all response information
-    # These are already captured in the inputSchema
-
-    return "\n".join(desc_parts)
+    # All parameters (path, query, etc.) are already visible in the tool's inputSchema,
+    # so we don't need to duplicate them in the description. This also prevents issues
+    # where hidden parameters (via transforms) would still appear in the description.
+    return base_description
 
 
 def format_description_with_responses(
