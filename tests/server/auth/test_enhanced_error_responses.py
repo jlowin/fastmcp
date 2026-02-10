@@ -8,6 +8,7 @@ This test suite covers:
 """
 
 import pytest
+from key_value.aio.stores.memory import MemoryStore
 from mcp.shared.auth import OAuthClientInformationFull
 from pydantic import AnyUrl
 from starlette.applications import Starlette
@@ -29,8 +30,6 @@ class TestEnhancedAuthorizationHandler:
     @pytest.fixture
     def oauth_proxy(self, rsa_key_pair):
         """Create OAuth proxy for testing."""
-        from key_value.aio.stores.memory import MemoryStore
-
         return OAuthProxy(
             upstream_authorization_endpoint="https://github.com/login/oauth/authorize",
             upstream_token_endpoint="https://github.com/login/oauth/access_token",
@@ -293,8 +292,6 @@ class TestContentNegotiation:
     @pytest.fixture
     def oauth_proxy(self):
         """Create OAuth proxy for testing."""
-        from key_value.aio.stores.memory import MemoryStore
-
         return OAuthProxy(
             upstream_authorization_endpoint="https://github.com/login/oauth/authorize",
             upstream_token_endpoint="https://github.com/login/oauth/access_token",
