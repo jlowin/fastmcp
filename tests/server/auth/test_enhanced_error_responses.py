@@ -8,6 +8,7 @@ This test suite covers:
 """
 
 import pytest
+from key_value.aio.stores.memory import MemoryStore
 from mcp.shared.auth import OAuthClientInformationFull
 from pydantic import AnyUrl
 from starlette.applications import Starlette
@@ -42,6 +43,7 @@ class TestEnhancedAuthorizationHandler:
             ),
             base_url="https://myserver.com",
             jwt_signing_key="test-secret",
+            client_storage=MemoryStore(),
         )
 
     def test_unregistered_client_returns_html_for_browser(self, oauth_proxy):
@@ -303,6 +305,7 @@ class TestContentNegotiation:
             ),
             base_url="https://myserver.com",
             jwt_signing_key="test-secret",
+            client_storage=MemoryStore(),
         )
 
     def test_html_preferred_when_both_accepted(self, oauth_proxy):
