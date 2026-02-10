@@ -8,6 +8,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Generic, Literal, cast
 
+import anyio
 from mcp.types import (
     ClientCapabilities,
     CreateMessageResult,
@@ -31,6 +32,7 @@ from typing_extensions import TypeVar
 from fastmcp import settings
 from fastmcp.exceptions import ToolError
 from fastmcp.server.sampling.sampling_tool import SamplingTool
+from fastmcp.utilities.async_utils import gather
 from fastmcp.utilities.json_schema import compress_schema
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.types import get_cached_typeadapter
@@ -260,7 +262,11 @@ async def execute_tools(
     Returns:
         List of tool result content blocks in the same order as tool_calls.
     """
-    from fastmcp.utilities.async_utils import gather
+    if tool_concurrency is not None and tool_concurrency < 0:
+        raise ValueError(
+            f"tool_concurrency must be None, 0 (unlimited), or a positive integer, "
+            f"got {tool_concurrency}"
+        )
 
     async def _execute_single_tool(tool_use: ToolUseContent) -> ToolResultContent:
         """Execute a single tool and return its result."""
@@ -310,10 +316,9 @@ async def execute_tools(
 
     # Check if any tool requires sequential execution
     requires_sequential = any(
-        tool_map.get(
-            tool_use.name, SamplingTool(name="", parameters={}, fn=lambda: None)
-        ).sequential
+        tool.sequential
         for tool_use in tool_calls
+        if (tool := tool_map.get(tool_use.name)) is not None
     )
 
     # Execute sequentially if required or if concurrency is None (default)
@@ -330,8 +335,6 @@ async def execute_tools(
         return await gather(*[_execute_single_tool(tc) for tc in tool_calls])
     else:
         # Bounded parallel execution with semaphore
-        import anyio
-
         semaphore = anyio.Semaphore(tool_concurrency)
 
         async def bounded_execute(tool_use: ToolUseContent) -> ToolResultContent:
