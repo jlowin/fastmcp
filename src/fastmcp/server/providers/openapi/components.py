@@ -218,6 +218,12 @@ class OpenAPITool(Tool):
         except httpx.RequestError as e:
             raise ValueError(f"Request error ({type(e).__name__}): {e!s}") from e
 
+        except Exception as e:
+            raise ValueError(
+                f"Error building request for {self._route.method.upper()} "
+                f"{self._route.path}: {type(e).__name__}: {e}"
+            ) from e
+
 
 class OpenAPIResource(Resource):
     """Resource implementation for OpenAPI endpoints."""
