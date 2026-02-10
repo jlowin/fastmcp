@@ -230,11 +230,13 @@ class OAuth(OAuthClientProvider):
         )
 
         if self._client_id:
-            # Create the full static client info directly which will avoid DCR
+            # Create the full static client info directly which will avoid DCR.
+            # Spread client_metadata so redirect_uris, grant_types, response_types,
+            # scope, etc. are included — servers may validate these fields.
             self._static_client_info = OAuthClientInformationFull(
                 client_id=self._client_id,
                 client_secret=self._client_secret,
-                **(self._additional_client_metadata or {}),
+                **client_metadata.model_dump(exclude_none=True),
             )
 
         token_storage = self._token_storage or MemoryStore()
@@ -273,6 +275,7 @@ class OAuth(OAuthClientProvider):
 
         if self._static_client_info is not None:
             self.context.client_info = self._static_client_info
+            await self.token_storage_adapter.set_client_info(self._static_client_info)
 
         if self.context.current_tokens and self.context.current_tokens.expires_in:
             self.context.update_token_expiry(self.context.current_tokens)
@@ -363,6 +366,15 @@ class OAuth(OAuthClientProvider):
                         break
 
         except ClientNotFoundError:
+            # Static credentials are fixed — retrying won't help. Surface the
+            # error so the user can correct their client_id / client_secret.
+            if self._static_client_info is not None:
+                raise ClientNotFoundError(
+                    "OAuth server rejected the static client credentials. "
+                    "Verify that the client_id (and client_secret, if provided) "
+                    "are correct and that the client is registered with the server."
+                ) from None
+
             logger.debug(
                 "OAuth client not found on server, clearing cache and retrying..."
             )
