@@ -233,10 +233,17 @@ class OAuth(OAuthClientProvider):
             # Create the full static client info directly which will avoid DCR.
             # Spread client_metadata so redirect_uris, grant_types, response_types,
             # scope, etc. are included — servers may validate these fields.
+            metadata = client_metadata.model_dump(exclude_none=True)
+            # Default token_endpoint_auth_method based on whether a secret is
+            # provided, unless the caller already set it via additional_client_metadata.
+            if "token_endpoint_auth_method" not in metadata:
+                metadata["token_endpoint_auth_method"] = (
+                    "client_secret_post" if self._client_secret else "none"
+                )
             self._static_client_info = OAuthClientInformationFull(
                 client_id=self._client_id,
                 client_secret=self._client_secret,
-                **client_metadata.model_dump(exclude_none=True),
+                **metadata,
             )
 
         token_storage = self._token_storage or MemoryStore()

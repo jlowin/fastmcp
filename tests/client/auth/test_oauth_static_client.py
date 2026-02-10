@@ -5,7 +5,7 @@ from unittest.mock import patch
 import httpx
 import pytest
 from mcp.shared.auth import OAuthClientInformationFull
-from pydantic import AnyHttpUrl
+from pydantic import AnyUrl
 
 from fastmcp.client import Client
 from fastmcp.client.auth import OAuth
@@ -43,6 +43,7 @@ class TestStaticClientInfoConstruction:
         assert info.response_types is not None
         assert "code" in info.response_types
         assert info.scope == "read write"
+        assert info.token_endpoint_auth_method == "client_secret_post"
 
     def test_static_client_info_without_secret(self):
         """Public clients can provide client_id without client_secret."""
@@ -55,6 +56,7 @@ class TestStaticClientInfoConstruction:
         assert info is not None
         assert info.client_id == "public-client"
         assert info.client_secret is None
+        assert info.token_endpoint_auth_method == "none"
         # Metadata should still be present
         assert info.redirect_uris is not None
         assert info.grant_types is not None
@@ -177,6 +179,7 @@ class TestStaticClientE2E:
     async def test_static_client_with_dcr_disabled(self):
         """Static client_id should work when the server has DCR disabled."""
         port = find_available_port()
+        callback_port = find_available_port()
         issuer_url = f"http://127.0.0.1:{port}"
 
         provider = InMemoryOAuthProvider(
@@ -193,24 +196,26 @@ class TestStaticClientE2E:
         def greet(name: str) -> str:
             return f"Hello, {name}!"
 
-        # Pre-register a client directly in the provider
+        # Pre-register a client directly in the provider.
+        # The redirect_uri must match what the OAuth client will use.
         pre_registered = OAuthClientInformationFull(
             client_id="pre-registered-client",
             client_secret="pre-registered-secret",
-            redirect_uris=[AnyHttpUrl("http://localhost:0/callback")],
+            redirect_uris=[AnyUrl(f"http://localhost:{callback_port}/callback")],
             grant_types=["authorization_code", "refresh_token"],
             response_types=["code"],
+            token_endpoint_auth_method="client_secret_post",
             scope="read write",
         )
         await provider.register_client(pre_registered)
 
         async with run_server_async(server, port=port, transport="http") as url:
-            # Use HeadlessOAuth with static credentials
             oauth = HeadlessOAuth(
                 mcp_url=url,
                 client_id="pre-registered-client",
                 client_secret="pre-registered-secret",
                 scopes=["read", "write"],
+                callback_port=callback_port,
             )
 
             async with Client(
@@ -224,6 +229,7 @@ class TestStaticClientE2E:
     async def test_static_client_with_dcr_enabled(self):
         """Static client_id should also work when DCR is enabled (skips DCR)."""
         port = find_available_port()
+        callback_port = find_available_port()
         issuer_url = f"http://127.0.0.1:{port}"
 
         provider = InMemoryOAuthProvider(
@@ -243,9 +249,10 @@ class TestStaticClientE2E:
         pre_registered = OAuthClientInformationFull(
             client_id="my-app",
             client_secret="my-secret",
-            redirect_uris=[AnyHttpUrl("http://localhost:0/callback")],
+            redirect_uris=[AnyUrl(f"http://localhost:{callback_port}/callback")],
             grant_types=["authorization_code", "refresh_token"],
             response_types=["code"],
+            token_endpoint_auth_method="client_secret_post",
             scope="read",
         )
         await provider.register_client(pre_registered)
@@ -256,6 +263,7 @@ class TestStaticClientE2E:
                 client_id="my-app",
                 client_secret="my-secret",
                 scopes=["read"],
+                callback_port=callback_port,
             )
 
             async with Client(
