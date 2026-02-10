@@ -6,6 +6,7 @@ import inspect
 from collections.abc import Callable
 from typing import Any
 
+from mcp.types import TextContent
 from mcp.types import Tool as SDKTool
 from pydantic import ConfigDict
 
@@ -178,14 +179,14 @@ class SamplingTool(FastMCPBaseModel):
                             "x-fastmcp-wrap-result"
                         ):
                             # Tool wraps results: {"result": value} -> value
-                            return result.structured_content.get("result")
+                            return result.structured_content["result"]
                         else:
                             # No wrapping: use structured_content directly
                             return result.structured_content
                     # Otherwise, extract from text content
                     if result.content and len(result.content) > 0:
                         first_content = result.content[0]
-                        if hasattr(first_content, "text"):
+                        if isinstance(first_content, TextContent):
                             return first_content.text
                 return result
 
