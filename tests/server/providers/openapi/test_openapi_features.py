@@ -931,6 +931,37 @@ class TestValidateOutput:
             assert result.structured_content is not None
             assert result.structured_content["unexpected_field"] == "surprise"
 
+    async def test_validate_output_false_wraps_non_dict_response(
+        self, spec_with_output_schema
+    ):
+        """Non-dict responses are wrapped even when schema says object and validate_output=False."""
+        mock_client = Mock(spec=httpx.AsyncClient)
+        mock_client.base_url = "https://api.example.com"
+        mock_client.headers = None
+
+        # Backend returns an array even though schema says object
+        mock_response = Mock(spec=Response)
+        mock_response.status_code = 200
+        mock_response.json.return_value = [{"id": 1}, {"id": 2}]
+        mock_response.raise_for_status = Mock()
+        mock_client.send = AsyncMock(return_value=mock_response)
+
+        provider = OpenAPIProvider(
+            openapi_spec=spec_with_output_schema,
+            client=mock_client,
+            validate_output=False,
+        )
+        mcp = FastMCP("Test")
+        mcp.add_provider(provider)
+
+        async with Client(mcp) as mcp_client:
+            result = await mcp_client.call_tool("get_user", {"id": 1})
+            assert result is not None
+            # Non-dict should be wrapped so structured_content is always a dict
+            assert result.structured_content is not None
+            assert isinstance(result.structured_content, dict)
+            assert result.structured_content["result"] == [{"id": 1}, {"id": 2}]
+
     async def test_from_openapi_threads_validate_output(self, spec_with_output_schema):
         """FastMCP.from_openapi() correctly passes validate_output to the provider."""
         mock_client = Mock(spec=httpx.AsyncClient)
