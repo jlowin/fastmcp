@@ -186,7 +186,7 @@ class SamplingTool(FastMCPBaseModel):
                             "x-fastmcp-wrap-result"
                         ):
                             # Tool wraps results: {"result": value} -> value
-                            return result.structured_content["result"]
+                            return result.structured_content.get("result")
                         else:
                             # No wrapping: use structured_content directly
                             return result.structured_content
