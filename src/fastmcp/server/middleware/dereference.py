@@ -17,7 +17,7 @@ class DereferenceRefsMiddleware(Middleware):
 
     Some MCP clients (e.g., VS Code Copilot) don't handle JSON Schema $ref
     properly. This middleware inlines all $ref definitions so schemas are
-    self-contained. Enabled by default via ``FastMCP(dereference_refs=True)``.
+    self-contained. Enabled by default via ``FastMCP(dereference_schemas=True)``.
     """
 
     @override

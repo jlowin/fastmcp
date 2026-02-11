@@ -229,7 +229,7 @@ class FastMCP(
         tools: Sequence[Tool | Callable[..., Any]] | None = None,
         on_duplicate: DuplicateBehavior | None = None,
         mask_error_details: bool | None = None,
-        dereference_refs: bool = True,
+        dereference_schemas: bool = True,
         strict_input_validation: bool | None = None,
         list_page_size: int | None = None,
         tasks: bool | None = None,
@@ -323,7 +323,7 @@ class FastMCP(
 
         self.middleware: list[Middleware] = list(middleware or [])
 
-        if dereference_refs:
+        if dereference_schemas:
             from fastmcp.server.middleware.dereference import (
                 DereferenceRefsMiddleware,
             )

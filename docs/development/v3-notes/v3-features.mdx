@@ -72,10 +72,10 @@ Auth check functions can now be `async`, enabling authorization decisions that d
 
 ### Optional `$ref` Dereferencing in Schemas
 
-Schema `$ref` dereferencing — which inlines all `$defs` for compatibility with MCP clients that don't handle `$ref` — is now controlled by the `dereference_refs` constructor kwarg ([#3141](https://github.com/jlowin/fastmcp/issues/3141)). Default is `True` (dereference on) because the non-compliant clients are popular and the failure mode is silent breakage that server authors can't diagnose. Opt out when you know your clients handle `$ref` and want smaller schemas:
+Schema `$ref` dereferencing — which inlines all `$defs` for compatibility with MCP clients that don't handle `$ref` — is now controlled by the `dereference_schemas` constructor kwarg ([#3141](https://github.com/jlowin/fastmcp/issues/3141)). Default is `True` (dereference on) because the non-compliant clients are popular and the failure mode is silent breakage that server authors can't diagnose. Opt out when you know your clients handle `$ref` and want smaller schemas:
 
 ```python
-mcp = FastMCP("my-server", dereference_refs=False)
+mcp = FastMCP("my-server", dereference_schemas=False)
 ```
 
 Dereferencing is implemented as middleware (`DereferenceRefsMiddleware`) that runs at serve-time, so schemas are stored with `$ref` intact and only inlined when sent to clients.

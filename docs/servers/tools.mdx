@@ -179,7 +179,7 @@ FastMCP automatically dereferences `$ref` entries in tool schemas to ensure comp
 Dereferencing happens at serve-time via middleware, so your schemas are stored with `$ref` intact and only inlined when sent to clients. If you know your clients handle `$ref` correctly and prefer smaller schemas, you can opt out:
 
 ```python
-mcp = FastMCP("my-server", dereference_refs=False)
+mcp = FastMCP("my-server", dereference_schemas=False)
 ```
 </Note>
 

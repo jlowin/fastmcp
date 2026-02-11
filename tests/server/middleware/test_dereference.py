@@ -19,11 +19,11 @@ class PaintRequest(pydantic.BaseModel):
 
 
 class TestDereferenceRefsMiddleware:
-    """End-to-end tests for the dereference_refs server kwarg."""
+    """End-to-end tests for the dereference_schemas server kwarg."""
 
-    async def test_dereference_refs_true_inlines_refs(self):
-        """With dereference_refs=True (default), tool schemas have $ref inlined."""
-        mcp = FastMCP("test", dereference_refs=True)
+    async def test_dereference_schemas_true_inlines_refs(self):
+        """With dereference_schemas=True (default), tool schemas have $ref inlined."""
+        mcp = FastMCP("test", dereference_schemas=True)
 
         @mcp.tool
         def paint(request: PaintRequest) -> str:
@@ -38,9 +38,9 @@ class TestDereferenceRefsMiddleware:
         # The Color enum should be inlined into the request property
         assert "$ref" not in str(schema)
 
-    async def test_dereference_refs_false_preserves_refs(self):
-        """With dereference_refs=False, $ref and $defs are preserved."""
-        mcp = FastMCP("test", dereference_refs=False)
+    async def test_dereference_schemas_false_preserves_refs(self):
+        """With dereference_schemas=False, $ref and $defs are preserved."""
+        mcp = FastMCP("test", dereference_schemas=False)
 
         @mcp.tool
         def paint(request: PaintRequest) -> str:
@@ -69,7 +69,7 @@ class TestDereferenceRefsMiddleware:
 
     async def test_does_not_mutate_original_tool(self):
         """Middleware should not mutate the shared Tool object."""
-        mcp = FastMCP("test", dereference_refs=True)
+        mcp = FastMCP("test", dereference_schemas=True)
 
         @mcp.tool
         def paint(request: PaintRequest) -> str:
@@ -89,7 +89,7 @@ class TestDereferenceRefsMiddleware:
 
     async def test_output_schema_dereferenced(self):
         """Middleware also dereferences output_schema when present."""
-        mcp = FastMCP("test", dereference_refs=True)
+        mcp = FastMCP("test", dereference_schemas=True)
 
         @mcp.tool
         def paint(request: PaintRequest) -> PaintRequest:
@@ -106,7 +106,7 @@ class TestDereferenceRefsMiddleware:
 
     async def test_resource_templates_dereferenced(self):
         """Middleware dereferences resource template schemas."""
-        mcp = FastMCP("test", dereference_refs=True)
+        mcp = FastMCP("test", dereference_schemas=True)
 
         @mcp.resource("paint://{color}")
         def get_paint(color: Color) -> str:
@@ -121,7 +121,7 @@ class TestDereferenceRefsMiddleware:
 
     async def test_no_ref_schemas_unchanged(self):
         """Tools without $ref should pass through unmodified."""
-        mcp = FastMCP("test", dereference_refs=True)
+        mcp = FastMCP("test", dereference_schemas=True)
 
         @mcp.tool
         def add(a: int, b: int) -> int:
