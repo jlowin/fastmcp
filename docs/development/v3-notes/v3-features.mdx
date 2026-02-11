@@ -70,7 +70,7 @@ Background tasks now use a distributed Redis notification queue for reliable del
 
 Sixteen deprecated keyword arguments have been removed from `FastMCP.__init__`. Passing any of them now raises `TypeError` with a migration hint. Environment variables (e.g., `FASTMCP_HOST`) continue to work — only the constructor kwargs moved.
 
-**Transport/server settings** (`host`, `port`, `log_level`, `debug`, `sse_path`, `message_path`, `streamable_http_path`, `json_response`, `stateless_http`): Pass to `run_http_async()` or `http_app()`, or set via environment variables.
+**Transport/server settings** (`host`, `port`, `log_level`, `debug`, `sse_path`, `message_path`, `streamable_http_path`, `json_response`, `stateless_http`): Pass to `run()`, `run_http_async()`, or `http_app()` as appropriate, or set via environment variables.
 
 ```python
 # Before
@@ -79,7 +79,7 @@ mcp.run()
 
 # After
 mcp = FastMCP("server")
-mcp.run_http(host="0.0.0.0", port=8080)
+mcp.run(transport="http", host="0.0.0.0", port=8080)
 ```
 
 **Duplicate handling** (`on_duplicate_tools`, `on_duplicate_resources`, `on_duplicate_prompts`): Use the unified `on_duplicate=` parameter.

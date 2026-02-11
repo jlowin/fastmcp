@@ -111,9 +111,9 @@ class _TransformingMCPServerMixin(FastMCPBaseModel):
             name=server_name,
         )
 
-        if self.include_tags:
+        if self.include_tags is not None:
             wrapped_mcp_server.enable(tags=self.include_tags, only=True)
-        if self.exclude_tags:
+        if self.exclude_tags is not None:
             wrapped_mcp_server.disable(tags=self.exclude_tags)
 
         # Apply tool transforms if configured
