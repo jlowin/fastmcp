@@ -385,17 +385,20 @@ def compress_schema(
     if dereference:
         schema = dereference_refs(schema)
 
+    # Resolve root-level $ref for MCP spec compliance (requires type: object at root)
+    schema = resolve_root_ref(schema)
+
     # Remove specific parameters if requested
     for param in prune_params or []:
         schema = _prune_param(schema, param=param)
 
-    # Apply combined optimizations in a single tree traversal
-    if prune_titles or prune_additional_properties:
-        schema = _single_pass_optimize(
-            schema,
-            prune_titles=prune_titles,
-            prune_additional_properties=prune_additional_properties,
-            prune_defs=False,
-        )
+    # Apply combined optimizations in a single tree traversal.
+    # Always prune unused $defs to keep schemas clean after parameter removal.
+    schema = _single_pass_optimize(
+        schema,
+        prune_titles=prune_titles,
+        prune_additional_properties=prune_additional_properties,
+        prune_defs=True,
+    )
 
     return schema
