@@ -139,7 +139,8 @@ class TestSamplingToolFromCallableTool:
         assert sampling_tool.name == "search"
         assert sampling_tool.description == "Search the web."
         assert "query" in sampling_tool.parameters.get("properties", {})
-        assert sampling_tool.fn is function_tool.fn
+        # fn is now a wrapper that calls tool.run() for proper result processing
+        assert callable(sampling_tool.fn)
 
     def test_from_function_tool_with_overrides(self):
         """Test converting FunctionTool with name/description overrides."""
@@ -233,3 +234,59 @@ class TestSamplingToolFromCallableTool:
 
         with pytest.raises(TypeError, match="Expected FunctionTool or TransformedTool"):
             SamplingTool.from_callable_tool(my_function)  # type: ignore[arg-type]
+
+    async def test_from_function_tool_with_output_schema(self):
+        """Test that FunctionTool with output_schema is handled correctly."""
+
+        def search(query: str) -> dict:
+            """Search for something."""
+            return {"results": ["item1", "item2"], "count": 2}
+
+        # Create FunctionTool with x-fastmcp-wrap-result
+        function_tool = FunctionTool.from_function(
+            search,
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "results": {"type": "array"},
+                    "count": {"type": "integer"},
+                },
+                "x-fastmcp-wrap-result": True,
+            },
+        )
+
+        sampling_tool = SamplingTool.from_callable_tool(function_tool)
+
+        # Run the tool - should unwrap the {"result": {...}} wrapper
+        result = await sampling_tool.run({"query": "test"})
+
+        # Should get the unwrapped dict, not ToolResult
+        assert isinstance(result, dict)
+        assert result == {"results": ["item1", "item2"], "count": 2}
+
+    async def test_from_function_tool_without_wrap_result(self):
+        """Test that FunctionTool without x-fastmcp-wrap-result is handled correctly."""
+
+        def get_data() -> dict:
+            """Get some data."""
+            return {"status": "ok", "value": 42}
+
+        # Create FunctionTool with output_schema but no wrap-result flag
+        function_tool = FunctionTool.from_function(
+            get_data,
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "status": {"type": "string"},
+                    "value": {"type": "integer"},
+                },
+            },
+        )
+
+        sampling_tool = SamplingTool.from_callable_tool(function_tool)
+
+        # Run the tool - should return structured_content directly
+        result = await sampling_tool.run({})
+
+        assert isinstance(result, dict)
+        assert result == {"status": "ok", "value": 42}

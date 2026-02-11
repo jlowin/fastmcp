@@ -148,36 +148,31 @@ class SamplingTool(FastMCPBaseModel):
                 "Only callable tools can be converted to SamplingTools."
             )
 
-        # For TransformedTool, we need to use .run() and unwrap ToolResult
-        # because .fn might be a forwarding function that returns ToolResult
-        if isinstance(tool, TransformedTool):
+        # Both FunctionTool and TransformedTool need .run() to ensure proper
+        # result processing (serializers, output_schema, wrap-result flags)
+        async def wrapper(**kwargs: Any) -> Any:
+            result = await tool.run(kwargs)
+            # Unwrap ToolResult - extract the actual value
+            if isinstance(result, ToolResult):
+                # If there's structured_content, use that
+                if result.structured_content is not None:
+                    # Check tool's schema - this is the source of truth
+                    if tool.output_schema and tool.output_schema.get(
+                        "x-fastmcp-wrap-result"
+                    ):
+                        # Tool wraps results: {"result": value} -> value
+                        return result.structured_content.get("result")
+                    else:
+                        # No wrapping: use structured_content directly
+                        return result.structured_content
+                # Otherwise, extract from text content
+                if result.content and len(result.content) > 0:
+                    first_content = result.content[0]
+                    if isinstance(first_content, TextContent):
+                        return first_content.text
+            return result
 
-            async def wrapper(**kwargs: Any) -> Any:
-                result = await tool.run(kwargs)
-                # Unwrap ToolResult - extract the actual value
-                if isinstance(result, ToolResult):
-                    # If there's structured_content, use that
-                    if result.structured_content is not None:
-                        # Check tool's schema - this is the source of truth
-                        if tool.output_schema and tool.output_schema.get(
-                            "x-fastmcp-wrap-result"
-                        ):
-                            # Tool wraps results: {"result": value} -> value
-                            return result.structured_content.get("result")
-                        else:
-                            # No wrapping: use structured_content directly
-                            return result.structured_content
-                    # Otherwise, extract from text content
-                    if result.content and len(result.content) > 0:
-                        first_content = result.content[0]
-                        if isinstance(first_content, TextContent):
-                            return first_content.text
-                return result
-
-            fn = wrapper
-        else:
-            # FunctionTool.fn can be used directly
-            fn = tool.fn
+        fn = wrapper
 
         # Extract the callable function, name, description, and parameters
         return cls(
