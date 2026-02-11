@@ -270,8 +270,8 @@ class TestCompressSchema:
         assert "remove" not in result["properties"]
         # Check that required list was updated
         assert result["required"] == ["keep"]
-        # $defs are preserved (dereferencing is handled by middleware, not compress_schema)
-        assert "$defs" in result
+        # All $defs entries are now unreferenced after pruning "remove", so they're cleaned up
+        assert "$defs" not in result
         # Check that additionalProperties was removed
         assert "additionalProperties" not in result
 
