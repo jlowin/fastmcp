@@ -4,6 +4,79 @@ icon: "list-check"
 rss: true
 ---
 
+<Update label="v3.0.0rc1" description="2026-02-12">
+
+**[v3.0.0rc1: RC-ing is Believing](https://github.com/jlowin/fastmcp/releases/tag/v3.0.0rc1)**
+
+FastMCP 3 RC1 means we believe the API is stable. Beta 2 drew a wave of real-world adoption — production deployments, migration reports, integration testing — and the feedback overwhelmingly confirmed that the architecture works. This release closes gaps that surfaced under load: auth flows that needed to be async, background tasks that needed reliable notification delivery, and APIs still carrying beta-era naming. If nothing unexpected surfaces, this is what 3.0.0 looks like.
+
+🚨 **Breaking Changes** — The `ui=` parameter is now `app=` with a unified `AppConfig` class (matching the feature's actual name), and 16 `FastMCP()` constructor kwargs have finally been removed. If you've been ignoring months of deprecation warnings, you'll get a `TypeError` with specific migration instructions.
+
+🔐 **Auth Improvements** — Three changes that together round out FastMCP's auth story for production. `auth=` checks can now be `async`, so you can hit databases or external services during authorization — previously, passing an async function silently passed because the unawaited coroutine was truthy. Static Client Registration lets clients provide a pre-registered `client_id`/`client_secret` directly, bypassing DCR for servers that don't support it. And Azure OBO flows are now declarative via dependency injection:
+
+```python
+from fastmcp.server.auth.providers.azure import EntraOBOToken
+
+@mcp.tool()
+async def get_emails(
+    graph_token: str = EntraOBOToken(["https://graph.microsoft.com/Mail.Read"]),
+):
+    # OBO exchange already happened — just use the token
+    ...
+```
+
+⚡ **Concurrent Sampling** — When an LLM returns multiple tool calls in a single response, `context.sample()` can now execute them in parallel. Opt in with `tool_concurrency=0` for unlimited parallelism, or set a bound. Tools that aren't safe to parallelize can declare `sequential=True`.
+
+📡 **Background Task Notifications** — Background tasks now reliably push progress updates and elicit user input through the standard MCP protocol. A distributed Redis queue replaces polling (7,200 round-trips/hour → one blocking call), and `ctx.elicit()` in background tasks automatically relays through the client's standard `elicitation_handler`.
+
+✅ **OpenAPI Output Validation** — When backends don't conform to their own OpenAPI schemas, the MCP SDK rejects the response and the tool fails. `validate_output=False` disables strict schema checking while still passing structured JSON to clients — a necessary escape hatch for imperfect APIs.
+
+## What's Changed
+### Enhancements 🔧
+* generate-cli: auto-generate SKILL.md agent skill by [@jlowin](https://github.com/jlowin) in [#3115](https://github.com/jlowin/fastmcp/pull/3115)
+* Scope Martian triage to bug-labeled issues for jlowin by [@jlowin](https://github.com/jlowin) in [#3124](https://github.com/jlowin/fastmcp/pull/3124)
+* Add Azure OBO dependencies, auth token injection, and documentation by [@jlowin](https://github.com/jlowin) in [#2918](https://github.com/jlowin/fastmcp/pull/2918)
+* feat: add Static Client Registration (#3085) by [@martimfasantos](https://github.com/martimfasantos) in [#3086](https://github.com/jlowin/fastmcp/pull/3086)
+* Add concurrent tool execution with sequential flag by [@strawgate](https://github.com/strawgate) in [#3022](https://github.com/jlowin/fastmcp/pull/3022)
+* Add validate_output option for OpenAPI tools by [@jlowin](https://github.com/jlowin) in [#3134](https://github.com/jlowin/fastmcp/pull/3134)
+* Relay task elicitation through standard MCP protocol by [@chrisguidry](https://github.com/chrisguidry) in [#3136](https://github.com/jlowin/fastmcp/pull/3136)
+* Bump py-key-value-aio to >=0.4.0,<0.5.0 by [@strawgate](https://github.com/strawgate) in [#3143](https://github.com/jlowin/fastmcp/pull/3143)
+* Support async auth checks by [@jlowin](https://github.com/jlowin) in [#3152](https://github.com/jlowin/fastmcp/pull/3152)
+* Make $ref dereferencing optional via FastMCP(dereference_refs=...) by [@jlowin](https://github.com/jlowin) in [#3151](https://github.com/jlowin/fastmcp/pull/3151)
+* Expose local_provider property, deprecate FastMCP.remove_tool() by [@jlowin](https://github.com/jlowin) in [#3155](https://github.com/jlowin/fastmcp/pull/3155)
+* Add helpers for converting FunctionTool and TransformedTool to SamplingTool by [@strawgate](https://github.com/strawgate) in [#3062](https://github.com/jlowin/fastmcp/pull/3062)
+* Updates to github actions / workflows for claude by [@strawgate](https://github.com/strawgate) in [#3157](https://github.com/jlowin/fastmcp/pull/3157)
+### Fixes 🐞
+* Updated deprecation URL for V3 by [@SrzStephen](https://github.com/SrzStephen) in [#3108](https://github.com/jlowin/fastmcp/pull/3108)
+* Fix Windows test timeouts in OAuth proxy provider tests by [@strawgate](https://github.com/strawgate) in [#3123](https://github.com/jlowin/fastmcp/pull/3123)
+* Fix session visibility marks leaking across sessions by [@jlowin](https://github.com/jlowin) in [#3132](https://github.com/jlowin/fastmcp/pull/3132)
+* Fix unhandled exceptions in OpenAPI POST tool calls by [@jlowin](https://github.com/jlowin) in [#3133](https://github.com/jlowin/fastmcp/pull/3133)
+* feat: distributed notification queue + BLPOP elicitation for background tasks by [@gfortaine](https://github.com/gfortaine) in [#2906](https://github.com/jlowin/fastmcp/pull/2906)
+* fix: snapshot access token for background tasks (#3095) by [@gfortaine](https://github.com/gfortaine) in [#3138](https://github.com/jlowin/fastmcp/pull/3138)
+* Stop duplicating path parameter descriptions into tool prose by [@jlowin](https://github.com/jlowin) in [#3149](https://github.com/jlowin/fastmcp/pull/3149)
+* fix: guard client pagination loops against misbehaving servers by [@jlowin](https://github.com/jlowin) in [#3167](https://github.com/jlowin/fastmcp/pull/3167)
+* Fix stale get_* references in docs and examples by [@jlowin](https://github.com/jlowin) in [#3168](https://github.com/jlowin/fastmcp/pull/3168)
+* Support non-serializable values in Context.set_state by [@jlowin](https://github.com/jlowin) in [#3171](https://github.com/jlowin/fastmcp/pull/3171)
+* Fix stale request context in StatefulProxyClient handlers by [@jlowin](https://github.com/jlowin) in [#3172](https://github.com/jlowin/fastmcp/pull/3172)
+### Breaking Changes 🛫
+* Rename ui= to app= and consolidate ToolUI/ResourceUI into AppConfig by [@jlowin](https://github.com/jlowin) in [#3117](https://github.com/jlowin/fastmcp/pull/3117)
+* Remove deprecated FastMCP() constructor kwargs by [@jlowin](https://github.com/jlowin) in [#3148](https://github.com/jlowin/fastmcp/pull/3148)
+### Docs 📚
+* Update docs to reference beta 2 by [@jlowin](https://github.com/jlowin) in [#3112](https://github.com/jlowin/fastmcp/pull/3112)
+* docs: add pre-registered OAuth clients to v3-features by [@jlowin](https://github.com/jlowin) in [#3129](https://github.com/jlowin/fastmcp/pull/3129)
+### Dependencies 📦
+* chore(deps): bump cryptography from 46.0.3 to 46.0.5 in /examples/testing_demo in the uv group across 1 directory by @dependabot in [#3140](https://github.com/jlowin/fastmcp/pull/3140)
+### Other Changes 🦾
+* docs: add v3.0.0rc1 features to v3-features tracking by [@jlowin](https://github.com/jlowin) in [#3145](https://github.com/jlowin/fastmcp/pull/3145)
+* docs: remove nonexistent MSALApp from rc1 notes by [@jlowin](https://github.com/jlowin) in [#3146](https://github.com/jlowin/fastmcp/pull/3146)
+
+## New Contributors
+* [@martimfasantos](https://github.com/martimfasantos) made their first contribution in [#3086](https://github.com/jlowin/fastmcp/pull/3086)
+
+**Full Changelog**: https://github.com/jlowin/fastmcp/compare/v3.0.0b2...v3.0.0rc1
+
+</Update>
+
 <Update label="v3.0.0b1" description="2026-01-20">
 
 **[v3.0.0b1: This Beta Work](https://github.com/jlowin/fastmcp/releases/tag/v3.0.0b1)**

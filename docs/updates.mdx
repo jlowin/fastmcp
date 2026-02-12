@@ -5,6 +5,26 @@ icon: "sparkles"
 tag: NEW
 ---
 
+<Update label="FastMCP 3.0.0rc1" description="February 12, 2026" tags={["Releases"]}>
+<Card
+title="FastMCP v3.0.0rc1: RC-ing is Believing"
+href="https://github.com/jlowin/fastmcp/releases/tag/v3.0.0rc1"
+cta="Read the release notes"
+>
+FastMCP 3 RC1 means we believe the API is stable. Beta 2 drew a wave of real-world adoption — production deployments, migration reports, integration testing — and the feedback overwhelmingly confirmed that the architecture works. This release closes gaps that surfaced under load: auth flows that needed to be async, background tasks that needed reliable notification delivery, and APIs still carrying beta-era naming. If nothing unexpected surfaces, this is what 3.0.0 looks like.
+
+🚨 **Breaking Changes** — The `ui=` parameter is now `app=` with a unified `AppConfig` class, and 16 `FastMCP()` constructor kwargs have been removed after months of deprecation warnings.
+
+🔐 **Auth Improvements** — Async `auth=` checks, Static Client Registration for servers without DCR, and declarative Azure OBO flows via dependency injection.
+
+⚡ **Concurrent Sampling** — `context.sample()` can now execute multiple tool calls in parallel with `tool_concurrency=0`.
+
+📡 **Background Task Notifications** — A distributed Redis queue replaces polling for progress updates and elicitation relay.
+
+✅ **OpenAPI Output Validation** — `validate_output=False` disables strict schema checking for imperfect backend APIs.
+</Card>
+</Update>
+
 <Update label="FastMCP 3.0.0b1" description="January 20, 2026" tags={["Releases"]}>
 <Card
 title="FastMCP 3.0.0b1: This Beta Work"
