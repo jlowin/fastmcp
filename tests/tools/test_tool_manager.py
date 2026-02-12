@@ -75,8 +75,9 @@ class TestAddTools:
         assert tool is not None
         assert tool.name == "create_user"
         assert tool.description == "Create a new user."
-        assert "name" in tool.parameters["$defs"]["UserInput"]["properties"]
-        assert "age" in tool.parameters["$defs"]["UserInput"]["properties"]
+        # $refs are dereferenced so UserInput is inlined
+        assert "name" in tool.parameters["properties"]["user"]["properties"]
+        assert "age" in tool.parameters["properties"]["user"]["properties"]
         assert "flag" in tool.parameters["properties"]
 
     async def test_callable_object(self):

@@ -53,12 +53,35 @@ def dereference_refs(schema: dict[str, Any]) -> dict[str, Any]:
         if "$defs" in dereferenced:
             dereferenced = {k: v for k, v in dereferenced.items() if k != "$defs"}
 
+        # Remove discriminator.mapping entries that referenced $defs
+        _strip_discriminator_mappings(dereferenced)
+
         return dereferenced
 
     except JsonRefError:
         # Self-referencing/circular schemas can't be fully dereferenced
         # Fall back to resolving only root-level $ref (for MCP spec compliance)
         return resolve_root_ref(schema)
+
+
+def _strip_discriminator_mappings(schema: Any, depth: int = 0) -> None:
+    """Remove discriminator.mapping entries whose values are $defs references.
+
+    Pydantic emits discriminator.mapping with plain-string references like
+    ``"#/$defs/Cat"`` that become dangling after $defs are removed by
+    dereference_refs(). The oneOf/anyOf variants already carry their own
+    const fields, so the mapping is redundant once refs are inlined.
+    """
+    if depth > 50 or not isinstance(schema, dict):
+        return
+    if "discriminator" in schema and isinstance(schema["discriminator"], dict):
+        schema["discriminator"].pop("mapping", None)
+    for value in schema.values():
+        if isinstance(value, dict):
+            _strip_discriminator_mappings(value, depth + 1)
+        elif isinstance(value, list):
+            for item in value:
+                _strip_discriminator_mappings(item, depth + 1)
 
 
 def _merge_ref_siblings(
@@ -367,6 +390,7 @@ def compress_schema(
     prune_defs: bool = True,
     prune_additional_properties: bool = True,
     prune_titles: bool = False,
+    dereference: bool = False,
 ) -> dict[str, Any]:
     """
     Remove the given parameters from the schema.
@@ -377,6 +401,7 @@ def compress_schema(
         prune_defs: Whether to remove unused definitions
         prune_additional_properties: Whether to remove additionalProperties: false
         prune_titles: Whether to remove title fields from the schema
+        dereference: Whether to inline $ref references for client compatibility
     """
     # Remove specific parameters if requested
     for param in prune_params or []:
@@ -390,5 +415,9 @@ def compress_schema(
             prune_additional_properties=prune_additional_properties,
             prune_defs=prune_defs,
         )
+
+    # Inline $ref references for MCP clients that don't handle them
+    if dereference:
+        schema = dereference_refs(schema)
 
     return schema
