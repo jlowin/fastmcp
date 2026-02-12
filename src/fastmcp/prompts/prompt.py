@@ -66,7 +66,7 @@ class Message(pydantic.BaseModel):
     def __init__(
         self,
         content: Any,
-        role: Literal["user", "assistant"] = "user",
+        role: Literal["user", "assistant", "system"] = "user",
     ):
         """Create Message with automatic serialization.
 
@@ -74,7 +74,7 @@ class Message(pydantic.BaseModel):
             content: The message content. str passes through directly.
                      TextContent and EmbeddedResource pass through.
                      Other types (dict, list, BaseModel) are JSON-serialized.
-            role: The message role, either "user" or "assistant".
+            role: The message role, either "user", "assistant" or "system".
         """
         # Handle already-wrapped content types
         if isinstance(content, (TextContent, EmbeddedResource)):

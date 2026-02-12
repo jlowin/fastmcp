@@ -76,6 +76,14 @@ class TestRenderPrompt:
         result = await prompt.render()
         assert result.messages == [Message("Hello, world!", role="assistant")]
 
+    async def test_fn_returns_system_message(self):
+        async def fn() -> list[Message]:
+            return [Message("Hello, world!", role="system")]
+
+        prompt = Prompt.from_function(fn)
+        result = await prompt.render()
+        assert result.messages == [Message("Hello, world!", role="system")]
+
     async def test_fn_returns_multiple_messages(self):
         expected = [
             Message("Hello, world!"),
