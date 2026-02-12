@@ -644,7 +644,7 @@ requests.
 The key is automatically prefixed with the session identifier.
 
 
-#### `get_state` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/context.py#L1201" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+#### `get_state` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/context.py#L1206" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 ```python
 get_state(self, key: str) -> Any
@@ -658,7 +658,7 @@ then falls back to the session-scoped state store.
 Returns None if the key is not found.
 
 
-#### `delete_state` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/context.py#L1215" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+#### `delete_state` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/context.py#L1220" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 ```python
 delete_state(self, key: str) -> None
@@ -669,7 +669,7 @@ Delete a value from the state store.
 Removes from both request-scoped and session-scoped stores.
 
 
-#### `enable_components` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/context.py#L1236" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+#### `enable_components` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/context.py#L1241" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 ```python
 enable_components(self) -> None
@@ -693,7 +693,7 @@ ResourceListChangedNotification, and PromptListChangedNotification.
 - `match_all`: If True, matches all components regardless of other criteria.
 
 
-#### `disable_components` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/context.py#L1274" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+#### `disable_components` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/context.py#L1279" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 ```python
 disable_components(self) -> None
@@ -717,7 +717,7 @@ ResourceListChangedNotification, and PromptListChangedNotification.
 - `match_all`: If True, matches all components regardless of other criteria.
 
 
-#### `reset_visibility` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/context.py#L1312" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+#### `reset_visibility` <sup><a href="https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/context.py#L1317" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 ```python
 reset_visibility(self) -> None
