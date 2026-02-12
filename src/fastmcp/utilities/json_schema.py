@@ -367,6 +367,7 @@ def compress_schema(
     prune_defs: bool = True,
     prune_additional_properties: bool = True,
     prune_titles: bool = False,
+    dereference: bool = False,
 ) -> dict[str, Any]:
     """
     Remove the given parameters from the schema.
@@ -377,6 +378,7 @@ def compress_schema(
         prune_defs: Whether to remove unused definitions
         prune_additional_properties: Whether to remove additionalProperties: false
         prune_titles: Whether to remove title fields from the schema
+        dereference: Whether to inline $ref references for client compatibility
     """
     # Remove specific parameters if requested
     for param in prune_params or []:
@@ -390,5 +392,9 @@ def compress_schema(
             prune_additional_properties=prune_additional_properties,
             prune_defs=prune_defs,
         )
+
+    # Inline $ref references for MCP clients that don't handle them
+    if dereference:
+        schema = dereference_refs(schema)
 
     return schema

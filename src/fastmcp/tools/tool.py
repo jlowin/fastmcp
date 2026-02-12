@@ -497,7 +497,10 @@ class ParsedFunction:
         # Compress and handle exclude_args
         prune_params = list(exclude_args) if exclude_args else None
         input_schema = compress_schema(
-            input_schema, prune_params=prune_params, prune_titles=True
+            input_schema,
+            prune_params=prune_params,
+            prune_titles=True,
+            dereference=True,
         )
 
         output_schema = None
@@ -557,7 +560,9 @@ class ParsedFunction:
                 else:
                     output_schema = base_schema
 
-                output_schema = compress_schema(output_schema, prune_titles=True)
+                output_schema = compress_schema(
+                    output_schema, prune_titles=True, dereference=True
+                )
 
                 # Resolve root-level $ref to meet MCP spec requirement for type: object
                 # Self-referential Pydantic models generate schemas with $ref at root

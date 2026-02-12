@@ -216,10 +216,14 @@ async def test_hidden_param_prunes_defs():
     schema = new_tool.parameters
     # Only 'a' should be visible
     assert list(schema["properties"].keys()) == ["a"]
-    # $defs should only contain VisibleType, not HiddenType
-    defs = schema.get("$defs", {})
-    assert "VisibleType" in defs
-    assert "HiddenType" not in defs
+    # $refs are dereferenced so VisibleType is inlined, not in $defs
+    assert "$defs" not in schema
+    # VisibleType's structure should be inlined into the property
+    assert schema["properties"]["a"] == {
+        "properties": {"x": {"type": "integer"}},
+        "required": ["x"],
+        "type": "object",
+    }
 
 
 async def test_forward_with_argument_mapping(add_tool):
@@ -427,7 +431,8 @@ def test_transform_args_with_parent_defaults():
 
     new_tool = Tool.from_tool(tool)
 
-    assert new_tool.parameters["$defs"] == tool.parameters["$defs"]
+    # $refs are dereferenced, so schemas should match (both inlined)
+    assert new_tool.parameters == tool.parameters
 
 
 def test_transform_args_validation_unknown_arg(add_tool):
@@ -1567,20 +1572,20 @@ class TestInputSchema:
             complex_tool, transform_args={"unused_param": ArgTransform(hide=True)}
         )
 
-        assert "UnusedType" not in transformed_tool.parameters["$defs"]
+        # $refs are dereferenced, so no $defs section
+        assert "$defs" not in transformed_tool.parameters
 
         assert transformed_tool.parameters == snapshot(
             {
                 "type": "object",
-                "properties": {"used_param": {"$ref": "#/$defs/UsedType"}},
-                "required": ["used_param"],
-                "$defs": {
-                    "UsedType": {
+                "properties": {
+                    "used_param": {
                         "properties": {"value": {"type": "string"}},
                         "required": ["value"],
                         "type": "object",
                     }
                 },
+                "required": ["used_param"],
             }
         )
 
@@ -1610,15 +1615,14 @@ class TestInputSchema:
         assert transformed.parameters == snapshot(
             {
                 "type": "object",
-                "properties": {"renamed_input": {"$ref": "#/$defs/InputType"}},
-                "required": ["renamed_input"],
-                "$defs": {
-                    "InputType": {
+                "properties": {
+                    "renamed_input": {
                         "properties": {"data": {"type": "string"}},
                         "required": ["data"],
                         "type": "object",
                     }
                 },
+                "required": ["renamed_input"],
             }
         )
 
@@ -1648,26 +1652,23 @@ class TestInputSchema:
             {
                 "type": "object",
                 "properties": {
-                    "param_a": {"$ref": "#/$defs/TypeA"},
-                    "param_b": {"$ref": "#/$defs/TypeB"},
-                },
-                "required": IsList("param_b", "param_a", check_order=False),
-                "$defs": {
-                    "TypeA": {
+                    "param_a": {
                         "properties": {"a": {"type": "string"}},
                         "required": ["a"],
                         "type": "object",
                     },
-                    "TypeB": {
+                    "param_b": {
                         "properties": {"b": {"type": "integer"}},
                         "required": ["b"],
                         "type": "object",
                     },
                 },
+                "required": IsList("param_b", "param_a", check_order=False),
             }
         )
 
-        assert "TypeA" in transform1.parameters["$defs"]
+        # $refs are dereferenced, so TypeA is inlined
+        assert "$defs" not in transform1.parameters
 
         # Second transform: hide param_b
         transform2 = Tool.from_tool(
@@ -1675,19 +1676,18 @@ class TestInputSchema:
             transform_args={"param_b": ArgTransform(hide=True, default=TypeB(b=42))},
         )
 
-        assert "TypeB" not in transform2.parameters["$defs"]
+        assert "$defs" not in transform2.parameters
 
         assert transform2.parameters == snapshot(
             {
                 "type": "object",
-                "properties": {"param_a": {"$ref": "#/$defs/TypeA"}},
-                "required": ["param_a"],
-                "$defs": {
-                    "TypeA": {
+                "properties": {
+                    "param_a": {
                         "properties": {"a": {"type": "string"}},
                         "required": ["a"],
                         "type": "object",
                     }
                 },
+                "required": ["param_a"],
             }
         )
