@@ -319,6 +319,19 @@ class TestContextStateSerializable:
         async with Context(fastmcp=server, session=mock_session) as context:
             assert await context.get_state("key") == "persistent"
 
+    async def test_serializable_write_clears_request_scoped_shadow(self):
+        """Writing serializable state clears any request-scoped shadow for the same key."""
+        server = FastMCP("test")
+        mock_session = MagicMock()
+
+        async with Context(fastmcp=server, session=mock_session) as context:
+            await context.set_state("key", "request-value", serializable=False)
+            assert await context.get_state("key") == "request-value"
+
+            # Serializable write should clear the shadow
+            await context.set_state("key", "session-value")
+            assert await context.get_state("key") == "session-value"
+
 
 class TestContextMeta:
     """Test suite for Context meta functionality."""

@@ -1182,6 +1182,8 @@ class Context:
         if not serializable:
             self._request_state[prefixed_key] = value
             return
+        # Clear any request-scoped shadow so the session value is visible
+        self._request_state.pop(prefixed_key, None)
         try:
             await self.fastmcp._state_store.put(
                 key=prefixed_key,
@@ -1189,6 +1191,9 @@ class Context:
                 ttl=self._STATE_TTL_SECONDS,
             )
         except Exception as e:
+            # Catch serialization errors from Pydantic (ValueError) or
+            # the key_value library (SerializationError). Both contain
+            # "serialize" in the message. Other exceptions propagate as-is.
             if "serialize" in str(e).lower():
                 raise TypeError(
                     f"Value for state key {key!r} is not serializable. "
