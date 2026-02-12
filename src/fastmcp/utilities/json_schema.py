@@ -53,12 +53,35 @@ def dereference_refs(schema: dict[str, Any]) -> dict[str, Any]:
         if "$defs" in dereferenced:
             dereferenced = {k: v for k, v in dereferenced.items() if k != "$defs"}
 
+        # Remove discriminator.mapping entries that referenced $defs
+        _strip_discriminator_mappings(dereferenced)
+
         return dereferenced
 
     except JsonRefError:
         # Self-referencing/circular schemas can't be fully dereferenced
         # Fall back to resolving only root-level $ref (for MCP spec compliance)
         return resolve_root_ref(schema)
+
+
+def _strip_discriminator_mappings(schema: Any, depth: int = 0) -> None:
+    """Remove discriminator.mapping entries whose values are $defs references.
+
+    Pydantic emits discriminator.mapping with plain-string references like
+    ``"#/$defs/Cat"`` that become dangling after $defs are removed by
+    dereference_refs(). The oneOf/anyOf variants already carry their own
+    const fields, so the mapping is redundant once refs are inlined.
+    """
+    if depth > 50 or not isinstance(schema, dict):
+        return
+    if "discriminator" in schema and isinstance(schema["discriminator"], dict):
+        schema["discriminator"].pop("mapping", None)
+    for value in schema.values():
+        if isinstance(value, dict):
+            _strip_discriminator_mappings(value, depth + 1)
+        elif isinstance(value, list):
+            for item in value:
+                _strip_discriminator_mappings(item, depth + 1)
 
 
 def _merge_ref_siblings(
