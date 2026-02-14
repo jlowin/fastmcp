@@ -161,6 +161,9 @@ class Context:
         await ctx.set_state("key", "value")
         value = await ctx.get_state("key")
 
+        # Store non-serializable values for the current request only
+        await ctx.set_state("client", http_client, serializable=False)
+
         return str(x)
     ```
 
@@ -194,6 +197,8 @@ class Context:
         self._tokens: list[Token] = []
         # Background task support (SEP-1686)
         self._task_id: str | None = task_id
+        # Request-scoped state for non-serializable values (serializable=False)
+        self._request_state: dict[str, Any] = {}
 
     @property
     def is_background_task(self) -> bool:
@@ -318,6 +323,10 @@ class Context:
         Returns an empty dict if no lifespan was configured or if the MCP
         session is not yet established.
 
+        In background tasks (Docket workers), where request_context is not
+        available, falls back to reading from the FastMCP server's lifespan
+        result directly.
+
         Example:
         ```python
         @server.tool
@@ -330,6 +339,11 @@ class Context:
         """
         rc = self.request_context
         if rc is None:
+            # In background tasks, request_context is not available.
+            # Fall back to the server's lifespan result directly (#3095).
+            result = self.fastmcp._lifespan_result
+            if result is not None:
+                return result
             return {}
         return rc.lifespan_context
 
@@ -338,9 +352,13 @@ class Context:
     ) -> None:
         """Report progress for the current operation.
 
+        Works in both foreground (MCP progress notifications) and background
+        (Docket task execution) contexts.
+
         Args:
             progress: Current progress value e.g. 24
             total: Optional total value e.g. 100
+            message: Optional status message describing current progress
         """
 
         progress_token = (
@@ -349,16 +367,48 @@ class Context:
             else None
         )
 
-        if progress_token is None:
+        # Foreground: Send MCP progress notification if we have a token
+        if progress_token is not None:
+            await self.session.send_progress_notification(
+                progress_token=progress_token,
+                progress=progress,
+                total=total,
+                message=message,
+                related_request_id=self.request_id,
+            )
             return
 
-        await self.session.send_progress_notification(
-            progress_token=progress_token,
-            progress=progress,
-            total=total,
-            message=message,
-            related_request_id=self.request_id,
-        )
+        # Background: Update Docket execution progress (stored in Redis)
+        # This makes progress visible via tasks/get and notifications/tasks/status
+        from fastmcp.server.dependencies import is_docket_available
+
+        if not is_docket_available():
+            return
+
+        try:
+            from docket.dependencies import Dependency
+
+            # Get current execution from worker context
+            execution = Dependency.execution.get()
+
+            # Update progress in Redis using Docket's progress API.
+            # Docket only exposes increment() (relative), so we compute
+            # the delta from the last reported value stored on this execution.
+            if total is not None:
+                await execution.progress.set_total(int(total))
+
+            current = int(progress)
+            last: int = getattr(execution, "_fastmcp_last_progress", 0)
+            delta = current - last
+            if delta > 0:
+                await execution.progress.increment(delta)
+            execution._fastmcp_last_progress = current  # type: ignore[attr-defined]
+
+            if message is not None:
+                await execution.progress.set_message(message)
+        except LookupError:
+            # Not running in Docket worker context - no progress tracking available
+            pass
 
     async def _paginate_list(
         self,
@@ -378,12 +428,16 @@ class Context:
         """
         all_items: list[Any] = []
         cursor: str | None = None
+        seen_cursors: set[str] = set()
         while True:
             request = request_factory(cursor)
             result = await call_method(request)
             all_items.extend(extract_items(result))
-            if result.nextCursor is None:
+            if not result.nextCursor:
                 break
+            if result.nextCursor in seen_cursors:
+                break
+            seen_cursors.add(result.nextCursor)
             cursor = result.nextCursor
         return all_items
 
@@ -754,6 +808,7 @@ class Context:
         tool_choice: ToolChoiceOption | str | None = None,
         execute_tools: bool = True,
         mask_error_details: bool | None = None,
+        tool_concurrency: int | None = None,
     ) -> SampleStep:
         """
         Make a single LLM sampling call.
@@ -777,6 +832,12 @@ class Context:
             mask_error_details: If True, mask detailed error messages from tool
                 execution. When None (default), uses the global settings value.
                 Tools can raise ToolError to bypass masking.
+            tool_concurrency: Controls parallel execution of tools:
+                - None (default): Sequential execution (one at a time)
+                - 0: Unlimited parallel execution
+                - N > 0: Execute at most N tools concurrently
+                If any tool has sequential=True, all tools execute sequentially
+                regardless of this setting.
 
         Returns:
             SampleStep containing:
@@ -810,6 +871,7 @@ class Context:
             tool_choice=tool_choice,
             auto_execute_tools=execute_tools,
             mask_error_details=mask_error_details,
+            tool_concurrency=tool_concurrency,
         )
 
     @overload
@@ -824,6 +886,7 @@ class Context:
         tools: Sequence[SamplingTool | Callable[..., Any]] | None = None,
         result_type: type[ResultT],
         mask_error_details: bool | None = None,
+        tool_concurrency: int | None = None,
     ) -> SamplingResult[ResultT]:
         """Overload: With result_type, returns SamplingResult[ResultT]."""
 
@@ -839,6 +902,7 @@ class Context:
         tools: Sequence[SamplingTool | Callable[..., Any]] | None = None,
         result_type: None = None,
         mask_error_details: bool | None = None,
+        tool_concurrency: int | None = None,
     ) -> SamplingResult[str]:
         """Overload: Without result_type, returns SamplingResult[str]."""
 
@@ -853,6 +917,7 @@ class Context:
         tools: Sequence[SamplingTool | Callable[..., Any]] | None = None,
         result_type: type[ResultT] | None = None,
         mask_error_details: bool | None = None,
+        tool_concurrency: int | None = None,
     ) -> SamplingResult[ResultT] | SamplingResult[str]:
         """
         Send a sampling request to the client and await the response.
@@ -883,6 +948,12 @@ class Context:
             mask_error_details: If True, mask detailed error messages from tool
                 execution. When None (default), uses the global settings value.
                 Tools can raise ToolError to bypass masking.
+            tool_concurrency: Controls parallel execution of tools:
+                - None (default): Sequential execution (one at a time)
+                - 0: Unlimited parallel execution
+                - N > 0: Execute at most N tools concurrently
+                If any tool has sequential=True, all tools execute sequentially
+                regardless of this setting.
 
         Returns:
             SamplingResult[T] containing:
@@ -906,6 +977,7 @@ class Context:
             tools=tools,
             result_type=result_type,
             mask_error_details=mask_error_details,
+            tool_concurrency=tool_concurrency,
         )
 
     @overload
@@ -1079,7 +1151,7 @@ class Context:
 
         return await elicit_for_task(
             task_id=self._task_id,  # type: ignore[arg-type]
-            session=self.session,
+            session=self._session,
             message=message,
             schema=schema,
             fastmcp=self.fastmcp,
@@ -1089,32 +1161,69 @@ class Context:
         """Create session-prefixed key for state storage."""
         return f"{self.session_id}:{key}"
 
-    async def set_state(self, key: str, value: Any) -> None:
-        """Set a value in the session-scoped state store.
+    async def set_state(
+        self, key: str, value: Any, *, serializable: bool = True
+    ) -> None:
+        """Set a value in the state store.
 
-        Values persist across requests within the same MCP session.
+        By default, values are stored in the session-scoped state store and
+        persist across requests within the same MCP session. Values must be
+        JSON-serializable (dicts, lists, strings, numbers, etc.).
+
+        For non-serializable values (e.g., HTTP clients, database connections),
+        pass ``serializable=False``. These values are stored in a request-scoped
+        dict and only live for the current MCP request (tool call, resource
+        read, or prompt render). They will not be available in subsequent
+        requests.
+
         The key is automatically prefixed with the session identifier.
-        State expires after 1 day to prevent unbounded memory growth.
         """
         prefixed_key = self._make_state_key(key)
-        await self.fastmcp._state_store.put(
-            key=prefixed_key,
-            value=StateValue(value=value),
-            ttl=self._STATE_TTL_SECONDS,
-        )
+        if not serializable:
+            self._request_state[prefixed_key] = value
+            return
+        # Clear any request-scoped shadow so the session value is visible
+        self._request_state.pop(prefixed_key, None)
+        try:
+            await self.fastmcp._state_store.put(
+                key=prefixed_key,
+                value=StateValue(value=value),
+                ttl=self._STATE_TTL_SECONDS,
+            )
+        except Exception as e:
+            # Catch serialization errors from Pydantic (ValueError) or
+            # the key_value library (SerializationError). Both contain
+            # "serialize" in the message. Other exceptions propagate as-is.
+            if "serialize" in str(e).lower():
+                raise TypeError(
+                    f"Value for state key {key!r} is not serializable. "
+                    f"Use set_state({key!r}, value, serializable=False) to store "
+                    f"non-serializable values. Note: non-serializable state is "
+                    f"request-scoped and will not persist across requests."
+                ) from e
+            raise
 
     async def get_state(self, key: str) -> Any:
-        """Get a value from the session-scoped state store.
+        """Get a value from the state store.
+
+        Checks request-scoped state first (set with ``serializable=False``),
+        then falls back to the session-scoped state store.
 
         Returns None if the key is not found.
         """
         prefixed_key = self._make_state_key(key)
+        if prefixed_key in self._request_state:
+            return self._request_state[prefixed_key]
         result = await self.fastmcp._state_store.get(key=prefixed_key)
         return result.value if result is not None else None
 
     async def delete_state(self, key: str) -> None:
-        """Delete a value from the session-scoped state store."""
+        """Delete a value from the state store.
+
+        Removes from both request-scoped and session-scoped stores.
+        """
         prefixed_key = self._make_state_key(key)
+        self._request_state.pop(prefixed_key, None)
         await self.fastmcp._state_store.delete(key=prefixed_key)
 
     # -------------------------------------------------------------------------
