@@ -7,9 +7,9 @@ return type inference, output schema suppression, and end-to-end round trips.
 from __future__ import annotations
 
 from mcp.types import TextContent
-from prefab_ui import UIResponse
 from prefab_ui.components import Column, Heading, Text
 from prefab_ui.components.base import Component
+from prefab_ui.response import UIResponse
 
 from fastmcp import Client, FastMCP
 from fastmcp.resources.types import TextResource

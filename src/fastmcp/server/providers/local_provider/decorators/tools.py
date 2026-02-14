@@ -16,14 +16,15 @@ import mcp.types
 from mcp.types import AnyFunction, ToolAnnotations
 
 import fastmcp
+from fastmcp.server.auth.authorization import AuthCheck
 from fastmcp.server.tasks.config import TaskConfig
 from fastmcp.tools.function_tool import FunctionTool
-from fastmcp.tools.tool import AuthCheckCallable, Tool
+from fastmcp.tools.tool import Tool
 from fastmcp.utilities.types import NotSet, NotSetT
 
 try:
-    from prefab_ui import UIResponse as _PrefabUIResponse
     from prefab_ui.components.base import Component as _PrefabComponent
+    from prefab_ui.response import UIResponse as _PrefabUIResponse
 
     _HAS_PREFAB = True
 except ImportError:
@@ -207,7 +208,7 @@ class ToolDecoratorMixin:
         task: bool | TaskConfig | None = None,
         serializer: ToolResultSerializerType | None = None,  # Deprecated
         timeout: float | None = None,
-        auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
+        auth: AuthCheck | list[AuthCheck] | None = None,
     ) -> FunctionTool: ...
 
     @overload
@@ -229,7 +230,7 @@ class ToolDecoratorMixin:
         task: bool | TaskConfig | None = None,
         serializer: ToolResultSerializerType | None = None,  # Deprecated
         timeout: float | None = None,
-        auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
+        auth: AuthCheck | list[AuthCheck] | None = None,
     ) -> Callable[[AnyFunction], FunctionTool]: ...
 
     # NOTE: This method mirrors fastmcp.tools.tool() but adds registration,
@@ -254,7 +255,7 @@ class ToolDecoratorMixin:
         task: bool | TaskConfig | None = None,
         serializer: ToolResultSerializerType | None = None,  # Deprecated
         timeout: float | None = None,
-        auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
+        auth: AuthCheck | list[AuthCheck] | None = None,
     ) -> (
         Callable[[AnyFunction], FunctionTool]
         | FunctionTool

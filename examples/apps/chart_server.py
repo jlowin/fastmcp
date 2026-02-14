@@ -12,7 +12,6 @@ Usage:
 
 from __future__ import annotations
 
-from prefab_ui import UIResponse
 from prefab_ui.components import (
     BarChart,
     ChartSeries,
@@ -21,6 +20,7 @@ from prefab_ui.components import (
     LineChart,
     Muted,
 )
+from prefab_ui.response import UIResponse
 
 from fastmcp import FastMCP
 

@@ -34,7 +34,6 @@ from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.openapi import (
     HTTPRoute,
     extract_output_schema_from_responses,
-    format_simple_description,
     parse_openapi_to_http_routes,
 )
 from fastmcp.utilities.openapi.director import RequestDirector
@@ -79,6 +78,7 @@ class OpenAPIProvider(Provider):
         mcp_component_fn: ComponentFn | None = None,
         mcp_names: dict[str, str] | None = None,
         tags: set[str] | None = None,
+        validate_output: bool = True,
     ):
         """Initialize provider by parsing OpenAPI spec and creating components.
 
@@ -93,6 +93,10 @@ class OpenAPIProvider(Provider):
             mcp_component_fn: Optional callable for component customization
             mcp_names: Optional dictionary mapping operationId to component names
             tags: Optional set of tags to add to all components
+            validate_output: If True (default), tools use the output schema
+                extracted from the OpenAPI spec for response validation. If
+                False, a permissive schema is used instead, allowing any
+                response structure while still returning structured JSON.
         """
         super().__init__()
 
@@ -101,6 +105,7 @@ class OpenAPIProvider(Provider):
             client = self._create_default_client(openapi_spec)
         self._client = client
         self._mcp_component_fn = mcp_component_fn
+        self._validate_output = validate_output
 
         # Keep track of names to detect collisions
         self._used_names: dict[str, Counter[str]] = {
@@ -232,16 +237,22 @@ class OpenAPIProvider(Provider):
             route.openapi_version,
         )
 
+        if not self._validate_output and output_schema is not None:
+            # Use a permissive schema that accepts any object, preserving
+            # the wrap-result flag so non-object responses still get wrapped
+            permissive: dict[str, Any] = {
+                "type": "object",
+                "additionalProperties": True,
+            }
+            if output_schema.get("x-fastmcp-wrap-result"):
+                permissive["x-fastmcp-wrap-result"] = True
+            output_schema = permissive
+
         tool_name = self._get_unique_name(name, "tool")
         base_description = (
             route.description
             or route.summary
             or f"Executes {route.method} {route.path}"
-        )
-        enhanced_description = format_simple_description(
-            base_description=base_description,
-            parameters=route.parameters,
-            request_body=route.request_body,
         )
 
         tool = OpenAPITool(
@@ -249,7 +260,7 @@ class OpenAPIProvider(Provider):
             route=route,
             director=self._director,
             name=tool_name,
-            description=enhanced_description,
+            description=base_description,
             parameters=combined_schema,
             output_schema=output_schema,
             tags=set(route.tags or []) | tags,
@@ -276,11 +287,6 @@ class OpenAPIProvider(Provider):
         base_description = (
             route.description or route.summary or f"Represents {route.path}"
         )
-        enhanced_description = format_simple_description(
-            base_description=base_description,
-            parameters=route.parameters,
-            request_body=route.request_body,
-        )
 
         resource = OpenAPIResource(
             client=self._client,
@@ -288,7 +294,7 @@ class OpenAPIProvider(Provider):
             director=self._director,
             uri=resource_uri,
             name=resource_name,
-            description=enhanced_description,
+            description=base_description,
             mime_type=_extract_mime_type_from_route(route),
             tags=set(route.tags or []) | tags,
         )
@@ -321,11 +327,6 @@ class OpenAPIProvider(Provider):
         base_description = (
             route.description or route.summary or f"Template for {route.path}"
         )
-        enhanced_description = format_simple_description(
-            base_description=base_description,
-            parameters=route.parameters,
-            request_body=route.request_body,
-        )
 
         template_params_schema = {
             "type": "object",
@@ -355,7 +356,7 @@ class OpenAPIProvider(Provider):
             director=self._director,
             uri_template=uri_template_str,
             name=template_name,
-            description=enhanced_description,
+            description=base_description,
             parameters=template_params_schema,
             tags=set(route.tags or []) | tags,
             mime_type=_extract_mime_type_from_route(route),

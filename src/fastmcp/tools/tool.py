@@ -26,6 +26,7 @@ from mcp.types import Tool as MCPTool
 from pydantic import BaseModel, Field, model_validator
 from pydantic.json_schema import SkipJsonSchema
 
+from fastmcp.server.auth.authorization import AuthCheck
 from fastmcp.server.tasks.config import TaskConfig, TaskMeta
 from fastmcp.utilities.components import FastMCPComponent
 from fastmcp.utilities.logging import get_logger
@@ -38,8 +39,8 @@ from fastmcp.utilities.types import (
 )
 
 try:
-    from prefab_ui import UIResponse as _PrefabUIResponse
     from prefab_ui.components.base import Component as _PrefabComponent
+    from prefab_ui.response import UIResponse as _PrefabUIResponse
 
     _HAS_PREFAB = True
 except ImportError:
@@ -155,7 +156,7 @@ class Tool(FastMCPComponent):
         ),
     ] = None
     auth: Annotated[
-        SkipJsonSchema[AuthCheckCallable | list[AuthCheckCallable] | None],
+        SkipJsonSchema[AuthCheck | list[AuthCheck] | None],
         Field(description="Authorization checks for this tool", exclude=True),
     ] = None
     timeout: Annotated[
@@ -215,7 +216,7 @@ class Tool(FastMCPComponent):
         meta: dict[str, Any] | None = None,
         task: bool | TaskConfig | None = None,
         timeout: float | None = None,
-        auth: AuthCheckCallable | list[AuthCheckCallable] | None = None,
+        auth: AuthCheck | list[AuthCheck] | None = None,
     ) -> FunctionTool:
         """Create a Tool from a function."""
         from fastmcp.tools.function_tool import FunctionTool
