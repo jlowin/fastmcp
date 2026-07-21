@@ -226,6 +226,7 @@ class OIDCProxy(OAuthProxy):
         redirect_path: str | None = None,
         # Client configuration
         allowed_client_redirect_uris: list[str] | None = None,
+        valid_scopes: list[str] | None = None,
         client_storage: AsyncKeyValue | None = None,
         # JWT and encryption keys
         jwt_signing_key: str | bytes | None = None,
@@ -284,6 +285,15 @@ class OIDCProxy(OAuthProxy):
                 ports allowed to vary for MCP compatibility. Unsafe browser schemes are rejected.
                 If empty list, no redirect URIs are allowed.
                 These are for MCP clients performing loopback redirects, NOT for the upstream OAuth app.
+            valid_scopes: The complete set of scopes clients are allowed to request,
+                advertised to clients via the `/.well-known` endpoints (as
+                `scopes_supported`) and enforced at Dynamic Client Registration: a
+                client that registers requesting a scope outside this set is rejected.
+                This is a superset of `required_scopes`, which is only the floor
+                enforced during token validation. Defaults to `required_scopes` when
+                not provided, so permitting optional scopes beyond the required floor
+                means setting this explicitly. Valid whether or not a custom
+                `token_verifier` is supplied.
             client_storage: Storage backend for OAuth state (client registrations, encrypted tokens).
                 If None, an encrypted file store will be created in the data directory
                 (derived from `platformdirs`).
@@ -414,6 +424,7 @@ class OIDCProxy(OAuthProxy):
             "issuer_url": issuer_url or base_url,
             "service_documentation_url": self.oidc_config.service_documentation,
             "allowed_client_redirect_uris": allowed_client_redirect_uris,
+            "valid_scopes": valid_scopes,
             "client_storage": client_storage,
             "jwt_signing_key": jwt_signing_key,
             "token_endpoint_auth_method": token_endpoint_auth_method,
