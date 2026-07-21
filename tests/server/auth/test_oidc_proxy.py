@@ -1079,3 +1079,42 @@ class TestOIDCProxyValidScopes:
                 "write",
                 "admin",
             ]
+
+    def test_valid_scopes_preserved_with_verify_id_token(
+        self, valid_oidc_configuration_dict
+    ):
+        """verify_id_token restores required_scopes without clobbering valid_scopes."""
+        with patch(
+            "fastmcp.server.auth.oidc_proxy.OIDCConfiguration.get_oidc_configuration"
+        ) as mock_get:
+            oidc_config = OIDCConfiguration.model_validate(
+                valid_oidc_configuration_dict
+            )
+            mock_get.return_value = oidc_config
+
+            proxy = OIDCProxy(
+                config_url=TEST_CONFIG_URL,
+                client_id=TEST_CLIENT_ID,
+                client_secret=TEST_CLIENT_SECRET,
+                base_url=TEST_BASE_URL,
+                required_scopes=["read"],
+                valid_scopes=["read", "write", "admin"],
+                verify_id_token=True,
+                jwt_signing_key="test-secret",
+            )
+
+            # Enforcement floor is restored to required_scopes...
+            assert proxy.required_scopes == ["read"]
+            # ...but the advertised/registerable set keeps the full valid_scopes.
+            assert proxy.client_registration_options is not None
+            assert proxy.client_registration_options.valid_scopes == [
+                "read",
+                "write",
+                "admin",
+            ]
+            assert proxy.client_registration_options.default_scopes == [
+                "read",
+                "write",
+                "admin",
+            ]
+            assert proxy._default_scope_str == "read write admin"

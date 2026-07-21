@@ -465,14 +465,16 @@ class OIDCProxy(OAuthProxy):
 
         self._verify_id_token = verify_id_token
 
-        # When verify_id_token strips scopes from the verifier, restore
-        # them on the provider so they're still advertised to clients
-        # and enforced at the FastMCP token level.  We also need to
-        # recompute derived state that OAuthProxy.__init__ already built
-        # from the (empty) verifier scopes.
-        if verify_id_token and required_scopes:
-            self.required_scopes = required_scopes
-            self.update_default_scopes(required_scopes)
+        # When verify_id_token strips scopes from the verifier, restore the
+        # derived scope state OAuthProxy.__init__ built from the (empty) verifier
+        # scopes. required_scopes is the enforcement floor; the advertised and
+        # registerable set is the broader valid_scopes when one was given.
+        if verify_id_token:
+            if required_scopes:
+                self.required_scopes = required_scopes
+            advertised_scopes = valid_scopes or required_scopes
+            if advertised_scopes:
+                self.update_default_scopes(advertised_scopes)
 
     def _get_verification_token(
         self, upstream_token_set: UpstreamTokenSet
