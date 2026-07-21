@@ -204,9 +204,11 @@ mcp = FastMCP(name="My Server", auth=auth)
 </ParamField>
 
 <ParamField body="valid_scopes" type="list[str] | None">
-  List of all possible valid scopes for the OAuth provider. These are advertised
-  to clients through the `/.well-known` endpoints. Defaults to `required_scopes`
-  from your TokenVerifier if not specified.
+  The complete set of scopes clients are allowed to request — the full set of
+  available scopes (a superset of `required_scopes`). These are advertised to
+  clients through the `/.well-known` endpoints and enforced at Dynamic Client
+  Registration. Defaults to `required_scopes` from your TokenVerifier if not
+  specified.
 </ParamField>
 
 <ParamField body="extra_authorize_params" type="dict[str, str] | None">
