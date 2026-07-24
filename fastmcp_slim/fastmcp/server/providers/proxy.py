@@ -695,8 +695,8 @@ class ProxyProvider(Provider):
         mcp = FastMCP("Proxy Server")
         mcp.add_provider(proxy)
 
-        # Can also add with namespace
-        mcp.add_provider(proxy.with_namespace("remote"))
+        # Can also add with a namespace
+        mcp.add_provider(proxy, namespace="remote")
         ```
     """
 
