@@ -285,7 +285,39 @@ class TestAudio:
     def test_audio_initialization_with_format(self):
         """Test audio initialization with a specific format."""
         audio = Audio(data=b"test", format="mp3")
-        assert audio._mime_type == "audio/mp3"
+        assert audio._mime_type == "audio/mpeg"
+
+    def test_audio_initialization_with_unmapped_format(self):
+        """Formats without a canonical mapping fall back to `audio/<format>`."""
+        audio = Audio(data=b"test", format="aac")
+        assert audio._mime_type == "audio/aac"
+
+    @pytest.mark.parametrize(
+        "fmt,expected",
+        [
+            ("wav", "audio/wav"),
+            ("mp3", "audio/mpeg"),
+            ("ogg", "audio/ogg"),
+            ("m4a", "audio/mp4"),
+            ("flac", "audio/flac"),
+        ],
+    )
+    def test_format_matches_path_mime_type(self, tmp_path, fmt, expected):
+        """`format=` and `path=` must resolve to the same canonical MIME type.
+
+        Regression test for #4627: `Audio(format="mp3")` previously produced the
+        non-canonical `audio/mp3` while `Audio(path="x.mp3")` produced
+        `audio/mpeg`.
+        """
+        from_format = Audio(data=b"test", format=fmt)
+
+        path = tmp_path / f"test.{fmt}"
+        path.write_bytes(b"fake audio data")
+        from_path = Audio(path=path)
+
+        assert from_format._mime_type == expected
+        assert from_path._mime_type == expected
+        assert from_format._mime_type == from_path._mime_type
 
     def test_missing_data_and_path_raises_error(self):
         """Test that error is raised when neither path nor data is provided."""
@@ -335,7 +367,7 @@ class TestAudio:
         content = audio.to_audio_content()
 
         assert content.type == "audio"
-        assert content.mime_type == "audio/mp3"
+        assert content.mime_type == "audio/mpeg"
         assert content.data == base64.b64encode(test_data).decode()
 
     def test_to_audio_content_error(self, monkeypatch):

@@ -312,6 +312,18 @@ class Image:
         return f"data:{mime_type or self._mime_type};base64,{data}"
 
 
+# Canonical MIME types keyed by (dotless) format / file extension. Both the
+# `format=` and `path=` construction paths consult this so they agree — e.g.
+# `Audio(format="mp3")` and `Audio(path="x.mp3")` both resolve to `audio/mpeg`.
+_AUDIO_MIME_TYPES = {
+    "wav": "audio/wav",
+    "mp3": "audio/mpeg",
+    "ogg": "audio/ogg",
+    "m4a": "audio/mp4",
+    "flac": "audio/flac",
+}
+
+
 class Audio:
     """Helper class for returning audio from tools."""
 
@@ -336,17 +348,12 @@ class Audio:
     def _get_mime_type(self) -> str:
         """Get MIME type from format or guess from file extension."""
         if self._format:
-            return f"audio/{self._format.lower()}"
+            fmt = self._format.lower()
+            return _AUDIO_MIME_TYPES.get(fmt, f"audio/{fmt}")
 
         if self.path:
-            suffix = self.path.suffix.lower()
-            return {
-                ".wav": "audio/wav",
-                ".mp3": "audio/mpeg",
-                ".ogg": "audio/ogg",
-                ".m4a": "audio/mp4",
-                ".flac": "audio/flac",
-            }.get(suffix, "application/octet-stream")
+            suffix = self.path.suffix.lower().lstrip(".")
+            return _AUDIO_MIME_TYPES.get(suffix, "application/octet-stream")
         return "audio/wav"  # default for raw binary data
 
     def to_audio_content(
