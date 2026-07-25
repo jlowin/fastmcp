@@ -285,7 +285,47 @@ class TestAudio:
     def test_audio_initialization_with_format(self):
         """Test audio initialization with a specific format."""
         audio = Audio(data=b"test", format="mp3")
-        assert audio._mime_type == "audio/mp3"
+        assert audio._mime_type == "audio/mpeg"
+
+    def test_audio_format_canonical_mime_types(self):
+        """Test that format strings produce canonical MIME types."""
+        # mp3 -> audio/mpeg (not audio/mp3)
+        audio = Audio(data=b"test", format="mp3")
+        assert audio._mime_type == "audio/mpeg"
+
+        # m4a -> audio/mp4 (not audio/m4a)
+        audio = Audio(data=b"test", format="m4a")
+        assert audio._mime_type == "audio/mp4"
+
+        # Formats that already have canonical MIME types
+        audio = Audio(data=b"test", format="wav")
+        assert audio._mime_type == "audio/wav"
+
+        audio = Audio(data=b"test", format="ogg")
+        assert audio._mime_type == "audio/ogg"
+
+        audio = Audio(data=b"test", format="flac")
+        assert audio._mime_type == "audio/flac"
+
+    def test_audio_format_matches_path_mime_type(self, tmp_path):
+        """Test that format= and path= produce the same MIME type for the same format."""
+        cases = [
+            ("mp3", ".mp3"),
+            ("m4a", ".m4a"),
+            ("wav", ".wav"),
+            ("ogg", ".ogg"),
+            ("flac", ".flac"),
+        ]
+        for fmt, ext in cases:
+            path = tmp_path / f"test{ext}"
+            path.write_bytes(b"fake audio data")
+            audio_from_format = Audio(data=b"test", format=fmt)
+            audio_from_path = Audio(path=path)
+            assert audio_from_format._mime_type == audio_from_path._mime_type, (
+                f"MIME type mismatch for {fmt}: "
+                f"format= gives {audio_from_format._mime_type!r}, "
+                f"path= gives {audio_from_path._mime_type!r}"
+            )
 
     def test_missing_data_and_path_raises_error(self):
         """Test that error is raised when neither path nor data is provided."""
@@ -335,7 +375,7 @@ class TestAudio:
         content = audio.to_audio_content()
 
         assert content.type == "audio"
-        assert content.mime_type == "audio/mp3"
+        assert content.mime_type == "audio/mpeg"
         assert content.data == base64.b64encode(test_data).decode()
 
     def test_to_audio_content_error(self, monkeypatch):

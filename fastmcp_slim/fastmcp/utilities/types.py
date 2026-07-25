@@ -333,10 +333,18 @@ class Audio:
         self._mime_type = self._get_mime_type()
         self.annotations = annotations
 
+    # Map format strings to canonical MIME types where the extension alone is not
+    # sufficient (e.g. "mp3" -> "audio/mpeg", not "audio/mp3").
+    _FORMAT_MIME_MAP: dict[str, str] = {
+        "mp3": "audio/mpeg",
+        "m4a": "audio/mp4",
+    }
+
     def _get_mime_type(self) -> str:
         """Get MIME type from format or guess from file extension."""
         if self._format:
-            return f"audio/{self._format.lower()}"
+            fmt = self._format.lower()
+            return self._FORMAT_MIME_MAP.get(fmt, f"audio/{fmt}")
 
         if self.path:
             suffix = self.path.suffix.lower()
