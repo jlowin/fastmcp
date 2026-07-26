@@ -102,7 +102,6 @@ from fastmcp.utilities.versions import (
 if TYPE_CHECKING:
     from fastmcp.client import Client
     from fastmcp.client.client import SDKServer
-    from fastmcp.client.sampling import SamplingHandler
     from fastmcp.client.transports import ClientTransport, ClientTransportT
     from fastmcp.server.extensions import ServerExtension
     from fastmcp.server.providers.openapi import ComponentFn as OpenAPIComponentFn
@@ -178,11 +177,13 @@ _REMOVED_KWARGS: dict[str, str] = {
     "include_tags": "Use `server.enable(tags=..., only=True)` after creating the server.",
     "exclude_tags": "Use `server.disable(tags=...)` after creating the server.",
     "tool_transformations": "Use `server.add_transform(ToolTransform(...))` after creating the server.",
+    "sampling_handler": "Server-initiated sampling was removed from MCP by SEP-2577. Call an LLM directly from your tool.",
+    "sampling_handler_behavior": "Server-initiated sampling was removed from MCP by SEP-2577. Call an LLM directly from your tool.",
 }
 
 
 def _check_removed_kwargs(kwargs: dict[str, Any]) -> None:
-    """Raise helpful TypeErrors for kwargs removed in v3."""
+    """Raise helpful TypeErrors for kwargs FastMCP no longer accepts."""
     for key in kwargs:
         if key in _REMOVED_KWARGS:
             raise TypeError(
@@ -355,8 +356,6 @@ class FastMCP(
         cache_scope: Literal["public", "private"] | None = None,
         tasks: bool | None = None,
         session_state_store: AsyncKeyValue | None = None,
-        sampling_handler: SamplingHandler | None = None,
-        sampling_handler_behavior: Literal["always", "fallback"] | None = None,
         client_log_level: mcp_types.LoggingLevel | None = None,
         experimental_capabilities: dict[str, dict[str, Any]] | None = None,
         **kwargs: Any,
@@ -537,11 +536,6 @@ class FastMCP(
 
         # Set up MCP protocol handlers
         self._setup_handlers()
-
-        self.sampling_handler: SamplingHandler | None = sampling_handler
-        self.sampling_handler_behavior: Literal["always", "fallback"] = (
-            sampling_handler_behavior or "fallback"
-        )
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}({self.name!r})"
