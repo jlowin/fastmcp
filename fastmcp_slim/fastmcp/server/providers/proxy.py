@@ -135,7 +135,9 @@ async def _relay_read_resource(
     to forward, instead of the high-level client trying to answer it here — the
     proxy has no back-channel to the real user, so driving it fails outright.
     The inbound request's continuation state travels down so the backend guard
-    sees the client's answers on its own `ctx.input_responses`.
+    sees the client's answers on its own `ctx.input_responses`. Trace context
+    still propagates: the SDK's JSON-RPC dispatcher injects it on every outgoing
+    request (SEP-414), below whichever client layer issued the call.
     """
     if client.protocol_version not in MODERN_PROTOCOL_VERSIONS:
         return await client.read_resource(uri)
