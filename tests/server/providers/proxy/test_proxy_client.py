@@ -66,13 +66,13 @@ async def _backend_list_roots(context: Context) -> list[Root]:
     FastMCP's server API. These helpers reach the SDK session directly to stand
     in for a legacy upstream, which is the only thing the proxy relay forwards.
     """
-    result = await context.session.list_roots()
+    result = await context.session.list_roots()  # ty: ignore[deprecated]
     return result.roots
 
 
 async def _backend_sample(context: Context) -> str:
     """Issue a handshake-era `sampling/createMessage` from a backend server."""
-    result = await context.session.create_message(
+    result = await context.session.create_message(  # ty: ignore[deprecated]
         messages=[
             SamplingMessage(
                 role="user", content=TextContent(type="text", text="Hello, world!")

@@ -1063,15 +1063,9 @@ async def process_data(data_uri: str, ctx: Context) -> dict:
     
     # Report progress
     await ctx.report_progress(progress=50, total=100)
-    
-    # Example request to the client's LLM for help
-    summary = await ctx.sample(f"Summarize this in 10 words: {data[:200]}")
-    
+
     await ctx.report_progress(progress=100, total=100)
-    return {
-        "length": len(data),
-        "summary": summary.text
-    }
+    return {"length": len(data)}
 ```
 
 The Context object provides access to:
@@ -1079,7 +1073,6 @@ The Context object provides access to:
 - **Logging**: `ctx.debug()`, `ctx.info()`, `ctx.warning()`, `ctx.error()`
 - **Progress Reporting**: `ctx.report_progress(progress, total)`
 - **Resource Access**: `ctx.read_resource(uri)`
-- **LLM Sampling**: `ctx.sample(...)`
 - **Request Information**: `ctx.request_id`, `ctx.client_id`
 
 For full documentation on the Context object and all its capabilities, see the [Context documentation](/servers/context).

@@ -23,7 +23,7 @@ async def _sample(
     answering a legacy server, so the stand-in server reaches the SDK session
     directly.
     """
-    result = await context.session.create_message(
+    result = await context.session.create_message(  # ty: ignore[deprecated]
         messages=messages,
         system_prompt=system_prompt,
         max_tokens=512,
@@ -72,7 +72,9 @@ def fastmcp_server():
                 ),
                 SamplingMessage(
                     role="assistant",
-                    content=TextContent(type="text", text="How can I assist you today?"),
+                    content=TextContent(
+                        type="text", text="How can I assist you today?"
+                    ),
                 ),
             ],
         )

@@ -307,7 +307,7 @@ def test_removed_server_initiated_methods_are_absent(name):
 def test_server_sampling_handler_kwargs_are_rejected(kwarg):
     """The server-side sampling handler existed only to answer `ctx.sample()`."""
     with pytest.raises(TypeError, match="SEP-2577"):
-        FastMCP("gone", **{kwarg: None})
+        FastMCP("gone", **{kwarg: None})  # ty: ignore[invalid-argument-type]
 
 
 @pytest.mark.parametrize("mode", MODERN_MODES)

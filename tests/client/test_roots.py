@@ -16,7 +16,7 @@ def fastmcp_server():
 
     @mcp.tool
     async def list_roots(context: Context) -> list[str]:
-        result = await context.session.list_roots()
+        result = await context.session.list_roots()  # ty: ignore[deprecated]
         return [str(r.uri) for r in result.roots]
 
     return mcp
@@ -58,11 +58,9 @@ class TestClientRoots:
 
         async def roots_handler(ctx) -> list[Root]:
             calls.append(ctx)
-            return [Root(uri="file://from/handler")]  # ty: ignore[invalid-argument-type]
+            return [Root(uri="file://from/handler")]
 
-        async with Client(
-            fastmcp_server, mode="legacy", roots=roots_handler
-        ) as client:
+        async with Client(fastmcp_server, mode="legacy", roots=roots_handler) as client:
             result = await client.call_tool("list_roots", {})
 
         assert len(calls) == 1
