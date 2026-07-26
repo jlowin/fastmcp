@@ -4,7 +4,7 @@ title: Change Register
 
 This is the complete register of user-facing changes from the MCP Python SDK v2 migration ([PR #4437](https://github.com/PrefectHQ/fastmcp/pull/4437)), organized by subsystem. It doubles as a review lens: take one subsystem, read its claimed changes, and verify each against the diff.
 
-Each entry is tagged **Absorbed** (public surface unchanged), **Bridged** (shim keeps old code working, usually warning), **Breaking** (user code must change), or **Deprecated** (works, warns, slated for removal). See the [overview](/development/v4-notes/index) for what each disposition means.
+Each entry is tagged **Absorbed** (public surface unchanged), **Bridged** (shim keeps old code working, usually warning), **Breaking** (user code must change), or **Deprecated** (works, warns, slated for removal). See the [overview](index.md) for what each disposition means.
 
 **Empirical validation (WS2 upgrade reality-check).** The register's compatibility claims are verified, not predicted. Running unchanged 3.x-era code against this branch, all 11 upgrade scenarios pass or warn — the only failures are the two predicted breaks, user `mcp.types` imports and positional `McpError(ErrorData(...))` construction. Cross-version wire interop between a 3.4.3 peer and this branch is bidirectionally clean across 9 operations (3.4.3 client ↔ v4 server and v4 client ↔ 3.4.3 server over HTTP). All 29 `_ALIASES` bridge entries warn correctly with actionable messages.
 
@@ -162,11 +162,11 @@ SDK v2 declares `extensions` as a real field on `ClientCapabilities`, so a clien
 
 The SEP-1686 task CRUD protocol (`tasks/get`, `tasks/result`, `tasks/list`, `tasks/cancel`) is entirely FastMCP-owned — the SDK ships no task store. Task detection moves to a params field: `params.task is not None` on `CallToolRequestParams`, with `ttl` from `params.task.ttl`. The four task handlers port to `add_request_handler`.
 
-The SDK has a real gap here (see [Known Gaps](/development/v4-notes/known-gaps) and sdk-feedback #1): it ships the task result types but omits them from the method registries, so a background-task `tools/call` returning a `CreateTaskResult` fails validation. FastMCP installs a registry-widening shim in `_sdk_patches.py` that adds `CreateTaskResult` to the `tools/call` result union and registers the `tasks/*` rows. It is a temporary patch with a self-documented removal trigger.
+The SDK has a real gap here (see [Known Gaps](known-gaps.md) and sdk-feedback #1): it ships the task result types but omits them from the method registries, so a background-task `tools/call` returning a `CreateTaskResult` fails validation. FastMCP installs a registry-widening shim in `_sdk_patches.py` that adds `CreateTaskResult` to the `tools/call` result union and registers the `tasks/*` rows. It is a temporary patch with a self-documented removal trigger.
 
 Resources and prompts have **no `task` field** on their params in b1, so task-augmented resource reads and prompt gets are not wire-expressible — a documented capability regression, tracked by xfails, not a bug FastMCP fixes.
 
-This section records the migration's *handling* of the SEP-1686 wire layer as it stood at merge. That layer is not the end state: it is slated for removal and rebuild on the `io.modelcontextprotocol/tasks` extension (SEP-2663) as the `fastmcp-tasks` package. See [Background Tasks (SEP-2663)](/development/v4-notes/background-tasks) for the forward plan; the `_sdk_patches.py` shim and the `server/tasks/*` wire handlers described here go away with it, while the Docket execution engine moves into `fastmcp-tasks`.
+This section records the migration's *handling* of the SEP-1686 wire layer as it stood at merge. That layer is not the end state: it is slated for removal and rebuild on the `io.modelcontextprotocol/tasks` extension (SEP-2663) as the `fastmcp-tasks` package. See [Background Tasks (SEP-2663)](background-tasks.md) for the forward plan; the `_sdk_patches.py` shim and the `server/tasks/*` wire handlers described here go away with it, while the Docket execution engine moves into `fastmcp-tasks`.
 
 *Verify:* `fastmcp_slim/fastmcp/_sdk_patches.py`, `server/tasks/*`.
 
@@ -379,7 +379,7 @@ async with Client("https://example.com/mcp", auth=auth) as client:
 
 ## HTTP
 
-The maintainer asked whether FastMCP can now delete its custom HTTP app and let the SDK's `Server.streamable_http_app()` handle everything. The answer for this PR is **no** — every override earns its keep. Convergence is a v4 project gated on three upstream additions (see [Feature Program](/development/v4-notes/feature-program)).
+The maintainer asked whether FastMCP can now delete its custom HTTP app and let the SDK's `Server.streamable_http_app()` handle everything. The answer for this PR is **no** — every override earns its keep. Convergence is a v4 project gated on three upstream additions (see [Feature Program](feature-program.md)).
 
 ### Kept overrides — Absorbed
 
@@ -496,7 +496,7 @@ A proxy is a server on its front and a client on its back, and the two eras have
 
 ### The xfail register — Known gap
 
-Roughly forty `xfail` markers across the test tree (concentrated in `tests/server/tasks/`, `tests/client/tasks/`, and `test_protocol_eras.py`) are the built-in beta tracker: each names the SDK gap it waits on. They are enumerated and mapped to sdk-feedback findings on the [Known Gaps](/development/v4-notes/known-gaps) page.
+Roughly forty `xfail` markers across the test tree (concentrated in `tests/server/tasks/`, `tests/client/tasks/`, and `test_protocol_eras.py`) are the built-in beta tracker: each names the SDK gap it waits on. They are enumerated and mapped to sdk-feedback findings on the [Known Gaps](known-gaps.md) page.
 
 ## Security
 

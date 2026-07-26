@@ -1456,7 +1456,7 @@ auth = GitHubProvider(
 )
 ```
 
-See `docs/development/v3-notes/auth-provider-env-vars.mdx` for rationale.
+See `v3-notes/auth-provider-env-vars.md` for rationale.
 
 #### Server Banner Environment Variable
 

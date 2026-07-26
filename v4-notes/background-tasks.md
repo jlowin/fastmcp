@@ -2,7 +2,7 @@
 title: Background Tasks (SEP-2663)
 ---
 
-**Status: Shipped (#4602, #4603).** This page is the approved design for rebuilding FastMCP's background-task support on the `io.modelcontextprotocol/tasks` extension. It supersedes the earlier "delete the task machinery" direction recorded during the SDK v2 migration. The [Feature Program](/development/v4-notes/feature-program#background-tasks-sep-2663) carries the one-line status; user-facing usage is documented at [Background Tasks](/servers/tasks) and [Background Tasks (client)](/clients/tasks).
+**Status: Shipped (#4602, #4603).** This page is the approved design for rebuilding FastMCP's background-task support on the `io.modelcontextprotocol/tasks` extension. It supersedes the earlier "delete the task machinery" direction recorded during the SDK v2 migration. The [Feature Program](feature-program.md#background-tasks-sep-2663) carries the one-line status; user-facing usage is documented at [Background Tasks](/servers/tasks) and [Background Tasks (client)](/clients/tasks).
 
 ## TL;DR
 
