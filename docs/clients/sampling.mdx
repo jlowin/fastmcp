@@ -178,19 +178,24 @@ Install the Google Gemini handler with `pip install 'fastmcp[gemini]'`.
 
 ## Sampling Capabilities
 
-By default, providing a `sampling_handler` advertises a basic sampling capability (without tool execution) to the server. If your handler supports executing tools during sampling, you must explicitly advertise the tool capability:
+Providing a `sampling_handler` advertises basic sampling support. Tool execution during sampling is opt-in: advertise it explicitly when your handler can run tools.
 
 ```python
 from mcp_types import SamplingCapability, SamplingToolsCapability
 
+tools_capability = SamplingCapability(tools=SamplingToolsCapability())
+
 client = Client(
     "my_mcp_server.py",
+    mode="legacy",
     sampling_handler=my_handler,
-    sampling_capabilities=SamplingCapability(tools=SamplingToolsCapability()),
+    sampling_capabilities=tools_capability,
 )
 ```
 
-To advertise sampling without tool support:
+Without the `tools` capability, a server that requests sampling with tools fails with `Client does not support sampling with tools`. Server-side features that rely on tool calls under the hood — such as `result_type` for structured output — need this capability too.
+
+To advertise sampling without tool support, pass a bare `SamplingCapability`. This is the default when you omit `sampling_capabilities` entirely.
 
 ```python
 from mcp_types import SamplingCapability
