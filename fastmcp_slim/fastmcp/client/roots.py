@@ -37,7 +37,7 @@ def create_roots_callback(
     if isinstance(handler, list):
         # TODO(ty): remove when ty supports isinstance union narrowing
         return _create_roots_callback_from_roots(handler)  # type: ignore[arg-type]  # ty:ignore[invalid-argument-type]
-    elif inspect.isfunction(handler):
+    elif callable(handler):
         return _create_roots_callback_from_fn(handler)
     else:
         raise ValueError(f"Invalid roots handler: {handler}")
