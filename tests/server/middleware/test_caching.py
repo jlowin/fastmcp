@@ -26,6 +26,7 @@ from pydantic import AnyUrl, BaseModel
 
 from fastmcp import Context, FastMCP
 from fastmcp.client.client import CallToolResult, Client
+from fastmcp.client.elicitation import ElicitResult
 from fastmcp.client.transports import FastMCPTransport
 from fastmcp.prompts.base import Message, Prompt
 from fastmcp.prompts.function_prompt import FunctionPrompt
@@ -922,21 +923,17 @@ class TestCachingWithInputRequiredResults:
 
     @staticmethod
     def _ask() -> mcp_types.InputRequiredResult:
-        return mcp_types.InputRequiredResult(
-            result_type="input_required",
-            input_requests={
-                "q": mcp_types.ElicitRequest(
-                    method="elicitation/create",
-                    params=mcp_types.ElicitRequestFormParams(
-                        message="Which quarter?",
-                        requested_schema={
-                            "type": "object",
-                            "properties": {"q": {"type": "string"}},
-                            "required": ["q"],
-                        },
-                    ),
-                )
+        params = mcp_types.ElicitRequestFormParams(
+            message="Which quarter?",
+            requested_schema={
+                "type": "object",
+                "properties": {"q": {"type": "string"}},
+                "required": ["q"],
             },
+        )
+        request = mcp_types.ElicitRequest(method="elicitation/create", params=params)
+        return mcp_types.InputRequiredResult(
+            result_type="input_required", input_requests={"q": request}
         )
 
     @classmethod
@@ -966,32 +963,24 @@ class TestCachingWithInputRequiredResults:
 
     @staticmethod
     async def _handler(message, response_type, params, ctx):
-        from fastmcp.client.elicitation import ElicitResult
-
         return ElicitResult(action="accept", content=response_type(q="Q3"))
 
-    async def test_tool_guard_completes_under_caching(self):
-        async with Client(
-            self._server(), mode="auto", elicitation_handler=self._handler
-        ) as client:
-            result = await client.call_tool("summarize_tool", {})
+    def _client(self) -> Client:
+        return Client(self._server(), mode="auto", elicitation_handler=self._handler)
 
+    async def test_tool_guard_completes_under_caching(self):
+        async with self._client() as client:
+            result = await client.call_tool("summarize_tool", {})
         assert result.data == "Summary for Q3"
 
     async def test_prompt_guard_completes_under_caching(self):
-        async with Client(
-            self._server(), mode="auto", elicitation_handler=self._handler
-        ) as client:
+        async with self._client() as client:
             result = await client.get_prompt("summarize")
-
         assert result.messages[0].content.text == "Summary for Q3"
 
     async def test_resource_guard_completes_under_caching(self):
-        async with Client(
-            self._server(), mode="auto", elicitation_handler=self._handler
-        ) as client:
+        async with self._client() as client:
             result = await client.read_resource("report://x")
-
         assert result[0].text == "Report for Q3"
 
     async def test_guard_still_asks_on_a_second_fresh_call(self):
@@ -1000,12 +989,8 @@ class TestCachingWithInputRequiredResults:
         A second fresh flow has to be asked the same question; serving it a
         cached final answer would skip the component's own per-round logic.
         """
-        mcp = self._server()
-        async with Client(
-            mcp, mode="auto", elicitation_handler=self._handler
-        ) as client:
+        async with self._client() as client:
             first = await client.get_prompt("summarize")
             second = await client.get_prompt("summarize")
-
         assert first.messages[0].content.text == "Summary for Q3"
         assert second.messages[0].content.text == "Summary for Q3"

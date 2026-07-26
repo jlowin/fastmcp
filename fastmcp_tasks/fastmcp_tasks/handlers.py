@@ -39,7 +39,6 @@ from fastmcp_tasks.creation import (
     registered_component_for_key,
 )
 from fastmcp_tasks.input_store import (
-    acquire_update_lock,
     acquire_update_lock_blocking,
     clear_outstanding,
     discard_outstanding,
@@ -351,9 +350,24 @@ async def tasks_update(
     )
 
     # Serialize concurrent updates for this task so two racing answers cannot
-    # each enqueue a next leg (double execution). A loser is an idempotent no-op.
-    if not await acquire_update_lock(docket, task_scope, task_id):
-        return UpdateTaskResult()
+    # each enqueue a next leg (double execution). Waiting rather than dropping
+    # the loser matters for partial fulfillment: SEP-2663 invites a client to
+    # answer a multi-request ask one key at a time, so two in-flight updates may
+    # carry *different* answers. Acknowledging the loser without storing its
+    # answer would strand the task waiting on a key the client believes it has
+    # already sent. Once the winner finishes, the loser re-reads the leg's
+    # outstanding state: a genuinely duplicate answer finds nothing left to
+    # match and is the idempotent no-op SEP-2663 asks for.
+    if not await acquire_update_lock_blocking(docket, task_scope, task_id):
+        # The holder is wedged. Report a retryable failure rather than a false
+        # acknowledgement, which would silently lose this answer.
+        raise MCPError(
+            code=mcp_types.INTERNAL_ERROR,
+            message=(
+                f"Task {task_id} has an update in progress that did not complete "
+                "in time; retry this update."
+            ),
+        )
     try:
         # A cancelled task never re-enters: clearing outstanding on cancel makes
         # translate return None already, but check explicitly so a cancel that

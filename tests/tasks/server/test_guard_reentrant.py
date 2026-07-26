@@ -11,9 +11,12 @@ the real interceptor and handlers via `task_helpers`.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import mcp_types
+from fastmcp_tasks.context import get_task_scope
+from fastmcp_tasks.input_store import acquire_update_lock, release_update_lock
 from mcp.shared.exceptions import MCPError
 from mcp_types import INTERNAL_ERROR
 
@@ -303,6 +306,77 @@ async def test_partial_update_keeps_task_parked_on_remaining_request():
             mcp,
             created.task_id,
             {pending: {"action": "accept", "content": {"value": "two"}}},
+        )
+        final = await wait_for_task(mcp, created.task_id)
+
+    assert final.status == "completed"
+    assert final.result is not None
+    assert final.result["content"][0]["text"] == "one+two"
+
+
+async def test_partial_update_waits_for_a_held_update_lock():
+    """An update that arrives while another holds the lock must still land.
+
+    SEP-2663 invites a client to answer a multi-request ask one key at a time,
+    so two updates can be in flight carrying *different* answers. Acknowledging
+    the one that loses the lock without storing its answer would leave the task
+    waiting forever on a key the client believes it already sent.
+
+    The lock is taken out of band here so the contention is deterministic rather
+    than dependent on scheduling.
+    """
+    mcp = FastMCP("lock-contention")
+    mcp.add_extension(TasksExtension())
+
+    @mcp.tool(task=True)
+    async def two_questions(ctx: Context) -> str | mcp_types.InputRequiredResult:
+        responses = ctx.input_responses
+        if responses is None:
+            return _input_required(
+                {
+                    "first": _elicit_request("First?"),
+                    "second": _elicit_request("Second?"),
+                }
+            )
+        return f"{_answer(responses, 'first')}+{_answer(responses, 'second')}"
+
+    async with running_task_server(mcp):
+        created = await submit_task(mcp, "two_questions", {})
+        parked = await wait_for_task(
+            mcp, created.task_id, target_states=frozenset({"input_required"})
+        )
+        assert parked.input_requests is not None
+        first = _key_asking(parked.input_requests, "First?")
+        second = _key_asking(parked.input_requests, "Second?")
+
+        docket = mcp._docket
+        assert docket is not None
+        scope = get_task_scope()
+
+        # Simulate a concurrent update in progress.
+        assert await acquire_update_lock(docket, scope, created.task_id)
+        pending = asyncio.create_task(
+            update_task(
+                mcp,
+                created.task_id,
+                {first: {"action": "accept", "content": {"value": "one"}}},
+            )
+        )
+        await asyncio.sleep(0.05)
+        assert not pending.done(), "update returned while the lock was held"
+        await release_update_lock(docket, scope, created.task_id)
+        await pending
+
+        # The blocked answer landed, so only the other key remains outstanding.
+        still_parked = await get_task(mcp, created.task_id)
+        assert still_parked.status == "input_required"
+        assert still_parked.input_requests is not None
+        assert list(still_parked.input_requests) == [second]
+
+        await update_task(
+            mcp,
+            created.task_id,
+            {second: {"action": "accept", "content": {"value": "two"}}},
         )
         final = await wait_for_task(mcp, created.task_id)
 
