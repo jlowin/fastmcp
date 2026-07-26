@@ -32,10 +32,12 @@ from typing import TYPE_CHECKING, Any
 
 from mcp.server.context import ServerRequestContext
 from mcp.shared.exceptions import MCPError
+from mcp.shared.inbound import MCP_NAME_HEADER, decode_header_value
+from mcp_types.jsonrpc import HEADER_MISMATCH
 from mcp_types.version import MODERN_PROTOCOL_VERSIONS
 
 from fastmcp.exceptions import NotFoundError
-from fastmcp.server.dependencies import extract_version_spec
+from fastmcp.server.dependencies import extract_version_spec, get_http_request
 from fastmcp.server.extensions import (
     MethodBinding,
     ServerExtension,
@@ -140,7 +142,7 @@ class TasksExtension(ServerExtension):
         """Reject a task method from a client that did not declare the extension.
 
         SEP-2663: a client issuing `tasks/get`/`tasks/update`/`tasks/cancel`
-        without the tasks capability in the request's `_meta` gets -32003. A
+        without the tasks capability in the request's `_meta` gets -32021. A
         client normally only holds a taskId because it declared the capability
         on the creating `tools/call`, but the method-level check is an explicit
         MUST, so enforce it here rather than assume.
@@ -156,22 +158,56 @@ class TasksExtension(ServerExtension):
                 data=missing_capability_error_data(),
             )
 
+    def _require_matching_task_route(self, task_id: str) -> None:
+        """Reject a task method whose `Mcp-Name` header disagrees with its body.
+
+        SEP-2243 mirrors a request's name-shaped field into `Mcp-Name` so
+        intermediaries can route without parsing the body, and requires servers
+        that read the body to check the two agree. SEP-2663 extends that to the
+        tasks namespace, where the name-shaped field is `taskId`. The core SDK's
+        pre-dispatch ladder only knows the base protocol's name-bearing methods,
+        so the extension enforces its own.
+        """
+        try:
+            request = get_http_request()
+        except RuntimeError:
+            # Not an HTTP transport, so there are no routing headers to check.
+            return
+        header = request.headers.get(MCP_NAME_HEADER)
+        if header is None:
+            return
+        if decode_header_value(header) != task_id:
+            raise MCPError(
+                code=HEADER_MISMATCH,
+                message=(
+                    f"{MCP_NAME_HEADER} header does not match the request body's "
+                    "'taskId' parameter"
+                ),
+            )
+
+    def _check_task_request(
+        self, ctx: ServerRequestContext[Any, Any], task_id: str
+    ) -> None:
+        """Run both gates every `tasks/*` method shares."""
+        self._require_tasks_capability(ctx)
+        self._require_matching_task_route(task_id)
+
     async def _handle_get(
         self, ctx: ServerRequestContext[Any, Any], params: GetTaskParams
     ) -> GetTaskResult:
-        self._require_tasks_capability(ctx)
+        self._check_task_request(ctx, params.task_id)
         return await tasks_get(self.server, params.task_id)
 
     async def _handle_update(
         self, ctx: ServerRequestContext[Any, Any], params: UpdateTaskParams
     ) -> UpdateTaskResult:
-        self._require_tasks_capability(ctx)
+        self._check_task_request(ctx, params.task_id)
         return await tasks_update(self.server, params.task_id, params.input_responses)
 
     async def _handle_cancel(
         self, ctx: ServerRequestContext[Any, Any], params: CancelTaskParams
     ) -> CancelTaskResult:
-        self._require_tasks_capability(ctx)
+        self._check_task_request(ctx, params.task_id)
         return await tasks_cancel(self.server, params.task_id)
 
     async def intercept_tool_call(
@@ -183,7 +219,7 @@ class TasksExtension(ServerExtension):
         """Decide whether to run this ``tools/call`` as a task.
 
         Consults the tool's ``TaskConfig`` mode and the client's per-request
-        opt-in: ``required`` always tasks (raising -32003 if the client did not
+        opt-in: ``required`` always tasks (raising -32021 if the client did not
         opt in), ``optional`` tasks only when the client opted in, ``forbidden``
         never tasks. A non-task call passes straight through to the tool body.
         """

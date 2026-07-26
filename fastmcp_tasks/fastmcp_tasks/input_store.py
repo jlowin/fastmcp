@@ -37,6 +37,8 @@ import mcp_types
 from fastmcp_tasks.keys import task_redis_prefix
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from docket import Docket
 
 logger = logging.getLogger(__name__)
@@ -250,6 +252,11 @@ async def store_outstanding(
             await redis.hset(map_key, surfaced, tool_key)
         await redis.expire(requests_key, ttl_seconds)
         await redis.expire(map_key, ttl_seconds)
+        # The answers that drove this leg have been consumed by the body that
+        # just parked, so drop them: responses accumulate per leg (a client may
+        # answer a multi-request ask one key at a time), and a stale carry-over
+        # would make the next leg look already-answered.
+        await redis.delete(_input_responses_key(docket, task_scope, task_id))
         if request_state is not None:
             await redis.set(state_key, request_state, ex=ttl_seconds)
         else:
@@ -306,7 +313,7 @@ async def translate_responses(
     task_id: str,
     leg: int,
     responses: dict[str, Any],
-) -> dict[str, mcp_types.Result] | None:
+) -> tuple[dict[str, mcp_types.Result], list[str]] | None:
     """Translate a ``tasks/update`` payload into typed, tool-keyed responses.
 
     ``responses`` is keyed by the surfaced keys the client received for ``leg``.
@@ -314,6 +321,10 @@ async def translate_responses(
     answer is validated into the result type its request maps to and re-keyed to
     the tool's own request key. Returns ``None`` when nothing matched, so the
     caller can treat a stale or empty update as an idempotent no-op.
+
+    Returns the tool-keyed answers alongside the surfaced keys they came from,
+    so the caller can retire exactly the answered requests and leave the rest
+    outstanding.
     """
     outstanding = await read_outstanding_inputs(docket, task_scope, task_id, leg)
     if not outstanding:
@@ -321,6 +332,7 @@ async def translate_responses(
     mapping = await _read_outstanding_map(docket, task_scope, task_id, leg)
 
     translated: dict[str, mcp_types.Result] = {}
+    matched: list[str] = []
     for surfaced_key, raw in responses.items():
         payload = outstanding.get(surfaced_key)
         if payload is None:
@@ -331,8 +343,11 @@ async def translate_responses(
         method = payload.get("method", "elicitation/create")
         result_type = result_type_for_method(method)
         translated[tool_key] = result_type.model_validate(raw)
+        matched.append(surfaced_key)
 
-    return translated or None
+    if not translated:
+        return None
+    return translated, matched
 
 
 async def store_input_responses(
@@ -347,6 +362,11 @@ async def store_input_responses(
     The responses are stored typed-but-serialized (``{"type", "data"}``) so the
     next leg's context factory reconstructs real result objects keyed by the
     tool's own request keys.
+
+    Answers merge into whatever the leg has already collected: a client may
+    answer a multi-request ask one `tasks/update` at a time, and the leg only
+    re-enters once every request has been answered. Callers hold the per-task
+    update lock, so the read-modify-write cannot interleave.
     """
     stored = {
         tool_key: {
@@ -355,12 +375,38 @@ async def store_input_responses(
         }
         for tool_key, result in translated.items()
     }
+    responses_key = _input_responses_key(docket, task_scope, task_id)
     async with docket.redis() as redis:
-        await redis.set(
-            _input_responses_key(docket, task_scope, task_id),
-            json.dumps(stored),
-            ex=ttl_seconds,
-        )
+        existing_raw = _decode(await redis.get(responses_key))
+        if existing_raw:
+            try:
+                existing = json.loads(existing_raw)
+            except json.JSONDecodeError:
+                existing = {}
+            if isinstance(existing, dict):
+                stored = {**existing, **stored}
+        await redis.set(responses_key, json.dumps(stored), ex=ttl_seconds)
+
+
+async def discard_outstanding(
+    docket: Docket,
+    task_scope: str | None,
+    task_id: str,
+    leg: int,
+    surfaced_keys: Iterable[str],
+) -> None:
+    """Drop just the surfaced keys an update answered, keeping the rest pending.
+
+    Partial fulfillment (SEP-2663): a leg that asked several questions stays
+    ``input_required`` until all are answered, and each ``tasks/get`` in between
+    must surface only the still-unanswered keys.
+    """
+    keys = list(surfaced_keys)
+    if not keys:
+        return
+    async with docket.redis() as redis:
+        await redis.hdel(_requests_key(docket, task_scope, task_id, leg), *keys)
+        await redis.hdel(_map_key(docket, task_scope, task_id, leg), *keys)
 
 
 async def clear_outstanding(

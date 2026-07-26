@@ -31,6 +31,7 @@ from mcp_types import (
     CallToolRequestParams,
     ToolAnnotations,
 )
+from mcp_types.jsonrpc import MISSING_REQUIRED_CLIENT_CAPABILITY
 from pydantic import AnyUrl
 from pydantic import ValidationError as PydanticValidationError
 from starlette.routing import BaseRoute
@@ -1484,6 +1485,24 @@ class FastMCP(
                     )
                     raise
                 except Exception as e:
+                    # Most MCPErrors raised under a tool describe how the call
+                    # went — a timeout, an upstream error a proxy forwarded —
+                    # and are masked into an `isError` result like any other
+                    # failure. A missing-client-capability error is different:
+                    # it says the request cannot be serviced at all, and
+                    # SEP-2575 requires it on the wire as -32021 (HTTP 400).
+                    # Flattening it into a result would drop the code and tell
+                    # the client the call had succeeded.
+                    if (
+                        isinstance(e, MCPError)
+                        and e.error.code == MISSING_REQUIRED_CLIENT_CAPABILITY
+                    ):
+                        logger.debug(
+                            "Tool %r requires a client capability the client did "
+                            "not declare",
+                            name,
+                        )
+                        raise
                     logger.exception(f"Error calling tool {name!r}")
                     # Handle actionable errors that should reach the LLM
                     # even when masking is enabled

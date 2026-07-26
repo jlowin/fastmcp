@@ -42,9 +42,13 @@ from fastmcp.client.transports.base import TransportOptions
 from fastmcp.exceptions import ResourceError
 from fastmcp.mcp_config import MCPConfig
 from fastmcp.prompts import Message, Prompt, PromptResult
-from fastmcp.prompts.base import PromptArgument
+from fastmcp.prompts.base import InputRequiredPromptResult, PromptArgument
 from fastmcp.resources import Resource, ResourceTemplate
-from fastmcp.resources.base import ResourceContent, ResourceResult
+from fastmcp.resources.base import (
+    InputRequiredResourceResult,
+    ResourceContent,
+    ResourceResult,
+)
 from fastmcp.resources.template import expand_uri_template
 from fastmcp.server.context import Context
 from fastmcp.server.dependencies import fastmcp_request_ctx, get_context
@@ -116,6 +120,38 @@ def _proxy_upstream_error(error: Exception) -> MCPError:
         code=mcp_types.INTERNAL_ERROR,
         message=str(error),
     )
+
+
+async def _relay_read_resource(
+    client: Client, uri: str, ctx: Context | None
+) -> (
+    list[mcp_types.TextResourceContents | mcp_types.BlobResourceContents]
+    | mcp_types.InputRequiredResult
+):
+    """Read a backend resource, surfacing a guard ask rather than driving it.
+
+    Mirrors `ProxyTool.run`: on a modern backend the low-level session is used
+    so an `InputRequiredResult` (SEP-2322) comes back as a result for the parent
+    to forward, instead of the high-level client trying to answer it here — the
+    proxy has no back-channel to the real user, so driving it fails outright.
+    The inbound request's continuation state travels down so the backend guard
+    sees the client's answers on its own `ctx.input_responses`. Trace context
+    still propagates: the SDK's JSON-RPC dispatcher injects it on every outgoing
+    request (SEP-414), below whichever client layer issued the call.
+    """
+    if client.protocol_version not in MODERN_PROTOCOL_VERSIONS:
+        return await client.read_resource(uri)
+    result = await client._await_with_session_monitoring(
+        client.session.read_resource(
+            uri,
+            input_responses=ctx.input_responses if ctx else None,
+            request_state=ctx.request_state if ctx else None,
+            allow_input_required=True,
+        )
+    )
+    if isinstance(result, mcp_types.InputRequiredResult):
+        return result
+    return list(result.contents)
 
 
 def _stash_proxy_request_context(client: Client, ctx: Context) -> None:
@@ -418,9 +454,12 @@ class ProxyResource(Resource):
         ) as span:
             span.set_attribute("fastmcp.provider.type", "ProxyProvider")
             client = await self._get_client()
+            ctx = get_context()
             async with client:
-                _stash_proxy_request_context(client, get_context())
-                result = await client.read_resource(backend_uri)
+                _stash_proxy_request_context(client, ctx)
+                result = await _relay_read_resource(client, backend_uri, ctx)
+            if isinstance(result, mcp_types.InputRequiredResult):
+                return InputRequiredResourceResult(result)
             if not result:
                 raise ResourceError(
                     f"Remote server returned empty content for {backend_uri}"
@@ -516,9 +555,28 @@ class ProxyTemplate(ResourceTemplate):
         backend_template = self._backend_uri_template or self.uri_template
         parameterized_uri = expand_uri_template(backend_template, params)
         client = await self._get_client()
+        ctx = context or get_context()
         async with client:
-            _stash_proxy_request_context(client, context or get_context())
-            result = await client.read_resource(parameterized_uri)
+            _stash_proxy_request_context(client, ctx)
+            result = await _relay_read_resource(client, parameterized_uri, ctx)
+
+        if isinstance(result, mcp_types.InputRequiredResult):
+            # The backend template asked for input. `InputRequiredResourceResult`
+            # is a `ResourceResult`, so caching it on the returned resource lets
+            # the ask ride the ordinary read path out to the parent's wire
+            # handler, which unwraps it.
+            return ProxyResource(
+                client_factory=self._client_factory,
+                uri=parameterized_uri,
+                name=self.name,
+                title=self.title,
+                description=self.description,
+                mime_type=self.mime_type or "text/plain",
+                icons=self.icons,
+                meta=self.meta,
+                tags=get_fastmcp_metadata(self.meta).get("tags", []),
+                _cached_content=InputRequiredResourceResult(result),
+            )
 
         if not result:
             raise ResourceError(
@@ -635,9 +693,26 @@ class ProxyPrompt(Prompt):
         ) as span:
             span.set_attribute("fastmcp.provider.type", "ProxyProvider")
             client = await self._get_client()
+            ctx = get_context()
             async with client:
-                _stash_proxy_request_context(client, get_context())
-                result = await client.get_prompt(backend_name, arguments)
+                _stash_proxy_request_context(client, ctx)
+                if client.protocol_version in MODERN_PROTOCOL_VERSIONS:
+                    # See `_relay_read_resource`: surface a backend guard's ask
+                    # instead of trying to answer it inside the proxy.
+                    raw = await client._await_with_session_monitoring(
+                        client.session.get_prompt(
+                            backend_name,
+                            arguments,
+                            input_responses=ctx.input_responses if ctx else None,
+                            request_state=ctx.request_state if ctx else None,
+                            allow_input_required=True,
+                        )
+                    )
+                    if isinstance(raw, mcp_types.InputRequiredResult):
+                        return InputRequiredPromptResult(raw)
+                    result = raw
+                else:
+                    result = await client.get_prompt(backend_name, arguments)
             # Convert GetPromptResult to PromptResult, preserving meta from result
             # (not the static prompt meta which includes fastmcp tags)
             # Convert PromptMessages to Messages
