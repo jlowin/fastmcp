@@ -210,6 +210,35 @@ class ResourceResult(pydantic.BaseModel):
         )
 
 
+class InputRequiredResourceResult(ResourceResult):
+    """The full result of a single multi-round-trip resource read (SEP-2322).
+
+    `InputRequiredResult` is a result type, not a `tools/call` feature: any
+    request may resolve to one. When a resource or resource template returns an
+    `InputRequiredResult` from its body to ask the client for input, that ask is
+    the legitimate result of this `resources/read` — so FastMCP wraps it in this
+    `ResourceResult` subclass, mirroring `InputRequiredToolResult` and
+    `InputRequiredPromptResult`, and it flows through the middleware chain as an
+    ordinary return value.
+
+    Invariant: the wrapped `InputRequiredResult` is never serialized as resource
+    contents. `contents` is always empty; the wire handler (`_on_read_resource`)
+    reads `.input_required` and returns it to the runner.
+    """
+
+    input_required: mcp_types.InputRequiredResult = pydantic.Field(
+        description="The client-input request this read resolved to (SEP-2322)"
+    )
+
+    def __init__(self, input_required: mcp_types.InputRequiredResult) -> None:
+        # Bypass ResourceResult's content-normalizing __init__: an
+        # input-required read carries no contents (see the invariant above), and
+        # `input_required` is a required field ResourceResult.__init__ can't set.
+        pydantic.BaseModel.__init__(
+            self, contents=[], meta=None, input_required=input_required
+        )
+
+
 def _public_content_meta(meta: dict[str, Any] | None) -> dict[str, Any] | None:
     """Strip FastMCP's internal bookkeeping out of component meta.
 
@@ -258,6 +287,12 @@ def convert_raw_to_resource_result(
     """
     if isinstance(raw_value, ResourceResult):
         return raw_value
+
+    if isinstance(raw_value, mcp_types.InputRequiredResult):
+        # The resource asked the client for input (SEP-2322). Wrap it so the
+        # ask travels the middleware chain as an ordinary result; the wire
+        # handler unwraps it.
+        return InputRequiredResourceResult(raw_value)
 
     meta = _public_content_meta(meta)
 

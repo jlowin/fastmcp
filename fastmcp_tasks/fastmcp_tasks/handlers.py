@@ -374,17 +374,25 @@ async def tasks_update(
         # may answer a multi-request ask one update at a time.
         await store_input_responses(docket, task_scope, task_id, translated)
 
-        # Retire only what this update answered. While anything is still
-        # outstanding the task stays `input_required` and `tasks/get` surfaces
-        # the remaining keys — the leg re-enters only once every request has an
-        # answer (SEP-2663 partial fulfillment).
-        await discard_outstanding(
-            docket, task_scope, task_id, leg_number, answered_keys
-        )
-        still_pending = await read_outstanding_inputs(
+        # A partial update retires only the keys it answered, leaving the task
+        # `input_required` with the rest surfaced; the leg re-enters only once
+        # every request has an answer (SEP-2663 partial fulfillment).
+        #
+        # The *last* answer deliberately leaves its marker in place. Outstanding
+        # requests are what make a completed-but-parked leg read as
+        # `input_required` rather than as a finished task, so retiring the final
+        # one before the next leg is durable would let a racing `tasks/get`
+        # report the task complete with a `None` result — and would strand it
+        # there for good if the enqueue below failed, since a retried update
+        # would no longer match any key. `clear_outstanding` runs after the
+        # pointer swap instead.
+        outstanding = await read_outstanding_inputs(
             docket, task_scope, task_id, leg_number
         )
-        if still_pending:
+        if set(outstanding) - set(answered_keys):
+            await discard_outstanding(
+                docket, task_scope, task_id, leg_number, answered_keys
+            )
             return UpdateTaskResult()
 
         # Every request is answered, so enqueue the next leg. Ordering matters:

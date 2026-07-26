@@ -29,6 +29,7 @@ from fastmcp.exceptions import (
     to_mcp_error,
 )
 from fastmcp.prompts.base import InputRequiredPromptResult
+from fastmcp.resources.base import InputRequiredResourceResult
 from fastmcp.server.completions import CompletionValues, normalize_completion
 from fastmcp.server.dependencies import bind_request_context, extract_version_spec
 from fastmcp.tools.base import InputRequiredToolResult, ToolResult
@@ -296,7 +297,7 @@ class MCPOperationsMixin:
         self: FastMCP,
         ctx: ServerRequestContext,
         params: ReadResourceRequestParams,
-    ) -> mcp_types.ReadResourceResult:
+    ) -> mcp_types.ReadResourceResult | mcp_types.InputRequiredResult:
         """Handle MCP 'resources/read' requests."""
         with bind_request_context(ctx):
             uri = params.uri
@@ -324,6 +325,23 @@ class MCPOperationsMixin:
                 # which would hide a legitimate client-input error. Masking
                 # already happened inside read_resource.
                 raise to_mcp_error(e) from e
+
+            if isinstance(result, InputRequiredResourceResult):
+                # The resource requested client input (SEP-2322). As with tools
+                # and prompts, the multi-round-trip result type only exists at
+                # 2026-07-28, so name the era problem on an older connection
+                # rather than failing as a generic "invalid result".
+                if ctx.protocol_version not in MODERN_PROTOCOL_VERSIONS:
+                    raise MCPError(
+                        code=INVALID_PARAMS,
+                        message=(
+                            f"Resource {str(uri)!r} returned an InputRequiredResult "
+                            "to request client input, but the multi-round-trip "
+                            "result type (SEP-2322) only exists at MCP 2026-07-28; "
+                            f"this connection negotiated {ctx.protocol_version!r}."
+                        ),
+                    )
+                return result.input_required
 
             return result.to_mcp_result(uri)
 

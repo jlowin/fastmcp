@@ -60,6 +60,14 @@ def _input_required(
     )
 
 
+def _key_asking(input_requests: dict[str, Any], message: str) -> str:
+    """The surfaced key whose parked request asks *message*."""
+    for key, payload in input_requests.items():
+        if payload["params"]["message"] == message:
+            return key
+    raise AssertionError(f"no parked request asks {message!r}")
+
+
 async def _park_key(mcp: FastMCP, task_id: str) -> str:
     parked = await wait_for_task(
         mcp, task_id, target_states=frozenset({"input_required"})
@@ -273,10 +281,12 @@ async def test_partial_update_keeps_task_parked_on_remaining_request():
             mcp, created.task_id, target_states=frozenset({"input_required"})
         )
         assert parked.input_requests is not None
-        keys = sorted(parked.input_requests)
-        assert len(keys) == 2
+        assert len(parked.input_requests) == 2
 
-        answered, pending = keys[0], keys[1]
+        # Surfaced keys are freshly minted per request, so they carry no order
+        # a test can rely on. Identify each by the question it asks.
+        answered = _key_asking(parked.input_requests, "First?")
+        pending = _key_asking(parked.input_requests, "Second?")
         await update_task(
             mcp,
             created.task_id,
@@ -299,6 +309,41 @@ async def test_partial_update_keeps_task_parked_on_remaining_request():
     assert final.status == "completed"
     assert final.result is not None
     assert final.result["content"][0]["text"] == "one+two"
+
+
+async def test_final_answer_keeps_task_parked_until_next_leg_is_durable():
+    """The last answer must not retire its outstanding marker early.
+
+    Outstanding requests are what make a completed-but-parked leg read as
+    `input_required`. Discarding the final one before the next leg is enqueued
+    would let a `tasks/get` landing in that window see a finished execution with
+    no result and report the task complete.
+    """
+    mcp = FastMCP("durable-reentry")
+    mcp.add_extension(TasksExtension())
+
+    @mcp.tool(task=True)
+    async def one_question(ctx: Context) -> str | mcp_types.InputRequiredResult:
+        responses = ctx.input_responses
+        if responses is None:
+            return _input_required({"only": _elicit_request("Only?")})
+        return f"got {_answer(responses, 'only')}"
+
+    async with running_task_server(mcp):
+        created = await submit_task(mcp, "one_question", {})
+        key = await _park_key(mcp, created.task_id)
+
+        await update_task(
+            mcp,
+            created.task_id,
+            {key: {"action": "accept", "content": {"value": "answer"}}},
+        )
+        final = await wait_for_task(mcp, created.task_id)
+
+    # The task must land on the real result, never on a phantom completion.
+    assert final.status == "completed"
+    assert final.result is not None
+    assert final.result["content"][0]["text"] == "got answer"
 
 
 async def test_protocol_error_fails_the_task_with_inlined_error():

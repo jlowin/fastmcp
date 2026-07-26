@@ -1273,3 +1273,75 @@ class TestPromptGuard:
         async with Client(self._context_prompt_server(), mode="legacy") as client:
             with pytest.raises(MCPError, match="2026-07-28"):
                 await client.session.get_prompt("summarize")
+
+
+class TestResourceGuard:
+    """Resources and templates ask for input the same way tools and prompts do."""
+
+    @staticmethod
+    def _resource_server() -> FastMCP:
+        mcp = FastMCP("resource-guard")
+
+        @mcp.resource("data://report")
+        async def report(ctx: Context) -> str | InputRequiredResult:
+            responses = ctx.input_responses
+            if responses is None:
+                return _ask(
+                    _elicit("context", "Which quarter?", "context"),
+                    key="context",
+                    request_state=None,
+                )
+            return f"Report for {_accepted(responses, 'context')['context']}"
+
+        @mcp.resource("data://report/{section}")
+        async def section_report(
+            section: str, ctx: Context
+        ) -> str | InputRequiredResult:
+            responses = ctx.input_responses
+            if responses is None:
+                return _ask(
+                    _elicit("context", f"Which quarter for {section}?", "context"),
+                    key="context",
+                    request_state=None,
+                )
+            quarter = _accepted(responses, "context")["context"]
+            return f"{section} for {quarter}"
+
+        return mcp
+
+    async def test_resource_emits_input_required(self):
+        async with Client(self._resource_server(), mode="auto") as client:
+            result = await client.session.read_resource(
+                "data://report", allow_input_required=True
+            )
+
+        assert isinstance(result, InputRequiredResult)
+        assert "context" in result.input_requests
+
+    async def test_resource_completes_with_responses(self):
+        async with Client(self._resource_server(), mode="auto") as client:
+            done = await client.session.read_resource(
+                "data://report",
+                input_responses={
+                    "context": mcp_types.ElicitResult(
+                        action="accept", content={"context": "Q3"}
+                    )
+                },
+            )
+
+        assert done.contents[0].text == "Report for Q3"
+
+    async def test_resource_template_emits_input_required(self):
+        """Templates share the converter, so the ask survives there too."""
+        async with Client(self._resource_server(), mode="auto") as client:
+            result = await client.session.read_resource(
+                "data://report/revenue", allow_input_required=True
+            )
+
+        assert isinstance(result, InputRequiredResult)
+        assert "context" in result.input_requests
+
+    async def test_resource_guard_rejected_on_handshake_era(self):
+        async with Client(self._resource_server(), mode="legacy") as client:
+            with pytest.raises(MCPError, match="2026-07-28"):
+                await client.session.read_resource("data://report")
