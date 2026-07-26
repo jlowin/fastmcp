@@ -15,7 +15,6 @@ from fastmcp.server.auth.redirect_validation import (
     is_loopback_host,
     is_redirect_uri_allowed_for_application_type,
 )
-from fastmcp.server.auth.uri_schemes import IANA_REGISTERED_URI_SCHEMES
 
 # Standard public IP used for DNS mocking in tests
 TEST_PUBLIC_IP = "93.184.216.34"
@@ -647,55 +646,35 @@ class TestApplicationTypeRedirectRules:
         [
             "http://client.example.com/callback",
             "http://example.com:8080/callback",
-            "ftp://files.example.com/callback",
-            "ws://socket.example.com/callback",
-            "wss://socket.example.com/callback",
-            "smb://attacker.example/share",
-            "smtp://attacker.example",
-            "nfs://attacker.example/path",
-            "ssh://attacker.example",
-            "ldap://attacker.example",
-            # Registered transports that a hand-picked "standard schemes" list
-            # would plausibly miss — these must fail closed via the registry.
-            "coap://attacker.example/cb",
-            "coaps://attacker.example/cb",
-            "stun://attacker.example",
-            "turn://attacker.example",
-            "mqtt://attacker.example/cb",
         ],
     )
-    def test_native_rejects_non_loopback_http_and_registered_schemes(self, uri: str):
-        """Native accepts only https, loopback http, and private-use schemes.
-
-        IANA-registered schemes are not available for private use (RFC 8252
-        §7.1), so they cannot receive an authorization code even though they are
-        not in the unsafe-browser-scheme set.
-        """
+    def test_native_rejects_non_loopback_cleartext_http(self, uri: str):
+        """Native may use cleartext http only against a loopback host."""
         assert is_redirect_uri_allowed_for_application_type(uri, "native") is False
-
-    def test_registry_covers_schemes_a_handpicked_list_would_miss(self):
-        """The private-use test consults the real IANA registry, not a subset.
-
-        This is the property that makes the check fail closed: these schemes are
-        registered transports that no hand-maintained list reliably enumerates.
-        """
-        for scheme in ("coap", "coaps", "stun", "turn", "mqtt"):
-            assert scheme in IANA_REGISTERED_URI_SCHEMES
-
-        # Private-use schemes must remain absent from the registry.
-        for scheme in ("com.example.app", "myapp", "cursor"):
-            assert scheme not in IANA_REGISTERED_URI_SCHEMES
 
     @pytest.mark.parametrize(
         "uri",
         [
+            # Real MCP client callbacks — these must keep working.
+            "vscode://callback",
+            "vscode-insiders://callback",
+            "urn:ietf:wg:oauth:2.0:oob",
+            "cursor://anysphere.cursor-mcp/oauth/callback",
+            # Reverse-domain and plain app schemes.
             "com.example.app://callback",
             "com.example.app:/oauth/callback",
             "myapp://callback",
         ],
     )
-    def test_native_accepts_private_use_schemes(self, uri: str):
-        """RFC 8252 §7.1 private-use schemes (unregistered) stay allowed."""
+    def test_native_accepts_app_and_private_use_schemes(self, uri: str):
+        """Native clients keep every scheme outside the unsafe set.
+
+        FastMCP deliberately does not try to classify a native client's scheme
+        as "private-use" versus "network transport": the IANA registry lists
+        `vscode` (an app-dispatch scheme) alongside `coap` and `smb`, so no
+        membership test separates the two without rejecting schemes that real
+        MCP clients depend on.
+        """
         assert is_redirect_uri_allowed_for_application_type(uri, "native") is True
 
     @pytest.mark.parametrize(

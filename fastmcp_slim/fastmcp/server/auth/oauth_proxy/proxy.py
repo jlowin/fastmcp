@@ -981,8 +981,7 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
                         f"Redirect URI '{redirect_uri}' is not allowed.",
                     )
                 # SEP-837: honor the client's declared application_type. "web"
-                # clients are restricted to https redirect URIs; "native" clients
-                # (the SDK default) may use loopback and private-use schemes.
+                # clients are restricted to non-loopback https redirect URIs.
                 if not is_redirect_uri_allowed_for_application_type(
                     redirect_uri,
                     application_type,
@@ -992,6 +991,17 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
                         f"Redirect URI '{redirect_uri}' is not allowed for "
                         f"application_type '{application_type}'.",
                     )
+        elif application_type == "web":
+            # Clients may omit redirect_uris and supply one at authorization,
+            # which falls back to the `http://localhost` placeholder below. A web
+            # client can never authorize against that placeholder (loopback http
+            # fails its own rule), so registering one would only produce a client
+            # that is guaranteed to fail later. Refuse it now, with a reason.
+            raise RegistrationError(
+                "invalid_redirect_uri",
+                "redirect_uris is required for application_type 'web'; web "
+                "clients must register a non-loopback https redirect URI.",
+            )
 
         redirect_uris = client_info.redirect_uris or [AnyUrl("http://localhost")]
 

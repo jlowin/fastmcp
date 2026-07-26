@@ -10,8 +10,6 @@ from urllib.parse import unquote, urlencode, urlparse, urlunparse
 
 from pydantic import AnyUrl
 
-from fastmcp.server.auth.uri_schemes import IANA_REGISTERED_URI_SCHEMES
-
 UNSAFE_REDIRECT_URI_SCHEMES = frozenset(
     {
         "javascript",
@@ -378,31 +376,26 @@ def is_redirect_uri_allowed_for_application_type(
     Client may use (RFC 7591 §2, OpenID Connect Dynamic Client Registration §2):
 
     - `"web"` clients must use `https` redirect URIs on a non-loopback host.
-      Loopback `http`, `https://localhost`, and custom/private-use schemes are
-      rejected.
-    - `"native"` clients are matched against a positive list of the three
-      redirect forms RFC 8252 sanctions for native apps, and nothing else:
+      Loopback `http`, `https://localhost`, and app/custom schemes are rejected.
+      This is the restriction SEP-837 actually asks for.
+    - `"native"` clients keep every scheme FastMCP already allowed, except that
+      `http` is restricted to loopback hosts (RFC 8252 §7.3, any port). App and
+      private-use schemes pass through untouched: `vscode://`,
+      `com.example.app:/callback`, `myapp://callback`, `urn:ietf:wg:oauth:2.0:oob`.
 
-      1. `https` claimed URLs (RFC 8252 §7.2).
-      2. `http` **only** with a loopback host (RFC 8252 §7.3) — any port.
-      3. Private-use URI schemes (RFC 8252 §7.1), i.e. a scheme that is *not*
-         IANA-registered. RFC 8252 defines a private-use scheme as an
-         unregistered one based on a domain the app controls
-         (`com.example.app:/callback`), so the membership test is against
-         `IANA_REGISTERED_URI_SCHEMES` — a vendored snapshot of the actual IANA
-         registry. Everything outside the registry is a private-use app scheme.
-
-      Checking the real registry rather than a hand-maintained list is what
-      makes this fail *closed*. Both a denylist of "dangerous" transports and
-      an allowlist of "standard" ones silently accept every scheme nobody
-      thought to include — `coap:`, `stun:`, `turn:`, and `mqtt:` are all
-      registered transports that a hand-picked subset misses, and each would
-      otherwise be treated as a private-use scheme and allowed to receive an
-      authorization code at a remote service instead of the local app.
+    Deliberately absent: any attempt to classify a native client's scheme as
+    "private-use" versus "a network transport". There is no sound test. The IANA
+    registry cannot separate them — `vscode` is registered *because* it is an
+    app-dispatch scheme, alongside transports like `coap` and `smb` — and
+    reverse-domain notation fails too, since `iris.beep` and
+    `microsoft.windows.camera` are registered while `myapp` is not. Every
+    formulation either rejects schemes real MCP clients depend on or admits the
+    ones it meant to exclude, so native scheme filtering is left to the
+    unsafe-scheme check below.
 
     Unsafe browser schemes (`javascript:`, `data:`, `file:`, `vbscript:`) are
-    always rejected regardless of `application_type`, layering on top of
-    FastMCP's existing scheme hardening.
+    always rejected regardless of `application_type`. That check predates this
+    function and is unchanged by it.
 
     The MCP SDK defaults `application_type` to `"native"` because MCP clients
     typically register loopback redirect URIs, so omitting the field preserves
@@ -422,13 +415,11 @@ def is_redirect_uri_allowed_for_application_type(
             return False
         return not is_loopback_host(parsed.hostname)
 
-    # "native" (and the SDK default): accept exactly the three RFC 8252 forms.
-    if scheme == "https":
-        return True
+    # "native" (and the SDK default): cleartext http only to a loopback host;
+    # every other non-unsafe scheme is left alone.
     if scheme == "http":
         return is_loopback_host(parsed.hostname)
-    # Private-use scheme: registered schemes are not available for private use.
-    return scheme not in IANA_REGISTERED_URI_SCHEMES
+    return True
 
 
 def validate_redirect_uri(

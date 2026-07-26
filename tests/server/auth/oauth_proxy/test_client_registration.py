@@ -318,6 +318,35 @@ class TestApplicationTypeRegistration:
         with pytest.raises(RegistrationError, match="application_type 'web'"):
             await oauth_proxy.register_client(client_info)
 
+    async def test_web_client_without_redirect_uris_is_rejected(self, oauth_proxy):
+        """A web client with no redirect_uris could never authorize.
+
+        Omitted redirect_uris fall back to the `http://localhost` placeholder,
+        which a web client can never use (loopback http fails its own rule), so
+        registering one would only create a client guaranteed to fail later.
+        """
+        client_info = OAuthClientInformationFull(
+            client_id="web-no-uris",
+            redirect_uris=None,
+            application_type="web",
+        )
+
+        with pytest.raises(RegistrationError, match="required for application_type"):
+            await oauth_proxy.register_client(client_info)
+
+    async def test_native_client_without_redirect_uris_still_allowed(self, oauth_proxy):
+        """Native clients may still defer redirect_uris to authorization time."""
+        client_info = OAuthClientInformationFull(
+            client_id="native-no-uris",
+            redirect_uris=None,
+            application_type="native",
+        )
+
+        await oauth_proxy.register_client(client_info)
+
+        stored = await oauth_proxy.get_client("native-no-uris")
+        assert stored is not None
+
     @pytest.mark.parametrize("application_type", ["web", "native"])
     async def test_unsafe_scheme_rejected_regardless_of_type(
         self, oauth_proxy, application_type
