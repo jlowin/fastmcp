@@ -134,16 +134,6 @@ async def test_tool_with_progress(ctx: Context) -> str:
     return "Progress test complete."
 
 
-@server.tool(name="test_sampling")
-async def test_sampling(prompt: str, ctx: Context) -> str:
-    """Requests LLM sampling via the client."""
-    result = await ctx.sample(
-        messages=[prompt],
-        result_type=str,
-    )
-    return f"Sampling result: {result}"
-
-
 class _UserInfo(BaseModel):
     username: str
     email: str
