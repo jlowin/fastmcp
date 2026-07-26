@@ -70,3 +70,15 @@ class TestClientRoots:
             result = await client.call_tool("list_roots", {})
 
         assert result.data == ["file:///partial"]
+
+    async def test_callable_object_roots_handler(self, fastmcp_server: FastMCP):
+        class RootsProvider:
+            async def __call__(self, _context: object) -> list[str]:
+                return ["file:///callable-object"]
+
+        async with Client(
+            fastmcp_server, mode="legacy", roots=RootsProvider()
+        ) as client:
+            result = await client.call_tool("list_roots", {})
+
+        assert result.data == ["file:///callable-object"]
