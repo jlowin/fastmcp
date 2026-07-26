@@ -10,107 +10,14 @@ from urllib.parse import unquote, urlencode, urlparse, urlunparse
 
 from pydantic import AnyUrl
 
+from fastmcp.server.auth.uri_schemes import IANA_REGISTERED_URI_SCHEMES
+
 UNSAFE_REDIRECT_URI_SCHEMES = frozenset(
     {
         "javascript",
         "data",
         "file",
         "vbscript",
-    }
-)
-
-#: Known standard (IANA-registered) URI schemes.
-#:
-#: RFC 8252 §7.1 defines a native app's private-use URI scheme as one that is
-#: *not* registered — apps are told to use a scheme based on a domain name they
-#: control (e.g. `com.example.app:`). So the correct test for "is this a
-#: private-use scheme?" is membership in the registered set, not membership in
-#: a denylist of dangerous transports: a denylist can only ever enumerate the
-#: harms someone thought of, while this set enumerates the schemes that are
-#: definitionally *not* available for private use. Anything outside it is, by
-#: RFC 8252's definition, a private-use/app-specific scheme.
-#:
-#: `http` and `https` are handled separately (they have their own rules) and are
-#: listed here so they can never fall through to the private-use branch.
-STANDARD_URI_SCHEMES = frozenset(
-    {
-        # Web / transport
-        "http",
-        "https",
-        "ws",
-        "wss",
-        "ftp",
-        "ftps",
-        "sftp",
-        "tftp",
-        "ssh",
-        "telnet",
-        "gopher",
-        "nntp",
-        "news",
-        "snmp",
-        "smb",
-        "cifs",
-        "nfs",
-        "afp",
-        "rsync",
-        "svn",
-        "git",
-        "cvs",
-        # Mail / messaging / realtime
-        "mailto",
-        "smtp",
-        "smtps",
-        "imap",
-        "imaps",
-        "pop",
-        "pop3",
-        "sip",
-        "sips",
-        "xmpp",
-        "irc",
-        "ircs",
-        "rtsp",
-        "rtmp",
-        "mms",
-        # Directory / data / db
-        "ldap",
-        "ldaps",
-        "dns",
-        "dict",
-        "finger",
-        "whois",
-        "jdbc",
-        "mysql",
-        "postgres",
-        "postgresql",
-        "redis",
-        "mongodb",
-        # Local / device / misc registered
-        "file",
-        "data",
-        "javascript",
-        "vbscript",
-        "about",
-        "blob",
-        "tel",
-        "fax",
-        "sms",
-        "mid",
-        "cid",
-        "urn",
-        "geo",
-        "magnet",
-        "bitcoin",
-        "ethereum",
-        "steam",
-        "view-source",
-        "chrome",
-        "chrome-extension",
-        "resource",
-        "jar",
-        "ms-help",
-        "shell",
     }
 )
 
@@ -266,7 +173,7 @@ def _match_host(uri_host: str | None, pattern_host: str | None) -> bool:
     return uri_host == pattern_host
 
 
-def _is_loopback_host(host: str | None) -> bool:
+def is_loopback_host(host: str | None) -> bool:
     """Check if a host is a loopback address.
 
     Per RFC 8252 §7.3, loopback covers the whole reserved loopback range, not
@@ -429,7 +336,7 @@ def matches_allowed_pattern(uri: str, pattern: str) -> bool:
         return False
 
     # RFC 8252 §7.3: loopback patterns without an explicit port match any port
-    if not (_is_loopback_host(pattern_host) and pattern_port is None):
+    if not (is_loopback_host(pattern_host) and pattern_port is None):
         if not _match_port(uri_port, pattern_port, uri_parsed.scheme.lower()):
             return False
 
@@ -458,14 +365,16 @@ def is_redirect_uri_allowed_for_application_type(
          IANA-registered. RFC 8252 defines a private-use scheme as an
          unregistered one based on a domain the app controls
          (`com.example.app:/callback`), so the membership test is against
-         `STANDARD_URI_SCHEMES` — the set of schemes definitionally unavailable
-         for private use. Everything outside it is a private-use/app scheme.
+         `IANA_REGISTERED_URI_SCHEMES` — a vendored snapshot of the actual IANA
+         registry. Everything outside the registry is a private-use app scheme.
 
-      This is a positive rule rather than a denylist of dangerous transports:
-      a denylist only blocks the harms someone remembered to enumerate, so
-      unlisted standard schemes (`smb:`, `smtp:`, `nfs:`, ...) would otherwise
-      reach the success path and could point an authorization code at a remote
-      service instead of the local app.
+      Checking the real registry rather than a hand-maintained list is what
+      makes this fail *closed*. Both a denylist of "dangerous" transports and
+      an allowlist of "standard" ones silently accept every scheme nobody
+      thought to include — `coap:`, `stun:`, `turn:`, and `mqtt:` are all
+      registered transports that a hand-picked subset misses, and each would
+      otherwise be treated as a private-use scheme and allowed to receive an
+      authorization code at a remote service instead of the local app.
 
     Unsafe browser schemes (`javascript:`, `data:`, `file:`, `vbscript:`) are
     always rejected regardless of `application_type`, layering on top of
@@ -487,15 +396,15 @@ def is_redirect_uri_allowed_for_application_type(
         # "web": require an https redirect URI on a non-loopback host.
         if scheme != "https":
             return False
-        return not _is_loopback_host(parsed.hostname)
+        return not is_loopback_host(parsed.hostname)
 
     # "native" (and the SDK default): accept exactly the three RFC 8252 forms.
     if scheme == "https":
         return True
     if scheme == "http":
-        return _is_loopback_host(parsed.hostname)
+        return is_loopback_host(parsed.hostname)
     # Private-use scheme: registered schemes are not available for private use.
-    return scheme not in STANDARD_URI_SCHEMES
+    return scheme not in IANA_REGISTERED_URI_SCHEMES
 
 
 def validate_redirect_uri(

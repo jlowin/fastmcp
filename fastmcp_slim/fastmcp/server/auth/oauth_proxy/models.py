@@ -14,6 +14,7 @@ from pydantic import AnyUrl, BaseModel, Field, ValidationError
 
 from fastmcp.server.auth.cimd import CIMDDocument
 from fastmcp.server.auth.redirect_validation import (
+    is_loopback_host,
     is_redirect_uri_allowed_for_application_type,
     matches_allowed_pattern,
     validate_redirect_uri,
@@ -140,10 +141,6 @@ def _redirect_uri_path(uri_path: str) -> str:
     return uri_path or "/"
 
 
-def _is_loopback_host(host: str | None) -> bool:
-    return host is not None and host.lower() in {"localhost", "127.0.0.1", "::1"}
-
-
 def _matches_registered_loopback_redirect_uri(
     redirect_uri: AnyUrl,
     registered_uri: AnyUrl,
@@ -159,7 +156,7 @@ def _matches_registered_loopback_redirect_uri(
     requested_host = requested.hostname.lower() if requested.hostname else None
     registered_host = registered.hostname.lower() if registered.hostname else None
 
-    if not _is_loopback_host(registered_host):
+    if not is_loopback_host(registered_host):
         return False
     if requested_host != registered_host:
         return False

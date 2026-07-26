@@ -244,6 +244,34 @@ class TestApplicationTypeRegistration:
         assert stored is not None
         assert stored.application_type == "native"
 
+    async def test_native_loopback_range_registers_then_authorizes_new_port(
+        self, oauth_proxy
+    ):
+        """A native client on 127.0.0.2 keeps loopback port flexibility.
+
+        Registration accepts the whole 127.0.0.0/8 range, and the stored client
+        must then authorize a different ephemeral port on that same address.
+        """
+        client_info = OAuthClientInformationFull(
+            client_id="loopback-range-client",
+            redirect_uris=[AnyUrl("http://127.0.0.2:3000/callback")],
+            application_type="native",
+        )
+
+        await oauth_proxy.register_client(client_info)
+
+        stored = await oauth_proxy.get_client("loopback-range-client")
+        assert stored is not None
+
+        uri = stored.validate_redirect_uri(AnyUrl("http://127.0.0.2:54321/callback"))
+        assert str(uri) == "http://127.0.0.2:54321/callback"
+
+        # A different host is still rejected — flexibility is loopback-only.
+        with pytest.raises(InvalidRedirectUriError):
+            stored.validate_redirect_uri(
+                AnyUrl("http://evil.example.com:54321/callback")
+            )
+
     async def test_native_client_accepts_loopback(self, oauth_proxy):
         client_info = OAuthClientInformationFull(
             client_id="native-client",

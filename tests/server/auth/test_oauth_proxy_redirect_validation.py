@@ -14,6 +14,7 @@ from fastmcp.server.auth.oauth_proxy.models import ProxyDCRClient
 from fastmcp.server.auth.redirect_validation import (
     is_redirect_uri_allowed_for_application_type,
 )
+from fastmcp.server.auth.uri_schemes import IANA_REGISTERED_URI_SCHEMES
 
 # Standard public IP used for DNS mocking in tests
 TEST_PUBLIC_IP = "93.184.216.34"
@@ -497,6 +498,46 @@ class TestOAuthProxyCIMDClient:
             client.validate_redirect_uri(AnyUrl("http://localhost:9999/other"))
 
 
+class TestRegisteredLoopbackPortFlexibility:
+    """The registered-URI port-flexible match uses the shared loopback classifier.
+
+    `models.py` previously carried its own `_is_loopback_host` that only knew
+    `127.0.0.1`, so a client registered on another address in `127.0.0.0/8`
+    silently lost port flexibility and was rejected as unregistered.
+    """
+
+    @pytest.mark.parametrize(
+        "host", ["127.0.0.1", "127.0.0.2", "127.5.5.5", "localhost"]
+    )
+    def test_loopback_range_keeps_port_flexibility(self, host: str):
+        client = ProxyDCRClient(
+            client_id="native",
+            client_secret="secret",
+            redirect_uris=[AnyUrl(f"http://{host}:3000/callback")],
+        )
+
+        uri = client.validate_redirect_uri(AnyUrl(f"http://{host}:54321/callback"))
+        assert str(uri) == f"http://{host}:54321/callback"
+
+    def test_non_loopback_host_still_requires_exact_match(self):
+        """Port flexibility is loopback-only; other hosts must match exactly."""
+        client = ProxyDCRClient(
+            client_id="external",
+            client_secret="secret",
+            redirect_uris=[AnyUrl("https://client.example.com:3000/callback")],
+        )
+
+        uri = client.validate_redirect_uri(
+            AnyUrl("https://client.example.com:3000/callback")
+        )
+        assert str(uri) == "https://client.example.com:3000/callback"
+
+        with pytest.raises(InvalidRedirectUriError):
+            client.validate_redirect_uri(
+                AnyUrl("https://client.example.com:54321/callback")
+            )
+
+
 class TestStoredApplicationTypeAtAuthorization:
     """SEP-837: a stored client's application_type is enforced at authorization."""
 
@@ -599,16 +640,36 @@ class TestApplicationTypeRedirectRules:
             "nfs://attacker.example/path",
             "ssh://attacker.example",
             "ldap://attacker.example",
+            # Registered transports that a hand-picked "standard schemes" list
+            # would plausibly miss — these must fail closed via the registry.
+            "coap://attacker.example/cb",
+            "coaps://attacker.example/cb",
+            "stun://attacker.example",
+            "turn://attacker.example",
+            "mqtt://attacker.example/cb",
         ],
     )
-    def test_native_rejects_non_loopback_http_and_standard_schemes(self, uri: str):
+    def test_native_rejects_non_loopback_http_and_registered_schemes(self, uri: str):
         """Native accepts only https, loopback http, and private-use schemes.
 
-        Standard IANA-registered schemes are not available for private use, so
-        they cannot receive an authorization code even though they are not in
-        the unsafe-browser-scheme set.
+        IANA-registered schemes are not available for private use (RFC 8252
+        §7.1), so they cannot receive an authorization code even though they are
+        not in the unsafe-browser-scheme set.
         """
         assert is_redirect_uri_allowed_for_application_type(uri, "native") is False
+
+    def test_registry_covers_schemes_a_handpicked_list_would_miss(self):
+        """The private-use test consults the real IANA registry, not a subset.
+
+        This is the property that makes the check fail closed: these schemes are
+        registered transports that no hand-maintained list reliably enumerates.
+        """
+        for scheme in ("coap", "coaps", "stun", "turn", "mqtt"):
+            assert scheme in IANA_REGISTERED_URI_SCHEMES
+
+        # Private-use schemes must remain absent from the registry.
+        for scheme in ("com.example.app", "myapp", "cursor"):
+            assert scheme not in IANA_REGISTERED_URI_SCHEMES
 
     @pytest.mark.parametrize(
         "uri",
