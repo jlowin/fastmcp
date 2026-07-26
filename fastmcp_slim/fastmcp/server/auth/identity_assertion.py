@@ -100,10 +100,9 @@ class IdentityAssertion(BaseModel):
         default=None,
         description=(
             "Expected `aud` value on the ID-JAG. When omitted, the audience is the "
-            "authorization server's own issuer identifier — its `issuer_url`, which "
-            "defaults to `base_url` — and that is where the ID-JAG's `aud` must point "
-            "per SEP-990. Override only when the IdP mints assertions bound to a "
-            "different audience identifier."
+            "authorization server's own issuer URL (its base URL), which is where the "
+            "ID-JAG's `aud` must point per SEP-990. Override only when the IdP mints "
+            "assertions bound to a different audience identifier."
         ),
     )
     required_scopes: list[str] | None = Field(

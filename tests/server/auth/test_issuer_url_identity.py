@@ -200,12 +200,17 @@ class TestOAuthProxyIssuerIdentity:
 
     @pytest.mark.parametrize(
         "issuer_url, expected",
-        [(ISSUER_URL, ISSUER), (None, BASE_URL_ISSUER)],
+        [(ISSUER_URL, BASE_URL_ISSUER), (None, BASE_URL_ISSUER)],
     )
-    def test_identity_assertion_audience_is_issuer_identifier(
+    def test_identity_assertion_audience_stays_on_base_url(
         self, issuer_url: str | None, expected: str
     ):
-        """SEP-990: an ID-JAG is bound to the server's advertised issuer."""
+        """The ID-JAG audience is intentionally not moved to issuer_url.
+
+        Changing it would reject assertions an IdP is already minting, and the
+        operator could only recover by reconfiguring the IdP. Tracked as
+        separate work from the issuer identity fix.
+        """
         proxy = OAuthProxy(
             upstream_authorization_endpoint="https://upstream.example.com/authorize",
             upstream_token_endpoint="https://upstream.example.com/token",

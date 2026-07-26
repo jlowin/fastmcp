@@ -689,15 +689,17 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
             )
 
         # Identity assertion (SEP-990 ID-JAG): the audience the ID-JAG must be
-        # bound to is this authorization server's own issuer identifier, which
-        # is `issuer_url` (defaulting to `base_url`) — the same value advertised
-        # as `issuer` in the authorization server metadata.
+        # bound to is this authorization server's own issuer URL (base_url).
+        # Deliberately left on base_url while the metadata issuer moves to
+        # issuer_url: changing it would reject assertions an IdP is already
+        # minting, and recovering needs IdP-side reconfiguration rather than a
+        # re-authorization. Tracked separately.
         self._identity_assertion: IdentityAssertion | None = identity_assertion
         self._identity_assertion_validator: IdentityAssertionValidator | None = None
         if identity_assertion is not None:
             self._identity_assertion_validator = IdentityAssertionValidator(
                 config=identity_assertion,
-                audience=str(self.issuer_url),
+                audience=str(self.base_url),
             )
         # ID-JAG access tokens are self-contained (no upstream token or JTI
         # mapping to delete), so revocation tracks their jtis here until the
