@@ -36,6 +36,7 @@ class InMemoryOAuthProvider(OAuthProvider):
 
     def __init__(
         self,
+        *,
         base_url: AnyHttpUrl | str | None = None,
         resource_base_url: AnyHttpUrl | str | None = None,
         issuer_url: AnyHttpUrl | str | None = None,
