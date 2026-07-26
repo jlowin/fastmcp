@@ -1260,6 +1260,60 @@ class TestInsufficientScopeSignal:
 
         assert exc_info.value.required_scopes == ["admin"]
 
+    async def test_chain_shortfall_stops_at_unevaluated_opaque_layer(self):
+        # The opaque middleware sits between two scope layers. The outer one
+        # raises before it ever runs, so whether it would admit the caller is
+        # unknown — and the scope behind it must not be disclosed. It returns
+        # True here to show the walk stops regardless of what the verdict
+        # would have been.
+        def tenant_check(ctx: AuthContext) -> bool:
+            return True
+
+        mcp = FastMCP(
+            middleware=[
+                AuthMiddleware(auth=require_scopes("admin")),
+                AuthMiddleware(auth=tenant_check),
+                AuthMiddleware(auth=require_scopes("write")),
+            ]
+        )
+
+        @mcp.tool
+        def api_tool() -> str:
+            return "ok"
+
+        tok = set_token(make_token(scopes=[]))
+        try:
+            with pytest.raises(InsufficientScopeError) as exc_info:
+                await mcp.call_tool("api_tool", {})
+        finally:
+            auth_context_var.reset(tok)
+
+        assert exc_info.value.required_scopes == ["admin"]
+
+    async def test_chain_shortfall_spans_consecutive_scope_only_layers(self):
+        # The same chain without the opaque layer aggregates all of it, proving
+        # the reachability bound does not over-correct.
+        mcp = FastMCP(
+            middleware=[
+                AuthMiddleware(auth=require_scopes("admin")),
+                AuthMiddleware(auth=require_scopes("write")),
+                AuthMiddleware(auth=require_scopes("delete")),
+            ]
+        )
+
+        @mcp.tool
+        def api_tool() -> str:
+            return "ok"
+
+        tok = set_token(make_token(scopes=[]))
+        try:
+            with pytest.raises(InsufficientScopeError) as exc_info:
+                await mcp.call_tool("api_tool", {})
+        finally:
+            auth_context_var.reset(tok)
+
+        assert exc_info.value.required_scopes == ["admin", "delete", "write"]
+
     async def test_restrict_tag_shortfall_names_scope(self):
         mcp = make_restricted_tag_server()
 

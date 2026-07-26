@@ -129,24 +129,42 @@ class AuthMiddleware(Middleware):
         a union within one middleware avoids.
 
         Sibling requirements are read without evaluating them: `scope_requirements`
-        is a pure comparison against the token and component. A sibling holding any
-        opaque check is skipped entirely, because its verdict is unknown and
-        disclosing the scopes of a layer that might deny for an unrelated reason
-        would leak requirements for a component the caller cannot reach. That
-        makes the aggregate a best-effort widening — never a disclosure past a
-        policy denial.
+        is a pure comparison against the token and component. Only the layers the
+        request would actually reach next may contribute, so the walk starts after
+        this middleware and stops at the first one whose requirements cannot be
+        read — a layer holding an opaque check is an unverified gate, and anything
+        at or beyond it might be unreachable for reasons that have nothing to do
+        with scopes. Disclosing those requirements would leak what sits behind a
+        policy the request never passed.
+
+        Layers *before* this one are already known to have passed, so they neither
+        block the walk nor contribute anything. This middleware's own shortfall
+        always counts: the request demonstrably reached it.
+
+        The result is therefore complete when the reachable chain is scope-only,
+        and deliberately partial otherwise — never a disclosure past an
+        unevaluated gate.
         """
         middleware = getattr(server, "middleware", None)
         if not isinstance(middleware, list):
             return own_missing
 
+        position = next(
+            (i for i, mw in enumerate(middleware) if mw is self),
+            None,
+        )
+        if position is None:
+            return own_missing
+
         missing = set(own_missing)
-        for mw in middleware:
-            if mw is self or not isinstance(mw, AuthMiddleware):
+        for mw in middleware[position + 1 :]:
+            if not isinstance(mw, AuthMiddleware):
                 continue
             sibling = scope_requirements(mw.auth, ctx)
-            if sibling:
-                missing |= set(sibling)
+            if sibling is None:
+                # An unverified gate. Nothing at or beyond it may contribute.
+                break
+            missing |= set(sibling)
         return sorted(missing)
 
     async def on_list_tools(
