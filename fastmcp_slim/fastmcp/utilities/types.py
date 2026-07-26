@@ -347,7 +347,9 @@ class Audio:
             return mapping.get(self._format.lower(), f"audio/{self._format.lower()}")
 
         if self.path:
-            return mapping.get(self.path.suffix.lower().lstrip("."), "application/octet-stream")
+            return mapping.get(
+                self.path.suffix.lower().lstrip("."), "application/octet-stream"
+            )
         return "audio/wav"  # default for raw binary data
 
     def to_audio_content(
