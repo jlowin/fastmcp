@@ -38,6 +38,7 @@ from fastmcp.server.auth.authorization import (
     AuthContext,
     run_auth_checks,
     run_auth_checks_with_shortfall,
+    scope_requirements,
 )
 from fastmcp.server.dependencies import get_access_token
 from fastmcp.server.middleware.middleware import (
@@ -112,6 +113,42 @@ class AuthMiddleware(Middleware):
     def __init__(self, auth: AuthCheck | list[AuthCheck]) -> None:
         self.auth = auth
 
+    def _chain_shortfall(
+        self,
+        own_missing: list[str],
+        ctx: AuthContext,
+        server: Any,
+    ) -> list[str]:
+        """Widen this middleware's shortfall to cover the rest of the chain.
+
+        Scope requirements are commonly split across several `AuthMiddleware`
+        instances (the tag-based configuration does exactly this). Raising as
+        soon as the first one finds a shortfall means the middleware further in
+        never runs, so a caller told only the outer scope would obtain it, retry,
+        and be denied for the next — the same non-convergent loop that reporting
+        a union within one middleware avoids.
+
+        Sibling requirements are read without evaluating them: `scope_requirements`
+        is a pure comparison against the token and component. A sibling holding any
+        opaque check is skipped entirely, because its verdict is unknown and
+        disclosing the scopes of a layer that might deny for an unrelated reason
+        would leak requirements for a component the caller cannot reach. That
+        makes the aggregate a best-effort widening — never a disclosure past a
+        policy denial.
+        """
+        middleware = getattr(server, "middleware", None)
+        if not isinstance(middleware, list):
+            return own_missing
+
+        missing = set(own_missing)
+        for mw in middleware:
+            if mw is self or not isinstance(mw, AuthMiddleware):
+                continue
+            sibling = scope_requirements(mw.auth, ctx)
+            if sibling:
+                missing |= set(sibling)
+        return sorted(missing)
+
     async def on_list_tools(
         self,
         context: MiddlewareContext[mt.ListToolsRequest],
@@ -184,6 +221,7 @@ class AuthMiddleware(Middleware):
         authorized, missing = await run_auth_checks_with_shortfall(self.auth, ctx)
         if not authorized:
             if missing:
+                missing = self._chain_shortfall(missing, ctx, fastmcp.fastmcp)
                 raise InsufficientScopeError(
                     missing,
                     message=(
@@ -271,6 +309,7 @@ class AuthMiddleware(Middleware):
         authorized, missing = await run_auth_checks_with_shortfall(self.auth, ctx)
         if not authorized:
             if missing:
+                missing = self._chain_shortfall(missing, ctx, fastmcp.fastmcp)
                 raise InsufficientScopeError(
                     missing,
                     message=(
@@ -382,6 +421,7 @@ class AuthMiddleware(Middleware):
         authorized, missing = await run_auth_checks_with_shortfall(self.auth, ctx)
         if not authorized:
             if missing:
+                missing = self._chain_shortfall(missing, ctx, fastmcp.fastmcp)
                 raise InsufficientScopeError(
                     missing,
                     message=(

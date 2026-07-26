@@ -114,6 +114,34 @@ def restrict_tag(tag: str, *, scopes: list[str]) -> AuthCheck:
     return _RestrictTag(tag, scopes)
 
 
+def scope_requirements(
+    checks: AuthCheck | list[AuthCheck],
+    ctx: AuthContext,
+) -> list[str] | None:
+    """Scopes a check list requires but the token lacks, without running it.
+
+    Returns ``None`` when the list contains any opaque (non-scope) check. Such a
+    check might deny for a reason unrelated to scopes, and evaluating it here
+    would run authorization logic — with whatever side effects it carries —
+    outside its normal place in the chain. Since its verdict is unknown, its
+    siblings' scopes must not be disclosed either, so the whole list is withheld.
+
+    When every check is scope-aware, the result is their combined shortfall,
+    computed purely from the token and component (an empty list means the list is
+    already satisfied). This lets a shortfall be aggregated across authorization
+    layers without evaluating anything that would otherwise be skipped.
+    """
+    check_list = [checks] if not isinstance(checks, list) else checks
+    check_list = cast(list[AuthCheck], check_list)
+
+    missing: set[str] = set()
+    for check in check_list:
+        if not isinstance(check, _ScopeAwareCheck):
+            return None
+        missing |= check.missing_scopes(ctx)
+    return sorted(missing)
+
+
 async def _evaluate_check(check: AuthCheck, ctx: AuthContext) -> bool:
     """Evaluate a single auth check, masking unexpected failures as denial.
 

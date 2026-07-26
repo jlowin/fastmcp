@@ -1161,6 +1161,105 @@ class TestInsufficientScopeSignal:
 
         assert exc_info.value.required_scopes == ["write"]
 
+    async def test_shortfall_unions_across_middleware_chain(self):
+        # Scope requirements split across two AuthMiddleware instances. The
+        # outer one raises before the inner ever runs, so its shortfall has to
+        # account for the inner requirement or the caller loops.
+        mcp = FastMCP(
+            middleware=[
+                AuthMiddleware(auth=require_scopes("admin")),
+                AuthMiddleware(auth=require_scopes("write")),
+            ]
+        )
+
+        @mcp.tool
+        def api_tool() -> str:
+            return "ok"
+
+        tok = set_token(make_token(scopes=[]))
+        try:
+            with pytest.raises(InsufficientScopeError) as exc_info:
+                await mcp.call_tool("api_tool", {})
+        finally:
+            auth_context_var.reset(tok)
+
+        assert exc_info.value.required_scopes == ["admin", "write"]
+
+    async def test_chain_shortfall_drops_already_granted_scope(self):
+        mcp = FastMCP(
+            middleware=[
+                AuthMiddleware(auth=require_scopes("admin")),
+                AuthMiddleware(auth=require_scopes("write")),
+            ]
+        )
+
+        @mcp.tool
+        def api_tool() -> str:
+            return "ok"
+
+        tok = set_token(make_token(scopes=["admin"]))
+        try:
+            with pytest.raises(InsufficientScopeError) as exc_info:
+                await mcp.call_tool("api_tool", {})
+        finally:
+            auth_context_var.reset(tok)
+
+        assert exc_info.value.required_scopes == ["write"]
+
+    async def test_opaque_denial_in_chain_stays_opaque(self):
+        # An opaque check denies in the outer middleware; the inner middleware's
+        # scope requirement must not be disclosed.
+        def deny_tenant(ctx: AuthContext) -> bool:
+            return False
+
+        mcp = FastMCP(
+            middleware=[
+                AuthMiddleware(auth=deny_tenant),
+                AuthMiddleware(auth=require_scopes("write")),
+            ]
+        )
+
+        @mcp.tool
+        def api_tool() -> str:
+            return "ok"
+
+        tok = set_token(make_token(scopes=[]))
+        try:
+            with pytest.raises(AuthorizationError) as exc_info:
+                await mcp.call_tool("api_tool", {})
+        finally:
+            auth_context_var.reset(tok)
+
+        assert not isinstance(exc_info.value, InsufficientScopeError)
+        assert "write" not in str(exc_info.value)
+
+    async def test_chain_shortfall_withholds_scopes_of_opaque_sibling(self):
+        # The outer middleware has a real scope shortfall, but the inner one
+        # pairs its scope requirement with an opaque check whose verdict is
+        # unknown. That layer's scope must not be disclosed.
+        def opaque_policy(ctx: AuthContext) -> bool:
+            return True
+
+        mcp = FastMCP(
+            middleware=[
+                AuthMiddleware(auth=require_scopes("admin")),
+                AuthMiddleware(auth=[opaque_policy, require_scopes("write")]),
+            ]
+        )
+
+        @mcp.tool
+        def api_tool() -> str:
+            return "ok"
+
+        tok = set_token(make_token(scopes=[]))
+        try:
+            with pytest.raises(InsufficientScopeError) as exc_info:
+                await mcp.call_tool("api_tool", {})
+        finally:
+            auth_context_var.reset(tok)
+
+        assert exc_info.value.required_scopes == ["admin"]
+
     async def test_restrict_tag_shortfall_names_scope(self):
         mcp = make_restricted_tag_server()
 
