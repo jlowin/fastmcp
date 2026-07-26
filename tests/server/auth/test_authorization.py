@@ -1119,6 +1119,48 @@ class TestInsufficientScopeSignal:
         assert not isinstance(exc_info.value, InsufficientScopeError)
         assert "admin" not in str(exc_info.value)
 
+    async def test_shortfall_unions_every_unmet_scope_check(self):
+        # Naming only the first failing check would strand the caller in a
+        # step-up loop: they obtain "read", retry, and are denied for "write".
+        mcp = FastMCP(
+            middleware=[
+                AuthMiddleware(auth=[require_scopes("read"), require_scopes("write")]),
+            ]
+        )
+
+        @mcp.tool
+        def api_tool() -> str:
+            return "ok"
+
+        tok = set_token(make_token(scopes=[]))
+        try:
+            with pytest.raises(InsufficientScopeError) as exc_info:
+                await mcp.call_tool("api_tool", {})
+        finally:
+            auth_context_var.reset(tok)
+
+        assert exc_info.value.required_scopes == ["read", "write"]
+
+    async def test_shortfall_union_drops_already_granted_scope(self):
+        mcp = FastMCP(
+            middleware=[
+                AuthMiddleware(auth=[require_scopes("read"), require_scopes("write")]),
+            ]
+        )
+
+        @mcp.tool
+        def api_tool() -> str:
+            return "ok"
+
+        tok = set_token(make_token(scopes=["read"]))
+        try:
+            with pytest.raises(InsufficientScopeError) as exc_info:
+                await mcp.call_tool("api_tool", {})
+        finally:
+            auth_context_var.reset(tok)
+
+        assert exc_info.value.required_scopes == ["write"]
+
     async def test_restrict_tag_shortfall_names_scope(self):
         mcp = make_restricted_tag_server()
 

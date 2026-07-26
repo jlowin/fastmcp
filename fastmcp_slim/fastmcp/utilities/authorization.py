@@ -114,55 +114,90 @@ def restrict_tag(tag: str, *, scopes: list[str]) -> AuthCheck:
     return _RestrictTag(tag, scopes)
 
 
+async def _evaluate_check(check: AuthCheck, ctx: AuthContext) -> bool:
+    """Evaluate a single auth check, masking unexpected failures as denial.
+
+    An ``AuthorizationError`` is the check's deliberate denial and propagates.
+    Any other exception is a bug in the check; it is logged and treated as a
+    denial so a broken check fails closed.
+    """
+    try:
+        result = check(ctx)
+        if inspect.isawaitable(result):
+            result = await result
+    except AuthorizationError:
+        raise
+    except Exception:
+        logger.warning(
+            f"Auth check {getattr(check, '__name__', repr(check))} "
+            "raised an unexpected exception",
+            exc_info=True,
+        )
+        return False
+    return bool(result)
+
+
 async def run_auth_checks_with_shortfall(
     checks: AuthCheck | list[AuthCheck],
     ctx: AuthContext,
 ) -> tuple[bool, list[str]]:
     """Run auth checks with AND logic, classifying the denial cause.
 
-    Returns ``(authorized, missing_scopes)``. ``missing_scopes`` is non-empty
-    only when the *first failing* check is a scope-aware check whose shortfall
-    caused the denial. A denial from an earlier non-scope check (e.g. a custom
-    tenant policy) short-circuits first and yields an empty list, so it is never
-    misreported as an ``insufficient_scope`` shortfall and never names the
-    scopes of a component the caller could not otherwise reach.
+    Returns ``(authorized, missing_scopes)``. ``missing_scopes`` names every
+    scope the caller must obtain to satisfy *all* scope requirements at once:
+    the union of the shortfalls across every scope-aware check, not just the
+    first one to fail. Reporting only the first would strand a caller in a
+    step-up loop — it obtains that scope, retries, and is denied again for the
+    next — so the union is what makes a single re-authorization converge.
 
-    This mirrors the short-circuit of the AND logic exactly: scopes are reported
-    for the same check that determined the denial, not for every scope check in
-    the list. An ``AuthorizationError`` raised by a check propagates unchanged.
+    The challenge is withheld entirely (an empty list, which the caller surfaces
+    as a plain ``AuthorizationError``) unless every non-scope check passes. A
+    custom policy denial — a tenant check, say — must never be reported as an
+    ``insufficient_scope`` shortfall, and must never name the scopes of a
+    component the caller could not otherwise reach. To guarantee that, the
+    opaque checks are all evaluated before any scope is disclosed; a shortfall
+    is only reported once they have all passed.
+
+    An ``AuthorizationError`` raised by a check propagates unchanged.
     """
     check_list = [checks] if not isinstance(checks, list) else checks
     check_list = cast(list[AuthCheck], check_list)
 
+    scope_shortfall = False
     for check in check_list:
-        try:
-            result = check(ctx)
-            if inspect.isawaitable(result):
-                result = await result
-        except AuthorizationError:
-            raise
-        except Exception:
-            logger.warning(
-                f"Auth check {getattr(check, '__name__', repr(check))} "
-                "raised an unexpected exception",
-                exc_info=True,
-            )
+        if await _evaluate_check(check, ctx):
+            continue
+        if not isinstance(check, _ScopeAwareCheck):
+            # An opaque denial dominates: deny without disclosing any scope.
             return False, []
+        # Keep going. The remaining opaque checks still have to pass before a
+        # scope shortfall may be disclosed, and the remaining scope checks
+        # contribute to the union.
+        scope_shortfall = True
 
-        if not result:
-            # The first failing check determines the denial. Name scopes only if
-            # that check is the scope requirement itself; otherwise stay opaque.
-            if isinstance(check, _ScopeAwareCheck):
-                return False, sorted(check.missing_scopes(ctx))
-            return False, []
+    if not scope_shortfall:
+        return True, []
 
-    return True, []
+    # Every opaque check passed, so naming the shortfall is safe. `missing_scopes`
+    # is a pure comparison against the token and returns an empty set for checks
+    # that passed, so unioning across all of them yields exactly the unmet scopes.
+    missing: set[str] = set()
+    for check in check_list:
+        if isinstance(check, _ScopeAwareCheck):
+            missing |= check.missing_scopes(ctx)
+    return False, sorted(missing)
 
 
 async def run_auth_checks(
     checks: AuthCheck | list[AuthCheck],
     ctx: AuthContext,
 ) -> bool:
-    """Run auth checks with AND logic."""
-    authorized, _ = await run_auth_checks_with_shortfall(checks, ctx)
-    return authorized
+    """Run auth checks with AND logic, stopping at the first failure."""
+    check_list = [checks] if not isinstance(checks, list) else checks
+    check_list = cast(list[AuthCheck], check_list)
+
+    for check in check_list:
+        if not await _evaluate_check(check, ctx):
+            return False
+
+    return True
