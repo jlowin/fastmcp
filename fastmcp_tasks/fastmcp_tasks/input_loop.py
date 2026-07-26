@@ -31,6 +31,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 import mcp_types
+from mcp.shared.exceptions import MCPError
 
 from fastmcp.exceptions import FastMCPError
 from fastmcp.tools.base import InputRequiredToolResult, ToolResult
@@ -142,6 +143,15 @@ def reentrant_task_fn(
             result = await fn(*args, **kwargs)
         except FastMCPError as exc:
             return _error_result(tool_name, exc)
+        except MCPError:
+            # A protocol fault, not a tool error. SEP-2663 reserves `failed`
+            # for exactly this, so it must escape the wrapper: the Docket
+            # execution fails and `tasks/get` inlines the JSON-RPC error
+            # instead of reporting a completed task with an `isError` result.
+            logger.exception(
+                "background task tool %r raised a protocol error", tool_name
+            )
+            raise
         except Exception as exc:
             logger.exception("background task tool %r raised", tool_name)
             return _error_result(tool_name, exc)

@@ -14,6 +14,8 @@ from __future__ import annotations
 from typing import Any
 
 import mcp_types
+from mcp.shared.exceptions import MCPError
+from mcp_types import INTERNAL_ERROR
 
 from fastmcp import Context, FastMCP
 from fastmcp_tasks import TasksExtension
@@ -244,3 +246,79 @@ async def test_state_only_guard_round_fails_clearly():
     assert final.result is not None
     assert final.result["isError"] is True
     assert "state-only" in final.result["content"][0]["text"]
+
+
+async def test_partial_update_keeps_task_parked_on_remaining_request():
+    """SEP-2663 partial fulfillment: a leg that asked two questions stays
+    `input_required` until both are answered, and each `tasks/get` in between
+    surfaces only what is still outstanding."""
+    mcp = FastMCP("partial")
+    mcp.add_extension(TasksExtension())
+
+    @mcp.tool(task=True)
+    async def two_questions(ctx: Context) -> str | mcp_types.InputRequiredResult:
+        responses = ctx.input_responses
+        if responses is None:
+            return _input_required(
+                {
+                    "first": _elicit_request("First?"),
+                    "second": _elicit_request("Second?"),
+                }
+            )
+        return f"{_answer(responses, 'first')}+{_answer(responses, 'second')}"
+
+    async with running_task_server(mcp):
+        created = await submit_task(mcp, "two_questions", {})
+        parked = await wait_for_task(
+            mcp, created.task_id, target_states=frozenset({"input_required"})
+        )
+        assert parked.input_requests is not None
+        keys = sorted(parked.input_requests)
+        assert len(keys) == 2
+
+        answered, pending = keys[0], keys[1]
+        await update_task(
+            mcp,
+            created.task_id,
+            {answered: {"action": "accept", "content": {"value": "one"}}},
+        )
+
+        still_parked = await get_task(mcp, created.task_id)
+        assert still_parked.status == "input_required"
+        assert still_parked.input_requests is not None
+        assert list(still_parked.input_requests) == [pending]
+
+        # Answering the last one resumes the leg, which now sees both answers.
+        await update_task(
+            mcp,
+            created.task_id,
+            {pending: {"action": "accept", "content": {"value": "two"}}},
+        )
+        final = await wait_for_task(mcp, created.task_id)
+
+    assert final.status == "completed"
+    assert final.result is not None
+    assert final.result["content"][0]["text"] == "one+two"
+
+
+async def test_protocol_error_fails_the_task_with_inlined_error():
+    """SEP-2663 reserves `failed` for protocol faults: an `MCPError` raised by
+    the body is inlined as a JSON-RPC error rather than reported as a completed
+    task carrying an `isError` result (which is what a `ToolError` produces)."""
+    mcp = FastMCP("protocol-fault")
+    mcp.add_extension(TasksExtension())
+
+    @mcp.tool(task=True)
+    async def explodes() -> str:
+        raise MCPError(code=INTERNAL_ERROR, message="protocol fault", data={"x": 1})
+
+    async with running_task_server(mcp):
+        created = await submit_task(mcp, "explodes", {})
+        final = await wait_for_task(mcp, created.task_id)
+
+    assert final.status == "failed"
+    assert final.result is None
+    assert final.error is not None
+    assert final.error["code"] == INTERNAL_ERROR
+    assert final.error["message"] == "protocol fault"
+    assert final.error["data"] == {"x": 1}

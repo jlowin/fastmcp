@@ -28,6 +28,7 @@ from fastmcp.exceptions import (
     NotFoundError,
     to_mcp_error,
 )
+from fastmcp.prompts.base import InputRequiredPromptResult
 from fastmcp.server.completions import CompletionValues, normalize_completion
 from fastmcp.server.dependencies import bind_request_context, extract_version_spec
 from fastmcp.tools.base import InputRequiredToolResult, ToolResult
@@ -306,8 +307,12 @@ class MCPOperationsMixin:
             try:
                 result = await self.read_resource(str(uri), version=version)
             except (DisabledError, NotFoundError) as e:
-                raise to_mcp_error(
-                    NotFoundError(f"Resource not found: {str(uri)!r}")
+                # SEP-2164: echo the requested URI in `data` so a client that
+                # pipelined several reads can tell which one is missing.
+                raise MCPError(
+                    code=INVALID_PARAMS,
+                    message=f"Resource not found: {str(uri)!r}",
+                    data={"uri": str(uri)},
                 ) from e
             except FastMCPError as e:
                 # Resource-visible errors (ResourceError, ValidationError, ...)
@@ -326,7 +331,7 @@ class MCPOperationsMixin:
         self: FastMCP,
         ctx: ServerRequestContext,
         params: GetPromptRequestParams,
-    ) -> mcp_types.GetPromptResult:
+    ) -> mcp_types.GetPromptResult | mcp_types.InputRequiredResult:
         """Handle MCP 'prompts/get' requests."""
         with bind_request_context(ctx):
             name = params.name
@@ -350,6 +355,23 @@ class MCPOperationsMixin:
                 # MCPError/ValidationError is masked as "Internal server error".
                 # Masking already happened inside render_prompt.
                 raise to_mcp_error(e) from e
+
+            if isinstance(result, InputRequiredPromptResult):
+                # The prompt requested client input (SEP-2322). As with tools,
+                # the multi-round-trip result type only exists at 2026-07-28, so
+                # name the era problem on an older connection rather than
+                # failing as a generic "invalid result".
+                if ctx.protocol_version not in MODERN_PROTOCOL_VERSIONS:
+                    raise MCPError(
+                        code=INVALID_PARAMS,
+                        message=(
+                            f"Prompt {name!r} returned an InputRequiredResult to "
+                            "request client input, but the multi-round-trip result "
+                            "type (SEP-2322) only exists at MCP 2026-07-28; this "
+                            f"connection negotiated {ctx.protocol_version!r}."
+                        ),
+                    )
+                return result.input_required
 
             return result.to_mcp_prompt_result()
 

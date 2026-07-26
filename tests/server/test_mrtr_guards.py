@@ -1215,3 +1215,61 @@ class TestHttpTransport:
 
         assert asked == ["Where would you like to fly?", "When to Paris?"]
         assert result.data == "Booked Paris on 2026-08-01"
+
+
+class TestPromptGuard:
+    """`InputRequiredResult` is a result type, not a tools/call feature, so a
+    prompt can ask for input the same way a tool does (SEP-2322)."""
+
+    @staticmethod
+    def _context_prompt_server() -> FastMCP:
+        mcp = FastMCP("prompt-guard")
+
+        @mcp.prompt
+        async def summarize(ctx: Context) -> str | InputRequiredResult:
+            responses = ctx.input_responses
+            if responses is None:
+                return _ask(
+                    _elicit("context", "What context?", "context"),
+                    key="context",
+                    request_state=None,
+                )
+            return f"Summarizing with {_accepted(responses, 'context')['context']}"
+
+        return mcp
+
+    async def test_prompt_emits_input_required(self):
+        """The asking round reaches the wire as an InputRequiredResult."""
+        async with Client(self._context_prompt_server(), mode="auto") as client:
+            result = await client.session.get_prompt(
+                "summarize", allow_input_required=True
+            )
+
+        assert isinstance(result, InputRequiredResult)
+        assert "context" in result.input_requests
+
+    async def test_prompt_completes_with_responses(self):
+        """Answering the ask renders the prompt on the next round."""
+        mcp = self._context_prompt_server()
+        async with Client(mcp, mode="auto") as client:
+            ask = await client.session.get_prompt(
+                "summarize", allow_input_required=True
+            )
+            assert isinstance(ask, InputRequiredResult)
+            done = await client.session.get_prompt(
+                "summarize",
+                input_responses={
+                    "context": mcp_types.ElicitResult(
+                        action="accept", content={"context": "quarterly report"}
+                    )
+                },
+            )
+
+        assert done.messages[0].content.text == ("Summarizing with quarterly report")
+
+    async def test_prompt_guard_rejected_on_handshake_era(self):
+        """The result type only exists at 2026-07-28, so an older connection
+        gets the era named rather than a generic invalid-result failure."""
+        async with Client(self._context_prompt_server(), mode="legacy") as client:
+            with pytest.raises(MCPError, match="2026-07-28"):
+                await client.session.get_prompt("summarize")
