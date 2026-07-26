@@ -62,8 +62,6 @@ def _modern_proxy(backend: FastMCP) -> FastMCP:
     return FastMCPProxy(client_factory=lambda: ProxyClient(backend, mode="auto"))
 
 
-
-
 class TestPromptGuard:
     """`InputRequiredResult` is a result type, not a tools/call feature, so a
     prompt can ask for input the same way a tool does (SEP-2322)."""
