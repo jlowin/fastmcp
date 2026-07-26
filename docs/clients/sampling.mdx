@@ -16,7 +16,7 @@ A sampling handler is the client's answer to that request: the server describes 
 On a **handshake-era** connection the server pushes a `sampling/createMessage` request down the open session mid-tool-call. On a **modern** (`2026-07-28`) connection there is no such channel, so a server instead *returns* an input-required result naming what it needs, and your client answers it and re-calls the tool. Both paths dispatch to the same `sampling_handler`, so register one and it works either way — this page's examples pin `mode="legacy"` only because they demonstrate the push route with a legacy server.
 
 <Note>
-This page is the client side. Writing a FastMCP **server** is the other direction, and there is no `ctx.sample()` there — see [Sampling](/servers/sampling) under Servers for why, and for calling an LLM from your own server instead.
+This page is the client side. Writing a FastMCP **server** is the other direction, and there is no `ctx.sample()` there — see [Sampling](/servers/sampling) under Servers for how a server returns a sampling request instead, and why calling an LLM directly is usually the better choice for generation.
 </Note>
 
 ## Handler Template

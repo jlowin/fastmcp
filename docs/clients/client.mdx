@@ -342,7 +342,7 @@ See [Prompts](/clients/prompts) for detailed documentation including argument se
 
 The client supports callback handlers for advanced server interactions. These let you respond to server-initiated requests and receive notifications.
 
-Sampling, elicitation, and roots are all server-initiated, so they belong to the handshake era described under [protocol negotiation](#protocol-negotiation). A default client negotiates the newest era both peers share, where the server has no back-channel to push those requests down, so an example that exercises them pins `mode="legacy"`. Logging and progress arrive as notifications on the response stream and work in either era.
+Sampling, elicitation, and roots are the requests a server makes of the client, and a server reaches your handlers by two routes depending on the era it speaks — see [protocol negotiation](#protocol-negotiation). On the handshake era it pushes the request down the open session mid-call. On the modern era there is no back-channel, so the server returns an input-required result naming what it needs and the client answers with a fresh call. Both routes dispatch to the same handler, so registering one covers both; the example below pins `mode="legacy"` only because it demonstrates the push route. Logging and progress arrive as notifications on the response stream and work in either era.
 
 ```python
 from fastmcp import Client

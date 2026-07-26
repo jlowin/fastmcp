@@ -1,7 +1,7 @@
 ---
 title: Client Roots
 sidebarTitle: Roots
-description: Provide local context and resource boundaries to MCP servers.
+description: Tell servers which local paths your client can reach.
 icon: folder-tree
 ---
 
@@ -13,9 +13,9 @@ Use this when you need to tell servers what local resources the client has acces
 
 Roots inform servers about resources the client can provide. Servers can use this information to adjust behavior or provide more relevant responses.
 
-<Note>
-**Roots require the older MCP protocol.** A server reads roots by sending a request down to the client, and protocol version `2026-07-28` removed the server's ability to do that. Clients default to `mode="auto"`, which negotiates the newest version both sides support, so the examples below pass `mode="legacy"`. See [protocol negotiation](/clients/client#protocol-negotiation).
-</Note>
+You register roots once, with `roots=`, and the client answers however the server asks for them. A **handshake-era** server pushes a `roots/list` request down the open session and reads the reply mid-call. A **modern** (`2026-07-28`) server has no such channel, so it returns an input-required result naming a roots request instead; `fastmcp.Client` fulfils it from the same `roots=` you registered and re-issues the call with the answer attached. One registration covers both routes, and the examples below work on either — the default `mode="auto"` negotiates whichever era the server speaks. See [protocol negotiation](/clients/client#protocol-negotiation) for how that choice is made.
+
+Roots is a good fit for the modern route rather than merely a workable one. A server asks for roots once and then has what it needs, so the single extra round trip buys the whole answer — unlike generation, where a loop of guard rounds would spend the round-trip budget over and over, which is why [server-side sampling](/servers/sampling) recommends calling an LLM directly instead. On the server side the request travels in the `input_requests` map of an `InputRequiredResult`, described under [the guard pattern](/servers/elicitation#sampling-and-roots).
 
 ## Static Roots
 
@@ -26,14 +26,13 @@ from fastmcp import Client
 
 client = Client(
     "my_mcp_server.py",
-    mode="legacy",
     roots=["/path/to/root1", "/path/to/root2"]
 )
 ```
 
 ## Dynamic Roots
 
-Use a callback to compute roots dynamically when the server requests them:
+Use a callback to compute roots when the server asks for them. The callback runs on both routes — a pushed `roots/list` on a handshake connection, and a returned roots request on a modern one:
 
 ```python
 from fastmcp import Client
@@ -45,7 +44,6 @@ async def roots_callback(context: RequestContext) -> list[str]:
 
 client = Client(
     "my_mcp_server.py",
-    mode="legacy",
     roots=roots_callback
 )
 ```
