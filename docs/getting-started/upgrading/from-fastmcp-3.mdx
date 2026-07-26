@@ -11,15 +11,15 @@ FastMCP 4 absorbs almost all of this for you. Field access is bridged so your ex
 
 ## Install the v4 prerelease
 
-While FastMCP 4 is in prerelease, pin the alpha and its prerelease protocol dependencies explicitly. For a uv project, add the following to `pyproject.toml`:
+While FastMCP 4 is in prerelease, pin the beta and its prerelease protocol dependencies explicitly. For a uv project, add the following to `pyproject.toml`:
 
 ```toml
 [project]
-dependencies = ["fastmcp==4.0.0a1"]
+dependencies = ["fastmcp==4.0.0b1"]
 
 [tool.uv]
 constraint-dependencies = [
-    "fastmcp-slim==4.0.0a1",
+    "fastmcp-slim==4.0.0b1",
     "mcp==2.0.0b2",
     "mcp-types==2.0.0b2",
 ]

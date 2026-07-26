@@ -4,9 +4,9 @@ title: v4.0 Development Notes
 
 This directory is the working map of FastMCP v4.0: the complete register of user-facing changes from the MCP Python SDK v2 migration ([PR #4437](https://github.com/PrefectHQ/fastmcp/pull/4437)), plus the forward v4 feature program. It plays three roles at once.
 
-1. **A change register.** Every user-visible change from the migration, organized by subsystem, with a note on how FastMCP handles it (absorbed, bridged, breaking, or deprecated) and where to find it in the diff. This is the [Change Register](/development/v4-notes/change-register).
-2. **A feature program.** The forward v4 work — sampling removal, multi-round-trip elicitation, the first-class 2026 client, a FastMCP-native extension API, the SEP-2663 background-tasks rebuild, and the SDK-delegation round-two convergence — now a mix of shipped, designed, and pending. Multi-round-trip guard tools (#4544), the client's `mode="auto"` default with a partial SDK-composition (#4572/#4574, full composition blocked upstream), the extension API (#4602), and background tasks on SEP-2663 (#4603) have shipped; sampling removal and SDK delegation remain ahead. Each carries an explicit status in the [Feature Program](/development/v4-notes/feature-program). The shipped side — what a v4 deployment provides on the modern protocol today, including the complete server-side SEP-990 identity assertion implementation — is cataloged in [2026-07-28 Protocol Support](/development/v4-notes/protocol-2026).
-3. **A review lens.** Because the migration PR is too large to review line by line, the change register is organized so a reviewer can take one subsystem, read its claimed changes, and verify each against the diff. The [Known Gaps](/development/v4-notes/known-gaps) page collects the deliberate xfails and the upstream dependencies that gate the follow-up work.
+1. **A change register.** Every user-visible change from the migration, organized by subsystem, with a note on how FastMCP handles it (absorbed, bridged, breaking, or deprecated) and where to find it in the diff. This is the [Change Register](change-register.md).
+2. **A feature program.** The forward v4 work — sampling removal, multi-round-trip elicitation, the first-class 2026 client, a FastMCP-native extension API, the SEP-2663 background-tasks rebuild, and the SDK-delegation round-two convergence — now a mix of shipped, designed, and pending. Multi-round-trip guard tools (#4544), the client's `mode="auto"` default with a partial SDK-composition (#4572/#4574, full composition blocked upstream), the extension API (#4602), and background tasks on SEP-2663 (#4603) have shipped; sampling removal and SDK delegation remain ahead. Each carries an explicit status in the [Feature Program](feature-program.md). The shipped side — what a v4 deployment provides on the modern protocol today, including the complete server-side SEP-990 identity assertion implementation — is cataloged in [2026-07-28 Protocol Support](protocol-2026.md).
+3. **A review lens.** Because the migration PR is too large to review line by line, the change register is organized so a reviewer can take one subsystem, read its claimed changes, and verify each against the diff. The [Known Gaps](known-gaps.md) page collects the deliberate xfails and the upstream dependencies that gate the follow-up work.
 
 ## Why v4 exists
 
@@ -22,7 +22,7 @@ FastMCP v4.0 is an engine swap. Three forces drive the major version:
 
 The migration merges to `main` and development continues there with subsequent PRs. Releases follow the SDK's own beta timeline:
 
-- **`main` carries the beta pins.** While the SDK is on `mcp==2.0.0b1` / `mcp-types==2.0.0b1`, `main` cuts **pre-releases** (`4.0.0b1`, `4.0.0b2`, …). No stable PyPI release goes out until `mcp 2.0.0` reaches GA — at which point the pins swap to the stable SDK and `4.0.0` ships. The pin-swap is a tracked checklist item on the [Known Gaps](/development/v4-notes/known-gaps) page.
+- **`main` carries the beta pins.** While the SDK is on `mcp==2.0.0b1` / `mcp-types==2.0.0b1`, `main` cuts **pre-releases** (`4.0.0b1`, `4.0.0b2`, …). No stable PyPI release goes out until `mcp 2.0.0` reaches GA — at which point the pins swap to the stable SDK and `4.0.0` ships. The pin-swap is a tracked checklist item on the [Known Gaps](known-gaps.md) page.
 - **`release/3.x` is the maintenance line.** A `release/3.x` branch is cut from pre-merge `main`. It stays on the SDK v1 line, receives upstream security patches, and serves users who cannot move to the SDK v2 beta yet.
 
 ### Release codenames
@@ -39,11 +39,11 @@ Following the pun-title convention (`v<version>: <pun>`), the v4 line runs a sin
 
 ## How to read the register
 
-Each subsystem section in the [Change Register](/development/v4-notes/change-register) tags its changes with one of four dispositions:
+Each subsystem section in the [Change Register](change-register.md) tags its changes with one of four dispositions:
 
 - **Absorbed** — the SDK changed underneath, but FastMCP's public surface is identical. Nothing for users to do.
 - **Bridged** — a compatibility shim keeps old code working, usually with a `FastMCPDeprecationWarning`. Users should migrate but are not forced to.
 - **Breaking** — user code must change. These are the headline migration items.
 - **Deprecated** — still works, warns now, slated for removal in a later release.
 
-The user-facing summary of the migration lives in the published [Upgrading from FastMCP 3](/getting-started/upgrading/from-fastmcp-3) guide. These development notes are the exhaustive version behind it.
+The user-facing summary of the migration lives in the published [Upgrading from FastMCP 3](https://gofastmcp.com/getting-started/upgrading/from-fastmcp-3) guide. These development notes are the exhaustive version behind it.
