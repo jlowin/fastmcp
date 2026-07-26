@@ -14,7 +14,7 @@ import logging
 
 import mcp_types
 import pytest
-from mcp_types import TextContent, ToolUseContent
+from mcp_types import TextContent
 from pydantic import AnyUrl
 
 from fastmcp.client import Client
@@ -414,4 +414,3 @@ class TestLogLevel:
             and record.levelname == "ERROR"
             for record in caplog.records
         )
-

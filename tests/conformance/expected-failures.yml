@@ -4,3 +4,7 @@ server:
   - resources-subscribe
   - resources-unsubscribe
   - dns-rebinding-protection
+  # Server-initiated sampling was removed from the server API (SEP-2577), so
+  # the fixture has no `test_sampling` tool for this handshake-era scenario to
+  # drive. Modern sampling is exercised by input-required-result-basic-sampling.
+  - tools-call-sampling
