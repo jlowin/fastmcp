@@ -46,4 +46,4 @@ Each subsystem section in the [Change Register](change-register.md) tags its cha
 - **Breaking** — user code must change. These are the headline migration items.
 - **Deprecated** — still works, warns now, slated for removal in a later release.
 
-The user-facing summary of the migration lives in the published [Upgrading from FastMCP 3](/getting-started/upgrading/from-fastmcp-3) guide. These development notes are the exhaustive version behind it.
+The user-facing summary of the migration lives in the published [Upgrading from FastMCP 3](https://gofastmcp.com/getting-started/upgrading/from-fastmcp-3) guide. These development notes are the exhaustive version behind it.
