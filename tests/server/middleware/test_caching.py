@@ -902,3 +902,110 @@ class TestAuthAwareCaching:
             assert {p.name for p in prompts} == {"public_prompt"}
         finally:
             auth_context_var.reset(tok)
+
+
+class TestCachingWithInputRequiredResults:
+    """A multi-round-trip ask must survive `ResponseCachingMiddleware`.
+
+    An ask carries no content of its own, so caching one would store an empty
+    result and the client would never see the question. Continuation legs must
+    also bypass the cache, since they share a cache key with a fresh call.
+    """
+
+    @staticmethod
+    def _answer(responses: mcp_types.InputResponses) -> str:
+        """The accepted value for the single question these guards ask."""
+        result = responses["q"]
+        assert isinstance(result, mcp_types.ElicitResult)
+        assert result.content is not None
+        return str(result.content["q"])
+
+    @staticmethod
+    def _ask() -> mcp_types.InputRequiredResult:
+        return mcp_types.InputRequiredResult(
+            result_type="input_required",
+            input_requests={
+                "q": mcp_types.ElicitRequest(
+                    method="elicitation/create",
+                    params=mcp_types.ElicitRequestFormParams(
+                        message="Which quarter?",
+                        requested_schema={
+                            "type": "object",
+                            "properties": {"q": {"type": "string"}},
+                            "required": ["q"],
+                        },
+                    ),
+                )
+            },
+        )
+
+    @classmethod
+    def _server(cls) -> FastMCP:
+        mcp = FastMCP("cached-guards")
+        mcp.add_middleware(ResponseCachingMiddleware())
+
+        @mcp.tool
+        async def summarize_tool(ctx: Context) -> str | mcp_types.InputRequiredResult:
+            if ctx.input_responses is None:
+                return cls._ask()
+            return f"Summary for {cls._answer(ctx.input_responses)}"
+
+        @mcp.prompt
+        async def summarize(ctx: Context) -> str | mcp_types.InputRequiredResult:
+            if ctx.input_responses is None:
+                return cls._ask()
+            return f"Summary for {cls._answer(ctx.input_responses)}"
+
+        @mcp.resource("report://x")
+        async def report(ctx: Context) -> str | mcp_types.InputRequiredResult:
+            if ctx.input_responses is None:
+                return cls._ask()
+            return f"Report for {cls._answer(ctx.input_responses)}"
+
+        return mcp
+
+    @staticmethod
+    async def _handler(message, response_type, params, ctx):
+        from fastmcp.client.elicitation import ElicitResult
+
+        return ElicitResult(action="accept", content=response_type(q="Q3"))
+
+    async def test_tool_guard_completes_under_caching(self):
+        async with Client(
+            self._server(), mode="auto", elicitation_handler=self._handler
+        ) as client:
+            result = await client.call_tool("summarize_tool", {})
+
+        assert result.data == "Summary for Q3"
+
+    async def test_prompt_guard_completes_under_caching(self):
+        async with Client(
+            self._server(), mode="auto", elicitation_handler=self._handler
+        ) as client:
+            result = await client.get_prompt("summarize")
+
+        assert result.messages[0].content.text == "Summary for Q3"
+
+    async def test_resource_guard_completes_under_caching(self):
+        async with Client(
+            self._server(), mode="auto", elicitation_handler=self._handler
+        ) as client:
+            result = await client.read_resource("report://x")
+
+        assert result[0].text == "Report for Q3"
+
+    async def test_guard_still_asks_on_a_second_fresh_call(self):
+        """The ask must not be cached away for the next caller.
+
+        A second fresh flow has to be asked the same question; serving it a
+        cached final answer would skip the component's own per-round logic.
+        """
+        mcp = self._server()
+        async with Client(
+            mcp, mode="auto", elicitation_handler=self._handler
+        ) as client:
+            first = await client.get_prompt("summarize")
+            second = await client.get_prompt("summarize")
+
+        assert first.messages[0].content.text == "Summary for Q3"
+        assert second.messages[0].content.text == "Summary for Q3"
