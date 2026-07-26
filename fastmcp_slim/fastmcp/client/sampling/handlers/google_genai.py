@@ -71,9 +71,9 @@ class GoogleGenaiSamplingHandler:
             client=GoogleGenaiClient(),
         )
 
-        # Sampling is a server-initiated request, so it only exists on the
-        # handshake era; pass `mode="legacy"` to answer one.
-        client = FastMCPClient(server_url, sampling_handler=handler, mode="legacy")
+        # Answers a handshake-era server's push request and a modern server's
+        # input-required round alike.
+        client = FastMCPClient("https://example.com/mcp", sampling_handler=handler)
         ```
     """
 

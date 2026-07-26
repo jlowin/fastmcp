@@ -1,7 +1,7 @@
 ---
 title: LLM Sampling
 sidebarTitle: Sampling
-description: Handle server-initiated LLM completion requests.
+description: Answer a server's request for an LLM completion.
 icon: robot
 ---
 
@@ -9,14 +9,14 @@ import { VersionBadge } from "/snippets/version-badge.mdx";
 
 <VersionBadge version="2.0.0" />
 
-Use this when you need to respond to server requests for LLM completions.
+Use this when a server asks your client to run an LLM completion on its behalf.
 
-A handshake-era MCP server can request an LLM completion from its client during tool execution, delegating the reasoning to whichever model the client controls. Answering those requests is what a sampling handler does, and it is how a FastMCP client stays interoperable with servers built before the protocol changed.
+A sampling handler is the client's answer to that request: the server describes the messages it wants completed, your handler runs them against whatever model you control, and the result goes back. Servers reach your handler by two different routes, and a handler you register serves both.
+
+On a **handshake-era** connection the server pushes a `sampling/createMessage` request down the open session mid-tool-call. On a **modern** (`2026-07-28`) connection there is no such channel, so a server instead *returns* an input-required result naming what it needs, and your client answers it and re-calls the tool. Both paths dispatch to the same `sampling_handler`, so register one and it works either way — this page's examples pin `mode="legacy"` only because they demonstrate the push route with a legacy server.
 
 <Note>
-**Sampling requires the older MCP protocol.** A server requests sampling by sending a request down to the client, and protocol version `2026-07-28` removed the server's ability to do that. Clients default to `mode="auto"`, which negotiates the newest version both sides support, so every example on this page passes `mode="legacy"`. See [protocol negotiation](/clients/client#protocol-negotiation).
-
-This page is about the client answering. Writing a FastMCP *server* is the other direction, and there is no `ctx.sample()` there — see [Sampling](/servers/sampling) under Servers for why, and for calling an LLM from your own server instead.
+This page is the client side. Writing a FastMCP **server** is the other direction, and there is no `ctx.sample()` there — see [Sampling](/servers/sampling) under Servers for why, and for calling an LLM from your own server instead.
 </Note>
 
 ## Handler Template

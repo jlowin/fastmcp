@@ -195,7 +195,7 @@ These parameters tune how the server processes requests and communicates with cl
 <ParamField body="client_log_level" type="LoggingLevel | None">
   <VersionBadge version="3.2.0" />
 
-  Default minimum log level for messages sent to MCP clients via `context.log()`. When set, messages below this level are suppressed. Individual clients can override this per-session using the MCP `logging/setLevel` request. One of `"debug"`, `"info"`, `"notice"`, `"warning"`, `"error"`, `"critical"`, `"alert"`, or `"emergency"`
+  Default minimum log level for messages sent to MCP clients via `context.log()`. When set, messages below this level are suppressed. Handshake-era clients can override this per-session using the MCP `logging/setLevel` request; the modern protocol has no session to hold that level, so clients on it filter by level in their own log handler instead. One of `"debug"`, `"info"`, `"notice"`, `"warning"`, `"error"`, `"critical"`, `"alert"`, or `"emergency"`
 </ParamField>
 
 <ParamField body="dereference_schemas" type="bool" default="True">
