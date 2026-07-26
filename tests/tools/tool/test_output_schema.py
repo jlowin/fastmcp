@@ -441,8 +441,8 @@ class TestToolFromFunctionOutputSchema:
         }
         tool = Tool.from_function(func, output_schema=explicit_schema)
 
-        # Should fail because int is not dict-compatible with object schema
-        with pytest.raises(ValueError, match="structured_content must be a dict"):
+        # Should fail because 42 does not conform to the object schema
+        with pytest.raises(ValueError, match="output_schema"):
             await tool.run({})
 
     async def test_object_output_schema_not_wrapped(self):
@@ -619,3 +619,104 @@ class TestWrapResultMeta:
         result = await tool.run({})
         assert result.structured_content == {"key": "val"}
         assert result.meta is None
+
+
+class TestOutputSchemaValidation:
+    """Tests that tool results are validated against the declared output_schema."""
+
+    async def test_valid_result_passes_validation(self):
+        """A conforming result should not raise."""
+
+        def func() -> dict[str, int]:
+            return {"value": 42}
+
+        tool = Tool.from_function(func)
+        result = await tool.run({})
+        assert result.structured_content == {"value": 42}
+
+    async def test_invalid_result_raises_value_error(self):
+        """A result that violates the schema should raise ValueError."""
+
+        def func() -> dict[str, int]:
+            # Return a value that breaks the inferred schema: str instead of int
+            return {"value": "not-an-int"}  # type: ignore[return-value]
+
+        tool = Tool.from_function(func)
+        with pytest.raises(ValueError, match="output_schema"):
+            await tool.run({})
+
+    async def test_explicit_schema_invalid_result_raises(self):
+        """An explicit output_schema violation should raise ValueError."""
+
+        explicit_schema = {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "age": {"type": "integer"},
+            },
+            "required": ["name", "age"],
+        }
+
+        def func() -> dict[str, Any]:
+            return {"name": "Alice", "age": "thirty"}  # age should be integer
+
+        tool = Tool.from_function(func, output_schema=explicit_schema)
+        with pytest.raises(ValueError, match="output_schema"):
+            await tool.run({})
+
+    async def test_explicit_schema_valid_result_passes(self):
+        """A result that conforms to an explicit schema should not raise."""
+
+        explicit_schema = {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "age": {"type": "integer"},
+            },
+            "required": ["name", "age"],
+        }
+
+        def func() -> dict[str, Any]:
+            return {"name": "Alice", "age": 30}
+
+        tool = Tool.from_function(func, output_schema=explicit_schema)
+        result = await tool.run({})
+        assert result.structured_content == {"name": "Alice", "age": 30}
+
+    async def test_wrapped_primitive_validated_against_schema(self):
+        """Wrapped primitive results are validated against the wrapping schema."""
+
+        def func() -> int:
+            return 42
+
+        tool = Tool.from_function(func)
+        # Inferred schema wraps int as {"result": <int>}, so result is valid
+        result = await tool.run({})
+        assert result.structured_content == {"result": 42}
+
+    async def test_no_schema_skips_validation(self):
+        """When output_schema is None, no validation is performed."""
+
+        def func() -> dict[str, Any]:
+            return {"anything": "goes", "no": "schema"}
+
+        tool = Tool.from_function(func, output_schema=None)
+        result = await tool.run({})
+        # No schema means no validation, dict still gets structured_content
+        assert result.structured_content == {"anything": "goes", "no": "schema"}
+
+    async def test_missing_required_field_raises(self):
+        """Missing required fields are caught by schema validation."""
+
+        explicit_schema = {
+            "type": "object",
+            "properties": {"required_field": {"type": "string"}},
+            "required": ["required_field"],
+        }
+
+        def func() -> dict[str, Any]:
+            return {}  # missing required_field
+
+        tool = Tool.from_function(func, output_schema=explicit_schema)
+        with pytest.raises(ValueError, match="output_schema"):
+            await tool.run({})

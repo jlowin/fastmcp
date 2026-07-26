@@ -43,6 +43,13 @@ try:
 except ImportError:
     _HAS_PREFAB = False
 
+try:
+    import jsonschema as _jsonschema
+
+    _HAS_JSONSCHEMA = True
+except ImportError:
+    _HAS_JSONSCHEMA = False
+
 if TYPE_CHECKING:
     from fastmcp.tools.function_tool import FunctionTool
     from fastmcp.tools.tool_transform import ArgTransform, TransformedTool
@@ -80,6 +87,31 @@ def default_serializer(data: Any) -> str:
     return pydantic_core.to_json(
         data, fallback=str, by_alias=resolve_serialize_by_alias(data)
     ).decode()
+
+
+def _validate_against_output_schema(
+    structured_content: dict[str, Any], output_schema: dict[str, Any]
+) -> None:
+    """Validate structured_content against the declared output_schema.
+
+    Skips validation silently when jsonschema is not installed (it is a
+    transitive dependency, not a direct one).  Raises ``ValueError`` if the
+    content does not conform to the schema.
+    """
+    if not _HAS_JSONSCHEMA:
+        return
+    # Strip FastMCP-internal extension keys so they do not confuse validators
+    # that operate in strict mode.  Standard validators ignore unknown keywords,
+    # but stripping is cheap and future-proofs against stricter validators.
+    schema_for_validation = {
+        k: v for k, v in output_schema.items() if k != "x-fastmcp-wrap-result"
+    }
+    try:
+        _jsonschema.validate(structured_content, schema_for_validation)
+    except _jsonschema.ValidationError as exc:
+        raise ValueError(
+            f"Tool result does not conform to the declared output_schema: {exc.message}"
+        ) from exc
 
 
 class ToolResult(BaseModel):
@@ -406,9 +438,11 @@ class Tool(FastMCPComponent):
 
         # Has output_schema - wrap if x-fastmcp-wrap-result is set
         wrap_result = self.output_schema.get("x-fastmcp-wrap-result")
+        structured_content = {"result": structured} if wrap_result else structured
+        _validate_against_output_schema(structured_content, self.output_schema)
         return ToolResult(
             content=content,
-            structured_content={"result": structured} if wrap_result else structured,
+            structured_content=structured_content,
             meta={"fastmcp": {"wrap_result": True}} if wrap_result else None,
         )
 
