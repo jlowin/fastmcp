@@ -12,6 +12,7 @@ from fastmcp.server.auth.cimd import CIMDDocument
 from fastmcp.server.auth.oauth_proxy import OAuthProxy
 from fastmcp.server.auth.oauth_proxy.models import ProxyDCRClient
 from fastmcp.server.auth.redirect_validation import (
+    is_loopback_host,
     is_redirect_uri_allowed_for_application_type,
 )
 from fastmcp.server.auth.uri_schemes import IANA_REGISTERED_URI_SCHEMES
@@ -507,7 +508,8 @@ class TestRegisteredLoopbackPortFlexibility:
     """
 
     @pytest.mark.parametrize(
-        "host", ["127.0.0.1", "127.0.0.2", "127.5.5.5", "localhost"]
+        "host",
+        ["127.0.0.1", "127.0.0.2", "127.5.5.5", "localhost", "app.localhost"],
     )
     def test_loopback_range_keeps_port_flexibility(self, host: str):
         client = ProxyDCRClient(
@@ -581,6 +583,19 @@ class TestStoredApplicationTypeAtAuthorization:
 
         uri = client.validate_redirect_uri(AnyUrl("http://localhost:55555/callback"))
         assert str(uri) == "http://localhost:55555/callback"
+
+    def test_web_client_rejects_localhost_namespace_at_authorization(self):
+        """The shared classifier means the namespace fix reaches this path too."""
+        client = ProxyDCRClient(
+            client_id="web",
+            client_secret="secret",
+            redirect_uris=[AnyUrl("https://client.example.com/callback")],
+            application_type="web",
+            allowed_redirect_uri_patterns=["https://*/*"],
+        )
+
+        with pytest.raises(InvalidRedirectUriError, match="application_type 'web'"):
+            client.validate_redirect_uri(AnyUrl("https://app.localhost/callback"))
 
 
 class TestApplicationTypeRedirectRules:
@@ -709,6 +724,95 @@ class TestApplicationTypeRedirectRules:
     def test_native_accepts_entire_loopback_range(self, uri: str):
         """The widened loopback range cuts both ways: native gains 127.0.0.0/8."""
         assert is_redirect_uri_allowed_for_application_type(uri, "native") is True
+
+
+class TestLocalhostNamespaceIsLoopback:
+    """RFC 6761 §6.3 reserves the whole `localhost` namespace for the local machine."""
+
+    @pytest.mark.parametrize(
+        "host",
+        [
+            "localhost",
+            "localhost.",  # absolute (FQDN) form
+            "LOCALHOST",
+            "app.localhost",  # reserved namespace
+            "api.app.localhost",
+            "App.LocalHost",
+            "evil.localhost",  # .localhost is a reserved TLD — genuinely local
+            "127.0.0.1",
+            "127.0.0.1.",  # absolute form of an IP literal
+            "127.0.0.2.",
+            "::1",
+            "[::1]",
+        ],
+    )
+    def test_loopback_names_and_literals(self, host: str):
+        assert is_loopback_host(host) is True
+
+    @pytest.mark.parametrize(
+        "host",
+        [
+            # `localhost` as a *label* of a registrable domain is not local. The
+            # suffix test is anchored on a leading dot so these cannot spoof it.
+            "localhost.evil.com",
+            "localhost.evil.com.",
+            "notlocalhost",
+            "mylocalhost",
+            "localhostx",
+            "evil.com",
+            "",
+            ".",
+        ],
+    )
+    def test_non_loopback_names_are_not_spoofable(self, host: str):
+        assert is_loopback_host(host) is False
+
+    @pytest.mark.parametrize(
+        "uri",
+        [
+            "https://app.localhost/cb",
+            "https://localhost./cb",
+            "https://api.app.localhost/cb",
+            "https://127.0.0.1./cb",
+        ],
+    )
+    def test_web_rejects_localhost_namespace(self, uri: str):
+        """Web clients must not reach the local machine by name."""
+        assert is_redirect_uri_allowed_for_application_type(uri, "web") is False
+
+    @pytest.mark.parametrize(
+        "uri",
+        [
+            "https://localhost.evil.com/cb",
+            "https://notlocalhost/cb",
+        ],
+    )
+    def test_web_still_accepts_ordinary_public_https(self, uri: str):
+        """Names that merely contain 'localhost' remain ordinary public hosts."""
+        assert is_redirect_uri_allowed_for_application_type(uri, "web") is True
+
+    @pytest.mark.parametrize(
+        "uri",
+        [
+            "http://app.localhost:3000/cb",
+            "http://localhost.:3000/cb",
+            "http://api.app.localhost:3000/cb",
+            "http://127.0.0.1.:3000/cb",
+        ],
+    )
+    def test_native_accepts_localhost_namespace(self, uri: str):
+        """These are legitimate loopback dev callbacks and must not be rejected."""
+        assert is_redirect_uri_allowed_for_application_type(uri, "native") is True
+
+    @pytest.mark.parametrize(
+        "uri",
+        [
+            "http://localhost.evil.com:3000/cb",
+            "http://notlocalhost:3000/cb",
+        ],
+    )
+    def test_native_rejects_plain_http_to_non_loopback_lookalikes(self, uri: str):
+        assert is_redirect_uri_allowed_for_application_type(uri, "native") is False
 
     @pytest.mark.parametrize("application_type", ["web", "native"])
     @pytest.mark.parametrize(

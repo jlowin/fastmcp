@@ -184,8 +184,23 @@ def is_loopback_host(host: str | None) -> bool:
     client register `https://127.0.0.2/callback` and slip past the
     non-loopback requirement.
 
-    Bracketed IPv6 literals (`[::1]`) are accepted, and non-IP hosts fall
-    through to the `localhost` name check without raising.
+    Names are handled per RFC 6761 §6.3, which reserves the entire `localhost`
+    namespace for the local machine: the exact name `localhost` *and* any
+    subdomain of it (`app.localhost`, `api.app.localhost`). `.localhost` is a
+    reserved TLD that cannot be registered, so a subdomain of it always resolves
+    to the loopback interface and must count as loopback in both directions —
+    otherwise a web client could register `https://app.localhost/callback` and
+    slip past the non-loopback requirement, while a native client using
+    `http://app.localhost:3000/callback` would be wrongly rejected.
+
+    The suffix test is anchored on a leading dot so it cannot be spoofed by a
+    registrable domain: `localhost.evil.com` and `notlocalhost` are ordinary
+    public names and are *not* loopback.
+
+    Hosts are also normalized before classification: bracketed IPv6 literals
+    (`[::1]`) are unwrapped, and a single trailing dot (the absolute/FQDN form,
+    e.g. `localhost.` or `127.0.0.1.`) is stripped, since it denotes the same
+    host. Non-IP hosts fall through to the name check without raising.
     """
     if not host:
         return False
@@ -194,13 +209,22 @@ def is_loopback_host(host: str | None) -> bool:
 
     # urlparse().hostname strips brackets, but callers that parse the netloc
     # themselves may still pass a bracketed IPv6 literal.
-    candidate = host[1:-1] if host.startswith("[") and host.endswith("]") else host
+    if host.startswith("[") and host.endswith("]"):
+        host = host[1:-1]
+
+    # Absolute (fully qualified) form: `localhost.` and `127.0.0.1.` name the
+    # same hosts as their relative spellings.
+    if host.endswith("."):
+        host = host[:-1]
+
+    if not host:
+        return False
 
     try:
-        return ipaddress.ip_address(candidate).is_loopback
+        return ipaddress.ip_address(host).is_loopback
     except ValueError:
-        # Not an IP literal — fall back to the hostname check.
-        return host == "localhost"
+        # Not an IP literal — RFC 6761 §6.3 reserved localhost namespace.
+        return host == "localhost" or host.endswith(".localhost")
 
 
 def _match_port(
