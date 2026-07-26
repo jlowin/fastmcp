@@ -227,36 +227,39 @@ The camelCase bridge is a migration aid, not a permanent fixture. It works today
 
 ## SDK deprecation warnings you may see
 
-Ordinary use of `ctx.info` (client logging) and `ctx.sample` now emits an SDK-level `MCPDeprecationWarning`:
+Ordinary use of `ctx.info` (client logging) emits an SDK-level `MCPDeprecationWarning`:
 
 ```
-The logging/sampling capability is deprecated as of 2026-07-28 (SEP-2577)
+The logging capability is deprecated as of 2026-07-28 (SEP-2577)
 ```
 
-These warnings come from the MCP SDK, not from FastMCP. For logging they are benign: `ctx.info` keeps working on session-based connections exactly as the protocol table below describes, and the SDK is only signaling the protocol's direction. For sampling, FastMCP additionally emits its own `FastMCPDeprecationWarning`: `ctx.sample` and `ctx.sample_step` are deprecated and slated for removal, so treat that warning as a prompt to migrate to server-side LLM calls rather than as informational.
+The warning comes from the MCP SDK, not from FastMCP, and it is benign. `ctx.info` and the rest of the logging methods keep working on every era, including the modern one — a log message is a *notification*, which rides the response stream the caller already opened. The SDK is signaling the protocol's direction for the capability declaration, not the notification itself.
 
 ## Protocol version support
 
 FastMCP servers built on the SDK v2 serve multiple protocol eras from the same server. The SDK negotiates the era each client speaks: the sessionless `2026-07-28` era (which discovers capabilities through `server/discover`) and earlier session-based handshake versions are all handled simultaneously. This formally supersedes FastMCP's earlier "latest protocol only" stance — a single server now works with clients across the protocol transition.
 
-Not every Context feature is available on every era yet. The imperative push APIs that call back into the client mid-execution — `ctx.elicit`, `ctx.sample`, and `ctx.list_roots` — depend on the session-based back-channel of the earlier eras, so on a `2026-07-28` connection they raise a clear, era-aware error rather than reaching the client. Elicitation itself still reaches the user on the modern era, through the guard pattern: a tool *returns* an `InputRequiredResult` describing what it needs, and the client answers with a fresh call (see [Elicitation on the modern protocol](/servers/elicitation#elicitation-on-the-modern-protocol)). Logging notifications and the request/response features flow on every era.
+FastMCP 4 is a modern MCP toolkit, so the server API is the modern protocol's API. Where a capability survived the transition in a different shape, FastMCP carries it across in that shape. Where the protocol removed a capability outright, FastMCP 4 does not carry a version of it that only works on old connections: **`ctx.sample()`, `ctx.sample_step()`, and `ctx.list_roots()` are gone from `Context` entirely**, along with the `sampling_handler=` and `sampling_handler_behavior=` arguments to `FastMCP()`. Calling them raises `AttributeError` on every era, not an era-specific runtime error, and `FastMCP(sampling_handler=...)` raises `TypeError` naming the migration.
 
-Sampling is the exception that does not come back, and the reason is the protocol rather than an unfinished FastMCP feature. SEP-2577 deprecated server-initiated sampling, so `ctx.sample` and `ctx.sample_step` are **deprecated** and will be removed in a future FastMCP release. Elicitation moved to the guard pattern because the modern protocol still carries elicitation requests; sampling has no equivalent path because the protocol deprecated the pattern itself. The migration is to call an LLM directly from your server rather than borrowing the client's model. See [Sampling](/servers/sampling) for details.
+This is a deliberate stance rather than an unfinished port. Server-initiated sampling and roots are *requests*: the server sends one and blocks for an answer, which needs a live back-channel the sessionless protocol does not have. Since `fastmcp.Client` now negotiates the modern protocol by default, keeping these methods would mean shipping an API whose default outcome is a runtime failure. Elicitation is the one server-initiated capability that survives, because the modern protocol carries it in a new shape: a tool *returns* an `InputRequiredResult` describing what it needs, and the client answers with a fresh call (see [Elicitation on the modern protocol](/servers/elicitation#elicitation-on-the-modern-protocol)).
+
+Migrating is direct in both cases. For sampling, [call an LLM from your server](/servers/sampling) with your own API key — your tool then behaves the same for every client, including the many that never implemented sampling. For roots, accept the paths you need as tool arguments, or ask for them through the same guard pattern, whose `input_requests` map carries a roots request alongside elicitation.
 
 | Context feature | Earlier eras (session-based) | `2026-07-28` (sessionless) |
 | --- | --- | --- |
 | `ctx.info` / logging notifications | Supported | Supported |
 | Tools, resources, prompts, completions | Supported | Supported |
 | `ctx.elicit` | Supported | Use the guard pattern (return `InputRequiredResult`) |
-| `ctx.sample` / `ctx.sample_step` | Supported (deprecated) | Removed — call an LLM server-side |
-| `ctx.list_roots` | Supported | Via the guard pattern (`input_requests` carries roots requests) |
+| `ctx.sample` / `ctx.sample_step` | Removed from the API — call an LLM server-side | Removed from the API — call an LLM server-side |
+| `ctx.list_roots` | Removed from the API — take paths as arguments, or use the guard pattern | Removed from the API — take paths as arguments, or use the guard pattern |
+| `client.set_logging_level()` | Supported | Raises — `logging/setLevel` needs session state the era lacks |
 | `Middleware.on_initialize` | Runs on connect | Never runs — there is no `initialize` handshake |
 | Session state (`ctx.set_state` across calls) | Persists for the session | Does not persist — every request is a fresh connection |
 | Background tasks (`task=True`) | Runs synchronously — never tasked | Supported via the tasks extension |
 
-If your tools rely on `ctx.elicit` or `ctx.list_roots`, they continue to work against clients on the earlier eras; on the modern era, reach for the guard pattern instead (see [Elicitation on the modern protocol](/servers/elicitation#elicitation-on-the-modern-protocol)). Sampling is deprecated on every era and will not return on modern connections — migrate those tools to server-side LLM calls.
-
 Two of these bite by default now, because **`fastmcp.Client` defaults to `mode="auto"`** in v4 — an ordinary `Client(server)` negotiates the newest protocol both sides share, which against a FastMCP server is the sessionless `2026-07-28` era. On that era there is no `initialize` handshake, so a `Middleware.on_initialize` hook never runs; and each request is a fresh connection, so state written with `ctx.set_state` in one call is not visible in the next. A server that gates access in `on_initialize` or relies on per-session state must keep its clients on the session-based era. The narrow escape is per-client: `Client(server, mode="legacy")`. The durable, server-side answer is to declare the versions the server actually serves so a modern client is refused at connect time rather than silently losing those features — see the server's protocol-version restriction (added alongside this change).
+
+The client side is unaffected by any of this. A `fastmcp.Client` still answers a legacy server's sampling and roots requests through `sampling_handler=` and `roots=` — see [client sampling](/clients/sampling) and [client roots](/clients/roots) — because a modern client still has to interoperate with servers built before the protocol changed.
 
 ## Upgrade checklist
 
@@ -265,11 +268,12 @@ Most servers upgrade untouched. Work down this list to find the ones that don't:
 1. **Bump your environment.** Raise any pin below `pydantic>=2.12`; upgrade FastAPI if your resolver complains about Starlette `<1.0.1`.
 2. **Fix imports that moved out.** Replace `from mcp.types import X` with `from mcp_types import X`, and update any import from the [removed modules](#moved-imports) (`fastmcp.server.proxy`, `fastmcp.server.openapi`, `fastmcp.server.apps`, the `fastmcp.tools.tool` / `resources.resource` / `prompts.prompt` component shims).
 3. **Update removed server APIs.** Swap `as_proxy` → `create_proxy`, `import_server` → `mount`, `mount(prefix=)` → `mount(namespace=)`, and the [other removed methods and keywords](#removed-server-methods-and-mount-keywords).
-4. **Update removed tool parameters.** Replace tool `serializer=` (return a `ToolResult`), `exclude_args=` (use `Depends()`), and `StreamableHttpTransport(sse_read_timeout=)`.
-5. **Fix `McpError` construction.** Positional `McpError(ErrorData(...))` becomes keyword `McpError(code=..., message=...)`. Catching is unchanged.
-6. **Move httpx to httpx2.** Grep for `except httpx.` and for custom `httpx_client_factory` / `httpx.Auth` objects handed to FastMCP, and swap the import to `httpx2`.
-7. **Decide the client era.** `Client` now defaults to `mode="auto"`. If a server relies on `on_initialize` or per-session state, keep its clients on `mode="legacy"` or restrict the server's served protocol versions.
-8. **Verify behavior changes.** Confirm templated resources that legitimately accept `..` or absolute paths are exempted, and update any client that matched the old `-32002` resource-not-found code.
-9. **Run with the camelCase bridge off.** Set `mcp_camelcase_compat = False` (or `FASTMCP_MCP_CAMELCASE_COMPAT=false`) in CI to surface every remaining camelCase read as a hard `AttributeError` before the shims are removed.
+4. **Replace `ctx.sample` and `ctx.list_roots`.** Both are gone from `Context`, as are `FastMCP(sampling_handler=...)` and `sampling_handler_behavior=`. Call an LLM directly from your server for generation; take file paths as tool arguments for roots.
+5. **Update removed tool parameters.** Replace tool `serializer=` (return a `ToolResult`), `exclude_args=` (use `Depends()`), and `StreamableHttpTransport(sse_read_timeout=)`.
+6. **Fix `McpError` construction.** Positional `McpError(ErrorData(...))` becomes keyword `McpError(code=..., message=...)`. Catching is unchanged.
+7. **Move httpx to httpx2.** Grep for `except httpx.` and for custom `httpx_client_factory` / `httpx.Auth` objects handed to FastMCP, and swap the import to `httpx2`.
+8. **Decide the client era.** `Client` now defaults to `mode="auto"`. If a server relies on `on_initialize` or per-session state, keep its clients on `mode="legacy"` or restrict the server's served protocol versions.
+9. **Verify behavior changes.** Confirm templated resources that legitimately accept `..` or absolute paths are exempted, and update any client that matched the old `-32002` resource-not-found code.
+10. **Run with the camelCase bridge off.** Set `mcp_camelcase_compat = False` (or `FASTMCP_MCP_CAMELCASE_COMPAT=false`) in CI to surface every remaining camelCase read as a hard `AttributeError` before the shims are removed.
 
 The executable version of this checklist lives in [`tests/test_upgrade_from_v3.py`](https://github.com/PrefectHQ/fastmcp/blob/main/tests/test_upgrade_from_v3.py): it builds representative 3.x-style servers and asserts they run unchanged, and pins every removed surface to the exact error it now raises.

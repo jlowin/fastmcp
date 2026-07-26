@@ -211,19 +211,9 @@ These parameters tune how the server processes requests and communicates with cl
 </ParamField>
 </Card>
 
-### Handlers and Storage
-
-These parameters provide custom handlers for MCP capabilities and persistent storage for session state.
+### Storage
 
 <Card>
-<ParamField body="sampling_handler" type="SamplingHandler | None">
-  Custom handler for MCP sampling requests (server-initiated LLM calls). See [Sampling](/servers/sampling) for details
-</ParamField>
-
-<ParamField body="sampling_handler_behavior" type='Literal["always", "fallback"] | None' default="fallback">
-  When `"fallback"`, the sampling handler is used only when no tool-specific handler exists. When `"always"`, this handler is used for all sampling requests
-</ParamField>
-
 <ParamField body="session_state_store" type="AsyncKeyValue | None">
   Persistent key-value store for session state that survives across requests. Defaults to an in-memory store. Provide a custom implementation for persistence across server restarts
 </ParamField>

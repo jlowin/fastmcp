@@ -21,7 +21,6 @@ The `Context` object provides a clean interface to access MCP features within yo
 - **Progress Reporting**: Update the client on the progress of long-running operations
 - **Resource Access**: List and read data from resources registered with the server
 - **Prompt Access**: List and retrieve prompts registered with the server
-- **LLM Sampling**: Request the client's LLM to generate text based on provided messages
 - **User Elicitation**: Request structured input from users during tool execution
 - **Request State**: Pass values and non-serializable resources between middleware and handlers within a request (for state that persists across requests, see [Session State](/servers/sessions))
 - **Session Visibility**: [Control which components are visible](/servers/visibility#per-session-visibility) to the current session
@@ -152,17 +151,13 @@ if result.action == "accept":
 
 See [User Elicitation](/servers/elicitation) for detailed examples and supported response types.
 
-### LLM Sampling
+### Server-initiated requests
 
-<VersionBadge version="2.0.0" />
+<Note>
+`Context` has no `sample()` or `list_roots()`. Both were server→client *requests*, and the modern MCP protocol has no channel to carry them ([SEP-2577](/servers/sampling)). For generation, [call an LLM directly from your server](/servers/sampling). For roots, accept paths as tool arguments, or ask for them through the [guard pattern](/servers/elicitation#elicitation-on-the-modern-protocol), which carries a roots request in `input_requests`.
 
-Request the client's LLM to generate text based on provided messages, useful for leveraging AI capabilities within your tools.
-
-```python
-response = await ctx.sample("Analyze this data", temperature=0.7)
-```
-
-See [LLM Sampling](/servers/sampling) for comprehensive usage and advanced techniques.
+Logging is unaffected — `ctx.info()` and friends are *notifications*, which ride the response stream and work on every protocol era.
+</Note>
 
 
 ### Progress Reporting

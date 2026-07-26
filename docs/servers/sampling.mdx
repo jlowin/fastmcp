@@ -1,0 +1,66 @@
+---
+title: Sampling
+sidebarTitle: Sampling
+description: Server-initiated sampling is not part of FastMCP 4 — here is why, and what to build instead.
+icon: robot
+---
+
+FastMCP 4 targets the modern MCP protocol, and that protocol has no channel for a server to send a request to a client. A tool cannot pause mid-execution to borrow the caller's model and wait for a completion, so server-initiated sampling is not part of the FastMCP 4 server API. There is no `ctx.sample()` and no server-side sampling handler. Generation belongs to your server now: you call an LLM with your own credentials, the same way you would call any other service.
+
+This follows the protocol rather than getting ahead of it. MCP removed server-initiated requests in the `2026-07-28` revision ([SEP-2577](https://modelcontextprotocol.io/community/sep-guidelines)), and FastMCP 4's client negotiates that revision by default. Keeping `ctx.sample()` around would mean shipping a method whose ordinary, default outcome is a runtime error.
+
+## Requests and notifications
+
+The distinction that makes this make sense is between *asking* and *telling*.
+
+A notification is fire-and-forget. Your server emits it and moves on, and it travels down the response stream the caller already opened for the request in flight. Nothing has to be held open on the server's behalf, so notifications survive the move to a stateless protocol untouched. This is why [logging](/servers/logging) still works exactly as it always has: `ctx.info()`, `ctx.debug()`, and the rest reach the client mid-call on every protocol era.
+
+```python
+from fastmcp import Context, FastMCP
+
+mcp = FastMCP("Reports")
+
+
+@mcp.tool
+async def build_report(rows: int, ctx: Context) -> str:
+    await ctx.info(f"Processing {rows} rows")
+    return "done"
+```
+
+Sampling is the other kind. It is a *request* — the server sends `sampling/createMessage` and then blocks until an answer comes back the other way. That requires a live, addressable connection the server can reach into, which is precisely the thing a stateless protocol does not have. There is no version of sampling that fits, which is why it has no replacement in the way elicitation does. Elicitation moved to the [guard pattern](/servers/elicitation#elicitation-on-the-modern-protocol), where a tool *returns* a description of what it needs and the client answers with a fresh call; generation does not decompose into rounds that way, because an agentic loop would spend the round-trip budget several times over.
+
+## Calling an LLM directly
+
+Your server calls the model. Hold a provider API key in your server's environment, create the client once at module scope so connections are reused across calls, and generate inside the tool. The result is a plain async function call with no protocol involvement, which also means you choose the model, control the prompt, see the token usage, and can test the tool without a client attached.
+
+```python
+import anthropic
+from fastmcp import FastMCP
+
+mcp = FastMCP("Summarizer")
+llm = anthropic.AsyncAnthropic()
+
+
+@mcp.tool
+async def summarize(text: str) -> str:
+    """Summarize a document in two sentences."""
+    response = await llm.messages.create(
+        model="claude-sonnet-4-5",
+        max_tokens=512,
+        system="Summarize the user's text in exactly two sentences.",
+        messages=[{"role": "user", "content": text}],
+    )
+    return response.content[0].text
+```
+
+Any provider SDK works the same way — swap the client and the call, and the tool signature is unchanged. Because generation is now ordinary application code, the surrounding concerns become ordinary too: retries, timeouts, caching, and cost accounting are yours to place where you want them rather than negotiated across a protocol boundary.
+
+The trade this makes is explicit. Sampling let a server borrow the caller's model and the caller's bill; calling directly means you supply the key and pay for the tokens. In exchange your tool behaves identically for every client, including the many that never implemented sampling at all.
+
+## Clients answering servers
+
+The client half of sampling is unaffected. A `fastmcp.Client` connecting to a handshake-era server may still receive `sampling/createMessage` requests from it, and passing `sampling_handler=` is how you answer them — see [Sampling](/clients/sampling) under Clients. That path exists for interoperating with older servers and has nothing to do with authoring one.
+
+<Note>
+Servers on FastMCP 3 still have `ctx.sample()` and `ctx.sample_step()`, documented in the [FastMCP 3 sampling guide](/v3/servers/sampling). Nothing changes for them until they upgrade.
+</Note>

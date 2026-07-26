@@ -11,10 +11,12 @@ import { VersionBadge } from "/snippets/version-badge.mdx";
 
 Use this when you need to respond to server requests for LLM completions.
 
-MCP servers can request LLM completions from clients during tool execution. This enables servers to delegate AI reasoning to the client, which controls which LLM is used and how requests are made.
+A handshake-era MCP server can request an LLM completion from its client during tool execution, delegating the reasoning to whichever model the client controls. Answering those requests is what a sampling handler does, and it is how a FastMCP client stays interoperable with servers built before the protocol changed.
 
 <Note>
 **Sampling requires the older MCP protocol.** A server requests sampling by sending a request down to the client, and protocol version `2026-07-28` removed the server's ability to do that. Clients default to `mode="auto"`, which negotiates the newest version both sides support, so every example on this page passes `mode="legacy"`. See [protocol negotiation](/clients/client#protocol-negotiation).
+
+This page is about the client answering. Writing a FastMCP *server* is the other direction, and there is no `ctx.sample()` there — see [Sampling](/servers/sampling) under Servers for why, and for calling an LLM from your own server instead.
 </Note>
 
 ## Handler Template
