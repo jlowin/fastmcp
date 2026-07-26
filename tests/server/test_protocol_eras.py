@@ -353,23 +353,17 @@ async def test_session_id_access_does_not_crash_on_modern(sessionless_server, mo
 
 
 @pytest.mark.parametrize("mode", MODERN_MODES)
-async def test_set_logging_level_does_not_crash_on_modern(sessionless_server, mode):
-    """logging/setLevel is a session-id-keyed, deprecated-at-2026 operation.
-    On a sessionless modern in-memory connection it must degrade cleanly (either
-    succeed as a no-op or raise a surfaced MCPError) rather than crash the
-    connection. Characterization: capture whichever the current contract is.
+async def test_set_logging_level_is_era_gated_on_modern(sessionless_server, mode):
+    """`logging/setLevel` asks a server to remember a level for the session, and
+    the modern era has no session — the method is absent from its registry. The
+    FastMCP client says so plainly instead of no-opping or surfacing the SDK's
+    opaque "Method not found", and the connection stays usable afterward.
     """
-    async with SDKClient(_server(sessionless_server), mode=mode) as client:
-        outcome: str
-        try:
-            await client.set_logging_level("debug")  # ty: ignore[deprecated]
-            outcome = "ok"
-        except MCPError:
-            outcome = "mcperror"
-        # Either way the connection is still usable afterward.
+    async with FastMCPClient(sessionless_server, mode=mode) as client:
+        with pytest.raises(RuntimeError, match="2026-07-28"):
+            await client.set_logging_level("debug")
         result = await client.call_tool("read_session_id", {})
     assert result.is_error is False
-    assert outcome in {"ok", "mcperror"}
 
 
 # ---------------------------------------------------------------------------
