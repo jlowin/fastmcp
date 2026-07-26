@@ -1314,12 +1314,7 @@ def _restore_request_context(
 
 
 def _make_restoring_handler(handler: Callable, rc_ref: list[Any]) -> Callable:
-    """Wrap a proxy handler to restore request_ctx before delegating.
-
-    The wrapper is a plain ``async def`` so it passes
-    ``inspect.isfunction()`` checks in handler registration paths
-    (e.g., ``create_roots_callback``).
-    """
+    """Wrap a proxy handler to restore request_ctx before delegating."""
 
     async def wrapper(*args: Any, **kwargs: Any) -> Any:
         _restore_request_context(rc_ref)
