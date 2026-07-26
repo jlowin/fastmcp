@@ -173,9 +173,7 @@ class TestOAuthProxyIssuerIdentity:
 
         app = Starlette(routes=proxy.get_routes())
         with TestClient(app) as test_client:
-            metadata = test_client.get(
-                "/.well-known/oauth-authorization-server"
-            ).json()
+            metadata = test_client.get("/.well-known/oauth-authorization-server").json()
 
             consent = test_client.get(f"/consent?txn_id={txn_id}")
             csrf_match = re.search(
