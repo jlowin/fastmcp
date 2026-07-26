@@ -75,7 +75,7 @@ class AnthropicSamplingHandler:
     Example:
         ```python
         from anthropic import AsyncAnthropic
-        from fastmcp import FastMCP
+        from fastmcp import Client
         from fastmcp.client.sampling.handlers.anthropic import AnthropicSamplingHandler
 
         handler = AnthropicSamplingHandler(
@@ -83,7 +83,9 @@ class AnthropicSamplingHandler:
             client=AsyncAnthropic(),
         )
 
-        server = FastMCP(sampling_handler=handler)
+        # Sampling is a server-initiated request, so it only exists on the
+        # handshake era; pass `mode="legacy"` to answer one.
+        client = Client(server_url, sampling_handler=handler, mode="legacy")
         ```
     """
 

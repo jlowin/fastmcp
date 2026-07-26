@@ -1,3 +1,5 @@
+import functools
+
 import pytest
 from mcp_types import Root
 
@@ -65,3 +67,40 @@ class TestClientRoots:
 
         assert len(calls) == 1
         assert result.data == ["file://from/handler"]
+
+    async def test_bound_method_roots_handler(self, fastmcp_server: FastMCP):
+        class RootsProvider:
+            async def get_roots(self, _context: object) -> list[str]:
+                return ["file:///bound-method"]
+
+        provider = RootsProvider()
+
+        async with Client(
+            fastmcp_server, mode="legacy", roots=provider.get_roots
+        ) as client:
+            result = await client.call_tool("list_roots", {})
+
+        assert result.data == ["file:///bound-method"]
+
+    async def test_partial_roots_handler(self, fastmcp_server: FastMCP):
+        async def get_roots(prefix: str, _context: object) -> list[str]:
+            return [f"file:///{prefix}"]
+
+        handler = functools.partial(get_roots, "partial")
+
+        async with Client(fastmcp_server, mode="legacy", roots=handler) as client:
+            result = await client.call_tool("list_roots", {})
+
+        assert result.data == ["file:///partial"]
+
+    async def test_callable_object_roots_handler(self, fastmcp_server: FastMCP):
+        class RootsProvider:
+            async def __call__(self, _context: object) -> list[str]:
+                return ["file:///callable-object"]
+
+        async with Client(
+            fastmcp_server, mode="legacy", roots=RootsProvider()
+        ) as client:
+            result = await client.call_tool("list_roots", {})
+
+        assert result.data == ["file:///callable-object"]
