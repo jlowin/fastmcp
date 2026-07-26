@@ -283,7 +283,7 @@ jobs:
 
       - name: Upload Marvin execution log
         if: always() && steps.marvin.conclusion != 'skipped'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: marvin-triage-execution-log
           path: |
