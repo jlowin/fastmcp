@@ -585,6 +585,25 @@ auth = OAuthProxy(
 
 Check your server logs for "Client registered with redirect_uri" messages to identify what URLs your clients use.
 
+### Application Type (Web vs. Native)
+
+During Dynamic Client Registration, a client may declare an `application_type` (per RFC 7591 and SEP-837) that governs which redirect URIs it is allowed to use. The OAuth proxy honors this field both at registration and when authorizing a redirect.
+
+`application_type` defaults to `"native"` because MCP clients typically run locally and register loopback callbacks. Clients that omit the field keep the permissive behavior described above. A client that explicitly registers as `"web"` is held to the stricter browser-app rules.
+
+Loopback covers the whole reserved range in both the address and name forms: every address in `127.0.0.0/8`, `::1`, and — per RFC 6761 — the name `localhost` along with any subdomain of it, such as `app.localhost`. The absolute (trailing-dot) spellings `localhost.` and `127.0.0.1.` are treated identically. A name that merely contains `localhost` as a label of a registrable domain, like `localhost.example.com`, is an ordinary public host and is not treated as loopback.
+
+| `application_type` | Allowed redirect URIs |
+| ------------------ | --------------------- |
+| `"native"` (default) | `https` URLs; app and private-use schemes (`vscode://callback`, `com.example.app:/callback`, `myapp://callback`, `urn:ietf:wg:oauth:2.0:oob`); and loopback `http` (`http://127.0.0.1`, any address in `127.0.0.0/8`, `http://localhost`, subdomains such as `http://app.localhost`, `http://[::1]`, any port) |
+| `"web"` | `https` on a non-loopback host only |
+
+Web clients must register a non-loopback `https` callback — that is the restriction SEP-837 asks for, and a web client that registers no redirect URI at all is refused, since it could never complete an authorization. Native clients keep the full range of schemes their platforms use; the only new limit is that cleartext `http` must target a loopback host, per RFC 8252 §7.3.
+
+Both application types always reject unsafe browser schemes (`javascript:`, `data:`, `file:`, `vbscript:`). FastMCP does not otherwise filter a native client's scheme: there is no reliable way to tell an app-dispatch scheme from a network transport, since the IANA registry lists `vscode:` alongside `coap:` and `smb:`, so any such filter would reject callbacks that real MCP clients depend on.
+
+A redirect URI that violates the declared type is refused during registration with a `RegistrationError` (`invalid_redirect_uri`). For example, a `"web"` client that registers `http://localhost:12345/callback` is rejected, since web clients must use a non-loopback `https` callback. Configure remote, browser-based clients as `application_type="web"` and give them an `https` callback URL.
+
 ## CIMD Support
 
 <VersionBadge version="3.0.0" />
