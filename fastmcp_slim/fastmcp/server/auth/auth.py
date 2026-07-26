@@ -4,6 +4,7 @@ import json
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
+from mcp.server.auth.handlers.metadata import MetadataHandler
 from mcp.server.auth.handlers.token import TokenErrorResponse
 from mcp.server.auth.handlers.token import TokenHandler as _SDKTokenHandler
 from mcp.server.auth.json_response import PydanticJSONResponse
@@ -30,6 +31,7 @@ from mcp.server.auth.provider import (
     TokenVerifier as TokenVerifierProtocol,
 )
 from mcp.server.auth.routes import (
+    build_metadata,
     cors_middleware,
     create_auth_routes,
     create_protected_resource_routes,
@@ -892,10 +894,10 @@ class OAuthProvider(
         # Configure resource URL before creating routes
         self.set_mcp_path(mcp_path)
 
-        # Create standard OAuth authorization server routes
-        # Pass base_url as issuer_url to ensure metadata declares endpoints where
-        # they're actually accessible (operational routes are mounted at
-        # base_url)
+        # Create standard OAuth authorization server routes. Pass base_url so
+        # the SDK mounts operational routes and declares endpoint URLs where
+        # they're actually accessible; the metadata route is replaced below so
+        # that the advertised `issuer` reports issuer_url instead.
         assert self.base_url is not None  # typing check
         assert (
             self.issuer_url is not None
@@ -914,6 +916,35 @@ class OAuthProvider(
         oauth_routes: list[Route] = []
         for route in sdk_routes:
             if (
+                isinstance(route, Route)
+                and route.path == "/.well-known/oauth-authorization-server"
+            ):
+                # The SDK bakes the metadata into the handler when it builds the
+                # route, and derives both `issuer` and every endpoint URL from a
+                # single argument. Rebuild it here so the endpoints stay on
+                # base_url (where the routes are mounted) while `issuer`
+                # reports issuer_url — the identifier clients used for RFC 8414
+                # discovery, which §3.3 requires the metadata to match.
+                metadata = build_metadata(
+                    self.base_url,
+                    self.service_documentation_url,
+                    self.client_registration_options or ClientRegistrationOptions(),
+                    self.revocation_options or RevocationOptions(),
+                )
+                metadata.issuer = self.issuer_url
+                metadata_handler = MetadataHandler(metadata)
+                oauth_routes.append(
+                    Route(
+                        path=route.path,
+                        endpoint=cors_middleware(
+                            metadata_handler.handle, ["GET", "OPTIONS"]
+                        ),
+                        methods=route.methods or ["GET", "OPTIONS"],
+                        name=route.name,
+                        include_in_schema=route.include_in_schema,
+                    )
+                )
+            elif (
                 isinstance(route, Route)
                 and route.path == "/token"
                 and route.methods is not None

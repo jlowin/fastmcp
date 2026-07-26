@@ -179,6 +179,7 @@ class AuthorizationHandler(SDKAuthorizationHandler):
         self,
         provider: OAuthAuthorizationServerProvider,
         base_url: AnyHttpUrl | str,
+        issuer_url: AnyHttpUrl | str | None = None,
         server_name: str | None = None,
         server_icon_url: str | None = None,
     ):
@@ -187,14 +188,17 @@ class AuthorizationHandler(SDKAuthorizationHandler):
         Args:
             provider: OAuth authorization server provider
             base_url: Base URL of the server for constructing endpoint URLs
+            issuer_url: Authorization server issuer identifier. Defaults to
+                `base_url`, which is correct whenever the server's identity and
+                its endpoint locations are the same URL.
             server_name: Optional server name for branding
             server_icon_url: Optional server icon URL for branding
         """
         super().__init__(provider)
         # Unnormalized on purpose: this must match the discovery document's
         # `issuer` field byte-for-byte per RFC 9207, and that field is built
-        # from the same unmodified base_url (see OAuthProxy.get_routes()).
-        self._issuer = str(base_url)
+        # from the same unmodified issuer_url (see OAuthProxy.get_routes()).
+        self._issuer = str(issuer_url if issuer_url is not None else base_url)
         self._base_url = str(base_url).rstrip("/")
         self._server_name = server_name
         self._server_icon_url = server_icon_url

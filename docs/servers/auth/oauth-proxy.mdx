@@ -135,6 +135,8 @@ mcp = FastMCP(name="My Server", auth=auth)
 <ParamField body="issuer_url" type="AnyHttpUrl | str | None">
   Issuer URL for OAuth authorization server metadata (defaults to `base_url`).
 
+  `issuer_url` is the server's OAuth identity: it is the `issuer` field of the authorization server metadata, the `iss` claim of the tokens the proxy mints, and the RFC 9207 `iss` parameter on authorization responses. `base_url` remains the location of the endpoints, so `authorization_endpoint`, `token_endpoint`, and the rest of the metadata still point at `base_url` where the routes are actually mounted.
+
   When `issuer_url` has a path component (either explicitly or by defaulting from `base_url`), FastMCP creates path-aware discovery routes per RFC 8414. For example, if `base_url` is `http://localhost:8000/api`, the authorization server metadata will be at `/.well-known/oauth-authorization-server/api`.
 
   **Default behavior (recommended for most cases):**
