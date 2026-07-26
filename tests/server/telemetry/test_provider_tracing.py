@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
-from fastmcp import FastMCP
+from fastmcp import Client, Context, FastMCP
+from fastmcp.server.providers.proxy import FastMCPProxy, ProxyClient
+from fastmcp.telemetry import TRACE_PARENT_KEY
 
 
 class TestFastMCPProviderTracing:
@@ -131,3 +133,53 @@ class TestProviderSpanHierarchy:
         assert child_span.parent is not None
         assert delegate_span.parent.span_id == parent_span.context.span_id
         assert child_span.parent.span_id == delegate_span.context.span_id
+
+
+class TestModernProxyTracePropagation:
+    """A modern proxy relays resources and prompts through the low-level
+    session so a backend guard's ask can surface (SEP-2322). That path skips
+    the high-level client's trace injection, so the relay must stamp the
+    outgoing `_meta` itself — otherwise every modern proxy read breaks the
+    distributed trace, not only the guard rounds."""
+
+    @staticmethod
+    def _backend(seen: dict[str, dict]) -> FastMCP:
+        backend = FastMCP("trace-backend")
+
+        def record(kind: str, ctx: Context) -> None:
+            rc = ctx.request_context
+            seen[kind] = dict(rc.meta) if rc is not None and rc.meta else {}
+
+        @backend.resource("data://x")
+        async def concrete(ctx: Context) -> str:
+            record("resource", ctx)
+            return "ok"
+
+        @backend.resource("data://{part}/y")
+        async def templated(part: str, ctx: Context) -> str:
+            record("template", ctx)
+            return "ok"
+
+        @backend.prompt
+        async def greet(ctx: Context) -> str:
+            record("prompt", ctx)
+            return "ok"
+
+        return backend
+
+    async def test_traceparent_reaches_backend(
+        self, trace_exporter: InMemorySpanExporter
+    ):
+        seen: dict[str, dict] = {}
+        proxy = FastMCPProxy(
+            client_factory=lambda: ProxyClient(self._backend(seen), mode="auto")
+        )
+
+        async with Client(proxy, mode="auto") as client:
+            await client.read_resource("data://x")
+            await client.read_resource("data://p/y")
+            await client.get_prompt("greet")
+
+        assert TRACE_PARENT_KEY in seen["resource"]
+        assert TRACE_PARENT_KEY in seen["template"]
+        assert TRACE_PARENT_KEY in seen["prompt"]

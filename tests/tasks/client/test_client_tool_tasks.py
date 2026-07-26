@@ -135,9 +135,9 @@ async def test_tool_task_cancel():
         assert final.status == "cancelled"
 
 
-async def test_required_mode_without_optin_raises_32003():
+async def test_required_mode_without_optin_raises_32021():
     """A legacy client never negotiates the tasks capability, so a required-mode
-    tool call is rejected with the -32003 missing-capability error."""
+    tool call is rejected with the -32021 missing-capability error."""
     mcp = FastMCP("required-test")
     mcp.add_extension(TasksExtension())
 
