@@ -594,11 +594,60 @@ class TestApplicationTypeRedirectRules:
             "ftp://files.example.com/callback",
             "ws://socket.example.com/callback",
             "wss://socket.example.com/callback",
+            "smb://attacker.example/share",
+            "smtp://attacker.example",
+            "nfs://attacker.example/path",
+            "ssh://attacker.example",
+            "ldap://attacker.example",
         ],
     )
-    def test_native_rejects_non_loopback_http_and_network_schemes(self, uri: str):
-        """Native clients may not use non-loopback http or transport schemes."""
+    def test_native_rejects_non_loopback_http_and_standard_schemes(self, uri: str):
+        """Native accepts only https, loopback http, and private-use schemes.
+
+        Standard IANA-registered schemes are not available for private use, so
+        they cannot receive an authorization code even though they are not in
+        the unsafe-browser-scheme set.
+        """
         assert is_redirect_uri_allowed_for_application_type(uri, "native") is False
+
+    @pytest.mark.parametrize(
+        "uri",
+        [
+            "com.example.app://callback",
+            "com.example.app:/oauth/callback",
+            "myapp://callback",
+        ],
+    )
+    def test_native_accepts_private_use_schemes(self, uri: str):
+        """RFC 8252 §7.1 private-use schemes (unregistered) stay allowed."""
+        assert is_redirect_uri_allowed_for_application_type(uri, "native") is True
+
+    @pytest.mark.parametrize(
+        "host",
+        ["127.0.0.1", "127.0.0.2", "127.5.5.5", "127.255.255.254"],
+    )
+    def test_web_rejects_entire_loopback_range(self, host: str):
+        """RFC 8252 §7.3 loopback is all of 127.0.0.0/8, not just 127.0.0.1.
+
+        Checking only 127.0.0.1 would let a web client bypass the non-loopback
+        requirement with any other address in the range.
+        """
+        uri = f"https://{host}/callback"
+        assert is_redirect_uri_allowed_for_application_type(uri, "web") is False
+
+    @pytest.mark.parametrize(
+        "uri",
+        [
+            "http://127.0.0.1:1234/cb",
+            "http://127.0.0.2:1234/cb",
+            "http://127.5.5.5:1234/cb",
+            "http://[::1]:1234/cb",
+            "http://localhost:1234/cb",
+        ],
+    )
+    def test_native_accepts_entire_loopback_range(self, uri: str):
+        """The widened loopback range cuts both ways: native gains 127.0.0.0/8."""
+        assert is_redirect_uri_allowed_for_application_type(uri, "native") is True
 
     @pytest.mark.parametrize("application_type", ["web", "native"])
     @pytest.mark.parametrize(

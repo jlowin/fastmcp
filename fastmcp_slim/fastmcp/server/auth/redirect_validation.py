@@ -5,6 +5,7 @@ protecting against userinfo-based bypass attacks like http://localhost@evil.com.
 """
 
 import fnmatch
+import ipaddress
 from urllib.parse import unquote, urlencode, urlparse, urlunparse
 
 from pydantic import AnyUrl
@@ -18,23 +19,98 @@ UNSAFE_REDIRECT_URI_SCHEMES = frozenset(
     }
 )
 
-#: Standard network-transport URI schemes that address a remote endpoint rather
-#: than an OS-registered native application. SEP-837 native clients may use
-#: private-use / custom schemes, but these schemes would deliver an
-#: authorization code to a network service, so they are rejected.
-NON_REDIRECT_NETWORK_SCHEMES = frozenset(
+#: Known standard (IANA-registered) URI schemes.
+#:
+#: RFC 8252 §7.1 defines a native app's private-use URI scheme as one that is
+#: *not* registered — apps are told to use a scheme based on a domain name they
+#: control (e.g. `com.example.app:`). So the correct test for "is this a
+#: private-use scheme?" is membership in the registered set, not membership in
+#: a denylist of dangerous transports: a denylist can only ever enumerate the
+#: harms someone thought of, while this set enumerates the schemes that are
+#: definitionally *not* available for private use. Anything outside it is, by
+#: RFC 8252's definition, a private-use/app-specific scheme.
+#:
+#: `http` and `https` are handled separately (they have their own rules) and are
+#: listed here so they can never fall through to the private-use branch.
+STANDARD_URI_SCHEMES = frozenset(
     {
+        # Web / transport
+        "http",
+        "https",
+        "ws",
+        "wss",
         "ftp",
         "ftps",
         "sftp",
         "tftp",
         "ssh",
-        "ws",
-        "wss",
-        "gopher",
         "telnet",
+        "gopher",
+        "nntp",
+        "news",
+        "snmp",
+        "smb",
+        "cifs",
+        "nfs",
+        "afp",
+        "rsync",
+        "svn",
+        "git",
+        "cvs",
+        # Mail / messaging / realtime
+        "mailto",
+        "smtp",
+        "smtps",
+        "imap",
+        "imaps",
+        "pop",
+        "pop3",
+        "sip",
+        "sips",
+        "xmpp",
+        "irc",
+        "ircs",
+        "rtsp",
+        "rtmp",
+        "mms",
+        # Directory / data / db
         "ldap",
         "ldaps",
+        "dns",
+        "dict",
+        "finger",
+        "whois",
+        "jdbc",
+        "mysql",
+        "postgres",
+        "postgresql",
+        "redis",
+        "mongodb",
+        # Local / device / misc registered
+        "file",
+        "data",
+        "javascript",
+        "vbscript",
+        "about",
+        "blob",
+        "tel",
+        "fax",
+        "sms",
+        "mid",
+        "cid",
+        "urn",
+        "geo",
+        "magnet",
+        "bitcoin",
+        "ethereum",
+        "steam",
+        "view-source",
+        "chrome",
+        "chrome-extension",
+        "resource",
+        "jar",
+        "ms-help",
+        "shell",
     }
 )
 
@@ -193,12 +269,31 @@ def _match_host(uri_host: str | None, pattern_host: str | None) -> bool:
 def _is_loopback_host(host: str | None) -> bool:
     """Check if a host is a loopback address.
 
-    Per RFC 8252 §7.3, loopback addresses include localhost, 127.0.0.1, and ::1.
+    Per RFC 8252 §7.3, loopback covers the whole reserved loopback range, not
+    just the two familiar literals: IPv4 `127.0.0.0/8` (so `127.0.0.2` and
+    `127.5.5.5` are loopback just as much as `127.0.0.1`) and IPv6 `::1`. IP
+    hosts are therefore classified with `ipaddress.ip_address().is_loopback`
+    rather than string equality — checking only `127.0.0.1` would let a web
+    client register `https://127.0.0.2/callback` and slip past the
+    non-loopback requirement.
+
+    Bracketed IPv6 literals (`[::1]`) are accepted, and non-IP hosts fall
+    through to the `localhost` name check without raising.
     """
     if not host:
         return False
+
     host = host.lower()
-    return host in ("localhost", "127.0.0.1", "::1")
+
+    # urlparse().hostname strips brackets, but callers that parse the netloc
+    # themselves may still pass a bracketed IPv6 literal.
+    candidate = host[1:-1] if host.startswith("[") and host.endswith("]") else host
+
+    try:
+        return ipaddress.ip_address(candidate).is_loopback
+    except ValueError:
+        # Not an IP literal — fall back to the hostname check.
+        return host == "localhost"
 
 
 def _match_port(
@@ -354,12 +449,23 @@ def is_redirect_uri_allowed_for_application_type(
     - `"web"` clients must use `https` redirect URIs on a non-loopback host.
       Loopback `http`, `https://localhost`, and custom/private-use schemes are
       rejected.
-    - `"native"` clients may use loopback `http` URLs (`http://127.0.0.1`,
-      `http://localhost`, `http://[::1]`, any port), `https` claimed URLs, and
-      OS-registered private-use / custom URI schemes (e.g. `com.example.app:/`,
-      `myapp://`). Non-loopback plain `http` and network-transport schemes
-      (`ftp:`, `ws:`, `wss:`, ...) that cannot deliver a code to a native app
-      are rejected.
+    - `"native"` clients are matched against a positive list of the three
+      redirect forms RFC 8252 sanctions for native apps, and nothing else:
+
+      1. `https` claimed URLs (RFC 8252 §7.2).
+      2. `http` **only** with a loopback host (RFC 8252 §7.3) — any port.
+      3. Private-use URI schemes (RFC 8252 §7.1), i.e. a scheme that is *not*
+         IANA-registered. RFC 8252 defines a private-use scheme as an
+         unregistered one based on a domain the app controls
+         (`com.example.app:/callback`), so the membership test is against
+         `STANDARD_URI_SCHEMES` — the set of schemes definitionally unavailable
+         for private use. Everything outside it is a private-use/app scheme.
+
+      This is a positive rule rather than a denylist of dangerous transports:
+      a denylist only blocks the harms someone remembered to enumerate, so
+      unlisted standard schemes (`smb:`, `smtp:`, `nfs:`, ...) would otherwise
+      reach the success path and could point an authorization code at a remote
+      service instead of the local app.
 
     Unsafe browser schemes (`javascript:`, `data:`, `file:`, `vbscript:`) are
     always rejected regardless of `application_type`, layering on top of
@@ -383,14 +489,13 @@ def is_redirect_uri_allowed_for_application_type(
             return False
         return not _is_loopback_host(parsed.hostname)
 
-    # "native" (and the SDK default).
+    # "native" (and the SDK default): accept exactly the three RFC 8252 forms.
+    if scheme == "https":
+        return True
     if scheme == "http":
-        # Native apps may only use http for loopback redirects (RFC 8252 §7.3).
         return _is_loopback_host(parsed.hostname)
-    # Reject network-transport schemes (ftp/ws/...) that address a remote
-    # endpoint and cannot deliver a code to the local app; allow https claimed
-    # URLs and OS-registered private-use / custom app schemes.
-    return scheme not in NON_REDIRECT_NETWORK_SCHEMES
+    # Private-use scheme: registered schemes are not available for private use.
+    return scheme not in STANDARD_URI_SCHEMES
 
 
 def validate_redirect_uri(
