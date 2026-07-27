@@ -13,21 +13,15 @@ Code blocks marked as sketches show the *intended* API and do not resolve agains
 
 ## Sampling removal
 
-**Status: Deprecation and era-gating shipped (#4448); removal slated for 4.0.**
+**Status: Shipped in 4.0.**
 
-Sampling is the push-shaped API where a server borrows the client's model mid-call (`ctx.sample`, `ctx.sample_step`). The `2026-07-28` era removes server-initiated requests, so this API cannot work on modern connections. Background-task sampling is dead under v2 — a worker's back-channel is gone once the submitting request returns, and no sampling relay was ever built (sdk-feedback #9).
+Sampling was the push-shaped API where a server borrows the client's model mid-call (`ctx.sample`, `ctx.sample_step`). The `2026-07-28` era removes server-initiated requests, so it cannot work on modern connections, and `Client`'s flip to `mode="auto"` made a modern connection the default — the era gate had become the default experience rather than an edge case. Background-task sampling was dead under v2 in any event: a worker's back-channel is gone once the submitting request returns, and no relay was ever built (sdk-feedback #9).
 
-The plan is Option A: **deprecate the push-sampling API now and remove it in the 4.0 release.** The first two steps shipped in #4448:
+Deprecation and era-gating shipped in #4448. The removal completes the plan: `ctx.sample`, `ctx.sample_step`, `ctx.list_roots`, `server/sampling/` (including `SamplingTool` and structured-result sampling), `FastMCP(sampling_handler=..., sampling_handler_behavior=...)`, and `examples/sampling/` are all gone. The server-authoring API is now the modern protocol's API, with nothing in it that only works against old clients.
 
-- **Done:** `ctx.sample` / `ctx.sample_step` emit a `FastMCPDeprecationWarning` (once per process, gated on `settings.deprecation_warnings`).
-- **Done:** both are era-gated to raise a clear, era-aware `ToolError` on `2026-07-28` before the wire, which also fixed the opaque "Method not found" of sdk-feedback #10.
-- **Pending 4.0:** remove `ctx.sample`, `ctx.sample_step`, `server/sampling/`, `SamplingTool`, and structured-result sampling.
+The migration story is honest: there is **no drop-in**. The guidance is architectural — call an LLM from your server directly, with your own API key, rather than borrowing the client's model. For roots, take paths as tool arguments or ask through the guard pattern, whose `input_requests` map still carries a `ListRootsRequest`.
 
-The migration story is honest: there is **no drop-in** on modern connections. The guidance is architectural — call an LLM from your server directly, with your own API key, rather than borrowing the client's model. That shift is the real answer, and it is why the removal justifies a major version.
-
-The client-side provider handlers (Anthropic, OpenAI, Google GenAI) are **retained** regardless: MRTR needs them to answer sampling input-requests from the client side. What is removed is the server-side push emitter, which the SDK never built for the modern era.
-
-Sampling still functions on the legacy eras. Users also see an SDK-level `MCPDeprecationWarning` on ordinary `ctx.sample` usage (the SDK deprecated the capability wire-side per SEP-2577). FastMCP's own deprecation — the warning with migration guidance, plus the era-gating — shipped in #4448; only the final removal remains for 4.0.
+The client-side provider handlers (Anthropic, OpenAI, Google GenAI) and `Client(sampling_handler=..., roots=...)` are **retained**: a FastMCP client still has to answer a legacy server's requests, and MRTR needs them from the client side. What is removed is the server-side push emitter. `ProxyClient`'s default relay handlers are retained for the same interop reason and now call the SDK session directly.
 
 ## MRTR elicitation
 

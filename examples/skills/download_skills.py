@@ -1,7 +1,7 @@
 """Example: Downloading skills from an MCP server.
 
 This example shows how to use the skills client utilities to discover
-and download skills from any MCP server that exposes them via SkillsProvider.
+and download skills from any MCP server that exposes them via a skills provider.
 
 Run this script:
     uv run python examples/skills/download_skills.py

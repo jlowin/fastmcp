@@ -8,6 +8,7 @@ from mcp_types import (
     LoggingLevel,
     ModelHint,
     ModelPreferences,
+    Root,
     TextContent,
 )
 from pydantic import BaseModel, Field
@@ -58,6 +59,34 @@ class TestProxyClientEraDefault:
         assert cast(Client, factory()).mode == "auto"
 
 
+async def _backend_list_roots(context: Context) -> list[Root]:
+    """Issue a handshake-era `roots/list` from a backend server.
+
+    `Context` has no `list_roots()`: server-initiated requests are not part of
+    FastMCP's server API. These helpers reach the SDK session directly to stand
+    in for a legacy upstream, which is the only thing the proxy relay forwards.
+    """
+    result = await context.session.list_roots()  # ty: ignore[deprecated]
+    return result.roots
+
+
+async def _backend_sample(context: Context) -> str:
+    """Issue a handshake-era `sampling/createMessage` from a backend server."""
+    result = await context.session.create_message(  # ty: ignore[deprecated]
+        messages=[
+            SamplingMessage(
+                role="user", content=TextContent(type="text", text="Hello, world!")
+            )
+        ],
+        system_prompt="You love FastMCP",
+        temperature=0.5,
+        max_tokens=100,
+        model_preferences=ModelPreferences(hints=[ModelHint(name="gpt-4o")]),
+        related_request_id=context.origin_request_id,
+    )
+    return result.content.text if isinstance(result.content, TextContent) else ""
+
+
 @pytest.fixture
 def fastmcp_server():
     mcp = FastMCP("TestServer")
@@ -68,21 +97,13 @@ def fastmcp_server():
 
     @mcp.tool
     async def list_roots(context: Context) -> list[str]:
-        roots = await context.list_roots()
-        return [str(r.uri) for r in roots]
+        return [str(r.uri) for r in await _backend_list_roots(context)]
 
     @mcp.tool
     async def sampling(
         context: Context,
     ) -> str:
-        result = await context.sample(
-            "Hello, world!",
-            system_prompt="You love FastMCP",
-            temperature=0.5,
-            max_tokens=100,
-            model_preferences="gpt-4o",
-        )
-        return result.text or ""
+        return await _backend_sample(context)
 
     @dataclass
     class Person:
@@ -514,17 +535,16 @@ def roots_backend_server():
 
     @mcp.resource("data://roots")
     async def roots_resource(context: Context) -> list[str]:
-        roots = await context.list_roots()
-        return [str(r.uri) for r in roots]
+        return [str(r.uri) for r in await _backend_list_roots(context)]
 
     @mcp.resource("data://roots/{key}")
     async def roots_template(key: str, context: Context) -> str:
-        roots = await context.list_roots()
+        roots = await _backend_list_roots(context)
         return ", ".join(f"{key}:{r.uri}" for r in roots)
 
     @mcp.prompt
     async def roots_prompt(context: Context) -> str:
-        roots = await context.list_roots()
+        roots = await _backend_list_roots(context)
         return ", ".join(str(r.uri) for r in roots)
 
     return mcp

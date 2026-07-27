@@ -6,6 +6,8 @@ icon: chart-line
 tag: NEW
 ---
 
+import { VersionBadge } from "/snippets/version-badge.mdx"
+
 FastMCP includes native OpenTelemetry instrumentation for observability. Traces are automatically generated for tool, prompt, resource, resource template, and task management operations, providing visibility into server behavior, request handling, and provider delegation chains.
 
 ## How It Works
@@ -20,6 +22,8 @@ FastMCP uses the OpenTelemetry API for instrumentation. This means:
 Because FastMCP only depends on the OpenTelemetry API, span creation is a no-op until you configure an SDK and exporter — so being on by default costs nothing until you opt into collection.
 
 ### Turning Telemetry Off
+
+<VersionBadge version="4.0.0" />
 
 To disable FastMCP's instrumentation entirely, set `FASTMCP_ENABLE_TELEMETRY=false` (or `fastmcp.settings.enable_telemetry = False`). When disabled, FastMCP creates no spans even if an SDK is configured.
 
@@ -238,7 +242,7 @@ Custom spans are most useful around work that is expensive or hard to debug:
 - External calls such as databases, vector stores, HTTP APIs, or queue operations
 - Multi-step tool logic where one stage dominates latency
 - Prompt or resource generation that fans out to other systems
-- Sampling calls made from inside a tool via `ctx.sample(...)`
+- LLM calls a tool makes to a model provider
 
 Avoid wrapping every small helper function or simple in-memory transformation. That usually adds noise without making traces easier to interpret.
 
@@ -286,9 +290,9 @@ async def docs_resource(slug: str) -> str:
         return await load_doc(slug)
 ```
 
-### Sampling calls inside tools
+### LLM calls inside tools
 
-If your tool uses `ctx.sample(...)`, keep the LLM work nested under the tool span so traces show both application logic and model latency together.
+A tool that [calls an LLM directly](/servers/sampling) should keep the model work nested under the tool span, so traces show application logic and model latency together.
 
 For providers with their own OTEL integrations, prefer enabling that instrumentation rather than manually creating a span around every model call. For example, if you use Google GenAI, `logfire.instrument_google_genai()` will emit child spans with token and request metadata under the active FastMCP tool span.
 

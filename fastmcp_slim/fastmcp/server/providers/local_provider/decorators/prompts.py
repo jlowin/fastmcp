@@ -15,7 +15,7 @@ import mcp_types
 
 from fastmcp.prompts.base import Prompt
 from fastmcp.prompts.function_prompt import FunctionPrompt
-from fastmcp.server.auth.authorization import AuthCheck
+from fastmcp.utilities.authorization import AuthCheck
 from fastmcp.utilities.types import AnyFunction
 
 if TYPE_CHECKING:

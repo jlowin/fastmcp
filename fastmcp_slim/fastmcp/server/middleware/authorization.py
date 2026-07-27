@@ -33,13 +33,6 @@ from fastmcp.exceptions import AuthorizationError, InsufficientScopeError
 from fastmcp.prompts.base import Prompt, PromptResult
 from fastmcp.resources.base import Resource, ResourceResult
 from fastmcp.resources.template import ResourceTemplate
-from fastmcp.server.auth.authorization import (
-    AuthCheck,
-    AuthContext,
-    run_auth_checks,
-    run_auth_checks_with_shortfall,
-    scope_requirements,
-)
 from fastmcp.server.dependencies import get_access_token
 from fastmcp.server.middleware.middleware import (
     CallNext,
@@ -47,6 +40,13 @@ from fastmcp.server.middleware.middleware import (
     MiddlewareContext,
 )
 from fastmcp.tools.base import Tool, ToolResult
+from fastmcp.utilities.authorization import (
+    AuthCheck,
+    AuthContext,
+    run_auth_checks,
+    run_auth_checks_with_shortfall,
+    scope_requirements,
+)
 from fastmcp.utilities.versions import VersionSpec
 
 logger = logging.getLogger(__name__)

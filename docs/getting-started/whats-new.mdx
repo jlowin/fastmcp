@@ -23,9 +23,11 @@ The rebuild also pulls the protocol's recent evolution forward in a single step.
 
 A FastMCP 4 server answers clients across the protocol transition from one deployment. The MCP SDK negotiates the era per connection — the sessionless `2026-07-28` protocol for clients that have moved forward, the session-based handshake for everyone else — and any replica behind a plain load balancer can serve a modern request. This supersedes FastMCP's earlier "latest protocol only" stance: you adopt the new protocol without forking your deployment or gating clients by version.
 
-The same negotiation runs from the client, and its default flipped. A plain `Client(url)` now probes for the modern protocol and adopts it when the server offers it, falling back to the handshake otherwise — where every earlier FastMCP version pinned the handshake outright. That flip is what brings the modern capabilities within reach of ordinary client code: a task-enabled tool hands back a handle to poll, and multi-round-trip elicitation resolves across successive requests, neither requiring the caller to opt in. Set `mode="legacy"` to pin the handshake when you need the session-based back-channel or the classic `initialize` result. See [Protocol negotiation](/clients/client#protocol-negotiation).
+The same negotiation runs from the client, and its default flipped. A plain `Client(url)` now probes for the modern protocol and adopts it when the server offers it, falling back to the handshake otherwise — where every earlier FastMCP version pinned the handshake outright. That flip is what brings the modern capabilities within reach of ordinary client code: a task-enabled tool hands back a handle to poll, and multi-round-trip elicitation resolves across successive requests, neither requiring the caller to opt in. Set `mode="legacy"` to pin the handshake when you need the session-based back-channel or the classic `initialize` result. Once connected, `client.protocol_version`, `client.server_info`, `client.server_capabilities`, and `client.instructions` read the same regardless of which era you negotiated — code that inspects the connection no longer branches on how it got there. See [Protocol negotiation](/clients/client#protocol-negotiation).
 
-The modern protocol is sessionless, so it drops the server's ability to call back into the client mid-request (SEP-2577). Imperative `ctx.elicit` and `ctx.list_roots` move to a request-shaped pattern on modern connections, and server-initiated sampling — which has no such replacement — is [deprecated](/servers/sampling). Everything else about writing a server is unchanged.
+The modern protocol is sessionless, so it drops the server's ability to call back into the client mid-request (SEP-2577), and FastMCP 4's server API reflects that. `ctx.elicit` moves to a request-shaped pattern that works on modern connections: the tool returns a description of the input it needs, and the client answers with a fresh call. `ctx.sample`, `ctx.sample_step`, and `ctx.list_roots` are gone from the API, because each of them pushed a request down a live connection and a method that only works against old clients is a trap.
+
+Both capabilities survive in the same request-shaped form. Asking for roots that way is the natural replacement, since one round trip buys the whole answer. Generation usually belongs in the server instead, because a loop of asking rounds spends the round-trip budget over and over — [call an LLM from your server](/servers/sampling). Logging is untouched: `ctx.info` and its siblings are notifications, and notifications ride the response stream on every era. Everything else about writing a server is unchanged.
 
 ## State without a session
 
@@ -84,6 +86,47 @@ mcp = FastMCP("Internal API", auth=auth)
 
 The asserted subject flows into the normal auth context, so tools read it through `get_access_token()` like any other identity. See [Identity Assertion](/servers/auth/oauth-proxy#identity-assertion-sep-990).
 
+Authorizing a caller by role is a related, provider-agnostic need. Scopes are standardized, so `require_scopes` behaves the same everywhere, but roles and groups are not part of OIDC and every provider files them under a different claim. `require_roles` handles the comparison and takes an `extract` callable naming where to look, so Keycloak's `realm_access.roles`, Cognito's `cognito:groups`, and Auth0's per-tenant namespaced claims all work without FastMCP guessing.
+
+```python
+from fastmcp import FastMCP
+from fastmcp.server.auth import require_roles
+
+mcp = FastMCP("Internal API")
+
+@mcp.tool(auth=require_roles("admin", extract=lambda c: c["realm_access"]["roles"]))
+def rotate_credentials() -> str:
+    """Only callable by a caller holding the 'admin' role."""
+    return "Rotated"
+```
+
+This illustrates the check in isolation — enforcing it for real needs an HTTP-transport server with a token-validating `auth` provider configured (a `JWTVerifier`, a `RemoteAuthProvider`, or a provider built on one, such as `KeycloakAuthProvider`, all expose claims directly), since STDIO has no OAuth concept and skips every check. See [Authorization](/servers/authorization#require_roles) for the full picture.
+
+The client side of enterprise auth arrived too. Not every FastMCP client has a user behind it — a backend service, a scheduled job, one MCP server calling another — and `ClientCredentialsOAuthProvider` authenticates one of those to a protected server with the OAuth 2.0 client-credentials grant: no browser, no redirect, no consent screen.
+
+```python
+import asyncio
+
+from fastmcp import Client
+from fastmcp.client.auth import ClientCredentialsOAuthProvider
+
+auth = ClientCredentialsOAuthProvider(
+    client_id="my-client-id",
+    client_secret="my-client-secret",
+    scopes=["read", "write"],
+)
+
+
+async def main():
+    async with Client("https://example.com/mcp", auth=auth) as client:
+        await client.list_tools()
+
+
+asyncio.run(main())
+```
+
+See [Machine-to-Machine Authentication](/clients/auth/client-credentials).
+
 ## Faster and safer
 
 Two more capabilities arrive by default. Response caching (SEP-2549) lets a server stamp freshness hints on its results that a caching [client](/clients/client#response-caching) reuses without a round trip, and a distributed `KeyValueResponseCacheStore` backs that cache with Redis or any key-value store, so a fleet of clients or proxy replicas shares fills.
@@ -95,5 +138,9 @@ mcp = FastMCP("Weather", cache_ttl=300, cache_scope="public")
 ```
 
 Security tightened in the same release: every templated resource screens its parameters for path traversal, absolute paths, and null bytes before the handler runs — [path security](/servers/resources#path-security) on by default, covering mounted and proxied templates too.
+
+The OAuth flow got more precise as well. Dynamic Client Registration now honors a client's declared `application_type` (SEP-837): the permissive loopback and app-scheme callbacks MCP clients rely on stay the default for `"native"`, while a client that registers as `"web"` is held to stricter browser-app redirect rules. And when `AuthMiddleware` denies a call specifically for a missing scope, it raises `InsufficientScopeError` naming exactly which scopes would fix it (SEP-2350), so a caller re-authorizes precisely instead of retrying blind. See [Application Type](/servers/auth/oauth-proxy#application-type-web-vs-native) and [Signaling Scope Shortfalls](/servers/authorization#signaling-scope-shortfalls).
+
+A gateway or load balancer in front of your server can now route a request without parsing its JSON-RPC body: on a modern connection, FastMCP's client attaches the method, target name, and opted-in argument values as HTTP headers (SEP-2243), so an intermediary dispatches on headers alone. See [Gateway Routing Headers](/deployment/http#gateway-routing-headers).
 
 When you're ready to move a server to v4, [Upgrading from FastMCP 3](/getting-started/upgrading/from-fastmcp-3) walks through every change and what it looks like in practice.

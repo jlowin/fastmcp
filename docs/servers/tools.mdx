@@ -722,7 +722,7 @@ Schema generation works for most common types including basic types, collections
 For complete control over tool responses, return a `ToolResult` object. This gives you explicit control over all aspects of the tool's output: traditional content, structured data, and metadata.
 
 ```python
-from fastmcp.tools.tool import ToolResult
+from fastmcp.tools import ToolResult
 from mcp_types import TextContent
 
 @mcp.tool
@@ -788,7 +788,7 @@ When you need custom serialization (like YAML, Markdown tables, or specialized f
 ```python
 import yaml
 from fastmcp import FastMCP
-from fastmcp.tools.tool import ToolResult
+from fastmcp.tools import ToolResult
 
 mcp = FastMCP("MyServer")
 
@@ -1056,22 +1056,14 @@ mcp = FastMCP(name="ContextDemo")
 async def process_data(data_uri: str, ctx: Context) -> dict:
     """Process data from a resource with progress reporting."""
     await ctx.info(f"Processing data from {data_uri}")
-    
-    # Read a resource
-    resource = await ctx.read_resource(data_uri)
-    data = resource[0].content if resource else ""
-    
-    # Report progress
+
+    result = await ctx.read_resource(data_uri)
+    data = result.contents[0].content if result.contents else ""
     await ctx.report_progress(progress=50, total=100)
-    
-    # Example request to the client's LLM for help
-    summary = await ctx.sample(f"Summarize this in 10 words: {data[:200]}")
-    
+
+    summary = str(data)[:200]
     await ctx.report_progress(progress=100, total=100)
-    return {
-        "length": len(data),
-        "summary": summary.text
-    }
+    return {"length": len(data), "summary": summary}
 ```
 
 The Context object provides access to:
@@ -1079,7 +1071,6 @@ The Context object provides access to:
 - **Logging**: `ctx.debug()`, `ctx.info()`, `ctx.warning()`, `ctx.error()`
 - **Progress Reporting**: `ctx.report_progress(progress, total)`
 - **Resource Access**: `ctx.read_resource(uri)`
-- **LLM Sampling**: `ctx.sample(...)`
 - **Request Information**: `ctx.request_id`, `ctx.client_id`
 
 For full documentation on the Context object and all its capabilities, see the [Context documentation](/servers/context).

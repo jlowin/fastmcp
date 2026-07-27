@@ -30,7 +30,7 @@ from mcp.shared.exceptions import MCPError
 from pydantic import FileUrl
 
 from fastmcp import Client as FastMCPClient
-from fastmcp import Context, FastMCP, settings
+from fastmcp import Context, FastMCP
 from fastmcp.exceptions import PromptError, ResourceError
 from fastmcp.server.elicitation import AcceptedElicitation
 from fastmcp.server.middleware import Middleware
@@ -216,16 +216,6 @@ def push_server() -> FastMCP:
         return f"elicited {result.data}"
 
     @mcp.tool
-    async def do_sample(ctx: Context) -> str:
-        result = await ctx.sample("hello")
-        return f"sampled {result.text}"
-
-    @mcp.tool
-    async def do_list_roots(ctx: Context) -> str:
-        roots = await ctx.list_roots()
-        return f"roots {[str(r.uri) for r in roots]}"
-
-    @mcp.tool
     async def do_log(ctx: Context) -> str:
         await ctx.info("a log line")
         return "logged"
@@ -264,31 +254,12 @@ async def test_elicit_works_on_legacy(push_server):
     assert _texts(result.content) == ["elicited 7"]
 
 
-async def test_sample_works_on_legacy(push_server):
-    async with SDKClient(
-        _server(push_server), mode="legacy", sampling_callback=_sampling_cb
-    ) as client:
-        result = await client.call_tool("do_sample", {})
-    assert result.is_error is False
-    assert _texts(result.content) == ["sampled sampled-text"]
-
-
-async def test_list_roots_works_on_legacy(push_server):
-    async with SDKClient(
-        _server(push_server), mode="legacy", list_roots_callback=_roots_cb
-    ) as client:
-        result = await client.call_tool("do_list_roots", {})
-    assert result.is_error is False
-    assert _texts(result.content) == ["roots ['file:///tmp']"]
-
-
 @pytest.mark.parametrize("mode", MODERN_MODES)
-@pytest.mark.parametrize("tool", ["do_elicit", "do_sample", "do_list_roots"])
-async def test_push_features_degrade_on_modern(push_server, mode, tool):
-    """Server-initiated requests (elicitation/sampling/roots) are removed at
-    2026-07-28 (SEP-2577), so a tool that uses them must degrade to a surfaced
-    error rather than hang or crash the connection. This asserts the
-    degradation happens and reaches the caller as an isError result.
+async def test_elicit_degrades_on_modern(push_server, mode):
+    """Elicitation is a server-initiated request, removed at 2026-07-28
+    (SEP-2577), so a tool that uses it must degrade to a surfaced error rather
+    than hang or crash the connection. The connection survives: a subsequent
+    normal call still works.
     """
     async with SDKClient(
         _server(push_server),
@@ -297,230 +268,46 @@ async def test_push_features_degrade_on_modern(push_server, mode, tool):
         sampling_callback=_sampling_cb,
         list_roots_callback=_roots_cb,
     ) as client:
-        result = await client.call_tool(tool, {})
+        result = await client.call_tool("do_elicit", {})
         assert result.is_error is True
-        # A subsequent normal call still works: the connection survived the
-        # per-request failure rather than tearing down the whole session.
         log_result = await client.call_tool("do_log", {})
         assert log_result.is_error is False
 
 
-async def test_list_roots_degradation_message_is_clear_on_modern(push_server):
-    """`ctx.list_roots()` sends with no related_request_id, so the SDK selects
-    the connection's no-back-channel outbound and raises the self-explanatory
-    NoBackChannelError. This is the *good* degradation message and we assert it.
-    """
-    async with SDKClient(_server(push_server), mode="2026-07-28") as client:
-        result = await client.call_tool("do_list_roots", {})
-    assert result.is_error is True
-    message = " ".join(_texts(result.content)).lower()
-    assert "back-channel" in message and "server-initiated" in message
-
-
-@pytest.mark.parametrize("tool", ["do_elicit", "do_sample"])
-async def test_elicit_sample_degradation_message_is_clear_on_modern(push_server, tool):
-    """FastMCP era-gates elicit/sample: on a 2026-07-28 connection they raise a
-    clear, era-aware error before hitting the wire, instead of the SDK's opaque
-    'Method not found' (sdk-feedback.md #10). Both messages name the removed
-    server-initiated capability so the caller knows why the request degraded.
+async def test_elicit_degradation_message_is_clear_on_modern(push_server):
+    """FastMCP era-gates elicit: on a 2026-07-28 connection it raises a clear,
+    era-aware error before hitting the wire, instead of the SDK's opaque
+    'Method not found' (sdk-feedback.md #10).
     """
     async with SDKClient(
         _server(push_server),
         mode="2026-07-28",
         elicitation_callback=_accept_elicit,
-        sampling_callback=_sampling_cb,
     ) as client:
-        result = await client.call_tool(tool, {})
-    assert result.is_error is True
-    message = " ".join(_texts(result.content)).lower()
-    assert "server-initiated" in message
-
-
-# ---------------------------------------------------------------------------
-# 3a-bis. Server-configured sampling handler answers WITHOUT the client
-# back-channel, so ctx.sample()/ctx.sample_step() must keep working on modern
-# connections. The era-gate only fires when nothing can serve the request.
-# ---------------------------------------------------------------------------
-
-
-def _handler_server(behavior) -> FastMCP:
-    """A server whose sampling is answered by a server-side handler."""
-
-    def sampling_handler(messages, params, ctx) -> str:
-        return "handler-answer"
-
-    mcp = FastMCP("handler", sampling_handler=sampling_handler)
-    if behavior is not None:
-        mcp.sampling_handler_behavior = behavior
-
-    @mcp.tool
-    async def do_sample(ctx: Context) -> str:
-        result = await ctx.sample("hello")
-        return f"sampled {result.text}"
-
-    @mcp.tool
-    async def do_sample_step(ctx: Context) -> str:
-        step = await ctx.sample_step("hello")
-        return f"stepped {step.text}"
-
-    return mcp
-
-
-@pytest.mark.parametrize("mode", MODERN_MODES)
-@pytest.mark.parametrize("behavior", ["always", "fallback"])
-@pytest.mark.parametrize("method", ["do_sample", "do_sample_step"])
-async def test_server_sampling_handler_works_on_modern(mode, behavior, method):
-    """A server-side sampling handler answers entirely server-side, so it works
-    on modern (2026-07-28) connections regardless of behavior. The era-gate must
-    NOT block these — nothing touches the removed client back-channel. Crucially,
-    'fallback' must go straight to the handler (no bare client-attempt failure)."""
-    server = _handler_server(behavior)
-    async with SDKClient(_server(server), mode=mode) as client:
-        result = await client.call_tool(method, {})
-    assert result.is_error is False
-    assert "handler-answer" in " ".join(_texts(result.content))
-
-
-@pytest.mark.parametrize("behavior", ["always", "fallback"])
-@pytest.mark.parametrize("method", ["do_sample", "do_sample_step"])
-async def test_server_sampling_handler_works_on_legacy(behavior, method):
-    """Handshake-era behavior is unchanged: the server-side handler still answers
-    on legacy connections."""
-    server = _handler_server(behavior)
-    async with SDKClient(_server(server), mode="legacy") as client:
-        result = await client.call_tool(method, {})
-    assert result.is_error is False
-    assert "handler-answer" in " ".join(_texts(result.content))
-
-
-@pytest.mark.parametrize("mode", MODERN_MODES)
-@pytest.mark.parametrize("method", ["do_sample", "do_sample_step"])
-async def test_sampling_without_handler_still_era_gated_on_modern(
-    push_server, mode, method
-):
-    """With no server-side handler configured, the request would hit the removed
-    client back-channel, so the clear era error still fires on modern."""
-    # push_server only defines do_sample; add a do_sample_step twin inline.
-    mcp = FastMCP("no-handler")
-
-    @mcp.tool
-    async def do_sample(ctx: Context) -> str:
-        result = await ctx.sample("hello")
-        return f"sampled {result.text}"
-
-    @mcp.tool
-    async def do_sample_step(ctx: Context) -> str:
-        step = await ctx.sample_step("hello")
-        return f"stepped {step.text}"
-
-    async with SDKClient(
-        _server(mcp), mode=mode, sampling_callback=_sampling_cb
-    ) as client:
-        result = await client.call_tool(method, {})
+        result = await client.call_tool("do_elicit", {})
     assert result.is_error is True
     assert "server-initiated" in " ".join(_texts(result.content)).lower()
 
 
 # ---------------------------------------------------------------------------
-# 3b. Sampling deprecation warning (SEP-2577): ctx.sample/ctx.sample_step warn
+# 3a-bis. Sampling and roots are not in the server API at all
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture
-def reset_sample_warn_flag():
-    """Reset the process-wide warn-once flag so a warning can be observed."""
-    import fastmcp.server.context as context_module
-
-    original = set(context_module._sample_deprecation_warned)
-    context_module._sample_deprecation_warned.clear()
-    try:
-        yield
-    finally:
-        context_module._sample_deprecation_warned.clear()
-        context_module._sample_deprecation_warned.update(original)
+@pytest.mark.parametrize("name", ["sample", "sample_step", "list_roots"])
+def test_removed_server_initiated_methods_are_absent(name):
+    """FastMCP 4 targets the modern protocol, so the capabilities SEP-2577
+    removed are not in the server-authoring API — not deprecated, not era-gated,
+    absent. A server that calls them fails at attribute lookup, in every era.
+    """
+    assert not hasattr(Context, name)
 
 
-@pytest.mark.parametrize("method", ["do_sample", "do_sample_step"])
-async def test_sampling_emits_deprecation_warning(reset_sample_warn_flag, method):
-    """`ctx.sample()` and `ctx.sample_step()` emit a FastMCPDeprecationWarning
-    naming SEP-2577 and the server-side-LLM migration path."""
-    from fastmcp.exceptions import FastMCPDeprecationWarning
-
-    mcp = FastMCP("warn")
-
-    @mcp.tool
-    async def do_sample(ctx: Context) -> str:
-        await ctx.sample("hello")
-        return "ok"
-
-    @mcp.tool
-    async def do_sample_step(ctx: Context) -> str:
-        await ctx.sample_step("hello")
-        return "ok"
-
-    with pytest.warns(FastMCPDeprecationWarning, match="SEP-2577"):
-        async with SDKClient(
-            _server(mcp), mode="legacy", sampling_callback=_sampling_cb
-        ) as client:
-            await client.call_tool(method, {})
-
-
-async def test_sampling_deprecation_warning_fires_once_per_process(
-    reset_sample_warn_flag,
-):
-    """The deprecation warning is warn-once: a second sample call in the same
-    process does not re-warn."""
-    from fastmcp.exceptions import FastMCPDeprecationWarning
-
-    mcp = FastMCP("warn-once")
-
-    @mcp.tool
-    async def do_sample(ctx: Context) -> str:
-        await ctx.sample("hello")
-        return "ok"
-
-    with pytest.warns(FastMCPDeprecationWarning):
-        async with SDKClient(
-            _server(mcp), mode="legacy", sampling_callback=_sampling_cb
-        ) as client:
-            await client.call_tool("do_sample", {})
-
-    import warnings as _warnings
-
-    with _warnings.catch_warnings():
-        _warnings.simplefilter("error", FastMCPDeprecationWarning)
-        async with SDKClient(
-            _server(mcp), mode="legacy", sampling_callback=_sampling_cb
-        ) as client:
-            result = await client.call_tool("do_sample", {})
-    assert result.is_error is False
-
-
-async def test_sampling_deprecation_warning_suppressible_via_settings(
-    reset_sample_warn_flag, monkeypatch
-):
-    """Setting `deprecation_warnings=False` suppresses the sampling warning,
-    matching the house pattern for every other FastMCP deprecation."""
-    import warnings as _warnings
-
-    from fastmcp.exceptions import FastMCPDeprecationWarning
-
-    monkeypatch.setattr(settings, "deprecation_warnings", False)
-
-    mcp = FastMCP("no-warn")
-
-    @mcp.tool
-    async def do_sample(ctx: Context) -> str:
-        await ctx.sample("hello")
-        return "ok"
-
-    with _warnings.catch_warnings():
-        _warnings.simplefilter("error", FastMCPDeprecationWarning)
-        async with SDKClient(
-            _server(mcp), mode="legacy", sampling_callback=_sampling_cb
-        ) as client:
-            result = await client.call_tool("do_sample", {})
-    assert result.is_error is False
+@pytest.mark.parametrize("kwarg", ["sampling_handler", "sampling_handler_behavior"])
+def test_server_sampling_handler_kwargs_are_rejected(kwarg):
+    """The server-side sampling handler existed only to answer `ctx.sample()`."""
+    with pytest.raises(TypeError, match="SEP-2577"):
+        FastMCP("gone", **{kwarg: None})  # ty: ignore[invalid-argument-type]
 
 
 @pytest.mark.parametrize("mode", MODERN_MODES)
@@ -566,23 +353,17 @@ async def test_session_id_access_does_not_crash_on_modern(sessionless_server, mo
 
 
 @pytest.mark.parametrize("mode", MODERN_MODES)
-async def test_set_logging_level_does_not_crash_on_modern(sessionless_server, mode):
-    """logging/setLevel is a session-id-keyed, deprecated-at-2026 operation.
-    On a sessionless modern in-memory connection it must degrade cleanly (either
-    succeed as a no-op or raise a surfaced MCPError) rather than crash the
-    connection. Characterization: capture whichever the current contract is.
+async def test_set_logging_level_is_era_gated_on_modern(sessionless_server, mode):
+    """`logging/setLevel` asks a server to remember a level for the session, and
+    the modern era has no session — the method is absent from its registry. The
+    FastMCP client says so plainly instead of no-opping or surfacing the SDK's
+    opaque "Method not found", and the connection stays usable afterward.
     """
-    async with SDKClient(_server(sessionless_server), mode=mode) as client:
-        outcome: str
-        try:
-            await client.set_logging_level("debug")  # ty: ignore[deprecated]
-            outcome = "ok"
-        except MCPError:
-            outcome = "mcperror"
-        # Either way the connection is still usable afterward.
+    async with FastMCPClient(sessionless_server, mode=mode) as client:
+        with pytest.raises(RuntimeError, match="2026-07-28"):
+            await client.set_logging_level("debug")
         result = await client.call_tool("read_session_id", {})
     assert result.is_error is False
-    assert outcome in {"ok", "mcperror"}
 
 
 # ---------------------------------------------------------------------------

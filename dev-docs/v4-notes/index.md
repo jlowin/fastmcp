@@ -16,7 +16,7 @@ FastMCP v4.0 is an engine swap. Three forces drive the major version:
 
 **Protocol version 2026-07-28.** The SDK v2 serves multiple protocol eras from one server. Alongside the session-based handshake eras, it introduces the sessionless `2026-07-28` era, which discovers capabilities through `server/discover` and removes server-initiated requests (SEP-2577). This formally supersedes FastMCP's earlier "latest protocol only" stance: a single server now works with clients across the protocol transition.
 
-**Sampling removal.** The `2026-07-28` era removes the server's ability to push a request back to the client mid-call. That takes the push-shaped sampling API (`ctx.sample`, `ctx.sample_step`) off the table on modern connections. Rather than leave it half-working, v4 deprecates it now and removes it in the 4.0 release — a real architectural shift for servers that borrowed the client's model, and one that justifies the major bump.
+**Sampling and roots removed from the server API.** The `2026-07-28` era removes the server's ability to push a request back to the client mid-call, which takes `ctx.sample`, `ctx.sample_step`, and `ctx.list_roots` off the table. Rather than leave them half-working against old clients only, 4.0 removes them from the server API entirely — a real architectural shift for servers that borrowed the client's model, and one that justifies the major bump. Client-side handlers stay, because a modern client still has to answer a legacy server.
 
 ## Release strategy
 

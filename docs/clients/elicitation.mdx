@@ -13,10 +13,8 @@ Use this when you need to respond to server requests for user input during tool 
 
 Elicitation allows MCP servers to request structured input from users during operations. Instead of requiring all inputs upfront, servers can interactively ask for missing parameters, request clarification, or gather additional context.
 
-Two routes reach that outcome, and the protocol version the client negotiates decides which one applies. On older versions the server pushes an elicitation request down to the client, over the connection the `initialize` handshake opens; that is the flow the next few sections describe. On `2026-07-28` and later the server instead returns a description of what it needs, and the client answers with a fresh call — see [input-required rounds](#input-required-rounds). You write the same `elicitation_handler` either way — FastMCP routes it to whichever mechanism the connection supports.
-
 <Note>
-**This page shows the older protocol's elicitation flow.** On protocol version `2026-07-28` the server instead returns a description of what it needs and the client answers with a new call — see [input-required rounds](#input-required-rounds). The same `elicitation_handler` serves both. Clients default to `mode="auto"`, so the examples below pass `mode="legacy"` to exercise the server-initiated flow. See [protocol negotiation](/clients/client#protocol-negotiation).
+**These sections show the server-initiated flow, which the handshake-era protocol uses.** On `2026-07-28` the server asks by returning a request instead — see [input-required rounds](#input-required-rounds). One `elicitation_handler` serves both, so the examples below pin `mode="legacy"` only to exercise the pushed form.
 </Note>
 
 ## Handler Template
