@@ -163,6 +163,15 @@ REMOVED_MODULES = [
     "fastmcp.server.apps",  # -> fastmcp.apps
     "fastmcp.server.app",  # -> fastmcp.apps / fastmcp
     "mcp.types",  # -> mcp_types
+    # The pre-rename component modules. `tool.py`/`resource.py`/`prompt.py` are
+    # now `base.py`; import the types from the package itself (`from
+    # fastmcp.tools import Tool`) rather than naming the private module.
+    "fastmcp.tools.tool",  # -> fastmcp.tools
+    "fastmcp.resources.resource",  # -> fastmcp.resources
+    "fastmcp.prompts.prompt",  # -> fastmcp.prompts
+    "fastmcp.experimental.sampling",  # -> fastmcp.client.sampling
+    "fastmcp.experimental.sampling.handlers",  # -> fastmcp.client.sampling.handlers
+    "fastmcp.server.auth.authorization",  # -> fastmcp.server.auth / fastmcp.utilities.authorization
 ]
 
 # Names that were re-export shims and are gone; import them from the canonical
@@ -174,10 +183,9 @@ REMOVED_NAMES = [
     # old misspelled names renamed to Cacheable* (no alias)  codespell:ignore
     ("fastmcp.server.middleware.caching", "CachableToolResult"),  # codespell:ignore
     ("fastmcp.server.middleware.caching", "CachablePromptResult"),  # codespell:ignore
-    # component-import shims -> fastmcp.tools.function_tool, etc.
-    ("fastmcp.tools.tool", "FunctionTool"),
-    ("fastmcp.resources.resource", "FunctionResource"),
-    ("fastmcp.prompts.prompt", "FunctionPrompt"),
+    # 3.0-era rename alias -> SkillsDirectoryProvider
+    ("fastmcp.server.providers.skills", "SkillsProvider"),
+    ("fastmcp.server.providers", "SkillsProvider"),
 ]
 
 

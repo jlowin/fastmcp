@@ -8,7 +8,7 @@ from .auth import (
     AccessToken,
     AuthProvider,
 )
-from .authorization import (
+from fastmcp.utilities.authorization import (
     AuthCheck,
     AuthContext,
     require_scopes,

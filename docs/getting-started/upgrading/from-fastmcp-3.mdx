@@ -178,9 +178,15 @@ The proxy, OpenAPI, and app integrations moved to their permanent homes, and the
 | `fastmcp.experimental.server.openapi` | `fastmcp.server.providers.openapi` |
 | `fastmcp.experimental.utilities.openapi` | `fastmcp.utilities.openapi` |
 | `fastmcp.server.apps`, `fastmcp.server.app` | `fastmcp.apps` (e.g. `AppConfig`) or `fastmcp` (`FastMCPApp`) |
+| `Tool` / `ToolResult` from `fastmcp.tools.tool` | `fastmcp.tools` |
+| `Resource` from `fastmcp.resources.resource` | `fastmcp.resources` |
+| `Prompt` / `Message` from `fastmcp.prompts.prompt` | `fastmcp.prompts` |
 | `FunctionTool` / `ParsedFunction` / `tool` from `fastmcp.tools.tool` | `fastmcp.tools.function_tool` |
 | `FunctionResource` / `resource` from `fastmcp.resources.resource` | `fastmcp.resources.function_resource` |
 | `FunctionPrompt` / `prompt` from `fastmcp.prompts.prompt` | `fastmcp.prompts.function_prompt` |
+| `fastmcp.experimental.sampling.handlers` | `fastmcp.client.sampling.handlers` |
+| `fastmcp.server.auth.authorization` | `fastmcp.server.auth` (e.g. `require_scopes`, `AuthCheck`) |
+| `SkillsProvider` | `SkillsDirectoryProvider` from `fastmcp.server.providers.skills` |
 
 Two renames in the same family are worth calling out because they have no compatibility alias. The response-caching wrapper models lost a spelling typo — `CachableToolResult`, `CachablePromptResult`, and their siblings became `CacheableToolResult`, `CacheablePromptResult`, etc. — so an import of the old spelling from `fastmcp.server.middleware.caching` raises `ImportError`. And `PromptToolMiddleware` / `ResourceToolMiddleware` are gone in favor of the `PromptsAsTools` / `ResourcesAsTools` transforms from `fastmcp.server.transforms` (the `ToolInjectionMiddleware` base class is retained).
 
