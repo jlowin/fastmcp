@@ -86,7 +86,7 @@ mcp = FastMCP("Internal API", auth=auth)
 
 The asserted subject flows into the normal auth context, so tools read it through `get_access_token()` like any other identity. See [Identity Assertion](/servers/auth/oauth-proxy#identity-assertion-sep-990).
 
-Authorizing that identity is the next step, and it is where providers diverge. Scopes are standardized, so `require_scopes` behaves the same everywhere, but roles and groups are not part of OIDC and every provider files them under a different claim. `require_roles` handles the comparison and takes an `extract` callable naming where to look, so Keycloak's `realm_access.roles`, Cognito's `cognito:groups`, and Auth0's per-tenant namespaced claims all work without FastMCP guessing.
+Authorizing a caller by role is a related, provider-agnostic need. Scopes are standardized, so `require_scopes` behaves the same everywhere, but roles and groups are not part of OIDC and every provider files them under a different claim. `require_roles` handles the comparison and takes an `extract` callable naming where to look, so Keycloak's `realm_access.roles`, Cognito's `cognito:groups`, and Auth0's per-tenant namespaced claims all work without FastMCP guessing.
 
 ```python
 from fastmcp import FastMCP
@@ -100,7 +100,7 @@ def rotate_credentials() -> str:
     return "Rotated"
 ```
 
-See [Authorization](/servers/authorization#require_roles).
+This illustrates the check in isolation — enforcing it for real needs an HTTP-transport server with a token-validating `auth` provider configured (a `JWTVerifier`, a `RemoteAuthProvider`, or a provider built on one, such as `KeycloakAuthProvider`, all expose claims directly), since STDIO has no OAuth concept and skips every check. See [Authorization](/servers/authorization#require_roles) for the full picture.
 
 ## Faster and safer
 
