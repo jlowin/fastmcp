@@ -13,6 +13,7 @@ for validation with Pydantic. It supports:
 - References and recursive schemas
 - Enums and constants
 - Union types
+- Schema composition (allOf merging, anyOf/oneOf unions)
 
 ## Unsupported regex patterns
 
@@ -230,6 +231,14 @@ def json_schema_to_type(
     # so that downstream json.dumps/hashing and default values work correctly.
     schema = _normalize_yaml_types(schema)
 
+    # Merge top-level allOf sub-schemas so that object composition flows
+    # through the object path below (and supports the ``name`` parameter).
+    if "allOf" in schema:
+        merged = _merge_all_of_schemas(schema, schema)
+        if merged is False:
+            return _UnsatisfiableType  # type: ignore[return-value]  # ty:ignore[invalid-return-type]
+        schema = merged
+
     # Always use the top-level schema for references
     if schema.get("type") == "object":
         return _object_schema_to_type(schema, schemas=schema, name=name)
@@ -444,6 +453,112 @@ def _get_from_type_handler(
     return type_handlers.get(schema.get("type", None), _return_Any)
 
 
+def _union_schema_to_type(
+    subschemas: list[Mapping[str, Any] | bool],
+    schemas: Mapping[str, Any],
+    resolving_refs: frozenset[str],
+) -> type | Any:
+    """Convert union sub-schemas (from anyOf/oneOf) to a Python Union type."""
+    types: list[type | Any] = [
+        _schema_to_type(subschema, schemas, resolving_refs) for subschema in subschemas
+    ]
+
+    # Check if one of the types is None (null)
+    has_null = type(None) in types
+    types = [t for t in types if t is not type(None)]
+
+    if len(types) == 0:
+        return type(None)
+    elif len(types) == 1:
+        if has_null:
+            return types[0] | None
+        else:
+            return types[0]
+    else:
+        if has_null:
+            return Union[(*types, type(None))]  # type: ignore
+        else:
+            return Union[tuple(types)]  # noqa: UP007
+
+
+def _merge_all_of_schemas(
+    schema: Mapping[str, Any],
+    schemas: Mapping[str, Any],
+    resolving_refs: frozenset[str] = frozenset(),
+) -> dict[str, Any] | Literal[False]:
+    """Merge an allOf schema's sub-schemas into a single schema.
+
+    Properties are merged across sub-schemas, required lists are concatenated
+    and deduplicated, and remaining keys are shallow-merged (later sub-schemas
+    win; constraint intersection, e.g. taking the max of two minimums, is not
+    attempted). Sibling keys of ``allOf`` participate in the merge and take
+    precedence over the sub-schemas. Returns ``False`` when any sub-schema is
+    the ``false`` schema (unsatisfiable).
+
+    ``$ref`` members are resolved (following chained refs) before merging;
+    per JSON Schema 2020-12, keys alongside a ``$ref`` apply conjunctively,
+    so the resolved target is merged first and the siblings on top. Nested
+    ``allOf`` keys (e.g. from a resolved ref) are expanded inline. A ``$ref``
+    cycle cannot be represented as a flat merged schema, so a reference that
+    is already being resolved contributes no constraints — the graceful
+    degradation counterpart of ``_schema_to_type`` returning ``Any`` for
+    cyclic references it cannot express.
+    """
+    merged: dict[str, Any] = {}
+    merged_properties: dict[str, Any] = {}
+    merged_required: list[str] = []
+
+    def merge_subschema(
+        subschema: Mapping[str, Any] | bool, refs: frozenset[str]
+    ) -> bool:
+        """Merge one sub-schema into the accumulators.
+
+        Returns False when the sub-schema is unsatisfiable.
+        """
+        # Boolean sub-schemas: true adds no constraints, false is unsatisfiable
+        if subschema is True:
+            return True
+        if subschema is False:
+            return False
+        sub = dict(subschema)
+        if "$ref" in sub:
+            ref = sub.pop("$ref")
+            # Merge the resolved target first so the member's sibling keys
+            # (left in ``sub``) apply on top. Skip refs already being
+            # resolved: see the recursion note in the docstring.
+            if ref not in refs and not merge_subschema(
+                _resolve_ref(ref, schemas), refs | {ref}
+            ):
+                return False
+        # Expand nested allOf (e.g. carried in by a resolved ref) inline
+        for nested in sub.pop("allOf", []):
+            if not merge_subschema(nested, refs):
+                return False
+        merged_properties.update(sub.pop("properties", {}))
+        for prop_name in sub.pop("required", []):
+            if prop_name not in merged_required:
+                merged_required.append(prop_name)
+        merged.update(sub)
+        return True
+
+    subschemas: list[Mapping[str, Any] | bool] = list(schema["allOf"])
+    siblings = {k: v for k, v in schema.items() if k != "allOf"}
+    if siblings:
+        subschemas.append(siblings)
+
+    for subschema in subschemas:
+        if not merge_subschema(subschema, resolving_refs):
+            return False
+
+    if merged_properties:
+        merged["properties"] = merged_properties
+        # Schemas that define properties without an explicit type are objects
+        merged.setdefault("type", "object")
+    if merged_required:
+        merged["required"] = merged_required
+    return merged
+
+
 def _schema_to_type(
     schema: Mapping[str, Any] | bool,
     schemas: Mapping[str, Any],
@@ -461,7 +576,7 @@ def _schema_to_type(
     if not schema:
         return object
 
-    if "type" not in schema and "properties" in schema:
+    if "type" not in schema and "properties" in schema and "allOf" not in schema:
         return _create_dataclass(schema, schema.get("title", "<unknown>"), schemas)
 
     # Handle references first
@@ -487,29 +602,23 @@ def _schema_to_type(
     if "enum" in schema:
         return _create_enum(f"Enum_{len(_classes)}", schema["enum"])
 
-    # Handle anyOf unions
+    # Handle anyOf/oneOf unions. oneOf is "exactly one" rather than "at least
+    # one", but both map to the same Python representation (a Union);
+    # oneOf's exclusivity (rejecting values matching multiple sub-schemas)
+    # is not enforced.
     if "anyOf" in schema:
-        types: list[type | Any] = [
-            _schema_to_type(subschema, schemas, resolving_refs)
-            for subschema in schema["anyOf"]
-        ]
+        return _union_schema_to_type(schema["anyOf"], schemas, resolving_refs)
 
-        # Check if one of the types is None (null)
-        has_null = type(None) in types
-        types = [t for t in types if t is not type(None)]
+    if "oneOf" in schema:
+        return _union_schema_to_type(schema["oneOf"], schemas, resolving_refs)
 
-        if len(types) == 0:
-            return type(None)
-        elif len(types) == 1:
-            if has_null:
-                return types[0] | None  # type: ignore
-            else:
-                return types[0]
-        else:
-            if has_null:
-                return Union[(*types, type(None))]  # type: ignore
-            else:
-                return Union[tuple(types)]  # type: ignore # noqa: UP007
+    # Handle allOf intersections by merging the sub-schemas into a single
+    # schema and converting the merged result.
+    if "allOf" in schema:
+        merged = _merge_all_of_schemas(schema, schemas, resolving_refs)
+        if merged is False:
+            return _UnsatisfiableType  # type: ignore[return-value]  # ty:ignore[invalid-return-type]
+        return _schema_to_type(merged, schemas, resolving_refs)
 
     schema_type = schema.get("type")
     if not schema_type:
