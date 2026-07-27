@@ -156,7 +156,10 @@ class OCIProvider(OIDCProxy):
             resource_base_url: Optional public base URL for the protected resource metadata
                 and token audience. Defaults to ``base_url``.
             audience: OCI API audience (optional)
-            issuer_url: Issuer URL for OCI IAM Domain metadata. This will override issuer URL from the discovery URL.
+            issuer_url: Issuer URL for OAuth metadata (defaults to base_url). This is
+                this server's own OAuth identity, not the OCI IAM Domain's — it has no
+                effect on the upstream issuer taken from the discovery URL. Use a
+                root-level URL to avoid 404s during discovery when mounting under a path.
             required_scopes: Required OCI scopes (defaults to ["openid"])
             redirect_path: Redirect path configured in OCI IAM Domain Integrated Application. The default is "/auth/callback".
             allowed_client_redirect_uris: List of allowed redirect URI patterns for MCP clients.

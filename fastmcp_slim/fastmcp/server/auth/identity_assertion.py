@@ -218,7 +218,7 @@ class IdentityAssertionValidator:
         """
         self.config = config
         # Accept the audience both with and without a trailing slash: metadata
-        # advertises the issuer exactly as pydantic renders base_url (a bare
+        # advertises the issuer exactly as pydantic renders issuer_url (a bare
         # domain gains a trailing slash), so an IdP that sets `aud` to the
         # advertised value verbatim must match, and so must one that strips it.
         if config.audience:

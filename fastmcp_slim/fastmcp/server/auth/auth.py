@@ -649,7 +649,7 @@ class MultiAuth(AuthProvider):
         from fastmcp.server.auth import MultiAuth, JWTVerifier, OAuthProxy
 
         auth = MultiAuth(
-            server=OAuthProxy(issuer_url="https://login.example.com/..."),
+            server=OAuthProxy(base_url="https://my-server.com", ...),
             verifiers=[JWTVerifier(jwks_uri="https://example.com/.well-known/jwks.json")],
         )
         mcp = FastMCP("my-server", auth=auth)
