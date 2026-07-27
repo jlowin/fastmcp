@@ -242,6 +242,39 @@ class ArgTransformConfig(FastMCPBaseModel):
         return ArgTransform(**self.model_dump(exclude_unset=True))  # pyright: ignore[reportAny]
 
 
+def _apply_meta_override(
+    source_meta: dict[str, Any] | None,
+    override: dict[str, Any] | None | NotSetT,
+) -> dict[str, Any] | None:
+    """Apply a transform's ``meta=`` override, preserving FastMCP's namespace.
+
+    An override replaces the caller-facing meta wholesale, which is what
+    users expect. The ``fastmcp`` namespace is carried across regardless:
+    it holds framework-owned data such as a component's app membership and
+    identity hash, which intermediaries rely on to recognize a tool they
+    are forwarding. A transform that renames a tool must not silently
+    destroy its identity.
+    """
+    if isinstance(override, NotSetT):
+        return source_meta
+    if override is None:
+        source_fastmcp = (source_meta or {}).get("fastmcp")
+        if isinstance(source_fastmcp, dict) and source_fastmcp:
+            return {"fastmcp": dict(source_fastmcp)}
+        return None
+
+    merged = dict(override)
+    source_fastmcp = (source_meta or {}).get("fastmcp")
+    if isinstance(source_fastmcp, dict):
+        override_fastmcp = override.get("fastmcp")
+        merged["fastmcp"] = (
+            {**source_fastmcp, **override_fastmcp}
+            if isinstance(override_fastmcp, dict)
+            else dict(source_fastmcp)
+        )
+    return merged
+
+
 class TransformedTool(Tool):
     """A tool that is transformed from another tool.
 
@@ -590,7 +623,7 @@ class TransformedTool(Tool):
             description if not isinstance(description, NotSetT) else tool.description
         )
         final_title = title if not isinstance(title, NotSetT) else tool.title
-        final_meta = meta if not isinstance(meta, NotSetT) else tool.meta
+        final_meta = _apply_meta_override(tool.meta, meta)
         final_annotations = (
             annotations if not isinstance(annotations, NotSetT) else tool.annotations
         )

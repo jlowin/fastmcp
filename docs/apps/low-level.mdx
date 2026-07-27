@@ -70,10 +70,12 @@ def my_tool() -> str:
 The `visibility` field controls where a tool appears:
 
 - `["model"]` — visible to the LLM (the default behavior)
-- `["app"]` — only callable from within the app UI, hidden from the LLM
+- `["app"]` — callable from within the app UI, kept out of the LLM's tool list
 - `["model", "app"]` — both
 
 This is useful when you have tools that only make sense as part of the app's interactive flow, not as standalone LLM actions.
+
+Visibility is a declaration, not server-side filtering. Every tool appears in `tools/list` carrying its `visibility` metadata, and the host decides what to show the model — the division the MCP Apps specification defines. Listing them is also what lets a proxy or gateway forward them: an intermediary can only route to a tool it can see.
 
 ```python
 @mcp.tool(

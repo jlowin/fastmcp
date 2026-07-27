@@ -65,9 +65,11 @@ Normal tool calls go through the provider chain, which applies transforms (names
 
 ### The hashed lookup bypass
 
-Backend tools are typically hidden from the model (`visibility=["app"]`). Visibility transforms would filter them out of normal resolution. And namespace transforms might rename them — `save_contact` becomes `contacts_save_contact` — while the renderer needs a stable way to call the original backend.
+Backend tools appear in `tools/list` like any other tool — the host is what keeps them away from the model. What they can't rely on is a stable *name*: namespace transforms rename them, so `save_contact` becomes `contacts_save_contact` in one composition and something else in another, while the renderer was built before any of that was decided.
 
-Hashed lookup solves both problems. FastMCP first tries normal tool resolution. If no visible tool matches and the requested name looks like `<hash>_<local_name>`, FastMCP calls `get_tool_by_hash(hash, local_name)`. That lookup walks the provider tree directly, skipping transforms. It finds an app-visible tool by its original registered name and verifies that its stored `meta["fastmcp"]["_tool_hash"]` matches the requested hash.
+Hashed lookup solves that. FastMCP first tries normal tool resolution. If no tool matches and the requested name looks like `<hash>_<local_name>`, FastMCP calls `get_tool_by_hash(hash, local_name)`. That lookup walks the provider tree directly, skipping transforms. It finds an app-visible tool by its original registered name and verifies that its stored `meta["fastmcp"]["tool_hash"]` matches the requested hash.
+
+The hash is public metadata, deterministic from the app name and the tool's registered name. Because it survives every transform and every wire boundary, an intermediary holding a renamed tool can still tell which tool it is.
 
 That's why `CallTool(save_contact)` keeps working when the server is mounted under a namespace. The renderer sends a deterministic hashed backend name; the server uses `get_tool_by_hash` to find the original tool without transforms in the way.
 

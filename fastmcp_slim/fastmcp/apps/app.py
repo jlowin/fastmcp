@@ -227,14 +227,17 @@ class FastMCPApp(Provider):
                 raise ValueError(f"Cannot determine tool name for {fn!r}")
 
             from fastmcp.apps.config import AppConfig, app_config_to_meta_dict
-            from fastmcp.server.providers.addressing import hash_tool
+            from fastmcp.server.providers.addressing import (
+                TOOL_HASH_META_KEY,
+                hash_tool,
+            )
 
             app_config = AppConfig(visibility=visibility)
             meta: dict[str, Any] = {
                 "ui": app_config_to_meta_dict(app_config),
                 "fastmcp": {
                     "app": self.name,
-                    "_tool_hash": hash_tool(self.name, resolved_name),
+                    TOOL_HASH_META_KEY: hash_tool(self.name, resolved_name),
                 },
             }
 
@@ -318,7 +321,10 @@ class FastMCPApp(Provider):
 
         def _register(fn: F, tool_name: str | None) -> F:
             from fastmcp.apps.config import AppConfig, app_config_to_meta_dict
-            from fastmcp.server.providers.addressing import hash_tool
+            from fastmcp.server.providers.addressing import (
+                TOOL_HASH_META_KEY,
+                hash_tool,
+            )
             from fastmcp.server.providers.local_provider.decorators.tools import (
                 PREFAB_RENDERER_URI,
             )
@@ -334,7 +340,7 @@ class FastMCPApp(Provider):
                 "ui": app_config_to_meta_dict(app_config),
                 "fastmcp": {
                     "app": self.name,
-                    "_tool_hash": hash_tool(self.name, resolved),
+                    TOOL_HASH_META_KEY: hash_tool(self.name, resolved),
                 },
             }
 
@@ -373,12 +379,15 @@ class FastMCPApp(Provider):
         if not isinstance(tool, Tool):
             tool = Tool._ensure_tool(tool)
 
-        from fastmcp.server.providers.addressing import hash_tool
+        from fastmcp.server.providers.addressing import (
+            TOOL_HASH_META_KEY,
+            hash_tool,
+        )
 
         meta = dict(tool.meta) if tool.meta else {}
         fm = meta.setdefault("fastmcp", {})
         fm["app"] = self.name
-        fm["_tool_hash"] = hash_tool(self.name, tool.name)
+        fm[TOOL_HASH_META_KEY] = hash_tool(self.name, tool.name)
         ui = meta.setdefault("ui", {})
         if "visibility" not in ui:
             ui["visibility"] = ["app"]

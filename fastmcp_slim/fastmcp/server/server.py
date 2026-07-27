@@ -145,8 +145,9 @@ def _version_request_meta(
 
 
 # The MCP SDK warns "Tool X not listed, no validation will be performed"
-# for every call to app-only tools (hidden from list_tools by design).
-# This fires even when validate_input=False. Suppress it.
+# for every call addressed by hashed backend name, since that address is
+# an identity rather than a listed tool name. This fires even when
+# validate_input=False. Suppress it.
 class _SuppressUnlistedToolWarning(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         return "not listed, no validation" not in record.getMessage()
@@ -221,66 +222,6 @@ def _get_auth_context() -> tuple[bool, Any]:
     from fastmcp.server.dependencies import get_access_token
 
     return (False, get_access_token())
-
-
-def _is_backend_tool(tool: Tool) -> bool:
-    """Check whether a tool is handled specially as backend tool
-
-    Tools registered via ``@app.tool()`` (without ``model=True``) have
-    ``meta["ui"]["visibility"] == ["app"]`` — they are callable by app UIs
-    but should not appear in tool list the client passes to the model.
-
-    They are handled specially for in various ways - e.g. they are looked
-    up via get_app_tool(), and don't appear in the tools/list output.
-    (FIXME: the latter isn't correct behavior according to the mcp-apps spec.)
-
-    Returns True (a backend tool) when:
-    - The tool has ``meta.fastmcp.app``.
-    - The tool has ``meta.ui.visibility``.
-    - The visibility is precisely ``["app"]``.
-
-    Returns False otherwise.
-    """
-    meta = tool.meta
-    if not meta:
-        return False
-    fastmcp = meta.get("fastmcp")
-    if not isinstance(fastmcp, dict):
-        return False
-    if fastmcp.get("app") is None:
-        return False
-    ui = meta.get("ui")
-    if not isinstance(ui, dict):
-        return False
-    visibility = ui.get("visibility")
-    if not isinstance(visibility, list):
-        return False
-    return len(visibility) == 1 and visibility[0] == "app"
-
-
-def _is_app_visible(tool: Tool) -> bool:
-    """Check whether a tool has explicitly opted into app-callable visibility.
-
-    Gates the dispatcher's hashed-name routing path: only tools whose
-    ``meta.ui.visibility`` list contains ``"app"`` can be reached via
-    ``<hash>_<local_name>`` calls. Tools without an explicit visibility
-    declaration are NOT app-callable — they must be reached by their
-    display name through the normal transform-aware resolution path.
-
-    This is the inverse of the "everything is dot-callable" trap: the
-    hashed-name path is an opt-in mechanism for FastMCPApp backend tools,
-    not a general bypass for arbitrary tools.
-    """
-    meta = tool.meta
-    if not meta:
-        return False
-    ui = meta.get("ui")
-    if not isinstance(ui, dict):
-        return False
-    visibility = ui.get("visibility")
-    if not isinstance(visibility, list):
-        return False
-    return "app" in visibility
 
 
 @asynccontextmanager
@@ -728,7 +669,7 @@ class FastMCP(
         """Replace placeholder Prefab URIs with per-tool hashed ones.
 
         For each tool whose ``meta.ui.resourceUri`` is the placeholder,
-        reads the tool's stored hash from ``meta.fastmcp._tool_hash``
+        reads the tool's stored hash from ``meta.fastmcp.tool_hash``
         and rewrites the URI to the per-tool form. Also strips CSP from
         tool meta (it belongs on the resource). Produces ``model_copy``
         views — originals are untouched.
@@ -800,7 +741,7 @@ class FastMCP(
     async def list_tools(self, *, run_middleware: bool = True) -> Sequence[Tool]:
         """List all enabled tools from providers.
 
-        Overrides Provider.list_tools() to add visibility filtering, auth filtering,
+        Overrides Provider.list_tools() to add enabled filtering, auth filtering,
         and middleware execution. Returns all versions (no deduplication).
         Protocol handlers deduplicate for MCP wire format.
         """
@@ -820,11 +761,14 @@ class FastMCP(
 
             # Core logic: list tools
             with server_span("tools/list", "tools/list", self.name, "tool", ""):
-                # Get all tools, apply session transforms, then filter enabled
-                # and model-visible (app-only tools are hidden from the model).
+                # Get all tools, apply session transforms, then filter enabled.
+                # App-only tools (meta.ui.visibility == ["app"]) are listed:
+                # the mcp-apps spec puts visibility filtering on the host, and
+                # a tool absent from tools/list cannot be forwarded by any
+                # intermediary that routes by name.
                 tools = list(await super().list_tools())
                 tools = await apply_session_transforms(tools)
-                tools = [t for t in tools if is_enabled(t) and not _is_backend_tool(t)]
+                tools = [t for t in tools if is_enabled(t)]
 
                 # Rewrite per-tool Prefab renderer URIs based on the tool's
                 # mount-point address. The walk pairs each tool with the
@@ -882,7 +826,7 @@ class FastMCP(
     ) -> Tool | None:
         """Get a tool by name, filtering disabled tools.
 
-        Overrides Provider.get_tool() to add visibility filtering after all
+        Overrides Provider.get_tool() to filter disabled tools after all
         transforms (including session-level) have been applied. This ensures
         session transforms can override provider-level disables.
 
@@ -902,18 +846,18 @@ class FastMCP(
 
         # Apply session transforms to single item
         tools = await apply_session_transforms([tool])
-        if tools and is_enabled(tools[0]) and not _is_backend_tool(tools[0]):
+        if tools and is_enabled(tools[0]):
             return tools[0]
 
-        # The highest version is disabled (or app-only). If an explicit version
-        # was requested, respect that. Otherwise fall back to the next-highest
-        # enabled, model-visible version.
+        # The highest version is disabled. If an explicit version was
+        # requested, respect that. Otherwise fall back to the next-highest
+        # enabled version.
         if version is not None:
             return None
 
         all_tools = [t for t in await super().list_tools() if t.name == name]
         all_tools = list(await apply_session_transforms(all_tools))
-        enabled = [t for t in all_tools if is_enabled(t) and not _is_backend_tool(t)]
+        enabled = [t for t in all_tools if is_enabled(t)]
 
         skip_auth, token = _get_auth_context()
         authorized: list[Tool] = []

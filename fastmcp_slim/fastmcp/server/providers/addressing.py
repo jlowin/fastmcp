@@ -13,9 +13,16 @@ app name + tool name. The hash serves two purposes:
    and ``read_resource`` synthesize these on demand from the tool's meta.
 
 The hash is computed at registration time from ``(app_name, tool_name)`` —
-both known at that moment — and stored in ``meta["fastmcp"]["_tool_hash"]``.
+both known at that moment — and stored in ``meta["fastmcp"]["tool_hash"]``.
 Deterministic across replicas (same code → same hash), no registry walk
 needed.
+
+The key is deliberately public. Keys prefixed with ``_`` inside the
+``fastmcp`` meta namespace are stripped at every serialization boundary
+(see ``FastMCPComponent.get_meta``) because they hold process-local state
+such as enabled/disabled marks. The hash is the opposite: a stable
+identity that intermediaries need in order to recognize a tool they are
+forwarding, so it must survive the wire.
 """
 
 from __future__ import annotations
@@ -24,6 +31,9 @@ import hashlib
 
 #: Length of the hex hash prefix used in URIs and backend-tool names.
 HASH_LENGTH = 12
+
+#: Key inside the ``fastmcp`` meta namespace holding a tool's identity hash.
+TOOL_HASH_META_KEY = "tool_hash"
 
 
 def hash_tool(app_name: str, tool_name: str) -> str:

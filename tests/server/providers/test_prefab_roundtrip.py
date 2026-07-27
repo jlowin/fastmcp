@@ -13,7 +13,8 @@ import json
 import pytest
 
 from fastmcp import FastMCP, FastMCPApp
-from fastmcp.server.providers.addressing import hashed_backend_name
+from fastmcp.server.providers.addressing import hash_tool, hashed_backend_name
+from fastmcp.server.providers.proxy import ProxyClient, ProxyProvider
 
 prefab_ui = pytest.importorskip("prefab_ui")
 from prefab_ui.actions.mcp import CallTool  # noqa: E402
@@ -129,6 +130,82 @@ class TestMountedServerRoundTrip:
         hashed_name = hashed_backend_name("contacts", "save")
         result = await outer.call_tool(hashed_name, {"name": "Carol"})
         assert result.content[0].text == "saved Carol"  # type: ignore[union-attr]  # ty:ignore[unresolved-attribute]
+
+
+class TestProxiedServerRoundTrip:
+    """A gateway proxying an app-bearing backend.
+
+    A proxy knows only what crossed the wire, so this is the topology that
+    breaks if app-only tools are filtered out of tools/list or if the
+    identity hash is stripped from meta.
+    """
+
+    @staticmethod
+    def _backend() -> FastMCP:
+        app = FastMCPApp("contacts")
+
+        @app.tool()
+        def save(name: str) -> str:
+            return f"saved {name}"
+
+        @app.ui()
+        def form() -> Text:
+            return Text(content="Form")
+
+        backend = FastMCP("Backend")
+        backend.add_provider(app)
+        return backend
+
+    async def test_app_only_tool_is_forwarded_through_a_proxy(self):
+        backend = self._backend()
+        gateway = FastMCP("Gateway")
+        gateway.add_provider(ProxyProvider(lambda: ProxyClient(backend)))
+
+        names = [t.name for t in await gateway.list_tools()]
+        assert "save" in names
+
+    async def test_identity_hash_survives_the_proxy(self):
+        backend = self._backend()
+        gateway = FastMCP("Gateway")
+        gateway.add_provider(ProxyProvider(lambda: ProxyClient(backend)))
+
+        tool = next(t for t in await gateway.list_tools() if t.name == "save")
+        assert tool.meta is not None
+        assert tool.meta["fastmcp"]["tool_hash"] == hash_tool("contacts", "save")
+
+    async def test_backend_tool_callable_by_hash_through_a_proxy(self):
+        backend = self._backend()
+        gateway = FastMCP("Gateway")
+        gateway.add_provider(ProxyProvider(lambda: ProxyClient(backend)))
+
+        hashed_name = hashed_backend_name("contacts", "save")
+        result = await gateway.call_tool(hashed_name, {"name": "Dana"})
+        assert result.content[0].text == "saved Dana"  # type: ignore[union-attr]  # ty:ignore[unresolved-attribute]
+
+    async def test_backend_tool_callable_through_a_namespaced_proxy(self):
+        backend = self._backend()
+        gateway = FastMCP("Gateway")
+        gateway.add_provider(
+            ProxyProvider(lambda: ProxyClient(backend)), namespace="up"
+        )
+
+        names = [t.name for t in await gateway.list_tools()]
+        assert "up_save" in names
+
+        hashed_name = hashed_backend_name("contacts", "save")
+        result = await gateway.call_tool(hashed_name, {"name": "Erin"})
+        assert result.content[0].text == "saved Erin"  # type: ignore[union-attr]  # ty:ignore[unresolved-attribute]
+
+    async def test_backend_tool_callable_through_chained_proxies(self):
+        backend = self._backend()
+        middle = FastMCP("Middle")
+        middle.add_provider(ProxyProvider(lambda: ProxyClient(backend)))
+        top = FastMCP("Top")
+        top.add_provider(ProxyProvider(lambda: ProxyClient(middle)))
+
+        hashed_name = hashed_backend_name("contacts", "save")
+        result = await top.call_tool(hashed_name, {"name": "Frank"})
+        assert result.content[0].text == "saved Frank"  # type: ignore[union-attr]  # ty:ignore[unresolved-attribute]
 
 
 class TestDynamicToolAdd:
