@@ -185,7 +185,8 @@ The proxy, OpenAPI, and app integrations moved to their permanent homes, and the
 | `FunctionResource` / `resource` from `fastmcp.resources.resource` | `fastmcp.resources.function_resource` |
 | `FunctionPrompt` / `prompt` from `fastmcp.prompts.prompt` | `fastmcp.prompts.function_prompt` |
 | `fastmcp.experimental.sampling.handlers` | `fastmcp.client.sampling.handlers` |
-| `fastmcp.server.auth.authorization` | `fastmcp.server.auth` (e.g. `require_scopes`, `AuthCheck`) |
+| `AuthCheck` / `AuthContext` / `require_scopes` / `require_roles` / `restrict_tag` / `run_auth_checks` from `fastmcp.server.auth.authorization` | `fastmcp.server.auth` |
+| `run_auth_checks_with_shortfall` / `scope_requirements` from `fastmcp.server.auth.authorization` | `fastmcp.utilities.authorization` |
 | `SkillsProvider` | `SkillsDirectoryProvider` from `fastmcp.server.providers.skills` |
 
 Two renames in the same family are worth calling out because they have no compatibility alias. The response-caching wrapper models lost a spelling typo — `CachableToolResult`, `CachablePromptResult`, and their siblings became `CacheableToolResult`, `CacheablePromptResult`, etc. — so an import of the old spelling from `fastmcp.server.middleware.caching` raises `ImportError`. And `PromptToolMiddleware` / `ResourceToolMiddleware` are gone in favor of the `PromptsAsTools` / `ResourcesAsTools` transforms from `fastmcp.server.transforms` (the `ToolInjectionMiddleware` base class is retained).

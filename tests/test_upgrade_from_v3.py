@@ -40,11 +40,27 @@ from fastmcp.exceptions import McpError
 from fastmcp.prompts.function_prompt import FunctionPrompt
 from fastmcp.resources.function_resource import FunctionResource
 from fastmcp.server import create_proxy
+from fastmcp.server.auth import (
+    AuthCheck,
+    AuthContext,
+    require_roles,
+    require_scopes,
+    restrict_tag,
+    run_auth_checks,
+)
 from fastmcp.server.middleware.caching import CacheableToolResult
 from fastmcp.server.providers.openapi import OpenAPIProvider
 from fastmcp.server.providers.proxy import FastMCPProxy, ProxyClient
 from fastmcp.server.transforms import PromptsAsTools, ResourcesAsTools, ToolTransform
 from fastmcp.tools.function_tool import FunctionTool
+
+# The two authorization names the removed shim exported that `fastmcp.server.auth`
+# deliberately does not re-export (middleware plumbing, no documented user-facing
+# use). The upgrade guide sends them here instead, so pin that path too.
+from fastmcp.utilities.authorization import (
+    run_auth_checks_with_shortfall,
+    scope_requirements,
+)
 
 
 class TestCommonServersUpgradeCleanly:
@@ -151,6 +167,27 @@ class TestCanonicalReplacementsResolve:
             ErrorData,
         )
         assert all(sym is not None for sym in symbols)
+
+    def test_authorization_symbols_resolve_from_their_documented_paths(self):
+        # The removed `fastmcp.server.auth.authorization` shim exported eight
+        # names, and the upgrade guide splits them across two replacements. Pin
+        # both halves: the checks users write against reach the auth package,
+        # while the two middleware helpers stay on the utilities module.
+        from_auth_package = (
+            AuthCheck,
+            AuthContext,
+            require_roles,
+            require_scopes,
+            restrict_tag,
+            run_auth_checks,
+        )
+        from_utilities = (run_auth_checks_with_shortfall, scope_requirements)
+        assert all(sym is not None for sym in from_auth_package + from_utilities)
+
+        import fastmcp.server.auth as auth_package
+
+        for name in ("run_auth_checks_with_shortfall", "scope_requirements"):
+            assert not hasattr(auth_package, name)
 
 
 # --- Hard removals: modules that no longer exist ---
