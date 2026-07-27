@@ -310,6 +310,7 @@ def _flatten_discriminator_subtypes(
     # keeping whichever came first would advertise one variant's constraint
     # (a `const` tag, say) while claiming to accept all of them.
     alternatives: dict[str, list[Any]] = {}
+    values: list[str] = []
     variants: list[str] = []
 
     for value, target in mapping.items():
@@ -333,10 +334,13 @@ def _flatten_discriminator_subtypes(
                 if prop_schema not in seen:
                     seen.append(prop_schema)
 
+        values.append(repr(value))
         if variant_fields:
             variants.append(f"{value!r} uses {', '.join(variant_fields)}")
 
-    if not alternatives:
+    # Every resolved variant is a legal tag even when it adds no fields of its
+    # own, so the accepted values are worth advertising on their own.
+    if not values:
         return None
 
     subtype_props = {
@@ -345,17 +349,23 @@ def _flatten_discriminator_subtypes(
     }
     properties = {**own_props, **subtype_props}
 
-    note = (
-        f"Selects the variant: {'; '.join(variants)}. "
-        "Send only the fields belonging to the selected variant."
-    )
+    note = f"Selects the variant. Accepted values: {', '.join(values)}."
+    if variants:
+        note += (
+            f" {'; '.join(variants)}."
+            " Send only the fields belonging to the selected variant."
+        )
+
+    # A discriminator names a property of the payload, so give it a schema even
+    # when the parent left it undeclared — it is otherwise required and unusable.
     tag_schema = properties.get(property_name)
-    if isinstance(tag_schema, dict):
-        existing = tag_schema.get("description")
-        properties[property_name] = {
-            **tag_schema,
-            "description": f"{existing} {note}" if existing else note,
-        }
+    if not isinstance(tag_schema, dict):
+        tag_schema = {"type": "string"}
+    existing = tag_schema.get("description")
+    properties[property_name] = {
+        **tag_schema,
+        "description": f"{existing} {note}" if existing else note,
+    }
 
     return properties
 

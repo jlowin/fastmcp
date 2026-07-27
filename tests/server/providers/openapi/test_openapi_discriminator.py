@@ -149,6 +149,16 @@ def colliding_variant_spec() -> dict[str, Any]:
     }
 
 
+def propertyless_variant_spec() -> dict[str, Any]:
+    """Subtypes that add nothing beyond the parent they compose."""
+    spec = discriminator_spec()
+    for name in ("Cat", "Dog"):
+        spec["components"]["schemas"][name] = {
+            "allOf": [{"$ref": "#/components/schemas/Pet"}]
+        }
+    return spec
+
+
 async def tool_schema(spec: dict[str, Any]) -> dict[str, Any]:
     """Build the server and return the generated input schema for create_pet."""
     async with httpx2.AsyncClient(
@@ -236,6 +246,27 @@ class TestDiscriminatorRequestBodies:
 
         assert result.structured_content == {"ok": True}
         assert received["body"] == {"petType": "cat", "meowVolume": 11}
+
+    async def test_accepted_values_are_advertised(self):
+        """The legal tags are named even when no variant adds a field."""
+        schema = await tool_schema(propertyless_variant_spec())
+
+        description = schema["properties"]["petType"]["description"]
+        assert "'cat'" in description
+        assert "'dog'" in description
+
+    async def test_propertyless_variant_is_still_named(self):
+        """A variant adding no fields remains a legal discriminator value."""
+        spec = discriminator_spec()
+        spec["components"]["schemas"]["Dog"] = {
+            "allOf": [{"$ref": "#/components/schemas/Pet"}]
+        }
+
+        schema = await tool_schema(spec)
+
+        description = schema["properties"]["petType"]["description"]
+        assert "'dog'" in description
+        assert "meowVolume" in description
 
     async def test_conflicting_variant_schemas_are_unioned(self):
         """No variant's constraint may be advertised as if it applied to all."""
