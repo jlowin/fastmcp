@@ -226,17 +226,24 @@ def _allof_members(
     schema_defs: dict[str, Any],
     resolving: set[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Expand local definition references while collecting ``allOf`` members."""
+    """Expand local schema references while collecting ``allOf`` members."""
     resolving = resolving or set()
 
     ref = schema.get("$ref")
-    if isinstance(ref, str) and ref.startswith("#/$defs/"):
-        name = ref.removeprefix("#/$defs/")
-        referenced_schema = schema_defs.get(name)
-        if isinstance(referenced_schema, dict) and name not in resolving:
-            siblings = {key: value for key, value in schema.items() if key != "$ref"}
-            members = _allof_members(referenced_schema, schema_defs, resolving | {name})
-            return members + ([siblings] if siblings else [])
+    if isinstance(ref, str):
+        for prefix in ("#/$defs/", "#/components/schemas/"):
+            if ref.startswith(prefix):
+                name = ref.removeprefix(prefix)
+                referenced_schema = schema_defs.get(name)
+                if isinstance(referenced_schema, dict) and name not in resolving:
+                    siblings = {
+                        key: value for key, value in schema.items() if key != "$ref"
+                    }
+                    members = _allof_members(
+                        referenced_schema, schema_defs, resolving | {name}
+                    )
+                    return members + ([siblings] if siblings else [])
+                break
 
     all_of = schema.get("allOf")
     if isinstance(all_of, list):

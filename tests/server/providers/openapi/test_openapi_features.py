@@ -1440,10 +1440,20 @@ class TestAllOfReferenceRequestBodies:
         },
         "components": {
             "schemas": {
-                "Pet": {
+                "Animal": {
                     "type": "object",
-                    "properties": {"petType": {"type": "string"}},
-                    "required": ["petType"],
+                    "properties": {"animalId": {"type": "string"}},
+                    "required": ["animalId"],
+                },
+                "Pet": {
+                    "allOf": [
+                        {"$ref": "#/components/schemas/Animal"},
+                        {
+                            "type": "object",
+                            "properties": {"petType": {"type": "string"}},
+                            "required": ["petType"],
+                        },
+                    ]
                 },
                 "Cat": {
                     "allOf": [
@@ -1475,16 +1485,22 @@ class TestAllOfReferenceRequestBodies:
                 tools = await mcp_client.list_tools()
                 tool = next(tool for tool in tools if tool.name == "create_pet")
                 assert tool.input_schema["properties"].keys() >= {
+                    "animalId",
                     "petType",
                     "meowVolume",
                 }
 
                 result = await mcp_client.call_tool(
-                    "create_pet", {"petType": "cat", "meowVolume": 11}
+                    "create_pet",
+                    {"animalId": "a-1", "petType": "cat", "meowVolume": 11},
                 )
 
         assert result.structured_content == {"ok": True}
-        assert received["body"] == {"petType": "cat", "meowVolume": 11}
+        assert received["body"] == {
+            "animalId": "a-1",
+            "petType": "cat",
+            "meowVolume": 11,
+        }
 
     async def test_allof_reference_request_body_does_not_crash(self):
         """Required fields inherited through a reference can be sent together."""
@@ -1501,8 +1517,13 @@ class TestAllOfReferenceRequestBodies:
             server = create_openapi_server(self.SPEC, client)
             async with Client(server) as mcp_client:
                 result = await mcp_client.call_tool(
-                    "create_pet", {"petType": "cat", "meowVolume": 11}
+                    "create_pet",
+                    {"animalId": "a-1", "petType": "cat", "meowVolume": 11},
                 )
 
         assert result.structured_content == {"ok": True}
-        assert received["body"] == {"petType": "cat", "meowVolume": 11}
+        assert received["body"] == {
+            "animalId": "a-1",
+            "petType": "cat",
+            "meowVolume": 11,
+        }
