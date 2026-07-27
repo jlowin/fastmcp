@@ -543,6 +543,7 @@ class OpenAPIParser(
         schema: dict,
         all_schemas: dict[str, Any],
         collected: set[str] | None = None,
+        follow_discriminator: bool = False,
     ) -> set[str]:
         """
         Extract all schema names referenced by a schema (including transitive dependencies).
@@ -551,12 +552,22 @@ class OpenAPIParser(
             schema: The schema to analyze
             all_schemas: All available schema definitions
             collected: Set of already collected schema names (for recursion)
+            follow_discriminator: Also collect the subtypes named by a
+                `discriminator.mapping`. Those values are bare strings rather
+                than `$ref` objects, so they are invisible to ordinary ref
+                collection.
 
         Returns:
             Set of schema names that are referenced
         """
         if collected is None:
             collected = set()
+
+        def collect(schema_name: str) -> None:
+            """Collect a schema by name and recurse into its dependencies."""
+            if schema_name not in collected and schema_name in all_schemas:
+                collected.add(schema_name)
+                find_refs(all_schemas[schema_name])
 
         def find_refs(obj):
             """Recursively find all $ref references."""
@@ -570,14 +581,18 @@ class OpenAPIParser(
                         return
 
                     # Add this schema and recursively find its dependencies
-                    if (
-                        collected is not None
-                        and schema_name not in collected
-                        and schema_name in all_schemas
-                    ):
-                        collected.add(schema_name)
-                        # Recursively find dependencies of this schema
-                        find_refs(all_schemas[schema_name])
+                    collect(schema_name)
+
+                if follow_discriminator:
+                    discriminator = obj.get("discriminator")
+                    if isinstance(discriminator, dict):
+                        mapping = discriminator.get("mapping")
+                        if isinstance(mapping, dict):
+                            for target in mapping.values():
+                                if isinstance(target, str) and target.startswith(
+                                    ("#/$defs/", "#/components/schemas/")
+                                ):
+                                    collect(target.split("/")[-1])
 
                 # Continue searching in all values
                 for value in obj.values():
@@ -614,10 +629,15 @@ class OpenAPIParser(
                 deps = self._extract_schema_dependencies(param.schema_, all_schemas)
                 needed_schemas.update(deps)
 
-        # Check request body for schema references
+        # Check request body for schema references. Request bodies are flattened
+        # into a single object, so discriminated subtypes need to come along.
         if request_body and request_body.content_schema:
             for content_schema in request_body.content_schema.values():
-                deps = self._extract_schema_dependencies(content_schema, all_schemas)
+                deps = self._extract_schema_dependencies(
+                    content_schema,
+                    all_schemas,
+                    follow_discriminator=True,
+                )
                 needed_schemas.update(deps)
 
         # Return only the needed input schemas
