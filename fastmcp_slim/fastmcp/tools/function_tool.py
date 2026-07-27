@@ -10,7 +10,6 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from types import MethodType
 from typing import (
-    TYPE_CHECKING,
     Annotated,
     Any,
     Literal,
@@ -52,10 +51,6 @@ from fastmcp.utilities.types import (
 )
 
 logger = get_logger(__name__)
-
-if TYPE_CHECKING:
-    from docket import Docket
-    from docket.execution import Execution
 
 
 class _ToolBodyError(Exception):
@@ -392,6 +387,29 @@ class FunctionTool(Tool):
         exec_is_async = is_coroutine_function(wrapper_fn)
         strict = _strict_input_validation()
 
+        result = await self._run_body(
+            type_adapter, exec_is_async, arguments, strict=strict
+        )
+
+        # An `InputRequiredResult` is the full result of this multi-round-trip
+        # leg (SEP-2322), not tool-output data: wrap it in an
+        # `InputRequiredToolResult` so it flows through the middleware chain as
+        # an ordinary result instead of being serialized as content. The wire
+        # handler reads it back out (see `_on_call_tool`).
+        if isinstance(result, mcp_types.InputRequiredResult):
+            return InputRequiredToolResult(result)
+
+        return self.convert_result(result)
+
+    async def _run_body(
+        self,
+        type_adapter: TypeAdapter[Any],
+        exec_is_async: bool,
+        arguments: dict[str, Any],
+        *,
+        strict: bool,
+    ) -> Any:
+        """Validate arguments and execute the body, applying any timeout."""
         try:
             if self.timeout is not None:
                 try:
@@ -428,15 +446,7 @@ class FunctionTool(Tool):
             assert original is not None
             raise original from original.__cause__
 
-        # An `InputRequiredResult` is the full result of this multi-round-trip
-        # leg (SEP-2322), not tool-output data: wrap it in an
-        # `InputRequiredToolResult` so it flows through the middleware chain as
-        # an ordinary result instead of being serialized as content. The wire
-        # handler reads it back out (see `_on_call_tool`).
-        if isinstance(result, mcp_types.InputRequiredResult):
-            return InputRequiredToolResult(result)
-
-        return self.convert_result(result)
+        return result
 
     async def _execute(
         self,
@@ -495,88 +505,6 @@ class FunctionTool(Tool):
         if inspect.isgenerator(result):
             return list(result)
         return result
-
-    def register_with_docket(self, docket: Docket) -> None:
-        """Register this tool with docket for background execution.
-
-        Registers the raw function so Docket sees and resolves ALL
-        dependencies — both FastMCP's (CurrentContext, Progress) and
-        Docket-native ones (Retry, Timeout, ConcurrencyLimit).
-        """
-        if not self.task_config.supports_tasks():
-            return
-        docket.register(self.fn, names=[self.key])
-
-    async def add_to_docket(
-        self,
-        docket: Docket,
-        arguments: dict[str, Any],
-        *,
-        fn_key: str | None = None,
-        task_key: str | None = None,
-        **kwargs: Any,
-    ) -> Execution:
-        """Schedule this tool for background execution via docket.
-
-        FunctionTool splats the arguments dict since .fn expects **kwargs.
-
-        Args:
-            docket: The Docket instance
-            arguments: Tool arguments
-            fn_key: Function lookup key in Docket registry (defaults to self.key)
-            task_key: Redis storage key for the result
-            **kwargs: Additional kwargs passed to docket.add()
-        """
-        lookup_key = fn_key or self.key
-        if task_key:
-            kwargs["key"] = task_key
-        return await docket.add(lookup_key, **kwargs)(**arguments)
-
-    def coerce_task_arguments(
-        self, arguments: dict[str, Any], *, strict: bool = False
-    ) -> dict[str, Any]:
-        """Validate client arguments against their declared parameter types.
-
-        The synchronous ``run()`` path validates arguments through the
-        function's Pydantic TypeAdapter, so a parameter typed as a model
-        arrives as a model instance. The task path hands the raw arguments to
-        Docket, which binds them to the function signature without coercion —
-        so without this a model-typed parameter would reach the function as a
-        raw dict (#4349). ``submit_to_docket`` calls this up front so coerced
-        values are what get queued, and validation errors surface before any
-        task state is created. Coerced values survive the trip to the worker
-        because Docket serializes task arguments with cloudpickle.
-
-        ``strict`` mirrors the synchronous path's ``strict_input_validation``
-        handling: when set, arguments are validated in strict mode so lax
-        coercions (e.g. the string ``"1"`` into an ``int``) are rejected at
-        submission rather than silently coerced and queued.
-
-        Injected dependency parameters (Context, Depends()) are excluded via
-        the same wrapper used by the synchronous path, so only client-supplied
-        arguments are coerced and Docket's dependency resolution is untouched.
-        """
-        from fastmcp.server.dependencies import without_injected_parameters
-
-        wrapper_fn = without_injected_parameters(
-            self.fn, run_in_thread=self.run_in_thread
-        )
-        hints = _resolve_param_hints(wrapper_fn)
-
-        coerced = dict(arguments)
-        for name, value in arguments.items():
-            annotation = hints.get(name)
-            if annotation is None:
-                continue
-            adapter = get_cached_typeadapter(annotation)
-            try:
-                coerced[name] = adapter.validate_python(value, strict=strict)
-            except PydanticValidationError as e:
-                # Argument coercion failure on the task path is a bad call, just
-                # like the synchronous path — surface it as fastmcp's
-                # ValidationError so it is classified consistently (see #4128).
-                raise ValidationError(str(e), log_level=logging.WARNING) from e
-        return coerced
 
 
 @overload

@@ -160,10 +160,9 @@ def get_client_ip() -> str:
 ```
 
 <Note>
-Both raise `RuntimeError` when called outside an HTTP context (e.g., STDIO transport).
-For background tasks created from an HTTP request, FastMCP restores a minimal request
-backed by the originating request's snapshotted headers. Use HTTP Headers if you need
-graceful fallback.
+Both raise `RuntimeError` when called outside an HTTP context (e.g., STDIO transport,
+or inside a background task — there is no live request object to reconstruct there).
+Use HTTP Headers below if you need graceful fallback, including inside background tasks.
 </Note>
 
 ### HTTP Headers
@@ -282,7 +281,8 @@ For background task execution, FastMCP provides dependencies that integrate with
 
 ```python
 from fastmcp import FastMCP
-from fastmcp.dependencies import CurrentDocket, CurrentWorker, Progress
+from fastmcp.dependencies import Progress
+from fastmcp_tasks.dependencies import CurrentDocket, CurrentWorker
 
 mcp = FastMCP("Task Demo")
 

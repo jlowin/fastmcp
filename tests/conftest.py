@@ -4,7 +4,6 @@ import secrets
 import socket
 import sys
 from collections.abc import Callable, Generator
-from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -115,17 +114,14 @@ def isolate_settings_home(_settings_home_root: Path):
     per-test overhead (numbering, test-id sanitization, retention-policy
     bookkeeping) for the ~99% of tests that never touch this directory.
 
-    Also sets a fast Docket polling interval for tests — the default 50ms
-    is fine for production but still adds ~25ms average pickup latency per
-    task. 10ms makes task tests near-instant.
+    Docket settings moved to the fastmcp-tasks package, so they are no longer
+    overridden here.
     """
     test_home = _settings_home_root / secrets.token_hex(8)
     test_home.mkdir()
 
     with temporary_settings(
         home=test_home,
-        docket__minimum_check_interval=timedelta(milliseconds=10),
-        docket__url=f"memory://{secrets.token_hex(4)}",
         client_disconnect_timeout=1,
     ):
         yield

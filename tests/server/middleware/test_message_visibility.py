@@ -12,6 +12,7 @@ from typing import Any
 
 import mcp_types
 import pytest
+from mcp.shared.dispatcher import CallOptions
 from mcp.shared.exceptions import MCPError
 from mcp_types import ElicitRequest, ElicitRequestFormParams, InputRequiredResult
 
@@ -63,6 +64,26 @@ def _adder() -> FastMCP:
         return a + b
 
     return server
+
+
+async def _raw_request(
+    client: Client, method: str, params: dict[str, Any]
+) -> dict[str, Any]:
+    """Send a bare JSON-RPC request through the dispatcher, bypassing the
+    typed `send_request` that normally stamps the outgoing envelope.
+
+    The modern protocol version requires every request's `params._meta` to
+    carry the protocol version, client info, and client capabilities (there is
+    no handshake to establish them once, up front), so a raw request built by
+    hand must stamp them the same way `send_request` would or the server
+    rejects the envelope before dispatch ever sees it.
+    """
+    data: dict[str, Any] = {"method": method, "params": params}
+    opts: CallOptions = {}
+    client.session._stamp(data, opts)
+    return await client.session._dispatcher.send_raw_request(
+        method, data.get("params"), opts
+    )
 
 
 class TestNotificationVisibility:
@@ -118,9 +139,7 @@ class TestUnroutableAndMalformed:
 
         async with Client(server) as client:
             with pytest.raises(MCPError):
-                await client.session._dispatcher.send_raw_request(
-                    "does/not/exist", {}, {}
-                )
+                await _raw_request(client, "does/not/exist", {})
 
         assert ("on_message", "does/not/exist") in recorder.records
         assert ("on_request", "does/not/exist") in recorder.records
@@ -135,9 +154,7 @@ class TestUnroutableAndMalformed:
 
         async with Client(server) as client:
             with pytest.raises(MCPError):
-                await client.session._dispatcher.send_raw_request(
-                    "tools/call", {"not_a_valid": "param"}, {}
-                )
+                await _raw_request(client, "tools/call", {"not_a_valid": "param"})
 
         assert ("on_message", "tools/call") in recorder.records
         assert ("on_call_tool", "tools/call") not in recorder.records
@@ -216,7 +233,10 @@ class TestMessageModification:
         server = _adder()
         server.add_middleware(RewriteLevel())
 
-        async with Client(server) as client:
+        # `logging/setLevel` was dropped from the method registry in the modern
+        # protocol version (logging is opt-in per-request via `_meta` there),
+        # so exercising it needs the older protocol.
+        async with Client(server, mode="legacy") as client:
             await client.session._dispatcher.send_raw_request(
                 "logging/setLevel", {"level": "not-a-valid-level"}, {}
             )
@@ -227,7 +247,9 @@ class TestMessageModification:
         recorder = HookRecorder()
         server.add_middleware(recorder)
 
-        async with Client(server) as client:
+        # `logging/setLevel` only exists on the older protocol; see the pin
+        # note in `test_modified_message_reaches_sdk_dispatch` above.
+        async with Client(server, mode="legacy") as client:
             await client.session._dispatcher.send_raw_request(
                 "logging/setLevel", {"level": "debug"}, {}
             )
@@ -254,7 +276,9 @@ class TestMessageModification:
         server.add_middleware(recorder)
         server.add_middleware(RewriteMethod())
 
-        async with Client(server) as client:
+        # `ping` was removed from the modern protocol version, so this pins
+        # the era where it's still a real method to rewrite away from.
+        async with Client(server, mode="legacy") as client:
             await client.session._dispatcher.send_raw_request("ping", {}, {})
 
         # Had the rewrite redirected dispatch, the component handler would have
@@ -286,9 +310,7 @@ class TestMessageModification:
 
         async with Client(server) as client:
             with pytest.raises(MCPError):
-                await client.session._dispatcher.send_raw_request(
-                    "tools/call", {"not_a_valid": "param"}, {}
-                )
+                await _raw_request(client, "tools/call", {"not_a_valid": "param"})
 
         calls = [r for r in recorder.records if r == ("on_message", "tools/call")]
         assert len(calls) == 1

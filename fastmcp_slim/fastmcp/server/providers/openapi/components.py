@@ -17,7 +17,6 @@ from fastmcp.resources import (
     ResourceTemplate,
 )
 from fastmcp.server.dependencies import get_http_headers
-from fastmcp.server.tasks.config import TaskConfig
 from fastmcp.tools.base import Tool, ToolResult
 from fastmcp.utilities.exceptions import (
     HTTP_STATUS_ERRORS,
@@ -27,6 +26,7 @@ from fastmcp.utilities.exceptions import (
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.openapi import HTTPRoute
 from fastmcp.utilities.openapi.director import RequestDirector
+from fastmcp.utilities.tasks import TaskConfig
 
 if TYPE_CHECKING:
     from fastmcp.server import Context

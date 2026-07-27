@@ -15,8 +15,7 @@ import mcp_types
 
 from fastmcp.prompts.base import Prompt
 from fastmcp.prompts.function_prompt import FunctionPrompt
-from fastmcp.server.auth.authorization import AuthCheck
-from fastmcp.server.tasks.config import TaskConfig
+from fastmcp.utilities.authorization import AuthCheck
 from fastmcp.utilities.types import AnyFunction
 
 if TYPE_CHECKING:
@@ -45,7 +44,6 @@ class PromptDecoratorMixin:
 
             meta = get_fastmcp_meta(prompt)
             if meta is not None and isinstance(meta, PromptMeta):
-                resolved_task = meta.task if meta.task is not None else False
                 enabled = meta.enabled
                 prompt = Prompt.from_function(
                     prompt,
@@ -56,7 +54,6 @@ class PromptDecoratorMixin:
                     icons=meta.icons,
                     tags=meta.tags,
                     meta=meta.meta,
-                    task=resolved_task,
                     auth=meta.auth,
                 )
             else:
@@ -82,7 +79,6 @@ class PromptDecoratorMixin:
         tags: set[str] | None = None,
         enabled: bool = True,
         meta: dict[str, Any] | None = None,
-        task: bool | TaskConfig | None = None,
         auth: AuthCheck | list[AuthCheck] | None = None,
     ) -> F: ...
 
@@ -99,7 +95,6 @@ class PromptDecoratorMixin:
         tags: set[str] | None = None,
         enabled: bool = True,
         meta: dict[str, Any] | None = None,
-        task: bool | TaskConfig | None = None,
         auth: AuthCheck | list[AuthCheck] | None = None,
     ) -> Callable[[F], F]: ...
 
@@ -115,7 +110,6 @@ class PromptDecoratorMixin:
         tags: set[str] | None = None,
         enabled: bool = True,
         meta: dict[str, Any] | None = None,
-        task: bool | TaskConfig | None = None,
         auth: AuthCheck | list[AuthCheck] | None = None,
     ) -> (
         Callable[[AnyFunction], FunctionPrompt]
@@ -140,7 +134,6 @@ class PromptDecoratorMixin:
             tags: Optional set of tags for categorizing the prompt
             enabled: Whether the prompt is enabled (default True). If False, adds to blocklist.
             meta: Optional meta information about the prompt
-            task: Optional task configuration for background execution
             auth: Optional authorization checks for the prompt
 
         Returns:
@@ -198,7 +191,6 @@ class PromptDecoratorMixin:
                 icons=icons,
                 tags=tags,
                 meta=meta,
-                task=task,
                 auth=auth,
                 enabled=enabled,
             )
@@ -232,6 +224,5 @@ class PromptDecoratorMixin:
             tags=tags,
             meta=meta,
             enabled=enabled,
-            task=task,
             auth=auth,
         )

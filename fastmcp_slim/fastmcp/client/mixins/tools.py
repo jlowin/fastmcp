@@ -2,21 +2,17 @@
 
 from __future__ import annotations
 
-import uuid
-import weakref
-from typing import TYPE_CHECKING, Any, Literal, cast, overload
+from typing import TYPE_CHECKING, Any, cast
 
 import mcp_types
 from mcp.client.caching import CacheMode
 from opentelemetry.trace import Status, StatusCode
-from pydantic import RootModel
 
 if TYPE_CHECKING:
     import datetime
 
     from fastmcp.client.client import CallToolResult, Client
 from fastmcp.client.progress import ProgressHandler
-from fastmcp.client.tasks import ToolTask
 from fastmcp.client.telemetry import client_span
 from fastmcp.exceptions import ToolError
 from fastmcp.telemetry import inject_trace_context
@@ -28,9 +24,6 @@ from fastmcp.utilities.types import get_cached_typeadapter
 logger = get_logger(__name__)
 
 AUTO_PAGINATION_MAX_PAGES = 250
-
-# Type alias for task response union (SEP-1686 graceful degradation)
-ToolTaskResponseUnion = RootModel[mcp_types.CreateTaskResult | mcp_types.CallToolResult]
 
 
 class ClientToolsMixin:
@@ -195,10 +188,20 @@ class ClientToolsMixin:
             read_timeout_seconds = normalize_timeout_to_seconds(timeout)
             progress_callback = progress_handler or self._progress_handler
 
+            # Only opt into claimed results (SEP-2133) when this client registered
+            # an extension that claims one; otherwise keep the SDK's default, which
+            # surfaces an unexpected claimed result as an error rather than parsing
+            # a shape we have no resolver for.
+            has_claims = bool(self._claim_by_model)
+
             async def _retry(
                 input_responses: mcp_types.InputResponses | None,
                 request_state: str | None,
-            ) -> mcp_types.CallToolResult | mcp_types.InputRequiredResult:
+            ) -> (
+                mcp_types.CallToolResult
+                | mcp_types.InputRequiredResult
+                | mcp_types.Result
+            ):
                 return await self.session.call_tool(
                     name=name,
                     arguments=arguments,
@@ -208,12 +211,26 @@ class ClientToolsMixin:
                     input_responses=input_responses,
                     request_state=request_state,
                     allow_input_required=True,
+                    allow_claimed=has_claims,
                 )
 
             first = await self._await_with_session_monitoring(_retry(None, None))
-            result = await self._await_with_session_monitoring(
+            driven = await self._await_with_session_monitoring(
                 self._drive_input_required(first, _retry)
             )
+            if isinstance(driven, mcp_types.CallToolResult):
+                result = driven
+            else:
+                # A claimed extension result (SEP-2133): resolve it through the
+                # owning extension's resolver into an ordinary CallToolResult.
+                # Resolution issues further session requests of its own (result
+                # validation lists tools; a resolver may make more), so it needs
+                # the same session monitoring as the calls above — otherwise a
+                # transport-level failure can kill the session runner while this
+                # await waits forever.
+                result = await self._await_with_session_monitoring(
+                    self._resolve_claimed_result(name, driven, read_timeout_seconds)
+                )
 
             # Reflect tool-level errors on the span so callers see ERROR
             # status even though the MCP protocol call itself succeeded.
@@ -254,7 +271,6 @@ class ClientToolsMixin:
             raise_on_error=raise_on_error,
         )
 
-    @overload
     async def call_tool(
         self: Client,
         name: str,
@@ -265,39 +281,7 @@ class ClientToolsMixin:
         progress_handler: ProgressHandler | None = None,
         raise_on_error: bool = True,
         meta: dict[str, Any] | None = None,
-        task: Literal[False] = False,
-    ) -> CallToolResult: ...
-
-    @overload
-    async def call_tool(
-        self: Client,
-        name: str,
-        arguments: dict[str, Any] | None = None,
-        *,
-        version: str | None = None,
-        timeout: datetime.timedelta | float | int | None = None,
-        progress_handler: ProgressHandler | None = None,
-        raise_on_error: bool = True,
-        meta: dict[str, Any] | None = None,
-        task: Literal[True],
-        task_id: str | None = None,
-        ttl: int = 60000,
-    ) -> ToolTask: ...
-
-    async def call_tool(
-        self: Client,
-        name: str,
-        arguments: dict[str, Any] | None = None,
-        *,
-        version: str | None = None,
-        timeout: datetime.timedelta | float | int | None = None,
-        progress_handler: ProgressHandler | None = None,
-        raise_on_error: bool = True,
-        meta: dict[str, Any] | None = None,
-        task: bool = False,
-        task_id: str | None = None,
-        ttl: int = 60000,
-    ) -> CallToolResult | ToolTask:
+    ) -> CallToolResult:
         """Call a tool on the server.
 
         Unlike call_tool_mcp, this method raises a ToolError if the tool call results in an error.
@@ -313,15 +297,11 @@ class ClientToolsMixin:
                 This is useful for passing contextual information (like user IDs, trace IDs, or preferences)
                 that shouldn't be tool arguments but may influence server-side processing. The server
                 can access this via `context.request_context.meta`. Defaults to None.
-            task (bool): If True, execute as background task (SEP-1686). Defaults to False.
-            task_id (str | None): Optional client-provided task ID (auto-generated if not provided).
-            ttl (int): Time to keep results available in milliseconds (default 60s).
 
         Returns:
-            CallToolResult | ToolTask: The content returned by the tool if task=False,
-                or a ToolTask object if task=True. If the tool returns structured
-                outputs, they are returned as a dataclass (if an output schema
-                is available) or a dictionary; otherwise, a list of content
+            CallToolResult: The content returned by the tool. If the tool returns
+                structured outputs, they are returned as a dataclass (if an output
+                schema is available) or a dictionary; otherwise, a list of content
                 blocks is returned. Note: to receive both structured and
                 unstructured outputs, use call_tool_mcp instead and access the
                 raw result object.
@@ -339,16 +319,6 @@ class ClientToolsMixin:
                 "version": version,
             }
 
-        if task:
-            return await self._call_tool_as_task(
-                name,
-                arguments,
-                task_id,
-                ttl,
-                raise_on_error=raise_on_error,
-                meta=request_meta or None,
-            )
-
         result = await self.call_tool_mcp(
             name=name,
             arguments=arguments or {},
@@ -359,85 +329,6 @@ class ClientToolsMixin:
         return await self._parse_call_tool_result(
             name, result, raise_on_error=raise_on_error
         )
-
-    async def _call_tool_as_task(
-        self: Client,
-        name: str,
-        arguments: dict[str, Any] | None = None,
-        task_id: str | None = None,
-        ttl: int = 60000,
-        raise_on_error: bool = True,
-        meta: dict[str, Any] | None = None,
-    ) -> ToolTask:
-        """Call a tool for background execution (SEP-1686).
-
-        Returns a ToolTask object that handles both background and immediate execution.
-        If the server accepts background execution, ToolTask will poll for results.
-        If the server declines (graceful degradation), ToolTask wraps the immediate result.
-
-        Args:
-            name: Tool name to call
-            arguments: Tool arguments
-            task_id: Optional client-provided task ID (ignored, for backward compatibility)
-            ttl: Time to keep results available in milliseconds (default 60s)
-            raise_on_error: Whether task.result() should raise ToolError on errors
-            meta: Optional request metadata (e.g., version info)
-
-        Returns:
-            ToolTask: Future-like object for accessing task status and results
-        """
-        # Per SEP-1686 final spec: client sends only ttl, server generates taskId
-        # Inject trace context into meta for propagation to server
-        propagated_meta = inject_trace_context(meta)
-        # SDK v2: request `_meta` is `RequestParamsMeta` (a TypedDict), not the
-        # old `RequestParams.Meta` nested model.
-        request_meta = cast(mcp_types.RequestParamsMeta | None, propagated_meta)
-
-        # Build request with task metadata
-        request = mcp_types.CallToolRequest(
-            params=mcp_types.CallToolRequestParams(
-                name=name,
-                arguments=arguments or {},
-                task=mcp_types.TaskMetadata(ttl=ttl),
-                _meta=request_meta,  # type: ignore[unknown-argument]  # pydantic alias
-            )
-        )
-
-        # Server returns CreateTaskResult (task accepted) or CallToolResult (graceful degradation)
-        # Use RootModel with Union to handle both response types (SDK calls model_validate)
-        wrapped_result = await self._await_with_session_monitoring(
-            self.session.send_request(
-                request=request,  # type: ignore[arg-type]
-                result_type=ToolTaskResponseUnion,
-            )
-        )
-        raw_result = wrapped_result.root
-
-        if isinstance(raw_result, mcp_types.CreateTaskResult):
-            # Task was accepted - extract task info from CreateTaskResult
-            server_task_id = raw_result.task.task_id
-            self._submitted_task_ids.add(server_task_id)
-
-            task_obj = ToolTask(
-                self,
-                server_task_id,
-                tool_name=name,
-                immediate_result=None,
-                raise_on_error=raise_on_error,
-            )
-            self._task_registry[server_task_id] = weakref.ref(task_obj)
-            return task_obj
-        else:
-            # Graceful degradation - server returned CallToolResult
-            parsed_result = await self._parse_call_tool_result(name, raw_result)
-            synthetic_task_id = task_id or str(uuid.uuid4())
-            return ToolTask(
-                self,
-                synthetic_task_id,
-                tool_name=name,
-                immediate_result=parsed_result,
-                raise_on_error=raise_on_error,
-            )
 
 
 async def _parse_call_tool_result(

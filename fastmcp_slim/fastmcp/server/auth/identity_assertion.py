@@ -99,10 +99,12 @@ class IdentityAssertion(BaseModel):
     audience: str | None = Field(
         default=None,
         description=(
-            "Expected `aud` value on the ID-JAG. When omitted, the audience is the "
-            "authorization server's own issuer URL (its base URL), which is where the "
-            "ID-JAG's `aud` must point per SEP-990. Override only when the IdP mints "
-            "assertions bound to a different audience identifier."
+            "Expected `aud` value on the ID-JAG. When omitted, the audience is this "
+            "server's issuer identifier — the `issuer` published in its authorization "
+            "server metadata, which is `issuer_url` when set and `base_url` otherwise "
+            "— and that is where the ID-JAG's `aud` must point per SEP-990. Override "
+            "only when the IdP mints assertions bound to a different audience "
+            "identifier."
         ),
     )
     required_scopes: list[str] | None = Field(
@@ -216,7 +218,7 @@ class IdentityAssertionValidator:
         """
         self.config = config
         # Accept the audience both with and without a trailing slash: metadata
-        # advertises the issuer exactly as pydantic renders base_url (a bare
+        # advertises the issuer exactly as pydantic renders issuer_url (a bare
         # domain gains a trailing slash), so an IdP that sets `aud` to the
         # advertised value verbatim must match, and so must one that strips it.
         if config.audience:

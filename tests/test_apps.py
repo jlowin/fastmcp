@@ -418,14 +418,14 @@ class TestExtensionAdvertisement:
         )
 
         async with Client(server) as client:
-            experimental = client.initialize_result.capabilities.experimental or {}
+            experimental = client.server_capabilities.experimental or {}
             assert experimental.get("file_exchange") == {"version": "0.3"}
 
     async def test_experimental_capabilities_default_empty(self):
         server = FastMCP("test")
 
         async with Client(server) as client:
-            experimental = client.initialize_result.capabilities.experimental
+            experimental = client.server_capabilities.experimental
             assert not experimental
 
 

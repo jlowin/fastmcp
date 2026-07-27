@@ -149,7 +149,8 @@ async def nested_server():
 
 async def test_ping(streamable_http_server: ASGIServer):
     """Test pinging the server."""
-    async with streamable_http_server.client() as client:
+    # `ping` is a handshake-era method, so this pins the legacy era.
+    async with streamable_http_server.client(mode="legacy") as client:
         result = await client.ping()
         assert result is True
 
@@ -158,7 +159,10 @@ async def test_ping_with_streamable_http_alias(
     streamable_http_server_with_streamable_http_alias: ASGIServer,
 ):
     """Test pinging the server."""
-    async with streamable_http_server_with_streamable_http_alias.client() as client:
+    # `ping` is a handshake-era method, so this pins the legacy era.
+    async with streamable_http_server_with_streamable_http_alias.client(
+        mode="legacy"
+    ) as client:
         result = await client.ping()
         assert result is True
 
@@ -179,7 +183,7 @@ async def test_session_id_callback(streamable_http_server: ASGIServer):
     """Test getting mcp-session-id from the transport."""
     transport = streamable_http_server.transport()
     assert transport.get_session_id() is None
-    async with Client(transport=transport):
+    async with Client(transport=transport, mode="legacy"):
         session_id = transport.get_session_id()
         assert session_id is not None
 
@@ -214,8 +218,9 @@ async def test_elicitation_tool(streamable_http_server: ASGIServer, request):
     if stateless_http:
         pytest.xfail("Elicitation is not supported in stateless HTTP mode")
 
+    # Server-initiated elicitation is handshake-era only.
     async with streamable_http_server.client(
-        elicitation_handler=elicitation_handler
+        elicitation_handler=elicitation_handler, mode="legacy"
     ) as client:
         result = await client.call_tool("elicit")
         assert result.data == "You said your name was: Alice!"
@@ -241,7 +246,9 @@ async def test_stateless_http_still_accepts_post(
 
 async def test_nested_streamable_http_server_resolves_correctly(nested_server: str):
     """Test patch for https://github.com/modelcontextprotocol/python-sdk/pull/659"""
-    async with Client(transport=StreamableHttpTransport(nested_server)) as client:
+    async with Client(
+        transport=StreamableHttpTransport(nested_server), mode="legacy"
+    ) as client:
         result = await client.ping()
         assert result is True
 

@@ -118,7 +118,7 @@ Create custom transforms by subclassing `Transform` and overriding the methods y
 ```python
 from collections.abc import Sequence
 from fastmcp.server.transforms import Transform, GetToolNext
-from fastmcp.tools.tool import Tool
+from fastmcp.tools import Tool
 
 class TagFilter(Transform):
     """Filter tools to only those with specific tags."""

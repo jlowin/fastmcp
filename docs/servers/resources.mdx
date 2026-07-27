@@ -783,6 +783,10 @@ def get_data_by_id(id: str) -> dict:
 
 When `mask_error_details=True`, only error messages from `ResourceError` will include details, other exceptions will be converted to a generic message.
 
+## Requesting Input
+
+A resource or resource template can ask the client for information before it produces content. On an MCP 2026-07-28 connection, return an `InputRequiredResult` describing what you need; the client answers and re-issues the `resources/read`, and your function runs again with the answer on `ctx.input_responses`. See [Elicitation](/servers/elicitation#prompts-and-resources) for the full pattern.
+
 ## Server Behavior
 
 ### Duplicate Resources

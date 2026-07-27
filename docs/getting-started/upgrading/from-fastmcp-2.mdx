@@ -81,7 +81,7 @@ BREAKING CHANGES (will crash at import or runtime):
 
 12. REPO MOVE: GitHub repository moved from jlowin/fastmcp to PrefectHQ/fastmcp. Update git remotes and dependency URLs that reference the old location.
 
-13. BACKGROUND TASKS: FastMCP's background task system (SEP-1686) is now an optional dependency. If the code uses task=True or TaskConfig, add pip install "fastmcp[tasks]".
+13. BACKGROUND TASKS: FastMCP's background task system is now an optional dependency. If the code uses task=True or TaskConfig, add pip install "fastmcp[tasks]".
 
 DEPRECATIONS (still work but emit warnings):
 
@@ -171,7 +171,7 @@ Prompt functions now use FastMCP's `Message` class instead of `mcp.types.PromptM
 
 ```python
 # Before
-from fastmcp.types import PromptMessage, TextContent
+from mcp.types import PromptMessage, TextContent
 
 @mcp.prompt
 def my_prompt() -> PromptMessage:
@@ -321,7 +321,7 @@ If you have code that treats the decorated result as a `FunctionTool` (e.g., acc
 
 **Background tasks require optional dependency**
 
-FastMCP's background task system (SEP-1686) is now behind an optional extra. If your server uses background tasks, install with:
+FastMCP's background task system is now behind an optional extra. If your server uses background tasks, install with:
 
 ```bash
 pip install "fastmcp[tasks]"

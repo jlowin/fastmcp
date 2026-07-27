@@ -103,7 +103,7 @@ class TestStaticTokenVerifier:
         """Test that server raises error when both OAuth and TokenVerifier provided."""
         from fastmcp.server.auth.providers.in_memory import InMemoryOAuthProvider
 
-        oauth_provider = InMemoryOAuthProvider("http://test.com")
+        oauth_provider = InMemoryOAuthProvider(base_url="http://test.com")
         token_verifier = StaticTokenVerifier({"token": {"client_id": "test"}})
 
         # This should work - OAuth provider

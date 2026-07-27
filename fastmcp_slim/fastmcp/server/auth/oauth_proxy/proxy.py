@@ -25,7 +25,9 @@ from base64 import urlsafe_b64encode
 from collections import OrderedDict
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from typing import Any, Literal
+from urllib.parse import urlencode
 
 import anyio
 import httpx2
@@ -41,6 +43,7 @@ from key_value.aio.stores.filetree import (
 )
 from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
 from mcp.server.auth.handlers.metadata import MetadataHandler
+from mcp.server.auth.handlers.register import RegistrationHandler
 from mcp.server.auth.middleware.client_auth import ClientAuthenticator
 from mcp.server.auth.provider import (
     AccessToken,
@@ -57,10 +60,14 @@ from mcp.server.auth.settings import (
     ClientRegistrationOptions,
     RevocationOptions,
 )
-from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
-from pydantic import AnyHttpUrl, AnyUrl, SecretStr
+from mcp.shared.auth import (
+    OAuthClientInformationFull,
+    OAuthClientMetadata,
+    OAuthToken,
+)
+from pydantic import AnyHttpUrl, AnyUrl, SecretStr, ValidationError
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, RedirectResponse
+from starlette.responses import HTMLResponse, RedirectResponse, Response
 from starlette.routing import Route
 from typing_extensions import override
 
@@ -104,6 +111,7 @@ from fastmcp.server.auth.oauth_proxy.ui import create_error_html
 from fastmcp.server.auth.oauth_proxy.upstream import AsyncOAuth2Client
 from fastmcp.server.auth.redirect_validation import (
     build_client_redirect,
+    is_redirect_uri_allowed_for_application_type,
     validate_redirect_uri,
 )
 from fastmcp.utilities.auth import parse_scopes
@@ -112,6 +120,52 @@ from fastmcp.utilities.logging import get_logger
 logger = get_logger(__name__)
 
 _REFRESH_LOCK_CACHE_SIZE = 10_000
+
+#: SEP-837: the client's declared `application_type`, recovered from the raw DCR
+#: request body by `_ApplicationTypeRegistrationHandler` before the SDK's
+#: `RegistrationHandler` runs. The SDK parses `application_type` into
+#: `OAuthClientMetadata` but drops it when it builds the
+#: `OAuthClientInformationFull` handed to `register_client`, so this ContextVar
+#: is the only place the real value survives into the provider. It is `None` when
+#: `register_client` is called directly (outside the HTTP route) or when the body
+#: failed to parse, in which case the object's own `application_type` is used.
+_pending_application_type: ContextVar[Literal["web", "native"] | None] = ContextVar(
+    "_pending_application_type", default=None
+)
+
+
+class _ApplicationTypeRegistrationHandler:
+    """Recover the DCR `application_type` the SDK handler drops (SEP-837).
+
+    The SDK's `RegistrationHandler` validates the request body into an
+    `OAuthClientMetadata` (which carries `application_type`) but omits the field
+    when constructing the `OAuthClientInformationFull` it passes to
+    `register_client`. This thin wrapper re-parses `application_type` from the
+    same request body and publishes it on a ContextVar so `register_client` can
+    enforce the web/native redirect rules, then delegates to the SDK handler
+    unchanged. Reading `request.body()` here is safe: Starlette caches the body,
+    so the SDK handler's own read returns the same bytes.
+    """
+
+    def __init__(self, handler: RegistrationHandler) -> None:
+        self._handler = handler
+
+    async def handle(self, request: Request) -> Response:
+        application_type: Literal["web", "native"] | None = None
+        try:
+            metadata = OAuthClientMetadata.model_validate_json(await request.body())
+        except ValidationError:
+            # Let the SDK handler surface the validation error verbatim.
+            application_type = None
+        else:
+            application_type = metadata.application_type
+
+        token = _pending_application_type.set(application_type)
+        try:
+            return await self._handler.handle(request)
+        finally:
+            _pending_application_type.reset(token)
+
 
 #: Marker claim identifying a FastMCP access token minted from a SEP-990 ID-JAG.
 #: These tokens are self-contained (they carry the asserted subject directly) and
@@ -634,14 +688,17 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
                 allowed_redirect_uri_patterns=self._allowed_client_redirect_uris,
             )
 
-        # Identity assertion (SEP-990 ID-JAG): the audience the ID-JAG must be
-        # bound to is this authorization server's own issuer URL (base_url).
+        # Identity assertion (SEP-990 ID-JAG): per RFC 7523 §3 the `aud` must
+        # identify this authorization server, and an authorization server is
+        # identified by its issuer — the same value published as `issuer` in
+        # the authorization server metadata, which is `issuer_url` (defaulting
+        # to `base_url`).
         self._identity_assertion: IdentityAssertion | None = identity_assertion
         self._identity_assertion_validator: IdentityAssertionValidator | None = None
         if identity_assertion is not None:
             self._identity_assertion_validator = IdentityAssertionValidator(
                 config=identity_assertion,
-                audience=str(self.base_url),
+                audience=str(self.issuer_url),
             )
         # ID-JAG access tokens are self-contained (no upstream token or JTI
         # mapping to delete), so revocation tracks their jtis here until the
@@ -704,9 +761,11 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
         super().set_mcp_path(mcp_path)
 
         # Create JWT issuer with correct audience based on actual MCP path
-        # This ensures tokens are bound to the specific resource URL
+        # This ensures tokens are bound to the specific resource URL. The `iss`
+        # claim is the authorization server's issuer identifier (`issuer_url`),
+        # which matches the `issuer` advertised in the metadata document.
         self._jwt_issuer = JWTIssuer(
-            issuer=str(self.base_url),
+            issuer=str(self.issuer_url),
             audience=str(self._resource_url),
             signing_key=self._jwt_signing_key,
         )
@@ -726,6 +785,19 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
                 "before token operations."
             )
         return self._jwt_issuer
+
+    @property
+    def token_endpoint_url(self) -> str:
+        """The token endpoint URL, as advertised in the authorization server metadata.
+
+        A CIMD `private_key_jwt` assertion is bound to this URL as its `aud`, so
+        it must match the advertised `token_endpoint` byte-for-byte. The SDK's
+        `build_metadata` builds that URL by stripping any trailing slash from
+        `base_url` first, so this does too: pydantic renders a bare-authority
+        `base_url` with a trailing slash, which would otherwise expect an `aud`
+        of `https://example.com//token`.
+        """
+        return f"{str(self.base_url).rstrip('/')}/token"
 
     # -------------------------------------------------------------------------
     # Upstream OAuth Client
@@ -788,6 +860,40 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
         code_challenge = urlsafe_b64encode(challenge_bytes).decode().rstrip("=")
 
         return code_verifier, code_challenge
+
+    def _build_upstream_authorize_url(
+        self, txn_id: str, transaction: dict[str, Any]
+    ) -> str:
+        """Construct the upstream IdP authorization URL using stored transaction data."""
+        query_params: dict[str, Any] = {
+            "response_type": "code",
+            "client_id": self._upstream_client_id,
+            "redirect_uri": f"{str(self.base_url).rstrip('/')}{self._redirect_path}",
+            "state": txn_id,
+        }
+
+        scopes_to_use = transaction.get("scopes") or self.required_scopes or []
+        if scopes_to_use:
+            query_params["scope"] = " ".join(scopes_to_use)
+
+        proxy_code_verifier = transaction.get("proxy_code_verifier")
+        if proxy_code_verifier:
+            challenge_bytes = hashlib.sha256(proxy_code_verifier.encode()).digest()
+            proxy_code_challenge = (
+                urlsafe_b64encode(challenge_bytes).decode().rstrip("=")
+            )
+            query_params["code_challenge"] = proxy_code_challenge
+            query_params["code_challenge_method"] = "S256"
+
+        if self._forward_resource:
+            if resource := transaction.get("resource"):
+                query_params["resource"] = resource
+
+        if self._extra_authorize_params:
+            query_params.update(self._extra_authorize_params)
+
+        separator = "&" if "?" in self._upstream_authorization_endpoint else "?"
+        return f"{self._upstream_authorization_endpoint}{separator}{urlencode(query_params)}"
 
     # -------------------------------------------------------------------------
     # Client Registration (Local Implementation)
@@ -872,6 +978,16 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
         # Create a ProxyDCRClient with configured redirect URI validation
         if client_info.client_id is None:
             raise ValueError("client_id is required for client registration")
+
+        # SEP-837: the SDK's RegistrationHandler drops application_type when it
+        # builds this object, so prefer the value the HTTP route recovered from
+        # the raw request body. Fall back to the object's own field for direct
+        # (non-HTTP) callers. Write it back so the DCR response echoes the type.
+        pending_application_type = _pending_application_type.get()
+        if pending_application_type is not None:
+            client_info.application_type = pending_application_type
+        application_type = client_info.application_type
+
         if client_info.redirect_uris:
             for redirect_uri in client_info.redirect_uris:
                 if not validate_redirect_uri(
@@ -882,6 +998,28 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
                         "invalid_redirect_uri",
                         f"Redirect URI '{redirect_uri}' is not allowed.",
                     )
+                # SEP-837: honor the client's declared application_type. "web"
+                # clients are restricted to non-loopback https redirect URIs.
+                if not is_redirect_uri_allowed_for_application_type(
+                    redirect_uri,
+                    application_type,
+                ):
+                    raise RegistrationError(
+                        "invalid_redirect_uri",
+                        f"Redirect URI '{redirect_uri}' is not allowed for "
+                        f"application_type '{application_type}'.",
+                    )
+        elif application_type == "web":
+            # Clients may omit redirect_uris and supply one at authorization,
+            # which falls back to the `http://localhost` placeholder below. A web
+            # client can never authorize against that placeholder (loopback http
+            # fails its own rule), so registering one would only produce a client
+            # that is guaranteed to fail later. Refuse it now, with a reason.
+            raise RegistrationError(
+                "invalid_redirect_uri",
+                "redirect_uris is required for application_type 'web'; web "
+                "clients must register a non-loopback https redirect URI.",
+            )
 
         redirect_uris = client_info.redirect_uris or [AnyUrl("http://localhost")]
 
@@ -910,6 +1048,7 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
             grant_types=registered_grant_types,
             scope=client_info.scope or self._default_scope_str,
             token_endpoint_auth_method="none",
+            application_type=application_type,
             allowed_redirect_uri_patterns=self._allowed_client_redirect_uris,
             client_name=getattr(client_info, "client_name", None),
         )
@@ -918,6 +1057,17 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
             key=client_info.client_id,
             value=proxy_client,
         )
+
+        # The SDK's RegistrationHandler serializes this same `client_info` object
+        # into the DCR response after we return. Left untouched it would echo the
+        # SDK's default `client_secret_post` (or a requested `client_secret_basic`)
+        # and a generated secret — a confidential method the proxy never enforces
+        # and does not advertise in server metadata. Normalize it to the public
+        # client we actually store so the registration response, stored client, and
+        # advertised `token_endpoint_auth_methods_supported` all agree.
+        client_info.token_endpoint_auth_method = "none"
+        client_info.client_secret = None
+        client_info.client_secret_expires_at = None
 
         # Log redirect URIs to help users discover what patterns they might need
         if client_info.redirect_uris:
@@ -1014,6 +1164,14 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
                 error="invalid_client",  # type: ignore[arg-type]  # "invalid_client" is valid OAuth error but not in Literal type  # ty:ignore[invalid-argument-type]
                 error_description="Client ID is required",
             )
+        # Clients may omit `scope` entirely, in which case OAuth lets the
+        # authorization server apply its configured default. Resolve that default
+        # once, here, so the transaction records the scopes actually being
+        # authorized. Every later consumer — the consent screen, the issued
+        # authorization code, token exchange, and refresh — reads this one value
+        # instead of deciding for itself whether to substitute required_scopes.
+        effective_scopes = params.scopes or self.required_scopes or []
+
         transaction = OAuthTransaction(
             txn_id=txn_id,
             client_id=client.client_id,
@@ -1021,7 +1179,7 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
             client_state=params.state or "",
             code_challenge=params.code_challenge,
             code_challenge_method=getattr(params, "code_challenge_method", "S256"),
-            scopes=params.scopes or [],
+            scopes=effective_scopes,
             created_at=time.time(),
             resource=getattr(params, "resource", None),
             proxy_code_verifier=proxy_code_verifier,
@@ -2248,6 +2406,7 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
                 authorize_handler = AuthorizationHandler(
                     provider=self,
                     base_url=self.base_url,  # ty: ignore[invalid-argument-type]
+                    issuer_url=self.issuer_url,
                     server_name=None,  # Could be extended to pass server metadata
                     server_icon_url=None,
                 )
@@ -2268,7 +2427,7 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
                 # Replace the token endpoint so it can (a) authenticate CIMD
                 # private_key_jwt clients and (b) accept the SEP-990 jwt-bearer
                 # grant when identity assertion is enabled.
-                token_endpoint_url = f"{self.base_url}/token"
+                token_endpoint_url = self.token_endpoint_url
                 if self._cimd_manager is not None:
                     authenticator: ClientAuthenticator = (
                         PrivateKeyJWTClientAuthenticator(
@@ -2293,6 +2452,35 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
                         methods=["POST", "OPTIONS"],
                     )
                 )
+            elif (
+                isinstance(route, Route)
+                and route.path == "/register"
+                and route.methods is not None
+                and "POST" in route.methods
+            ):
+                # SEP-837: wrap the SDK RegistrationHandler so the client's
+                # declared application_type (which the SDK parses but drops before
+                # calling register_client) survives into the provider and its
+                # web/native redirect rules are enforced over HTTP.
+                registration_options = (
+                    self.client_registration_options or ClientRegistrationOptions()
+                )
+                sdk_registration_handler = RegistrationHandler(
+                    provider=self,
+                    options=registration_options,
+                )
+                registration_handler = _ApplicationTypeRegistrationHandler(
+                    sdk_registration_handler
+                )
+                custom_routes.append(
+                    Route(
+                        path="/register",
+                        endpoint=cors_middleware(
+                            registration_handler.handle, ["POST", "OPTIONS"]
+                        ),
+                        methods=["POST", "OPTIONS"],
+                    )
+                )
             elif isinstance(route, Route) and route.path.startswith(
                 "/.well-known/oauth-authorization-server"
             ):
@@ -2307,31 +2495,31 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
                     revocation_options,
                     supports_identity_assertion=self._identity_assertion is not None,
                 )
+                # `build_metadata` derives both the `issuer` field and every
+                # endpoint URL from a single argument. Endpoints must stay on
+                # `base_url` (that is where the routes are actually mounted),
+                # while the issuer identity is `issuer_url`. RFC 8414 §3.3
+                # requires `issuer` to match the URL the client used for
+                # discovery, which is the `issuer_url` advertised in the
+                # protected resource metadata.
+                metadata.issuer = self.issuer_url  # ty: ignore[invalid-assignment]
                 # RFC 9207: every authorization response we issue carries an
                 # `iss` matching this issuer byte-for-byte, so this route must
                 # always be overridden to advertise support — not just when
                 # CIMD or identity assertion is also enabled.
                 metadata.authorization_response_iss_parameter_supported = True
+                # Every client the proxy authenticates at the token endpoint is
+                # public: DCR-registered and synthesized clients are stored with
+                # `token_endpoint_auth_method="none"`, and CIMD clients use
+                # `private_key_jwt`. The SDK's default advertisement of
+                # `client_secret_basic`/`client_secret_post` is misleading — the
+                # proxy never enforces a downstream client secret — so we override
+                # it to reflect the methods actually supported.
+                auth_methods = ["none"]
                 if self._cimd_manager is not None:
                     metadata.client_id_metadata_document_supported = True
-                    existing = metadata.token_endpoint_auth_methods_supported or []
-                    metadata.token_endpoint_auth_methods_supported = [
-                        *existing,
-                        "private_key_jwt",
-                        "none",
-                    ]
-                if self._identity_assertion is not None:
-                    # DCR clients are public (`token_endpoint_auth_method="none"`),
-                    # so a metadata consumer must see `none` advertised to use the
-                    # jwt-bearer grant — even when CIMD (which also adds it) is off.
-                    methods_supported = (
-                        metadata.token_endpoint_auth_methods_supported or []
-                    )
-                    if "none" not in methods_supported:
-                        metadata.token_endpoint_auth_methods_supported = [
-                            *methods_supported,
-                            "none",
-                        ]
+                    auth_methods.append("private_key_jwt")
+                metadata.token_endpoint_auth_methods_supported = auth_methods
                 handler = MetadataHandler(metadata)
                 methods = route.methods or ["GET", "OPTIONS"]
 
@@ -2432,7 +2620,7 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
                         url=build_client_redirect(
                             client_redirect_uri,
                             error_params,
-                            iss=str(self.base_url),
+                            iss=str(self.issuer_url),
                         ),
                         status_code=302,
                     )
@@ -2600,7 +2788,7 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
             }
 
             client_callback_url = build_client_redirect(
-                client_redirect_uri, callback_params, iss=str(self.base_url)
+                client_redirect_uri, callback_params, iss=str(self.issuer_url)
             )
 
             logger.debug(f"Forwarding to client callback for transaction {txn_id}")

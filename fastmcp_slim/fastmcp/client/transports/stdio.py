@@ -173,9 +173,20 @@ class StdioTransport(ClientTransport):
         # signal the connection task to stop
         self._stop_event.set()
 
-        # wait for the connection task to finish cleanly
-        with contextlib.suppress(Exception):
-            await self._connect_task
+        # Wait without propagating the connection task's cancellation into
+        # this caller. Cancellation of this wait therefore still belongs to
+        # the caller and must propagate normally.
+        connect_task = self._connect_task
+        await asyncio.wait({connect_task})
+        try:
+            _ = connect_task.result()
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.debug(
+                "Suppressed exception from stdio connection task during disconnect",
+                exc_info=True,
+            )
 
         # reset variables and events for potential future reconnects
         self._connect_task = None

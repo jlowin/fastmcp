@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import logging
-import warnings
 import weakref
-from collections.abc import Callable, Generator, Mapping, Sequence
+from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
@@ -11,13 +10,11 @@ from logging import Logger
 from typing import Any, Literal, cast, overload
 
 import mcp_types
+from key_value.aio.errors import SerializationError
 from mcp import LoggingLevel, ServerSession
 from mcp.server.context import ServerRequestContext
 from mcp_types import (
     GetPromptResult,
-    ModelPreferences,
-    Root,
-    SamplingMessage,
 )
 from mcp_types import Prompt as SDKPrompt
 from mcp_types import Resource as SDKResource
@@ -26,8 +23,7 @@ from pydantic.networks import AnyUrl
 from typing_extensions import TypeVar
 from uncalled_for import SharedContext
 
-import fastmcp
-from fastmcp.exceptions import FastMCPDeprecationWarning, ToolError
+from fastmcp.exceptions import ToolError
 from fastmcp.resources.base import ResourceResult
 from fastmcp.server.dependencies import FastMCPRequestContext, fastmcp_request_ctx
 from fastmcp.server.elicitation import (
@@ -38,11 +34,6 @@ from fastmcp.server.elicitation import (
     parse_elicit_response_type,
 )
 from fastmcp.server.low_level import client_supports_extension
-from fastmcp.server.sampling import SampleStep, SamplingResult, SamplingTool
-from fastmcp.server.sampling.run import (
-    sample_impl,
-    sample_step_impl,
-)
 from fastmcp.server.server import FastMCP, StateValue
 from fastmcp.server.transforms.visibility import (
     Visibility,
@@ -75,30 +66,6 @@ _clamp_logger(logger=to_client_logger, max_level="DEBUG")
 
 
 T = TypeVar("T", default=Any)
-ResultT = TypeVar("ResultT", default=str)
-
-# Import ToolChoiceOption from sampling module (after other imports)
-from fastmcp.server.sampling.run import ToolChoiceOption  # noqa: E402
-
-# Warn-once guard for the sampling deprecation. Server-initiated createMessage
-# was removed from MCP as of 2026-07-28 (SEP-2577); the warning fires a single
-# time per process to flag that ctx.sample/ctx.sample_step are on their way out.
-# A mutable set (mutated in place, never rebound) rather than a `global` boolean
-# so the warn-once state is unambiguously read and written from the module.
-_sample_deprecation_warned: set[bool] = set()
-
-_SAMPLING_DEPRECATION_MESSAGE = (
-    "ctx.sample() and ctx.sample_step() are deprecated and will be removed in a "
-    "future FastMCP release. They rely on server-initiated createMessage "
-    "requests, which were removed from MCP as of 2026-07-28 (SEP-2577), so they "
-    "work only on session-based (handshake-era) connections. Call an LLM "
-    "directly from your server instead."
-)
-
-_SAMPLING_MODERN_ERROR = (
-    "server-initiated sampling is not available on MCP 2026-07-28 connections; "
-    "SEP-2577 removed it — call an LLM from your server instead."
-)
 
 _ELICIT_MODERN_ERROR = (
     "elicitation via server-initiated requests is unavailable on 2026-07-28 "
@@ -106,23 +73,21 @@ _ELICIT_MODERN_ERROR = (
 )
 
 
-def _warn_sampling_deprecated() -> None:
-    """Emit the sampling deprecation warning once per process.
-
-    Gated on ``settings.deprecation_warnings`` like every other FastMCP
-    deprecation; fires a single time (module-level flag) rather than per call.
-    """
-    if _sample_deprecation_warned or not fastmcp.settings.deprecation_warnings:
-        return
-    _sample_deprecation_warned.add(True)
-    warnings.warn(
-        _SAMPLING_DEPRECATION_MESSAGE,
-        FastMCPDeprecationWarning,
-        stacklevel=3,
-    )
-
-
 _current_context: ContextVar[Context | None] = ContextVar("context", default=None)
+
+
+#: Error raised when a tool calls ``ctx.elicit()`` inside a background task.
+#: Background tasks gather input with the guard/return pattern (return an
+#: ``InputRequiredResult``), which the end-and-reenter machinery drives across
+#: worker legs. Imperative elicitation would require blocking a worker on a
+#: client round-trip, which end-and-reenter deliberately does not do.
+_TASK_ELICIT_ERROR = (
+    "Imperative ctx.elicit() is not supported inside a background task. Gather "
+    "input with the guard pattern instead: return an InputRequiredResult from "
+    "the tool (with input_requests), and read ctx.input_responses / "
+    "ctx.request_state when the task re-runs after the client answers."
+)
+
 
 TransportType = Literal["stdio", "sse", "streamable-http"]
 _current_transport: ContextVar[TransportType | None] = ContextVar(
@@ -247,14 +212,21 @@ class Context:
         self._origin_request_id: str | None = origin_request_id
         # Request-scoped state for non-serializable values (serializable=False)
         self._request_state: dict[str, Any] = {}
+        # Multi-round-trip input carried in-task (SEP-2322 guard channel). A
+        # foreground round recovers `input_responses`/`request_state` from the
+        # wire request; a worker has no wire request, so the tasks extension's
+        # in-task loop sets these between rounds and the properties below fall
+        # back to them. The guard tool reads `ctx.input_responses` identically
+        # in both modes — only the transport differs (task store vs wire params).
+        self._task_input_responses: mcp_types.InputResponses | None = None
+        self._task_request_state: str | None = None
 
     @property
     def is_background_task(self) -> bool:
         """True when this context is running in a background task (Docket worker).
 
-        When True, certain operations like elicit() and sample() will use
-        task-aware implementations that can pause the task and wait for
-        client input.
+        When True, certain operations like elicit() will use task-aware
+        implementations that can pause the task and wait for client input.
 
         Example:
             ```python
@@ -308,25 +280,9 @@ class Context:
         self._tokens.append(token)
 
         # Set current server for dependency injection (use weakref to avoid reference cycles)
-        from fastmcp.server.dependencies import (
-            _current_docket,
-            _current_server,
-            _current_worker,
-            is_docket_available,
-        )
+        from fastmcp.server.dependencies import _current_server, is_docket_available
 
         self._server_token = _current_server.set(weakref.ref(self.fastmcp))
-
-        # Re-set docket/worker from the server instance so mounted children
-        # inherit the parent's Docket via the ContextVar. Only servers that
-        # own the Docket (the parent) have _docket set; children skip this,
-        # leaving the parent's value in place.
-        if is_docket_available():
-            server = self.fastmcp
-            if server._docket is not None:
-                self._docket_token = _current_docket.set(server._docket)
-            if server._worker is not None:
-                self._worker_token = _current_worker.set(server._worker)
 
         if not is_docket_available():
             # Without docket, the lifespan won't provide a SharedContext,
@@ -338,18 +294,8 @@ class Context:
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
         """Exit the context manager and reset the most recent token."""
-        from fastmcp.server.dependencies import (
-            _current_docket,
-            _current_server,
-            _current_worker,
-        )
+        from fastmcp.server.dependencies import _current_server
 
-        if hasattr(self, "_worker_token"):
-            _current_worker.reset(self._worker_token)
-            del self._worker_token
-        if hasattr(self, "_docket_token"):
-            _current_docket.reset(self._docket_token)
-            del self._docket_token
         if hasattr(self, "_shared_context"):
             await self._shared_context.__aexit__(exc_type, exc_val, exc_tb)
             del self._shared_context
@@ -389,6 +335,25 @@ class Context:
         """
         return fastmcp_request_ctx.get()
 
+    def client_extension_settings(self, identifier: str) -> dict[str, Any] | None:
+        """This request's per-request opt-in settings for an MCP extension.
+
+        SEP-2133 extensions negotiate per request: the client repeats its
+        extension capabilities in each request's ``_meta`` under
+        ``io.modelcontextprotocol/clientCapabilities`` → ``extensions`` →
+        ``identifier``. Returns the declared settings dict (possibly empty) when
+        the extension was opted in for this request, or ``None`` when it was
+        not (or there is no active request). This bridges an extension's
+        ``tools/call`` interceptor — which receives a FastMCP ``Context`` — to
+        the request's declared client capabilities.
+        """
+        rc = self.request_context
+        if rc is None:
+            return None
+        from fastmcp.server.extensions import _extract_client_extension_settings
+
+        return _extract_client_extension_settings(rc.meta, identifier)
+
     def _input_response_params(
         self,
     ) -> mcp_types.InputResponseRequestParams | None:
@@ -422,9 +387,14 @@ class Context:
         keys match the `input_requests` map the tool minted; each value is the
         client's result for that request (an `ElicitResult`, `CreateMessageResult`,
         or `ListRootsResult`).
+
+        In a background task there is no wire request, so this falls back to the
+        responses the in-task guard loop delivered (see the tasks extension).
         """
         params = self._input_response_params()
-        return params.input_responses if params else None
+        if params is not None and params.input_responses is not None:
+            return params.input_responses
+        return self._task_input_responses
 
     @property
     def request_state(self) -> str | None:
@@ -436,9 +406,14 @@ class Context:
         before the tool runs, so tampering is rejected before this is read).
         `None` on the initial round. Use it to carry a small amount of computed
         state across rounds without re-deriving it.
+
+        In a background task there is no wire request, so this falls back to the
+        state the in-task guard loop re-injected (see the tasks extension).
         """
         params = self._input_response_params()
-        return params.request_state if params else None
+        if params is not None and params.request_state is not None:
+            return params.request_state
+        return self._task_request_state
 
     @property
     def lifespan_context(self) -> dict[str, Any]:
@@ -764,6 +739,15 @@ class Context:
         elif self._session is not None:
             session = self._session
         else:
+            # Background task: no live session, but the submitting request's
+            # stable session id was captured in the task snapshot. Use it so
+            # session-scoped state (session_id / get_state / set_state) keeps
+            # working in a worker, keyed to the same client that submitted.
+            from fastmcp.server.dependencies import _background_task_session_id
+
+            task_session_id = _background_task_session_id.get()
+            if task_session_id is not None:
+                return task_session_id
             raise RuntimeError(
                 "session_id is not available because no session exists. "
                 "This typically means you're outside a request context."
@@ -898,13 +882,6 @@ class Context:
             extra=extra,
         )
 
-    async def list_roots(self) -> list[Root]:
-        """List the roots available to the server, as indicated by the client."""
-        # Deprecated upstream in SDK v2 but deliberately kept per compat directive;
-        # removed with the multi-round-trip follow-up.
-        result = await self.session.list_roots()  # ty: ignore[deprecated]
-        return result.roots
-
     async def send_notification(
         self, notification: mcp_types.ServerNotification
     ) -> None:
@@ -970,242 +947,6 @@ class Context:
             return False
         return rc.protocol_version in MODERN_PROTOCOL_VERSIONS
 
-    def _server_can_sample(self) -> bool:
-        """True when a server-configured sampling handler can serve the request
-        without the client back-channel.
-
-        FastMCP supports a server-side sampling handler (``FastMCP(sampling_handler=...)``).
-        With ``sampling_handler_behavior="always"`` the handler always answers;
-        with ``"fallback"`` it answers whenever the client cannot. On modern
-        connections the client back-channel is gone, so either configuration lets
-        the server answer entirely server-side as long as a handler is set. (For
-        ``"always"`` without a handler the sampling implementation raises its own
-        clear "no handler configured" error, which is not an era concern.)
-        """
-        fastmcp = self.fastmcp
-        if fastmcp.sampling_handler_behavior == "always":
-            return True
-        return fastmcp.sampling_handler is not None
-
-    async def sample_step(
-        self,
-        messages: str | Sequence[str | SamplingMessage],
-        *,
-        system_prompt: str | None = None,
-        temperature: float | None = None,
-        max_tokens: int | None = None,
-        model_preferences: ModelPreferences | str | list[str] | None = None,
-        tools: Sequence[SamplingTool | Callable[..., Any]] | None = None,
-        tool_choice: ToolChoiceOption | str | None = None,
-        execute_tools: bool = True,
-        mask_error_details: bool | None = None,
-        tool_concurrency: int | None = None,
-    ) -> SampleStep:
-        """
-        Make a single LLM sampling call.
-
-        This is a stateless function that makes exactly one LLM call and optionally
-        executes any requested tools. Use this for fine-grained control over the
-        sampling loop.
-
-        Args:
-            messages: The message(s) to send. Can be a string, list of strings,
-                or list of SamplingMessage objects.
-            system_prompt: Optional system prompt for the LLM.
-            temperature: Optional sampling temperature.
-            max_tokens: Maximum tokens to generate. Defaults to 512.
-            model_preferences: Optional model preferences.
-            tools: Optional list of tools the LLM can use.
-            tool_choice: Tool choice mode ("auto", "required", or "none").
-            execute_tools: If True (default), execute tool calls and append results
-                to history. If False, return immediately with tool_calls available
-                in the step for manual execution.
-            mask_error_details: If True, mask detailed error messages from tool
-                execution. When None (default), uses the global settings value.
-                Tools can raise ToolError to bypass masking.
-            tool_concurrency: Controls parallel execution of tools:
-                - None (default): Sequential execution (one at a time)
-                - 0: Unlimited parallel execution
-                - N > 0: Execute at most N tools concurrently
-                If any tool has sequential=True, all tools execute sequentially
-                regardless of this setting.
-
-        Returns:
-            SampleStep containing:
-            - .response: The raw LLM response
-            - .history: Messages including input, assistant response, and tool results
-            - .is_tool_use: True if the LLM requested tool execution
-            - .tool_calls: List of tool calls (if any)
-            - .text: The text content (if any)
-
-        Example:
-            messages = "Research X"
-
-            while True:
-                step = await ctx.sample_step(messages, tools=[search])
-
-                if not step.is_tool_use:
-                    print(step.text)
-                    break
-
-                # Continue with tool results
-                messages = step.history
-        """
-        _warn_sampling_deprecated()
-        # On modern (2026-07-28) connections the client back-channel is gone
-        # (SEP-2577). A server-configured sampling handler can still answer
-        # entirely server-side; only raise the era error when nothing can serve
-        # the request. When modern, force the handler path (never attempt the
-        # dead client) by passing client_available=False.
-        client_available = not self._is_modern_protocol()
-        if not client_available and not self._server_can_sample():
-            raise ToolError(_SAMPLING_MODERN_ERROR)
-        return await sample_step_impl(
-            self,
-            messages=messages,
-            system_prompt=system_prompt,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            model_preferences=model_preferences,
-            tools=tools,
-            tool_choice=tool_choice,
-            auto_execute_tools=execute_tools,
-            mask_error_details=mask_error_details,
-            tool_concurrency=tool_concurrency,
-            client_available=client_available,
-        )
-
-    @overload
-    async def sample(
-        self,
-        messages: str | Sequence[str | SamplingMessage],
-        *,
-        system_prompt: str | None = None,
-        temperature: float | None = None,
-        max_tokens: int | None = None,
-        model_preferences: ModelPreferences | str | list[str] | None = None,
-        tools: Sequence[SamplingTool | Callable[..., Any]] | None = None,
-        result_type: type[ResultT],
-        mask_error_details: bool | None = None,
-        tool_concurrency: int | None = None,
-    ) -> SamplingResult[ResultT]:
-        """Overload: With result_type, returns SamplingResult[ResultT]."""
-
-    @overload
-    async def sample(
-        self,
-        messages: str | Sequence[str | SamplingMessage],
-        *,
-        system_prompt: str | None = None,
-        temperature: float | None = None,
-        max_tokens: int | None = None,
-        model_preferences: ModelPreferences | str | list[str] | None = None,
-        tools: Sequence[SamplingTool | Callable[..., Any]] | None = None,
-        result_type: None = None,
-        mask_error_details: bool | None = None,
-        tool_concurrency: int | None = None,
-    ) -> SamplingResult[str]:
-        """Overload: Without result_type, returns SamplingResult[str]."""
-
-    async def sample(
-        self,
-        messages: str | Sequence[str | SamplingMessage],
-        *,
-        system_prompt: str | None = None,
-        temperature: float | None = None,
-        max_tokens: int | None = None,
-        model_preferences: ModelPreferences | str | list[str] | None = None,
-        tools: Sequence[SamplingTool | Callable[..., Any]] | None = None,
-        result_type: type[ResultT] | None = None,
-        mask_error_details: bool | None = None,
-        tool_concurrency: int | None = None,
-    ) -> SamplingResult[ResultT] | SamplingResult[str]:
-        """
-        Send a sampling request to the client and await the response.
-
-        This method runs to completion automatically. When tools are provided,
-        it executes a tool loop: if the LLM returns a tool use request, the tools
-        are executed and the results are sent back to the LLM. This continues
-        until the LLM provides a final text response.
-
-        When result_type is specified, a synthetic `final_response` tool is
-        created. The LLM calls this tool to provide the structured response,
-        which is validated against the result_type and returned as `.result`.
-
-        For fine-grained control over the sampling loop, use sample_step() instead.
-
-        Args:
-            messages: The message(s) to send. Can be a string, list of strings,
-                or list of SamplingMessage objects.
-            system_prompt: Optional system prompt for the LLM.
-            temperature: Optional sampling temperature.
-            max_tokens: Maximum tokens to generate. Defaults to 512.
-            model_preferences: Optional model preferences.
-            tools: Optional list of tools the LLM can use. Accepts plain
-                functions or SamplingTools.
-            result_type: Optional type for structured output. When specified,
-                a synthetic `final_response` tool is created and the LLM's
-                response is validated against this type.
-            mask_error_details: If True, mask detailed error messages from tool
-                execution. When None (default), uses the global settings value.
-                Tools can raise ToolError to bypass masking.
-            tool_concurrency: Controls parallel execution of tools:
-                - None (default): Sequential execution (one at a time)
-                - 0: Unlimited parallel execution
-                - N > 0: Execute at most N tools concurrently
-                If any tool has sequential=True, all tools execute sequentially
-                regardless of this setting.
-
-        Returns:
-            SamplingResult[T] containing:
-            - .text: The text representation (raw text or JSON for structured)
-            - .result: The typed result (str for text, parsed object for structured)
-            - .history: All messages exchanged during sampling
-
-        Deprecated:
-            Server-initiated sampling relies on the createMessage back-channel,
-            which MCP removed as of 2026-07-28 (SEP-2577). This method works only
-            on session-based (handshake-era) connections and will be removed in a
-            future FastMCP release. Call an LLM directly from your server instead.
-        """
-        _warn_sampling_deprecated()
-        # On modern (2026-07-28) connections the client back-channel is gone
-        # (SEP-2577). A server-configured sampling handler can still answer
-        # entirely server-side; only raise the era error when nothing can serve
-        # the request. When modern, force the handler path (never attempt the
-        # dead client) by passing client_available=False.
-        client_available = not self._is_modern_protocol()
-        if not client_available and not self._server_can_sample():
-            raise ToolError(_SAMPLING_MODERN_ERROR)
-        return await sample_impl(  # ty: ignore[invalid-return-type]
-            self,
-            messages=messages,
-            system_prompt=system_prompt,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            model_preferences=model_preferences,
-            tools=tools,
-            result_type=result_type,
-            mask_error_details=mask_error_details,
-            tool_concurrency=tool_concurrency,
-            client_available=client_available,
-        )
-
-    @overload
-    async def elicit(
-        self,
-        message: str,
-        response_type: None,
-        *,
-        response_title: str | None = None,
-        response_description: str | None = None,
-    ) -> (
-        AcceptedElicitation[dict[str, Any]] | DeclinedElicitation | CancelledElicitation
-    ): ...
-
-    """When response_type is None, the accepted elicitation will contain an
-    empty dict"""
-
     @overload
     async def elicit(
         self,
@@ -1216,8 +957,7 @@ class Context:
         response_description: str | None = None,
     ) -> AcceptedElicitation[T] | DeclinedElicitation | CancelledElicitation: ...
 
-    """When response_type is not None, the accepted elicitation will contain the
-    response data"""
+    """The accepted elicitation will contain the response data"""
 
     @overload
     async def elicit(
@@ -1283,8 +1023,7 @@ class Context:
         | list[str]
         | dict[str, dict[str, str]]
         | list[list[str]]
-        | list[dict[str, dict[str, str]]]
-        | None = None,
+        | list[dict[str, dict[str, str]]],
         *,
         response_title: str | None = None,
         response_description: str | None = None,
@@ -1309,11 +1048,9 @@ class Context:
         "value" field will be generated for the MCP interaction and
         automatically deconstructed into the primitive type upon response.
 
-        Passing ``response_type=None`` (or omitting it) is deprecated and will
-        be removed in a future version. The resulting empty-schema form-mode
-        request is ambiguous and causes some clients (e.g. VS Code) to hang on
-        an empty form. Pass an explicit ``response_type`` describing the data
-        you want back.
+        ``response_type`` is required. Pass ``bool`` when all you need is a
+        confirmation; an empty schema leaves some clients rendering an empty,
+        non-functional form.
 
         Args:
             message: A human-readable message explaining what information is needed
@@ -1330,21 +1067,11 @@ class Context:
                 ``value`` field. Same scope rules as ``response_title``.
 
         Note:
-            This method works transparently in both request and background task
-            contexts. In background task mode (SEP-1686), it will set the task
-            status to "input_required" and wait for the client to provide input.
+            Imperative elicitation is not available inside a background task
+            (calling it there raises a ``ToolError``). A task gathers input with
+            the guard pattern: return an ``InputRequiredResult`` and read
+            ``ctx.input_responses`` / ``ctx.request_state`` when the task re-runs.
         """
-        if response_type is None and fastmcp.settings.deprecation_warnings:
-            warnings.warn(
-                "Calling ctx.elicit() without a response_type is deprecated "
-                "and will be removed in a future version. The empty-schema "
-                "form-mode request is ambiguous under the current MCP spec "
-                "and causes some clients (e.g. VS Code) to render an empty, "
-                "non-functional form. Pass an explicit response_type "
-                "describing the data you expect back.",
-                FastMCPDeprecationWarning,
-                stacklevel=2,
-            )
         config = parse_elicit_response_type(
             response_type,
             response_title=response_title,
@@ -1352,24 +1079,22 @@ class Context:
         )
 
         if self.is_background_task:
-            # Background task mode: use task-aware elicitation
-            result = await self._elicit_for_task(
-                message=message,
-                schema=config.schema,
-            )
-        else:
-            # Foreground push path: server-initiated elicitation needs a
-            # back-channel, which the 2026-07-28 era removed (SEP-2577). Raise a
-            # clear era-aware error before hitting the wire instead of the SDK's
-            # opaque "Method not found". Handshake-era behavior is unchanged.
-            if self._is_modern_protocol():
-                raise ToolError(_ELICIT_MODERN_ERROR)
-            # Standard request mode: use session.elicit directly
-            result = await self.session.elicit(
-                message=message,
-                requested_schema=config.schema,
-                related_request_id=self.request_id,
-            )
+            # Background tasks gather input with the guard/return pattern, not
+            # imperative elicitation — the worker never blocks on a client
+            # round-trip. Fail fast with the guidance to use InputRequiredResult.
+            raise ToolError(_TASK_ELICIT_ERROR)
+        # Foreground push path: server-initiated elicitation needs a back-channel,
+        # which the 2026-07-28 era removed (SEP-2577). Raise a clear era-aware
+        # error before hitting the wire instead of the SDK's opaque "Method not
+        # found". Handshake-era behavior is unchanged.
+        if self._is_modern_protocol():
+            raise ToolError(_ELICIT_MODERN_ERROR)
+        # Standard request mode: use session.elicit directly
+        result = await self.session.elicit(
+            message=message,
+            requested_schema=config.schema,
+            related_request_id=self.request_id,
+        )
 
         if result.action == "accept":
             return handle_elicit_accept(config, result.content)
@@ -1379,46 +1104,6 @@ class Context:
             return CancelledElicitation()
         else:
             raise ValueError(f"Unexpected elicitation action: {result.action}")
-
-    async def _elicit_for_task(
-        self,
-        message: str,
-        schema: dict[str, Any],
-    ) -> mcp_types.ElicitResult:
-        """Send an elicitation request from a background task (SEP-1686).
-
-        This method handles elicitation when running in a Docket worker context,
-        where there's no active MCP request. It:
-        1. Sets the task status to "input_required"
-        2. Sends the elicitation request with task metadata
-        3. Waits for the client to provide input via tasks/sendInput
-        4. Returns the result and resumes task execution
-
-        Args:
-            message: The message to display to the user
-            schema: The JSON schema for the expected response
-
-        Returns:
-            ElicitResult with the user's response
-
-        Raises:
-            RuntimeError: If not running in a background task context
-        """
-        if not self.is_background_task:
-            raise RuntimeError(
-                "_elicit_for_task called but not in a background task context"
-            )
-
-        # Import here to avoid circular imports and optional dependency issues
-        from fastmcp.server.tasks.elicitation import elicit_for_task
-
-        return await elicit_for_task(
-            task_id=self._task_id,  # type: ignore[arg-type]  # ty:ignore[invalid-argument-type]
-            session=self._session,
-            message=message,
-            schema=schema,
-            fastmcp=self.fastmcp,
-        )
 
     def _make_state_key(self, key: str) -> str:
         """Create session-prefixed key for state storage."""
@@ -1453,10 +1138,10 @@ class Context:
                 value=StateValue(value=value),
                 ttl=self._STATE_TTL_SECONDS,
             )
-        except Exception as e:
-            # Catch serialization errors from Pydantic (ValueError) or
-            # the key_value library (SerializationError). Both contain
-            # "serialize" in the message. Other exceptions propagate as-is.
+        except (ValueError, SerializationError) as e:
+            # Pydantic raises PydanticSerializationError (a ValueError) and the
+            # key_value library raises SerializationError; both carry "serialize"
+            # in the message. Other ValueErrors propagate unchanged.
             if "serialize" in str(e).lower():
                 raise TypeError(
                     f"Value for state key {key!r} is not serializable. "

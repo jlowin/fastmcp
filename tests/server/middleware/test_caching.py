@@ -355,9 +355,18 @@ class TestResponseCachingMiddlewareIntegration:
 
     async def test_list_operations_preserve_component_metadata(self):
         """Base component fields should survive conversion through the cache."""
+        from fastmcp.server.extensions import ServerExtension
+        from fastmcp.utilities.tasks import TASKS_EXTENSION_ID
+
+        class _StubTasksExtension(ServerExtension):
+            identifier = TASKS_EXTENSION_ID
+
         icon = mcp_types.Icon(src="https://example.com/component.png")
         mcp = FastMCP("MetadataServer")
         mcp.add_middleware(ResponseCachingMiddleware())
+        # A task-enabled tool requires the tasks extension to serve; register a
+        # stub so the metadata (execution.task_support) can be verified end-to-end.
+        mcp.add_extension(_StubTasksExtension())
 
         @mcp.tool(icons=[icon], task=TaskConfig(mode="optional"))
         async def greet() -> str:
@@ -381,7 +390,9 @@ class TestResponseCachingMiddlewareIntegration:
         assert not hasattr(cached_resources[0], "fn")
         assert not hasattr(cached_prompts[0], "fn")
 
-        async with Client(mcp) as client:
+        # Pinned to legacy: the tool's `execution.task_support` (SEP-1686) is
+        # advertised in the handshake-era tool listing; the modern listing omits it.
+        async with Client(mcp, mode="legacy") as client:
             for _ in range(2):
                 tools = await client.list_tools()
                 resources = await client.list_resources()

@@ -5,14 +5,11 @@ from __future__ import annotations
 import base64
 import json
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Annotated, Any, ClassVar, overload
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar
 
 import mcp_types
 
 if TYPE_CHECKING:
-    from docket import Docket
-    from docket.execution import Execution
-
     from fastmcp.resources.function_resource import FunctionResource
 
 import pydantic
@@ -32,7 +29,6 @@ from typing_extensions import Self
 
 from fastmcp.utilities.authorization import AuthCheck
 from fastmcp.utilities.components import FastMCPComponent
-from fastmcp.utilities.tasks import TaskConfig, TaskMeta
 
 
 class ResourceContent(pydantic.BaseModel):
@@ -214,6 +210,35 @@ class ResourceResult(pydantic.BaseModel):
         )
 
 
+class InputRequiredResourceResult(ResourceResult):
+    """The full result of a single multi-round-trip resource read (SEP-2322).
+
+    `InputRequiredResult` is a result type, not a `tools/call` feature: any
+    request may resolve to one. When a resource or resource template returns an
+    `InputRequiredResult` from its body to ask the client for input, that ask is
+    the legitimate result of this `resources/read` — so FastMCP wraps it in this
+    `ResourceResult` subclass, mirroring `InputRequiredToolResult` and
+    `InputRequiredPromptResult`, and it flows through the middleware chain as an
+    ordinary return value.
+
+    Invariant: the wrapped `InputRequiredResult` is never serialized as resource
+    contents. `contents` is always empty; the wire handler (`_on_read_resource`)
+    reads `.input_required` and returns it to the runner.
+    """
+
+    input_required: mcp_types.InputRequiredResult = pydantic.Field(
+        description="The client-input request this read resolved to (SEP-2322)"
+    )
+
+    def __init__(self, input_required: mcp_types.InputRequiredResult) -> None:
+        # Bypass ResourceResult's content-normalizing __init__: an
+        # input-required read carries no contents (see the invariant above), and
+        # `input_required` is a required field ResourceResult.__init__ can't set.
+        pydantic.BaseModel.__init__(
+            self, contents=[], meta=None, input_required=input_required
+        )
+
+
 def _public_content_meta(meta: dict[str, Any] | None) -> dict[str, Any] | None:
     """Strip FastMCP's internal bookkeeping out of component meta.
 
@@ -262,6 +287,12 @@ def convert_raw_to_resource_result(
     """
     if isinstance(raw_value, ResourceResult):
         return raw_value
+
+    if isinstance(raw_value, mcp_types.InputRequiredResult):
+        # The resource asked the client for input (SEP-2322). Wrap it so the
+        # ask travels the middleware chain as an ordinary result; the wire
+        # handler unwraps it.
+        return InputRequiredResourceResult(raw_value)
 
     meta = _public_content_meta(meta)
 
@@ -339,7 +370,6 @@ class Resource(FastMCPComponent):
         tags: set[str] | None = None,
         annotations: Annotations | None = None,
         meta: dict[str, Any] | None = None,
-        task: bool | TaskConfig | None = None,
         auth: AuthCheck | list[AuthCheck] | None = None,
     ) -> FunctionResource:
         from fastmcp.resources.function_resource import (
@@ -358,7 +388,6 @@ class Resource(FastMCPComponent):
             tags=tags,
             annotations=annotations,
             meta=meta,
-            task=task,
             auth=auth,
         )
 
@@ -414,43 +443,14 @@ class Resource(FastMCPComponent):
             raw_value, mime_type=self.mime_type, meta=self.meta
         )
 
-    @overload
-    async def _read(self, task_meta: None = None) -> ResourceResult: ...
+    async def _read(self) -> ResourceResult:
+        """Server entry point for resource reads.
 
-    @overload
-    async def _read(self, task_meta: TaskMeta) -> mcp_types.CreateTaskResult: ...
-
-    async def _read(
-        self, task_meta: TaskMeta | None = None
-    ) -> ResourceResult | mcp_types.CreateTaskResult:
-        """Server entry point that handles task routing.
-
-        This allows ANY Resource subclass to support background execution by setting
-        task_config.mode to "supported" or "required". The server calls this
-        method instead of read() directly.
-
-        Args:
-            task_meta: If provided, execute as a background task and return
-                CreateTaskResult. If None (default), execute synchronously and
-                return ResourceResult.
-
-        Returns:
-            ResourceResult when task_meta is None.
-            CreateTaskResult when task_meta is provided.
-
-        Subclasses can override this to customize task routing behavior.
-        For example, FastMCPProviderResource overrides to delegate to child
-        middleware without submitting to Docket.
+        The server calls this method instead of ``read()`` directly so that
+        subclasses can customize dispatch. For example,
+        ``FastMCPProviderResource`` overrides this to delegate to child-server
+        middleware.
         """
-        from fastmcp.server.tasks.routing import check_background_task
-
-        task_result = await check_background_task(
-            component=self, task_type="resource", arguments=None, task_meta=task_meta
-        )
-        if task_result:
-            return task_result
-
-        # Synchronous execution - convert result to ResourceResult
         result = await self.read()
         return self.convert_result(result)
 
@@ -481,33 +481,6 @@ class Resource(FastMCPComponent):
         """The globally unique lookup key for this resource."""
         base_key = self.make_key(str(self.uri))
         return f"{base_key}@{self.version or ''}"
-
-    def register_with_docket(self, docket: Docket) -> None:
-        """Register this resource with docket for background execution."""
-        if not self.task_config.supports_tasks():
-            return
-        docket.register(self.read, names=[self.key])
-
-    async def add_to_docket(  # type: ignore[override]
-        self,
-        docket: Docket,
-        *,
-        fn_key: str | None = None,
-        task_key: str | None = None,
-        **kwargs: Any,
-    ) -> Execution:
-        """Schedule this resource for background execution via docket.
-
-        Args:
-            docket: The Docket instance
-            fn_key: Function lookup key in Docket registry (defaults to self.key)
-            task_key: Redis storage key for the result
-            **kwargs: Additional kwargs passed to docket.add()
-        """
-        lookup_key = fn_key or self.key
-        if task_key:
-            kwargs["key"] = task_key
-        return await docket.add(lookup_key, **kwargs)()
 
     def get_span_attributes(self) -> dict[str, Any]:
         return super().get_span_attributes() | {

@@ -1,13 +1,13 @@
 import abc
 import contextlib
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, TypeVar
 
 import httpx2
 import mcp_types
 from mcp import ClientSession
-from mcp.client.extension import NotificationBinding
+from mcp.client.extension import NotificationBinding, ResultClaim
 from mcp.client.session import (
     ElicitationFnT,
     ListRootsFnT,
@@ -33,6 +33,8 @@ class ClientSessionKwargs(TypedDict, total=False):
     message_handler: MessageHandlerFnT | None
     client_info: mcp_types.Implementation | None
     notification_bindings: Sequence[NotificationBinding[Any]] | None
+    extensions: dict[str, dict[str, Any]] | None
+    result_claims: Mapping[str, Sequence[ResultClaim[Any]]] | None
 
 
 @dataclass(frozen=True)
@@ -77,6 +79,13 @@ class ClientTransport(abc.ABC):
     to an MCP server, and providing a ClientSession within an async context.
 
     """
+
+    #: Whether this transport can only carry the legacy (handshake) protocol era.
+    #: The modern `2026-07-28` era is sessionless and served over Streamable HTTP;
+    #: the SSE transport predates it and cannot serve it. When True, a client with
+    #: `mode="auto"` negotiates the legacy handshake directly rather than probing
+    #: `server/discover` (which some servers answer over SSE but then cannot serve).
+    legacy_only: bool = False
 
     @abc.abstractmethod
     @contextlib.asynccontextmanager

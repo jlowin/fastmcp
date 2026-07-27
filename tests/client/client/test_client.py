@@ -13,7 +13,6 @@ from pydantic import AnyUrl
 
 import fastmcp
 from fastmcp.client import Client
-from fastmcp.client.tasks import TaskNotificationHandler
 from fastmcp.client.transports import (
     ClientTransport,
     FastMCPTransport,
@@ -273,7 +272,14 @@ async def test_client_serialization_error():
 
 
 async def test_server_deserialization_error():
-    """Test server error when JSON string cannot be converted to expected type."""
+    """Test server error when JSON string cannot be converted to expected type.
+
+    `_on_get_prompt` in fastmcp_slim/fastmcp/server/mixins/mcp_operations.py
+    catches `FastMCPError` broadly and translates it into an `MCPError` via
+    `to_mcp_error`, the same way `_on_call_tool` surfaces tool errors. The
+    `PromptError` raised during argument conversion reaches the client with
+    its message intact on both protocol eras.
+    """
 
     server = FastMCP("TestServer")
 
@@ -341,7 +347,7 @@ async def test_read_resource_mcp(fastmcp_server):
 
 async def test_client_connection(fastmcp_server):
     """Test that connect is idempotent."""
-    client = Client(transport=FastMCPTransport(fastmcp_server))
+    client = Client(transport=FastMCPTransport(fastmcp_server), mode="legacy")
 
     # Connect idempotently
     async with client:
@@ -353,7 +359,7 @@ async def test_client_connection(fastmcp_server):
 
 async def test_initialize_called_once(fastmcp_server):
     """Test that initialization is called once and sets initialize_result."""
-    client = Client(transport=FastMCPTransport(fastmcp_server))
+    client = Client(transport=FastMCPTransport(fastmcp_server), mode="legacy")
     async with client:
         # Verify that initialization succeeded by checking initialize_result
         assert client.initialize_result is not None
@@ -362,7 +368,7 @@ async def test_initialize_called_once(fastmcp_server):
 
 async def test_initialize_result_connected(fastmcp_server):
     """Test that initialize_result returns the correct result when connected."""
-    client = Client(transport=FastMCPTransport(fastmcp_server))
+    client = Client(transport=FastMCPTransport(fastmcp_server), mode="legacy")
 
     # Initialize result should be None before connection
     assert client.initialize_result is None
@@ -397,7 +403,7 @@ async def test_server_info_custom_version():
     """Test that custom version is properly set in serverInfo."""
     # Test with custom version
     server_with_version = FastMCP("CustomVersionServer", version="1.2.3")
-    client = Client(transport=FastMCPTransport(server_with_version))
+    client = Client(transport=FastMCPTransport(server_with_version), mode="legacy")
 
     async with client:
         result = client.initialize_result
@@ -407,7 +413,7 @@ async def test_server_info_custom_version():
 
     # Test without version (backward compatibility)
     server_without_version = FastMCP("DefaultVersionServer")
-    client = Client(transport=FastMCPTransport(server_without_version))
+    client = Client(transport=FastMCPTransport(server_without_version), mode="legacy")
 
     async with client:
         result = client.initialize_result
@@ -879,32 +885,19 @@ async def test_client_list_dict_return_type():
         assert result.data == [{"city": "NYC", "temp": 72}, {"city": "LA", "temp": 85}]
 
 
-def test_client_new_resets_mutable_task_state(fastmcp_server):
-    """Client.new() should not share mutable task tracking structures."""
-    client = Client(transport=FastMCPTransport(fastmcp_server))
+def test_client_new_preserves_internal_task_extension(fastmcp_server):
+    """Client.new() rebuilds the clone with the auto-registered tasks claim.
 
-    client._task_registry["task-1"] = lambda: None  # type: ignore[assignment]  # ty:ignore[invalid-assignment]
-    client._submitted_task_ids.add("task-1")
+    The tasks client extension (from fastmcp-tasks, imported above) is folded into
+    every Client automatically; a clone must carry it too so tasked calls still
+    resolve transparently on the clone.
+    """
+    from fastmcp_tasks.client_models import ClientCreateTaskResult
+
+    client = Client(transport=FastMCPTransport(fastmcp_server))
+    assert ClientCreateTaskResult in client._claim_by_model
 
     clone = client.new()
-
     assert clone is not client
-    assert clone._task_registry == {}
-    assert clone._submitted_task_ids == set()
-    assert clone._task_registry is not client._task_registry
-    assert clone._submitted_task_ids is not client._submitted_task_ids
-
-
-def test_client_new_rebinds_default_task_notification_handler(fastmcp_server):
-    """Client.new() should bind the default task handler to the cloned client."""
-    client = Client(transport=FastMCPTransport(fastmcp_server))
-
-    handler = client._session_kwargs.get("message_handler")
-    assert isinstance(handler, TaskNotificationHandler)
-
-    clone = client.new()
-
-    clone_handler = clone._session_kwargs.get("message_handler")
-    assert isinstance(clone_handler, TaskNotificationHandler)
-    assert clone_handler is not handler
-    assert clone_handler._client_ref() is clone
+    assert ClientCreateTaskResult in clone._claim_by_model
+    assert clone._claim_by_model is not client._claim_by_model

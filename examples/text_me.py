@@ -41,7 +41,7 @@ class SurgeSettings(BaseSettings):
 
 # Create server
 mcp = FastMCP("Text me")
-surge_settings = SurgeSettings()  # type: ignore
+surge_settings = SurgeSettings()  # type: ignore[call-arg]
 
 
 @mcp.tool(name="textme", description="Send a text message to me")

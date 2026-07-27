@@ -9,7 +9,6 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from types import MethodType
 from typing import (
-    TYPE_CHECKING,
     Any,
     Literal,
     Protocol,
@@ -33,12 +32,7 @@ from fastmcp.utilities.authorization import AuthCheck
 from fastmcp.utilities.docstring_parsing import ParsedDocstring, parse_docstring
 from fastmcp.utilities.json_schema import compress_schema
 from fastmcp.utilities.logging import get_logger
-from fastmcp.utilities.tasks import TaskConfig
 from fastmcp.utilities.types import get_cached_typeadapter
-
-if TYPE_CHECKING:
-    from docket import Docket
-    from docket.execution import Execution
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -66,7 +60,6 @@ class PromptMeta:
     icons: list[Icon] | None = None
     tags: set[str] | None = None
     meta: dict[str, Any] | None = None
-    task: bool | TaskConfig | None = None
     auth: AuthCheck | list[AuthCheck] | None = None
     enabled: bool = True
 
@@ -90,7 +83,6 @@ class FunctionPrompt(Prompt):
         icons: list[Icon] | None = None,
         tags: set[str] | None = None,
         meta: dict[str, Any] | None = None,
-        task: bool | TaskConfig | None = None,
         auth: AuthCheck | list[AuthCheck] | None = None,
     ) -> FunctionPrompt:
         """Create a Prompt from a function.
@@ -110,7 +102,7 @@ class FunctionPrompt(Prompt):
         # Check mutual exclusion
         individual_params_provided = any(
             x is not None
-            for x in [name, version, title, description, icons, tags, meta, task, auth]
+            for x in [name, version, title, description, icons, tags, meta, auth]
         )
 
         if metadata is not None and individual_params_provided:
@@ -129,7 +121,6 @@ class FunctionPrompt(Prompt):
                 icons=icons,
                 tags=tags,
                 meta=meta,
-                task=task,
                 auth=auth,
             )
 
@@ -151,16 +142,6 @@ class FunctionPrompt(Prompt):
         # Parse the outer docstring (before unwrapping) to preserve the class
         # docstring as the prompt description for callable class instances.
         outer_docstring = parse_docstring(fn)
-
-        # Normalize task to TaskConfig and validate
-        task_value = metadata.task
-        if task_value is None:
-            task_config = TaskConfig(mode="forbidden")
-        elif isinstance(task_value, bool):
-            task_config = TaskConfig.from_bool(task_value)
-        else:
-            task_config = task_value
-        task_config.validate_function(fn, func_name)
 
         # if the fn is a callable class, we need to get the __call__ method from here out
         if not inspect.isroutine(fn) and not isinstance(fn, functools.partial):
@@ -267,7 +248,6 @@ class FunctionPrompt(Prompt):
             tags=metadata.tags or set(),
             fn=wrapped_fn,
             meta=metadata.meta,
-            task_config=task_config,
             auth=metadata.auth,
         )
 
@@ -367,37 +347,6 @@ class FunctionPrompt(Prompt):
             logger.exception(f"Error rendering prompt {self.name}")
             raise PromptError(f"Error rendering prompt {self.name!r}: {e}") from e
 
-    def register_with_docket(self, docket: Docket) -> None:
-        """Register this prompt with docket for background execution."""
-        if not self.task_config.supports_tasks():
-            return
-        docket.register(self.fn, names=[self.key])
-
-    async def add_to_docket(
-        self,
-        docket: Docket,
-        arguments: dict[str, Any] | None,
-        *,
-        fn_key: str | None = None,
-        task_key: str | None = None,
-        **kwargs: Any,
-    ) -> Execution:
-        """Schedule this prompt for background execution via docket.
-
-        FunctionPrompt splats the arguments dict since .fn expects **kwargs.
-
-        Args:
-            docket: The Docket instance
-            arguments: Prompt arguments
-            fn_key: Function lookup key in Docket registry (defaults to self.key)
-            task_key: Redis storage key for the result
-            **kwargs: Additional kwargs passed to docket.add()
-        """
-        lookup_key = fn_key or self.key
-        if task_key:
-            kwargs["key"] = task_key
-        return await docket.add(lookup_key, **kwargs)(**(arguments or {}))
-
 
 @overload
 def prompt(fn: F) -> F: ...
@@ -411,7 +360,6 @@ def prompt(
     icons: list[Icon] | None = None,
     tags: set[str] | None = None,
     meta: dict[str, Any] | None = None,
-    task: bool | TaskConfig | None = None,
     auth: AuthCheck | list[AuthCheck] | None = None,
 ) -> Callable[[F], F]: ...
 @overload
@@ -425,7 +373,6 @@ def prompt(
     icons: list[Icon] | None = None,
     tags: set[str] | None = None,
     meta: dict[str, Any] | None = None,
-    task: bool | TaskConfig | None = None,
     auth: AuthCheck | list[AuthCheck] | None = None,
 ) -> Callable[[F], F]: ...
 
@@ -440,7 +387,6 @@ def prompt(
     icons: list[Icon] | None = None,
     tags: set[str] | None = None,
     meta: dict[str, Any] | None = None,
-    task: bool | TaskConfig | None = None,
     auth: AuthCheck | list[AuthCheck] | None = None,
 ) -> Any:
     """Standalone decorator to mark a function as an MCP prompt.
@@ -463,7 +409,6 @@ def prompt(
             icons=icons,
             tags=tags,
             meta=meta,
-            task=task,
             auth=auth,
         )
         target = fn.__func__ if isinstance(fn, staticmethod | MethodType) else fn

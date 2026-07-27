@@ -22,6 +22,7 @@ from typing import Annotated
 
 import mcp_types
 import pytest
+from docket import Docket
 from mcp.client._input_required import InputRequiredRoundsExceededError
 from mcp.server.request_state import RequestStateSecurity
 from mcp.shared.exceptions import MCPError
@@ -37,6 +38,8 @@ from fastmcp.server.middleware.error_handling import ErrorHandlingMiddleware
 from fastmcp.server.middleware.middleware import Middleware
 from fastmcp.tools.base import InputRequiredToolResult, ToolResult
 from fastmcp.utilities.tests import run_server_async
+from fastmcp_tasks import TasksExtension
+from tests.tasks.task_helpers import running_task_server, submit_task, wait_for_task
 
 
 def _elicit(key: str, message: str, field: str) -> ElicitRequest:
@@ -1158,8 +1161,20 @@ class TestTaskExecution:
     background task has no such request, so returning a guard result from a task
     is rejected with a clear error rather than silently yielding empty content."""
 
-    async def test_guard_result_from_task_is_rejected(self):
+    @pytest.fixture
+    def reset_docket_memory_server(self):
+        """Force a fresh memory:// Docket server bound to this test's loop."""
+        if hasattr(Docket, "_memory_server"):
+            delattr(Docket, "_memory_server")
+        yield
+        if hasattr(Docket, "_memory_server"):
+            delattr(Docket, "_memory_server")
+
+    async def test_guard_result_from_task_parks_for_input(
+        self, reset_docket_memory_server
+    ):
         mcp = FastMCP("guard-task")
+        mcp.add_extension(TasksExtension())
 
         @mcp.tool(task=True)
         async def book_flight(ctx: Context) -> str | InputRequiredResult:
@@ -1169,10 +1184,20 @@ class TestTaskExecution:
                 request_state=None,
             )
 
-        async with Client(mcp) as client:
-            task = await client.call_tool("book_flight", {}, task=True)
-            with pytest.raises(MCPError, match="background task"):
-                await task.result()
+        # A function-tool guard is driven as a task by the in-task reentrant
+        # loop: submitting `book_flight` parks its input request on the poll
+        # surface (`input_required`), where a client answers it via
+        # `tasks/update`. The full round-trip lives in
+        # tests/tasks/server/test_guard_reentrant.py.
+        async with running_task_server(mcp):
+            created = await submit_task(mcp, "book_flight", {})
+            parked = await wait_for_task(
+                mcp,
+                created.task_id,
+                target_states=frozenset({"input_required"}),
+            )
+            assert parked.status == "input_required"
+            assert parked.input_requests
 
 
 class TestHttpTransport:

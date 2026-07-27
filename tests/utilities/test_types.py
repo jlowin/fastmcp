@@ -282,10 +282,25 @@ class TestAudio:
         assert audio.data == b"test"
         assert audio._mime_type == "audio/wav"  # Default for raw data
 
+    def test_mime_type_from_format(self):
+        """Test MIME type normalization from audio format."""
+
+        expected = {
+            "wav": "audio/wav",
+            "mp3": "audio/mpeg",
+            "ogg": "audio/ogg",
+            "m4a": "audio/mp4",
+            "flac": "audio/flac",
+        }
+
+        for fmt, mime in expected.items():
+            audio = Audio(data=b"test", format=fmt)
+            assert audio._mime_type == mime
+
     def test_audio_initialization_with_format(self):
         """Test audio initialization with a specific format."""
         audio = Audio(data=b"test", format="mp3")
-        assert audio._mime_type == "audio/mp3"
+        assert audio._mime_type == "audio/mpeg"
 
     def test_missing_data_and_path_raises_error(self):
         """Test that error is raised when neither path nor data is provided."""
@@ -335,7 +350,7 @@ class TestAudio:
         content = audio.to_audio_content()
 
         assert content.type == "audio"
-        assert content.mime_type == "audio/mp3"
+        assert content.mime_type == "audio/mpeg"
         assert content.data == base64.b64encode(test_data).decode()
 
     def test_to_audio_content_error(self, monkeypatch):
@@ -460,6 +475,22 @@ class TestFile:
         assert str(resource.resource.uri) == "file:///resource.pdf"
         if isinstance(resource.resource, BlobResourceContents):
             assert resource.resource.blob == base64.b64encode(test_data).decode()
+
+    def test_to_resource_content_with_data_and_name_without_extension(self):
+        """Test data-backed File URI with a custom name that needs an extension."""
+        file = File(data=b"test file data", format="pdf", name="report")
+        resource = file.to_resource_content()
+
+        assert resource.resource.mime_type == "application/pdf"
+        assert str(resource.resource.uri) == "file:///report.pdf"
+
+    def test_to_resource_content_with_data_preserves_name_extension(self):
+        """Test data-backed File URI preserves a custom name with an extension."""
+        file = File(data=b"test file data", format="pdf", name="report.pdf")
+        resource = file.to_resource_content()
+
+        assert resource.resource.mime_type == "application/pdf"
+        assert str(resource.resource.uri) == "file:///report.pdf"
 
     def test_to_resource_content_with_text_data(self):
         """Test conversion to ResourceContent with text data (TextResourceContents)."""

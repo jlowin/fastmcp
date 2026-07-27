@@ -129,6 +129,17 @@ class ElicitConfig:
     is_raw: bool
 
 
+#: Raised when a response type is missing. The empty-object schema this used to
+#: produce was ambiguous under the MCP spec and left some clients (e.g. VS Code)
+#: rendering an empty, non-functional form. Deprecated in 3.2, removed in 4.0.
+_NONE_RESPONSE_TYPE_ERROR = (
+    "ctx.elicit() requires a response_type. The empty-schema form-mode request "
+    "produced by response_type=None was ambiguous under the MCP spec and caused "
+    "some clients to render an empty, non-functional form. Pass a type "
+    "describing the data you expect back — use `bool` for a confirmation."
+)
+
+
 def parse_elicit_response_type(
     response_type: Any,
     response_title: str | None = None,
@@ -136,8 +147,8 @@ def parse_elicit_response_type(
 ) -> ElicitConfig:
     """Parse response_type into schema and handling configuration.
 
-    Supports multiple syntaxes:
-    - None: Empty object schema, expect empty response
+    A response type is required; ``None`` raises ``TypeError``. Supports
+    multiple syntaxes:
     - dict: `{"low": {"title": "..."}}` -> single-select titled enum
     - list patterns:
         - `[["a", "b"]]` -> multi-select untitled
@@ -150,26 +161,16 @@ def parse_elicit_response_type(
     The ``response_title`` and ``response_description`` arguments customize the
     label and description of the wrapped ``value`` property for the scalar/dict/list
     shorthand forms. They are only valid when FastMCP is wrapping the response
-    type; passing them with a full BaseModel/dataclass (or ``None``) raises
-    ``TypeError``, because in those cases the user already controls field
-    metadata via ``Field(title=..., description=...)``.
+    type; passing them with a full BaseModel/dataclass raises ``TypeError``,
+    because in those cases the user already controls field metadata via
+    ``Field(title=..., description=...)``.
     """
     has_response_metadata = (
         response_title is not None or response_description is not None
     )
 
     if response_type is None:
-        if has_response_metadata:
-            raise TypeError(
-                "response_title and response_description are not supported when "
-                "response_type is None, because the elicitation schema has no "
-                "fields to label."
-            )
-        return ElicitConfig(
-            schema={"type": "object", "properties": {}},
-            response_type=None,
-            is_raw=False,
-        )
+        raise TypeError(_NONE_RESPONSE_TYPE_ERROR)
 
     if isinstance(response_type, dict):
         config = _parse_dict_syntax(response_type)

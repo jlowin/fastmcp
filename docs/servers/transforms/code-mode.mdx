@@ -250,7 +250,7 @@ Here's a minimal example:
 from fastmcp.experimental.transforms.code_mode import CodeMode
 from fastmcp.experimental.transforms.code_mode import GetToolCatalog, GetSchemas
 from fastmcp.server.context import Context
-from fastmcp.tools.tool import Tool
+from fastmcp.tools import Tool
 
 def list_all_tools(get_catalog: GetToolCatalog) -> Tool:
     async def list_tools(ctx: Context) -> str:

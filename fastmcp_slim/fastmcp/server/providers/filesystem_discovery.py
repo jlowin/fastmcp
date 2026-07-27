@@ -349,7 +349,6 @@ def extract_components(module: ModuleType) -> list[FastMCPComponent]:
                 )
                 components.append(tool)
             elif isinstance(meta, ResourceMeta):
-                resolved_task = meta.task if meta.task is not None else False
                 has_uri_params = "{" in meta.uri and "}" in meta.uri
                 wrapper_fn = without_injected_parameters(obj)
                 has_func_params = bool(inspect.signature(wrapper_fn).parameters)
@@ -367,7 +366,6 @@ def extract_components(module: ModuleType) -> list[FastMCPComponent]:
                         tags=meta.tags,
                         annotations=meta.annotations,
                         meta=meta.meta,
-                        task=resolved_task,
                         auth=meta.auth,
                     )
                 else:
@@ -383,12 +381,10 @@ def extract_components(module: ModuleType) -> list[FastMCPComponent]:
                         tags=meta.tags,
                         annotations=meta.annotations,
                         meta=meta.meta,
-                        task=resolved_task,
                         auth=meta.auth,
                     )
                 components.append(resource)
             elif isinstance(meta, PromptMeta):
-                resolved_task = meta.task if meta.task is not None else False
                 prompt = Prompt.from_function(
                     obj,
                     name=meta.name,
@@ -398,7 +394,6 @@ def extract_components(module: ModuleType) -> list[FastMCPComponent]:
                     icons=meta.icons,
                     tags=meta.tags,
                     meta=meta.meta,
-                    task=resolved_task,
                     auth=meta.auth,
                 )
                 components.append(prompt)

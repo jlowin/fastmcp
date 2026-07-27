@@ -60,18 +60,20 @@ class GoogleGenaiSamplingHandler:
 
     Example:
         ```python
-        from google.genai import Client
-        from fastmcp import FastMCP
+        from google.genai import Client as GoogleGenaiClient
+        from fastmcp import Client as FastMCPClient
         from fastmcp.client.sampling.handlers.google_genai import (
             GoogleGenaiSamplingHandler,
         )
 
         handler = GoogleGenaiSamplingHandler(
             default_model="gemini-2.0-flash",
-            client=Client(),
+            client=GoogleGenaiClient(),
         )
 
-        server = FastMCP(sampling_handler=handler)
+        # Answers a handshake-era server's push request and a modern server's
+        # input-required round alike.
+        client = FastMCPClient("https://example.com/mcp", sampling_handler=handler)
         ```
     """
 

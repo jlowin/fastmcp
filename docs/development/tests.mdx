@@ -369,7 +369,7 @@ async def test_tenant_header_is_visible_to_tools():
         headers={"X-Tenant-ID": "acme"},
         timeout=5,
     ) as client:
-        await client.ping()
+        await client.list_tools()
 ```
 
 #### Sharing One Server Across Tests
@@ -398,10 +398,15 @@ async def test_greet(http_server: ASGIServer):
         assert greeting.data == "Hello, World!"
 
 async def test_sessions_are_isolated(http_server: ASGIServer):
-    async with http_server.client() as first, http_server.client() as second:
+    async with (
+        http_server.client(mode="legacy") as first,
+        http_server.client(mode="legacy") as second,
+    ):
         assert await first.ping() is True
         assert await second.ping() is True
 ```
+
+Sessions belong to the handshake era of the MCP protocol, and so does `ping`, so a test that is about session behavior pins `mode="legacy"`. Every keyword argument `client()` doesn't consume itself is passed straight to `Client`. See [protocol negotiation](/clients/client#protocol-negotiation).
 
 For assertions about raw HTTP — status codes, response headers, metadata endpoints — `http_client()` returns an `httpx.AsyncClient` bound to the same app. Because nothing is listening on the network, this is the only way to make raw requests; a plain `httpx.AsyncClient()` cannot reach the server.
 
@@ -430,7 +435,7 @@ async def test_server_binds_a_real_port():
     async with run_server_async(server) as url:
         assert url.startswith("http://127.0.0.1:")
         async with Client(url) as client:
-            assert await client.ping() is True
+            assert await client.list_tools() == []
 ```
 
 #### Subprocess Testing (Special Cases)
@@ -464,8 +469,8 @@ async def test_http_transport(http_server: str):
     async with Client(
         transport=StreamableHttpTransport(http_server)
     ) as client:
-        result = await client.ping()
-        assert result is True
+        tools = await client.list_tools()
+        assert "greet" in [tool.name for tool in tools]
 ```
 
 The `run_server_in_process` utility handles server lifecycle, port allocation, and cleanup automatically. Use this only when subprocess isolation is truly necessary, as it's slower and harder to debug than in-process testing. FastMCP uses the `client_process` marker to isolate these tests in CI.

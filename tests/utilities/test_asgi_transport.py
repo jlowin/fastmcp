@@ -197,7 +197,8 @@ class TestRunServerInMemory:
     async def test_custom_path_is_used(self):
         async with asgi_server(build_server(), path="/custom") as server:
             assert server.url.endswith("/custom")
-            async with server.client() as client:
+            # `ping` exists only in the handshake era, so this pins that era.
+            async with server.client(mode="legacy") as client:
                 assert await client.ping() is True
 
     async def test_server_initiated_request_mid_stream(self):
@@ -211,7 +212,11 @@ class TestRunServerInMemory:
             return {"value": "Alice"}
 
         async with asgi_server(build_server()) as server:
-            async with server.client(elicitation_handler=elicitation_handler) as client:
+            # Server-initiated elicitation is handshake-era only, and it is the
+            # mid-stream request this test exists to exercise, so pin that era.
+            async with server.client(
+                elicitation_handler=elicitation_handler, mode="legacy"
+            ) as client:
                 result = await client.call_tool("elicit_name", {})
 
         assert result.data == "You said Alice"

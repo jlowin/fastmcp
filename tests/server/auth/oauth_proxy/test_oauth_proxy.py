@@ -10,6 +10,7 @@ from key_value.aio.stores.memory import MemoryStore
 from mcp.shared.auth import OAuthClientInformationFull
 from pydantic import AnyUrl
 from starlette.applications import Starlette
+from starlette.testclient import TestClient
 
 from fastmcp.server.auth.oauth_proxy import OAuthProxy
 from fastmcp.server.auth.oauth_proxy.models import OAuthTransaction
@@ -235,11 +236,37 @@ class TestOAuthProxyInitialization:
         metadata = response.json()
         assert metadata.get("client_id_metadata_document_supported") is True
         assert set(metadata.get("token_endpoint_auth_methods_supported")) == {
-            "client_secret_post",
-            "client_secret_basic",
             "private_key_jwt",
             "none",
         }
+
+    async def test_metadata_advertises_only_public_client_auth(self, jwt_verifier):
+        """The proxy authenticates every client as public, so metadata must
+        advertise `none` and must not claim secret-based methods it never enforces.
+        """
+        proxy = OAuthProxy(
+            upstream_authorization_endpoint="https://auth.example.com/authorize",
+            upstream_token_endpoint="https://auth.example.com/token",
+            upstream_client_id="client-123",
+            upstream_client_secret="secret-456",
+            token_verifier=jwt_verifier,
+            base_url="https://api.example.com",
+            jwt_signing_key="test-secret",
+            client_storage=MemoryStore(),
+            enable_cimd=False,
+        )
+
+        app = Starlette(routes=proxy.get_routes())
+        transport = httpx2.ASGITransport(app=app)
+
+        async with httpx2.AsyncClient(
+            transport=transport, base_url="https://api.example.com"
+        ) as client:
+            response = await client.get("/.well-known/oauth-authorization-server")
+
+        assert response.status_code == 200
+        metadata = response.json()
+        assert set(metadata.get("token_endpoint_auth_methods_supported")) == {"none"}
 
     async def test_metadata_advertises_authorization_response_issuer_parameter(
         self, jwt_verifier
@@ -592,3 +619,38 @@ class TestIdpCallbackSuccessForwarding:
         # byte-for-byte.
         assert "flag" in query
         assert "sig=%FF%FE" in query
+
+
+class TestCIMDTokenEndpointAudience:
+    """The `aud` expected on a CIMD assertion matches the advertised token endpoint."""
+
+    @pytest.mark.parametrize(
+        "base_url",
+        ["https://api.example.com", "https://api.example.com/api"],
+    )
+    def test_token_endpoint_url_matches_advertised_metadata(
+        self, jwt_verifier, base_url: str
+    ):
+        """A bare-authority base_url must not expect `aud` of `https://host//token`.
+
+        CIMD is enabled by default, and a spec-following client binds its
+        private_key_jwt assertion to the `token_endpoint` the metadata
+        advertises. If the proxy expects a different string, every such client
+        is rejected with invalid_client.
+        """
+        proxy = OAuthProxy(
+            upstream_authorization_endpoint="https://auth.example.com/authorize",
+            upstream_token_endpoint="https://auth.example.com/token",
+            upstream_client_id="client-123",
+            upstream_client_secret="secret-456",
+            token_verifier=jwt_verifier,
+            base_url=base_url,
+            jwt_signing_key="test-secret",
+            client_storage=MemoryStore(),
+        )
+
+        app = Starlette(routes=proxy.get_routes(mcp_path="/mcp"))
+        with TestClient(app) as client:
+            metadata = client.get("/.well-known/oauth-authorization-server").json()
+
+        assert proxy.token_endpoint_url == metadata["token_endpoint"]

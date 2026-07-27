@@ -29,15 +29,10 @@ from typing import Any
 
 import mcp_types as mt
 
-from fastmcp.exceptions import AuthorizationError
+from fastmcp.exceptions import AuthorizationError, InsufficientScopeError
 from fastmcp.prompts.base import Prompt, PromptResult
 from fastmcp.resources.base import Resource, ResourceResult
 from fastmcp.resources.template import ResourceTemplate
-from fastmcp.server.auth.authorization import (
-    AuthCheck,
-    AuthContext,
-    run_auth_checks,
-)
 from fastmcp.server.dependencies import get_access_token
 from fastmcp.server.middleware.middleware import (
     CallNext,
@@ -45,6 +40,13 @@ from fastmcp.server.middleware.middleware import (
     MiddlewareContext,
 )
 from fastmcp.tools.base import Tool, ToolResult
+from fastmcp.utilities.authorization import (
+    AuthCheck,
+    AuthContext,
+    run_auth_checks,
+    run_auth_checks_with_shortfall,
+    scope_requirements,
+)
 from fastmcp.utilities.versions import VersionSpec
 
 logger = logging.getLogger(__name__)
@@ -110,6 +112,60 @@ class AuthMiddleware(Middleware):
 
     def __init__(self, auth: AuthCheck | list[AuthCheck]) -> None:
         self.auth = auth
+
+    def _chain_shortfall(
+        self,
+        own_missing: list[str],
+        ctx: AuthContext,
+        server: Any,
+    ) -> list[str]:
+        """Widen this middleware's shortfall to cover the rest of the chain.
+
+        Scope requirements are commonly split across several `AuthMiddleware`
+        instances (the tag-based configuration does exactly this). Raising as
+        soon as the first one finds a shortfall means the middleware further in
+        never runs, so a caller told only the outer scope would obtain it, retry,
+        and be denied for the next — the same non-convergent loop that reporting
+        a union within one middleware avoids.
+
+        Sibling requirements are read without evaluating them: `scope_requirements`
+        is a pure comparison against the token and component. Only the layers the
+        request would actually reach next may contribute, so the walk starts after
+        this middleware and stops at the first one whose requirements cannot be
+        read — a layer holding an opaque check is an unverified gate, and anything
+        at or beyond it might be unreachable for reasons that have nothing to do
+        with scopes. Disclosing those requirements would leak what sits behind a
+        policy the request never passed.
+
+        Layers *before* this one are already known to have passed, so they neither
+        block the walk nor contribute anything. This middleware's own shortfall
+        always counts: the request demonstrably reached it.
+
+        The result is therefore complete when the reachable chain is scope-only,
+        and deliberately partial otherwise — never a disclosure past an
+        unevaluated gate.
+        """
+        middleware = getattr(server, "middleware", None)
+        if not isinstance(middleware, list):
+            return own_missing
+
+        position = next(
+            (i for i, mw in enumerate(middleware) if mw is self),
+            None,
+        )
+        if position is None:
+            return own_missing
+
+        missing = set(own_missing)
+        for mw in middleware[position + 1 :]:
+            if not isinstance(mw, AuthMiddleware):
+                continue
+            sibling = scope_requirements(mw.auth, ctx)
+            if sibling is None:
+                # An unverified gate. Nothing at or beyond it may contribute.
+                break
+            missing |= set(sibling)
+        return sorted(missing)
 
     async def on_list_tools(
         self,
@@ -180,7 +236,17 @@ class AuthMiddleware(Middleware):
         # Global auth check
         token = get_access_token()
         ctx = AuthContext(token=token, component=tool)
-        if not await run_auth_checks(self.auth, ctx):
+        authorized, missing = await run_auth_checks_with_shortfall(self.auth, ctx)
+        if not authorized:
+            if missing:
+                missing = self._chain_shortfall(missing, ctx, fastmcp.fastmcp)
+                raise InsufficientScopeError(
+                    missing,
+                    message=(
+                        f"Authorization failed for tool '{tool_name}': "
+                        f"insufficient scope (required: {', '.join(missing)})"
+                    ),
+                )
             raise AuthorizationError(
                 f"Authorization failed for tool '{tool_name}': insufficient permissions"
             )
@@ -258,7 +324,17 @@ class AuthMiddleware(Middleware):
         # Global auth check
         token = get_access_token()
         ctx = AuthContext(token=token, component=component)
-        if not await run_auth_checks(self.auth, ctx):
+        authorized, missing = await run_auth_checks_with_shortfall(self.auth, ctx)
+        if not authorized:
+            if missing:
+                missing = self._chain_shortfall(missing, ctx, fastmcp.fastmcp)
+                raise InsufficientScopeError(
+                    missing,
+                    message=(
+                        f"Authorization failed for resource '{uri}': "
+                        f"insufficient scope (required: {', '.join(missing)})"
+                    ),
+                )
             raise AuthorizationError(
                 f"Authorization failed for resource '{uri}': insufficient permissions"
             )
@@ -360,7 +436,17 @@ class AuthMiddleware(Middleware):
         # Global auth check
         token = get_access_token()
         ctx = AuthContext(token=token, component=prompt)
-        if not await run_auth_checks(self.auth, ctx):
+        authorized, missing = await run_auth_checks_with_shortfall(self.auth, ctx)
+        if not authorized:
+            if missing:
+                missing = self._chain_shortfall(missing, ctx, fastmcp.fastmcp)
+                raise InsufficientScopeError(
+                    missing,
+                    message=(
+                        f"Authorization failed for prompt '{prompt_name}': "
+                        f"insufficient scope (required: {', '.join(missing)})"
+                    ),
+                )
             raise AuthorizationError(
                 f"Authorization failed for prompt '{prompt_name}': insufficient permissions"
             )

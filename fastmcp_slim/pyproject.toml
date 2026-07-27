@@ -108,4 +108,3 @@ server = [
     "watchfiles>=1.0.0",
     "websockets>=15.0.1",
 ]
-tasks = ["pydocket>=0.20.0"]

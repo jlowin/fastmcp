@@ -175,7 +175,7 @@ These parameters tune how the server processes requests and communicates with cl
 <ParamField body="strict_input_validation" type="bool" default="False">
   <VersionBadge version="2.13.0" />
 
-  When `False` (default), FastMCP uses Pydantic's flexible validation that coerces compatible inputs (e.g., `"10"` → `10` for int parameters). When `True`, validates inputs against the exact JSON Schema before calling your function, rejecting type mismatches. See [Input Validation Modes](/servers/tools#input-validation-modes) for details
+  When `False` (default), FastMCP uses Pydantic's flexible validation that coerces compatible inputs (e.g., `"10"` → `10` for int parameters). When `True`, validates inputs against the exact JSON Schema before calling your function, rejecting type mismatches. See [Validation Modes](/servers/tools#validation-modes) for details
 </ParamField>
 
 <ParamField body="mask_error_details" type="bool | None">
@@ -195,7 +195,7 @@ These parameters tune how the server processes requests and communicates with cl
 <ParamField body="client_log_level" type="LoggingLevel | None">
   <VersionBadge version="3.2.0" />
 
-  Default minimum log level for messages sent to MCP clients via `context.log()`. When set, messages below this level are suppressed. Individual clients can override this per-session using the MCP `logging/setLevel` request. One of `"debug"`, `"info"`, `"notice"`, `"warning"`, `"error"`, `"critical"`, `"alert"`, or `"emergency"`
+  Default minimum log level for messages sent to MCP clients via `context.log()`. When set, messages below this level are suppressed. Handshake-era clients can override this per-session using the MCP `logging/setLevel` request; the modern protocol has no session to hold that level, so clients on it filter by level in their own log handler instead. One of `"debug"`, `"info"`, `"notice"`, `"warning"`, `"error"`, `"critical"`, `"alert"`, or `"emergency"`
 </ParamField>
 
 <ParamField body="dereference_schemas" type="bool" default="True">
@@ -211,19 +211,9 @@ These parameters tune how the server processes requests and communicates with cl
 </ParamField>
 </Card>
 
-### Handlers and Storage
-
-These parameters provide custom handlers for MCP capabilities and persistent storage for session state.
+### Storage
 
 <Card>
-<ParamField body="sampling_handler" type="SamplingHandler | None">
-  Custom handler for MCP sampling requests (server-initiated LLM calls). See [Sampling](/servers/sampling) for details
-</ParamField>
-
-<ParamField body="sampling_handler_behavior" type='Literal["always", "fallback"] | None' default="fallback">
-  When `"fallback"`, the sampling handler is used only when no tool-specific handler exists. When `"always"`, this handler is used for all sampling requests
-</ParamField>
-
 <ParamField body="session_state_store" type="AsyncKeyValue | None">
   Persistent key-value store for session state that survives across requests. Defaults to an in-memory store. Provide a custom implementation for persistence across server restarts
 </ParamField>

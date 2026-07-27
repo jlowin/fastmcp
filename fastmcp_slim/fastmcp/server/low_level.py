@@ -461,13 +461,9 @@ class LowLevelServer(_Server[LifespanResultT]):
         # ensure we use the FastMCP notification options
         if notification_options is None:
             notification_options = self.notification_options
-        merged = {
-            **self.fastmcp.experimental_capabilities,
-            **(experimental_capabilities or {}),
-        }
         return super().create_initialization_options(
             notification_options=notification_options,
-            experimental_capabilities=merged or None,
+            experimental_capabilities=experimental_capabilities,
             extensions=extensions,
         )
 
@@ -479,25 +475,45 @@ class LowLevelServer(_Server[LifespanResultT]):
         *,
         protocol_version: str | None = None,
     ) -> mcp_types.ServerCapabilities:
-        """Override to set capabilities.tasks as a first-class field per SEP-1686
-        and advertise the MCP Apps UI extension.
+        """Override to advertise registered extensions and the MCP Apps UI extension.
 
-        ``ServerCapabilities.tasks`` and ``ServerCapabilities.extensions`` are
-        real declared fields in v2, so we update them directly.
+        ``ServerCapabilities.extensions`` is a real declared field in v2, so we
+        update it directly. The
+        `FastMCP(experimental_capabilities=...)` merge also lives here rather
+        than in `create_initialization_options`: the modern `server/discover`
+        handler calls this directly, without going through
+        `create_initialization_options` at all, so merging there only reached
+        the handshake-era `initialize` response and silently dropped
+        constructor-configured experimental capabilities from `discover`.
         """
-        from fastmcp.server.tasks.capabilities import get_task_capabilities
-
+        merged_experimental = {
+            **self.fastmcp.experimental_capabilities,
+            **(experimental_capabilities or {}),
+        }
         capabilities = super().get_capabilities(
             notification_options,
-            experimental_capabilities,
+            merged_experimental or None,
             extensions,
             protocol_version=protocol_version,
         )
 
+        # Advertise every registered extension's settings under
+        # capabilities.extensions[identifier]. The hand-rolled UI splice stays
+        # for now (MCP Apps migrates onto the extension API in a later phase);
+        # the two coexist. Advertisement is unconditional — the SDK's pre-2026
+        # version sieve strips capabilities.extensions on legacy eras, a known
+        # limitation (sdk-feedback #2).
         existing_extensions = capabilities.extensions or {}
+        registered_extensions = {
+            extension.identifier: extension.settings()
+            for extension in self.fastmcp._extensions.values()
+        }
         return capabilities.model_copy(
             update={
-                "tasks": get_task_capabilities(),
-                "extensions": {**existing_extensions, UI_EXTENSION_ID: {}},
+                "extensions": {
+                    **existing_extensions,
+                    UI_EXTENSION_ID: {},
+                    **registered_extensions,
+                },
             }
         )

@@ -188,7 +188,10 @@ class TestBaseTransformBehavior:
             await ctx.disable_components(names={"delete_record"})
             return "disabled"
 
-        async with Client(mcp) as client:
+        # Session visibility rules only persist across requests on the
+        # handshake era (see `test_session_visibility.py`); the modern
+        # protocol version has no session for them to persist in.
+        async with Client(mcp, mode="legacy") as client:
             # Before disabling, search should find delete_record
             result = await client.call_tool("search_tools", {"pattern": "delete"})
             found = _parse_tool_result(result)

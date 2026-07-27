@@ -100,6 +100,64 @@ class InMemoryStdioMCPServer(StdioMCPServer):
         return FastMCPTransport(mcp=self.mcp)
 
 
+class TestConfigTransportLegacyOnly:
+    """`MCPConfigTransport.legacy_only` gating (regression for the over-broad flag).
+
+    A single-server config delegates directly to the underlying transport with no
+    proxy, so it must mirror that transport's era capability rather than being
+    forced legacy. Only the multi-server composite (backed by legacy-era
+    ProxyClients) is legacy-only.
+    """
+
+    def test_single_modern_capable_server_is_not_forced_legacy(self):
+        """A single Streamable HTTP backend stays modern-capable under mode='auto'."""
+        config = {
+            "mcpServers": {"only": {"url": "https://example.com/mcp"}},
+        }
+        transport = MCPConfigTransport(config)
+        assert isinstance(transport.transport, StreamableHttpTransport)
+        assert transport.legacy_only is False
+
+    def test_single_sse_server_mirrors_legacy_only(self):
+        """A single SSE backend is legacy-only because SSE cannot serve modern."""
+        config = {
+            "mcpServers": {
+                "only": {"url": "https://example.com/sse", "transport": "sse"}
+            },
+        }
+        transport = MCPConfigTransport(config)
+        assert isinstance(transport.transport, SSETransport)
+        assert transport.legacy_only is True
+
+    def test_multi_server_config_is_legacy_only(self):
+        """A multi-server composite is legacy-only regardless of backend eras."""
+        config = {
+            "mcpServers": {
+                "a": {"url": "https://a.example.com/mcp"},
+                "b": {"url": "https://b.example.com/mcp"},
+            },
+        }
+        transport = MCPConfigTransport(config)
+        assert transport.legacy_only is True
+
+    def test_transforming_single_server_wrapper_is_legacy_only(self):
+        """A single-server config that uses tool transforms or tag filters wraps
+        a legacy-pinned proxy; the wrapper transport must advertise legacy-only
+        so a default `mode="auto"` frontend negotiates the same era as the
+        backend rather than negotiating modern against a legacy upstream."""
+        config = {
+            "mcpServers": {
+                "a": {
+                    "url": "https://a.example.com/mcp",
+                    "include_tags": ["public"],
+                },
+            },
+        }
+        mcp_config = MCPConfig.from_dict(config)
+        transport = mcp_config.mcpServers["a"].to_transport()
+        assert transport.legacy_only is True
+
+
 def test_parse_single_stdio_config():
     config = {
         "mcpServers": {

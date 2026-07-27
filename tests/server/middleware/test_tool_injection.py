@@ -121,7 +121,10 @@ class TestToolInjectionMiddleware:
         )
         base_server.add_middleware(middleware)
 
-        async with Client[FastMCPTransport](base_server) as client:
+        # Pinned to legacy: a middleware-injected tool's raised exception is
+        # surfaced with its message on the handshake era; the modern server
+        # runner reports it as a generic "Internal server error".
+        async with Client[FastMCPTransport](base_server, mode="legacy") as client:
             with pytest.raises(Exception, match="Cannot divide by zero"):
                 _ = await client.call_tool(name="divide", arguments={"a": 10, "b": 0})
 

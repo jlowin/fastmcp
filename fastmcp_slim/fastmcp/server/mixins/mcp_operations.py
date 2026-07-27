@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 import mcp_types
 from mcp.server.context import ServerRequestContext
@@ -11,6 +12,7 @@ from mcp.shared.exceptions import MCPError
 from mcp_types import (
     INVALID_PARAMS,
     CallToolRequestParams,
+    CompleteRequestParams,
     EmptyResult,
     GetPromptRequestParams,
     PaginatedRequestParams,
@@ -18,6 +20,7 @@ from mcp_types import (
     SetLevelRequestParams,
 )
 from mcp_types.version import MODERN_PROTOCOL_VERSIONS
+from pydantic import BaseModel
 
 from fastmcp.exceptions import (
     DisabledError,
@@ -25,9 +28,15 @@ from fastmcp.exceptions import (
     NotFoundError,
     to_mcp_error,
 )
+from fastmcp.prompts.base import InputRequiredPromptResult
+from fastmcp.resources.base import InputRequiredResourceResult
+from fastmcp.server.completions import CompletionValues, normalize_completion
 from fastmcp.server.dependencies import bind_request_context, extract_version_spec
-from fastmcp.server.tasks.config import TaskMeta
-from fastmcp.tools.base import InputRequiredToolResult
+from fastmcp.tools.base import InputRequiredToolResult, ToolResult
+from fastmcp.utilities.async_utils import (
+    call_sync_fn_in_threadpool,
+    is_coroutine_function,
+)
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.pagination import paginate_sequence
 from fastmcp.utilities.versions import VersionSpec, dedupe_with_versions
@@ -120,9 +129,6 @@ class MCPOperationsMixin:
             "logging/setLevel", SetLevelRequestParams, self._on_set_logging_level
         )
 
-        # Register SEP-1686 task protocol handlers
-        self._setup_task_protocol_handlers()
-
     async def _on_list_tools(
         self: FastMCP,
         ctx: ServerRequestContext,
@@ -213,16 +219,8 @@ class MCPOperationsMixin:
         self: FastMCP,
         ctx: ServerRequestContext,
         params: CallToolRequestParams,
-    ) -> (
-        mcp_types.CallToolResult
-        | mcp_types.InputRequiredResult
-        | mcp_types.CreateTaskResult
-    ):
+    ) -> mcp_types.CallToolResult | mcp_types.InputRequiredResult | BaseModel:
         """Handle MCP 'tools/call' requests.
-
-        Task metadata is a first-class params field (``params.task``); its
-        presence triggers backgrounding. The tool's ``_run()`` handles the
-        backgrounding decision so middleware runs before Docket.
 
         A guard tool (SEP-2322 multi-round-trip) requests client input by
         returning an ``InputRequiredResult`` from its body; the run machinery
@@ -243,14 +241,9 @@ class MCPOperationsMixin:
             )
 
             version = _version_from_ctx(ctx)
-            task_meta = (
-                TaskMeta(ttl=params.task.ttl) if params.task is not None else None
-            )
 
             try:
-                result = await self.call_tool(
-                    key, arguments, version=version, task_meta=task_meta
-                )
+                result = await self.call_tool(key, arguments, version=version)
             except (DisabledError, NotFoundError):
                 # Unknown/disabled tool: return an error result (matching the
                 # v1 SDK's call_tool behavior) so the client surfaces a
@@ -273,8 +266,14 @@ class MCPOperationsMixin:
                     is_error=True,
                 )
 
-            if isinstance(result, mcp_types.CreateTaskResult):
+            if not isinstance(result, ToolResult):
+                # An extension's tools/call interceptor produced a non-ToolResult
+                # wire result — the tasks extension's CreateTaskResult when it ran
+                # the call as a task. Core does not interpret extension result
+                # shapes; hand it straight to the runner, which serializes it for
+                # the negotiated protocol version.
                 return result
+
             if isinstance(result, InputRequiredToolResult):
                 # A guard tool requested client input (SEP-2322). The
                 # multi-round-trip result type only exists at 2026-07-28; on an
@@ -298,14 +297,8 @@ class MCPOperationsMixin:
         self: FastMCP,
         ctx: ServerRequestContext,
         params: ReadResourceRequestParams,
-    ) -> mcp_types.ReadResourceResult | mcp_types.CreateTaskResult:
-        """Handle MCP 'resources/read' requests.
-
-        Note: ``ReadResourceRequestParams`` has no ``task`` field in this SDK
-        version, so resource task submission over the wire is not expressible;
-        ``task_meta`` is always None here. The CreateTaskResult return branch is
-        retained harmlessly pending an upstream ``task`` field on these params.
-        """
+    ) -> mcp_types.ReadResourceResult | mcp_types.InputRequiredResult:
+        """Handle MCP 'resources/read' requests."""
         with bind_request_context(ctx):
             uri = params.uri
             logger.debug(f"[{self.name}] Handler called: read_resource %s", uri)
@@ -315,25 +308,49 @@ class MCPOperationsMixin:
             try:
                 result = await self.read_resource(str(uri), version=version)
             except (DisabledError, NotFoundError) as e:
-                raise to_mcp_error(
-                    NotFoundError(f"Resource not found: {str(uri)!r}")
+                # SEP-2164: echo the requested URI in `data` so a client that
+                # pipelined several reads can tell which one is missing.
+                raise MCPError(
+                    code=INVALID_PARAMS,
+                    message=f"Resource not found: {str(uri)!r}",
+                    data={"uri": str(uri)},
                 ) from e
+            except FastMCPError as e:
+                # Resource-visible errors (ResourceError, ValidationError, ...)
+                # must reach the wire as an MCPError. Resources have no
+                # error-result shape the way tools do, so the equivalent of
+                # _on_call_tool's error result is a translated MCPError: at
+                # 2026-07-28 the runner only preserves MCPError/ValidationError
+                # messages and masks anything else as "Internal server error",
+                # which would hide a legitimate client-input error. Masking
+                # already happened inside read_resource.
+                raise to_mcp_error(e) from e
 
-            if isinstance(result, mcp_types.CreateTaskResult):
-                return result
+            if isinstance(result, InputRequiredResourceResult):
+                # The resource requested client input (SEP-2322). As with tools
+                # and prompts, the multi-round-trip result type only exists at
+                # 2026-07-28, so name the era problem on an older connection
+                # rather than failing as a generic "invalid result".
+                if ctx.protocol_version not in MODERN_PROTOCOL_VERSIONS:
+                    raise MCPError(
+                        code=INVALID_PARAMS,
+                        message=(
+                            f"Resource {str(uri)!r} returned an InputRequiredResult "
+                            "to request client input, but the multi-round-trip "
+                            "result type (SEP-2322) only exists at MCP 2026-07-28; "
+                            f"this connection negotiated {ctx.protocol_version!r}."
+                        ),
+                    )
+                return result.input_required
+
             return result.to_mcp_result(uri)
 
     async def _on_get_prompt(
         self: FastMCP,
         ctx: ServerRequestContext,
         params: GetPromptRequestParams,
-    ) -> mcp_types.GetPromptResult | mcp_types.CreateTaskResult:
-        """Handle MCP 'prompts/get' requests.
-
-        Note: ``GetPromptRequestParams`` has no ``task`` field in this SDK
-        version, so prompt task submission over the wire is not expressible;
-        ``task_meta`` is always None here.
-        """
+    ) -> mcp_types.GetPromptResult | mcp_types.InputRequiredResult:
+        """Handle MCP 'prompts/get' requests."""
         with bind_request_context(ctx):
             name = params.name
             arguments = params.arguments
@@ -349,9 +366,31 @@ class MCPOperationsMixin:
                 result = await self.render_prompt(name, arguments, version=version)
             except (DisabledError, NotFoundError) as e:
                 raise to_mcp_error(NotFoundError(f"Unknown prompt: {name!r}")) from e
+            except FastMCPError as e:
+                # Prompt-visible errors (PromptError, ValidationError, ...) must
+                # reach the wire as an MCPError for the same reason as
+                # resources: at 2026-07-28 anything that is not an
+                # MCPError/ValidationError is masked as "Internal server error".
+                # Masking already happened inside render_prompt.
+                raise to_mcp_error(e) from e
 
-            if isinstance(result, mcp_types.CreateTaskResult):
-                return result
+            if isinstance(result, InputRequiredPromptResult):
+                # The prompt requested client input (SEP-2322). As with tools,
+                # the multi-round-trip result type only exists at 2026-07-28, so
+                # name the era problem on an older connection rather than
+                # failing as a generic "invalid result".
+                if ctx.protocol_version not in MODERN_PROTOCOL_VERSIONS:
+                    raise MCPError(
+                        code=INVALID_PARAMS,
+                        message=(
+                            f"Prompt {name!r} returned an InputRequiredResult to "
+                            "request client input, but the multi-round-trip result "
+                            "type (SEP-2322) only exists at MCP 2026-07-28; this "
+                            f"connection negotiated {ctx.protocol_version!r}."
+                        ),
+                    )
+                return result.input_required
+
             return result.to_mcp_prompt_result()
 
     async def _on_set_logging_level(
@@ -374,3 +413,54 @@ class MCPOperationsMixin:
             session_id = _log_level_session_key(rc.session)
             self._client_log_levels[session_id] = params.level
             return EmptyResult()
+
+    async def _on_complete(
+        self: FastMCP,
+        ctx: ServerRequestContext,
+        params: CompleteRequestParams,
+    ) -> mcp_types.CompleteResult:
+        """Handle MCP 'completion/complete' requests.
+
+        Routes to the server's registered completion handler (set via
+        ``@mcp.completion``). The handler switches on the reference and argument
+        and returns candidate values. A handler that does not recognize the
+        reference/argument returns ``None`` or an empty sequence, which becomes
+        an empty completion rather than an error — an unknown reference is not a
+        protocol failure. This handler is registered on the low-level server
+        only once a completion handler exists, so the completions capability is
+        declared exactly when the server can answer.
+        """
+        with bind_request_context(ctx):
+            logger.debug(f"[{self.name}] Handler called: complete %s", params.ref)
+            handler = self._completion_handler
+            if handler is None:
+                return mcp_types.CompleteResult(
+                    completion=mcp_types.Completion(values=[])
+                )
+
+            if is_coroutine_function(handler):
+                raw = handler(params.ref, params.argument, params.context)
+            else:
+                # A sync handler may perform blocking work (a database lookup,
+                # say); run it in a threadpool so it does not stall the event
+                # loop, matching how sync tools/prompts/resources are invoked.
+                raw = await call_sync_fn_in_threadpool(
+                    handler, params.ref, params.argument, params.context
+                )
+            result = await raw if inspect.isawaitable(raw) else raw
+            completion = normalize_completion(cast(CompletionValues, result))
+            return mcp_types.CompleteResult(completion=completion)
+
+    def _register_completion_handler(self: FastMCP) -> None:
+        """Register the low-level ``completion/complete`` handler.
+
+        Called when a completion handler is set (via
+        ``add_completion_handler``) so the SDK derives the completions
+        capability from the handler's presence. Registration is idempotent —
+        re-registering replaces the handler.
+        """
+        self._mcp_server.add_request_handler(
+            "completion/complete",
+            CompleteRequestParams,
+            self._on_complete,
+        )
