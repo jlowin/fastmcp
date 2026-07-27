@@ -646,10 +646,22 @@ class MultiAuth(AuthProvider):
 
     Example:
         ```python
+        from fastmcp import FastMCP
         from fastmcp.server.auth import MultiAuth, JWTVerifier, OAuthProxy
 
+        upstream = OAuthProxy(
+            upstream_authorization_endpoint="https://login.example.com/oauth/authorize",
+            upstream_token_endpoint="https://login.example.com/oauth/token",
+            upstream_client_id="my-app",
+            upstream_client_secret="secret",
+            token_verifier=JWTVerifier(
+                jwks_uri="https://login.example.com/.well-known/jwks.json"
+            ),
+            base_url="https://my-server.com",
+        )
+
         auth = MultiAuth(
-            server=OAuthProxy(issuer_url="https://login.example.com/..."),
+            server=upstream,
             verifiers=[JWTVerifier(jwks_uri="https://example.com/.well-known/jwks.json")],
         )
         mcp = FastMCP("my-server", auth=auth)
