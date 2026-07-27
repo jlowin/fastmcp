@@ -29,7 +29,10 @@ from key_value.aio.protocols import AsyncKeyValue
 from pydantic import AnyHttpUrl
 
 from fastmcp.server.auth.auth import AccessToken
-from fastmcp.server.auth.oidc_proxy import OIDCProxy
+from fastmcp.server.auth.oidc_proxy import (
+    DEFAULT_OIDC_DISCOVERY_TIMEOUT_SECONDS,
+    OIDCProxy,
+)
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 from fastmcp.utilities.auth import parse_scopes
 from fastmcp.utilities.logging import get_logger
@@ -83,6 +86,7 @@ class AWSCognitoTokenVerifier(JWTVerifier):
             client_id=access_token.client_id,
             scopes=access_token.scopes,
             expires_at=access_token.expires_at,
+            subject=access_token.subject,
             claims=cognito_claims,
         )
 
@@ -124,6 +128,7 @@ class AWSCognitoProvider(OIDCProxy):
         user_pool_id: str,
         client_id: str,
         client_secret: str,
+        timeout_seconds: int | None = DEFAULT_OIDC_DISCOVERY_TIMEOUT_SECONDS,
         base_url: AnyHttpUrl | str,
         resource_base_url: AnyHttpUrl | str | None = None,
         aws_region: str = "eu-central-1",
@@ -137,6 +142,8 @@ class AWSCognitoProvider(OIDCProxy):
         consent_csp_policy: str | None = None,
         forward_resource: bool = True,
         fallback_refresh_token_expiry_seconds: int | None = None,
+        fastmcp_access_token_expiry_seconds: int | None = None,
+        token_expiry_threshold_seconds: int = 0,
     ):
         """Initialize AWS Cognito OAuth provider.
 
@@ -144,6 +151,10 @@ class AWSCognitoProvider(OIDCProxy):
             user_pool_id: Your Cognito User Pool ID (e.g., "eu-central-1_XXXXXXXXX")
             client_id: Cognito app client ID
             client_secret: Cognito app client secret
+            timeout_seconds: Timeout, in seconds, for the OIDC discovery request
+                made during construction. Defaults to 10 seconds so a slow or
+                unreachable issuer cannot block server startup indefinitely. Pass
+                None to fall back to the HTTP client's own default timeout.
             base_url: Public URL where OAuth endpoints will be accessible (includes any mount path)
             resource_base_url: Optional public base URL for the protected resource metadata
                 and token audience. Defaults to ``base_url``.
@@ -166,6 +177,17 @@ class AWSCognitoProvider(OIDCProxy):
                 When "external", the built-in consent screen is skipped but no warning is
                 logged, indicating that consent is handled externally (e.g. by the upstream IdP).
                 SECURITY WARNING: Only set to False for local development or testing environments.
+            fallback_refresh_token_expiry_seconds: Lifetime for the FastMCP-issued
+                refresh token when the upstream provider omits `refresh_expires_in`
+                (e.g. Cognito, GitHub, many OIDC IdPs). Defaults to 1 year. The upstream
+                refresh remains the source of truth. See `OAuthProxy` for details.
+            fastmcp_access_token_expiry_seconds: Lifetime for the FastMCP-issued access
+                token, decoupling it from the upstream provider's `expires_in`. Defaults
+                to None (mirror the upstream lifetime). Set this for bridges whose
+                upstream issues short-lived access tokens that some MCP clients can't
+                refresh gracefully (e.g. `mcp-remote`). See `OAuthProxy` for details.
+            token_expiry_threshold_seconds: Number of seconds before actual expiry to
+                treat a token as expired, refreshing early to avoid races. Defaults to 0.
         """
         # Parse scopes if provided as string
         required_scopes_final = (
@@ -185,6 +207,7 @@ class AWSCognitoProvider(OIDCProxy):
             config_url=config_url,
             client_id=client_id,
             client_secret=client_secret,
+            timeout_seconds=timeout_seconds,
             algorithm="RS256",
             required_scopes=required_scopes_final,
             base_url=base_url,
@@ -198,6 +221,8 @@ class AWSCognitoProvider(OIDCProxy):
             consent_csp_policy=consent_csp_policy,
             forward_resource=forward_resource,
             fallback_refresh_token_expiry_seconds=fallback_refresh_token_expiry_seconds,
+            fastmcp_access_token_expiry_seconds=fastmcp_access_token_expiry_seconds,
+            token_expiry_threshold_seconds=token_expiry_threshold_seconds,
         )
 
         logger.debug(

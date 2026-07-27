@@ -25,7 +25,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install UV
         uses: astral-sh/setup-uv@v7
@@ -51,6 +51,9 @@ jobs:
 
       - name: Run Claude for Issue Comment
         uses: ./.github/actions/run-claude
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
         with:
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github-token: ${{ steps.marvin-token.outputs.token }}
@@ -61,13 +64,13 @@ jobs:
             <context>
             Repository: ${{ github.repository }}
             Issue Number: #${{ github.event.issue.number }}
-            Issue Title: ${{ github.event.issue.title }}
+            Issue Title: ${{ env.ISSUE_TITLE }}
             Issue Author: ${{ github.event.issue.user.login }}
             Comment Author: ${{ github.event.comment.user.login }}
             </context>
 
             <user_request>
-            ${{ github.event.comment.body }}
+            ${{ env.COMMENT_BODY }}
             </user_request>
 
             <task>

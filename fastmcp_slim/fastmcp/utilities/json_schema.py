@@ -1,10 +1,43 @@
 from __future__ import annotations
 
-import copy
 from collections import defaultdict
 from typing import Any
 
 from jsonref import JsonRefError, replace_refs
+
+
+def _copy_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """Return a deep copy of a JSON schema without recursing.
+
+    `copy.deepcopy` consumes stack frames in proportion to nesting depth, so a
+    deeply nested schema raises `RecursionError` before the traversals in this
+    module can apply their own depth guards — turning a schema that used to
+    compress into one that fails outright. Schemas are plain JSON, so an
+    explicit stack copies the containers at any depth and shares the immutable
+    scalars at the leaves.
+    """
+    root: dict[str, Any] = {}
+    stack: list[tuple[Any, Any]] = [(schema, root)]
+
+    while stack:
+        source, target = stack.pop()
+        if isinstance(source, dict):
+            pairs: list[tuple[Any, Any]] = list(source.items())
+        else:
+            pairs = list(enumerate(source))
+
+        for key, value in pairs:
+            if isinstance(value, dict):
+                child: Any = {}
+                stack.append((value, child))
+            elif isinstance(value, list):
+                child = [None] * len(value)
+                stack.append((value, child))
+            else:
+                child = value
+            target[key] = child
+
+    return root
 
 
 def _defs_have_cycles(defs: dict[str, Any]) -> bool:
@@ -89,6 +122,8 @@ def _strip_discriminator(obj: Any) -> Any:
     """
     if isinstance(obj, dict):
         skip = "discriminator" in obj and ("anyOf" in obj or "oneOf" in obj)
+        if skip:
+            obj = require_discriminator_property(obj)
         # Keys that hold instance data, not sub-schemas — don't recurse.
         _DATA_KEYS = {"default", "const", "examples", "enum"}
         return {
@@ -99,6 +134,47 @@ def _strip_discriminator(obj: Any) -> Any:
     if isinstance(obj, list):
         return [_strip_discriminator(item) for item in obj]
     return obj
+
+
+def _require_property(schema: dict[str, Any], property_name: str) -> dict[str, Any]:
+    """Return a copy of *schema* with *property_name* in ``required``."""
+    required = schema.get("required")
+    if required is None:
+        return {**schema, "required": [property_name]}
+    if isinstance(required, list) and property_name not in required:
+        return {**schema, "required": [*required, property_name]}
+    return schema
+
+
+def require_discriminator_property(schema: dict[str, Any]) -> dict[str, Any]:
+    """Keep an OpenAPI discriminator's tag mandatory after the keyword is dropped.
+
+    Returns a copy of *schema* with ``discriminator.propertyName`` added to each
+    ``anyOf``/``oneOf`` variant's ``required`` list. A Pydantic discriminated
+    union whose tag has a default omits that tag from ``required``; without this,
+    an untagged payload passes the generated schema but fails later in the source
+    model with ``union_tag_not_found``. No-op if there is no string
+    ``propertyName``.
+    """
+    discriminator = schema.get("discriminator")
+    if not isinstance(discriminator, dict):
+        return schema
+    property_name = discriminator.get("propertyName")
+    if not isinstance(property_name, str):
+        return schema
+
+    result = schema.copy()
+    for key in ("anyOf", "oneOf"):
+        variants = result.get(key)
+        if not isinstance(variants, list):
+            continue
+        result[key] = [
+            _require_property(variant, property_name)
+            if isinstance(variant, dict)
+            else variant
+            for variant in variants
+        ]
+    return result
 
 
 def dereference_refs(schema: dict[str, Any]) -> dict[str, Any]:
@@ -281,6 +357,20 @@ def resolve_root_ref(schema: dict[str, Any]) -> dict[str, Any]:
             if def_name in defs:
                 # Create a new schema by copying the referenced definition
                 resolved = dict(defs[def_name])
+
+                # Preserve root-level sibling metadata from the original schema.
+                # Pydantic may put user-facing fields such as title, description,
+                # default, or examples next to the root $ref. Those fields still
+                # describe the root schema even when we can only resolve that
+                # root reference for circular schemas.
+                resolved.update(
+                    {
+                        key: value
+                        for key, value in schema.items()
+                        if key not in {"$ref", "$defs"}
+                    }
+                )
+
                 # Preserve $defs for nested references (other fields may still use them)
                 resolved["$defs"] = defs
                 return resolved
@@ -291,7 +381,7 @@ def _prune_param(schema: dict[str, Any], param: str) -> dict[str, Any]:
     """Return a new schema with *param* removed from `properties`, `required`,
     and (if no longer referenced) `$defs`.
     """
-    schema = copy.deepcopy(schema)
+    schema = _copy_schema(schema)
 
     # ── 1. drop from properties/required ──────────────────────────────
     props = schema.get("properties", {})
@@ -441,6 +531,11 @@ def _single_pass_optimize(
     if not (prune_defs or prune_titles or prune_additional_properties):
         return schema  # Nothing to do
 
+    # Work on a copy so the caller's schema is never mutated (see docstring). The
+    # pruning phases below pop keys/$defs in place, which would otherwise corrupt a
+    # shared dict such as a live Tool.input_schema passed straight to compress_schema.
+    schema = _copy_schema(schema)
+
     # Phase 1: Collect references and apply simple cleanups
     # Track which $defs are referenced from the main schema and from other $defs
     root_refs: set[str] = set()  # $defs referenced directly from main schema
@@ -448,6 +543,11 @@ def _single_pass_optimize(
         list
     )  # def A references def B
     defs = schema.get("$defs")
+
+    # Set when the traversal below gives up at its depth limit. Once that
+    # happens the reference scan is incomplete, so we can no longer tell which
+    # definitions are genuinely unused.
+    reference_scan_truncated = False
 
     def traverse_and_clean(
         node: object,
@@ -466,7 +566,10 @@ def _single_pass_optimize(
         about) but we skip all cleanups so we don't mutate user data that
         happens to look metadata-shaped.
         """
+        nonlocal reference_scan_truncated
+
         if depth > 50:  # Prevent infinite recursion
+            reference_scan_truncated = True
             return
 
         if isinstance(node, dict):
@@ -474,7 +577,7 @@ def _single_pass_optimize(
             # this regardless of `in_schema` — a $ref in a user extension
             # still pins the referenced $def as "used".
             if prune_defs:
-                ref = node.get("$ref")  # type: ignore
+                ref = node.get("$ref")
                 if isinstance(ref, str) and ref.startswith("#/$defs/"):
                     referenced_def = ref.split("/")[-1]
                     if current_def_name:
@@ -508,7 +611,7 @@ def _single_pass_optimize(
 
                 if (
                     prune_additional_properties
-                    and node.get("additionalProperties") is False  # type: ignore
+                    and node.get("additionalProperties") is False
                 ):
                     node.pop("additionalProperties")  # type: ignore
 
@@ -589,6 +692,13 @@ def _single_pass_optimize(
     if prune_defs and defs:
         for def_name, def_schema in defs.items():
             traverse_and_clean(def_schema, current_def_name=def_name, in_schema=True)
+
+        # An incomplete scan has not seen every $ref, so a definition that looks
+        # unused may simply be referenced below the cutoff. Keeping an unused
+        # definition is harmless; dropping a referenced one leaves a dangling
+        # $ref and an invalid schema.
+        if reference_scan_truncated:
+            return schema
 
         # Phase 4: Remove unused definitions
         def is_def_used(def_name: str, visiting: set[str] | None = None) -> bool:

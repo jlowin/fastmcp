@@ -31,7 +31,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from functools import partial
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from typing_extensions import Self
 
@@ -44,7 +44,13 @@ if TYPE_CHECKING:
     from fastmcp.prompts.base import Prompt
     from fastmcp.resources.base import Resource
     from fastmcp.resources.template import ResourceTemplate
-    from fastmcp.server.transforms import Transform
+    from fastmcp.server.transforms import (
+        GetPromptNext,
+        GetResourceNext,
+        GetResourceTemplateNext,
+        GetToolNext,
+        Transform,
+    )
     from fastmcp.tools.base import Tool
 
 
@@ -166,12 +172,15 @@ class Provider:
             The tool if found (may be marked disabled), None if not found.
         """
 
-        async def base(n: str, version: VersionSpec | None = None) -> Tool | None:
+        async def base(n: str, *, version: VersionSpec | None = None) -> Tool | None:
             return await self._get_tool(n, version)
 
-        chain = base
+        chain: GetToolNext = cast("GetToolNext", base)
         for transform in self.transforms:
-            chain = partial(transform.get_tool, call_next=chain)
+            chain = cast(
+                "GetToolNext",
+                partial(cast(Any, transform.get_tool), call_next=chain),
+            )
 
         return await chain(name, version=version)
 
@@ -250,12 +259,17 @@ class Provider:
             The resource if found (may be marked disabled), None if not found.
         """
 
-        async def base(u: str, version: VersionSpec | None = None) -> Resource | None:
+        async def base(
+            u: str, *, version: VersionSpec | None = None
+        ) -> Resource | None:
             return await self._get_resource(u, version)
 
-        chain = base
+        chain: GetResourceNext = cast("GetResourceNext", base)
         for transform in self.transforms:
-            chain = partial(transform.get_resource, call_next=chain)
+            chain = cast(
+                "GetResourceNext",
+                partial(cast(Any, transform.get_resource), call_next=chain),
+            )
 
         return await chain(uri, version=version)
 
@@ -286,13 +300,19 @@ class Provider:
         """
 
         async def base(
-            u: str, version: VersionSpec | None = None
+            u: str, *, version: VersionSpec | None = None
         ) -> ResourceTemplate | None:
             return await self._get_resource_template(u, version)
 
-        chain = base
+        chain: GetResourceTemplateNext = cast("GetResourceTemplateNext", base)
         for transform in self.transforms:
-            chain = partial(transform.get_resource_template, call_next=chain)
+            chain = cast(
+                "GetResourceTemplateNext",
+                partial(
+                    cast(Any, transform.get_resource_template),
+                    call_next=chain,
+                ),
+            )
 
         return await chain(uri, version=version)
 
@@ -322,12 +342,15 @@ class Provider:
             The prompt if found (may be marked disabled), None if not found.
         """
 
-        async def base(n: str, version: VersionSpec | None = None) -> Prompt | None:
+        async def base(n: str, *, version: VersionSpec | None = None) -> Prompt | None:
             return await self._get_prompt(n, version)
 
-        chain = base
+        chain: GetPromptNext = cast("GetPromptNext", base)
         for transform in self.transforms:
-            chain = partial(transform.get_prompt, call_next=chain)
+            chain = cast(
+                "GetPromptNext",
+                partial(cast(Any, transform.get_prompt), call_next=chain),
+            )
 
         return await chain(name, version=version)
 
@@ -365,7 +388,7 @@ class Provider:
             matching = [t for t in matching if version.matches(t.version)]
         if not matching:
             return None
-        return max(matching, key=version_sort_key)  # type: ignore[type-var]  # ty:ignore[invalid-return-type]
+        return max(matching, key=version_sort_key)
 
     async def _list_resources(self) -> Sequence[Resource]:
         """Return all available resources.
@@ -396,7 +419,7 @@ class Provider:
             matching = [r for r in matching if version.matches(r.version)]
         if not matching:
             return None
-        return max(matching, key=version_sort_key)  # type: ignore[type-var]  # ty:ignore[invalid-return-type]
+        return max(matching, key=version_sort_key)
 
     async def _list_resource_templates(self) -> Sequence[ResourceTemplate]:
         """Return all available resource templates.
@@ -427,7 +450,7 @@ class Provider:
             matching = [t for t in matching if version.matches(t.version)]
         if not matching:
             return None
-        return max(matching, key=version_sort_key)  # type: ignore[type-var]  # ty:ignore[invalid-return-type]
+        return max(matching, key=version_sort_key)
 
     async def _list_prompts(self) -> Sequence[Prompt]:
         """Return all available prompts.
@@ -458,7 +481,7 @@ class Provider:
             matching = [p for p in matching if version.matches(p.version)]
         if not matching:
             return None
-        return max(matching, key=version_sort_key)  # type: ignore[type-var]  # ty:ignore[invalid-return-type]
+        return max(matching, key=version_sort_key)
 
     # -------------------------------------------------------------------------
     # Task registration
@@ -473,12 +496,19 @@ class Provider:
 
         Used by the server during startup to register functions with Docket.
         """
-        # Fetch all component types in parallel
+        # Fetch all component types in parallel. Iterate the bound methods
+        # rather than a tuple of already-called coroutines: a parenthesized
+        # comma expression is a tuple, so it would create all four coroutines
+        # before `gather` starts, which is exactly what `gather` asks callers
+        # to avoid.
         results = await gather(
-            self._list_tools(),
-            self._list_resources(),
-            self._list_resource_templates(),
-            self._list_prompts(),
+            fetch()
+            for fetch in (
+                self._list_tools,
+                self._list_resources,
+                self._list_resource_templates,
+                self._list_prompts,
+            )
         )
         tools = cast("Sequence[Tool]", results[0])
         resources = cast("Sequence[Resource]", results[1])

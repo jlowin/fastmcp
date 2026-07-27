@@ -16,11 +16,13 @@ class TestOAuthProxyAuthorization:
 
     async def test_authorize_creates_transaction(self, oauth_proxy):
         """Test that authorize creates transaction and redirects to consent."""
-        client = OAuthClientInformationFull(
-            client_id="test-client",
-            client_secret="test-secret",
-            redirect_uris=[AnyUrl("http://localhost:54321/callback")],
-            jwt_signing_key="test-secret",  # type: ignore[call-arg]  # Optional field in MCP SDK  # ty:ignore[unknown-argument]
+        client = OAuthClientInformationFull.model_validate(
+            {
+                "client_id": "test-client",
+                "client_secret": "test-secret",
+                "redirect_uris": ["http://localhost:54321/callback"],
+                "jwt_signing_key": "test-secret",
+            }
         )
 
         # Register client first (required for consent flow)
@@ -52,6 +54,67 @@ class TestOAuthProxyAuthorization:
         assert transaction.code_challenge == "challenge-abc"
         assert transaction.client_state == "client-state-123"
         assert transaction.scopes == ["read", "write"]
+
+    async def test_authorize_records_configured_scopes_when_client_omits_scope(
+        self, oauth_proxy
+    ):
+        """A client that omits `scope` has the configured default recorded.
+
+        The transaction is the single source of truth for what is being
+        authorized, so it must hold the effective scopes rather than an empty
+        list that each downstream consumer patches up on its own.
+        """
+        client = OAuthClientInformationFull.model_validate(
+            {
+                "client_id": "test-client",
+                "client_secret": "test-secret",
+                "redirect_uris": ["http://localhost:54321/callback"],
+                "jwt_signing_key": "test-secret",
+            }
+        )
+        await oauth_proxy.register_client(client)
+
+        params = AuthorizationParams(
+            redirect_uri=AnyUrl("http://localhost:54321/callback"),
+            redirect_uri_provided_explicitly=True,
+            state="client-state-123",
+            code_challenge="challenge-abc",
+            scopes=None,
+        )
+
+        redirect_url = await oauth_proxy.authorize(client, params)
+        txn_id = parse_qs(urlparse(redirect_url).query)["txn_id"][0]
+
+        transaction = await oauth_proxy._transaction_store.get(key=txn_id)
+        assert transaction is not None
+        assert transaction.scopes == ["read", "write"]
+
+    async def test_authorize_does_not_widen_explicit_client_scopes(self, oauth_proxy):
+        """An explicit narrow scope request is never widened to the configured set."""
+        client = OAuthClientInformationFull.model_validate(
+            {
+                "client_id": "test-client",
+                "client_secret": "test-secret",
+                "redirect_uris": ["http://localhost:54321/callback"],
+                "jwt_signing_key": "test-secret",
+            }
+        )
+        await oauth_proxy.register_client(client)
+
+        params = AuthorizationParams(
+            redirect_uri=AnyUrl("http://localhost:54321/callback"),
+            redirect_uri_provided_explicitly=True,
+            state="client-state-123",
+            code_challenge="challenge-abc",
+            scopes=["read"],
+        )
+
+        redirect_url = await oauth_proxy.authorize(client, params)
+        txn_id = parse_qs(urlparse(redirect_url).query)["txn_id"][0]
+
+        transaction = await oauth_proxy._transaction_store.get(key=txn_id)
+        assert transaction is not None
+        assert transaction.scopes == ["read"]
 
 
 class TestOAuthProxyPKCE:

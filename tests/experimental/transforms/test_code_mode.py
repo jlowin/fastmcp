@@ -1,13 +1,16 @@
+import asyncio
 import importlib
+import importlib.util
 import json
 from typing import Any
 
 import pytest
-from mcp.types import ImageContent, TextContent
+from mcp_types import ImageContent, TextContent
 
 from fastmcp import Client, FastMCP
 from fastmcp.exceptions import ToolError
 from fastmcp.experimental.transforms.code_mode import (
+    _DEFAULT_LIMITS,
     CodeMode,
     GetSchemas,
     GetToolCatalog,
@@ -17,6 +20,30 @@ from fastmcp.experimental.transforms.code_mode import (
 )
 from fastmcp.server.context import Context
 from fastmcp.tools.base import Tool, ToolResult
+
+requires_monty = pytest.mark.skipif(
+    importlib.util.find_spec("pydantic_monty") is None,
+    reason="pydantic-monty is required for the real Monty sandbox provider",
+)
+
+# test_code_mode_monty_bare_call_returns_empty deliberately runs
+# `print(call_tool(...))` without awaiting, which orphans a `Provider.get_tool`
+# coroutine. CPython reports it as "never awaited" only when the coroutine is
+# garbage-collected, which happens asynchronously — often partway through a
+# *later* test — so a per-test filter can't reliably catch it. The suite
+# promotes that warning (and its unraisable-teardown variant) to an error via
+# `filterwarnings` in pyproject.toml, so scope the suppression to the module
+# but pin it to that exact coroutine; genuine "never awaited" leaks elsewhere
+# still surface as errors.
+pytestmark = [
+    pytest.mark.filterwarnings(
+        "ignore:coroutine 'Provider.get_tool' was never awaited:RuntimeWarning"
+    ),
+    pytest.mark.filterwarnings(
+        "ignore:Exception ignored in.*Provider.get_tool:"
+        "pytest.PytestUnraisableExceptionWarning"
+    ),
+]
 
 
 def _unwrap_result(result: ToolResult) -> Any:
@@ -629,7 +656,7 @@ async def test_code_mode_execute_non_text_content_stringified() -> None:
 
     @mcp.tool
     def image_tool() -> ImageContent:
-        return ImageContent(type="image", data="base64data", mimeType="image/png")
+        return ImageContent(type="image", data="base64data", mime_type="image/png")
 
     mcp.add_transform(CodeMode(sandbox_provider=_UnsafeTestSandboxProvider()))
 
@@ -683,6 +710,116 @@ async def test_code_mode_sandbox_error_surfaces_as_tool_error() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Real Monty sandbox end-to-end (issue #4263)
+#
+# Every execute test above runs through the exec-based
+# _UnsafeTestSandboxProvider, so the real MontySandboxProvider + call_tool
+# path is otherwise uncovered. These tests drive call_tool through the actual
+# pydantic-monty sandbox, the path #4263 reported as broken.
+# ---------------------------------------------------------------------------
+
+
+@requires_monty
+@pytest.mark.parametrize("async_tool", [False, True])
+async def test_code_mode_monty_execute_call_tool(async_tool: bool) -> None:
+    """call_tool resolves and returns through the real Monty sandbox.
+
+    The reported failure ("empty result") could not be reproduced on a
+    directly-registered tool: ``return await call_tool(...)`` returns the
+    value for both sync and async backend tools.
+    """
+    mcp = FastMCP("CodeMode Monty Execute")
+
+    if async_tool:
+
+        @mcp.tool
+        async def add(x: int, y: int) -> int:
+            return x + y
+    else:
+
+        @mcp.tool
+        def add(x: int, y: int) -> int:
+            return x + y
+
+    mcp.add_transform(CodeMode(sandbox_provider=MontySandboxProvider()))
+
+    result = await _run_tool(
+        mcp, "execute", {"code": "return await call_tool('add', {'x': 2, 'y': 3})"}
+    )
+    assert _unwrap_result(result) == {"result": 5}
+
+
+@requires_monty
+async def test_code_mode_monty_execute_string_result() -> None:
+    """A string-returning tool round-trips through the real Monty sandbox."""
+    mcp = FastMCP("CodeMode Monty String")
+
+    @mcp.tool
+    def greet(name: str) -> str:
+        return f"Hello, {name}!"
+
+    mcp.add_transform(CodeMode(sandbox_provider=MontySandboxProvider()))
+
+    result = await _run_tool(
+        mcp, "execute", {"code": "return await call_tool('greet', {'name': 'World'})"}
+    )
+    assert _unwrap_string_result(result) == "Hello, World!"
+
+
+@requires_monty
+async def test_code_mode_monty_execute_chaining() -> None:
+    """Multiple sequential call_tool() calls chain through the real sandbox."""
+    mcp = FastMCP("CodeMode Monty Chaining")
+
+    @mcp.tool
+    def add(x: int, y: int) -> int:
+        return x + y
+
+    mcp.add_transform(CodeMode(sandbox_provider=MontySandboxProvider()))
+
+    result = await _run_tool(
+        mcp,
+        "execute",
+        {
+            "code": (
+                "a = await call_tool('add', {'x': 1, 'y': 2})\n"
+                "b = await call_tool('add', {'x': a['result'], 'y': 10})\n"
+                "return b"
+            )
+        },
+    )
+    assert _unwrap_result(result) == {"result": 13}
+
+
+@requires_monty
+async def test_code_mode_monty_bare_call_returns_empty() -> None:
+    """Pins the reported #4263 symptom as a usage error, not a sandbox bug.
+
+    The report's code called ``call_tool`` bare — ``print(call_tool(...))``
+    without ``await`` or ``return``. ``call_tool`` is async, so a bare call
+    hands back an unawaited coroutine, and ``print`` returns ``None``; the
+    block therefore returns nothing and ``execute`` yields an empty result.
+    The accompanying "coroutine ... was never awaited" RuntimeWarning is a
+    cascading effect of that unawaited coroutine being garbage-collected, not
+    a separate defect (see the module-level ``filterwarnings`` note for why it
+    is suppressed rather than asserted).
+    """
+    mcp = FastMCP("CodeMode Monty Bare Call")
+
+    @mcp.tool
+    def greet(name: str) -> str:
+        return f"Hello, {name}!"
+
+    mcp.add_transform(CodeMode(sandbox_provider=MontySandboxProvider()))
+
+    result = await _run_tool(
+        mcp, "execute", {"code": "print(call_tool('greet', {'name': 'World'}))"}
+    )
+    assert result.content == []
+    assert result.structured_content is None
+
+
+# ---------------------------------------------------------------------------
 # Sandbox provider tests
 # ---------------------------------------------------------------------------
 
@@ -711,7 +848,123 @@ async def test_monty_provider_forwards_limits() -> None:
         await provider.run("x = 0\nfor _ in range(10**9):\n    x += 1")
 
 
-async def test_monty_provider_no_limits_by_default() -> None:
+async def test_monty_provider_applies_default_limits() -> None:
     provider = MontySandboxProvider()
+    assert provider.limits == _DEFAULT_LIMITS
+    # Default limits are generous enough for ordinary code.
     result = await provider.run("return 1 + 2")
     assert result == 3
+
+
+async def test_monty_provider_explicit_none_disables_limits() -> None:
+    provider = MontySandboxProvider(limits=None)
+    assert provider.limits is None
+    result = await provider.run("return 1 + 2")
+    assert result == 3
+
+
+async def test_monty_provider_explicit_limits_override_defaults() -> None:
+    provider = MontySandboxProvider(limits={"max_duration_secs": 0.1})
+    assert provider.limits == {"max_duration_secs": 0.1}
+
+
+async def test_monty_provider_default_limits_are_not_shared_between_instances() -> None:
+    """Each default provider must own its limits dict.
+
+    `limits` is a mutable public attribute; if instances shared the
+    module-level baseline, mutating one would silently change the defaults
+    for every other default provider in the process.
+    """
+    a = MontySandboxProvider()
+    b = MontySandboxProvider()
+
+    assert a.limits is not b.limits
+    assert a.limits is not _DEFAULT_LIMITS
+
+    assert a.limits is not None
+    a.limits["max_duration_secs"] = 1
+
+    assert b.limits == {"max_duration_secs": 30.0, "max_memory": 100_000_000}
+    assert _DEFAULT_LIMITS == {"max_duration_secs": 30.0, "max_memory": 100_000_000}
+
+
+async def test_code_mode_max_tool_calls_default_is_50() -> None:
+    assert CodeMode().max_tool_calls == 50
+
+
+async def test_code_mode_max_tool_calls_enforced() -> None:
+    mcp = FastMCP("CodeMode ToolCap")
+
+    @mcp.tool
+    def ping() -> str:
+        return "pong"
+
+    mcp.add_transform(
+        CodeMode(sandbox_provider=_UnsafeTestSandboxProvider(), max_tool_calls=3)
+    )
+
+    code = "\n".join(
+        [
+            "results = []",
+            "for _ in range(5):",
+            "    results.append(await call_tool('ping', {}))",
+            "return results",
+        ]
+    )
+    with pytest.raises(ToolError, match=r"Tool call limit exceeded: at most 3"):
+        await _run_tool(mcp, "execute", {"code": code})
+
+
+async def test_code_mode_max_tool_calls_none_is_unlimited() -> None:
+    mcp = FastMCP("CodeMode ToolCapNone")
+
+    @mcp.tool
+    def ping() -> str:
+        return "pong"
+
+    mcp.add_transform(
+        CodeMode(sandbox_provider=_UnsafeTestSandboxProvider(), max_tool_calls=None)
+    )
+
+    code = "\n".join(
+        [
+            "n = 0",
+            "for _ in range(60):",
+            "    await call_tool('ping', {})",
+            "    n += 1",
+            "return n",
+        ]
+    )
+    result = await _run_tool(mcp, "execute", {"code": code})
+    assert _unwrap_result(result) == 60
+
+
+async def test_monty_provider_cancels_future_when_task_cancelled() -> None:
+    """Cancelling the awaiting task must cancel the underlying sandbox future.
+
+    Otherwise the native Monty thread keeps running to completion after a
+    client disconnects or the request times out. A subclass overrides the
+    launch seam so the cancellation handling in `run()` is exercised against
+    a controllable future rather than a live sandbox thread.
+    """
+    loop = asyncio.get_running_loop()
+    sandbox_future: asyncio.Future[Any] = loop.create_future()
+
+    class _NeverFinishingProvider(MontySandboxProvider):
+        def _run_monty(self, monty: Any, *, inputs: Any, external_functions: Any):
+            return sandbox_future
+
+    provider = _NeverFinishingProvider()
+    task = asyncio.create_task(provider.run("return 1"))
+
+    # Advance the task to `await future` (no suspension point before it).
+    for _ in range(3):
+        await asyncio.sleep(0)
+        if not task.done():
+            break
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert sandbox_future.cancelled()

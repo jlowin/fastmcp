@@ -1,17 +1,26 @@
-"""Client error handling tests."""
+"""Client error handling tests.
+
+Resource, resource-template, and prompt error *detail* surfacing is
+era-neutral. `_on_read_resource` / `_on_get_prompt` in
+`fastmcp_slim/fastmcp/server/mixins/mcp_operations.py` catch `FastMCPError`
+broadly and translate it into an `MCPError` via `to_mcp_error`, mirroring how
+`_on_call_tool` returns tool errors as an `isError` `CallToolResult`. The
+detailed message (a `ResourceError`/`PromptError`, or the `ResourceError`/
+`PromptError` that wraps an arbitrary handler exception) reaches the client
+on the default `auto` mode exactly as it does on `mode="legacy"`.
+"""
 
 import logging
 
-import mcp.types
+import mcp_types
 import pytest
-from mcp.types import TextContent, ToolUseContent
+from mcp_types import TextContent
 from pydantic import AnyUrl
 
 from fastmcp.client import Client
 from fastmcp.client.mixins.tools import _parse_call_tool_result
 from fastmcp.client.transports import FastMCPTransport
 from fastmcp.exceptions import PromptError, ResourceError, ToolError
-from fastmcp.server.sampling.run import SamplingTool, execute_tools
 from fastmcp.server.server import FastMCP
 
 
@@ -27,7 +36,7 @@ class TestErrorHandling:
 
         async with client:
             result = await client.call_tool_mcp("error_tool", {})
-            assert result.isError
+            assert result.is_error
             assert isinstance(result.content[0], TextContent)
             assert "test error" in result.content[0].text
             assert "abc" in result.content[0].text
@@ -43,7 +52,7 @@ class TestErrorHandling:
 
         async with client:
             result = await client.call_tool_mcp("error_tool", {})
-            assert result.isError
+            assert result.is_error
             assert isinstance(result.content[0], TextContent)
             assert "test error" not in result.content[0].text
             assert "abc" not in result.content[0].text
@@ -57,7 +66,7 @@ class TestErrorHandling:
 
         async with Client(transport=FastMCPTransport(mcp)) as client:
             result = await client.call_tool_mcp("validated_tool", {"x": "abc"})
-            assert result.isError
+            assert result.is_error
             # Pydantic validation error message should NOT be masked
             assert isinstance(result.content[0], TextContent)
             assert "Input should be a valid integer" in result.content[0].text
@@ -73,7 +82,7 @@ class TestErrorHandling:
 
         async with client:
             result = await client.call_tool_mcp("custom_error_tool", {})
-            assert result.isError
+            assert result.is_error
             assert isinstance(result.content[0], TextContent)
             assert "test error" in result.content[0].text
             assert "abc" in result.content[0].text
@@ -207,7 +216,7 @@ class TestParseToolResultEdgeCases:
     """
 
     async def test_error_with_empty_content_raises_with_fallback_message(self):
-        result = mcp.types.CallToolResult(content=[], isError=True)
+        result = mcp_types.CallToolResult(content=[], is_error=True)
 
         with pytest.raises(ToolError, match="Tool 'my_tool' returned an error"):
             await _parse_call_tool_result(
@@ -219,11 +228,11 @@ class TestParseToolResultEdgeCases:
             )
 
     async def test_error_with_non_text_content_raises_with_fallback_message(self):
-        result = mcp.types.CallToolResult(
+        result = mcp_types.CallToolResult(
             content=[
-                mcp.types.ImageContent(type="image", data="abc", mimeType="image/png")
+                mcp_types.ImageContent(type="image", data="abc", mime_type="image/png")
             ],
-            isError=True,
+            is_error=True,
         )
 
         with pytest.raises(ToolError, match="Tool 'my_tool' returned an error"):
@@ -236,9 +245,9 @@ class TestParseToolResultEdgeCases:
             )
 
     async def test_error_with_text_content_raises_with_message(self):
-        result = mcp.types.CallToolResult(
-            content=[mcp.types.TextContent(type="text", text="custom error msg")],
-            isError=True,
+        result = mcp_types.CallToolResult(
+            content=[mcp_types.TextContent(type="text", text="custom error msg")],
+            is_error=True,
         )
 
         with pytest.raises(ToolError, match="custom error msg"):
@@ -251,10 +260,10 @@ class TestParseToolResultEdgeCases:
             )
 
     async def test_error_with_structured_content_does_not_parse_data(self):
-        result = mcp.types.CallToolResult(
-            content=[mcp.types.TextContent(type="text", text="error happened")],
-            isError=True,
-            structuredContent={"key": "value"},
+        result = mcp_types.CallToolResult(
+            content=[mcp_types.TextContent(type="text", text="error happened")],
+            is_error=True,
+            structured_content={"key": "value"},
         )
 
         parsed = await _parse_call_tool_result(
@@ -283,7 +292,7 @@ class TestLogLevel:
             with caplog.at_level(logging.WARNING):
                 result = await client.call_tool_mcp("custom_level_tool", {})
 
-        assert result.isError
+        assert result.is_error
         assert isinstance(result.content[0], TextContent)
         assert "Missing required parameter" in result.content[0].text
         assert any(
@@ -307,7 +316,7 @@ class TestLogLevel:
             with caplog.at_level(logging.ERROR):
                 result = await client.call_tool_mcp("regular_error_tool", {})
 
-        assert result.isError
+        assert result.is_error
         assert isinstance(result.content[0], TextContent)
         assert "Something went wrong" in result.content[0].text
         assert any(
@@ -402,41 +411,6 @@ class TestLogLevel:
         assert "Something went wrong" in str(exc_info.value)
         assert any(
             "Error rendering prompt 'regular_prompt'" in record.message
-            and record.levelname == "ERROR"
-            for record in caplog.records
-        )
-
-    async def test_sampling_tool_error_with_custom_log_level(self, caplog):
-        """ToolError with custom log_level in sampling should log at specified level."""
-
-        async def custom_level_sampling_tool(x: int) -> int:
-            raise ToolError("Expected sampling error", log_level=logging.WARNING)
-
-        tool = SamplingTool.from_function(custom_level_sampling_tool)
-        tool_use = ToolUseContent(
-            type="tool_use",
-            id="test-id",
-            name="custom_level_sampling_tool",
-            input={"x": 42},
-        )
-
-        with caplog.at_level(logging.WARNING):
-            results = await execute_tools(
-                tool_calls=[tool_use],
-                tool_map={"custom_level_sampling_tool": tool},
-                mask_error_details=False,
-            )
-
-        assert len(results) == 1
-        assert results[0].isError
-        assert "Expected sampling error" in results[0].content[0].text  # type: ignore
-        assert any(
-            "Error calling sampling tool" in record.message
-            and record.levelname == "WARNING"
-            for record in caplog.records
-        )
-        assert not any(
-            "Error calling sampling tool" in record.message
             and record.levelname == "ERROR"
             for record in caplog.records
         )

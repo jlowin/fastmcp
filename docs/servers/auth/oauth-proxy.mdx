@@ -114,7 +114,7 @@ mcp = FastMCP(name="My Server", auth=auth)
 <ParamField body="base_url" type="AnyHttpUrl | str" required>
   Public URL where OAuth endpoints will be accessible, **including any mount path** (e.g., `https://your-server.com/api`).
 
-  This URL is used to construct OAuth callback URLs and operational endpoints. When mounting under a path prefix, include that prefix in `base_url`. Use `issuer_url` separately to specify where auth server metadata is located (typically at root level).
+  This URL is used to construct OAuth callback URLs and operational endpoints. When mounting under a path prefix, include that prefix in `base_url`. Use `issuer_url` separately to give the server an OAuth identity that differs from where its endpoints are mounted (typically the root level).
 </ParamField>
 
 <ParamField body="resource_base_url" type="AnyHttpUrl | str | None">
@@ -134,6 +134,8 @@ mcp = FastMCP(name="My Server", auth=auth)
 
 <ParamField body="issuer_url" type="AnyHttpUrl | str | None">
   Issuer URL for OAuth authorization server metadata (defaults to `base_url`).
+
+  `issuer_url` is the server's OAuth identity: it is the `issuer` field of the authorization server metadata, the `iss` claim of the tokens the proxy mints, and the RFC 9207 `iss` parameter on authorization responses. `base_url` remains the location of the endpoints, so `authorization_endpoint`, `token_endpoint`, and the rest of the metadata still point at `base_url` where the routes are actually mounted.
 
   When `issuer_url` has a path component (either explicitly or by defaulting from `base_url`), FastMCP creates path-aware discovery routes per RFC 8414. For example, if `base_url` is `http://localhost:8000/api`, the authorization server metadata will be at `/.well-known/oauth-authorization-server/api`.
 
@@ -192,17 +194,23 @@ mcp = FastMCP(name="My Server", auth=auth)
 
 <ParamField body="allowed_client_redirect_uris" type="list[str] | None">
   List of allowed redirect URI patterns for MCP clients. Patterns support
-  wildcards (e.g., `"http://localhost:*"`, `"https://*.example.com/*"`). -
-  `None` (default): All redirect URIs allowed (for MCP/DCR compatibility) -
-  Empty list `[]`: No redirect URIs allowed - Custom list: Only matching
-  patterns allowed These patterns apply to MCP client loopback redirects, NOT
-  the upstream OAuth app redirect URI.
+  wildcards (e.g., `"http://localhost:*"`, `"https://*.example.com/*"`).
+  - `None` (default): DCR clients use registered redirect URIs, with loopback
+    ports allowed to vary for MCP compatibility. Unsafe browser schemes such as
+    `javascript:`, `data:`, `file:`, and `vbscript:` are rejected.
+  - Empty list `[]`: No redirect URIs allowed
+  - Custom list: Only matching patterns allowed
+
+  These patterns apply to MCP client loopback redirects. Configure the upstream
+  OAuth app redirect URI separately with `redirect_path`.
 </ParamField>
 
 <ParamField body="valid_scopes" type="list[str] | None">
-  List of all possible valid scopes for the OAuth provider. These are advertised
-  to clients through the `/.well-known` endpoints. Defaults to `required_scopes`
-  from your TokenVerifier if not specified.
+  The complete set of scopes clients are allowed to request — the full set of
+  available scopes (a superset of `required_scopes`). These are advertised to
+  clients through the `/.well-known` endpoints and enforced at Dynamic Client
+  Registration. Defaults to `required_scopes` from your TokenVerifier if not
+  specified.
 </ParamField>
 
 <ParamField body="extra_authorize_params" type="dict[str, str] | None">
@@ -510,7 +518,31 @@ This architecture also prevents [token passthrough](#token-passthrough) — see 
 
 **Token expiry alignment:**
 
-FastMCP token lifetimes match the upstream token lifetimes. When the upstream token expires, the FastMCP token also expires, maintaining consistent security boundaries.
+By default, FastMCP token lifetimes match the upstream token lifetimes. When the upstream token expires, the FastMCP token also expires, maintaining consistent security boundaries.
+
+**Extending the FastMCP token lifetime:**
+
+Some upstream providers issue short-lived access tokens (5–60 minutes is common). Because the FastMCP token is a reference into the proxy's storage rather than the upstream credential itself, its client-facing lifetime can be longer than the upstream token's without weakening security: every request re-validates the upstream token and transparently refreshes it when it has expired, so a revoked or genuinely expired upstream session still fails validation and forces re-authentication.
+
+This matters for MCP clients that don't refresh gracefully. For example, [`mcp-remote`](https://github.com/geelen/mcp-remote) (used by Claude Desktop) has known issues handling access-token expiry, so a short upstream lifetime can push users through a full OAuth flow after every idle period. Set `fastmcp_access_token_expiry_seconds` to decouple the FastMCP token lifetime from the upstream `expires_in`:
+
+```python
+from fastmcp.server.auth import OAuthProxy
+
+auth = OAuthProxy(
+    upstream_authorization_endpoint="https://provider.com/oauth/authorize",
+    upstream_token_endpoint="https://provider.com/oauth/token",
+    upstream_client_id="your-client-id",
+    upstream_client_secret="your-client-secret",
+    token_verifier=token_verifier,
+    base_url="https://your-server.com",
+    fastmcp_access_token_expiry_seconds=60 * 60 * 24,  # 24 hours
+)
+```
+
+The upstream token's real expiry is preserved internally to drive transparent refresh; only the FastMCP-issued token lives longer. This parameter is available on every provider built on the OAuth proxy (`GitHubProvider`, `GoogleProvider`, `AzureProvider`, and the rest).
+
+Extending the lifetime only works when the upstream provider issues a refresh token, since that's what lets the proxy renew the access token behind the scenes. When the upstream provides no refresh token, the FastMCP token lifetime is capped at the upstream `expires_in` — issuing a longer-lived token would claim a validity the proxy can't honor.
 
 **Refresh tokens:**
 
@@ -532,7 +564,7 @@ auth = OAuthProxy(
 
 ### Redirect URI Validation
 
-While the OAuth proxy accepts all redirect URIs by default (for DCR compatibility), you can restrict which clients can connect by specifying allowed patterns:
+By default, the OAuth proxy validates DCR clients against their registered redirect URIs while allowing loopback ports to vary for MCP compatibility. Unsafe browser schemes such as `javascript:` are always rejected. You can restrict which clients can connect at the server level by specifying allowed patterns:
 
 ```python
 # Allow only localhost clients (common for development)
@@ -556,6 +588,27 @@ auth = OAuthProxy(
 ```
 
 Check your server logs for "Client registered with redirect_uri" messages to identify what URLs your clients use.
+
+### Application Type (Web vs. Native)
+
+<VersionBadge version="4.0.0" />
+
+During Dynamic Client Registration, a client may declare an `application_type` (per RFC 7591 and SEP-837) that governs which redirect URIs it is allowed to use. The OAuth proxy honors this field both at registration and when authorizing a redirect.
+
+`application_type` defaults to `"native"` because MCP clients typically run locally and register loopback callbacks. Clients that omit the field keep the permissive behavior described above. A client that explicitly registers as `"web"` is held to the stricter browser-app rules.
+
+Loopback covers the whole reserved range in both the address and name forms: every address in `127.0.0.0/8`, `::1`, and — per RFC 6761 — the name `localhost` along with any subdomain of it, such as `app.localhost`. The absolute (trailing-dot) spellings `localhost.` and `127.0.0.1.` are treated identically. A name that merely contains `localhost` as a label of a registrable domain, like `localhost.example.com`, is an ordinary public host and is not treated as loopback.
+
+| `application_type` | Allowed redirect URIs |
+| ------------------ | --------------------- |
+| `"native"` (default) | `https` URLs; app and private-use schemes (`vscode://callback`, `com.example.app:/callback`, `myapp://callback`, `urn:ietf:wg:oauth:2.0:oob`); and loopback `http` (`http://127.0.0.1`, any address in `127.0.0.0/8`, `http://localhost`, subdomains such as `http://app.localhost`, `http://[::1]`, any port) |
+| `"web"` | `https` on a non-loopback host only |
+
+Web clients must register a non-loopback `https` callback — that is the restriction SEP-837 asks for, and a web client that registers no redirect URI at all is refused, since it could never complete an authorization. Native clients keep the full range of schemes their platforms use; the only new limit is that cleartext `http` must target a loopback host, per RFC 8252 §7.3.
+
+Both application types always reject unsafe browser schemes (`javascript:`, `data:`, `file:`, `vbscript:`). FastMCP does not otherwise filter a native client's scheme: there is no reliable way to tell an app-dispatch scheme from a network transport, since the IANA registry lists `vscode:` alongside `coap:` and `smb:`, so any such filter would reject callbacks that real MCP clients depend on.
+
+A redirect URI that violates the declared type is refused during registration with a `RegistrationError` (`invalid_redirect_uri`). For example, a `"web"` client that registers `http://localhost:12345/callback` is rejected, since web clients must use a non-loopback `https` callback. Configure remote, browser-based clients as `application_type="web"` and give them an `https` callback URL.
 
 ## CIMD Support
 
@@ -625,6 +678,83 @@ auth = OAuthProxy(
 )
 ```
 
+## Identity Assertion (SEP-990)
+
+<VersionBadge version="4.0.0" />
+
+<Tip>
+Identity assertion is a beta feature. The API may change in a future release.
+</Tip>
+
+Identity assertion enables an enterprise "on-behalf-of" flow. A corporate identity provider (Okta, Microsoft Entra, etc.) issues an *ID-JAG* — a signed JWT that asserts an employee's identity to a specific MCP authorization server. The client presents that ID-JAG at the token endpoint using the RFC 7523 `jwt-bearer` grant, and the proxy validates it and mints a short-lived access token for the asserted user. No refresh token is issued: the identity provider controls session lifetime, and the client re-exchanges a fresh ID-JAG when its access token expires. This lets a workforce reach your MCP server with corporate-managed identity and centralized revocation, without each user running an interactive browser login.
+
+To enable it, pass an `IdentityAssertion` configuration listing the issuers you trust:
+
+```python
+from fastmcp import FastMCP
+from fastmcp.server.auth import OAuthProxy, IdentityAssertion
+
+auth = OAuthProxy(
+    upstream_authorization_endpoint="https://accounts.example.com/authorize",
+    upstream_token_endpoint="https://accounts.example.com/token",
+    upstream_client_id="your-client-id",
+    upstream_client_secret="your-client-secret",
+    base_url="https://your-server.com",
+    identity_assertion=IdentityAssertion(
+        trusted_issuers=["https://login.acme-corp.com"],
+    ),
+)
+
+mcp = FastMCP("Internal API", auth=auth)
+
+@mcp.tool
+def whoami() -> str:
+    from fastmcp.server.dependencies import get_access_token
+
+    token = get_access_token()
+    return token.subject or "unknown"
+```
+
+When identity assertion is configured, the proxy advertises the `urn:ietf:params:oauth:grant-type:jwt-bearer` grant type and the `urn:ietf:params:oauth:grant-profile:id-jag` grant profile in its authorization server metadata, so compatible clients can discover the capability. When it is not configured, the grant is rejected as unsupported.
+
+### How Validation Works
+
+For each ID-JAG presented at the token endpoint, the proxy checks that:
+
+- the JOSE header `typ` is `oauth-id-jag+jwt`;
+- the `iss` claim is one of the configured `trusted_issuers`;
+- the signature verifies against the issuer's published keys;
+- the `aud` claim identifies this authorization server — configure your identity provider to mint assertions whose `aud` is the `issuer` value published at `/.well-known/oauth-authorization-server`, which is your `issuer_url` when you set one and your `base_url` otherwise;
+- the signed `client_id` claim matches the client presenting the assertion — an assertion the IdP minted for one client cannot be redeemed by another;
+- the signed `resource` claim names this server — an assertion minted for a different MCP server behind the same IdP is rejected;
+- `exp` (and `iat`/`nbf`, when present) place the assertion within a short lifetime and its validity window; and
+- the `jti` has not been seen before, preventing replay.
+
+The issuer's signing keys are discovered automatically via OIDC (`{issuer}/.well-known/openid-configuration`). For issuers that do not publish a discovery document, provide the JWKS URI explicitly per issuer:
+
+```python
+identity_assertion=IdentityAssertion(
+    trusted_issuers=["https://login.acme-corp.com"],
+    jwks_uris={"https://login.acme-corp.com": "https://login.acme-corp.com/keys"},
+)
+```
+
+Verification assumes `RS256` unless the issuer signs with another algorithm, in which case set `algorithm` explicitly (any asymmetric JWS algorithm — `RS*`, `PS*`, or `ES*` — since assertions are verified against a published JWKS, not a shared secret). When trusted issuers use different algorithms, override per issuer with `algorithms`, keyed the same way as `jwks_uris`:
+
+```python
+identity_assertion=IdentityAssertion(
+    trusted_issuers=["https://login.acme-corp.com", "https://sso.other-corp.com"],
+    algorithm="ES256",
+    algorithms={"https://sso.other-corp.com": "RS256"},
+)
+```
+
+The subject asserted in the ID-JAG flows into the normal FastMCP auth context. Tools read it through `get_access_token()` exactly as they would for any other token, because the proxy issues the access token through its own token factory.
+
+<Warning>
+Replay protection is per-process. Each server process tracks seen `jti` values in memory, so a horizontally-scaled deployment running multiple workers or replicas could accept the same assertion once per process. The same applies to revocation of ID-JAG access tokens: they are self-contained, so revocation is tracked in-process until the token's (short, 5-minute default) natural expiry. For deployments that require strict single-use enforcement across replicas, configure sticky routing so a given client's requests reach the same process, or place a shared store in front of the token endpoint. This mirrors the posture of CIMD `private_key_jwt` replay protection, which is also per-process.
+</Warning>
+
 ## Security
 
 ### Key and Storage Management
@@ -633,8 +763,7 @@ auth = OAuthProxy(
 The OAuth proxy requires cryptographic keys for JWT signing and storage encryption, plus persistent storage to maintain valid tokens across server restarts.
 
 **Default behavior (appropriate for development only):**
-- **Mac/Windows**: FastMCP automatically generates keys and stores them in your system keyring. Storage defaults to disk. Tokens survive server restarts. This is **only** suitable for development and local testing.
-- **Linux**: Keys are ephemeral (random salt at startup). Storage defaults to memory. Tokens become invalid on server restart.
+On every platform, FastMCP deterministically derives `jwt_signing_key` from `upstream_client_secret` using HKDF, and storage defaults to an encrypted disk store in your platform's data directory (derived from `platformdirs`). Tokens survive server restarts as long as `upstream_client_secret` doesn't change. This is **only** suitable for development and local testing.
 
 **For production:**
 Configure the following parameters together: provide a unique `jwt_signing_key` (for signing FastMCP JWTs), and a shared `client_storage` backend (for storing tokens). Both are required for production deployments. Use a network-accessible storage backend like Redis or DynamoDB rather than local disk storage. **Wrap your storage in `FernetEncryptionWrapper` to encrypt sensitive OAuth tokens at rest** (see the `client_storage` parameter documentation above for examples). The keys accept any secret string and derive proper cryptographic keys using HKDF. See [OAuth Token Security](/deployment/http#oauth-token-security) and [Storage Backends](/servers/storage-backends) for complete production setup.

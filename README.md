@@ -20,7 +20,7 @@
 [![Tests](https://github.com/PrefectHQ/fastmcp/actions/workflows/run-tests.yml/badge.svg)](https://github.com/PrefectHQ/fastmcp/actions/workflows/run-tests.yml)
 [![License](https://img.shields.io/github/license/PrefectHQ/fastmcp.svg)](https://github.com/PrefectHQ/fastmcp/blob/main/LICENSE)
 
-<a href="https://trendshift.io/repositories/13266" target="_blank"><img src="https://trendshift.io/api/badge/repositories/13266" alt="prefecthq%2Ffastmcp | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
+<a href="https://trendshift.io/repositories/21461" target="_blank"><img src="https://trendshift.io/api/badge/repositories/21461" alt="prefecthq%2Ffastmcp | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
 </div>
 
 ---
@@ -103,6 +103,9 @@ For full installation instructions, including verification and upgrading, see th
 - [Upgrading from FastMCP v2](https://gofastmcp.com/getting-started/upgrading/from-fastmcp-2)
 - [Upgrading from the MCP Python SDK](https://gofastmcp.com/getting-started/upgrading/from-mcp-sdk)
 - [Upgrading from the low-level SDK](https://gofastmcp.com/getting-started/upgrading/from-low-level-sdk)
+
+> [!NOTE]
+> If `import fastmcp` fails right after a `pip` upgrade from FastMCP 3.2 or earlier, run `pip install --force-reinstall fastmcp`. See [Troubleshooting](https://gofastmcp.com/getting-started/installation#troubleshooting) for why this happens (`uv` is unaffected).
 
 ## 📚 Documentation
 

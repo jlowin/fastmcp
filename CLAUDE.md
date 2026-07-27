@@ -60,7 +60,7 @@ When modifying MCP functionality, changes typically need to be applied across al
 
 - Prek hooks are required (run automatically on commits)
 - Never amend commits to fix prek failures
-- Apply PR labels: bugs/breaking/enhancements/features
+- Never apply labels manually or invent new ones — issues and PRs are auto-labeled by a bot based on title/body/code changes. Don't note a "suggested" or "appropriate" label anywhere in the PR body either. See the review-pr skill.
 - Improvements = enhancements (not features) unless specified
 - **NEVER** force-push on collaborative repos
 - **ALWAYS** run prek before PRs
@@ -68,6 +68,12 @@ When modifying MCP functionality, changes typically need to be applied across al
 - **NEVER** merge a PR marked as do-not-merge or draft. Check title, body, AND labels for `[DNM]`, `DNM`, `DO NOT MERGE`, `DON'T MERGE`, `DONT MERGE`, `do-not-merge`, `dont-merge`, `[DRAFT]`, or `DRAFT` (case-insensitive, any variation — some authors use `[DRAFT]` in the title even when `isDraft` is false). Authors use these as hard stops — respect them even if CI is green and review looks clean. When triaging a batch of PRs, filter these out up front AND re-check each one's labels immediately before merging, since labels can change mid-session.
 - **ALWAYS** read review-bot comments before approving a PR. CodeRabbit and chatgpt-codex-connector (Codex) leave substantive review comments on most PRs in this repo — these bots have read the diff and often flag real issues that aren't in the PR description. Use `gh pr view <num> --comments` and read the bot feedback as part of review. Unlike proposed solutions from issue reporters, review-bot feedback should be evaluated on its merits, not discounted.
 - **Be constructively skeptical of bot review comments on your own PRs.** CodeRabbit, Codex, and claude[bot] run a fresh review pass on every push, which means a PR with active churn can accumulate bot comments in a stream that never really ends — each fix surfaces a new edge case the next pass can flag. Most of the early feedback is real and worth acting on; diminishing returns set in fast. Evaluate each comment on its merits, the same way you would a human reviewer: is this a real bug users will hit, or a hypothetical that requires an adversarial setup? Does the fix introduce more complexity than the problem? Has the bot missed context that's obvious to a human reader (a `*,` keyword-only marker, a design decision documented elsewhere, something already resolved on a later commit)? When a comment is pedantic, a false positive, or flagging something already fixed, reply on the thread explaining the reasoning and move on — don't keep iterating just because more comments arrive. If you find yourself three rounds deep and the feedback is shifting toward "what if someone does X" hypotheticals, you're past the point where each fix is improving the PR. Stop, document the contract as-is, and ship.
+
+### Outbound Comments and Shell Interpolation
+
+- Never pass GitHub, Linear, or Slack comment bodies inline through shell arguments when the body contains `$`, `${...}`, backticks, `$(...)`, environment-variable examples, secrets, or config interpolation examples.
+- Use a body file or structured API payload for outbound comments, then inspect the exact outgoing text before posting. Prefer `gh ... --body-file /path/to/comment.md` over `--body "..."`.
+- When explaining environment interpolation, use placeholders and fenced code blocks. Never include raw `.env` contents in outbound comments.
 
 ### Releases
 
@@ -78,10 +84,12 @@ Only cut releases when the maintainer explicitly asks. Tags follow `v<version>` 
 Write the maintainer-approved handwritten notes to a temporary file, then create the release. `--generate-notes` appends the auto-generated changelog after the handwritten content.
 
 ```bash
-gh release create v3.2.0 --target main --title "v3.2.0: Theme Here" --generate-notes --notes-file /tmp/release-notes.md
+gh release create v4.0.0 --target main --title "v4.0.0: Theme Here" --generate-notes --notes-start-tag v3.4.4 --notes-file /tmp/release-notes.md
 ```
 
-Most releases target `main`, but maintenance or backport releases may target a different branch (e.g., `release/2.x`). Confirm the target with the maintainer if there's any ambiguity.
+**Always pass `--notes-start-tag <last-stable-tag>`.** Without it, `--generate-notes` picks the most recent prior tag as the changelog start point — and if a prerelease exists (e.g. `v3.4.0b1`), it starts from *that*, silently truncating the PR list to only the commits since the beta. Pin it to the last stable release (e.g. `v3.3.1` when cutting `v3.4.0`). Verify after: the compare link at the bottom of the generated notes should read `v<last-stable>...v<new>`.
+
+Use the branch that owns the release line as the target: current-major releases target `main`, 3.x maintenance releases target `release/3.x`, and 2.x maintenance releases target `release/2.x`. Confirm the target with the maintainer if there's any ambiguity. For example, cut a 3.4.4 maintenance release with `--target release/3.x`, not `main`.
 
 The handwritten notes are prepended above the auto-generated changelog and are the part that matters. Do not include a title in the notes body — the release title (`v{version}: {pun}`) already serves as the heading. Work with the maintainer to draft the notes — propose a draft, get feedback, iterate. Do not publish without the maintainer's sign-off.
 
@@ -97,9 +105,18 @@ gh api -X POST repos/PrefectHQ/fastmcp/releases/generate-notes \
   --jq '.body'
 ```
 
+Set `target_commitish` to the same branch that will receive the release tag. For maintenance releases, use the maintenance branch (for example, `release/3.x`) so the preview matches the release notes GitHub will generate.
+
 **Point releases** (3.0, 3.1, 3.2) get narrative prose: open with the theme of the release, then walk through headline features conceptually — what they enable, why they matter, how they fit together. Write it the way a blog post reads, not a changelog. Multiple paragraphs, code examples where they clarify.
 
 **Patch releases** (3.1.1, 3.0.2) get 1-2 sentences explaining what broke and what the fix does. Keep it minimal — the auto-generated changelog has the details.
+
+**Merge the docs changelog PR *before* cutting the release, not after.** The post-publish `update-published-docs` job force-pushes the `published-docs` branch (which gofastmcp.com serves) to the released commit for stable releases on the default branch, so the changelog entry only reaches the live site if it's already in the commit being tagged. Land the docs PR on the release target branch first, then cut the release from that branch. If you tag first and merge docs after, this release's changelog won't appear on the live site until the next default-branch stable release force-pushes `published-docs` forward. Maintenance releases from `release/3.x` or `release/2.x` publish packages and GitHub notes without repointing `published-docs`; add their changelog entries on the maintenance branch, slotted into the matching major-version section. Two hand-maintained files mirror the GitHub release and must get a new entry for every version, newest at the top (these are `.mdx` and are not covered by the prek Prettier hook, which only runs on `yaml`/`json5` — match the existing entries' style by hand):
+
+- `docs/changelog.mdx` is the full mirror. Add an `<Update label="v<version>" description="YYYY-MM-DD">` block with: a bold linked title (`**[v<version>: <pun>](<release-url>)**`), a condensed 1-paragraph intro (one sentence for patches), the full categorized PR list reformatted from the `--generate-notes` output (`* <title> by [@user](https://github.com/user) in [#NNNN](<pull-url>)`), a `## New Contributors` list (plain `@user`, linked PR), and a `**Full Changelog**: [vA...vB](<compare-url>)` line.
+- `docs/updates.mdx` is the skimmable card feed. Add an `<Update label="FastMCP <version>" description="Month DD, YYYY" tags={["Releases"]}>` wrapping a `<Card>` that links to the GitHub release, with a 1-2 sentence summary and (for point releases) a handful of emoji-bulleted highlights.
+
+Because the docs land *before* the tag exists, derive the entry from the maintainer-approved handwritten notes (intro/summary) and the `--generate-notes` API *preview* (the PR-list body — see the generate-notes API call above, which returns the exact changelog without cutting anything). Scripting the link reformatting is reliable for long PR lists. The release-URL, tag, and compare links follow the known pattern (`/releases/tag/v<version>`, `compare/v<last-stable>...v<version>`) and will 404 only during the short window between merging the docs PR and cutting the release minutes later — they resolve before the release workflow completes. For this reason, create and merge the docs PR *immediately* before cutting the release — treat the two as one tight back-to-back sequence, not independent steps — so the links are valid by the time the release publishes rather than dangling for any longer than necessary.
 
 ### Commit Messages and Agent Attribution
 

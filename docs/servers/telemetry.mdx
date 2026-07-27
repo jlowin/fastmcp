@@ -6,18 +6,26 @@ icon: chart-line
 tag: NEW
 ---
 
-FastMCP includes native OpenTelemetry instrumentation for observability. Traces are automatically generated for tool, prompt, resource, and resource template operations, providing visibility into server behavior, request handling, and provider delegation chains.
+import { VersionBadge } from "/snippets/version-badge.mdx"
+
+FastMCP includes native OpenTelemetry instrumentation for observability. Traces are automatically generated for tool, prompt, resource, resource template, and task management operations, providing visibility into server behavior, request handling, and provider delegation chains.
 
 ## How It Works
 
 FastMCP uses the OpenTelemetry API for instrumentation. This means:
 
-- **Zero configuration required** - Native FastMCP instrumentation is available by default
+- **On by default** - Instrumentation is active out of the box, no opt-in required
 - **No overhead when unused** - Without an SDK, all operations are no-ops
 - **Bring your own SDK** - You control collection, export, and sampling
 - **Works with any OTEL backend** - Jaeger, Zipkin, Datadog, New Relic, etc.
 
-FastMCP also propagates OpenTelemetry context through MCP `params._meta`, including `traceparent` and `tracestate` when present.
+Because FastMCP only depends on the OpenTelemetry API, span creation is a no-op until you configure an SDK and exporter — so being on by default costs nothing until you opt into collection.
+
+### Turning Telemetry Off
+
+<VersionBadge version="4.0.0" />
+
+To disable FastMCP's instrumentation entirely, set `FASTMCP_ENABLE_TELEMETRY=false` (or `fastmcp.settings.enable_telemetry = False`). When disabled, FastMCP creates no spans even if an SDK is configured.
 
 ## Enabling Telemetry
 
@@ -54,23 +62,24 @@ This works with any OTLP-compatible backend (Jaeger, Zipkin, Grafana Tempo, Data
 
 ## Tracing
 
-FastMCP creates spans for the MCP operations it currently instruments, providing end-to-end visibility into request handling.
+FastMCP creates spans for all MCP operations, providing end-to-end visibility into request handling.
 
 ### Server Spans
 
-The server creates spans for each supported operation using [MCP semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/mcp/):
+The server creates spans for each operation using [MCP semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/mcp/):
 
 | Span Name | Description |
 |-----------|-------------|
 | `tools/call {name}` | Tool execution (e.g., `tools/call get_weather`) |
 | `resources/read` | Resource read (URI in `mcp.resource.uri` attribute, not span name) |
 | `prompts/get {name}` | Prompt render (e.g., `prompts/get greeting`) |
+| `tasks/{operation}` | Task management (`tasks/get`, `tasks/update`, or `tasks/cancel`) |
 
 For mounted servers, an additional `delegate {name}` span shows the delegation to the child server.
 
 ### Client Spans
 
-The FastMCP client creates spans for outgoing requests with the same naming pattern (`tools/call {name}`, `resources/read`, `prompts/get {name}`).
+The FastMCP client creates spans for outgoing requests with the same naming pattern (`tools/call {name}`, `resources/read`, `prompts/get {name}`, and `tasks/{operation}`).
 
 ### Span Hierarchy
 
@@ -90,6 +99,54 @@ tools/call remote_search (CLIENT)
   └── tools/call remote_search (SERVER, provider=ProxyProvider)
         └── [remote server spans via trace context propagation]
 ```
+
+### Background tasks
+
+Background task traces have two parts:
+
+- Task submission and management requests use normal client-to-server context propagation. `tasks/get`, `tasks/update`, and `tasks/cancel` server spans are descendants of the corresponding FastMCP client spans.
+- Deferred execution runs in a Docket worker. Docket records its `CONSUMER` span as a new trace root with a span link to the submission context, rather than making it a child of the submission span. Custom spans created inside the task are children of that worker span.
+
+Span links preserve the causal relationship without forcing worker sampling to inherit the submit trace's sampling decision. Some tracing backends do not display links prominently, so the worker trace may look disconnected even though the link is present.
+
+Frequent status polling can produce more detail than you need. You can drop those client and server spans with a sampler that checks the span name before delegating to `ParentBased`:
+
+```python
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.sampling import (
+    ALWAYS_ON,
+    Decision,
+    ParentBased,
+    Sampler,
+    SamplingResult,
+)
+
+
+class DropTaskPolls(Sampler):
+    def __init__(self):
+        self._delegate = ParentBased(ALWAYS_ON)
+
+    def should_sample(self, parent_context, trace_id, name, *args, **kwargs):
+        if name in {"tasks/get"}:
+            return SamplingResult(Decision.DROP)
+        return self._delegate.should_sample(
+            parent_context,
+            trace_id,
+            name,
+            *args,
+            **kwargs,
+        )
+
+    def get_description(self):
+        return "DropTaskPolls"
+
+
+provider = TracerProvider(sampler=DropTaskPolls())
+trace.set_tracer_provider(provider)
+```
+
+The name check must happen before `ParentBased` delegates. If the name-based sampler is nested inside `ParentBased`, it is not consulted for child spans whose parent was already sampled.
 
 ## Programmatic Configuration
 
@@ -120,25 +177,6 @@ def greet(name: str) -> str:
 <Tip>
 The SDK must be configured **before** importing FastMCP to ensure the tracer provider is set when FastMCP initializes.
 </Tip>
-
-## Interoperability Mode
-
-If another MCP-aware instrumentation layer should own the MCP spans, switch FastMCP to propagation-only mode:
-
-```bash
-export FASTMCP_TELEMETRY_MODE=propagation_only
-```
-
-In this mode, FastMCP still injects and extracts trace context through MCP `_meta`, but it stops creating its own MCP request spans and `delegate` spans.
-
-Library authors can suppress only FastMCP's native spans programmatically without disabling unrelated nested instrumentation:
-
-```python
-from fastmcp.telemetry import suppress_fastmcp_telemetry
-
-with suppress_fastmcp_telemetry():
-    result = await client.call_tool("search", {"query": "otel"})
-```
 
 ### Local Development
 
@@ -204,7 +242,7 @@ Custom spans are most useful around work that is expensive or hard to debug:
 - External calls such as databases, vector stores, HTTP APIs, or queue operations
 - Multi-step tool logic where one stage dominates latency
 - Prompt or resource generation that fans out to other systems
-- Sampling calls made from inside a tool via `ctx.sample(...)`
+- LLM calls a tool makes to a model provider
 
 Avoid wrapping every small helper function or simple in-memory transformation. That usually adds noise without making traces easier to interpret.
 
@@ -252,9 +290,9 @@ async def docs_resource(slug: str) -> str:
         return await load_doc(slug)
 ```
 
-### Sampling calls inside tools
+### LLM calls inside tools
 
-If your tool uses `ctx.sample(...)`, keep the LLM work nested under the tool span so traces show both application logic and model latency together.
+A tool that [calls an LLM directly](/servers/sampling) should keep the model work nested under the tool span, so traces show application logic and model latency together.
 
 For providers with their own OTEL integrations, prefer enabling that instrumentation rather than manually creating a span around every model call. For example, if you use Google GenAI, `logfire.instrument_google_genai()` will emit child spans with token and request metadata under the active FastMCP tool span.
 
@@ -291,7 +329,8 @@ FastMCP implements the [OpenTelemetry MCP semantic conventions](https://opentele
 
 | Attribute | Description |
 |-----------|-------------|
-| `mcp.method.name` | The MCP method being called (`tools/call`, `resources/read`, `prompts/get`) |
+| `mcp.method.name` | The MCP method being called (`tools/call`, `resources/read`, `prompts/get`, `tasks/get`, etc.) |
+| `mcp.protocol.version` | The negotiated MCP protocol version for the request |
 | `mcp.session.id` | Session identifier for the MCP connection |
 | `mcp.resource.uri` | The resource URI (for resource operations) |
 | `gen_ai.tool.name` | Tool name (on `tools/call` spans) |
@@ -315,7 +354,7 @@ All custom attributes use the `fastmcp.` prefix for features unique to FastMCP:
 |-----------|-------------|
 | `fastmcp.server.name` | Server name |
 | `fastmcp.component.type` | `tool`, `resource`, `prompt`, or `resource_template` |
-| `fastmcp.component.key` | Full component identifier (e.g., `tool:greet`) |
+| `fastmcp.component.key` | Full component key, including type and version delimiter (e.g., `tool:greet@` or `tool:greet@v2`) |
 | `fastmcp.provider.type` | Provider class (`LocalProvider`, `FastMCPProvider`, `ProxyProvider`) |
 
 Provider-specific attributes for delegation context:

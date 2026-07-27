@@ -4,7 +4,7 @@ from urllib.parse import quote
 import pytest
 from pydantic import BaseModel
 
-from fastmcp import Context, FastMCP
+from fastmcp import Client, Context, FastMCP
 from fastmcp.resources import ResourceTemplate
 from fastmcp.resources.function_resource import FunctionResource
 from fastmcp.resources.template import (
@@ -951,6 +951,30 @@ class TestExpandUriTemplate:
         result = expand_uri_template("test://{x}", {"x": "foo", "unused": "bar"})
         assert result == "test://foo"
 
+    @pytest.mark.parametrize(
+        "template, params, expected",
+        [
+            # Simple {var} matches a single segment, so "/" must be encoded.
+            (
+                "data://{path}/info",
+                {"path": "hello/world"},
+                "data://hello%2Fworld/info",
+            ),
+            ("test://{x}", {"x": "a b"}, "test://a%20b"),
+            ("test://{x}", {"x": "a?b"}, "test://a%3Fb"),
+            ("test://{x}", {"x": "a#b"}, "test://a%23b"),
+            # Wildcard {var*} may span segments, so "/" is preserved but other
+            # reserved characters are still encoded.
+            ("test://{path*}", {"path": "a/b/c"}, "test://a/b/c"),
+            ("test://{path*}", {"path": "a b/c"}, "test://a%20b/c"),
+        ],
+    )
+    def test_expand_encodes_reserved_characters(
+        self, template: str, params: dict[str, str], expected: str
+    ):
+        """Path values are percent-encoded so the result round-trips through match."""
+        assert expand_uri_template(template, params) == expected
+
 
 class TestMatchExpandRoundTrip:
     """match_uri_template and expand_uri_template must agree on the template grammar."""
@@ -972,3 +996,147 @@ class TestMatchExpandRoundTrip:
         params = match_uri_template(uri, template)
         assert params is not None
         assert expand_uri_template(template, params) == uri
+
+    @pytest.mark.parametrize(
+        "template, params",
+        [
+            ("data://{path}/info", {"path": "hello/world"}),
+            ("test://{x}", {"x": "a b c"}),
+            ("test://{x}", {"x": "100%"}),
+            ("test://{x}/{y}", {"x": "a/b", "y": "c?d"}),
+            ("test://{path*}", {"path": "a/b/c"}),
+            ("test://pre/{rest*}", {"rest": "x y/z"}),
+        ],
+    )
+    def test_match_then_expand_recovers_params(
+        self, template: str, params: dict[str, str]
+    ):
+        """Expanding params and matching them back reproduces the original values."""
+        uri = expand_uri_template(template, params)
+        assert match_uri_template(uri, template) == params
+
+
+class TestTemplateMimeType:
+    """A template must serve the MIME type it advertises in listings."""
+
+    @pytest.mark.parametrize(
+        "declared,expected",
+        [
+            ("text/csv", "text/csv"),
+            ("text/html", "text/html"),
+            (None, "text/plain"),
+        ],
+    )
+    async def test_declared_mime_type_is_served_on_read(
+        self, declared: str | None, expected: str
+    ):
+        """A string return honors the template's declared mime_type."""
+        mcp = FastMCP()
+
+        kwargs = {"mime_type": declared} if declared else {}
+
+        @mcp.resource("data://report/{name}", **kwargs)
+        def report(name: str) -> str:
+            return f"col_a,col_b\n{name},1"
+
+        async with Client(mcp) as client:
+            result = await client.read_resource("data://report/x")
+
+        assert result[0].mime_type == expected
+
+    async def test_read_mime_type_matches_listed_mime_type(self):
+        """resources/templates/list and resources/read must agree."""
+        mcp = FastMCP()
+
+        @mcp.resource("data://item/{id}", mime_type="text/csv")
+        def item(id: str) -> str:
+            return f"id\n{id}"
+
+        async with Client(mcp) as client:
+            listed = await client.list_resource_templates()
+            read = await client.read_resource("data://item/7")
+
+        assert listed[0].mime_type == read[0].mime_type == "text/csv"
+
+    async def test_json_native_return_matches_concrete_resource(self):
+        """A dict return behaves the same for templates and concrete resources."""
+        mcp = FastMCP()
+
+        @mcp.resource("data://concrete")
+        def concrete() -> dict:
+            return {"k": 1}
+
+        @mcp.resource("data://templated/{id}")
+        def templated(id: str) -> dict:
+            return {"k": id}
+
+        async with Client(mcp) as client:
+            concrete_result = await client.read_resource("data://concrete")
+            templated_result = await client.read_resource("data://templated/1")
+
+        assert concrete_result[0].mime_type == templated_result[0].mime_type
+
+    async def test_component_meta_propagates_to_content(self):
+        """Template-level meta reaches content items, as it does for resources."""
+        mcp = FastMCP()
+
+        @mcp.resource("data://tagged/{id}", meta={"team": "infra"})
+        def tagged(id: str) -> str:
+            return id
+
+        async with Client(mcp) as client:
+            result = await client.read_resource("data://tagged/9")
+
+        assert result[0].meta is not None
+        assert result[0].meta["team"] == "infra"
+
+
+class TestInternalMetaNotLeaked:
+    """FastMCP's private visibility marker must never reach the wire."""
+
+    @pytest.mark.parametrize(
+        "uri,read_uri",
+        [
+            ("data://plain", "data://plain"),
+            ("data://tmpl/{id}", "data://tmpl/1"),
+        ],
+    )
+    async def test_visibility_marker_stripped_from_content_meta(
+        self, uri: str, read_uri: str
+    ):
+        """Applying a visibility rule must not add internal meta to content."""
+        mcp = FastMCP()
+
+        if "{" in uri:
+
+            @mcp.resource(uri)
+            def templated(id: str) -> str:
+                return id
+        else:
+
+            @mcp.resource(uri)
+            def concrete() -> str:
+                return "value"
+
+        # Applying any visibility rule stamps the internal marker on meta
+        mcp.enable(names={"templated" if "{" in uri else "concrete"})
+
+        async with Client(mcp) as client:
+            result = await client.read_resource(read_uri)
+
+        assert result[0].meta is None
+
+    async def test_user_meta_survives_stripping(self):
+        """Only the internal namespace is removed; user meta is preserved."""
+        mcp = FastMCP()
+
+        @mcp.resource("data://tagged/{id}", meta={"team": "infra"})
+        def tagged(id: str) -> str:
+            return id
+
+        mcp.enable(names={"tagged"})
+
+        async with Client(mcp) as client:
+            result = await client.read_resource("data://tagged/1")
+
+        assert result[0].meta == {"team": "infra"}

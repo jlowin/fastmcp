@@ -73,14 +73,14 @@ def search_products_implementation(query: str, category: str | None = None) -> l
   Provides the description exposed via MCP. If set, the function's docstring is ignored for the tool description, though docstring-derived parameter descriptions still apply (see [Docstring Descriptions](#docstring-descriptions)).
 </ParamField>
 
+<ParamField body="title" type="str | None">
+  A human-readable display title for the tool. If omitted, FastMCP falls back to `annotations.title` when present.
+</ParamField>
+
 <ParamField body="tags" type="set[str] | None">
   A set of strings used to categorize the tool. These can be used by the server and, in some cases, by clients to filter or group available tools.
 </ParamField>
 
-<ParamField body="enabled" type="bool" default="True">
-  <Warning>Deprecated in v3.0.0. Use `mcp.enable()` / `mcp.disable()` at the server level instead.</Warning>
-  A boolean to enable or disable the tool. See [Component Visibility](#component-visibility) for the recommended approach.
-</ParamField>
 
 <ParamField body="icons" type="list[Icon] | None">
   <VersionBadge version="2.13.0" />
@@ -722,8 +722,8 @@ Schema generation works for most common types including basic types, collections
 For complete control over tool responses, return a `ToolResult` object. This gives you explicit control over all aspects of the tool's output: traditional content, structured data, and metadata.
 
 ```python
-from fastmcp.tools.tool import ToolResult
-from mcp.types import TextContent
+from fastmcp.tools import ToolResult
+from mcp_types import TextContent
 
 @mcp.tool
 def advanced_tool() -> ToolResult:
@@ -746,7 +746,7 @@ ToolResult(content="Hello, world!")
 # List of content blocks
 ToolResult(content=[
     TextContent(type="text", text="Result: 42"),
-    ImageContent(type="image", data="base64...", mimeType="image/png")
+    ImageContent(type="image", data="base64...", mime_type="image/png")
 ])
 ```
 
@@ -788,7 +788,7 @@ When you need custom serialization (like YAML, Markdown tables, or specialized f
 ```python
 import yaml
 from fastmcp import FastMCP
-from fastmcp.tools.tool import ToolResult
+from fastmcp.tools import ToolResult
 
 mcp = FastMCP("MyServer")
 
@@ -918,7 +918,7 @@ def public_action() -> str:
     return "Done"
 
 # Disable specific tools by key
-mcp.disable(keys={"tool:admin_action"})
+mcp.disable(names={"admin_action"})
 
 # Disable tools by tag
 mcp.disable(tags={"admin"})
@@ -944,7 +944,7 @@ Annotations serve several purposes in client applications:
 You can add annotations to a tool using the `annotations` parameter in the `@mcp.tool` decorator. FastMCP accepts either a plain dict or `ToolAnnotations`; the examples below use `ToolAnnotations` for consistency and stronger editor/type support.
 
 ```python
-from mcp.types import ToolAnnotations
+from mcp_types import ToolAnnotations
 
 @mcp.tool(
     annotations=ToolAnnotations(
@@ -983,7 +983,7 @@ Mark a tool as read-only when it retrieves data, performs calculations, or check
 
 ```python
 from fastmcp import FastMCP
-from mcp.types import ToolAnnotations
+from mcp_types import ToolAnnotations
 
 mcp = FastMCP("Data Server")
 
@@ -1034,8 +1034,8 @@ def example_tool() -> str:
 
 # These operations trigger notifications:
 mcp.add_tool(example_tool)              # Sends tools/list_changed notification
-mcp.disable(keys={"tool:example_tool"}) # Sends tools/list_changed notification
-mcp.enable(keys={"tool:example_tool"})  # Sends tools/list_changed notification
+mcp.disable(names={"example_tool"})  # Sends tools/list_changed notification
+mcp.enable(names={"example_tool"})   # Sends tools/list_changed notification
 mcp.local_provider.remove_tool("example_tool")  # Sends tools/list_changed notification
 ```
 
@@ -1056,22 +1056,14 @@ mcp = FastMCP(name="ContextDemo")
 async def process_data(data_uri: str, ctx: Context) -> dict:
     """Process data from a resource with progress reporting."""
     await ctx.info(f"Processing data from {data_uri}")
-    
-    # Read a resource
-    resource = await ctx.read_resource(data_uri)
-    data = resource[0].content if resource else ""
-    
-    # Report progress
+
+    result = await ctx.read_resource(data_uri)
+    data = result.contents[0].content if result.contents else ""
     await ctx.report_progress(progress=50, total=100)
-    
-    # Example request to the client's LLM for help
-    summary = await ctx.sample(f"Summarize this in 10 words: {data[:200]}")
-    
+
+    summary = str(data)[:200]
     await ctx.report_progress(progress=100, total=100)
-    return {
-        "length": len(data),
-        "summary": summary.text
-    }
+    return {"length": len(data), "summary": summary}
 ```
 
 The Context object provides access to:
@@ -1079,7 +1071,6 @@ The Context object provides access to:
 - **Logging**: `ctx.debug()`, `ctx.info()`, `ctx.warning()`, `ctx.error()`
 - **Progress Reporting**: `ctx.report_progress(progress, total)`
 - **Resource Access**: `ctx.read_resource(uri)`
-- **LLM Sampling**: `ctx.sample(...)`
 - **Request Information**: `ctx.request_id`, `ctx.client_id`
 
 For full documentation on the Context object and all its capabilities, see the [Context documentation](/servers/context).

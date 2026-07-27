@@ -1,8 +1,12 @@
+import json
 from dataclasses import dataclass
-from typing import Any
+from typing import Annotated, Any
 
 import pytest
+from mcp_types import CallToolResult, TextContent
+from pydantic import BaseModel, ConfigDict, Field
 
+from fastmcp import Client, FastMCP
 from fastmcp.tools.base import Tool, ToolResult
 
 
@@ -68,6 +72,88 @@ class TestToolResultCasting:
         assert result.content[0].text == "test data"
         assert result.structured_content == {"data_type": "test"}
         assert result.meta == {"some": "metadata"}
+
+
+class TestToolResultIsError:
+    """A tool can return an error result (isError) instead of raising."""
+
+    def test_to_mcp_result_sets_iserror_and_preserves_content(self):
+        result = ToolResult(
+            content="boom", structured_content={"code": 42}, is_error=True
+        )
+        mcp_result = result.to_mcp_result()
+        assert isinstance(mcp_result, CallToolResult)
+        assert mcp_result.is_error is True
+        assert isinstance(mcp_result.content[0], TextContent)
+        assert mcp_result.content[0].text == "boom"
+        assert mcp_result.structured_content == {"code": 42}
+
+    def test_default_is_not_error(self):
+        result = ToolResult(content="ok")
+        assert result.is_error is False
+
+    async def test_returned_error_raises_on_client_by_default(self):
+        from fastmcp import FastMCP
+        from fastmcp.client import Client
+        from fastmcp.exceptions import ToolError
+
+        mcp = FastMCP()
+
+        @mcp.tool
+        def failing() -> ToolResult:
+            return ToolResult(content="upstream boom", is_error=True)
+
+        async with Client(mcp) as client:
+            with pytest.raises(ToolError):
+                await client.call_tool("failing", {})
+
+    async def test_returned_error_preserves_content_when_not_raising(self):
+        from fastmcp import FastMCP
+        from fastmcp.client import Client
+
+        mcp = FastMCP()
+
+        @mcp.tool
+        def failing() -> ToolResult:
+            return ToolResult(content="upstream boom", is_error=True)
+
+        async with Client(mcp) as client:
+            result = await client.call_tool("failing", {}, raise_on_error=False)
+
+        assert result.is_error is True
+        assert result.content[0].text == "upstream boom"
+
+    def test_raw_call_tool_result_is_preserved(self):
+        tool = Tool.from_function(lambda: None, name="test_tool")
+        raw_result = CallToolResult(
+            content=[TextContent(type="text", text="upstream boom")],
+            structured_content={"code": 42},
+            is_error=True,
+            _meta={"source": "upstream"},
+        )
+
+        result = tool.convert_result(raw_result)
+
+        assert result.to_mcp_result() is raw_result
+
+    async def test_raw_call_tool_result_preserves_protocol_fields(self):
+        mcp = FastMCP()
+
+        raw_result = CallToolResult(
+            content=[TextContent(type="text", text="upstream boom")],
+            structured_content={"code": 42},
+            is_error=True,
+            _meta={"source": "upstream"},
+        )
+
+        @mcp.tool
+        def failing() -> CallToolResult:
+            return raw_result
+
+        async with Client(mcp) as client:
+            result = await client.call_tool_mcp("failing", {})
+
+        assert result.model_dump(by_alias=True) == raw_result.model_dump(by_alias=True)
 
 
 class TestUnionReturnTypes:
@@ -182,3 +268,160 @@ class TestSerializationAlias:
                 component_data = result.structured_content
             assert component_data["componentId"] == "test123"
             assert "id" not in component_data
+
+
+class TestSerializeByAlias:
+    """Tests that a model's serialize_by_alias config is honored at runtime.
+
+    pydantic_core's serialization helpers default by_alias to True, which
+    silently ignores serialize_by_alias=False. The serialized result and the
+    generated output schema must both reflect the model's configured behavior.
+    """
+
+    async def test_serialize_by_alias_false_uses_field_names(self):
+        """serialize_by_alias=False emits field names in schema, structured, and text."""
+
+        class Biofile(BaseModel):
+            model_config = ConfigDict(serialize_by_alias=False)
+            id: str = Field(alias="_id")
+            filepath: str
+
+        mcp = FastMCP()
+
+        @mcp.tool
+        def get_biofile() -> Annotated[Biofile, Field(description="data")]:
+            return Biofile(_id="123", filepath="/p")
+
+        async with Client(mcp) as client:
+            tools = {t.name: t for t in await client.list_tools()}
+            result = await client.call_tool("get_biofile", {})
+
+        assert result.structured_content == {"id": "123", "filepath": "/p"}
+        assert json.loads(result.content[0].text) == {  # type: ignore[union-attr]
+            "id": "123",
+            "filepath": "/p",
+        }
+        assert set(tools["get_biofile"].output_schema["properties"]) == {  # type: ignore[index]
+            "id",
+            "filepath",
+        }
+
+    async def test_unset_config_preserves_alias_default(self):
+        """A model with an alias but no serialize config keeps emitting the alias."""
+
+        class Biofile(BaseModel):
+            id: str = Field(alias="_id")
+            filepath: str
+
+        mcp = FastMCP()
+
+        @mcp.tool
+        def get_biofile() -> Biofile:
+            return Biofile(_id="123", filepath="/p")
+
+        async with Client(mcp) as client:
+            tools = {t.name: t for t in await client.list_tools()}
+            result = await client.call_tool("get_biofile", {})
+
+        assert result.structured_content == {"_id": "123", "filepath": "/p"}
+        assert set(tools["get_biofile"].output_schema["properties"]) == {  # type: ignore[index]
+            "_id",
+            "filepath",
+        }
+
+    async def test_serialize_by_alias_true_uses_alias(self):
+        """serialize_by_alias=True emits aliases, same as the default."""
+
+        class Biofile(BaseModel):
+            model_config = ConfigDict(serialize_by_alias=True)
+            id: str = Field(alias="_id")
+
+        mcp = FastMCP()
+
+        @mcp.tool
+        def get_biofile() -> Biofile:
+            return Biofile(_id="123")
+
+        async with Client(mcp) as client:
+            tools = {t.name: t for t in await client.list_tools()}
+            result = await client.call_tool("get_biofile", {})
+
+        assert result.structured_content == {"_id": "123"}
+        assert set(tools["get_biofile"].output_schema["properties"]) == {"_id"}  # type: ignore[index]
+
+    async def test_nested_models_respect_config(self):
+        """serialize_by_alias=False propagates through nested models."""
+
+        class Inner(BaseModel):
+            model_config = ConfigDict(serialize_by_alias=False)
+            inner_id: str = Field(alias="_iid")
+
+        class Outer(BaseModel):
+            model_config = ConfigDict(serialize_by_alias=False)
+            id: str = Field(alias="_id")
+            inner: Inner
+
+        mcp = FastMCP()
+
+        @mcp.tool
+        def get_outer() -> Outer:
+            return Outer(_id="1", inner=Inner(_iid="2"))
+
+        async with Client(mcp) as client:
+            result = await client.call_tool("get_outer", {})
+
+        assert result.structured_content == {"id": "1", "inner": {"inner_id": "2"}}
+
+    async def test_annotated_optional_return_stays_consistent(self):
+        """Annotated[Model, ...] | None resolves the model inside the union arm.
+
+        Regression: the union arm is a typing.Annotated object, so a naive
+        isinstance check skipped the model and the schema fell back to aliases
+        while the runtime serialized field names, breaking client validation.
+        """
+
+        class Biofile(BaseModel):
+            model_config = ConfigDict(serialize_by_alias=False)
+            id: str = Field(alias="_id")
+
+        mcp = FastMCP()
+
+        @mcp.tool
+        def get_biofile() -> Annotated[Biofile, Field(description="x")] | None:
+            return Biofile(_id="1")
+
+        async with Client(mcp) as client:
+            tools = {t.name: t for t in await client.list_tools()}
+            # client-side validation of structured content against the schema
+            # raises if they disagree
+            result = await client.call_tool("get_biofile", {})
+
+        schema_props = set(tools["get_biofile"].output_schema["properties"])  # type: ignore[index]
+        assert schema_props == set(result.structured_content)  # type: ignore[arg-type]
+        assert result.structured_content == {"result": {"id": "1"}}
+
+    @pytest.mark.parametrize("serialize_by_alias", [True, False, None])
+    async def test_schema_and_structured_content_agree(self, serialize_by_alias):
+        """The output schema field names always match the structured content keys."""
+        if serialize_by_alias is None:
+            config = ConfigDict()
+        else:
+            config = ConfigDict(serialize_by_alias=serialize_by_alias)
+
+        class Model(BaseModel):
+            model_config = config
+            id: str = Field(alias="_id")
+            name: str
+
+        mcp = FastMCP()
+
+        @mcp.tool
+        def get_model() -> Model:
+            return Model(_id="1", name="x")
+
+        async with Client(mcp) as client:
+            tools = {t.name: t for t in await client.list_tools()}
+            result = await client.call_tool("get_model", {})
+
+        schema_props = set(tools["get_model"].output_schema["properties"])  # type: ignore[index]
+        assert schema_props == set(result.structured_content)  # type: ignore[arg-type]

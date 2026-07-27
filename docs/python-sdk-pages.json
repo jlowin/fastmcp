@@ -1,33 +1,31 @@
 [
-  "python-sdk/fastmcp-apps",
   "python-sdk/fastmcp-cli",
-  "python-sdk/fastmcp-client",
   "python-sdk/fastmcp-decorators",
   "python-sdk/fastmcp-dependencies",
   "python-sdk/fastmcp-exceptions",
   "python-sdk/fastmcp-mcp_config",
-  "python-sdk/fastmcp-prompts",
-  "python-sdk/fastmcp-resources",
-  "python-sdk/fastmcp-server",
   "python-sdk/fastmcp-settings",
   "python-sdk/fastmcp-telemetry",
-  "python-sdk/fastmcp-tools",
   "python-sdk/fastmcp-types",
+  {
+    "group": "fastmcp.apps",
+    "pages": [
+      "python-sdk/fastmcp-apps-__init__",
+      "python-sdk/fastmcp-apps-app",
+      "python-sdk/fastmcp-apps-approval",
+      "python-sdk/fastmcp-apps-choice",
+      "python-sdk/fastmcp-apps-config",
+      "python-sdk/fastmcp-apps-file_upload",
+      "python-sdk/fastmcp-apps-form",
+      "python-sdk/fastmcp-apps-generative"
+    ]
+  },
   {
     "group": "fastmcp.experimental",
     "pages": [
-      "python-sdk/fastmcp-experimental-__init__",
-      {
-        "group": "sampling",
-        "pages": [
-          "python-sdk/fastmcp-experimental-sampling-__init__",
-          "python-sdk/fastmcp-experimental-sampling-handlers"
-        ]
-      },
       {
         "group": "transforms",
         "pages": [
-          "python-sdk/fastmcp-experimental-transforms-__init__",
           "python-sdk/fastmcp-experimental-transforms-code_mode"
         ]
       }
@@ -37,8 +35,10 @@
     "group": "fastmcp.utilities",
     "pages": [
       "python-sdk/fastmcp-utilities-__init__",
+      "python-sdk/fastmcp-utilities-asgi_transport",
       "python-sdk/fastmcp-utilities-async_utils",
       "python-sdk/fastmcp-utilities-auth",
+      "python-sdk/fastmcp-utilities-authorization",
       "python-sdk/fastmcp-utilities-cli",
       "python-sdk/fastmcp-utilities-components",
       "python-sdk/fastmcp-utilities-docstring_parsing",
@@ -56,7 +56,6 @@
           {
             "group": "v1",
             "pages": [
-              "python-sdk/fastmcp-utilities-mcp_server_config-v1-__init__",
               {
                 "group": "environments",
                 "pages": [
@@ -69,7 +68,6 @@
               {
                 "group": "sources",
                 "pages": [
-                  "python-sdk/fastmcp-utilities-mcp_server_config-v1-sources-__init__",
                   "python-sdk/fastmcp-utilities-mcp_server_config-v1-sources-base",
                   "python-sdk/fastmcp-utilities-mcp_server_config-v1-sources-filesystem"
                 ]
@@ -82,6 +80,7 @@
       "python-sdk/fastmcp-utilities-openapi",
       "python-sdk/fastmcp-utilities-pagination",
       "python-sdk/fastmcp-utilities-skills",
+      "python-sdk/fastmcp-utilities-tasks",
       "python-sdk/fastmcp-utilities-tests",
       "python-sdk/fastmcp-utilities-timeout",
       "python-sdk/fastmcp-utilities-token_cache",

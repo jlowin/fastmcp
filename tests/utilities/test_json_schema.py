@@ -1,4 +1,6 @@
 import copy
+import sys
+from typing import Any
 from unittest.mock import patch
 
 from jsonref import replace_refs
@@ -10,6 +12,31 @@ from fastmcp.utilities.json_schema import (
     dereference_refs,
     resolve_root_ref,
 )
+
+
+def _measure_depth(schema: dict[str, Any]) -> int:
+    """Return how many `items` levels deep an array-nested schema goes.
+
+    Walks iteratively so the assertion helpers cannot themselves hit the
+    recursion limit the tests are probing.
+    """
+    depth = 0
+    node: Any = schema
+    while isinstance(node.get("items"), dict):
+        node = node["items"]
+        depth += 1
+    return depth
+
+
+def _count_titles(schema: dict[str, Any]) -> int:
+    """Count the `title` keys down an array-nested schema, iteratively."""
+    count = 0
+    node: Any = schema
+    while isinstance(node, dict):
+        if "title" in node:
+            count += 1
+        node = node.get("items")
+    return count
 
 
 class TestPruneParam:
@@ -120,6 +147,9 @@ class TestDereferenceRefs:
                 }
             },
             "$ref": "#/$defs/Node",
+            "title": "Tree node",
+            "description": "A recursive tree node.",
+            "examples": [{"children": []}],
         }
         result = dereference_refs(schema)
 
@@ -127,6 +157,9 @@ class TestDereferenceRefs:
         # Root should be resolved but nested refs preserved
         assert result.get("type") == "object"
         assert "$defs" in result  # $defs preserved for circular refs
+        assert result["title"] == "Tree node"
+        assert result["description"] == "A recursive tree node."
+        assert result["examples"] == [{"children": []}]
 
     def test_falls_back_for_circular_json_pointer_refs(self):
         """Test that circular JSON Pointer $ref (non-$defs) does not crash.
@@ -286,6 +319,48 @@ class TestDereferenceRefs:
         actions = {v["properties"]["action"]["const"] for v in result["anyOf"]}
         assert actions == {"identify", "delete"}
 
+    def test_discriminator_property_remains_required_after_inlining(self):
+        schema = {
+            "$defs": {
+                "Comprehensive": {
+                    "type": "object",
+                    "properties": {
+                        "kind": {"const": "comprehensive", "type": "string"},
+                    },
+                },
+                "Validate": {
+                    "type": "object",
+                    "properties": {
+                        "kind": {"const": "validate", "type": "string"},
+                        "target_id": {"type": "string"},
+                    },
+                    "required": ["target_id"],
+                },
+            },
+            "anyOf": [
+                {"$ref": "#/$defs/Comprehensive"},
+                {"$ref": "#/$defs/Validate"},
+            ],
+            "discriminator": {
+                "mapping": {
+                    "comprehensive": "#/$defs/Comprehensive",
+                    "validate": "#/$defs/Validate",
+                },
+                "propertyName": "kind",
+            },
+        }
+        result = dereference_refs(schema)
+
+        assert "discriminator" not in result
+        for variant in result["anyOf"]:
+            assert "kind" in variant["required"]
+        validate_schema = next(
+            variant
+            for variant in result["anyOf"]
+            if variant["properties"]["kind"]["const"] == "validate"
+        )
+        assert validate_schema["required"] == ["target_id", "kind"]
+
     def test_preserves_property_named_discriminator(self):
         """A field *named* 'discriminator' inside properties must survive."""
         schema = {
@@ -309,6 +384,84 @@ class TestDereferenceRefs:
 
 class TestCompressSchema:
     """Tests for the compress_schema function."""
+
+    def test_does_not_mutate_input(self):
+        """compress_schema must return a new dict and leave the caller's schema
+        untouched, even when it prunes titles, additionalProperties and unused
+        $defs (a live Tool.input_schema is passed straight in at some call sites)."""
+        schema = {
+            "type": "object",
+            "title": "MySchema",
+            "additionalProperties": False,
+            "properties": {
+                "a": {"type": "string", "title": "A"},
+                "b": {
+                    "type": "object",
+                    "title": "B",
+                    "properties": {"c": {"type": "integer", "title": "C"}},
+                },
+            },
+            "$defs": {"Unused": {"type": "string", "title": "Unused"}},
+        }
+        original = copy.deepcopy(schema)
+
+        result = compress_schema(
+            schema, prune_titles=True, prune_additional_properties=True
+        )
+
+        # The input is untouched...
+        assert schema == original
+        assert result is not schema
+        # ...and the returned copy really was optimized (so it is not a no-op).
+        assert "title" not in result
+        assert "title" not in result["properties"]["b"]["properties"]["c"]
+        assert "additionalProperties" not in result
+        assert "$defs" not in result
+
+    def test_compresses_schema_nested_far_beyond_the_recursion_limit(self):
+        """Deeply nested schemas must compress rather than raise RecursionError.
+
+        Copying the schema is what sets the depth ceiling, so it must not
+        recurse: schemas this deep arrive from proxied or remote MCP servers,
+        and failing to compress them is worse than compressing them partially.
+        """
+        depth = sys.getrecursionlimit() * 2
+
+        schema: dict[str, Any] = {"type": "string", "title": "Leaf"}
+        for _ in range(depth):
+            schema = {"type": "array", "title": "Level", "items": schema}
+
+        original_depth = _measure_depth(schema)
+
+        result = compress_schema(schema, prune_titles=True)
+
+        assert result is not schema
+        assert _measure_depth(result) == original_depth
+        # The caller's schema is still intact at every level...
+        assert _count_titles(schema) == original_depth + 1
+        # ...and the copy really was pruned as deep as the traversal reaches.
+        assert _count_titles(result) < _count_titles(schema)
+
+    def test_keeps_defs_referenced_below_the_traversal_cutoff(self):
+        """A $ref deeper than the traversal walks must still pin its definition.
+
+        The reference scan stops at its depth guard, so past that point it
+        cannot prove a definition is unused. Dropping one anyway would leave a
+        dangling $ref — an invalid schema is worse than an unpruned one.
+        """
+        schema: dict[str, Any] = {"$ref": "#/$defs/Leaf"}
+        for _ in range(60):
+            schema = {"type": "array", "items": schema}
+        schema["$defs"] = {"Leaf": {"type": "string"}}
+
+        result = compress_schema(schema)
+
+        assert result["$defs"] == {"Leaf": {"type": "string"}}
+
+        node: Any = result
+        while isinstance(node.get("items"), dict):
+            node = node["items"]
+        assert node == {"$ref": "#/$defs/Leaf"}
 
     def test_preserves_refs_by_default(self):
         """Test that compress_schema preserves $refs by default."""

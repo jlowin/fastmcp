@@ -25,10 +25,11 @@ from fastmcp.tools.function_tool import DecoratedTool, FunctionTool, ToolMeta
         "from fastmcp.resources import Resource, resource",
         "from fastmcp.prompts import Prompt, prompt",
         "import sys; import fastmcp.apps.config; assert 'fastmcp.tools.function_tool' not in sys.modules",
-        "from fastmcp.server.auth.authorization import AuthCheck",
+        "from fastmcp.server.auth import AuthCheck",
         "from fastmcp.server import Context, FastMCP, create_proxy",
     ],
 )
+@pytest.mark.subprocess_heavy
 def test_component_import_works_in_fresh_interpreter(statement: str):
     result = subprocess.run(
         [sys.executable, "-c", statement],
@@ -151,6 +152,19 @@ class TestToolDecorator:
         # The function is still callable even though it has metadata
         result = cast(DecoratedTool, greet)("World")
         assert result == "Hello, World!"
+
+    def test_staticmethod_metadata_is_available_on_unwrapped_function(self):
+        """@tool should attach metadata where staticmethod access can find it."""
+
+        class MyClass:
+            @tool(name="custom-static-tool")
+            @staticmethod
+            def my_method() -> str:
+                return "hello"
+
+        created_tool = FunctionTool.from_function(MyClass.my_method)
+
+        assert created_tool.name == "custom-static-tool"
 
     def test_tool_rejects_classmethod_decorator(self):
         """@tool should reject classmethod-decorated functions."""

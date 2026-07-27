@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import html
 import io
 import json
 import logging
@@ -39,10 +40,10 @@ import time
 import webbrowser
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import urlencode
 
-import httpcore
-import httpx
+import httpcore2
+import httpx2
 import uvicorn
 from starlette.applications import Starlette
 from starlette.requests import Request
@@ -52,6 +53,18 @@ from starlette.routing import Route
 from fastmcp.utilities.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def _json_for_script(value: Any) -> str:
+    """Serialize JSON for embedding inside an HTML script element."""
+    return (
+        json.dumps(value)
+        .replace("&", "\\u0026")
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("\u2028", "\\u2028")
+        .replace("\u2029", "\\u2029")
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1039,7 +1052,7 @@ def _build_picker_html(tools: list[dict[str, Any]]) -> str:
         from prefab_ui.components.form import Form
         from prefab_ui.rx import RESULT, Rx
     except ImportError:
-        return "<html><body><p>prefab-ui not installed. Run: pip install fastmcp[apps]</p></body></html>"
+        return "<html><body><p>prefab-ui not installed. Run: pip install 'fastmcp[apps]'</p></body></html>"
 
     if not tools:
         with Column(gap=4, css_class="p-6 max-w-2xl mx-auto") as view:
@@ -1089,7 +1102,7 @@ def _build_picker_html(tools: list[dict[str, Any]]) -> str:
                     "__json_args__": Rx("__json_args__"),
                 }
 
-                on_error = ShowToast(Rx("$error"), variant="error")  # type: ignore[arg-type]  # ty:ignore[invalid-argument-type]
+                on_error = ShowToast(Rx("$error"), variant="error")  # type: ignore[arg-type]
 
                 input_mode = f"_mode_{name}"
                 _desc_max_lines = 10
@@ -1204,11 +1217,11 @@ async def _list_tools(mcp_url: str) -> list[dict[str, Any]]:
         return []
 
     try:
-        async with streamable_http_client(mcp_url) as (read, write, _):  # noqa: SIM117
+        async with streamable_http_client(mcp_url) as (read, write):  # noqa: SIM117
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 result = await session.list_tools()
-                return [t.model_dump() for t in result.tools]
+                return [t.model_dump(by_alias=True) for t in result.tools]
     except Exception as exc:
         logger.debug(f"Could not list tools from {mcp_url}: {exc}")
         return []
@@ -1219,15 +1232,14 @@ async def _read_mcp_resource(mcp_url: str, uri: str) -> str | None:
     try:
         from mcp import ClientSession
         from mcp.client.streamable_http import streamable_http_client
-        from pydantic import AnyUrl
     except ImportError:
         return None
 
     try:
-        async with streamable_http_client(mcp_url) as (read, write, _):  # noqa: SIM117
+        async with streamable_http_client(mcp_url) as (read, write):  # noqa: SIM117
             async with ClientSession(read, write) as session:
                 await session.initialize()
-                result = await session.read_resource(AnyUrl(uri))
+                result = await session.read_resource(uri)
                 for content in result.contents:
                     text = getattr(content, "text", None)
                     if text:
@@ -1288,7 +1300,7 @@ def _fetch_app_bridge_bundle_sync(
     # We do this before the (potentially cached) app-bridge download so that
     # any network error is surfaced early and clearly.
     types_url = f"{sdk_base}/types.js"
-    with httpx.Client(timeout=30.0) as client:
+    with httpx2.Client(timeout=30.0) as client:
         resp = client.get(types_url, follow_redirects=True)
         resp.raise_for_status()
         types_content = resp.text
@@ -1302,7 +1314,7 @@ def _fetch_app_bridge_bundle_sync(
     zod_wrapper_path = zod_wrapper_match.group(1)  # e.g. /zod@^4.3.5/v4?target=es2022
 
     zod_wrapper_url = f"https://esm.sh{zod_wrapper_path}"
-    with httpx.Client(timeout=30.0) as client:
+    with httpx2.Client(timeout=30.0) as client:
         resp = client.get(zod_wrapper_url, follow_redirects=True)
         resp.raise_for_status()
         wrapper_content = resp.text
@@ -1332,7 +1344,7 @@ def _fetch_app_bridge_bundle_sync(
         return app_bridge_js, import_map_json
 
     npm_url = f"https://registry.npmjs.org/@modelcontextprotocol/ext-apps/-/ext-apps-{version}.tgz"
-    with httpx.Client(timeout=30.0) as client:
+    with httpx2.Client(timeout=30.0) as client:
         resp = client.get(npm_url, follow_redirects=True)
         resp.raise_for_status()
         data = resp.content
@@ -1375,6 +1387,7 @@ def _make_dev_app(
     app_bridge_js: str,
     import_map_tag: str,
     message_log: _MessageLog,
+    log_panel: bool,
 ) -> Starlette:
     """Build the Starlette dev server application."""
 
@@ -1391,7 +1404,11 @@ def _make_dev_app(
             on_open_link="bridge.onopenlink = async ({ url }) => { window.location.href = url; return {}; };",
             on_initialized="bridge.oninitialized = async () => {};",
         )
-        return HTMLResponse(_inject_log_panel(host_html))
+        return (
+            HTMLResponse(_inject_log_panel(host_html))
+            if log_panel
+            else HTMLResponse(host_html)
+        )
 
     async def picker_app(request: Request) -> HTMLResponse:
         """Prefab picker UI — tool list with one tab per UI tool."""
@@ -1410,13 +1427,17 @@ def _make_dev_app(
         args_raw = request.query_params.get("args", "{}")
         tool_args = json.loads(args_raw)
         host_html = _HOST_HTML_TEMPLATE.format(
-            tool_name=tool,
+            tool_name=html.escape(tool, quote=True),
             import_map_tag=import_map_tag,
-            tool_name_json=json.dumps(tool),
-            tool_args_json=json.dumps(tool_args),
+            tool_name_json=_json_for_script(tool),
+            tool_args_json=_json_for_script(tool_args),
             mcp_sdk_version=_MCP_SDK_VERSION,
         )
-        return HTMLResponse(_inject_log_panel(host_html))
+        return (
+            HTMLResponse(_inject_log_panel(host_html))
+            if log_panel
+            else HTMLResponse(host_html)
+        )
 
     async def api_launch(request: Request) -> Response:
         """Picker form submits here; returns a /launch URL string for OpenLink."""
@@ -1469,8 +1490,7 @@ def _make_dev_app(
                         except (json.JSONDecodeError, TypeError):
                             pass
                 tool_args[k] = v
-        args_json = quote(json.dumps(tool_args))
-        url = f"/launch?tool={tool}&args={args_json}"
+        url = "/launch?" + urlencode({"tool": tool, "args": json.dumps(tool_args)})
         return Response(
             content=json.dumps(url),
             media_type="application/json",
@@ -1525,9 +1545,11 @@ def _make_dev_app(
 
         # Use a reasonable default timeout to prevent the proxy from hanging
         # if the backend server is unresponsive.
-        client = httpx.AsyncClient(timeout=httpx.Timeout(60.0, read=None))
+        client = httpx2.AsyncClient(
+            timeout=httpx2.Timeout(60.0, read=None), trust_env=False
+        )
 
-        async def _stream_and_cleanup(resp: httpx.Response) -> Any:
+        async def _stream_and_cleanup(resp: httpx2.Response) -> Any:
             is_sse = "text/event-stream" in resp.headers.get("content-type", "")
             buf: list[bytes] = []
             sse_buf = ""
@@ -1552,10 +1574,10 @@ def _make_dev_app(
                     else:
                         buf.append(chunk)
             except (
-                httpx.RemoteProtocolError,
-                httpx.ReadError,
-                httpx.ReadTimeout,
-                httpcore.RemoteProtocolError,
+                httpx2.RemoteProtocolError,
+                httpx2.ReadError,
+                httpx2.ReadTimeout,
+                httpcore2.RemoteProtocolError,
             ):
                 pass  # Connection closed during shutdown — not an error
             finally:
@@ -1595,7 +1617,7 @@ def _make_dev_app(
                 headers=fwd_headers,
                 media_type=content_type or "application/octet-stream",
             )
-        except (httpx.ConnectError, httpx.ConnectTimeout):
+        except (httpx2.ConnectError, httpx2.ConnectTimeout):
             await client.aclose()
             return Response(
                 content=json.dumps({"error": "MCP server not reachable"}).encode(),
@@ -1653,6 +1675,7 @@ async def _start_user_server(
     mcp_port: int,
     *,
     reload: bool = True,
+    host: str = "127.0.0.1",
 ) -> asyncio.subprocess.Process:
     """Start the user's MCP server as a subprocess on mcp_port."""
     cmd = [
@@ -1663,6 +1686,8 @@ async def _start_user_server(
         server_spec,
         "--transport",
         "http",
+        "--host",
+        host,
         "--port",
         str(mcp_port),
         "--no-banner",
@@ -1684,15 +1709,15 @@ async def _wait_for_server(url: str, timeout: float = 15.0) -> bool:
     """Poll until the server is accepting connections."""
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
-    async with httpx.AsyncClient() as client:
+    async with httpx2.AsyncClient(trust_env=False) as client:
         while loop.time() < deadline:
             try:
                 await client.get(url, timeout=1.0)
                 return True
             except (
-                httpx.ConnectError,
-                httpx.RemoteProtocolError,
-                httpx.TimeoutException,
+                httpx2.ConnectError,
+                httpx2.RemoteProtocolError,
+                httpx2.TimeoutException,
             ):
                 await asyncio.sleep(0.25)
     return False
@@ -1704,6 +1729,8 @@ async def run_dev_apps(
     mcp_port: int = 8000,
     dev_port: int = 8080,
     reload: bool = True,
+    host: str = "127.0.0.1",
+    log_panel: bool = True,
 ) -> None:
     """Start the full dev environment for a FastMCPApp server.
 
@@ -1711,8 +1738,16 @@ async def run_dev_apps(
     on *dev_port* (with an /mcp proxy to the user's server), then opens
     the browser.
     """
-    mcp_url = f"http://localhost:{mcp_port}/mcp"
-    dev_url = f"http://localhost:{dev_port}"
+    mcp_url = (
+        f"http://{host}:{mcp_port}/mcp"
+        if ":" not in host
+        else f"http://[{host}]:{mcp_port}/mcp"
+    )
+    dev_url = (
+        f"http://{host}:{dev_port}"
+        if ":" not in host
+        else f"http://[{host}]:{dev_port}"
+    )
 
     user_proc: asyncio.subprocess.Process | None = None
 
@@ -1727,10 +1762,20 @@ async def run_dev_apps(
             (dev_port, "dev UI", "--dev-port"),
         ]:
             in_use = False
-            for family, addr in (
-                (socket.AF_INET, ("127.0.0.1", port)),
-                (socket.AF_INET6, ("::1", port, 0, 0)),
-            ):
+            _targets = (
+                (
+                    (socket.AF_INET, ("127.0.0.1", port)),
+                    (socket.AF_INET6, ("::1", port, 0, 0)),
+                )
+                if host == "127.0.0.1"
+                else (
+                    ((socket.AF_INET6, (host, port, 0, 0)),)
+                    if ":" in host
+                    else ((socket.AF_INET, (host, port)),)
+                )
+            )
+
+            for family, addr in _targets:
                 try:
                     with socket.socket(family, socket.SOCK_STREAM) as s:
                         if s.connect_ex(addr) == 0:
@@ -1751,7 +1796,9 @@ async def run_dev_apps(
         # Start the server first so user_proc is assigned before anything
         # that might fail (e.g. npm fetch).  This ensures the finally
         # cleanup can kill the subprocess even if the bundle fetch raises.
-        user_proc = await _start_user_server(server_spec, mcp_port, reload=reload)
+        user_proc = await _start_user_server(
+            server_spec, mcp_port, reload=reload, host=host
+        )
         app_bridge_js, import_map_json = await _fetch_app_bridge_bundle(
             _EXT_APPS_VERSION, _MCP_SDK_VERSION
         )
@@ -1766,10 +1813,12 @@ async def run_dev_apps(
 
         logger.info(f"FastMCP dev UI at {dev_url}")
 
-        dev_app = _make_dev_app(mcp_url, app_bridge_js, import_map_tag, _MessageLog())
+        dev_app = _make_dev_app(
+            mcp_url, app_bridge_js, import_map_tag, _MessageLog(), log_panel
+        )
         config = uvicorn.Config(
             dev_app,
-            host="localhost",
+            host=host,
             port=dev_port,
             log_level="warning",
             ws="websockets-sansio",

@@ -104,10 +104,27 @@ Some tools request additional input during execution through MCP's elicitation m
 | ------ | ---- | ----------- |
 | Command | `--command` | Connect via stdio |
 | Transport | `--transport`, `-t` | Force `http` or `sse` |
+| Prompt | `--prompt` | Treat the target as a prompt name instead of a tool/resource |
 | Input JSON | `--input-json` | Base arguments as JSON (merged with `key=value`) |
 | JSON | `--json` | Raw JSON output |
 | Timeout | `--timeout` | Connection timeout in seconds |
 | Auth | `--auth` | `oauth`, a bearer token, or `none` |
+
+## Reading Resources and Getting Prompts
+
+`fastmcp call` can also read resources and render prompts. If the target contains `://`, the CLI treats it as a resource URI and calls `read_resource`:
+
+```bash
+fastmcp call server.py resource://docs/readme
+fastmcp call server.py file:///tmp/example.txt --json
+```
+
+To get a prompt, pass `--prompt`; prompt arguments use the same `key=value` and `--input-json` forms as tool calls:
+
+```bash
+fastmcp call server.py summarize --prompt topic=weather
+fastmcp call server.py summarize --prompt --input-json '{"topic": "weather"}'
+```
 
 ## Discovering Configured Servers
 
@@ -138,3 +155,7 @@ Any server that appears here can be used by name with `list`, `call`, and other 
 For LLM agents that can execute shell commands but don't have native MCP support, the CLI provides a clean bridge. The agent calls `fastmcp list --json` to discover available tools with full schemas, then `fastmcp call --json` to invoke them with structured results.
 
 Because the CLI handles connection management, transport selection, and type coercion internally, the agent doesn't need to understand MCP protocol details — it just reads JSON and constructs shell commands.
+
+## Remote Stdio Bridges
+
+For MCP hosts that expect a local stdio command but need to connect to a remote HTTP server, use [`fastmcp-remote`](/clients/fastmcp-remote). It provides a small standalone bridge for host configuration, while `fastmcp list` and `fastmcp call` remain focused on direct inspection and invocation from the terminal.

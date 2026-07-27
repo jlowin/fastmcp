@@ -1,20 +1,50 @@
+import contextlib
 import ssl
+from collections.abc import AsyncIterator
 from ssl import VerifyMode
-from typing import cast
+from typing import Any, cast
 
-import httpx
+import httpx2
 import pytest
 from mcp.shared._httpx_utils import McpHttpClientFactory
 
 from fastmcp import Client
 from fastmcp.client.auth.oauth import OAuth
-from fastmcp.client.transports import SSETransport, StreamableHttpTransport
+from fastmcp.client.transports import (
+    ClientTransport,
+    SSETransport,
+    StreamableHttpTransport,
+)
+
+
+class BasicTransport(ClientTransport):
+    @contextlib.asynccontextmanager
+    async def connect_session(self, **session_kwargs: Any) -> AsyncIterator[Any]:
+        raise AssertionError("BasicTransport does not create sessions")
+        yield
+
+
+class TestClientTransport:
+    def test_default_repr_uses_subclass_name(self):
+        assert repr(BasicTransport()) == "<BasicTransport>"
+
+    def test_default_session_id_is_none(self):
+        assert BasicTransport().get_session_id() is None
+
+    def test_client_rejects_auth_for_transports_without_auth_support(self):
+        with pytest.raises(ValueError, match="does not support auth"):
+            Client(BasicTransport(), auth="oauth")
+
+    def test_client_accepts_none_auth_for_transports_without_auth_support(self):
+        client = Client(BasicTransport(), auth=None)
+
+        assert isinstance(client.transport, BasicTransport)
 
 
 async def test_oauth_uses_same_client_as_transport_streamable_http():
     transport = StreamableHttpTransport(
         "https://some.fake.url/",
-        httpx_client_factory=lambda *args, **kwargs: httpx.AsyncClient(
+        httpx_client_factory=lambda *args, **kwargs: httpx2.AsyncClient(
             verify=False, *args, **kwargs
         ),
         auth="oauth",
@@ -32,7 +62,7 @@ async def test_oauth_uses_same_client_as_transport_streamable_http():
 async def test_oauth_uses_same_client_as_transport_sse():
     transport = SSETransport(
         "https://some.fake.url/",
-        httpx_client_factory=lambda *args, **kwargs: httpx.AsyncClient(
+        httpx_client_factory=lambda *args, **kwargs: httpx2.AsyncClient(
             verify=False, *args, **kwargs
         ),
         auth="oauth",
@@ -233,7 +263,7 @@ class TestSSLVerify:
     async def test_oauth_custom_factory_preserved_with_verify(self):
         custom_factory = cast(
             McpHttpClientFactory,
-            lambda **kwargs: httpx.AsyncClient(verify=False, **kwargs),
+            lambda **kwargs: httpx2.AsyncClient(verify=False, **kwargs),
         )
         auth = OAuth(httpx_client_factory=custom_factory)
         transport = StreamableHttpTransport(
@@ -245,7 +275,7 @@ class TestSSLVerify:
         assert transport.auth.httpx_client_factory is custom_factory
 
     def test_warns_when_both_factory_and_verify_provided_streamable(self):
-        factory = cast(McpHttpClientFactory, httpx.AsyncClient)
+        factory = cast(McpHttpClientFactory, httpx2.AsyncClient)
         with pytest.warns(UserWarning, match="httpx_client_factory.*takes precedence"):
             StreamableHttpTransport(
                 "https://example.com/mcp",
@@ -254,7 +284,7 @@ class TestSSLVerify:
             )
 
     def test_warns_when_both_factory_and_verify_provided_sse(self):
-        factory = cast(McpHttpClientFactory, httpx.AsyncClient)
+        factory = cast(McpHttpClientFactory, httpx2.AsyncClient)
         with pytest.warns(UserWarning, match="httpx_client_factory.*takes precedence"):
             SSETransport(
                 "https://example.com/sse",

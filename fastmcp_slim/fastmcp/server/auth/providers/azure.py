@@ -10,7 +10,7 @@ import hashlib
 from collections import OrderedDict
 from typing import TYPE_CHECKING, Any, Literal, cast
 
-import httpx
+import httpx2
 from key_value.aio.protocols import AsyncKeyValue
 
 from fastmcp.dependencies import Dependency
@@ -116,9 +116,11 @@ class AzureProvider(OAuthProxy):
         consent_csp_policy: str | None = None,
         forward_resource: bool = True,
         fallback_refresh_token_expiry_seconds: int | None = None,
+        fastmcp_access_token_expiry_seconds: int | None = None,
+        token_expiry_threshold_seconds: int = 0,
         base_authority: str = "login.microsoftonline.com",
         token_issuer: str | None = None,
-        http_client: httpx.AsyncClient | None = None,
+        http_client: httpx2.AsyncClient | None = None,
         enable_cimd: bool = True,
     ) -> None:
         """Initialize Azure OAuth provider.
@@ -174,11 +176,22 @@ class AzureProvider(OAuthProxy):
                 When "external", the built-in consent screen is skipped but no warning is
                 logged, indicating that consent is handled externally (e.g. by the upstream IdP).
                 SECURITY WARNING: Only set to False for local development or testing environments.
-            http_client: Optional httpx.AsyncClient for connection pooling in JWKS fetches.
+            http_client: Optional httpx2.AsyncClient for connection pooling in JWKS fetches.
                 When provided, the client is reused for JWT key fetches and the caller
                 is responsible for its lifecycle. When None (default), a fresh client is created per fetch.
             enable_cimd: Enable CIMD (Client ID Metadata Document) support for URL-based
                 client IDs (default True). Set to False to disable.
+            fallback_refresh_token_expiry_seconds: Lifetime for the FastMCP-issued
+                refresh token when the upstream provider omits `refresh_expires_in`
+                (e.g. Cognito, GitHub, many OIDC IdPs). Defaults to 1 year. The upstream
+                refresh remains the source of truth. See `OAuthProxy` for details.
+            fastmcp_access_token_expiry_seconds: Lifetime for the FastMCP-issued access
+                token, decoupling it from the upstream provider's `expires_in`. Defaults
+                to None (mirror the upstream lifetime). Set this for bridges whose
+                upstream issues short-lived access tokens that some MCP clients can't
+                refresh gracefully (e.g. `mcp-remote`). See `OAuthProxy` for details.
+            token_expiry_threshold_seconds: Number of seconds before actual expiry to
+                treat a token as expired, refreshing early to avoid races. Defaults to 0.
         """
         # Parse scopes if provided as string
         parsed_required_scopes = parse_scopes(required_scopes)
@@ -262,6 +275,8 @@ class AzureProvider(OAuthProxy):
             consent_csp_policy=consent_csp_policy,
             forward_resource=forward_resource,
             fallback_refresh_token_expiry_seconds=fallback_refresh_token_expiry_seconds,
+            fastmcp_access_token_expiry_seconds=fastmcp_access_token_expiry_seconds,
+            token_expiry_threshold_seconds=token_expiry_threshold_seconds,
             valid_scopes=parsed_required_scopes,
             enable_cimd=enable_cimd,
         )
@@ -428,6 +443,26 @@ class AzureProvider(OAuthProxy):
                 prefixed.append(f"{self.identifier_uri}/{scope}")
         return prefixed
 
+    def _translate_scopes_from_idp(self, scopes: list[str]) -> list[str]:
+        """Strip ``{identifier_uri}/`` from custom API scopes Azure echoes back.
+
+        Inverse of :meth:`_prefix_scopes_for_azure`. Azure echoes the prefixed
+        form (``api://{client_id}/read``) in its token response's ``scope``
+        field, while MCP clients request and recognize the short form
+        (``read``) — the same form advertised on
+        ``/.well-known/oauth-authorization-server`` via ``valid_scopes``. Without
+        this translation, strict clients compare requested vs. granted scopes
+        and surface a "permissions not granted" warning (e.g. ChatGPT) even
+        when nothing is actually wrong.
+
+        OIDC scopes (``openid``, ``profile``, ``email``, ``offline_access``) and
+        external resource URIs (Microsoft Graph, etc.) never carry the prefix,
+        so :meth:`str.removeprefix` is a no-op on them and they pass through
+        unchanged.
+        """
+        prefix = f"{self.identifier_uri}/"
+        return [s.removeprefix(prefix) for s in scopes]
+
     def _build_upstream_authorize_url(
         self, txn_id: str, transaction: dict[str, Any]
     ) -> str:
@@ -466,8 +501,12 @@ class AzureProvider(OAuthProxy):
         Returns:
             List of scopes for Azure token endpoint
         """
-        # Prefix scopes for this API
-        prefixed_scopes = self._prefix_scopes_for_azure(scopes or [])
+        # Prefix scopes for this API. Some clients omit the scope parameter on
+        # the MCP authorization request; use the provider's configured scopes
+        # just like the authorize URL path does.
+        prefixed_scopes = self._prefix_scopes_for_azure(
+            scopes or self.required_scopes or []
+        )
 
         # Add OIDC scopes only (not other API scopes) to avoid AADSTS28000
         if self.additional_authorize_scopes:
@@ -493,9 +532,13 @@ class AzureProvider(OAuthProxy):
         """
         logger.debug("Base scopes from storage: %s", scopes)
 
+        # Some clients omit the scope parameter on the MCP authorization request;
+        # use the provider's configured scopes just like the authorize URL path does.
+        requested_scopes = scopes or self.required_scopes or []
+
         # Filter out any additional_authorize_scopes that may have been stored
         additional_scopes_set = set(self.additional_authorize_scopes or [])
-        base_scopes = [s for s in scopes if s not in additional_scopes_set]
+        base_scopes = [s for s in requested_scopes if s not in additional_scopes_set]
 
         # Prefix base scopes with identifier_uri for Azure
         prefixed_scopes = self._prefix_scopes_for_azure(base_scopes)
@@ -739,10 +782,19 @@ class AzureJWTVerifier(JWTVerifier):
         property returns the full-URI form for OAuth metadata while
         ``required_scopes`` retains the short form for token validation.
         """
-        if not self.required_scopes:
+        return self.get_challenge_scopes()
+
+    def get_challenge_scopes(
+        self, required_scopes: list[str] | None = None
+    ) -> list[str]:
+        """Prefix any effective validation scopes for Azure authorization."""
+        effective_scopes = (
+            self.required_scopes if required_scopes is None else required_scopes
+        )
+        if not effective_scopes:
             return []
         prefixed = []
-        for scope in self.required_scopes:
+        for scope in effective_scopes:
             if scope in OIDC_SCOPES or "://" in scope or "/" in scope:
                 prefixed.append(scope)
             else:
@@ -838,13 +890,13 @@ def EntraOBOToken(scopes: list[str]) -> str:
     Example:
         ```python
         from fastmcp.server.auth.providers.azure import EntraOBOToken
-        import httpx
+        import httpx2
 
         @mcp.tool()
         async def get_my_emails(
             graph_token: str = EntraOBOToken(["https://graph.microsoft.com/Mail.Read"])
         ):
-            async with httpx.AsyncClient() as client:
+            async with httpx2.AsyncClient() as client:
                 resp = await client.get(
                     "https://graph.microsoft.com/v1.0/me/messages",
                     headers={"Authorization": f"Bearer {graph_token}"}

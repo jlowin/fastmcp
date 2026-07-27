@@ -1,23 +1,27 @@
 from __future__ import annotations
 
 import inspect
-import warnings
 from collections.abc import Callable
 from contextvars import ContextVar
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Annotated, Any, Literal, cast
 
+import mcp_types
 import pydantic_core
-from mcp.types import ToolAnnotations
+from mcp_types import ToolAnnotations
 from pydantic import ConfigDict
 from pydantic.fields import Field
 from pydantic.functional_validators import BeforeValidator
 from pydantic.json_schema import SkipJsonSchema
 
-import fastmcp
-from fastmcp.exceptions import FastMCPDeprecationWarning
-from fastmcp.tools.base import Tool, ToolResult, _convert_to_content
+from fastmcp.tools.base import (
+    InputRequiredToolResult,
+    Tool,
+    ToolResult,
+    _convert_to_content,
+    resolve_serialize_by_alias,
+)
 from fastmcp.tools.function_parsing import ParsedFunction
 from fastmcp.utilities.async_utils import (
     call_sync_fn_in_threadpool,
@@ -321,6 +325,16 @@ class TransformedTool(Tool):
                 if inspect.isawaitable(result):
                     result = await result
 
+            # A multi-round-trip ask (SEP-2322) is not output data: it must
+            # reach the wire handler intact, never reshaped by output_schema
+            # (which would rebuild it as a plain empty ToolResult and drop the
+            # input_required payload). A custom transform fn may return the raw
+            # `InputRequiredResult`, like any tool body; wrap it the same way.
+            if isinstance(result, InputRequiredToolResult):
+                return result
+            if isinstance(result, mcp_types.InputRequiredResult):
+                return InputRequiredToolResult(result)
+
             # If transform function returns ToolResult, respect our output_schema setting
             if isinstance(result, ToolResult):
                 if self.output_schema is None:
@@ -338,23 +352,29 @@ class TransformedTool(Tool):
 
             # Otherwise convert to content and create ToolResult with proper structured content
 
-            unstructured_result = _convert_to_content(
-                result, serializer=self.serializer
-            )
+            unstructured_result = _convert_to_content(result)
 
             structured_output = None
             # First handle structured content based on output schema, if any
             if self.output_schema is not None:
                 if self.output_schema.get("x-fastmcp-wrap-result"):
-                    # Schema says wrap - always wrap in result key
-                    structured_output = {"result": result}
+                    # Schema says wrap - serialize the inner result first (so its
+                    # serialize_by_alias config is honored) before nesting, since
+                    # wrapping in a dict would otherwise mask the model's config.
+                    structured_output = {
+                        "result": pydantic_core.to_jsonable_python(
+                            result, by_alias=resolve_serialize_by_alias(result)
+                        )
+                    }
                 else:
                     structured_output = result
             # If no output schema, try to serialize the result. If it is a dict, use
             # it as structured content. If it is not a dict, ignore it.
             if structured_output is None:
                 try:
-                    structured_output = pydantic_core.to_jsonable_python(result)
+                    structured_output = pydantic_core.to_jsonable_python(
+                        result, by_alias=resolve_serialize_by_alias(result)
+                    )
                     if not isinstance(structured_output, dict):
                         structured_output = None
                 except Exception:
@@ -380,7 +400,6 @@ class TransformedTool(Tool):
         transform_args: dict[str, ArgTransform] | None = None,
         annotations: ToolAnnotations | NotSetT | None = NotSet,
         output_schema: dict[str, Any] | NotSetT | None = NotSet,
-        serializer: Callable[[Any], str] | NotSetT | None = NotSet,  # Deprecated
         meta: dict[str, Any] | NotSetT | None = NotSet,
     ) -> TransformedTool:
         """Create a transformed tool from a parent tool.
@@ -402,7 +421,6 @@ class TransformedTool(Tool):
             output_schema: Control output schema for structured outputs:
                 - None (default): Inherit from transform_fn if available, then parent tool
                 - dict: Use custom output schema
-            serializer: Deprecated. Return ToolResult from your tools for full control over serialization.
             meta: Control meta information:
                 - NotSet (default): Inherit from parent tool
                 - dict: Use custom meta information
@@ -457,18 +475,6 @@ class TransformedTool(Tool):
         """
         tool = Tool._ensure_tool(tool)
 
-        if (
-            serializer is not NotSet
-            and serializer is not None
-            and fastmcp.settings.deprecation_warnings
-        ):
-            warnings.warn(
-                "The `serializer` parameter is deprecated. "
-                "Return ToolResult from your tools for full control over serialization. "
-                "See https://gofastmcp.com/servers/tools#custom-serialization for migration examples.",
-                FastMCPDeprecationWarning,
-                stacklevel=2,
-            )
         transform_args = transform_args or {}
 
         if transform_fn is not None:
@@ -588,9 +594,6 @@ class TransformedTool(Tool):
         final_annotations = (
             annotations if not isinstance(annotations, NotSetT) else tool.annotations
         )
-        final_serializer = (
-            serializer if not isinstance(serializer, NotSetT) else tool.serializer
-        )
 
         transformed_tool = cls(
             fn=final_fn,
@@ -604,7 +607,6 @@ class TransformedTool(Tool):
             output_schema=final_output_schema,
             tags=tags or tool.tags,
             annotations=final_annotations,
-            serializer=final_serializer,
             meta=final_meta,
             transform_args=transform_args,
             auth=tool.auth,
@@ -705,7 +707,8 @@ class TransformedTool(Tool):
         schema = {
             "type": "object",
             "properties": new_props,
-            "required": list(new_required),
+            # Iterate props (not the set) for deterministic ordering
+            "required": [p for p in new_props if p in new_required],
             "additionalProperties": False,
         }
 
@@ -897,7 +900,11 @@ class TransformedTool(Tool):
         result = {
             "type": "object",
             "properties": merged_props,
-            "required": list(final_required),
+            # Iterate props (not the set) for deterministic ordering; keep any
+            # required names not present in properties (sorted) rather than
+            # silently dropping them.
+            "required": [p for p in merged_props if p in final_required]
+            + sorted(final_required - set(merged_props)),
             "additionalProperties": False,
         }
 

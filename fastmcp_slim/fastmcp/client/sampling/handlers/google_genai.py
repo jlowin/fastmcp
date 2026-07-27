@@ -2,6 +2,7 @@
 
 import base64
 from collections.abc import Sequence
+from typing import Any, cast
 from uuid import uuid4
 
 try:
@@ -27,13 +28,12 @@ try:
 except ImportError as e:
     raise ImportError(
         "The `google-genai` package is not installed. "
-        "Install it with `pip install fastmcp-slim[gemini]` or add `google-genai` "
+        "Install it with `pip install 'fastmcp-slim[gemini]'` or add `google-genai` "
         "to your dependencies."
     ) from e
 
 from mcp import ClientSession, ServerSession
-from mcp.shared.context import LifespanContextT, RequestContext
-from mcp.types import (
+from mcp_types import (
     AudioContent,
     CreateMessageResult,
     CreateMessageResultWithTools,
@@ -47,8 +47,10 @@ from mcp.types import (
     ToolResultContent,
     ToolUseContent,
 )
-from mcp.types import CreateMessageRequestParams as SamplingParams
-from mcp.types import Tool as MCPTool
+from mcp_types import CreateMessageRequestParams as SamplingParams
+from mcp_types import Tool as MCPTool
+
+from fastmcp.client._sdk_context_shim import LifespanContextT, RequestContext
 
 __all__ = ["GoogleGenaiSamplingHandler"]
 
@@ -58,18 +60,20 @@ class GoogleGenaiSamplingHandler:
 
     Example:
         ```python
-        from google.genai import Client
-        from fastmcp import FastMCP
+        from google.genai import Client as GoogleGenaiClient
+        from fastmcp import Client as FastMCPClient
         from fastmcp.client.sampling.handlers.google_genai import (
             GoogleGenaiSamplingHandler,
         )
 
         handler = GoogleGenaiSamplingHandler(
             default_model="gemini-2.0-flash",
-            client=Client(),
+            client=GoogleGenaiClient(),
         )
 
-        server = FastMCP(sampling_handler=handler)
+        # Answers a handshake-era server's push request and a modern server's
+        # input-required round alike.
+        client = FastMCPClient("https://example.com/mcp", sampling_handler=handler)
         ```
     """
 
@@ -100,10 +104,10 @@ class GoogleGenaiSamplingHandler:
             google_tools = [
                 _convert_tool_to_google_genai(tool) for tool in params.tools
             ]
-            tool_config = _convert_tool_choice_to_google_genai(params.toolChoice)
+            tool_config = _convert_tool_choice_to_google_genai(params.tool_choice)
 
         # Select the model based on preferences
-        selected_model = self._get_model(model_preferences=params.modelPreferences)
+        selected_model = self._get_model(model_preferences=params.model_preferences)
 
         # Configure thinking if a budget is specified
         thinking_config = (
@@ -117,12 +121,12 @@ class GoogleGenaiSamplingHandler:
                 model=selected_model,
                 contents=contents,
                 config=GenerateContentConfig(
-                    system_instruction=params.systemPrompt,
+                    system_instruction=params.system_prompt,
                     temperature=params.temperature,
-                    max_output_tokens=params.maxTokens,
-                    stop_sequences=params.stopSequences,
+                    max_output_tokens=params.max_tokens,
+                    stop_sequences=params.stop_sequences,
                     thinking_config=thinking_config,
-                    tools=google_tools,  # ty: ignore[invalid-argument-type]
+                    tools=cast(Any, google_tools),
                     tool_config=tool_config,
                 ),
             )
@@ -150,7 +154,7 @@ def _convert_tool_to_google_genai(tool: MCPTool) -> GoogleTool:
     """
     from fastmcp.utilities.json_schema import compress_schema
 
-    schema = compress_schema(tool.inputSchema, prune_titles=True)
+    schema = compress_schema(tool.input_schema, prune_titles=True)
     return GoogleTool(
         function_declarations=[
             FunctionDeclaration(
@@ -207,7 +211,7 @@ def _sampling_content_to_google_genai_part(
         return Part(
             inline_data=Blob(
                 data=base64.b64decode(content.data),
-                mime_type=content.mimeType,
+                mime_type=content.mime_type,
             )
         )
 
@@ -215,7 +219,7 @@ def _sampling_content_to_google_genai_part(
         return Part(
             inline_data=Blob(
                 data=base64.b64decode(content.data),
-                mime_type=content.mimeType,
+                mime_type=content.mime_type,
             )
         )
 
@@ -249,7 +253,7 @@ def _sampling_content_to_google_genai_part(
         # Our IDs are formatted as "{function_name}_{uuid8}", so extract the name.
         # Note: This is a limitation of MCP's ToolResultContent which only carries
         # toolUseId, while Google's FunctionResponse requires the function name.
-        tool_use_id = content.toolUseId
+        tool_use_id = content.tool_use_id
         if "_" in tool_use_id:
             # Split and rejoin all but the last part (the UUID suffix)
             parts = tool_use_id.rsplit("_", 1)
@@ -399,5 +403,5 @@ def _response_to_result_with_tools(
         content=content,
         role="assistant",
         model=model,
-        stopReason=stop_reason,
+        stop_reason=stop_reason,
     )

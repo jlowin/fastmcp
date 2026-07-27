@@ -23,7 +23,6 @@ from fastmcp.cli.auth import auth_app
 from fastmcp.cli.client import call_command, discover_command, list_command
 from fastmcp.cli.generate import generate_cli_command
 from fastmcp.cli.install import install_app
-from fastmcp.cli.tasks import tasks_app
 from fastmcp.utilities.cli import is_already_in_uv_subprocess, load_and_merge_config
 from fastmcp.utilities.inspect import (
     InspectFormat,
@@ -66,6 +65,9 @@ def _parse_env_var(env_var: str) -> tuple[str, str]:
         logger.error("Invalid environment variable format. Must be KEY=VALUE")
         sys.exit(1)
     key, value = env_var.split("=", 1)
+    if not key.strip():
+        logger.error("Invalid environment variable format. KEY cannot be empty")
+        sys.exit(1)
     return key.strip(), value.strip()
 
 
@@ -359,6 +361,21 @@ async def apps(
             help="Auto-reload the MCP server on file changes",
         ),
     ] = True,
+    host: Annotated[
+        str,
+        cyclopts.Parameter(
+            "--host",
+            help="Host to bind to",
+        ),
+    ] = "127.0.0.1",
+    log_panel: Annotated[
+        bool,
+        cyclopts.Parameter(
+            "--log-panel",
+            negative="--no-log-panel",
+            help="Log panel feature in FastMCP dev UI",
+        ),
+    ] = True,
 ) -> None:
     """Preview a FastMCPApp UI in the browser.
 
@@ -378,7 +395,14 @@ async def apps(
 
     from fastmcp.cli.apps_dev import run_dev_apps
 
-    await run_dev_apps(server_spec, mcp_port=mcp_port, dev_port=dev_port, reload=reload)
+    await run_dev_apps(
+        server_spec,
+        mcp_port=mcp_port,
+        dev_port=dev_port,
+        reload=reload,
+        host=host,
+        log_panel=log_panel,
+    )
 
 
 @app.command
@@ -410,7 +434,7 @@ async def run(
         str | None,
         cyclopts.Parameter(
             "--path",
-            help="The route path for the server (default: /mcp/ for http transport, /sse/ for sse transport)",
+            help="The route path for the server (default: /mcp for http transport, /sse for sse transport)",
         ),
     ] = None,
     log_level: Annotated[
@@ -705,6 +729,8 @@ async def run(
             inner_cmd.extend(["--log-level", final_log_level])
         if final_no_banner:
             inner_cmd.append("--no-banner")
+        if stateless:
+            inner_cmd.append("--stateless")
         # Add skip-env flag to prevent infinite recursion
         inner_cmd.append("--skip-env")
 
@@ -1098,9 +1124,6 @@ app.command(project_app)
 
 # Add install subcommands using proper Cyclopts pattern
 app.command(install_app)
-
-# Add tasks subcommand group
-app.command(tasks_app)
 
 # Add client query commands
 app.command(list_command, name="list")

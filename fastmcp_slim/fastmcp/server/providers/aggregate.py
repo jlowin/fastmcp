@@ -23,7 +23,7 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator, Sequence
 from contextlib import AsyncExitStack, asynccontextmanager
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING, Literal, TypeVar
 
 from fastmcp.exceptions import NotFoundError
 from fastmcp.server.providers.base import Provider
@@ -41,6 +41,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
+ProviderErrorStrategy = Literal["warn", "raise"]
 
 
 class AggregateProvider(Provider):
@@ -53,7 +54,9 @@ class AggregateProvider(Provider):
     the Namespace transform. This means namespace transformation is handled
     by the wrapped provider, not by AggregateProvider.
 
-    Errors from individual providers are logged and skipped (graceful degradation).
+    Errors from individual providers are logged and skipped by default. Set
+    ``provider_error_strategy="raise"`` to fail the aggregate operation when
+    any provider fails.
 
     Example:
         ```python
@@ -65,14 +68,23 @@ class AggregateProvider(Provider):
         ```
     """
 
-    def __init__(self, providers: Sequence[Provider] | None = None) -> None:
+    def __init__(
+        self,
+        providers: Sequence[Provider] | None = None,
+        *,
+        provider_error_strategy: ProviderErrorStrategy = "warn",
+    ) -> None:
         """Initialize with an optional sequence of providers.
 
         Args:
             providers: Optional initial providers (without namespacing).
                 For namespaced providers, use add_provider() instead.
+            provider_error_strategy: How provider errors should affect aggregate
+                operations. ``"warn"`` logs and skips failed providers.
+                ``"raise"`` propagates the first provider error.
         """
         super().__init__()
+        self.provider_error_strategy = provider_error_strategy
         self.providers: list[Provider] = list(providers or [])
 
     def add_provider(self, provider: Provider, *, namespace: str = "") -> None:
@@ -121,6 +133,8 @@ class AggregateProvider(Provider):
         seen_keys: dict[str, int] = {}
         for i, result in enumerate(results):
             if isinstance(result, BaseException):
+                if self.provider_error_strategy == "raise":
+                    raise result
                 logger.warning(
                     f"Error during {operation} from provider "
                     f"{self.providers[i]}: {result}"
@@ -153,6 +167,8 @@ class AggregateProvider(Provider):
         for i, result in enumerate(results):
             if isinstance(result, BaseException):
                 if not isinstance(result, NotFoundError):
+                    if self.provider_error_strategy == "raise":
+                        raise result
                     logger.warning(
                         f"Error during {operation} from provider "
                         f"{self.providers[i]}: {result}"
@@ -174,7 +190,7 @@ class AggregateProvider(Provider):
     async def _list_tools(self) -> Sequence[Tool]:
         """List all tools from all providers."""
         results = await gather(
-            *[p.list_tools() for p in self.providers],
+            (p.list_tools() for p in self.providers),
             return_exceptions=True,
         )
         return self._collect_list_results(results, "list_tools")
@@ -184,7 +200,7 @@ class AggregateProvider(Provider):
     ) -> Tool | None:
         """Get tool by name from providers."""
         results = await gather(
-            *[p.get_tool(name, version) for p in self.providers],
+            (p.get_tool(name, version) for p in self.providers),
             return_exceptions=True,
         )
         return self._get_highest_version_result(results, f"get_tool({name!r})")  # type: ignore[return-value]  # ty:ignore[invalid-argument-type, invalid-return-type]
@@ -192,11 +208,13 @@ class AggregateProvider(Provider):
     async def get_app_tool(self, app_name: str, tool_name: str) -> Tool | None:
         """Query all child providers for an app tool."""
         results = await gather(
-            *[p.get_app_tool(app_name, tool_name) for p in self.providers],
+            (p.get_app_tool(app_name, tool_name) for p in self.providers),
             return_exceptions=True,
         )
         for r in results:
             if isinstance(r, BaseException):
+                if self.provider_error_strategy == "raise":
+                    raise r
                 continue
             if r is not None:
                 return r
@@ -205,11 +223,13 @@ class AggregateProvider(Provider):
     async def get_tool_by_hash(self, tool_hash: str, tool_name: str) -> Tool | None:
         """Query all child providers for a tool matching a hash."""
         results = await gather(
-            *[p.get_tool_by_hash(tool_hash, tool_name) for p in self.providers],
+            (p.get_tool_by_hash(tool_hash, tool_name) for p in self.providers),
             return_exceptions=True,
         )
         for r in results:
             if isinstance(r, BaseException):
+                if self.provider_error_strategy == "raise":
+                    raise r
                 continue
             if r is not None:
                 return r
@@ -222,7 +242,7 @@ class AggregateProvider(Provider):
     async def _list_resources(self) -> Sequence[Resource]:
         """List all resources from all providers."""
         results = await gather(
-            *[p.list_resources() for p in self.providers],
+            (p.list_resources() for p in self.providers),
             return_exceptions=True,
         )
         return self._collect_list_results(results, "list_resources")
@@ -232,7 +252,7 @@ class AggregateProvider(Provider):
     ) -> Resource | None:
         """Get resource by URI from providers."""
         results = await gather(
-            *[p.get_resource(uri, version) for p in self.providers],
+            (p.get_resource(uri, version) for p in self.providers),
             return_exceptions=True,
         )
         return self._get_highest_version_result(results, f"get_resource({uri!r})")  # type: ignore[return-value]  # ty:ignore[invalid-argument-type, invalid-return-type]
@@ -244,7 +264,7 @@ class AggregateProvider(Provider):
     async def _list_resource_templates(self) -> Sequence[ResourceTemplate]:
         """List all resource templates from all providers."""
         results = await gather(
-            *[p.list_resource_templates() for p in self.providers],
+            (p.list_resource_templates() for p in self.providers),
             return_exceptions=True,
         )
         return self._collect_list_results(results, "list_resource_templates")
@@ -254,7 +274,7 @@ class AggregateProvider(Provider):
     ) -> ResourceTemplate | None:
         """Get resource template by URI from providers."""
         results = await gather(
-            *[p.get_resource_template(uri, version) for p in self.providers],
+            (p.get_resource_template(uri, version) for p in self.providers),
             return_exceptions=True,
         )
         return self._get_highest_version_result(
@@ -268,7 +288,7 @@ class AggregateProvider(Provider):
     async def _list_prompts(self) -> Sequence[Prompt]:
         """List all prompts from all providers."""
         results = await gather(
-            *[p.list_prompts() for p in self.providers],
+            (p.list_prompts() for p in self.providers),
             return_exceptions=True,
         )
         return self._collect_list_results(results, "list_prompts")
@@ -278,7 +298,7 @@ class AggregateProvider(Provider):
     ) -> Prompt | None:
         """Get prompt by name from providers."""
         results = await gather(
-            *[p.get_prompt(name, version) for p in self.providers],
+            (p.get_prompt(name, version) for p in self.providers),
             return_exceptions=True,
         )
         return self._get_highest_version_result(results, f"get_prompt({name!r})")  # type: ignore[return-value]  # ty:ignore[invalid-argument-type, invalid-return-type]
@@ -290,7 +310,7 @@ class AggregateProvider(Provider):
     async def get_tasks(self) -> Sequence[FastMCPComponent]:
         """Get all task-eligible components from all providers."""
         results = await gather(
-            *[p.get_tasks() for p in self.providers],
+            (p.get_tasks() for p in self.providers),
             return_exceptions=True,
         )
         return self._collect_list_results(results, "get_tasks")

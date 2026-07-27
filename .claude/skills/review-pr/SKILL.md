@@ -94,6 +94,12 @@ After evaluating comments:
 
 Codex sometimes re-posts old comments that reference code you've already fixed (they appear on the old commit's diff). These are stale — verify the fix is in the latest commit and reply noting the fix is already in place.
 
+## Labels — never apply or invent them
+
+**Do not apply labels to PRs or issues programmatically, and never create new ones.** Issues and PRs in this repo are auto-labeled by a bot based on title, body, and code changes — there's no fixed canonical list to match against, and GitHub's "add labels" API auto-creates any label name that doesn't already exist, so a typo or guessed name silently pollutes the repo's label list with a stray, uncolored duplicate. There is no MCP tool to delete a label, so a mistaken creation can only be cleaned up by hand in repo settings.
+
+Don't call out a "suggested" or "appropriate" label in the PR body either — the bot doesn't read it, and it just adds noise.
+
 ## When a PR is ready
 
 A PR is ready for human review when:
