@@ -8,11 +8,15 @@ icon: circle-question
 
 Most servers run untouched. The defining change in FastMCP 4 is its engine — the MCP Python SDK v2 — and FastMCP absorbs nearly all of it for you, including the wire-wide rename from camelCase to snake_case, which is bridged so your existing reads keep working.
 
-What does reach your code fails loudly at import or call time, and every fix is mechanical: your own `from mcp.types import X` becomes `from mcp_types import X`, `McpError(ErrorData(...))` becomes `McpError(code=..., message=...)`, custom `httpx` clients handed to a transport become `httpx2`, and `ctx.sample()` and `ctx.list_roots()` are gone. [Upgrading from FastMCP 3](/getting-started/upgrading/from-fastmcp-3) covers each one and ends with a checklist.
+Most of what does reach your code fails loudly at import or call time, and the fix is mechanical: your own `from mcp.types import X` becomes `from mcp_types import X`, `McpError(ErrorData(...))` becomes `McpError(code=..., message=...)`, custom `httpx` clients handed to a transport become `httpx2`, and `ctx.sample()` and `ctx.list_roots()` are gone.
+
+One change is silent, so go looking for it: an `except httpx.ConnectError:` around a FastMCP call still imports and still type-checks, because `httpx` usually remains installed through some other dependency — but FastMCP now raises the `httpx2` exception, so the handler simply stops matching and your fallback quietly never runs. Grep for `except httpx.` and move those to `httpx2`. [Upgrading from FastMCP 3](/getting-started/upgrading/from-fastmcp-3) covers each one and ends with a checklist.
 
 ## Why does my client connect with a different protocol version than before?
 
-`fastmcp.Client` defaults to `mode="auto"` as of FastMCP 4, so it negotiates the newest era both sides speak rather than pinning the handshake. Against a FastMCP server that means the sessionless `2026-07-28` protocol; every earlier FastMCP version connected at `2025-11-25`.
+`fastmcp.Client` defaults to `mode="auto"` as of FastMCP 4, so it negotiates the newest era both sides speak rather than pinning the handshake. Over streamable HTTP or stdio to a FastMCP server that means the sessionless `2026-07-28` protocol, where FastMCP 3 connected at `2025-11-25`.
+
+Two transports are exceptions and stay on the handshake whatever you ask for: SSE predates the sessionless era and cannot carry it, and a multi-server `MCPConfigTransport` mounts each backend behind a legacy-era composite. Seeing `2025-11-25` on either is correct, not a negotiation failure.
 
 The client probes `server/discover` and adopts the modern protocol when the server answers, falling back to the `initialize` handshake for anything that is not positive evidence of a modern peer — so a mixed fleet of servers still connects. Pin the old behavior per client with `Client(url, mode="legacy")`. See [Protocol negotiation](/clients/client#protocol-negotiation).
 
@@ -38,7 +42,9 @@ Pinning is per client, not a deployment setting: `Client(url, mode="legacy")`. T
 
 `ctx.sample()` and `ctx.sample_step()` are not part of FastMCP 4. Calling either raises `AttributeError` on every protocol era, and `FastMCP(sampling_handler=...)` raises `TypeError` naming the migration.
 
-Sampling was a server-to-client *request*: the server sent `sampling/createMessage` and blocked until an answer came back down the session. The modern protocol has no server-to-client request direction at all, so there is no shape sampling could survive in. Generation moves into your server instead — hold a provider API key and call the model directly, which has the side benefit that your tool behaves identically for every client, including the many that never implemented sampling. [Sampling](/servers/sampling) shows the pattern.
+Sampling was a server-to-client *request*: the server sent `sampling/createMessage` and blocked until an answer came back down the session. The modern protocol has no server-to-client request direction at all, so the pushed form has nowhere to go.
+
+The asking survives in a different shape. A tool can return an `InputRequiredResult` carrying a `CreateMessageRequest`; the client answers it through the same `sampling_handler` it already registers, and your tool runs again with the completion. Reach for that when using *the caller's* model is the point. Otherwise put generation in your server — hold a provider API key and call the model directly, which has the side benefit that your tool behaves identically for every client, including the many that never implemented sampling. [Sampling](/servers/sampling) shows both.
 
 ## What happened to `ctx.list_roots()`?
 
@@ -76,7 +82,9 @@ Work that must happen once per process belongs in the server [lifespan](/servers
 
 On a modern connection every request is a fresh connection, so `ctx.set_state` lives only for the duration of the call that wrote it. The same code persists state across calls on a handshake-era connection, which is why it appears to break the moment a client negotiates `2026-07-28`.
 
-[Session state](/servers/sessions) is the durable answer, following MCP's own decision to move session semantics up into the application. Declare a `UserSession` parameter and FastMCP injects one bucket of stored state keyed to the authenticated user, with nothing to pass around. Declare a `SessionId` argument when a single user needs several independent sessions, and the caller mints an id with `create_session` and supplies it on each call. Both store server-side and key to the caller's identity, so a handle is inert in anyone else's hands.
+[Session state](/servers/sessions) is the durable answer, following MCP's own decision to move session semantics up into the application. Declare a `UserSession` parameter and FastMCP injects one bucket of stored state keyed to the authenticated user, with nothing to pass around. Declare a `SessionId` argument when a single user needs several independent sessions, and the caller mints an id with `create_session` and supplies it on each call. Both store server-side and key to the authenticated caller's identity, so a handle is inert in anyone else's hands.
+
+That isolation comes from authentication, not from the id. On an unauthenticated server there is no principal to key on, so every session shares one anonymous namespace and a `SessionId` becomes a bearer capability — anyone holding it can read and write that state. Treat unauthenticated sessions as single-tenant or trusted-network only; `UserSession` sidesteps the question by requiring an authenticated principal outright.
 
 ## How do I run background tasks now?
 
