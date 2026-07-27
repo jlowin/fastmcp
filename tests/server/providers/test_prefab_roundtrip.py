@@ -13,6 +13,7 @@ import json
 import pytest
 
 from fastmcp import FastMCP, FastMCPApp
+from fastmcp.exceptions import ToolError
 from fastmcp.server.providers.addressing import hash_tool, hashed_backend_name
 from fastmcp.server.providers.proxy import ProxyClient, ProxyProvider
 
@@ -234,10 +235,9 @@ class TestDynamicToolAdd:
 
 
 class TestCollision:
-    async def test_same_app_name_same_tool_name_first_wins(self):
-        """Two apps with the same name and same tool name: the hash is
-        identical, so get_tool_by_hash returns the first match. This is
-        the same first-match behavior the old get_app_tool had."""
+    async def test_distinct_hashes_resolve_independently(self):
+        """Two apps sharing a name but with different tool names hash
+        differently, so each tool resolves to itself."""
         app_a = FastMCPApp("shared")
         app_b = FastMCPApp("shared")
 
@@ -249,14 +249,67 @@ class TestCollision:
         def save_b(name: str) -> str:
             return f"from B: {name}"
 
-        # Register under a different local tool name to avoid
-        # actual collision at the provider level. The hash collision
-        # only happens when both app name AND tool name match.
-        # This test just verifies one app's tool is reachable.
         server = FastMCP("Platform")
         server.add_provider(app_a)
         server.add_provider(app_b)
 
-        hashed_name = hashed_backend_name("shared", "save")
-        result = await server.call_tool(hashed_name, {"name": "Eve"})
+        result = await server.call_tool(
+            hashed_backend_name("shared", "save"), {"name": "Eve"}
+        )
         assert result.content[0].text == "from A: Eve"  # type: ignore[union-attr]  # ty:ignore[unresolved-attribute]
+
+        result_b = await server.call_tool(
+            hashed_backend_name("shared", "save_b"), {"name": "Eve"}
+        )
+        assert result_b.content[0].text == "from B: Eve"  # type: ignore[union-attr]  # ty:ignore[unresolved-attribute]
+
+    async def test_ambiguous_identity_raises_rather_than_guessing(self):
+        """The same app composed into two branches yields two tools with one
+        identity. Routing to either would silently execute the wrong branch's
+        tool, so the call is refused."""
+        server = FastMCP("Platform")
+        for marker, namespace in (("A", "a"), ("B", "b")):
+            app = FastMCPApp("contacts")
+
+            @app.tool()
+            def save(name: str, _marker: str = marker) -> str:
+                return f"from {_marker}: {name}"
+
+            server.add_provider(app, namespace=namespace)
+
+        with pytest.raises(ToolError, match="Ambiguous app tool"):
+            await server.call_tool(
+                hashed_backend_name("contacts", "save"), {"name": "Eve"}
+            )
+
+    async def test_distinct_app_names_route_independently_through_a_gateway(self):
+        """The multi-tenant gateway shape: distinct app names stay unambiguous
+        no matter how many backends sit behind one proxy."""
+
+        def backend(marker: str, app_name: str) -> FastMCP:
+            app = FastMCPApp(app_name)
+
+            @app.tool()
+            def save(name: str) -> str:
+                return f"from {marker}: {name}"
+
+            server = FastMCP(f"Backend-{marker}")
+            server.add_provider(app)
+            return server
+
+        first = backend("A", "crm")
+        second = backend("B", "billing")
+
+        gateway = FastMCP("Gateway")
+        gateway.add_provider(ProxyProvider(lambda: ProxyClient(first)), namespace="a")
+        gateway.add_provider(ProxyProvider(lambda: ProxyClient(second)), namespace="b")
+
+        result_a = await gateway.call_tool(
+            hashed_backend_name("crm", "save"), {"name": "Eve"}
+        )
+        assert result_a.content[0].text == "from A: Eve"  # type: ignore[union-attr]  # ty:ignore[unresolved-attribute]
+
+        result_b = await gateway.call_tool(
+            hashed_backend_name("billing", "save"), {"name": "Eve"}
+        )
+        assert result_b.content[0].text == "from B: Eve"  # type: ignore[union-attr]  # ty:ignore[unresolved-attribute]
