@@ -114,7 +114,7 @@ mcp = FastMCP(name="My Server", auth=auth)
 <ParamField body="base_url" type="AnyHttpUrl | str" required>
   Public URL where OAuth endpoints will be accessible, **including any mount path** (e.g., `https://your-server.com/api`).
 
-  This URL is used to construct OAuth callback URLs and operational endpoints. When mounting under a path prefix, include that prefix in `base_url`. Use `issuer_url` separately to specify where auth server metadata is located (typically at root level).
+  This URL is used to construct OAuth callback URLs and operational endpoints. When mounting under a path prefix, include that prefix in `base_url`. Use `issuer_url` separately to give the server an OAuth identity that differs from where its endpoints are mounted (typically the root level).
 </ParamField>
 
 <ParamField body="resource_base_url" type="AnyHttpUrl | str | None">

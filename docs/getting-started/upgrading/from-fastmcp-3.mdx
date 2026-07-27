@@ -215,11 +215,17 @@ Two `@tool` parameters and two settings are gone:
 
 ## Behavior changes to verify
 
-Two server-side behaviors changed in ways that compile fine but can surface at runtime.
+Three server-side behaviors changed in ways that compile fine but can surface at runtime.
 
 **Templated resources are path-screened by default.** Every templated resource now has its extracted parameter values checked for path-traversal (`..` segments), absolute paths, and null bytes *before your handler runs*, at the server's read chokepoint. A rejected read returns a non-leaky "resource not found" error. Only a standalone `..` segment counts as traversal, so values that merely contain dots (`file.tar.gz`, `HEAD~3..HEAD`) and dotfiles (`.env`) still pass. If a template legitimately accepts `..`-bearing or absolute values, exempt the parameter with `ResourceSecurity(exempt_params={...})`, disable the check per-component with `security=None`, or set a server-wide default with `FastMCP(resource_security=...)`. See [Resources → Path Security](/servers/resources#path-security).
 
 **Resource-not-found now returns `-32602`.** The wire error code for a missing resource from the core `resources/read` handler changed from `-32002` to `-32602` (`INVALID_PARAMS`, per SEP-2164). The human-readable message ("Resource not found: ...") is unchanged, so this only affects clients that matched on the numeric code — update those to expect `-32602`. (The opt-in `ErrorHandlingMiddleware` keeps its own per-method-prefix code mapping; if you run it with `transform_errors=True` it can still map not-found to a different code, so it is unaffected by this change.)
+
+**An OAuth server whose `issuer_url` differs from its `base_url` re-authorizes its clients once.** `issuer_url` exists so a server's OAuth identity can differ from the URL its endpoints are mounted at — the usual case being a server under `/api` whose discovery lives at the host root. It now supplies the `issuer` in the authorization server metadata, the `iss` claim on every token the server mints, and the RFC 9207 `iss` on authorization responses; `base_url` still supplies `authorization_endpoint`, `token_endpoint`, and the rest, because that is where the routes are actually mounted. Both values previously came from `base_url`, which published an `issuer` contradicting the URL the client had just performed discovery at — a document RFC 8414 §3.3 requires a strict client to reject.
+
+The cost of the correction is the `iss` on tokens already in the wild, so it falls on the providers that mint their own tokens — `OAuthProxy` and everything built on it. Access *and* refresh tokens carry the claim, and the verifier compares it exactly, so clients cannot refresh their way across the upgrade; it is a one-time full re-authorization. Interactive clients re-prompt and recover on their own, while a headless deployment holding a long-lived refresh token needs someone to re-authorize it. Plan the upgrade for a window where that is acceptable. If an identity provider mints SEP-990 ID-JAG assertions for this server, repoint their `aud` at the new issuer too — unless you pin the expected value with `IdentityAssertion(audience=...)`, which overrides the issuer and keeps working untouched.
+
+Servers that leave `issuer_url` unset, or set it to the same value as `base_url`, are unaffected. It defaults to `base_url`, and the metadata and minted `iss` are byte-identical to what 3.x produced.
 
 ## Deprecation timeline
 
@@ -273,7 +279,7 @@ Most servers upgrade untouched. Work down this list to find the ones that don't:
 6. **Fix `McpError` construction.** Positional `McpError(ErrorData(...))` becomes keyword `McpError(code=..., message=...)`. Catching is unchanged.
 7. **Move httpx to httpx2.** Grep for `except httpx.` and for custom `httpx_client_factory` / `httpx.Auth` objects handed to FastMCP, and swap the import to `httpx2`.
 8. **Decide the client era.** `Client` now defaults to `mode="auto"`. If a server relies on `on_initialize` or per-session state, keep its clients on `mode="legacy"` or restrict the server's served protocol versions.
-9. **Verify behavior changes.** Confirm templated resources that legitimately accept `..` or absolute paths are exempted, and update any client that matched the old `-32002` resource-not-found code.
+9. **Verify behavior changes.** Confirm templated resources that legitimately accept `..` or absolute paths are exempted, update any client that matched the old `-32002` resource-not-found code, and if your server mints its own OAuth tokens (`OAuthProxy` and the providers built on it) under an `issuer_url` that differs from its `base_url`, schedule the [one-time re-authorization](#behavior-changes-to-verify) its clients now need.
 10. **Run with the camelCase bridge off.** Set `mcp_camelcase_compat = False` (or `FASTMCP_MCP_CAMELCASE_COMPAT=false`) in CI to surface every remaining camelCase read as a hard `AttributeError` before the shims are removed.
 
 The executable version of this checklist lives in [`tests/test_upgrade_from_v3.py`](https://github.com/PrefectHQ/fastmcp/blob/main/tests/test_upgrade_from_v3.py): it builds representative 3.x-style servers and asserts they run unchanged, and pins every removed surface to the exact error it now raises.
