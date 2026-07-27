@@ -58,6 +58,75 @@ def read_write_operation() -> str:
     return "Read/write action completed"
 ```
 
+### require_roles
+
+Scopes are standardized, so `require_scopes` works the same everywhere. Roles and groups are not part of OIDC, so every identity provider puts them under a different claim. `require_roles` handles the comparison and takes an `extract` callable that tells it where to look.
+
+```python
+from fastmcp import FastMCP
+from fastmcp.server.auth import require_roles
+
+def keycloak_roles(claims: dict) -> list[str]:
+    return claims["realm_access"]["roles"]
+
+mcp = FastMCP("Role Server")
+
+@mcp.tool(auth=require_roles("admin", extract=keycloak_roles))
+def admin_operation() -> str:
+    """Requires the 'admin' role."""
+    return "Admin action completed"
+```
+
+Keeping the claim path at the call site means any provider works, including ones with unusual shapes. Common locations:
+
+| Provider | Extractor |
+| --- | --- |
+| Keycloak | `lambda c: c["realm_access"]["roles"]` |
+| Microsoft Entra | `lambda c: c["roles"]` |
+| AWS Cognito | `lambda c: c["cognito:groups"]` |
+| Auth0 | `lambda c: c["permissions"]` |
+
+Verify the claim against your own tenant before relying on it. Auth0's namespaced custom claims are configured per tenant, and Entra emits `roles` or `groups` depending on the app manifest.
+
+Multiple roles are required together, matching `require_scopes`. A token whose claims lack the path entirely is denied rather than raising, so the extractor can index directly.
+
+```python
+@mcp.tool(auth=require_roles("admin", "auditor", extract=keycloak_roles))
+def audited_admin_operation() -> str:
+    """Requires both the 'admin' AND 'auditor' roles."""
+    return "Audited admin action"
+```
+
+<Warning>
+`require_roles` cannot signal a scope shortfall. OAuth has no way to request a role, so there is no `insufficient_scope` challenge to emit and the check is opaque. Because a single opaque check withholds scope disclosure for every check beside it, combining `require_roles` and `require_scopes` on one component stops that component from emitting the step-up challenges described in [Signaling Scope Shortfalls](#signaling-scope-shortfalls). Apply them at different layers — for example scopes on the component and roles in middleware — if you need both.
+</Warning>
+
+### Checking Other Claims
+
+`require_roles` is a convenience for the common case. `AccessToken.claims` holds every claim from the token, so gating on anything else needs no special API — just an auth check that reads it.
+
+```python
+from fastmcp import FastMCP
+from fastmcp.server.auth import AuthContext
+
+mcp = FastMCP("Claim Server")
+
+def require_tenant(tenant_id: str):
+    """Require the token to come from a specific tenant."""
+    def check(ctx: AuthContext) -> bool:
+        if ctx.token is None:
+            return False
+        return ctx.token.claims.get("tid") == tenant_id
+    return check
+
+@mcp.tool(auth=require_tenant("acme"))
+def tenant_operation() -> str:
+    """Only callable by tokens issued for the acme tenant."""
+    return "Tenant action completed"
+```
+
+The same caveat applies: a check like this is opaque, so it suppresses scope disclosure for its siblings.
+
 ### restrict_tag
 
 Tag-based restrictions apply scope requirements conditionally. If a component has the specified tag, the token must have the required scopes. Components without the tag are unaffected.
@@ -417,6 +486,7 @@ from fastmcp.server.auth import (
     AuthContext,       # Context with .token, .component
     AuthCheck,         # Type alias: sync or async Callable[[AuthContext], bool]
     require_scopes,    # Built-in: requires specific scopes
+    require_roles,     # Built-in: requires roles read from token claims
     restrict_tag,      # Built-in: tag-based scope requirements
     run_auth_checks,   # Utility: run checks with AND logic
 )

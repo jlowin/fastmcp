@@ -12,6 +12,7 @@ from fastmcp.exceptions import AuthorizationError, InsufficientScopeError
 from fastmcp.server.auth import (
     AccessToken,
     AuthContext,
+    require_roles,
     require_scopes,
     restrict_tag,
     run_auth_checks,
@@ -19,6 +20,7 @@ from fastmcp.server.auth import (
 from fastmcp.server.middleware import AuthMiddleware
 from fastmcp.server.transforms import ToolTransform
 from fastmcp.tools.tool_transform import ToolTransformConfig, TransformedTool
+from fastmcp.utilities.authorization import scope_requirements
 from fastmcp.utilities.versions import VersionSpec
 
 # =============================================================================
@@ -26,14 +28,17 @@ from fastmcp.utilities.versions import VersionSpec
 # =============================================================================
 
 
-def make_token(scopes: list[str] | None = None) -> AccessToken:
+def make_token(
+    scopes: list[str] | None = None,
+    claims: dict | None = None,
+) -> AccessToken:
     """Create a test access token."""
     return AccessToken(
         token="test-token",
         client_id="test-client",
         scopes=scopes or [],
         expires_at=None,
-        claims={},
+        claims=claims or {},
     )
 
 
@@ -84,6 +89,82 @@ class TestRequireScopes:
         ctx = AuthContext(token=None, component=make_tool())
         check = require_scopes("admin")
         assert check(ctx) is False
+
+
+# =============================================================================
+# Tests for require_roles
+# =============================================================================
+
+
+KEYCLOAK = {"realm_access": {"roles": ["admin", "viewer"]}}
+
+
+def keycloak_roles(claims: dict) -> list[str]:
+    return claims["realm_access"]["roles"]
+
+
+class TestRequireRoles:
+    @pytest.mark.parametrize(
+        "claims, extract",
+        [
+            (KEYCLOAK, keycloak_roles),
+            ({"roles": ["admin"]}, lambda c: c["roles"]),
+            ({"cognito:groups": ["admin"]}, lambda c: c["cognito:groups"]),
+            ({"permissions": ["admin"]}, lambda c: c["permissions"]),
+            (
+                {"https://app.example.com/roles": ["admin"]},
+                lambda c: c["https://app.example.com/roles"],
+            ),
+        ],
+    )
+    def test_reads_roles_from_provider_specific_claim(self, claims, extract):
+        ctx = AuthContext(token=make_token(claims=claims), component=make_tool())
+        assert require_roles("admin", extract=extract)(ctx) is True
+
+    def test_requires_all_roles(self):
+        ctx = AuthContext(token=make_token(claims=KEYCLOAK), component=make_tool())
+        check = require_roles("admin", "viewer", extract=keycloak_roles)
+        assert check(ctx) is True
+
+    def test_denies_when_one_role_missing(self):
+        ctx = AuthContext(token=make_token(claims=KEYCLOAK), component=make_tool())
+        check = require_roles("admin", "auditor", extract=keycloak_roles)
+        assert check(ctx) is False
+
+    def test_denies_without_token(self):
+        ctx = AuthContext(token=None, component=make_tool())
+        assert require_roles("admin", extract=keycloak_roles)(ctx) is False
+
+    @pytest.mark.parametrize(
+        "claims",
+        [{}, {"realm_access": {}}, {"realm_access": None}, {"realm_access": []}],
+    )
+    def test_denies_when_claim_absent_or_malformed(self, claims):
+        """A token without the claim is an ordinary denial, not a broken check."""
+        ctx = AuthContext(token=make_token(claims=claims), component=make_tool())
+        assert require_roles("admin", extract=keycloak_roles)(ctx) is False
+
+    def test_rejects_empty_role_list(self):
+        """A check with no roles would admit any authenticated caller."""
+        with pytest.raises(ValueError, match="at least one role"):
+            require_roles(extract=keycloak_roles)
+
+    def test_is_opaque_to_scope_shortfall(self):
+        """Roles cannot be requested via OAuth, so they yield no step-up."""
+        ctx = AuthContext(token=make_token(claims=KEYCLOAK), component=make_tool())
+        check = require_roles("auditor", extract=keycloak_roles)
+        assert scope_requirements(check, ctx) is None
+
+    def test_suppresses_shortfall_disclosure_of_sibling_scope_checks(self):
+        """One opaque check withholds the whole list's scope requirements."""
+        token = make_token(scopes=["read"], claims=KEYCLOAK)
+        ctx = AuthContext(token=token, component=make_tool())
+        checks = [
+            require_scopes("write"),
+            require_roles("admin", extract=keycloak_roles),
+        ]
+        assert scope_requirements(checks, ctx) is None
+        assert scope_requirements([require_scopes("write")], ctx) == ["write"]
 
 
 # =============================================================================
