@@ -177,6 +177,7 @@ class AuthorizationHandler(SDKAuthorizationHandler):
 
     def __init__(
         self,
+        *,
         provider: OAuthAuthorizationServerProvider,
         base_url: AnyHttpUrl | str,
         issuer_url: AnyHttpUrl | str | None = None,
