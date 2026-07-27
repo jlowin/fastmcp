@@ -46,6 +46,16 @@ runs:
           PARALLEL_FLAGS="--numprocesses auto --maxprocesses $MAX_PROCS --dist worksteal"
         fi
 
+        # pytest-timeout has no signal-based method on Windows, so it falls back
+        # to the thread method, which dumps stacks and os._exit()s the process.
+        # Under a contended runner that turns a single slow test into a dead
+        # xdist worker, failing whichever unrelated test that worker happened to
+        # be running. Give parallel Windows runs more headroom so ordinary
+        # scheduling jitter does not take a worker down.
+        if [ "$RUNNER_OS" == "Windows" ] && [ "$MAX_PROCS" != "0" ]; then
+          TIMEOUT=$((TIMEOUT * 4))
+        fi
+
         uv run --no-sync pytest \
           --inline-snapshot=disable \
           --timeout=$TIMEOUT \
