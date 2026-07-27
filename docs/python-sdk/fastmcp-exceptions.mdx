@@ -10,7 +10,7 @@ Custom exceptions for FastMCP.
 
 ## Functions
 
-### `to_mcp_error` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/exceptions.py#L98" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+### `to_mcp_error` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/exceptions.py#L122" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 ```python
 to_mcp_error(exc: Exception) -> MCPError
@@ -118,4 +118,17 @@ or policy tripped.
 
 
 Error when authorization check fails.
+
+
+### `InsufficientScopeError` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/exceptions.py#L98" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+
+Authorization failed because the token is missing required OAuth scopes.
+
+Unlike a bare ``AuthorizationError``, this carries the specific scopes the
+caller must obtain. A component-level scope shortfall can then be signalled
+as a spec-correct ``insufficient_scope`` step-up (SEP-2350 / RFC 6750 §3),
+naming exactly what to re-authorize for instead of an opaque denial. The
+named scopes are only the *unmet* ones, so an existing grant is accumulated
+rather than replaced when the caller re-authorizes.
 
